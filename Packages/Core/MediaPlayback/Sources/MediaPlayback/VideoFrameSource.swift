@@ -121,10 +121,63 @@ final class VideoFrameSource {
         ) else {
             return nil
         }
+        // ⚠️ A FRAME FROM THE PAST IS DROPPED, NOT SHOWN.
+        //
+        // This is the reported fast-forward, finally located. The output's clock
+        // agrees with the player — that was measured and is why re-requesting a
+        // different time changed nothing — but its queue of DECODED frames can
+        // be seconds behind, and `copyPixelBuffer` serves the oldest it has
+        // rather than refusing. Asked for the frame at 18.5s it returns the one
+        // from 15.6s, and the next tick 15.75s, and so on: an entire backlog
+        // delivered one frame per display refresh, which on screen is the
+        // picture racing until it catches up. Measured across one burst, the gap
+        // closing 2.90 → 2.75 → 2.56 → … → 0.24 while the player advanced
+        // normally throughout.
+        //
+        // The copy above already consumed the frame, so dropping it here is what
+        // drains the queue: the surface holds its last picture for the fraction
+        // of a second that takes, then resumes at the place playback is actually
+        // at. A cut, rather than a scrub through everything that was missed.
+        //
+        // ⚠️ AND BOUNDED, because a guard that drops frames must not be able to
+        // freeze the picture. If the output is steadily behind rather than
+        // draining a backlog, dropping every frame would show nothing at all —
+        // a worse fault than the one being fixed, and one that would look like
+        // the player dying. After `maxConsecutiveDrops` the next frame is shown
+        // whatever its age: late video beats no video.
+        if displayTime.isValid, (wantedTime - displayTime).seconds > Self.staleFrameTolerance,
+           consecutiveDrops < Self.maxConsecutiveDrops {
+            consecutiveDrops += 1
+            VideoPlaybackTrace.emit(String(
+                format: "dropped stale frame=%.3fs wanted=%.3fs behind=%.3fs n=%d",
+                displayTime.seconds, wantedTime.seconds,
+                (wantedTime - displayTime).seconds, consecutiveDrops
+            ))
+            return nil
+        }
+        consecutiveDrops = 0
         Self.ensureColorAttachments(on: buffer)
         lastClockTime = wantedTime
         return (buffer, displayTime.isValid ? displayTime : itemTime)
     }
+
+    /// How far behind the requested time a frame may be and still be shown.
+    ///
+    /// Generous on purpose. Normal delivery is within a frame or two, and the
+    /// fault this guards against is measured in SECONDS — so half a second
+    /// separates them with room to spare, and no ordinary frame is ever at risk
+    /// of being dropped for being slightly late.
+    private static let staleFrameTolerance: Double = 0.5
+
+    /// How many stale frames may be dropped in a row before one is shown anyway.
+    ///
+    /// At 120Hz this is a fifth of a second of holding the last picture — long
+    /// enough to drain a backlog of a few seconds, far too short to read as a
+    /// freeze. The cap is what makes this guard safe to be WRONG: if the output
+    /// is permanently behind rather than catching up, the video keeps playing,
+    /// merely late.
+    private static let maxConsecutiveDrops = 24
+    private var consecutiveDrops = 0
 
     /// The clock reading that went with the last frame handed out.
     ///
