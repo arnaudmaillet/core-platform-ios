@@ -299,10 +299,20 @@ final class VideoFrameRenderer {
                 // ASKING for frames further ahead than playback actually is:
                 // the pictures race while the player is perfectly fine. The two
                 // numbers agreeing kills that idea; diverging, it names it.
+                // ⚠️ And what the player says its SPEED is.
+                //
+                // The last question worth asking cheaply: a clock advancing six
+                // times faster than real time is either obeying a rate somebody
+                // set, or disagreeing with its own. `playerRate=1.00` next to a
+                // 6x clock means the timebase is inconsistent with the player's
+                // own declared speed — an AVFoundation behaviour to design
+                // around, not a call of ours to take back. Anything above 1
+                // means the opposite, and then it IS ours.
                 VideoPlaybackTrace.emit(String(
-                    format: "fast frames=%.3fs clock=%.3fs real=%.3fs rate=%.1fx out=%.3fs player=%.3fs",
+                    format: "fast frames=%.3fs clock=%.3fs real=%.3fs rate=%.1fx "
+                          + "out=%.3fs player=%.3fs playerRate=%.2f",
                     mediaElapsed, clockElapsed, gap, rate,
-                    itemTime.seconds, player.currentTime().seconds
+                    itemTime.seconds, player.currentTime().seconds, player.rate
                 ))
             }
             maxRateSinceTraceSample = max(maxRateSinceTraceSample, rate)

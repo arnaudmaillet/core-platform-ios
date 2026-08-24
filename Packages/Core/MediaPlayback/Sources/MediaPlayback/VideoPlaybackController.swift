@@ -355,6 +355,25 @@ public final class VideoPlaybackController {
         return player.timeControlStatus != .paused
     }
 
+    /// Whether what `view` is playing is an **adaptive** stream rather than a
+    /// single progressive file.
+    ///
+    /// ⚠️ A CAPABILITY, not a file extension — even though the extension is what
+    /// answers it here, because at this layer the resolved URL is all there is.
+    /// What the callers actually need to know is whether the player is free to
+    /// re-plan: to fetch the next segment, to change rendition, to rebuild its
+    /// buffer. A progressive file cannot do any of that, which is why holding
+    /// one paused is exact and free.
+    ///
+    /// The distinction earns its place because the two behave differently when
+    /// resumed, measured rather than assumed: in one session the adaptive stream
+    /// came back running 5x to 17.5x for seconds while the progressive file
+    /// resumed at exactly 1.00x through the same code.
+    public func isAdaptiveStream(in view: VideoRenderView) -> Bool {
+        guard let url = playingURL[ObjectIdentifier(view)] else { return false }
+        return url.pathExtension.lowercased() == "m3u8"
+    }
+
     /// Whether `view` is already bound to a player for **this** asset.
     ///
     /// ⚠️ The question a caller must ask before starting something, or it throws
