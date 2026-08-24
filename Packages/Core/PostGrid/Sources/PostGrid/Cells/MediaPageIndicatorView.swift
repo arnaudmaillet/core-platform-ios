@@ -32,9 +32,18 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// itself would be a second thing deciding where the pages are.
     public var onPageRequested: ((Int) -> Void)?
 
+    /// The scrub, exposed so a host can make its OWN pan yield to it.
+    ///
+    /// ⚠️ The only reliable way to beat a recognizer attached to an ancestor: a
+    /// view cannot refuse touches on the ancestor's behalf, because the
+    /// ancestor sees them too. It has to be told once, explicitly —
+    /// `theirPan.require(toFail: indicator.scrubGesture)`.
+    public let scrubGesture = UIPanGestureRecognizer()
+
     private let dots = PageDotsView()
     private let label = UILabel()
     private var pageCount = 0
+    private var currentPage = 0
 
     public init() {
         label.font = PostMetaPillView.font
@@ -47,8 +56,24 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         isUserInteractionEnabled = true
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTouch))
         addGestureRecognizer(tap)
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleTouch))
-        addGestureRecognizer(pan)
+        scrubGesture.addTarget(self, action: #selector(handleTouch))
+        addGestureRecognizer(scrubGesture)
+        // ⚠️ NOTHING ELSE MAY CLAIM THIS TOUCH.
+        //
+        // The chip sits inside a carousel that pans and, on the post screen,
+        // under a dismissal that pans too — and a scrub is a horizontal drag,
+        // which is exactly what both are looking for. Whoever won the race got
+        // it, so scrubbing sometimes paged the carousel and sometimes dismissed
+        // the post.
+        //
+        // Two halves here: `cancelsTouchesInView` keeps the touch from reaching
+        // the views underneath, and `isExclusiveTouch` keeps a second finger
+        // from starting something else mid-scrub. The third cannot live here —
+        // a recognizer on an ANCESTOR is blocked by neither, so hosts must make
+        // theirs stand down. See `scrubGesture`.
+        scrubGesture.cancelsTouchesInView = true
+        tap.cancelsTouchesInView = true
+        isExclusiveTouch = true
         // ⚠️ This chip YIELDS horizontal space; the counters and the date do not.
         //
         // It is the only one of the four whose content can be shown partially
@@ -73,11 +98,39 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         isHidden = count < 2
         guard count >= 2 else { return }
 
-        let usesDots = count <= Self.dotLimit
+        applyPresentation()
+        setCurrent(current)
+    }
+
+    /// Dots or a count, decided in ONE place.
+    ///
+    /// ⚠️ Expanding overrides the limit on purpose. Above `dotLimit` a resting
+    /// chip shows "3 / 12", because a dozen dots squeezed into a corner is a
+    /// smear that says less than the number does. But the moment a finger is on
+    /// it the chip is not a label any more, it is the thing being dragged — and
+    /// what it must show then is WHERE the pages are, which only dots can say.
+    private func applyPresentation() {
+        let usesDots = isExpanded || pageCount <= Self.dotLimit
         dots.isHidden = !usesDots
         label.isHidden = usesDots
-        if usesDots { dots.configure(count: count) }
-        setCurrent(current)
+        if usesDots { dots.configure(count: pageCount) }
+    }
+
+    /// Whether the chip is showing itself in full for a scrub.
+    public private(set) var isExpanded = false
+
+    public func setExpanded(_ expanded: Bool) {
+        guard expanded != isExpanded, pageCount >= 2 else { return }
+        isExpanded = expanded
+        applyPresentation()
+        setCurrent(currentPage)
+        invalidateIntrinsicContentSize()
+    }
+
+    /// What the chip needs to show every dot — the width a host must find for
+    /// it, or decide it cannot.
+    public var expandedContentWidth: CGFloat {
+        PageDotsView.width(forDots: pageCount) + Self.insets.leading + Self.insets.trailing
     }
 
     /// Moves the mark without rebuilding, because this is called on every
@@ -85,18 +138,45 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     public func setCurrent(_ current: Int) {
         guard pageCount >= 2 else { return }
         let page = min(max(current, 0), pageCount - 1)
-        if pageCount <= Self.dotLimit {
+        currentPage = page
+        if isExpanded || pageCount <= Self.dotLimit {
             dots.setCurrent(page)
         } else {
             label.text = "\(page + 1) / \(pageCount)"
         }
     }
 
+    /// The viewer began or ended scrubbing.
+    ///
+    /// Reported out, like the page request, because what "expanded" costs is a
+    /// LAYOUT decision — which neighbours must yield, and whether any need to at
+    /// all — and only the row that owns those neighbours can make it.
+    public var onScrubbingChanged: ((Bool) -> Void)?
+
+    /// Whether a finger is on the chip right now.
+    public private(set) var isScrubbing = false {
+        didSet {
+            guard isScrubbing != oldValue else { return }
+            onScrubbingChanged?(isScrubbing)
+        }
+    }
+
     @objc private func handleTouch(_ recognizer: UIGestureRecognizer) {
         guard pageCount >= 2 else { return }
+        switch recognizer.state {
+        case .began, .changed:
+            isScrubbing = true
+        case .ended, .cancelled, .failed:
+            isScrubbing = false
+        default:
+            break
+        }
         onPageRequested?(
             Self.page(at: recognizer.location(in: self).x, width: bounds.width, count: pageCount)
         )
+        // A tap has no `.ended` worth waiting for — it fires once, already
+        // ended — so the expansion it opens is closed on the same call.
+        if recognizer is UITapGestureRecognizer { isScrubbing = false }
     }
 
     /// Which page a touch at `x` is asking for.

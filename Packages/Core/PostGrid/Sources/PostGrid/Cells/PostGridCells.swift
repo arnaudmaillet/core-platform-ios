@@ -179,6 +179,21 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// True while this row is drawing its collection rather than a single
     /// preview. Asked in several places, and each of them was a `!(x?.y ?? true)`
     /// before, which is one negation too many to read at a glance.
+    @objc private func handleMediaHold(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            onMediaHoldChanged?(true)
+        case .ended, .cancelled, .failed:
+            // ⚠️ `.cancelled` is the COMMON case, not an edge one: it fires when
+            // a finger rests and then drags to page or to scroll. Treating it as
+            // anything but "the hold is over" leaves the clip paused for good
+            // after an ordinary swipe.
+            onMediaHoldChanged?(false)
+        default:
+            break
+        }
+    }
+
     /// Whether this row is drawing a COLLECTION rather than one attachment.
     ///
     /// Public because the question "is this row on its clip's page" only means
@@ -1420,6 +1435,21 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // The same inset as the chips at the other end, and as everything on the
         // card above it — furniture on the preview is held off it exactly as the
         // preview is held off the card.
+        // ⚠️ HOLD TO PAUSE LIVES ON THE MEDIA, NOT ON THE CAROUSEL.
+        //
+        // A post with one attachment is a gallery of one — the gesture means the
+        // same thing on both and there is no reason for two implementations to
+        // drift apart. It sat on the carousel first, which gave the behaviour to
+        // collections only and left single-video cards without it.
+        //
+        // On `mediaView`, an ancestor of the carousel, so the pages still
+        // receive the pan. `cancelsTouchesInView = false` for the same reason:
+        // a finger that rests and then drags is paging, not holding.
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleMediaHold))
+        hold.minimumPressDuration = MediaCarouselView.holdToPauseDuration
+        hold.cancelsTouchesInView = false
+        mediaView.addGestureRecognizer(hold)
+
         playBadge.constrain(in: mediaView) { parent in
             playBadge.topAnchor.constraint(
                 equalTo: parent.topAnchor, constant: Self.mediaFurnitureInset
@@ -1660,6 +1690,69 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         )
         dotFloor.priority = UILayoutPriority(749)
         NSLayoutConstraint.activate([centred, dotFloor])
+
+        // ⚠️ THE EXPANSION IS A SEPARATE, INACTIVE LADDER RUNG.
+        //
+        // While a finger is on the chip it stops being one of four things
+        // sharing a row and becomes the thing being dragged: it takes the whole
+        // width between the preview's insets so every page is reachable without
+        // the finger leaving it. Held at 998 — below the counts' own
+        // anti-truncation rung, above everything else — so that even here a
+        // count never clips; it is hidden instead, which is honest, where a
+        // clipped count would be wrong.
+        scrubExpansion = [
+            pageIndicator.leadingAnchor.constraint(
+                equalTo: mediaView.leadingAnchor, constant: Self.mediaFurnitureInset
+            ),
+            pageIndicator.trailingAnchor.constraint(
+                equalTo: mediaView.trailingAnchor, constant: -Self.mediaFurnitureInset
+            ),
+        ]
+        for constraint in scrubExpansion { constraint.priority = UILayoutPriority(998) }
+
+        pageIndicator.onScrubbingChanged = { [weak self] scrubbing in
+            self?.setIndicatorScrubbing(scrubbing)
+        }
+    }
+
+    /// Constraints that give the chip the whole row, active only mid-scrub.
+    private var scrubExpansion: [NSLayoutConstraint] = []
+
+    /// Whether the counters and the date are currently out of the way.
+    private var scrubHidesChips = false
+
+    /// Opens or closes the scrubbing presentation.
+    ///
+    /// ⚠️ THE NEIGHBOURS ARE HIDDEN ONLY IF THEY ARE ACTUALLY IN THE WAY.
+    ///
+    /// A gallery of three expands into space the row already has; hiding the
+    /// counts for it would be a flicker with nothing bought. A gallery of twelve
+    /// genuinely needs the width. So the question is measured rather than
+    /// assumed: does the chip's full run of dots want more than the room it is
+    /// already sitting in.
+    private func setIndicatorScrubbing(_ scrubbing: Bool) {
+        pageIndicator.setExpanded(scrubbing)
+        let needsRoom = scrubbing
+            && pageIndicator.expandedContentWidth > pageIndicator.bounds.width
+        if scrubbing {
+            NSLayoutConstraint.activate(scrubExpansion)
+        } else {
+            NSLayoutConstraint.deactivate(scrubExpansion)
+        }
+        guard needsRoom != scrubHidesChips else {
+            layoutIfNeeded()
+            return
+        }
+        scrubHidesChips = needsRoom
+        // Faded, not removed: they keep their place in the row, so nothing
+        // re-flows underneath and the chip expands over a stable layout.
+        UIView.animate(withDuration: 0.15) {
+            let alpha: CGFloat = needsRoom ? 0 : 1
+            self.likesPill.alpha = alpha
+            self.commentsPill.alpha = alpha
+            self.agePill.alpha = alpha
+            self.layoutIfNeeded()
+        }
     }
 
     /// The carousel, built on first use — most posts have one piece of media and
@@ -1694,10 +1787,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // half reaches the other, which is what keeps the carousel the only
         // thing that decides where the pages are.
         pageIndicator.onPageRequested = { [weak view] page in
-            view?.setPage(page)
+            // ⚠️ NOT ANIMATED. The chip is a scrubber: the viewer's finger is
+            // the clock, and an animation would run its own on top — a drag
+            // across twelve pages would queue twelve scroll animations and
+            // arrive late at every one of them. Teleporting keeps the page under
+            // the finger where the finger is.
+            view?.setPage(page, animated: false)
         }
         view.onTapped = { [weak self] in self?.onMediaTapped?() }
-        view.onHoldChanged = { [weak self] held in self?.onMediaHoldChanged?(held) }
         mediaView.insertSubview(view, belowSubview: likesPill)
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([

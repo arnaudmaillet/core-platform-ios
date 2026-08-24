@@ -87,14 +87,6 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// rather than a hole in `hitTest`: the pages still have to receive the pan.
     public var onTapped: (() -> Void)?
 
-    /// A finger is resting on a page (`true`), or has lifted (`false`).
-    ///
-    /// ⚠️ REPORTED OUT, like the tap and the page change, and for the same
-    /// reason: this view does not know that playback exists. It knows a finger
-    /// is down. Whoever owns the player decides that this means pause — which
-    /// is what keeps the pool from ever learning that pages exist.
-    public var onHoldChanged: ((Bool) -> Void)?
-
     /// Fired whenever the page under the box changes, so the host can move an
     /// indicator that lives OUTSIDE this view — see `PostGridListRowCell`, where
     /// the chips and the indicator belong to the preview rather than to its
@@ -276,19 +268,6 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         // touches that land on the pages.
         addGestureRecognizer(tap)
 
-        // Hold to pause. On THIS view for the same reason the tap is — the
-        // scroll view would refuse a recognizer it does not own.
-        //
-        // ⚠️ It must not eat the PAN. A finger that rests and then drags is
-        // paging, not holding, and a recognizer that swallowed the touch would
-        // have made a carousel unscrollable the moment anyone paused on it.
-        // `cancelsTouchesInView = false` plus a hold that ends on `.cancelled`
-        // — which is what the scroll view's pan triggers when it wins — is what
-        // makes the two coexist.
-        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
-        hold.minimumPressDuration = Self.holdToPauseDuration
-        hold.cancelsTouchesInView = false
-        addGestureRecognizer(hold)
         switch style {
         case .card:
             // The card's own fill, so the gutter between two pages and the
@@ -413,21 +392,6 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// How long a press must last before it is a hold rather than a tap.
     /// Matches the post screen's, so the gesture feels the same on both.
     public static let holdToPauseDuration: TimeInterval = 0.2
-
-    @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
-        switch recognizer.state {
-        case .began:
-            onHoldChanged?(true)
-        case .ended, .cancelled, .failed:
-            // ⚠️ `.cancelled` is not an edge case here, it is the common one:
-            // it is what fires when the viewer rests a finger and then drags to
-            // page. Treating it as anything other than "the hold is over" would
-            // leave the clip paused for good after an ordinary swipe.
-            onHoldChanged?(false)
-        default:
-            break
-        }
-    }
 
     // MARK: - Hero concealment
 

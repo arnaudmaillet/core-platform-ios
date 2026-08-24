@@ -283,8 +283,47 @@ public struct MockSocialDataset: Sendable {
             // — with a single clip, a duplicate and a correct reuse look the
             // same from outside.
             let videoPagePositions: Set<Int> = [1, 2]
+            // ⚠️ A SECOND, MUCH LARGER GALLERY — index 2.
+            //
+            // Three pages exercise the seams; they do not exercise the LIMITS.
+            // A dozen does: the indicator has to stop drawing one dot per page
+            // and start windowing, the retention window has to refuse most of
+            // what it is offered, and a scrub across the chip has to reach pages
+            // that are nowhere near the screen. None of that is observable on a
+            // gallery small enough for every page to be a dot.
+            //
+            // Two of its pages are clips, for the same reason the small one has
+            // two: with a single clip, a duplicated player and a correctly
+            // reused one look identical from outside.
+            let bigShapes: [(Int, Int)] = (0..<12).map { position in
+                switch position % 3 {
+                case 0: (1600, 900)
+                case 1: (1080, 1080)
+                default: (900, 1600)
+                }
+            }
+            let bigVideoPositions: Set<Int> = [3, 8]
             let extraMedia: [(url: String, width: Int, height: Int)] =
-                index == 4
+                index == 2
+                ? bigShapes.enumerated().map { position, shape in
+                    switch (mediaCatalog, bigVideoPositions.contains(position)) {
+                    case (.synthetic, false):
+                        ("mock://media/new-2-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case (.synthetic, true):
+                        ("mock://video/new-2-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case (.realAssets, false):
+                        (MockMediaFixtures.imageURL(index: 60 + position, width: shape.0, height: shape.1),
+                         shape.0, shape.1)
+                    case (.realAssets, true):
+                        // Distinct clips again, and distinct from the small
+                        // gallery's: two posts sharing a file is its own test
+                        // (see `PlaybackScopeTests`) and must not be smuggled in
+                        // here by accident.
+                        { let fixture = MockMediaFixtures.videos[position % MockMediaFixtures.videos.count]
+                          return (fixture.url, fixture.width, fixture.height) }()
+                    }
+                }
+                : index == 4
                 ? collectionShapes.enumerated().map { position, shape in
                     switch (mediaCatalog, videoPagePositions.contains(position)) {
                     case (.synthetic, false):

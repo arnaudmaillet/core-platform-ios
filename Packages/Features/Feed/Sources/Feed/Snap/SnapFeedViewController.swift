@@ -724,6 +724,22 @@ final class SnapFeedViewController: UIViewController {
                 cell.onMediaPageChanged = { [weak self] page in
                     self?.onMediaPageChanged?(id, page)
                 }
+                // ⚠️ THE DISMISSAL STANDS DOWN FOR A SCRUB.
+                //
+                // Both are horizontal-ish drags on the same pixels, and the
+                // dismissal's pan lives on this screen's own view — an ancestor
+                // — so no amount of `cancelsTouchesInView` on the chip can stop
+                // it seeing the touch first. It has to be told, and told for
+                // every cell, because the chip is a different object each time
+                // one is configured. Reported as scrubbing the indicator
+                // dismissing the post instead of paging it.
+                //
+                // `require(toFail:)` and not a delegate: a delegate would let
+                // both run and the dismissal would still move the screen.
+                for pan in self.view.gestureRecognizers ?? []
+                where pan is UIPanGestureRecognizer && pan !== cell.mediaScrubGesture {
+                    pan.require(toFail: cell.mediaScrubGesture)
+                }
                 // The post's interaction zone is bounded by the SCREEN's
                 // header/footer thresholds (nav bar bottom, toolbar top),
                 // not by the cell's ambient safe area: this view's insets

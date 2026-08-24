@@ -577,7 +577,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             self.onMediaPageChanged?(page)
         }
         chrome.onMediaPageRequested = { [weak self] page in
-            self?.mediaCard.setPage(page)
+            // Teleport, for the reason the card's own indicator does: the
+            // scrubbing finger is the clock, and a scroll animation would run a
+            // second one against it.
+            self?.mediaCard.setPage(page, animated: false)
         }
     }
 
@@ -1574,6 +1577,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     #if DEBUG
     /// The page's playback surface, for a test that needs to ask the pool about
     /// it. Playback ownership is the pool's, so a test has to name the surface.
+    /// The page indicator's scrub, so the screen can make its dismissal yield.
+    var mediaScrubGesture: UIPanGestureRecognizer { chrome.mediaScrubGesture }
+
     var debugRenderSurface: VideoRenderView { mediaCard.renderView }
 
     /// Moves the collection to a page as a viewer's swipe would.
