@@ -78,11 +78,27 @@ final class VideoFrameSource {
         // back invalid or negative; both mean "nothing to show yet".
         guard itemTime.isValid, itemTime >= .zero else { return nil }
         guard output.hasNewPixelBuffer(forItemTime: itemTime) else { return nil }
-        guard let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) else {
+        // ⚠️ THE BUFFER'S OWN TIME, not the clock's.
+        //
+        // These are not the same number and the difference is a whole
+        // investigation. `itemTime(forHostTime:)` is the player's TIMEBASE — at
+        // rate 1 it advances at exactly 1x by construction, so a probe built on
+        // it can only ever report that the clock is on time. It reported that
+        // for four runs while the viewer was plainly watching the picture race.
+        //
+        // What the eye sees is which FRAME is on screen, and that is this: the
+        // presentation time of the buffer the output actually handed back.
+        // When the two disagree, the pictures are running away from the clock —
+        // which is the only shape left that fits "fast for a few seconds, then
+        // normal" with a playhead measured at 1x throughout.
+        var displayTime = CMTime.invalid
+        guard let buffer = output.copyPixelBuffer(
+            forItemTime: itemTime, itemTimeForDisplay: &displayTime
+        ) else {
             return nil
         }
         Self.ensureColorAttachments(on: buffer)
-        return (buffer, itemTime)
+        return (buffer, displayTime.isValid ? displayTime : itemTime)
     }
 
     /// Gives a buffer default Rec. 709 colour attachments when it carries none.
