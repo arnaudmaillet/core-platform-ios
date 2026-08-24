@@ -1943,6 +1943,14 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             cell.onMediaPageChanged = { [weak self] _ in
                 self?.updateAutoplay()
             }
+            // Hold to pause, the same gesture the post screen carries. Captured
+            // by POST rather than by cell for the reason the handlers below
+            // state: the row that received the touch can have been recycled by
+            // the time the finger lifts, and the clip that must resume is the
+            // one belonging to the post, not to whatever the cell shows now.
+            cell.onMediaHoldChanged = { [weak self] held in
+                self?.playback?.setHeld(held, for: post.id)
+            }
             // The band's identity and its "...", if the post carries an author.
             // Captured by AUTHOR and by POST for the same reason the caption's
             // handler is captured by post: the row that asked can have moved by

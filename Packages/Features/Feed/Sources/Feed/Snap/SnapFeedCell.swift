@@ -518,6 +518,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         tap.delegate = self
         contentView.addGestureRecognizer(tap)
 
+        // Hold to pause: the clip stops while the finger is down and resumes
+        // when it lifts.
+        //
+        // ⚠️ IT MUST NOT CANCEL THE TAP, and the two must not fight. A hold is
+        // a tap that outstayed its welcome, so the recognizers overlap by
+        // construction: `cancelsTouchesInView = false` keeps the rest of the
+        // cell reachable, and the short duration is what separates "toggle" from
+        // "hold" in the hand rather than in the code.
+        //
+        // Deliberately NOT a toggle. A hold has an end, and playback resumes at
+        // it — which is why it reads as "look at this frame" rather than as a
+        // second way to press pause. The pause glyph stays out of it for the
+        // same reason: nothing was chosen, so nothing should be announced.
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleMediaHold))
+        hold.minimumPressDuration = Self.holdToPauseDuration
+        hold.cancelsTouchesInView = false
+        hold.delegate = self
+        contentView.addGestureRecognizer(hold)
+
         // The glass card's swipe exit. TWO locks keep it strictly inside
         // the engagement lifecycle — this recognizer paralyzed the whole
         // feed when it had neither:
@@ -1473,6 +1492,37 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return
         }
         togglePlayback()
+    }
+
+    /// How long a press must last before it counts as a hold rather than a tap.
+    ///
+    /// Short, because the gesture's whole value is that it feels immediate —
+    /// hold to look, let go to carry on. Long enough that an ordinary tap on
+    /// the way to play/pause never trips it.
+    static let holdToPauseDuration: TimeInterval = 0.2
+
+    /// Whether a hold is what stopped playback, so its end knows to resume.
+    ///
+    /// ⚠️ Recorded rather than assumed. A clip the viewer had ALREADY paused by
+    /// tapping must not start playing because a later hold ended on it — the
+    /// release undoes the hold, and nothing else.
+    private var isHeldPaused = false
+
+    @objc private func handleMediaHold(_ recognizer: UILongPressGestureRecognizer) {
+        guard playsVideo, let videoPlayback else { return }
+        switch recognizer.state {
+        case .began:
+            // Only a clip that is actually running can be held. Holding a
+            // paused one and letting go would otherwise start it.
+            guard videoPlayback.isAdvancing(in: mediaCard.renderView) else { return }
+            isHeldPaused = videoPlayback.setPaused(true, in: mediaCard.renderView)
+        case .ended, .cancelled, .failed:
+            guard isHeldPaused else { return }
+            isHeldPaused = false
+            videoPlayback.setPaused(false, in: mediaCard.renderView)
+        default:
+            break
+        }
     }
 
     /// Toggles the active video's playback and reflects it in the pause glyph.

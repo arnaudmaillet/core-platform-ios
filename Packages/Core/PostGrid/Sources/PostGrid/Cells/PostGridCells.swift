@@ -214,6 +214,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// a video — is the surface's business, not the cell's.
     public var onMediaPageChanged: ((Int) -> Void)?
 
+    /// A finger is resting on this row's media (`true`), or has lifted
+    /// (`false`). Relayed from the carousel, or from the preview itself for a
+    /// single attachment — the gesture is the same on both, and so is what it
+    /// means.
+    public var onMediaHoldChanged: ((Bool) -> Void)?
+
     // MARK: - Autoplay surface
 
     /// The surface an autoplaying row renders into, built on first use so a
@@ -1307,6 +1313,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// Built on first use: most posts have one piece of media.
     private var carousel: MediaCarouselView?
 
+    /// The carousel, for a test that needs to ask where a page put something.
+    var debugCarousel: MediaCarouselView? { carousel }
+
     private var loadTask: Task<Void, Never>?
     /// The metadata line always hangs off the caption; what changes per
     /// configure is whether it CLOSES the card. A media row's line is hidden
@@ -1681,6 +1690,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             view?.setPage(page)
         }
         view.onTapped = { [weak self] in self?.onMediaTapped?() }
+        view.onHoldChanged = { [weak self] held in self?.onMediaHoldChanged?(held) }
         mediaView.insertSubview(view, belowSubview: likesPill)
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([

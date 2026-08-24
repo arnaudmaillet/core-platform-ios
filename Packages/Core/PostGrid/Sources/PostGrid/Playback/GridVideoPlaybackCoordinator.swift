@@ -864,6 +864,28 @@ public final class GridVideoPlaybackCoordinator {
         }
     }
 
+    /// Holds a row's clip still while a finger rests on it, and lets it go when
+    /// the finger lifts.
+    ///
+    /// ⚠️ It resumes only what IT stopped. A clip that was already paused — one
+    /// page over, or resting because its row lost the ranking — must not start
+    /// playing because somebody held and released it. The held id is recorded
+    /// for exactly that reason, and a hold that found nothing running records
+    /// nothing.
+    public func setHeld(_ held: Bool, for id: PostID) {
+        guard let surface = loans[id]?.watchedClipSurface else { return }
+        if held {
+            guard pool.isAdvancing(in: surface) else { return }
+            if pool.setPaused(true, in: surface) { heldIDs.insert(id) }
+        } else {
+            guard heldIDs.remove(id) != nil else { return }
+            pool.setPaused(false, in: surface)
+        }
+    }
+
+    /// Rows whose clip this coordinator stopped for a hold.
+    private var heldIDs: Set<PostID> = []
+
     /// Brings a row's next clip to its first frame, so swiping the card's pages
     /// shows a picture rather than a thumbnail and a wait.
     ///

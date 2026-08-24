@@ -209,6 +209,95 @@ struct RowClipRetentionTests {
         #expect(cell.retainedPlaybackSurfaces.contains { $0 === replaced } == false)
     }
 
+    // MARK: - Where the mark sits
+
+    /// ⚠️ THE CORNER, and the SAME corner the row's own badge uses.
+    ///
+    /// A single-video card has always put its play badge at the media's top
+    /// trailing corner. Only a carousel's pages sat it in the middle, so a
+    /// collection and a single clip disagreed about where the mark lives — and
+    /// the collection's version covered the photograph it was describing.
+    ///
+    /// Asserted as a QUADRANT rather than a coordinate: the exact inset is the
+    /// card's furniture rule and may move with it, but "top trailing, off the
+    /// edge, clear of the middle" is the decision.
+    @Test func aVideoPagesMarkSitsInTheTopTrailingCorner() {
+        let cell = row([true, true])
+        let carousel = cell.debugCarousel
+        let page = try? #require(carousel?.pageViews.first)
+        let badge = try? #require(page?.badge)
+        let bounds = try? #require(page?.bounds)
+        guard let badge, let bounds, bounds.width > 0 else {
+            Issue.record("the page was never laid out, so its badge proves nothing")
+            return
+        }
+
+        #expect(badge.frame.maxX <= bounds.maxX)
+        #expect(badge.frame.minX > bounds.midX)
+        #expect(badge.frame.maxY < bounds.midY)
+        // Clear of the centre it used to occupy.
+        #expect(badge.frame.contains(CGPoint(x: bounds.midX, y: bounds.midY)) == false)
+    }
+
+    // MARK: - Hold to pause
+
+    /// A finger resting on the media stops the clip, and lifting it starts
+    /// again.
+    @Test func holdingStopsTheClipAndReleasingResumesIt() async {
+        let pool = VideoPlaybackController(
+            source: StubVideoSource(), poolSize: 6, capacity: 6
+        )
+        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 6)
+        let cell = row([true], id: "post-0")
+        coordinator.setSurfaceVisible(true)
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-0"),
+                  cell: cell, distanceFromCentre: 0)
+        ])
+        _ = cell.makeVideoRenderViewIfNeeded()
+        await settle { pool.isAdvancing(in: (cell.watchedClipSurface ?? cell.makeVideoRenderViewIfNeeded())) }
+        #expect(pool.isAdvancing(in: (cell.watchedClipSurface ?? cell.makeVideoRenderViewIfNeeded())), "nothing was playing to hold")
+
+        coordinator.setHeld(true, for: PostID("post-0"))
+        #expect(pool.isAdvancing(in: (cell.watchedClipSurface ?? cell.makeVideoRenderViewIfNeeded())) == false)
+
+        coordinator.setHeld(false, for: PostID("post-0"))
+        #expect(pool.isAdvancing(in: (cell.watchedClipSurface ?? cell.makeVideoRenderViewIfNeeded())))
+    }
+
+    /// ⚠️ RELEASING UNDOES THE HOLD, AND NOTHING ELSE.
+    ///
+    /// A clip that was already stopped — one page over, or resting because its
+    /// row lost the ranking — must not start playing because a finger happened
+    /// to rest on it and lift. The hold resumes what it stopped; it is not a
+    /// second way to press play.
+    @Test func releasingDoesNotStartAClipTheHoldNeverStopped() async {
+        let pool = VideoPlaybackController(
+            source: StubVideoSource(), poolSize: 6, capacity: 6
+        )
+        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 6)
+        let cell = row([true], id: "post-0")
+        coordinator.setSurfaceVisible(true)
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-0"),
+                  cell: cell, distanceFromCentre: 0, isPaused: true)
+        ])
+        _ = cell.makeVideoRenderViewIfNeeded()
+        await settle { pool.hasPlayer(in: (cell.watchedClipSurface ?? cell.makeVideoRenderViewIfNeeded())) }
+        // ⚠️ The denominator. "Still not advancing" is satisfied by a clip that
+        // never had a player at all, which would make this test agree with any
+        // implementation whatsoever.
+        #expect(pool.hasPlayer(in: (cell.watchedClipSurface ?? cell.makeVideoRenderViewIfNeeded())),
+                "no player was ever bound, so nothing below means anything")
+        pool.setPaused(true, in: (cell.watchedClipSurface ?? cell.makeVideoRenderViewIfNeeded()))
+        #expect(pool.isAdvancing(in: (cell.watchedClipSurface ?? cell.makeVideoRenderViewIfNeeded())) == false)
+
+        coordinator.setHeld(true, for: PostID("post-0"))
+        coordinator.setHeld(false, for: PostID("post-0"))
+
+        #expect(pool.isAdvancing(in: (cell.watchedClipSurface ?? cell.makeVideoRenderViewIfNeeded())) == false)
+    }
+
     // MARK: - One at a time
 
     private func settle(until condition: () -> Bool, tries: Int = 400) async {
@@ -239,7 +328,14 @@ struct RowClipRetentionTests {
                       cell: cell, distanceFromCentre: 0)
             ])
             _ = cell.makeVideoRenderViewIfNeeded()
-            await settle { pool.activePlayerCount >= page + 1 }
+            // ⚠️ Wait for what is ASSERTED, not for a proxy of it. Waiting on a
+            // player count and then asserting that one is ADVANCING leaves a
+            // window where the count is right and the resume has not landed —
+            // measured as an intermittent failure, one run in four.
+            await settle {
+                guard let watched = cell.watchedClipSurface else { return false }
+                return pool.isAdvancing(in: watched)
+            }
         }
 
         await reconcile(page: 0)

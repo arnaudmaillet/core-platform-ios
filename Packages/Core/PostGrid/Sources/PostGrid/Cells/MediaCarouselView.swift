@@ -87,6 +87,14 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// rather than a hole in `hitTest`: the pages still have to receive the pan.
     public var onTapped: (() -> Void)?
 
+    /// A finger is resting on a page (`true`), or has lifted (`false`).
+    ///
+    /// ⚠️ REPORTED OUT, like the tap and the page change, and for the same
+    /// reason: this view does not know that playback exists. It knows a finger
+    /// is down. Whoever owns the player decides that this means pause — which
+    /// is what keeps the pool from ever learning that pages exist.
+    public var onHoldChanged: ((Bool) -> Void)?
+
     /// Fired whenever the page under the box changes, so the host can move an
     /// indicator that lives OUTSIDE this view — see `PostGridListRowCell`, where
     /// the chips and the indicator belong to the preview rather than to its
@@ -267,6 +275,20 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         // and the post would not open. An ancestor recognizer still receives
         // touches that land on the pages.
         addGestureRecognizer(tap)
+
+        // Hold to pause. On THIS view for the same reason the tap is — the
+        // scroll view would refuse a recognizer it does not own.
+        //
+        // ⚠️ It must not eat the PAN. A finger that rests and then drags is
+        // paging, not holding, and a recognizer that swallowed the touch would
+        // have made a carousel unscrollable the moment anyone paused on it.
+        // `cancelsTouchesInView = false` plus a hold that ends on `.cancelled`
+        // — which is what the scroll view's pan triggers when it wins — is what
+        // makes the two coexist.
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
+        hold.minimumPressDuration = Self.holdToPauseDuration
+        hold.cancelsTouchesInView = false
+        addGestureRecognizer(hold)
         switch style {
         case .card:
             // The card's own fill, so the gutter between two pages and the
@@ -386,6 +408,25 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
 
     @objc private func handleTap() {
         onTapped?()
+    }
+
+    /// How long a press must last before it is a hold rather than a tap.
+    /// Matches the post screen's, so the gesture feels the same on both.
+    public static let holdToPauseDuration: TimeInterval = 0.2
+
+    @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            onHoldChanged?(true)
+        case .ended, .cancelled, .failed:
+            // ⚠️ `.cancelled` is not an edge case here, it is the common one:
+            // it is what fires when the viewer rests a finger and then drags to
+            // page. Treating it as anything other than "the hold is over" would
+            // leave the clip paused for good after an ordinary swipe.
+            onHoldChanged?(false)
+        default:
+            break
+        }
     }
 
     // MARK: - Hero concealment
@@ -595,7 +636,10 @@ final class CarouselPageView: UIView {
     /// Whether this page is REALLY holding `view` — both halves, for the reason
     /// `host` states: a weak reference outlives the view being taken away.
     func hosts(_ view: UIView) -> Bool { surface === view && view.superview === self }
-    private let badge = UIImageView(image: UIImage(systemName: "play.fill"))
+    /// Readable inside the package so a test can ask WHERE the mark sits — the
+    /// one property of it that a screenshot proves and a walk for image views
+    /// does not.
+    let badge = UIImageView(image: UIImage(systemName: "play.fill"))
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -626,17 +670,32 @@ final class CarouselPageView: UIView {
         super.layoutSubviews()
         cover.frame = bounds
         surface?.frame = bounds
-        let side = min(bounds.width, bounds.height) * Self.badgeFraction
+        // ⚠️ IN THE CORNER, not the middle — and this is the row's own rule,
+        // not a new one.
+        //
+        // A single-video card has always put its play badge at the media's top
+        // trailing corner, held off it by `mediaFurnitureInset` like every other
+        // piece of furniture. Only the carousel's pages sat it in the centre, so
+        // a collection and a single clip disagreed about where the mark lives
+        // and the collection's version covered the photograph it was describing.
+        //
+        // The badge says "this page is a video". It does not need the middle of
+        // the picture to say it.
+        let side = badge.intrinsicContentSize.width
+        let inset = PostGridListRowCell.mediaFurnitureInset
         badge.frame = CGRect(
-            x: (bounds.width - side) / 2, y: (bounds.height - side) / 2,
-            width: side, height: side
+            x: bounds.width - side - inset, y: inset, width: side, height: side
         )
     }
 
-    /// A twelfth of the page's short side, clamped — the row's badge is sized
-    /// against its preview the same way, so a page and a single-video card
-    /// carry the same mark at the same weight.
-    private static let badgeFraction: CGFloat = 0.12
+    /// The badge is sized by its SYMBOL now, not by the page.
+    ///
+    /// It used to be a twelfth of the short side, which is the right rule for a
+    /// mark in the middle of a picture — it has to scale with what it sits on.
+    /// A mark in the corner is furniture, and furniture on this card is sized
+    /// and inset like the rest of it: the row's own badge is a plain symbol at
+    /// its natural size, and the two now match by construction rather than by
+    /// two constants agreeing.
 
     func host(_ surface: UIView) {
         // ⚠️ IDENTITY IS NOT ENOUGH — ask whether it is actually here.
