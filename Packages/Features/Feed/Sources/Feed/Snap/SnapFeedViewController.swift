@@ -2559,30 +2559,36 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // the replica's doing: the destination itself is already engaged
         // before the push (`destinationEngaged=true` at flight-build time).
         //
-        // ⚠️ AN ENGAGED PAGE FLIES ITS THREAD, not a picture of the layout it
-        // is not in.
+        // ⚠️ AN ENGAGED PAGE GETS NO REPLICA, and the reason is written out in
+        // `RevealTransition` — which is where this should have been read first.
         //
-        // This is the same defect one card further along. A post opened from
-        // its COMMENT COUNT engages before the push, and the replica — built
-        // from the resting arrangement — flew the caption, the rail and the
-        // page dots for the whole flight, then swapped to the thread as the
-        // card was removed. What the viewer watched for half a second was the
-        // layout they had chosen not to open.
+        // A post opened from its COMMENT COUNT engages before the push. The
+        // replica, built from the RESTING arrangement, then flew the caption,
+        // the rail and the page dots for the whole flight and swapped to the
+        // thread as the card was removed: half a second of the layout the
+        // viewer had chosen not to open.
         //
-        // Flying with NO replica was the first fix and only half of one: the
-        // card carried the photograph honestly, but the thread still did not
-        // exist until the card was taken away, so the opening still ended in a
-        // swap. A still of the engaged stream rides over the media instead —
-        // scaled by the card exactly as the resting replica was, and sharp at
-        // the end where the card is at 1:1.
+        // ❌ A STILL OF THE ENGAGED PAGE was tried in its place and is reverted.
+        // It is the sixth instance of a mistake this codebase has already
+        // catalogued: "every previous attempt at a text hero flew a replica of
+        // the row and made it impersonate the destination, and all five of them
+        // died of the same thing — a text page IS its comment stream, a hosted
+        // child controller with its own self-sizing layout, and no stand-in can
+        // be that. The artifacts were the symptoms (A SKELETON IN THE
+        // PHOTOGRAPHED STILL, a blank card, the wrong safe area, two captions);
+        // impersonation was the disease."
         //
-        // Scoped to the MEDIA engagement: a text page's resting one is a
-        // different mechanism with its own reveal, and this is not the commit
-        // that changes it.
-        if commentsEngagedID != nil, !commentsEngagementIsResting {
-            flightChrome = nil
-            return engagedStillHost()
-        }
+        // Every one of those symptoms turned up again, in order: the caption's
+        // glass missing because a lens has nothing to sample when detached,
+        // then the whole panel frozen mid-skeleton on two runs in three,
+        // because the still races a fetch it cannot outrun. A still that shows
+        // the WRONG content is worse than a landing that is merely late.
+        //
+        // What the text page does instead is show the REAL page through a
+        // mask that opens from the row's rect. That is the shape of the answer
+        // here too, and it is not a line of code — see the notes on this
+        // commit.
+        if commentsEngagedID != nil, !commentsEngagementIsResting { return nil }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
         // Captured, not ambient: the replica must render at the live cell's
@@ -2591,33 +2597,6 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         configureFlightChrome(chrome)
         flightChrome = chrome
         return chrome
-    }
-
-    /// A host for the engaged still, filled ONE RUNLOOP TURN LATER.
-    ///
-    /// ⚠️ THE CAPTURE CANNOT HAPPEN NOW, and the log says so plainly: the
-    /// still is taken before `GLASSLOG: materialize`, because the destination
-    /// only gains a window after the flight is built. Every glass surface here
-    /// is window-guarded — building one off-window is what stalls the render
-    /// server — so at build time the caption bubble and the composer have no
-    /// material at all, and a still of them is their TEXT floating with no
-    /// bubble under it. Which is the pop this whole thing exists to remove,
-    /// moved one layer down.
-    ///
-    /// Nothing is lost by waiting: `ZoomFlight` fades this replica in from
-    /// alpha 0, so the frames it misses are the ones where it would have been
-    /// invisible anyway.
-    private func engagedStillHost() -> UIView {
-        let host = UIView()
-        host.isUserInteractionEnabled = false
-        DispatchQueue.main.async { [weak self, weak host] in
-            guard let host, let still = self?.activeSnapCell?.engagedCommentsSnapshot()
-            else { return }
-            still.frame = host.bounds
-            still.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            host.addSubview(still)
-        }
-        return host
     }
 
     /// Hides only the feed's own view: the navigation bar above it (owned by

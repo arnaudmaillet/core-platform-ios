@@ -747,51 +747,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         [commentsContainer.layer, headerFrost.layer, mediaBackdrop.layer, chrome.layer]
     }
 
-    /// A still of the engaged thread, for a flight to carry over the media.
-    ///
-    /// ⚠️ THE STREAM ONLY — never the media under it. The flying card already
-    /// carries the photograph, and on a video post it carries the LIVE surface;
-    /// a still copy laid over that would freeze the one thing the flight works
-    /// hardest to keep moving.
-    ///
-    /// `afterScreenUpdates: true` on purpose, and it is doing two jobs. The
-    /// obvious one is that a page engaged before the push has never rendered,
-    /// so a snapshot of what is already on screen would be blank. The other is
-    /// that forcing the update here forces it HERE — inside the flight's
-    /// staging, where the card is about to cover everything — rather than
-    /// leaving it to the landing.
-    func engagedCommentsSnapshot() -> UIView? {
-        guard isCommentsEngaged, !commentsContainer.isHidden, commentsContainer.alpha > 0
-        else { return nil }
-        // ⚠️ THE WHOLE ENGAGED FACE MINUS THE MEDIA, not the stream alone.
-        //
-        // The stream by itself flew over an undimmed photograph and the landing
-        // put the readability wash on in one frame: the page visibly darkened
-        // the instant the card was removed, which is the same swap this is
-        // meant to remove, in tone instead of in layout. The wash lives on
-        // `mediaBackdrop`, a sibling of the stream, so the snapshot has to be
-        // taken one level up — with the media itself hidden, because the card
-        // is already carrying that and a still copy over a live surface is a
-        // frozen video.
-        //
-        // ❌ LEAVING THE MEDIA IN WAS TRIED, to give the lenses a backdrop to
-        // sample, and it is worse on both counts: the glass still did not
-        // render, and the page's media view has not hydrated this early, so the
-        // still laid a flat placeholder over the card's real photograph.
-        //
-        // Safe to hide it: `setZoomContentHidden(true)` has already run by the
-        // time a flight asks for this, so nothing here is on screen to flicker.
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-glass-log") {
-            print("GLASSLOG: capturing engaged still")
-        }
-        #endif
-        let wasHidden = mediaCard.isHidden
-        mediaCard.isHidden = true
-        defer { mediaCard.isHidden = wasHidden }
-        return contentView.snapshotView(afterScreenUpdates: true)
-    }
-
     /// Materializes the header band's blur AHEAD of the engagement.
     ///
     /// A material arrives through `effect`, and building one is render-server
