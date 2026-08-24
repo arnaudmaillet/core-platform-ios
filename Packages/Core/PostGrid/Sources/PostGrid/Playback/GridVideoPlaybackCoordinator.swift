@@ -193,15 +193,7 @@ public final class GridVideoPlaybackCoordinator {
             let watched = candidate.cell.watchedClipSurface
             for surface in candidate.cell.retainedPlaybackSurfaces
             where surface !== watched {
-                // ⚠️ Adaptive streams are released rather than held — see the
-                // note on `isAdaptiveStream`. Held paused they come back running
-                // several times too fast; released, returning to one costs a
-                // fresh start, which is what it always cost.
-                if pool.isAdaptiveStream(in: surface) {
-                    pool.stop(surface)
-                } else {
-                    pool.setPaused(true, in: surface)
-                }
+                pool.setPaused(true, in: surface)
             }
             prewarm(candidate)
         }

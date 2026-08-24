@@ -310,24 +310,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // photograph and a video goes on playing beside it. Pausing here is what
         // makes "keeps its last frame" true rather than "keeps running".
         for page in mediaCard.surfacedPages where page != mediaCard.currentPage {
-            let surface = mediaCard.surface(forPage: page)
-            // ⚠️ AN ADAPTIVE STREAM IS NOT KEPT WARM BY PAUSING IT.
-            //
-            // Holding a progressive file paused is exact: the clock stops and
-            // resuming costs nothing. An adaptive one is free to re-plan while
-            // it is stopped, and measured, it comes back running 5x to 17.5x for
-            // seconds — the fast-forward reported on the long clip and never on
-            // the short one, through this same code.
-            //
-            // So it is released instead. Returning to it costs a fresh start,
-            // which is exactly what it cost before any of this existed: the
-            // retention gives up its benefit on the one kind of media where it
-            // cannot deliver it honestly, and keeps it everywhere else.
-            if videoPlayback.isAdaptiveStream(in: surface) {
-                videoPlayback.stop(surface)
-            } else {
-                videoPlayback.setPaused(true, in: surface)
-            }
+            // Adaptive streams are held paused exactly like files. They were
+            // briefly released here instead, on the theory that resuming one was
+            // what produced the fast-forward — it was not; the frames were
+            // stale, not the playback (see `VideoFrameSource`). Keeping the
+            // distinction would have cost the instant return on precisely the
+            // long clips that benefit from it most, to work around a fault that
+            // is fixed.
+            videoPlayback.setPaused(true, in: mediaCard.surface(forPage: page))
         }
         mediaCard.hostRetainedSurfaces()
         #if DEBUG
