@@ -233,6 +233,26 @@ final class VideoFrameSource {
     /// ready" — which is a load, and looks like one.
     private(set) var isCatchingUp = false
 
+    /// What the ITEM says about itself: ready, failed, or still deciding.
+    ///
+    /// ⚠️ The question `why=no-new-buffer` cannot answer. An output with nothing
+    /// to give looks the same whether its item is still loading, has failed
+    /// outright, or is fine and merely between frames — and the first two are
+    /// not render faults at all. Everything upstream of here was measured before
+    /// this was, which is how five fixes went into the wrong layer.
+    var itemDiagnosis: String {
+        guard let item = observedItem else { return "no-item" }
+        switch item.status {
+        case .readyToPlay:
+            return "ready keepUp=\(item.isPlaybackLikelyToKeepUp ? "Y" : "N")"
+        case .failed:
+            let reason = item.error.map { "\($0)" } ?? "unknown"
+            return "FAILED \(reason.prefix(120))"
+        default:
+            return "loading"
+        }
+    }
+
     /// Why the last tick produced nothing — the question a `rated=0` heartbeat
     /// cannot answer on its own, and four runs were spent not knowing it.
     private(set) var noFrameReason = "none"

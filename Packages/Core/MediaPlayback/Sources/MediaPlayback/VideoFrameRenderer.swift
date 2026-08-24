@@ -257,11 +257,28 @@ final class VideoFrameRenderer {
         }
         guard hostTime - lastTraceSampleHostTime >= 1 else { return }
         VideoPlaybackTrace.emit(String(
-            format: "rate max=%.2fx rated=%d surfaces=%d item=%@ why=%@",
+            format: "rate max=%.2fx rated=%d surfaces=%d why=%@ item=%@",
             maxRateSinceTraceSample, ratedDispatchesSinceTraceSample,
-            surfaces.allObjects.count, source.hasItem ? "Y" : "N",
-            source.noFrameReason
+            surfaces.allObjects.count, source.noFrameReason,
+            source.itemDiagnosis
         ))
+        // ⚠️ THE FAULT, STATED WITHOUT REFERENCE TO ANY LAYER.
+        //
+        // A clip nobody paused, whose item is ready, with a surface attached,
+        // that drew nothing for a whole second. That is the reported bug and
+        // nothing else is — and it took this long to say because every earlier
+        // probe measured a piece of the machinery instead of the outcome. Twice
+        // I read `rated=0` as a fault when it was the correct state for a
+        // deliberately paused warm clip; this cannot make that mistake, because
+        // being paused is the first thing it excludes.
+        if ratedDispatchesSinceTraceSample == 0,
+           player.timeControlStatus != .paused,
+           surfaces.allObjects.contains(where: { $0.window != nil }) {
+            VideoPlaybackTrace.emit(
+                "FROZEN unpaused clip drew nothing: \(source.itemDiagnosis) "
+                + "status=\(player.timeControlStatus.rawValue)"
+            )
+        }
         lastTraceSampleHostTime = hostTime
         maxRateSinceTraceSample = 0
         ratedDispatchesSinceTraceSample = 0
