@@ -761,7 +761,7 @@ final class SnapChromeView: UIView {
 
     /// The indicator's scrub, passed up so the screen's own pans can yield to
     /// it. See `MediaPageIndicatorView.scrubGesture`.
-    var mediaScrubGesture: UIPanGestureRecognizer { mediaPageIndicator.scrubGesture }
+    var mediaScrubGesture: UIGestureRecognizer { mediaPageIndicator.scrubGesture }
 
     func setTickerActive(_ active: Bool) {
         commentTicker.setActive(active)

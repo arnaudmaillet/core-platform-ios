@@ -1443,11 +1443,22 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // collections only and left single-video cards without it.
         //
         // On `mediaView`, an ancestor of the carousel, so the pages still
-        // receive the pan. `cancelsTouchesInView = false` for the same reason:
-        // a finger that rests and then drags is paging, not holding.
+        // receive the pan.
+        //
+        // ⚠️ IT MUST CANCEL THE TOUCH, and this is where the two shapes were not
+        // really unified. A collection opens by its carousel's own tap; a single
+        // attachment opens by the COLLECTION VIEW selecting the cell, which is
+        // driven by plain touch delivery. Letting the touch through therefore
+        // opened the post the moment a hold ended — on single-media cards only,
+        // which is exactly how it was reported.
+        //
+        // Cancelling costs the pans nothing: a gesture recognizer is not touch
+        // delivery, so the carousel still pages and the feed still scrolls. What
+        // it stops is the cell's own selection tracking — and only once the hold
+        // has actually recognised, so an ordinary tap still opens the post.
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleMediaHold))
         hold.minimumPressDuration = MediaCarouselView.holdToPauseDuration
-        hold.cancelsTouchesInView = false
+        hold.cancelsTouchesInView = true
         mediaView.addGestureRecognizer(hold)
 
         playBadge.constrain(in: mediaView) { parent in

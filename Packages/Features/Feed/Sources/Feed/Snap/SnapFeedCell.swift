@@ -1578,7 +1578,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The page's playback surface, for a test that needs to ask the pool about
     /// it. Playback ownership is the pool's, so a test has to name the surface.
     /// The page indicator's scrub, so the screen can make its dismissal yield.
-    var mediaScrubGesture: UIPanGestureRecognizer { chrome.mediaScrubGesture }
+    var mediaScrubGesture: UIGestureRecognizer { chrome.mediaScrubGesture }
 
     var debugRenderSurface: VideoRenderView { mediaCard.renderView }
 

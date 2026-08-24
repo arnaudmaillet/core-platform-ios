@@ -34,11 +34,26 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
 
     /// The scrub, exposed so a host can make its OWN pan yield to it.
     ///
-    /// ⚠️ The only reliable way to beat a recognizer attached to an ancestor: a
-    /// view cannot refuse touches on the ancestor's behalf, because the
-    /// ancestor sees them too. It has to be told once, explicitly —
-    /// `theirPan.require(toFail: indicator.scrubGesture)`.
-    public let scrubGesture = UIPanGestureRecognizer()
+    /// ⚠️ A LONG PRESS OF ZERO DURATION, NOT A PAN — and that is the whole
+    /// reason dragging the chip did nothing while tapping it worked.
+    ///
+    /// A pan must see MOVEMENT before it begins, and every scroll view above
+    /// this chip is watching for exactly the same movement. The feed's
+    /// collection view is an ancestor; it claimed the drag every time, so the
+    /// pan here never got past `.possible` and the chip only ever responded to
+    /// taps.
+    ///
+    /// A long press with no minimum duration begins on TOUCH-DOWN, before any
+    /// scroll view has anything to go on, and then reports `.changed` for every
+    /// movement — which is a scrubber exactly. `allowableMovement` is lifted
+    /// because the default cancels a long press that travels, and travelling is
+    /// the point.
+    public let scrubGesture: UILongPressGestureRecognizer = {
+        let scrub = UILongPressGestureRecognizer()
+        scrub.minimumPressDuration = 0
+        scrub.allowableMovement = .greatestFiniteMagnitude
+        return scrub
+    }()
 
     private let dots = PageDotsView()
     private let label = UILabel()
@@ -54,8 +69,10 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         // off because a counter that swallowed touches would put a dead corner
         // on the preview; this one has something to do with them.
         isUserInteractionEnabled = true
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTouch))
-        addGestureRecognizer(tap)
+        // No separate tap: a zero-duration long press already fires `.began` on
+        // touch-down and `.ended` on lift, which IS a tap — and a second
+        // recognizer competing for the same touch is how the drag was lost in
+        // the first place.
         scrubGesture.addTarget(self, action: #selector(handleTouch))
         addGestureRecognizer(scrubGesture)
         // ⚠️ NOTHING ELSE MAY CLAIM THIS TOUCH.
@@ -72,7 +89,6 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         // a recognizer on an ANCESTOR is blocked by neither, so hosts must make
         // theirs stand down. See `scrubGesture`.
         scrubGesture.cancelsTouchesInView = true
-        tap.cancelsTouchesInView = true
         isExclusiveTouch = true
         // ⚠️ This chip YIELDS horizontal space; the counters and the date do not.
         //
@@ -174,9 +190,6 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         onPageRequested?(
             Self.page(at: recognizer.location(in: self).x, width: bounds.width, count: pageCount)
         )
-        // A tap has no `.ended` worth waiting for — it fires once, already
-        // ended — so the expansion it opens is closed on the same call.
-        if recognizer is UITapGestureRecognizer { isScrubbing = false }
     }
 
     /// Which page a touch at `x` is asking for.
