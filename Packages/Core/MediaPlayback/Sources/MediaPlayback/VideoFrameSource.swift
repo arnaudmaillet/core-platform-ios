@@ -98,8 +98,18 @@ final class VideoFrameSource {
             return nil
         }
         Self.ensureColorAttachments(on: buffer)
+        lastClockTime = itemTime
         return (buffer, displayTime.isValid ? displayTime : itemTime)
     }
+
+    /// The clock reading that went with the last frame handed out.
+    ///
+    /// ⚠️ Kept so the two can be compared. The frames racing while the clock
+    /// keeps time and the clock itself running fast look identical from the
+    /// screen, and they are different faults: one is the output handing back
+    /// buffers ahead of what was asked for, the other is the timebase. Only
+    /// logging both in one line tells them apart.
+    private(set) var lastClockTime: CMTime = .invalid
 
     /// Gives a buffer default Rec. 709 colour attachments when it carries none.
     ///

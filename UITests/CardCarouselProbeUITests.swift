@@ -29,7 +29,7 @@ final class CardCarouselProbeUITests: XCTestCase {
         // instead of the long HLS stream. One variable changed, to test
         // whether the reported effect really tracks media length.
         for _ in 0..<3 { swipeCarousel() }
-        Thread.sleep(forTimeInterval: 4)
+        Thread.sleep(forTimeInterval: 12)
 
         // ⚠️ THE PATH THE SWIPING PROBE NEVER TOOK — opening the post and
         // coming back. The acceleration was reported on the RETURN, and a probe

@@ -282,17 +282,29 @@ final class VideoFrameRenderer {
             let mediaElapsed = (itemTime - lastItemTime).seconds
             let rate = mediaElapsed / gap
             if rate > 1.5 {
+                // Both readings on one line: what the FRAMES did and what the
+                // CLOCK did over the same interval. Equal, and the timebase is
+                // racing; the frames alone, and the output is handing back
+                // buffers ahead of the time it was asked for.
+                let clockNow = source.lastClockTime
+                let clockElapsed = (lastClockTime.isValid && clockNow.isValid)
+                    ? (clockNow - lastClockTime).seconds : Double.nan
                 VideoPlaybackTrace.emit(String(
-                    format: "fast media=%.3fs real=%.3fs rate=%.1fx at=%.3fs",
-                    mediaElapsed, gap, rate, itemTime.seconds
+                    format: "fast frames=%.3fs clock=%.3fs real=%.3fs rate=%.1fx at=%.3fs",
+                    mediaElapsed, clockElapsed, gap, rate, itemTime.seconds
                 ))
             }
             maxRateSinceTraceSample = max(maxRateSinceTraceSample, rate)
             ratedDispatchesSinceTraceSample += 1
         }
         lastItemTime = itemTime
+        lastClockTime = source.lastClockTime
         lastDispatchHostTime = hostTime
     }
+
+    /// The clock reading that accompanied the previous frame — the other half of
+    /// the comparison above.
+    private var lastClockTime: CMTime = .invalid
 
     /// Per-second dispatch rate under `-avsbdl-log`.
     ///
