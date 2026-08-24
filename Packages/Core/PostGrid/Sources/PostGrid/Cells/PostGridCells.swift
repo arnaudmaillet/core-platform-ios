@@ -502,6 +502,22 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         }
         view.transform = .identity
         view.isHidden = false
+        // ⚠️ THE ADOPTED VIEW IS THIS PAGE'S SURFACE FROM HERE ON.
+        //
+        // Without this the page map still names the surface the landing just
+        // replaced, and the live one — the view actually carrying the adopted
+        // player — is in no map at all. Nothing can pause what it cannot name,
+        // so that player ran on for as long as the row lived: returning to its
+        // page found playback seconds ahead of where it was left, and the
+        // picture raced to reach it.
+        //
+        // Reported precisely: "in the post it pauses properly, in the card the
+        // video catches up as if it had kept going". It had. The post's card
+        // view took this same line when its own landing was fixed; the row
+        // never got it, and that asymmetry is exactly what was observed.
+        if showsCarousel, let carousel, carousel.currentPageVideoURL != nil {
+            pageSurfaces[carousel.currentPage] = view
+        }
         install(view)
         loadedVideoRenderView = view
     }

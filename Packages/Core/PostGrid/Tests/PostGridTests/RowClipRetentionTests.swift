@@ -184,6 +184,31 @@ struct RowClipRetentionTests {
         #expect(cell.clipsToPrewarm().isEmpty)
     }
 
+    /// ⚠️ A LANDING'S SURFACE MUST BE FINDABLE, or its clip never stops.
+    ///
+    /// The hero flight hands the row a live surface. If the page map still names
+    /// the one it replaced, the live view is in no map at all — and the pause
+    /// pass walks that map, so nothing can pause the player it carries. It runs
+    /// for the life of the row, and returning to its page finds playback seconds
+    /// ahead, with the picture racing to reach it.
+    ///
+    /// Observed as the card and the post behaving differently: the post's card
+    /// view took this line when its landing was fixed, and the row did not.
+    @Test func aLandingPutsItsSurfaceInThePageMap() {
+        let cell = row([true, true])
+        cell.retainClips(budget: 2)
+        let replaced = cell.makeVideoRenderViewIfNeeded()
+
+        let flown = VideoRenderView()
+        cell.adoptVideoRenderView(flown)
+
+        #expect(cell.watchedClipSurface === flown)
+        #expect(cell.retainedPlaybackSurfaces.contains { $0 === flown })
+        // And the one it replaced is gone, so nothing is paused twice or held
+        // by a page that no longer draws it.
+        #expect(cell.retainedPlaybackSurfaces.contains { $0 === replaced } == false)
+    }
+
     // MARK: - One at a time
 
     private func settle(until condition: () -> Bool, tries: Int = 400) async {

@@ -193,7 +193,22 @@ public final class GridVideoPlaybackCoordinator {
             let watched = candidate.cell.watchedClipSurface
             for surface in candidate.cell.retainedPlaybackSurfaces
             where surface !== watched {
-                pool.setPaused(true, in: surface)
+                // ⚠️ A PAUSE THAT FINDS NOTHING IS REPORTED, not shrugged off.
+                //
+                // `setPaused` answers whether there was a player to pause, and
+                // the answer was being discarded. A surface the pool has no
+                // registration for is one whose clip is running somewhere this
+                // loop cannot reach — which is a clip that never stops, and it
+                // took a viewer noticing the card and the post behaving
+                // differently to find one.
+                let paused = pool.setPaused(true, in: surface)
+                #if DEBUG
+                if !paused, CarouselPlaybackAudit.isEnabled {
+                    CarouselPlaybackAudit.trace(
+                        "pause found no player \(candidate.id.rawValue)"
+                    )
+                }
+                #endif
             }
             prewarm(candidate)
         }
