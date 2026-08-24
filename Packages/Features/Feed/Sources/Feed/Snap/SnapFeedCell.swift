@@ -1592,6 +1592,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return
         }
         guard chrome.alpha < 1 else { return }
+        // ⚠️ NOT WHEN THE COMMENTS ALREADY OWN THE CHROME.
+        //
+        // `chrome` is one of the engagement's own fade layers: engaged, it is
+        // deliberately at zero. This restore is unconditional — it exists to
+        // undo the HOLD, and it wrote the same property — so a post opened
+        // straight into its thread landed wearing both interfaces at once, the
+        // ticker and the caption and the page dots sitting under a comment
+        // stream.
+        //
+        // The hold's opposite is not "visible", it is "whatever the page was
+        // doing before it was covered".
+        guard !isCommentsEngaged else { return }
         UIView.animate(
             withDuration: 0.26, delay: 0.02,
             usingSpringWithDamping: 0.85, initialSpringVelocity: 0,

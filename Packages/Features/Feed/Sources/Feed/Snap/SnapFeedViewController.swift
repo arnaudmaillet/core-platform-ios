@@ -402,7 +402,7 @@ final class SnapFeedViewController: UIViewController {
         // the route, because on the hero path this fires WITH the transition
         // and would spend the engagement's layout inside the flight's last
         // frames — the one place this screen refuses to spend it.
-        if !isAwaitingZoomPresentation { applyPendingComments() }
+        if !isAwaitingZoomPresentation { applyPendingComments(animated: true) }
         #if DEBUG
         runDebugAppearanceHooks()
         #endif
@@ -1654,7 +1654,7 @@ final class SnapFeedViewController: UIViewController {
     /// path (user taps a comment surface on a media post) — the animated
     /// reveal, the pager lock, and the toolbar swap all fire together;
     /// text pages take the pre-rendered resting path instead.
-    private func presentComments(for id: PostID) {
+    private func presentComments(for id: PostID, animated: Bool = true) {
         guard commentsEngagedID == nil,
               let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell
@@ -1705,7 +1705,7 @@ final class SnapFeedViewController: UIViewController {
                 detail?.setCommentSortOrder(order)
             }
         }
-        setEngagedChrome(true, hasMedia: true, animated: true)
+        setEngagedChrome(true, hasMedia: true, animated: animated)
         // LAYOUT FIRST, UNANIMATED. Inside the spring, `layoutIfNeeded`
         // turns every frame the layout resolves into an animated property —
         // and the tree under it is the whole comments panel. On a warm panel
@@ -1713,6 +1713,18 @@ final class SnapFeedViewController: UIViewController {
         // frame is what we want the spring to animate FROM, not something
         // for it to interpolate towards.
         UIView.performWithoutAnimation { cell.contentView.layoutIfNeeded() }
+        // ⚠️ NOTHING TO ANIMATE FROM. A post opened AT its comments has never
+        // been seen in the other layout, so there is no previous state for a
+        // spring to carry the eye between — animating here would show the
+        // viewer the arrangement they did not ask for, for a fifth of a second,
+        // on their way to the one they did.
+        if !animated {
+            UIView.performWithoutAnimation {
+                cell.setCommentsEngaged(true)
+                detail?.animateEngagedTransition(toEngaged: true, duration: 0)
+                cell.contentView.layoutIfNeeded()
+            }
+        } else {
         // ONE MOTION, still — but built out of explicit animations rather
         // than a `UIView.animate` block. The block's own commit was the last
         // thing standing between this transition and a whole frame budget:
@@ -1722,6 +1734,7 @@ final class SnapFeedViewController: UIViewController {
         detail?.animateEngagedTransition(
             toEngaged: true, duration: SnapCommentsLayout.engageDuration
         )
+        }
         #if DEBUG
         // The discriminating measurement: frame gaps once the animation is
         // OVER and the engaged interface is simply sitting there. If it drops
@@ -1735,9 +1748,10 @@ final class SnapFeedViewController: UIViewController {
         // The whole tap-time cost, in one number. It is a hitch budget: any
         // main-thread work here is a frame the video is not shown on.
         if ProcessInfo.processInfo.arguments.contains("-engage-profile") {
-            print(String(format: "[engage] TAP→animating %6.2f ms (warm=%@)",
+            print(String(format: "[engage] TAP→animating %6.2f ms (warm=%@ animated=%@)",
                          (CACurrentMediaTime() - __engageStart) * 1000,
-                         wasPrewarmed ? "yes" : "NO"))
+                         wasPrewarmed ? "yes" : "NO",
+                         animated ? "yes" : "no"))
         }
         #endif
     }
@@ -2545,6 +2559,23 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // the replica's doing: the destination itself is already engaged
         // before the push (`destinationEngaged=true` at flight-build time).
         //
+        // ⚠️ AN ENGAGED PAGE HAS NO RESTING CHROME TO REPLICATE, so it gets no
+        // replica at all.
+        //
+        // This is the same defect one card further along. A post opened from
+        // its COMMENT COUNT engages before the push, and the replica — built
+        // from the resting arrangement — flew the caption, the rail and the
+        // page dots for the whole flight, then swapped to the thread as the
+        // card was removed. The engagement was already correct underneath; what
+        // the viewer was watching was a picture of the layout they had chosen
+        // not to open.
+        //
+        // Nothing is lost by flying without one: the card carries the
+        // photograph, and the photograph is what the engaged page shows behind
+        // its stream. Scoped to the MEDIA engagement — a text page's resting
+        // one is a different mechanism with its own reveal, and this is not the
+        // commit that changes it.
+        if commentsEngagedID != nil, !commentsEngagementIsResting { return nil }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
         // Captured, not ambient: the replica must render at the live cell's
@@ -2599,15 +2630,39 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// since the card the viewer pressed is what the flight is carrying.
     public func openComments(for id: PostID) {
         pendingCommentsID = id
+        // ⚠️ NOW, IF THERE IS ANYTHING TO DO IT TO — before the push, not after
+        // the landing.
+        //
+        // Applied on landing, the viewer watched the post arrive in its ordinary
+        // layout and THEN rearrange itself into the thread: two screens for one
+        // press. The engagement has to be the state the page is already in when
+        // it becomes visible, which means it has to happen before the flight
+        // starts, because during the flight is the one window this screen
+        // refuses to spend layout in.
+        //
+        // The cost is real and it moves rather than disappears: the delay now
+        // sits between the finger lifting and the card leaving, where it reads
+        // as latency, instead of inside the animation, where it reads as jank.
+        // Of the two that is the one to take — and there is nothing to animate
+        // yet, so the engagement is applied UNANIMATED and simply is the layout
+        // the page opens in.
+        loadViewIfNeeded()
+        view.layoutIfNeeded()
+        applyPendingComments(animated: false)
     }
 
     /// Engages the comments a card asked for, once there is a page to engage
     /// them on. Reading the request clears it, so a dismissal and a second open
     /// start from nothing.
-    func applyPendingComments() {
-        guard let id = pendingCommentsID else { return }
+    ///
+    /// Silent when the post has no cell yet — a feed pushed cold has no pages
+    /// until its first render, and the landing seam is what picks the request up
+    /// then. Which is why the request is only cleared once it is USED.
+    func applyPendingComments(animated: Bool) {
+        guard let id = pendingCommentsID,
+              dataSource.indexPath(for: id) != nil else { return }
         pendingCommentsID = nil
-        presentComments(for: id)
+        presentComments(for: id, animated: animated)
     }
 
     /// Takes the pending page for `id`, if there is one. Reading it clears it —
@@ -2948,7 +3003,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         scheduleIdleCommentsWarm()
         // …unless a card asked to land IN the comments, in which case there is
         // nothing to warm for: the engagement is happening now.
-        applyPendingComments()
+        applyPendingComments(animated: true)
     }
 
     /// The hero transition's dismiss-leg live seam: mirrors the active cell's
