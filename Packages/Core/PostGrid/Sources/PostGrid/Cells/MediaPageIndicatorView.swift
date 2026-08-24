@@ -259,14 +259,70 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         switch state {
         case .began:
             isScrubbing = true
+            anchor(at: x)
         case .changed:
             isScrubbing = true
-            onPageRequested?(Self.page(at: x, width: bounds.width, count: pageCount))
+            requestPage(draggedTo: x)
         case .ended, .cancelled, .failed:
             isScrubbing = false
         default:
             break
         }
+    }
+
+    /// ⚠️ THE PAGE YOU ARE ON IS WHERE THE DRAG STARTS FROM, wherever the
+    /// finger lands.
+    ///
+    /// The touch used to be read ABSOLUTELY — the strip divided into as many
+    /// bands as there are pages, and wherever you pressed is the page you got.
+    /// Which meant putting a finger on the middle of the chip teleported a
+    /// twelve-page post to page six before the drag had moved at all. The chip
+    /// looked like a scrubber and behaved like a row of targets.
+    ///
+    /// So the touch-down point is an ORIGIN, not a coordinate: it pins the
+    /// current page, and only movement from there asks for anything. Nothing
+    /// jumps, and the dots track the finger.
+    private func anchor(at x: CGFloat) {
+        scrubAnchorX = x
+        scrubAnchorPage = currentPage
+        lastRequestedPage = currentPage
+    }
+
+    /// One dot's slot per page, which is what makes the gesture legible: the
+    /// mark advances by exactly the distance between two dots, so the finger
+    /// and the strip move at the same rate.
+    ///
+    /// The chip is only ~50pt of dots, which would cap a single stroke at four
+    /// or five pages — except that the scrub is a long press with its movement
+    /// limit lifted, so it keeps tracking well outside the chip. A drag across
+    /// the screen covers thirty pages; the chip's width bounds what is DRAWN,
+    /// never what is reachable.
+    static var pointsPerPage: CGFloat { dotDiameter + dotSpacing }
+
+    private var scrubAnchorX: CGFloat = 0
+    private var scrubAnchorPage = 0
+    private var lastRequestedPage: Int?
+
+    private func requestPage(draggedTo x: CGFloat) {
+        let travelled = Int(((x - scrubAnchorX) / Self.pointsPerPage).rounded())
+        let raw = scrubAnchorPage + travelled
+        let page = min(max(raw, 0), pageCount - 1)
+        // ⚠️ RE-ANCHOR AT THE ENDS, or the gesture goes numb.
+        //
+        // Drag twenty pages past the last one and `raw` is twenty out of range.
+        // Without this the finger would have to travel all twenty back before
+        // the strip moved again — the control would feel stuck exactly when the
+        // viewer is trying to correct an overshoot. Pinning the anchor to the
+        // edge means the way back responds on the first slot.
+        if raw != page {
+            scrubAnchorPage = page
+            scrubAnchorX = x
+        }
+        // Only when it CHANGES: `.changed` fires on every touch move, and the
+        // host's answer to a page request is to scroll a carousel.
+        guard page != lastRequestedPage else { return }
+        lastRequestedPage = page
+        onPageRequested?(page)
     }
 
     #if DEBUG
@@ -283,31 +339,13 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     }
     #endif
 
-    /// Which page a touch at `x` is asking for.
+    /// The floor this chip may be compressed to: two dots and their runway.
     ///
-    /// ⚠️ Across the WHOLE run of pages, even when only a window of dots is
-    /// drawn. The chip is a scrubber, not a row of discrete targets: with a
-    /// windowed indicator the visible dots are not the pages, so mapping a touch
-    /// onto them would make the far right mean "the last dot I can see" rather
-    /// than "the end" — and which page that is would change as the window moved.
-    /// One rule at every width, and every page reachable at every width.
-    ///
-    /// Truncation, not rounding: the strip divides into `count` equal BANDS and
-    /// the viewer is pointing at a band. Rounding makes the first and last bands
-    /// half-width, so the two pages people reach for most become the hardest to
-    /// hit.
-    static func page(at x: CGFloat, width: CGFloat, count: Int) -> Int {
-        guard count > 1 else { return 0 }
-        let inset = insets.leading
-        let usable = max(width - inset * 2, 1)
-        let fraction = min(max((x - inset) / usable, 0), 1)
-        return min(Int(fraction * CGFloat(count)), count - 1)
-    }
-
-    /// The floor this chip may be compressed to: two dots plus its own padding.
-    public var minimumChipWidth: CGFloat {
-        dots.minimumWidth + Self.insets.leading + Self.insets.trailing
-    }
+    /// ⚠️ The padding is NOT added on top. It used to be — the chip held it and
+    /// the dots view did not — but the dots view now spans it, so `minimumWidth`
+    /// already counts it. Adding it again reserved 24pt of nothing and made the
+    /// chip the last thing on the row to compress instead of the first.
+    public var minimumChipWidth: CGFloat { dots.minimumWidth }
 }
 
 /// The dots themselves, laid out by hand so the chip can be narrower than its

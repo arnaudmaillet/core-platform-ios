@@ -100,21 +100,80 @@ struct CarouselPagingLimitTests {
         #expect(requested.isEmpty)
     }
 
-    /// And dragging does, at the page under the finger — asserted beside its
-    /// opposite, because a gesture that asks for nothing at all would satisfy
-    /// the test above.
-    @Test func draggingRequestsThePageUnderTheFinger() {
+    /// And dragging does — asserted beside its opposite, because a gesture that
+    /// asks for nothing at all would satisfy the test above.
+    @Test func draggingAdvancesFromWhereTheFingerLanded() {
         let indicator = MediaPageIndicatorView()
         indicator.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
-        indicator.configure(count: 12, current: 0)
+        indicator.configure(count: 12, current: 3)
         var requested: [Int] = []
         indicator.onPageRequested = { requested.append($0) }
 
-        indicator.debugScrub(.began, atX: 10)
-        indicator.debugScrub(.changed, atX: 110)
+        indicator.debugScrub(.began, atX: 60)
+        indicator.debugScrub(.changed, atX: 60 + MediaPageIndicatorView.pointsPerPage * 2)
 
-        #expect(requested.count == 1)
-        #expect((requested.first ?? 0) > 6)
+        #expect(requested == [5])
+    }
+
+    /// ⚠️ WHERE YOU PRESS IS AN ORIGIN, NOT A COORDINATE.
+    ///
+    /// The touch used to be read absolutely — the strip divided into as many
+    /// bands as there are pages — so landing on the middle of the chip
+    /// teleported a twelve-page post to page six before the drag had moved at
+    /// all. Both ends of the chip are pressed here, from the same page, to show
+    /// the answer no longer depends on WHERE the finger went down.
+    @Test func thePressPointDoesNotDecideThePage() {
+        for x in [CGFloat(4), 60, 116] {
+            let indicator = MediaPageIndicatorView()
+            indicator.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+            indicator.configure(count: 12, current: 3)
+            var requested: [Int] = []
+            indicator.onPageRequested = { requested.append($0) }
+
+            indicator.debugScrub(.began, atX: x)
+            indicator.debugScrub(.changed, atX: x + MediaPageIndicatorView.pointsPerPage)
+
+            #expect(requested == [4])
+        }
+    }
+
+    /// A drag that goes nowhere asks for nothing, and a drag that comes back
+    /// asks once — the host's answer to a request is to scroll a carousel, and
+    /// `.changed` fires on every touch move.
+    @Test func onlyAChangeOfPageIsRequested() {
+        let indicator = MediaPageIndicatorView()
+        indicator.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+        indicator.configure(count: 12, current: 5)
+        var requested: [Int] = []
+        indicator.onPageRequested = { requested.append($0) }
+
+        indicator.debugScrub(.began, atX: 60)
+        indicator.debugScrub(.changed, atX: 62)
+        indicator.debugScrub(.changed, atX: 63)
+
+        #expect(requested.isEmpty)
+    }
+
+    /// ⚠️ OVERSHOOTING MUST NOT GO NUMB.
+    ///
+    /// Drag well past the last page and a naive anchor is left that many pages
+    /// out of range: the finger would have to travel all the way back before
+    /// the strip moved again, which is exactly when the viewer is trying to
+    /// correct. The anchor pins to the edge, so the way back responds on the
+    /// first slot.
+    @Test func comingBackFromPastTheEndRespondsImmediately() {
+        let indicator = MediaPageIndicatorView()
+        indicator.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+        indicator.configure(count: 12, current: 10)
+        var requested: [Int] = []
+        indicator.onPageRequested = { requested.append($0) }
+
+        let slot = MediaPageIndicatorView.pointsPerPage
+        indicator.debugScrub(.began, atX: 60)
+        indicator.debugScrub(.changed, atX: 60 + slot * 20)   // far past the end
+        indicator.debugScrub(.changed, atX: 60 + slot * 19)   // one slot back
+
+        #expect(requested == [11, 10])
     }
 
     // MARK: - The dots

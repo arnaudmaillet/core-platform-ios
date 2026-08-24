@@ -753,32 +753,42 @@ struct CarouselChipsAreFixedTests {
         }
     }
 
-    /// The indicator is a CONTROL: a tap or a drag across it asks for a page.
-    ///
-    /// Truncation into equal bands, not rounding. Rounding makes the first and
-    /// last bands half-width, so the two pages people reach for most — the ends
-    /// — become the hardest to hit.
-    @Test func theIndicatorTurnsATouchIntoAPage() {
-        let width: CGFloat = 100
-        func page(_ x: CGFloat) -> Int {
-            MediaPageIndicatorView.page(at: x, width: width, count: 4)
-        }
+    /// The indicator is a CONTROL: a drag across it asks for pages, one per dot
+    /// slot, in whichever direction the finger goes.
+    @Test func theIndicatorTurnsADragIntoPages() {
+        let indicator = MediaPageIndicatorView()
+        indicator.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+        indicator.configure(count: 8, current: 4)
+        var requested: [Int] = []
+        indicator.onPageRequested = { requested.append($0) }
 
-        #expect(page(0) == 0)
-        #expect(page(width) == 3)
-        // Four equal bands across the padded strip: the ends are as wide as the
-        // middles.
-        #expect(page(width * 0.2) == 0)
-        #expect(page(width * 0.45) == 1)
-        #expect(page(width * 0.95) == 3)
-        // Outside the chip is clamped, never a crash and never a wrap.
-        #expect(page(-40) == 0)
-        #expect(page(width + 40) == 3)
+        let slot = MediaPageIndicatorView.pointsPerPage
+        indicator.debugScrub(.began, atX: 60)
+        indicator.debugScrub(.changed, atX: 60 + slot)
+        indicator.debugScrub(.changed, atX: 60 + slot * 2)
+        indicator.debugScrub(.changed, atX: 60)
+        indicator.debugScrub(.changed, atX: 60 - slot)
+
+        #expect(requested == [5, 6, 4, 3])
+        // Clamped at both ends, never a crash and never a wrap.
+        indicator.debugScrub(.changed, atX: 60 - slot * 40)
+        indicator.debugScrub(.changed, atX: 60 + slot * 40)
+        #expect(requested.last == 7)
+        #expect(requested.contains(0))
     }
 
     /// A single-page post has no page to ask for.
     @Test func theIndicatorAsksForNothingWhenThereIsOnePage() {
-        #expect(MediaPageIndicatorView.page(at: 80, width: 100, count: 1) == 0)
+        let indicator = MediaPageIndicatorView()
+        indicator.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+        indicator.configure(count: 1, current: 0)
+        var requested: [Int] = []
+        indicator.onPageRequested = { requested.append($0) }
+
+        indicator.debugScrub(.began, atX: 20)
+        indicator.debugScrub(.changed, atX: 90)
+
+        #expect(requested.isEmpty)
     }
 
     /// A row recycled from a collection to a single-media post must not keep the
