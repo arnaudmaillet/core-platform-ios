@@ -2559,23 +2559,31 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // the replica's doing: the destination itself is already engaged
         // before the push (`destinationEngaged=true` at flight-build time).
         //
-        // ⚠️ AN ENGAGED PAGE HAS NO RESTING CHROME TO REPLICATE, so it gets no
-        // replica at all.
+        // ⚠️ AN ENGAGED PAGE FLIES ITS THREAD, not a picture of the layout it
+        // is not in.
         //
         // This is the same defect one card further along. A post opened from
         // its COMMENT COUNT engages before the push, and the replica — built
         // from the resting arrangement — flew the caption, the rail and the
         // page dots for the whole flight, then swapped to the thread as the
-        // card was removed. The engagement was already correct underneath; what
-        // the viewer was watching was a picture of the layout they had chosen
-        // not to open.
+        // card was removed. What the viewer watched for half a second was the
+        // layout they had chosen not to open.
         //
-        // Nothing is lost by flying without one: the card carries the
-        // photograph, and the photograph is what the engaged page shows behind
-        // its stream. Scoped to the MEDIA engagement — a text page's resting
-        // one is a different mechanism with its own reveal, and this is not the
-        // commit that changes it.
-        if commentsEngagedID != nil, !commentsEngagementIsResting { return nil }
+        // Flying with NO replica was the first fix and only half of one: the
+        // card carried the photograph honestly, but the thread still did not
+        // exist until the card was taken away, so the opening still ended in a
+        // swap. A still of the engaged stream rides over the media instead —
+        // scaled by the card exactly as the resting replica was, and sharp at
+        // the end where the card is at 1:1.
+        //
+        // Scoped to the MEDIA engagement: a text page's resting one is a
+        // different mechanism with its own reveal, and this is not the commit
+        // that changes it.
+        if commentsEngagedID != nil, !commentsEngagementIsResting {
+            let snapshot = activeSnapCell?.engagedCommentsSnapshot()
+            flightChrome = nil
+            return snapshot
+        }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
         // Captured, not ambient: the replica must render at the live cell's
