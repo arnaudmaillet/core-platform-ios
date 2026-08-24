@@ -1013,33 +1013,38 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // arrives a moment after the shape it sits in makes the shape read as a
         // container the text drops into. It is a small dishonesty about physics
         // and it is what makes the row feel alive rather than assembled.
+        // ⚠️ FADE AND SCALE, NO TRANSLATION.
+        //
+        // A chip that slides in comes FROM somewhere, and there is nowhere for
+        // it to have come from — it was always at that spot, merely invisible.
+        // Growing into place says the true thing: this was here, and it is
+        // arriving. The spring is deliberately shallow; a pronounced bounce on
+        // four small capsules reads as a toy.
         for (index, view) in furnitureViews.enumerated() where !view.isHidden {
             let contents = (view as? PostMetaPillView)?.contentRow
             view.alpha = 0
-            view.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
-            // The SAME treatment as the capsule — fade and bounce — offset in
-            // time and space rather than softened. A gentler curve on the text
-            // read as two different effects happening at once; the same one,
-            // arriving a beat later and from three points lower, reads as the
-            // text following the shape into place.
-            contents?.transform = CGAffineTransform(translationX: 0, y: 3)
-                .scaledBy(x: 0.94, y: 0.94)
+            view.transform = CGAffineTransform(scaleX: 0.88, y: 0.88)
             contents?.alpha = 0
+            contents?.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+            let step = 0.04 * Double(index)
             UIView.animate(
-                withDuration: 0.34, delay: 0.03 * Double(index),
-                usingSpringWithDamping: 0.66, initialSpringVelocity: 0.6,
+                withDuration: 0.36, delay: step,
+                usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3,
                 options: [.allowUserInteraction, .beginFromCurrentState]
             ) {
                 view.alpha = 1
                 view.transform = .identity
             }
+            // The contents run the same curve a beat later, so the capsule
+            // reads as a container the text grows into rather than as one solid
+            // thing changing size.
             UIView.animate(
-                withDuration: 0.34, delay: 0.03 * Double(index) + 0.05,
-                usingSpringWithDamping: 0.66, initialSpringVelocity: 0.6,
+                withDuration: 0.36, delay: step + 0.06,
+                usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3,
                 options: [.allowUserInteraction, .beginFromCurrentState]
             ) {
-                contents?.transform = .identity
                 contents?.alpha = 1
+                contents?.transform = .identity
             }
         }
     }
@@ -1829,9 +1834,16 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// already sitting in.
     private func setIndicatorScrubbing(_ scrubbing: Bool) {
         pageIndicator.setExpanded(scrubbing)
+        // ⚠️ THE EXPANSION ITSELF IS CONDITIONAL, not just the hiding.
+        //
+        // Three dots already fit where they are: widening the chip for them
+        // moves a row that had no reason to move, and then moves it back. The
+        // room is taken only when the full run of dots genuinely wants more than
+        // the chip already has — which for a small gallery is never, so nothing
+        // happens at all and that is the correct amount of feedback.
         let needsRoom = scrubbing
             && pageIndicator.expandedContentWidth > pageIndicator.bounds.width
-        if scrubbing {
+        if needsRoom {
             NSLayoutConstraint.activate(scrubExpansion)
         } else {
             NSLayoutConstraint.deactivate(scrubExpansion)

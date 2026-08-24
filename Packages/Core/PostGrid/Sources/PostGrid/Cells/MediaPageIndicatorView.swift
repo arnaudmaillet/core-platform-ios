@@ -32,6 +32,39 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// itself would be a second thing deciding where the pages are.
     public var onPageRequested: ((Int) -> Void)?
 
+    /// Asks for the system's interactive glass instead of the card's flat
+    /// ground.
+    ///
+    /// ⚠️ FOR THE POST SCREEN ONLY, and the distinction is the one this
+    /// package's chip rule already draws. On a CARD the chip sits on the card's
+    /// own fill, where a material resolves to that fill and disappears — which
+    /// is why the card's chips carry a flat ground rather than a lens. Over a
+    /// full-bleed photograph there IS something behind it, so glass is finally
+    /// the honest answer: it takes its cue from the picture instead of pretending
+    /// to a colour of its own.
+    ///
+    /// `isInteractive` is the system's own press response — the material flexes
+    /// under a finger. That is the whole of the feedback; there is no scale or
+    /// spring of ours near it, and there must not be: a transform on a glass
+    /// lens is the thing this codebase already tried once and rejected.
+    public func useInteractiveGlass() {
+        prefersInteractiveGlass = true
+        if window != nil { effect = makeGround() }
+    }
+
+    private var prefersInteractiveGlass = false
+
+    override public func makeGround() -> UIVisualEffect? {
+        guard prefersInteractiveGlass else { return super.makeGround() }
+        // Shape before material, for the reason `PagedTabBar` records: a glass
+        // effect switched on over a layer that has not been given its radius
+        // yet draws one frame of hard corners.
+        layoutIfNeeded()
+        let glass = UIGlassEffect(style: .regular)
+        glass.isInteractive = true
+        return glass
+    }
+
     /// The scrub, exposed so a host can make its OWN pan yield to it.
     ///
     /// ⚠️ A LONG PRESS OF ZERO DURATION, NOT A PAN — and that is the whole

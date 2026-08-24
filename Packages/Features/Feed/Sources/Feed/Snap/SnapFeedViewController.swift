@@ -2825,6 +2825,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     public func zoomTransitionWillBegin() {
         isAwaitingZoomPresentation = true
         activeSnapCell?.defersPlaybackForFlight = true
+        activeSnapCell?.setChromeHeldForFlight(true)
     }
 
     /// Parks the active page's player for the source it is flying home to.
@@ -2889,6 +2890,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         #endif
         flightChrome = nil
         isAwaitingZoomPresentation = false
+        // The replica is gone; the page's own chrome comes in rather than
+        // simply stopping being covered.
+        activeSnapCell?.setChromeHeldForFlight(false)
         // A flight card may have mirrored the active cell's player; with the
         // card gone, the cell reclaims the render slot (only the most
         // recently attached layer of a shared player is guaranteed to

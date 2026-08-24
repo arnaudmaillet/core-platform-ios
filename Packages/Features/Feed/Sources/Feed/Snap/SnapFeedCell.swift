@@ -1577,6 +1577,30 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     #if DEBUG
     /// The page's playback surface, for a test that needs to ask the pool about
     /// it. Playback ownership is the pool's, so a test has to name the surface.
+    /// Holds the page's own chrome back while a flight's REPLICA stands in for
+    /// it, then brings it in.
+    ///
+    /// ⚠️ The replica exists precisely so the real chrome need not be visible in
+    /// the air. It was anyway — nothing ever hid it — so the card simply lifted
+    /// off a fully drawn page, and at the landing the replica vanished and the
+    /// real thing was revealed on one frame. That is the pop: not something
+    /// appearing, but something that had been there all along stopping being
+    /// covered.
+    func setChromeHeldForFlight(_ held: Bool) {
+        if held {
+            chrome.alpha = 0
+            return
+        }
+        guard chrome.alpha < 1 else { return }
+        UIView.animate(
+            withDuration: 0.26, delay: 0.02,
+            usingSpringWithDamping: 0.85, initialSpringVelocity: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.chrome.alpha = 1
+        }
+    }
+
     /// The page indicator's scrub, so the screen can make its dismissal yield.
     var mediaScrubGesture: UIGestureRecognizer { chrome.mediaScrubGesture }
 
@@ -1672,6 +1696,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onRequestCommentsClose = nil
         onRequestCommentsPageDrive = nil
         setPauseGlyphVisible(false)
+        // ⚠️ A held chrome must never ride a recycled cell. A flight that is
+        // cancelled, or a dismissal that ends the page instead of landing it,
+        // leaves the hold un-released — and the next post to use this cell would
+        // arrive with no chrome at all and nothing on the way to bring it back.
+        chrome.alpha = 1
         cancelPrewarming()
         videoPlayback?.stop(mediaCard.renderView)
         // Reuse is the other door out, and a retained clip must not walk

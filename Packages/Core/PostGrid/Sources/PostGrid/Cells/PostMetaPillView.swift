@@ -236,7 +236,7 @@ public class PostMetaPillView: UIVisualEffectView {
     /// So a pill that stands on the card returns nil here and paints itself.
     /// Overridable rather than a stored parameter because the choice is a
     /// property of WHERE the pill is, which its class already says.
-    func makeGround() -> UIVisualEffect? {
+    public func makeGround() -> UIVisualEffect? {
         Self.makeBackdrop()
     }
 
@@ -306,7 +306,7 @@ public class PostCardPillView: PostMetaPillView {
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Nothing to resolve: the ground above is painted, not sampled.
-    override func makeGround() -> UIVisualEffect? { nil }
+    override public func makeGround() -> UIVisualEffect? { nil }
 }
 
 /// A chip's BOX without a chip's ground.
