@@ -950,12 +950,56 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // chips with it and brought the whole strip back in one frame at the
         // landing, which is the pop this rule exists to prevent, rebuilt inside
         // the preview it was written for.
+        // ⚠️ REMEMBERED, because a flight outlives a configure.
+        //
+        // A row can be re-dequeued and reconfigured while its twin is in the
+        // air, and `prepareForReuse` resets the furniture to visible. The
+        // concealment was applied to the instance that flew, so the fresh one
+        // came back with its play badge lit in the MIDDLE of a dismissal —
+        // on single-media rows only, because a collection's badge is hidden
+        // outright by `post.isCollection` and so has nothing to reveal.
+        // ⚠️ Only a flight ENDING earns the settle. `prepareForReuse` comes
+        // through here too, and animating there would flutter the chips of
+        // every row a scroll recycles — a cost paid continuously for an effect
+        // that belongs to one moment.
+        let wasConcealed = isHeroMediaConcealed
+        isHeroMediaConcealed = concealed
         if let carousel, !carousel.isHidden {
             carousel.setCurrentPageConcealed(concealed)
             return
         }
         mediaView.alpha = concealed ? 0 : 1
         playBadge.alpha = concealed ? 0 : 1
+        if wasConcealed, !concealed { animateFurnitureIn() }
+    }
+
+    /// Whether a flight is currently standing in for this row's media.
+    private(set) var isHeroMediaConcealed = false
+
+    /// Brings the chips, the date and the badge back with a settle rather than
+    /// a switch.
+    ///
+    /// ⚠️ The MEDIA is deliberately not animated. The flight has just handed the
+    /// picture over; fading THAT in would show the hand-off instead of hiding
+    /// it. What pops is the furniture — counters, date, badge — which the flight
+    /// never carried and which therefore arrives from nothing on the landing
+    /// frame.
+    private func animateFurnitureIn() {
+        let furniture: [UIView] = [likesPill, commentsPill, agePill, pageIndicator, playBadge]
+        for view in furniture where !view.isHidden {
+            view.alpha = 0
+            view.transform = CGAffineTransform(scaleX: 0.92, y: 0.92)
+        }
+        UIView.animate(
+            withDuration: 0.28, delay: 0.02,
+            usingSpringWithDamping: 0.72, initialSpringVelocity: 0.4,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            for view in furniture where !view.isHidden {
+                view.alpha = 1
+                view.transform = .identity
+            }
+        }
     }
 
     /// Hides whatever THIS row's flight is carrying, for as long as it is in
@@ -1996,6 +2040,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // pages the box has no single answer, and a badge over the whole
         // preview would sit on a photograph as often as on a clip.
         playBadge.isHidden = post.kind != .video || post.isCollection
+        // ⚠️ RE-ASSERTED, not assumed. A flight can be in the air while this
+        // row is reconfigured, and everything above has just set the furniture
+        // visible. Without this the badge lights up mid-dismissal.
+        if isHeroMediaConcealed { setHeroMediaConcealed(true) }
         // The line and the pills are the same four values in two placements, so
         // exactly one of them is on screen. The line is hidden rather than
         // unconstrained: it keeps hanging off the caption under the preview,

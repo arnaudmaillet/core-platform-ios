@@ -303,6 +303,16 @@ public struct MockSocialDataset: Sendable {
                 }
             }
             let bigVideoPositions: Set<Int> = [3, 8]
+            // ⚠️ A THIRD GALLERY, small — index 1.
+            //
+            // The indicator now expands only when the full run of dots wants
+            // more room than it already has, and that rule has two outcomes.
+            // Testing it needs both near the top of the feed, where a viewer
+            // opening the app meets them without scrolling: twelve pages, which
+            // must expand and displace the counters, and three, which must not
+            // move anything at all. One of each proves the condition; either
+            // alone proves only that something happens.
+            let smallShapes: [(Int, Int)] = [(1080, 1080), (1600, 900)]
             let extraMedia: [(url: String, width: Int, height: Int)] =
                 index == 2
                 ? bigShapes.enumerated().map { position, shape in
@@ -321,6 +331,16 @@ public struct MockSocialDataset: Sendable {
                         // here by accident.
                         { let fixture = MockMediaFixtures.videos[position % MockMediaFixtures.videos.count]
                           return (fixture.url, fixture.width, fixture.height) }()
+                    }
+                }
+                : index == 1
+                ? smallShapes.enumerated().map { position, shape in
+                    switch mediaCatalog {
+                    case .synthetic:
+                        ("mock://media/new-1-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case .realAssets:
+                        (MockMediaFixtures.imageURL(index: 80 + position, width: shape.0, height: shape.1),
+                         shape.0, shape.1)
                     }
                 }
                 : index == 4
