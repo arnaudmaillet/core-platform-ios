@@ -66,15 +66,25 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     private func applyPressFeedback() {
         guard !prefersInteractiveGlass else { return }
         UIView.animate(
-            withDuration: 0.3, delay: 0,
-            usingSpringWithDamping: 0.6, initialSpringVelocity: 0.4,
+            withDuration: 0.5, delay: 0,
+            usingSpringWithDamping: 0.52, initialSpringVelocity: 0.9,
             options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
             self.transform = self.isScrubbing
-                ? CGAffineTransform(scaleX: 1.18, y: 1.18)
+                ? CGAffineTransform(scaleX: Self.pressedScale, y: Self.pressedScale)
                 : .identity
         }
     }
+
+    /// How far the card's chip swells under a finger.
+    ///
+    /// ⚠️ THIS IS NOT THE EXPANSION THAT WAS REJECTED. That one changed the
+    /// chip's WIDTH, which re-laid the dots out: the target moved away from the
+    /// finger that had just landed on it. A uniform scale about the centre
+    /// magnifies the control without re-aiming it — and `location(in:)` reports
+    /// through the transform, so the page under the finger is the page the
+    /// arithmetic reads either way.
+    private static let pressedScale: CGFloat = 1.26
 
     override public func makeGround() -> UIVisualEffect? {
         guard prefersInteractiveGlass else { return super.makeGround() }
@@ -318,10 +328,35 @@ final class PageDotsView: UIView {
     private var current = 0
     private var dots: [UIView] = []
 
+    /// ⚠️ THE STRIP ENDS IN A FADE, NOT IN A CUT.
+    ///
+    /// Every dot keeps a frame on the strip so the window can SLIDE, which
+    /// means a dot leaving the window has to cross the container's edge. Under
+    /// a plain clip that edge is a blade: the dot went out as a half-moon, then
+    /// a crescent, then nothing — a shape no dot ever has at rest, and the eye
+    /// reads it as breakage rather than as travel.
+    ///
+    /// The mask is applied ONLY on a side the run actually continues past. A
+    /// gallery that fits has nothing arriving or leaving, and fading its first
+    /// and last dot would dim them for no reason at all.
+    private let edgeFade = CAGradientLayer()
+
+    /// How far in the fade reaches: one gap between dots. A dot is gone by the
+    /// time it is a gap outside, which is roughly when it would have been cut.
+    static let edgeFadeWidth = MediaPageIndicatorView.dotSpacing
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
+        // Kept as the backstop: the mask decides how a dot LEAVES, the clip
+        // guarantees nothing is ever drawn outside the chip.
         clipsToBounds = true
+        edgeFade.startPoint = CGPoint(x: 0, y: 0.5)
+        edgeFade.endPoint = CGPoint(x: 1, y: 0.5)
+        edgeFade.colors = [
+            UIColor.clear.cgColor, UIColor.white.cgColor,
+            UIColor.white.cgColor, UIColor.clear.cgColor,
+        ]
     }
 
     @available(*, unavailable)
@@ -361,18 +396,21 @@ final class PageDotsView: UIView {
         )
         // ⚠️ TWO DURATIONS, because two different things move.
         //
-        // The mark passing between dots that stay put is a change of STATE —
-        // brief, or it lags the finger and the chip stops feeling attached to
-        // the gesture. The window travelling is a change of PLACE, and a place
-        // that jumps cannot be followed; that one is worth a spring.
+        // The mark passing between dots that stay put is a change of STATE; the
+        // window travelling is a change of PLACE, and a place takes longer to
+        // follow than a colour does. Both are springs — a dot that switches
+        // colour and size on one frame reads as a light being flicked rather
+        // than as a mark moving along a row, and a linear crossfade between two
+        // greys reads as a dissolve rather than as something arriving.
         //
-        // Both animate: a dot that switches colour and size on one frame reads
-        // as a light being flicked rather than as a mark moving along a row.
+        // Neither is so long that the chip stops feeling attached to the finger:
+        // the mark is where the finger is on the frame it gets there, and only
+        // its APPEARANCE catches up.
         setNeedsLayout()
         let travelling = start != previousStart
         UIView.animate(
-            withDuration: travelling ? 0.28 : 0.16, delay: 0,
-            usingSpringWithDamping: travelling ? 0.8 : 1, initialSpringVelocity: 0,
+            withDuration: travelling ? 0.44 : 0.32, delay: 0,
+            usingSpringWithDamping: travelling ? 0.72 : 0.9, initialSpringVelocity: 0,
             options: [.allowUserInteraction, .beginFromCurrentState]
         ) { self.layoutIfNeeded() }
     }
@@ -469,5 +507,34 @@ final class PageDotsView: UIView {
             )
             dot.alpha = isVisible ? (index == current ? 1 : 0.35) : 0
         }
+        applyEdgeFade(start: start, visible: visible)
+    }
+
+    /// Softens whichever ends have somewhere to arrive from.
+    private func applyEdgeFade(start: Int, visible: Int) {
+        let leading = start > 0
+        let trailing = start + visible < count
+        guard leading || trailing, bounds.width > 0 else {
+            layer.mask = nil
+            return
+        }
+        layer.mask = edgeFade
+        edgeFade.frame = bounds
+        let fade = Self.edgeFadeWidth / bounds.width
+        edgeFade.locations = [
+            0,
+            NSNumber(value: Double(leading ? fade : 0)),
+            NSNumber(value: Double(trailing ? 1 - fade : 1)),
+            1,
+        ]
+    }
+
+    /// Which ends are faded, for a test that would otherwise have to read a
+    /// gradient's stops back to itself.
+    var debugEdgeFade: (leading: Bool, trailing: Bool) {
+        guard layer.mask === edgeFade,
+              let stops = edgeFade.locations?.map(\.doubleValue), stops.count == 4
+        else { return (false, false) }
+        return (stops[1] > 0, stops[2] < 1)
     }
 }

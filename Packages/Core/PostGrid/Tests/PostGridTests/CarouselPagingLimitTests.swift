@@ -193,4 +193,43 @@ struct CarouselPagingLimitTests {
 
         #expect(dots.debugDotSizes.allSatisfy { $0 == MediaPageIndicatorView.dotDiameter })
     }
+
+    // MARK: - The ends of the strip
+
+    /// ⚠️ THE STRIP ENDS IN A FADE, NOT IN A CUT — on the sides that have
+    /// somewhere to arrive from, and only those.
+    ///
+    /// A dot leaving the window crosses the container's edge, and a plain clip
+    /// turned it into a half-moon on the way out: a shape no dot has at rest.
+    /// All three positions are asserted together, because the fade is only
+    /// meaningful if it tracks WHICH side the run continues on.
+    @Test func theStripFadesOnlyWhereTheRunContinues() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.width(forDots: 5), height: 6)
+        dots.configure(count: 12)
+
+        dots.setCurrent(0)
+        dots.layoutIfNeeded()
+        #expect(dots.debugEdgeFade == (leading: false, trailing: true))
+
+        dots.setCurrent(6)
+        dots.layoutIfNeeded()
+        #expect(dots.debugEdgeFade == (leading: true, trailing: true))
+
+        dots.setCurrent(11)
+        dots.layoutIfNeeded()
+        #expect(dots.debugEdgeFade == (leading: true, trailing: false))
+    }
+
+    /// And a gallery that fits is not masked at all: nothing arrives or leaves,
+    /// so a fade there would only dim the first and last dot for no reason.
+    @Test func aGalleryThatFitsIsNotFaded() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.width(forDots: 5), height: 6)
+        dots.configure(count: 4)
+        dots.setCurrent(1)
+        dots.layoutIfNeeded()
+
+        #expect(dots.debugEdgeFade == (leading: false, trailing: false))
+    }
 }
