@@ -1793,90 +1793,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         dotFloor.priority = UILayoutPriority(749)
         NSLayoutConstraint.activate([centred, dotFloor])
 
-        // ⚠️ THE EXPANSION IS A SEPARATE, INACTIVE LADDER RUNG.
-        //
-        // While a finger is on the chip it stops being one of four things
-        // sharing a row and becomes the thing being dragged: it takes the whole
-        // width between the preview's insets so every page is reachable without
-        // the finger leaving it. Held at 998 — below the counts' own
-        // anti-truncation rung, above everything else — so that even here a
-        // count never clips; it is hidden instead, which is honest, where a
-        // clipped count would be wrong.
-        scrubExpansion = [
-            pageIndicator.leadingAnchor.constraint(
-                equalTo: mediaView.leadingAnchor, constant: Self.mediaFurnitureInset
-            ),
-            pageIndicator.trailingAnchor.constraint(
-                equalTo: mediaView.trailingAnchor, constant: -Self.mediaFurnitureInset
-            ),
-        ]
-        for constraint in scrubExpansion { constraint.priority = UILayoutPriority(998) }
-
-        pageIndicator.onScrubbingChanged = { [weak self] scrubbing in
-            self?.setIndicatorScrubbing(scrubbing)
-        }
-    }
-
-    /// Constraints that give the chip the whole row, active only mid-scrub.
-    private var scrubExpansion: [NSLayoutConstraint] = []
-
-    /// Whether the counters and the date are currently out of the way.
-    private var scrubHidesChips = false
-
-    /// Opens or closes the scrubbing presentation.
-    ///
-    /// ⚠️ THE NEIGHBOURS ARE HIDDEN ONLY IF THEY ARE ACTUALLY IN THE WAY.
-    ///
-    /// A gallery of three expands into space the row already has; hiding the
-    /// counts for it would be a flicker with nothing bought. A gallery of twelve
-    /// genuinely needs the width. So the question is measured rather than
-    /// assumed: does the chip's full run of dots want more than the room it is
-    /// already sitting in.
-    private func setIndicatorScrubbing(_ scrubbing: Bool) {
-        // The chip has already expanded itself; what is decided here is who
-        // gives up room for it.
-        // ⚠️ THE EXPANSION ITSELF IS CONDITIONAL, not just the hiding.
-        //
-        // Three dots already fit where they are: widening the chip for them
-        // moves a row that had no reason to move, and then moves it back. The
-        // room is taken only when the full run of dots genuinely wants more than
-        // the chip already has — which for a small gallery is never, so nothing
-        // happens at all and that is the correct amount of feedback.
-        let needsRoom = scrubbing
-            && pageIndicator.expandedContentWidth > pageIndicator.bounds.width
-        if needsRoom {
-            NSLayoutConstraint.activate(scrubExpansion)
-        } else {
-            NSLayoutConstraint.deactivate(scrubExpansion)
-        }
-        guard needsRoom != scrubHidesChips else {
-            // The width still changed even when the neighbours did not, so the
-            // settle runs either way.
-            UIView.animate(
-                withDuration: 0.32, delay: 0,
-                usingSpringWithDamping: 0.72, initialSpringVelocity: 0.5,
-                options: [.allowUserInteraction, .beginFromCurrentState]
-            ) { self.layoutIfNeeded() }
-            return
-        }
-        scrubHidesChips = needsRoom
-        // Faded, not removed: they keep their place in the row, so nothing
-        // re-flows underneath and the chip expands over a stable layout.
-        // A spring, because the chip is being DRAGGED open — a linear widen
-        // reads as a panel being resized, where a slight overshoot reads as
-        // something giving way under a finger. Shallow: it is a chip, not a
-        // drawer.
-        UIView.animate(
-            withDuration: 0.32, delay: 0,
-            usingSpringWithDamping: 0.72, initialSpringVelocity: 0.5,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            let alpha: CGFloat = needsRoom ? 0 : 1
-            self.likesPill.alpha = alpha
-            self.commentsPill.alpha = alpha
-            self.agePill.alpha = alpha
-            self.layoutIfNeeded()
-        }
+        // The chip's width never changes now — five dots at any length, with
+        // the window sliding under them — so there is nothing for this row to
+        // make room for. It briefly grew under a finger instead, which moved
+        // the dots the finger had just landed on: a control whose targets shift
+        // when you touch it cannot be aimed, and every scrub began with a jump.
     }
 
     /// The carousel, built on first use — most posts have one piece of media and

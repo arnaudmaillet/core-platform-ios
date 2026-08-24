@@ -4,13 +4,18 @@ import UIKit
 /// Which page of a collection the preview is showing, as the middle chip of the
 /// row that already carries the counters and the age.
 ///
-/// ## Two renderings, one view
+/// ## A sliding window of dots, at any length
 ///
-/// **Dots** up to `dotLimit`, because dots are the carousel's universal signal
-/// and read without being counted. **`3 / 14`** beyond it, because a row of
-/// fourteen dots is a texture rather than a count — it stops answering "how far
-/// in am I" at exactly the point the question starts mattering. The wire caps
-/// nothing, so both cases are real.
+/// Dots always, because they are the carousel's universal signal and read
+/// without being counted. A count — "3 / 14" — was tried and removed: it says
+/// how many pages exist and nothing about WHERE you are, which is the one thing
+/// an indicator over a photograph is for.
+///
+/// Fourteen dots would be a texture rather than a count, so at most five are
+/// drawn and the window travels with the viewer. The outermost dot SHRINKS when
+/// the run continues past it, on whichever side it continues — that is what
+/// stops five dots claiming to be the whole gallery, and it is read without
+/// being explained.
 ///
 /// ## Why it is a chip at all
 ///
@@ -19,11 +24,6 @@ import UIKit
 /// the row would then contain two things that answer the question differently.
 /// Same ground, same rule.
 public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwning {
-    /// Above this many pages, dots become a count. Eight is where a glanceable
-    /// row stops being glanceable — the point at which the eye starts counting
-    /// instead of seeing.
-    public static let dotLimit = 8
-
     public static let dotDiameter: CGFloat = 6
     public static let dotSpacing: CGFloat = 5
 
@@ -156,8 +156,8 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// ⚠️ Always dots, at every count. A "3 / 12" told the viewer how many pages
     /// there are and nothing about WHERE they are, which is the one thing an
     /// indicator over a photograph is for — and it read as a label bolted onto a
-    /// row of chips rather than as part of the carousel. A window of dots says
-    /// both, at any length.
+    /// row of chips rather than as part of the carousel. A sliding window of
+    /// dots says both, at any length, in a fixed amount of room.
     /// chip shows "3 / 12", because a dozen dots squeezed into a corner is a
     /// smear that says less than the number does. But the moment a finger is on
     /// it the chip is not a label any more, it is the thing being dragged — and
@@ -168,23 +168,7 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         dots.configure(count: pageCount)
     }
 
-    /// Whether the chip is showing itself in full for a scrub.
-    public private(set) var isExpanded = false
 
-    public func setExpanded(_ expanded: Bool) {
-        guard expanded != isExpanded, pageCount >= 2 else { return }
-        isExpanded = expanded
-        dots.isExpanded = expanded
-        applyPresentation()
-        setCurrent(currentPage)
-        invalidateIntrinsicContentSize()
-    }
-
-    /// What the chip needs to show every dot — the width a host must find for
-    /// it, or decide it cannot.
-    public var expandedContentWidth: CGFloat {
-        PageDotsView.width(forDots: pageCount) + Self.insets.leading + Self.insets.trailing
-    }
 
     /// Moves the mark without rebuilding, because this is called on every
     /// scroll callback of a carousel the viewer is dragging.
@@ -206,14 +190,6 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     public private(set) var isScrubbing = false {
         didSet {
             guard isScrubbing != oldValue else { return }
-            // ⚠️ THE CHIP EXPANDS ITSELF, and only the CONSEQUENCES are the
-            // host's. Showing every dot under a finger is what this control
-            // does, on every screen it appears on; which neighbours must yield
-            // to make room is a layout question only the surrounding row can
-            // answer. Leaving both to the host meant the card grew and the post
-            // did not — it was wired on one surface and forgotten on the other,
-            // and a viewer scrubbing twelve pages there still saw four dots.
-            setExpanded(isScrubbing)
             onScrubbingChanged?(isScrubbing)
         }
     }
@@ -277,24 +253,18 @@ final class PageDotsView: UIView {
     /// the chip has to keep saying "there is more than one" at every width.
     static let minimumVisibleDots = 2
 
-    /// The ceiling while nobody is touching it: four.
+    /// The window: five dots, at any length, at rest and under a finger alike.
     ///
-    /// ⚠️ A CAP ON WIDTH, not on meaning. Twelve dots resting on a card is a
-    /// smudge — legible as "many", useless as "where" — and it crowds the
-    /// counters beside it for information nobody is reading at rest. Four says
-    /// the same thing in a quarter of the room: there are more, you are here.
-    /// The rest of them exist and are one touch away, which is what the
-    /// expansion is for.
-    static let maximumRestingDots = 4
-
-    /// Whether the chip is being scrubbed, and may therefore show everything.
-    var isExpanded = false {
-        didSet {
-            guard isExpanded != oldValue else { return }
-            invalidateIntrinsicContentSize()
-            setNeedsLayout()
-        }
-    }
+    /// ⚠️ FIXED ON PURPOSE. The chip used to grow while being scrubbed, which
+    /// meant the dots moved under the finger that had just landed on them — the
+    /// scrub began with a jump, and the page it selected was not the page that
+    /// had been under the thumb a frame earlier. A control whose targets move
+    /// when you touch it cannot be aimed.
+    ///
+    /// So the width never changes and the WINDOW slides instead. Five, because
+    /// four leaves only two full-size dots once both edges are shrunken, and two
+    /// is not enough to read a position from.
+    static let maximumVisibleDots = 5
 
     private var count = 0
     private var current = 0
@@ -325,19 +295,42 @@ final class PageDotsView: UIView {
     }
 
     func setCurrent(_ page: Int) {
+        guard page != current else { return }
+        let previousStart = Self.windowStart(
+            current: current,
+            visible: Self.visibleDots(in: bounds.width, count: count),
+            count: count
+        )
         current = page
-        // Opacity, not colour: the chip's foreground is `.label`, which already
-        // resolves against the interface style, and a second colour here would
-        // be a second thing to keep in step with it.
-        for (index, dot) in dots.enumerated() { dot.alpha = index == page ? 1 : 0.35 }
+        // ⚠️ EVERYTHING — position, size and opacity — is decided in
+        // `layoutSubviews` and nowhere else. Opacity was set here as well, and
+        // two places deciding one dot's appearance is how an edge dot ended up
+        // full-size and half-lit at the same time.
+        let start = Self.windowStart(
+            current: page,
+            visible: Self.visibleDots(in: bounds.width, count: count),
+            count: count
+        )
+        // The window travelling is the only thing worth animating: the mark
+        // moving between two dots that stay put should be immediate, or it lags
+        // the finger.
+        guard start != previousStart else {
+            setNeedsLayout()
+            layoutIfNeeded()
+            return
+        }
         setNeedsLayout()
+        UIView.animate(
+            withDuration: 0.24, delay: 0,
+            usingSpringWithDamping: 0.82, initialSpringVelocity: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) { self.layoutIfNeeded() }
     }
 
     /// What the chip asks for when nothing is competing: every dot.
     override var intrinsicContentSize: CGSize {
-        let asked = isExpanded ? count : min(count, Self.maximumRestingDots)
-        return CGSize(
-            width: Self.width(forDots: asked),
+        CGSize(
+            width: Self.width(forDots: min(count, Self.maximumVisibleDots)),
             height: MediaPageIndicatorView.dotDiameter
         )
     }
@@ -370,6 +363,20 @@ final class PageDotsView: UIView {
         return min(max(current - half, 0), count - visible)
     }
 
+    /// How small an edge dot goes when the run continues past it.
+    ///
+    /// ⚠️ THE ONLY THING THAT SAYS "THERE IS MORE", now that the chip no longer
+    /// grows. A window of five identical dots is a lie at page one of twelve —
+    /// it says "five pages, you are on the first". A shrunken dot at the edge
+    /// says the run is cut off there, and the eye reads it without being told.
+    static let edgeDotScale: CGFloat = 0.55
+
+    /// The drawn size of each VISIBLE dot, in order — how a test asks which
+    /// ones were cut without reading the layout arithmetic back to itself.
+    var debugDotSizes: [CGFloat] {
+        dots.filter { $0.alpha > 0 }.map(\.frame.width)
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         guard !dots.isEmpty else { return }
@@ -381,18 +388,31 @@ final class PageDotsView: UIView {
         // chip would otherwise sit against one edge and read as misaligned.
         let used = Self.width(forDots: visible)
         let originX = ((bounds.width - used) / 2).rounded()
-        let y = ((bounds.height - diameter) / 2).rounded()
+        let centreY = (bounds.height / 2).rounded()
         for (index, dot) in dots.enumerated() {
             let offset = index - start
-            guard offset >= 0, offset < visible else {
-                dot.isHidden = true
-                continue
-            }
-            dot.isHidden = false
+            // ⚠️ A SLOT PAST THE WINDOW IS STILL POSITIONED, not hidden.
+            //
+            // The dots SLIDE when the window moves, and a dot that pops into
+            // existence at the edge cannot slide in from anywhere. Every dot
+            // keeps a frame on the strip; the chip clips, so the ones outside
+            // simply are not seen — and when the window shifts they travel in
+            // from where they already were.
+            let isVisible = offset >= 0 && offset < visible
+            // The outermost dot shrinks when the run continues past it, on
+            // whichever side it continues.
+            let continuesBefore = offset == 0 && start > 0
+            let continuesAfter = offset == visible - 1 && start + visible < count
+            let scale: CGFloat = (continuesBefore || continuesAfter) ? Self.edgeDotScale : 1
+            let side = (diameter * scale).rounded()
             dot.frame = CGRect(
-                x: originX + CGFloat(offset) * (diameter + spacing),
-                y: y, width: diameter, height: diameter
+                x: originX + CGFloat(offset) * (diameter + spacing)
+                    + ((diameter - side) / 2).rounded(),
+                y: centreY - (side / 2).rounded(),
+                width: side, height: side
             )
+            dot.layer.cornerRadius = side / 2
+            dot.alpha = isVisible ? (index == current ? 1 : 0.35) : 0
         }
     }
 }

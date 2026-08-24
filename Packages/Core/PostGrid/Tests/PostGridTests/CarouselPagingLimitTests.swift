@@ -81,33 +81,78 @@ struct CarouselPagingLimitTests {
 
     // MARK: - The dots
 
-    /// ⚠️ FOUR AT REST, however many pages there are.
+    /// ⚠️ FIVE, at any length, at rest and under a finger alike.
     ///
-    /// Twelve dots on a card is a smudge — legible as "many", useless as
-    /// "where" — and it crowds the counters beside it for information nobody
-    /// reads at rest. The rest exist and are one touch away.
-    @Test func aLongGalleryRestsOnFourDots() {
+    /// The chip used to grow while being scrubbed, which moved the dots the
+    /// finger had just landed on — the scrub began with a jump and selected a
+    /// page that had not been under the thumb a frame earlier. A control whose
+    /// targets move when you touch it cannot be aimed. So the width is fixed
+    /// and the WINDOW travels instead.
+    @Test func aLongGalleryDrawsAFixedWindowOfFive() {
         let dots = PageDotsView()
         dots.configure(count: 12)
 
         #expect(dots.intrinsicContentSize.width
-                == PageDotsView.width(forDots: PageDotsView.maximumRestingDots))
+                == PageDotsView.width(forDots: PageDotsView.maximumVisibleDots))
     }
 
-    @Test func touchingItAsksForAllOfThem() {
-        let dots = PageDotsView()
-        dots.configure(count: 12)
-        dots.isExpanded = true
-
-        #expect(dots.intrinsicContentSize.width == PageDotsView.width(forDots: 12))
-    }
-
-    /// A gallery under the cap asks for exactly what it has — the cap must not
-    /// pad a short run out to four.
+    /// A gallery under the window asks for exactly what it has — the window is a
+    /// ceiling, not a padding, or a dot would sit under a page that is not there.
     @Test func aShortGalleryAsksForItsOwnDots() {
         let dots = PageDotsView()
         dots.configure(count: 3)
 
         #expect(dots.intrinsicContentSize.width == PageDotsView.width(forDots: 3))
+    }
+
+    /// ⚠️ THE EDGE DOT SHRINKS WHERE THE RUN CONTINUES, and that is the only
+    /// thing left saying "there is more".
+    ///
+    /// Five identical dots at page one of twelve is a lie: it says five pages,
+    /// you are on the first. Both directions are asserted, because a run
+    /// continues on whichever side the viewer is not at.
+    @Test func theEdgeDotShrinksOnTheSideTheRunContinues() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.width(forDots: 5), height: 6)
+        dots.configure(count: 12)
+        dots.setCurrent(0)
+        dots.layoutIfNeeded()
+
+        let sizes = dots.debugDotSizes
+        // At the start: nothing before, so the leading dot is full and the
+        // trailing one is cut off.
+        #expect(sizes.first == MediaPageIndicatorView.dotDiameter)
+        #expect(sizes.last ?? 0 < MediaPageIndicatorView.dotDiameter)
+
+        dots.setCurrent(11)
+        dots.layoutIfNeeded()
+        let atEnd = dots.debugDotSizes
+        #expect(atEnd.last == MediaPageIndicatorView.dotDiameter)
+        #expect(atEnd.first ?? 0 < MediaPageIndicatorView.dotDiameter)
+    }
+
+    /// And in the middle both edges are cut, because the run continues both ways.
+    @Test func bothEdgesShrinkInTheMiddleOfALongRun() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.width(forDots: 5), height: 6)
+        dots.configure(count: 12)
+        dots.setCurrent(6)
+        dots.layoutIfNeeded()
+
+        let sizes = dots.debugDotSizes
+        #expect(sizes.first ?? 0 < MediaPageIndicatorView.dotDiameter)
+        #expect(sizes.last ?? 0 < MediaPageIndicatorView.dotDiameter)
+    }
+
+    /// A gallery that fits has no continuation on either side, so nothing is
+    /// cut — the shrink must mean something rather than being decoration.
+    @Test func aGalleryThatFitsHasNoShrunkenEdges() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.width(forDots: 5), height: 6)
+        dots.configure(count: 4)
+        dots.setCurrent(1)
+        dots.layoutIfNeeded()
+
+        #expect(dots.debugDotSizes.allSatisfy { $0 == MediaPageIndicatorView.dotDiameter })
     }
 }
