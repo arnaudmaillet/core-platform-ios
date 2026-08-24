@@ -206,6 +206,14 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     public private(set) var isScrubbing = false {
         didSet {
             guard isScrubbing != oldValue else { return }
+            // ⚠️ THE CHIP EXPANDS ITSELF, and only the CONSEQUENCES are the
+            // host's. Showing every dot under a finger is what this control
+            // does, on every screen it appears on; which neighbours must yield
+            // to make room is a layout question only the surrounding row can
+            // answer. Leaving both to the host meant the card grew and the post
+            // did not — it was wired on one surface and forgotten on the other,
+            // and a viewer scrubbing twelve pages there still saw four dots.
+            setExpanded(isScrubbing)
             onScrubbingChanged?(isScrubbing)
         }
     }

@@ -1833,7 +1833,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// assumed: does the chip's full run of dots want more than the room it is
     /// already sitting in.
     private func setIndicatorScrubbing(_ scrubbing: Bool) {
-        pageIndicator.setExpanded(scrubbing)
+        // The chip has already expanded itself; what is decided here is who
+        // gives up room for it.
         // ⚠️ THE EXPANSION ITSELF IS CONDITIONAL, not just the hiding.
         //
         // Three dots already fit where they are: widening the chip for them
@@ -1849,13 +1850,27 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             NSLayoutConstraint.deactivate(scrubExpansion)
         }
         guard needsRoom != scrubHidesChips else {
-            layoutIfNeeded()
+            // The width still changed even when the neighbours did not, so the
+            // settle runs either way.
+            UIView.animate(
+                withDuration: 0.32, delay: 0,
+                usingSpringWithDamping: 0.72, initialSpringVelocity: 0.5,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) { self.layoutIfNeeded() }
             return
         }
         scrubHidesChips = needsRoom
         // Faded, not removed: they keep their place in the row, so nothing
         // re-flows underneath and the chip expands over a stable layout.
-        UIView.animate(withDuration: 0.15) {
+        // A spring, because the chip is being DRAGGED open — a linear widen
+        // reads as a panel being resized, where a slight overshoot reads as
+        // something giving way under a finger. Shallow: it is a chip, not a
+        // drawer.
+        UIView.animate(
+            withDuration: 0.32, delay: 0,
+            usingSpringWithDamping: 0.72, initialSpringVelocity: 0.5,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
             let alpha: CGFloat = needsRoom ? 0 : 1
             self.likesPill.alpha = alpha
             self.commentsPill.alpha = alpha

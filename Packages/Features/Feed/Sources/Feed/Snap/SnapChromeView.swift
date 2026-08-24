@@ -285,6 +285,26 @@ final class SnapChromeView: UIView {
             mediaPageIndicator.bottomAnchor.constraint(
                 equalTo: commentTicker.topAnchor, constant: -Spacing.sm
             )
+            // ⚠️ A CEILING, so the chip has somewhere to grow INTO.
+            //
+            // It is centred and sized by its contents, which is right at rest —
+            // four dots, no more. Under a finger it asks for every dot it has,
+            // and with nothing bounding it a twelve-page gallery would reach for
+            // a width wider than the screen. The rail owns the trailing column,
+            // so the room is what is left inside the readable margins.
+            mediaPageIndicator.widthAnchor.constraint(
+                lessThanOrEqualTo: parent.widthAnchor, constant: -Spacing.lg * 4
+            )
+        }
+        // The chip expands itself; this screen only has to let the change
+        // settle rather than snap, the same spring the card uses.
+        mediaPageIndicator.onScrubbingChanged = { [weak self] _ in
+            guard let self else { return }
+            UIView.animate(
+                withDuration: 0.32, delay: 0,
+                usingSpringWithDamping: 0.72, initialSpringVelocity: 0.5,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) { self.layoutIfNeeded() }
         }
 
 
