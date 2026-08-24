@@ -257,8 +257,10 @@ final class VideoFrameRenderer {
         }
         guard hostTime - lastTraceSampleHostTime >= 1 else { return }
         VideoPlaybackTrace.emit(String(
-            format: "rate max=%.2fx rated=%d",
-            maxRateSinceTraceSample, ratedDispatchesSinceTraceSample
+            format: "rate max=%.2fx rated=%d surfaces=%d item=%@ why=%@",
+            maxRateSinceTraceSample, ratedDispatchesSinceTraceSample,
+            surfaces.allObjects.count, source.hasItem ? "Y" : "N",
+            source.noFrameReason
         ))
         lastTraceSampleHostTime = hostTime
         maxRateSinceTraceSample = 0

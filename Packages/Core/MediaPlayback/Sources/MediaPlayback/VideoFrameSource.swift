@@ -79,7 +79,7 @@ final class VideoFrameSource {
     /// `VideoFrameRenderer` for why holding one is the memory bug in this
     /// design.
     func copyFrame(atHostTime hostTime: CFTimeInterval) -> (buffer: CVPixelBuffer, itemTime: CMTime)? {
-        guard let output else { return nil }
+        guard let output else { noFrameReason = "no-output"; return nil }
         let itemTime = output.itemTime(forHostTime: hostTime)
         // `itemTime(forHostTime:)` reads the PLAYER's timebase — the same clock
         // its audio renderer runs on. That is the entire A/V sync answer for
@@ -88,7 +88,10 @@ final class VideoFrameSource {
         //
         // Before playback starts the timebase has no rate and the answer comes
         // back invalid or negative; both mean "nothing to show yet".
-        guard itemTime.isValid, itemTime >= .zero else { return nil }
+        guard itemTime.isValid, itemTime >= .zero else {
+            noFrameReason = itemTime.isValid ? "negative-time" : "invalid-time"
+            return nil
+        }
         // A note kept because the idea was wrong in an instructive way: this
         // once re-requested `player.currentTime()` whenever the output's clock
         // disagreed with it by more than half a second, on the theory that the
@@ -106,6 +109,7 @@ final class VideoFrameSource {
             // always HAS frames waiting — that is what makes it a drain — so
             // reaching here means the wait, whatever it was, is over.
             isCatchingUp = false
+            noFrameReason = "no-new-buffer"
             return nil
         }
         // ⚠️ THE BUFFER'S OWN TIME, not the clock's.
@@ -228,6 +232,10 @@ final class VideoFrameSource {
     /// a drain is "the frame you are looking at is old and the next one is not
     /// ready" — which is a load, and looks like one.
     private(set) var isCatchingUp = false
+
+    /// Why the last tick produced nothing — the question a `rated=0` heartbeat
+    /// cannot answer on its own, and four runs were spent not knowing it.
+    private(set) var noFrameReason = "none"
 
     /// The clock reading that went with the last frame handed out.
     ///

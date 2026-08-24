@@ -183,7 +183,23 @@ public final class VideoPlaybackController {
             return
         }
 
-        guard let playableURL = try? await source.playableURL(for: mediaURL) else { return }
+        // ⚠️ THE ONE STEP THAT COULD FAIL IN SILENCE.
+        //
+        // A resolution that throws returned from here with nothing bound, no
+        // trace, and no way to tell the result apart from a player that simply
+        // had not arrived yet. Four starts, zero frames and zero "attached but
+        // frozen" reports pointed straight at it: the picture was never frozen,
+        // it was never started.
+        let resolved: URL
+        do {
+            resolved = try await source.playableURL(for: mediaURL)
+        } catch {
+            VideoPlaybackTrace.emit(
+                "resolve FAILED \(mediaURL.lastPathComponent): \(error)"
+            )
+            return
+        }
+        let playableURL = resolved
         // Lost the race to a newer play/stop while resolving: drop this result.
         guard generation[key] == token else { return }
         // ⚠️ AND ASK AGAIN, because the check above happened before an await.
@@ -226,6 +242,7 @@ public final class VideoPlaybackController {
         playingURL[key] = mediaURL
         playingScope[key] = scope
         player.play()
+        VideoPlaybackTrace.emit("bound \(mediaURL.lastPathComponent) scope=\(scope ?? "-")")
     }
 
     /// Brings a clip to its first frame and stops there, so arriving at it
@@ -382,6 +399,24 @@ public final class VideoPlaybackController {
     /// bound to a player, that is not moving. Paused is a legitimate state —
     /// a clip one page over is meant to be paused — so the question only means
     /// something next to whether the viewer is looking at it.
+    /// Whether `view`'s player is REALLY playing, as opposed to merely not
+    /// paused.
+    ///
+    /// ⚠️ THE DISTINCTION `isAdvancing` CANNOT MAKE, and it cost a whole round
+    /// of diagnosis. `timeControlStatus != .paused` is true for
+    /// `.waitingToPlayAtSpecifiedRate` — a player that has been asked to play,
+    /// has bound its item, and is stalled fetching data it may never get. From
+    /// outside, that is indistinguishable from playing: attached, unpaused, and
+    /// showing nothing. Which is exactly the state reported as "the player is
+    /// attached but the image stays frozen".
+    ///
+    /// `isAdvancing` keeps its meaning because callers use it to read INTENT —
+    /// did a pause take, did a resume take — and intent is what they need. This
+    /// answers the other question, and diagnostics should ask this one.
+    public func isPlayingForReal(in view: VideoRenderView) -> Bool {
+        activePlayers[ObjectIdentifier(view)]?.timeControlStatus == .playing
+    }
+
     public func isAdvancing(in view: VideoRenderView) -> Bool {
         guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
         return player.timeControlStatus != .paused

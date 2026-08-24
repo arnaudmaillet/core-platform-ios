@@ -309,6 +309,39 @@ public final class GridVideoPlaybackCoordinator {
         }
         #if DEBUG
         Self.logPool(loans.count, handoff: handoffID)
+        // ⚠️ THE REPORTED SYMPTOM, NAMED.
+        //
+        // "The player is attached but the image stays frozen" is a state, and
+        // until now nothing in this file could say it out loud: a row with a
+        // loan and a bound player that is not advancing, while nobody asked for
+        // it to be paused. Every probe so far measured somewhere else and came
+        // back clean, which is what four rounds of fixing real-but-unrelated
+        // faults looks like.
+        if CarouselPlaybackAudit.isEnabled {
+            for candidate in chosen where !candidate.isPaused {
+                guard let surface = candidate.cell.watchedClipSurface else {
+                    CarouselPlaybackAudit.trace(
+                        "STUCK \(candidate.id.rawValue) no-surface loan=\(loans[candidate.id] != nil)"
+                    )
+                    continue
+                }
+                let bound = pool.hasPlayer(in: surface)
+                let moving = pool.isAdvancing(in: surface)
+                // ⚠️ Three states, not two. "Not paused" is not "playing":
+                // a player stalled fetching data reports the first and not the
+                // second, and looks identical on screen to a frozen picture.
+                let playing = pool.isPlayingForReal(in: surface)
+                if bound && !(moving && playing) {
+                    CarouselPlaybackAudit.trace(
+                        "STUCK \(candidate.id.rawValue) "
+                        + (moving ? "waiting-to-play" : "not-advancing") + " "
+                        + "loan=\(loans[candidate.id] != nil) "
+                        + "starting=\(startTasks[candidate.id] != nil) "
+                        + "held=\(heldIDs.contains(candidate.id))"
+                    )
+                }
+            }
+        }
         #endif
     }
 
