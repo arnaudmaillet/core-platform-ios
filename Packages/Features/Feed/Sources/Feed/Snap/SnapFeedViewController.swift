@@ -2580,9 +2580,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // different mechanism with its own reveal, and this is not the commit
         // that changes it.
         if commentsEngagedID != nil, !commentsEngagementIsResting {
-            let snapshot = activeSnapCell?.engagedCommentsSnapshot()
             flightChrome = nil
-            return snapshot
+            return engagedStillHost()
         }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
@@ -2592,6 +2591,33 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         configureFlightChrome(chrome)
         flightChrome = chrome
         return chrome
+    }
+
+    /// A host for the engaged still, filled ONE RUNLOOP TURN LATER.
+    ///
+    /// ⚠️ THE CAPTURE CANNOT HAPPEN NOW, and the log says so plainly: the
+    /// still is taken before `GLASSLOG: materialize`, because the destination
+    /// only gains a window after the flight is built. Every glass surface here
+    /// is window-guarded — building one off-window is what stalls the render
+    /// server — so at build time the caption bubble and the composer have no
+    /// material at all, and a still of them is their TEXT floating with no
+    /// bubble under it. Which is the pop this whole thing exists to remove,
+    /// moved one layer down.
+    ///
+    /// Nothing is lost by waiting: `ZoomFlight` fades this replica in from
+    /// alpha 0, so the frames it misses are the ones where it would have been
+    /// invisible anyway.
+    private func engagedStillHost() -> UIView {
+        let host = UIView()
+        host.isUserInteractionEnabled = false
+        DispatchQueue.main.async { [weak self, weak host] in
+            guard let host, let still = self?.activeSnapCell?.engagedCommentsSnapshot()
+            else { return }
+            still.frame = host.bounds
+            still.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            host.addSubview(still)
+        }
+        return host
     }
 
     /// Hides only the feed's own view: the navigation bar above it (owned by

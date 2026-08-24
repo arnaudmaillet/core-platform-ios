@@ -774,9 +774,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // is already carrying that and a still copy over a live surface is a
         // frozen video.
         //
-        // Safe to hide it for the duration: `setZoomContentHidden(true)` has
-        // already run by the time a flight asks for this, so nothing here is on
-        // screen to flicker.
+        // ❌ LEAVING THE MEDIA IN WAS TRIED, to give the lenses a backdrop to
+        // sample, and it is worse on both counts: the glass still did not
+        // render, and the page's media view has not hydrated this early, so the
+        // still laid a flat placeholder over the card's real photograph.
+        //
+        // Safe to hide it: `setZoomContentHidden(true)` has already run by the
+        // time a flight asks for this, so nothing here is on screen to flicker.
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-glass-log") {
+            print("GLASSLOG: capturing engaged still")
+        }
+        #endif
         let wasHidden = mediaCard.isHidden
         mediaCard.isHidden = true
         defer { mediaCard.isHidden = wasHidden }
