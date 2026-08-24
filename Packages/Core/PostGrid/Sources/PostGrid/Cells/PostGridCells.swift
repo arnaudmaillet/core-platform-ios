@@ -964,13 +964,29 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // that belongs to one moment.
         let wasConcealed = isHeroMediaConcealed
         isHeroMediaConcealed = concealed
+        // ⚠️ THE FURNITURE GOES IN BOTH SHAPES, and that is the unification.
+        //
+        // A single attachment hid its chips for free — they are subviews of the
+        // preview, and the preview went to alpha 0. A collection conceals only
+        // the PAGE, so its counters, date and indicator stayed lit through the
+        // whole flight while the single-media version's vanished. Same gesture,
+        // two behaviours, which is exactly the doubt raised about whether this
+        // was ever really unified. It was not.
+        //
+        // What the flight carries is the media. What it does not carry is the
+        // furniture — so the furniture goes, in both.
+        for view in furnitureViews { view.alpha = concealed ? 0 : 1 }
         if let carousel, !carousel.isHidden {
             carousel.setCurrentPageConcealed(concealed)
-            return
+        } else {
+            mediaView.alpha = concealed ? 0 : 1
         }
-        mediaView.alpha = concealed ? 0 : 1
-        playBadge.alpha = concealed ? 0 : 1
         if wasConcealed, !concealed { animateFurnitureIn() }
+    }
+
+    /// Everything the preview wears that the flight does not reproduce.
+    private var furnitureViews: [UIView] {
+        [likesPill, commentsPill, agePill, pageIndicator, playBadge]
     }
 
     /// Whether a flight is currently standing in for this row's media.
@@ -985,19 +1001,39 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// never carried and which therefore arrives from nothing on the landing
     /// frame.
     private func animateFurnitureIn() {
-        let furniture: [UIView] = [likesPill, commentsPill, agePill, pageIndicator, playBadge]
-        for view in furniture where !view.isHidden {
+        // ⚠️ NOT ALL AT ONCE, AND NOT AS ONE PIECE.
+        //
+        // Four chips arriving on the same frame with the same curve read as a
+        // single sheet being switched on — the eye sees one event, not four
+        // objects. A few hundredths of a second between them is enough for it
+        // to read as things settling into a row.
+        //
+        // And each capsule's CONTENTS lag its shape by a couple of points. A
+        // label transformed with its capsule is one object sliding; a label that
+        // arrives a moment after the shape it sits in makes the shape read as a
+        // container the text drops into. It is a small dishonesty about physics
+        // and it is what makes the row feel alive rather than assembled.
+        for (index, view) in furnitureViews.enumerated() where !view.isHidden {
+            let contents = (view as? PostMetaPillView)?.contentRow
             view.alpha = 0
-            view.transform = CGAffineTransform(scaleX: 0.92, y: 0.92)
-        }
-        UIView.animate(
-            withDuration: 0.28, delay: 0.02,
-            usingSpringWithDamping: 0.72, initialSpringVelocity: 0.4,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            for view in furniture where !view.isHidden {
+            view.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+            contents?.transform = CGAffineTransform(translationX: 0, y: 3)
+            contents?.alpha = 0
+            UIView.animate(
+                withDuration: 0.34, delay: 0.03 * Double(index),
+                usingSpringWithDamping: 0.66, initialSpringVelocity: 0.6,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
                 view.alpha = 1
                 view.transform = .identity
+            }
+            UIView.animate(
+                withDuration: 0.3, delay: 0.03 * Double(index) + 0.05,
+                usingSpringWithDamping: 0.8, initialSpringVelocity: 0,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
+                contents?.transform = .identity
+                contents?.alpha = 1
             }
         }
     }

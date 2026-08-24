@@ -162,6 +162,7 @@ public class PostMetaPillView: UIVisualEffectView {
         row.alignment = .center
         row.spacing = spacing
         row.pin(to: contentView, insets: insets)
+        contentRow = row
         // 999, not required: the pin above is required, so a content taller than
         // the declared height would be an unsatisfiable pair. This way the row
         // sizes to its contents in that case and logs nothing — the shape
@@ -170,6 +171,15 @@ public class PostMetaPillView: UIVisualEffectView {
         uniform.priority = .init(999)
         uniform.isActive = true
     }
+
+    /// The chip's contents, so an animation can move them independently of the
+    /// capsule around them.
+    ///
+    /// ⚠️ The two moving together reads as one object sliding, which is what a
+    /// capsule and its label look like when both are animated by the same
+    /// transform. Letting the contents lag by a few points is what makes the
+    /// shape feel like a container the text is settling INTO.
+    private(set) weak var contentRow: UIView?
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
