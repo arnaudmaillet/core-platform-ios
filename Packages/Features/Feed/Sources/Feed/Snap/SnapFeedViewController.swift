@@ -2647,8 +2647,39 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // yet, so the engagement is applied UNANIMATED and simply is the layout
         // the page opens in.
         loadViewIfNeeded()
+        // One layout pass, to give the request a cell to engage.
+        //
+        // ⚠️ WHERE THIS OPENING'S COST ACTUALLY IS, because two plausible
+        // answers were measured and are both wrong.
+        //
+        // Filmed against the same post opened the ordinary way: 350ms
+        // tap-to-settled, against 650–800ms here. The extra is NOT this call
+        // (57ms) and NOT an unresolved layout — a second `layoutIfNeeded` after
+        // the engagement measures 0.02ms, so `presentComments` has already
+        // resolved the tree. It is a stall of ~270–300ms at the LANDING, which
+        // shows up as the flight card sitting at full size for a quarter of a
+        // second before the thread appears under it.
+        //
+        // `syncEngagementAfterAppearance` is where that work is: at
+        // `viewDidAppear` it re-seats the composer and re-materializes its
+        // frost, saying in as many words that the window guard makes every
+        // earlier call a no-op and "the didAppear pass the one that lands".
+        // Moving the header frost AND the composer's into
+        // `zoomTransitionWillBegin` — the first moment there is a window and
+        // the last one where the card still hides everything — did not move the
+        // number, so the cost is not the materials alone. Both attempts were
+        // reverted rather than kept on a story.
         view.layoutIfNeeded()
+        #if DEBUG
+        let __engaged = CACurrentMediaTime()
+        #endif
         applyPendingComments(animated: false)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-engage-profile") {
+            print(String(format: "[engage] pre-push engage %6.2f ms",
+                         (CACurrentMediaTime() - __engaged) * 1000))
+        }
+        #endif
     }
 
     /// Engages the comments a card asked for, once there is a page to engage
