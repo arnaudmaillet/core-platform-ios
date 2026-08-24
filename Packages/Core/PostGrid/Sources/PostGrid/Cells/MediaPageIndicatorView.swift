@@ -129,7 +129,19 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         label.font = PostMetaPillView.font
         label.textColor = PostMetaPillView.foreground
         label.adjustsFontForContentSizeCategory = true
-        super.init(contents: [dots, label], spacing: 0)
+        // ⚠️ NO HORIZONTAL PADDING HERE; THE DOTS VIEW CARRIES IT INSTEAD.
+        //
+        // The chip is exactly as wide as it was — `PageDotsView` adds the same
+        // 12pt back into its own intrinsic width — but the padding is now
+        // INSIDE the dots view rather than around it, which is what gives a
+        // dot leaving the window somewhere to go. See `PageDotsView.overhang`.
+        super.init(
+            contents: [dots, label], spacing: 0,
+            insets: NSDirectionalEdgeInsets(
+                top: PostMetaPillView.insets.top, leading: 0,
+                bottom: PostMetaPillView.insets.bottom, trailing: 0
+            )
+        )
         // The one chip that IS a control. `PostMetaPillView` turns interaction
         // off because a counter that swallowed touches would put a dead corner
         // on the preview; this one has something to do with them.
@@ -258,6 +270,10 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     }
 
     #if DEBUG
+    /// Where the dots sit inside the chip — the runway is only real if the dots
+    /// view actually reaches the capsule's ends.
+    var debugDotsFrame: CGRect { dots.frame }
+
     /// Drives the scrub without a finger — the simulator injects none.
     ///
     /// Goes through `handleScrub`, not around it: a test that reimplemented the
@@ -341,9 +357,37 @@ final class PageDotsView: UIView {
     /// and last dot would dim them for no reason at all.
     private let edgeFade = CAGradientLayer()
 
-    /// How far in the fade reaches: one gap between dots. A dot is gone by the
-    /// time it is a gap outside, which is roughly when it would have been cut.
-    static let edgeFadeWidth = MediaPageIndicatorView.dotSpacing
+    /// ⚠️ THE RUNWAY EITHER SIDE OF THE WINDOW, and the fix to a dot being cut
+    /// in half on its way out.
+    ///
+    /// A fade at the container's edge was not enough on its own: the dot was
+    /// still travelling when it reached that edge, so it went out as a vertical
+    /// slice — faint, but a straight line where a curve should be. Fading it
+    /// harder would only have dimmed the dots that are meant to be READ.
+    ///
+    /// The room was already there, on the wrong side of the boundary. The chip
+    /// pads its contents by 12pt, so the dots view used to stop 12pt short of
+    /// the capsule's ends with nothing in between. Now the dots view spans that
+    /// padding itself and lays its window out 12pt in, which leaves a dot a
+    /// whole slot of runway to disappear over — outside the window, inside the
+    /// view, and never near the edge while it is still visible.
+    ///
+    /// Taken FROM the chip's padding rather than added to it: the capsule is
+    /// the same size it always was.
+    static let overhang = PostMetaPillView.insets.leading
+
+    /// The fade covers the runway exactly. A dot at rest is never touched by it
+    /// — the window begins where the fade ends — and a dot leaving reaches zero
+    /// as it reaches the edge.
+    static var edgeFadeWidth: CGFloat { overhang }
+
+    /// What the chip is: dots, plus the runway on both sides.
+    static func chipWidth(forDots visible: Int) -> CGFloat {
+        width(forDots: visible) + 2 * overhang
+    }
+
+    /// The part of the view the window is laid out in.
+    private var windowWidth: CGFloat { max(bounds.width - 2 * Self.overhang, 0) }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -381,7 +425,7 @@ final class PageDotsView: UIView {
         guard page != current else { return }
         let previousStart = Self.windowStart(
             current: current,
-            visible: Self.visibleDots(in: bounds.width, count: count),
+            visible: Self.visibleDots(in: windowWidth, count: count),
             count: count
         )
         current = page
@@ -391,7 +435,7 @@ final class PageDotsView: UIView {
         // full-size and half-lit at the same time.
         let start = Self.windowStart(
             current: page,
-            visible: Self.visibleDots(in: bounds.width, count: count),
+            visible: Self.visibleDots(in: windowWidth, count: count),
             count: count
         )
         // ⚠️ TWO DURATIONS, because two different things move.
@@ -415,16 +459,17 @@ final class PageDotsView: UIView {
         ) { self.layoutIfNeeded() }
     }
 
-    /// What the chip asks for when nothing is competing: every dot.
+    /// What the chip asks for when nothing is competing: every dot, and the
+    /// runway either side of them.
     override var intrinsicContentSize: CGSize {
         CGSize(
-            width: Self.width(forDots: min(count, Self.maximumVisibleDots)),
+            width: Self.chipWidth(forDots: min(count, Self.maximumVisibleDots)),
             height: MediaPageIndicatorView.dotDiameter
         )
     }
 
     /// The floor the chip may be compressed to.
-    var minimumWidth: CGFloat { Self.width(forDots: Self.minimumVisibleDots) }
+    var minimumWidth: CGFloat { Self.chipWidth(forDots: Self.minimumVisibleDots) }
 
     static func width(forDots visible: Int) -> CGFloat {
         guard visible > 0 else { return 0 }
@@ -468,7 +513,7 @@ final class PageDotsView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard !dots.isEmpty else { return }
-        let visible = Self.visibleDots(in: bounds.width, count: count)
+        let visible = Self.visibleDots(in: windowWidth, count: count)
         let start = Self.windowStart(current: current, visible: visible, count: count)
         let diameter = MediaPageIndicatorView.dotDiameter
         let spacing = MediaPageIndicatorView.dotSpacing
@@ -529,12 +574,33 @@ final class PageDotsView: UIView {
         ]
     }
 
-    /// Which ends are faded, for a test that would otherwise have to read a
-    /// gradient's stops back to itself.
-    var debugEdgeFade: (leading: Bool, trailing: Bool) {
+    /// How far in the fade reaches at each end, IN POINTS — so a test can ask
+    /// whether it overlaps a dot rather than read a gradient's stops back to
+    /// itself.
+    var debugFadeExtent: (leading: CGFloat, trailing: CGFloat) {
         guard layer.mask === edgeFade,
               let stops = edgeFade.locations?.map(\.doubleValue), stops.count == 4
-        else { return (false, false) }
-        return (stops[1] > 0, stops[2] < 1)
+        else { return (0, 0) }
+        return (CGFloat(stops[0...1].max() ?? 0) * bounds.width,
+                CGFloat(1 - (stops[2...3].min() ?? 1)) * bounds.width)
+    }
+
+    /// Which ends are faded at all.
+    var debugEdgeFade: (leading: Bool, trailing: Bool) {
+        let extent = debugFadeExtent
+        return (extent.leading > 0, extent.trailing > 0)
+    }
+
+    /// Where the visible dots actually sit, so a test can check they are clear
+    /// of both the fade and the edge.
+    var debugDotFrames: [CGRect] {
+        dots.filter { $0.alpha > 0 }.map(\.frame)
+    }
+
+    /// Every dot's frame, INCLUDING the ones parked outside the window — which
+    /// is the set that matters when the question is whether anything is being
+    /// cut, since a dot on its way out is exactly a dot that is no longer in it.
+    var debugAllDotFrames: [CGRect] {
+        dots.map(\.frame)
     }
 }

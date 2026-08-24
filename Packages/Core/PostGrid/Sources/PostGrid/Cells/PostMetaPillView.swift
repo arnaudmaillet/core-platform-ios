@@ -10,8 +10,10 @@ import UIKit
 /// and it works there because they are two short numbers over a thumbnail
 /// nobody is reading. A DATE is a word, and words need a floor.
 ///
-/// So the pill brings one: `.systemMaterial`, which is defined PER INTERFACE
-/// STYLE. Light chip in light mode, dark chip in dark mode, on every photo.
+/// So the pill brings one: a `UIBlurEffect` material, which is defined PER
+/// INTERFACE STYLE. Light chip in light mode, dark chip in dark mode, on every
+/// photo. Which STEP of material is a separate question, settled at
+/// `makeBackdrop`.
 ///
 /// ## Two rejected grounds, and they fail in opposite directions
 ///
@@ -244,13 +246,28 @@ public class PostMetaPillView: UIVisualEffectView {
     /// it is without a window — building the effect is cheap, ATTACHING one
     /// off-screen is what stalls a headless simulator.
     ///
-    /// `.systemMaterial` rather than one of the thinner steps: the thinner a
-    /// material is the more of the photo it lets through, and the closer it
-    /// comes to the behaviour this deliberately moved away from — a light chip
-    /// going grey over a dark image while its `.label` glyphs stay black.
-    /// Regular holds the interface style's own tone.
+    /// ⚠️ `.systemThin`, ONE STEP DOWN FROM REGULAR — and the step was argued
+    /// the other way first.
+    ///
+    /// The case against thinning: the thinner a material is the more of the
+    /// photo it lets through, and the closer it comes to the behaviour this
+    /// class exists to avoid — a light chip going grey over a dark image while
+    /// its `.label` glyphs stay black.
+    ///
+    /// What that argument missed is that the CARD is not the post screen. Here
+    /// four chips lie along the bottom of a preview a few hundred points tall,
+    /// and at regular they read as four frosted slabs: the chip stops being a
+    /// floor under a number and becomes an object competing with the picture.
+    /// Thin still resolves per interface style, still holds its own tone, and
+    /// is one step — not two. Ultra-thin is where the chip genuinely starts
+    /// taking the photo's side, and that is the line.
+    ///
+    /// The property being traded is OPACITY, not authority: what makes this
+    /// safe is the same thing that made regular safe, that a `UIBlurEffect`
+    /// style is defined per interface style while a glass lens samples what
+    /// passes under it.
     static func makeBackdrop() -> UIVisualEffect {
-        UIBlurEffect(style: .systemMaterial)
+        UIBlurEffect(style: .systemThinMaterial)
     }
 }
 
