@@ -1017,7 +1017,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             let contents = (view as? PostMetaPillView)?.contentRow
             view.alpha = 0
             view.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+            // The SAME treatment as the capsule — fade and bounce — offset in
+            // time and space rather than softened. A gentler curve on the text
+            // read as two different effects happening at once; the same one,
+            // arriving a beat later and from three points lower, reads as the
+            // text following the shape into place.
             contents?.transform = CGAffineTransform(translationX: 0, y: 3)
+                .scaledBy(x: 0.94, y: 0.94)
             contents?.alpha = 0
             UIView.animate(
                 withDuration: 0.34, delay: 0.03 * Double(index),
@@ -1028,8 +1034,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
                 view.transform = .identity
             }
             UIView.animate(
-                withDuration: 0.3, delay: 0.03 * Double(index) + 0.05,
-                usingSpringWithDamping: 0.8, initialSpringVelocity: 0,
+                withDuration: 0.34, delay: 0.03 * Double(index) + 0.05,
+                usingSpringWithDamping: 0.66, initialSpringVelocity: 0.6,
                 options: [.allowUserInteraction, .beginFromCurrentState]
             ) {
                 contents?.transform = .identity

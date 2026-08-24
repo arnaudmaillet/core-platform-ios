@@ -283,7 +283,11 @@ public struct MockSocialDataset: Sendable {
             // — with a single clip, a duplicate and a correct reuse look the
             // same from outside.
             let videoPagePositions: Set<Int> = [1, 2]
-            // ⚠️ A SECOND, MUCH LARGER GALLERY — index 2.
+            // ⚠️ THE FEED'S FIRST POST IS THE LARGE GALLERY — index 0.
+            //
+            // Posts are ordered newest first, so index zero is what a viewer
+            // meets on launch. The limits are what want looking at, and they
+            // are not reachable by scrolling past three other cards first.
             //
             // Three pages exercise the seams; they do not exercise the LIMITS.
             // A dozen does: the indicator has to stop drawing one dot per page
@@ -295,7 +299,10 @@ public struct MockSocialDataset: Sendable {
             // Two of its pages are clips, for the same reason the small one has
             // two: with a single clip, a duplicated player and a correctly
             // reused one look identical from outside.
-            let bigShapes: [(Int, Int)] = (0..<12).map { position in
+            // ⚠️ ELEVEN extra pages, not twelve — the post's own media is page
+            // one. Counting the extras as the total is how a "twelve-page
+            // gallery" quietly becomes thirteen.
+            let bigShapes: [(Int, Int)] = (0..<11).map { position in
                 switch position % 3 {
                 case 0: (1600, 900)
                 case 1: (1080, 1080)
@@ -313,14 +320,23 @@ public struct MockSocialDataset: Sendable {
             // move anything at all. One of each proves the condition; either
             // alone proves only that something happens.
             let smallShapes: [(Int, Int)] = [(1080, 1080), (1600, 900)]
+            // ⚠️ CHOSEN BY CAPTION, NOT BY INDEX, and the arithmetic is why.
+            //
+            // These are seeded oldest-index-first and the feed presents them the
+            // other way round, so "index 0" is the LAST card a viewer sees —
+            // the opposite of what was asked for. Rather than re-derive that
+            // inversion here and have it rot the next time the ordering moves,
+            // the post is named: this caption is empirically the first card in
+            // the feed, and a mock may know that about itself.
+            let isFirstInFeed = caption == "Golden hour over the harbour."
             let extraMedia: [(url: String, width: Int, height: Int)] =
-                index == 2
+                isFirstInFeed
                 ? bigShapes.enumerated().map { position, shape in
                     switch (mediaCatalog, bigVideoPositions.contains(position)) {
                     case (.synthetic, false):
-                        ("mock://media/new-2-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                        ("mock://media/new-0-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
                     case (.synthetic, true):
-                        ("mock://video/new-2-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                        ("mock://video/new-0-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
                     case (.realAssets, false):
                         (MockMediaFixtures.imageURL(index: 60 + position, width: shape.0, height: shape.1),
                          shape.0, shape.1)
