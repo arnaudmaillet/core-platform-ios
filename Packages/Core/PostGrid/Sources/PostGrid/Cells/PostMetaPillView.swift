@@ -156,8 +156,12 @@ public class PostMetaPillView: UIVisualEffectView {
         // shape was CONFIGURED, never that it was drawn. It took a 3x crop of a
         // screenshot to see it.
         clipsToBounds = true
-        // Furniture, never a target. The card's own tap opens the post, and a
-        // chip that swallowed touches would put two dead corners on the preview.
+        // ⚠️ FURNITURE UNTIL SOMETHING ASKS OTHERWISE — see `setTapHandler`.
+        //
+        // The card's own tap opens the post, so a chip that swallowed touches
+        // for nothing would put dead corners on the preview. A chip that has
+        // somewhere to send them is a different thing, and turns this back on
+        // for itself.
         isUserInteractionEnabled = false
         let row = UIStackView(arrangedSubviews: contents)
         row.axis = .horizontal
@@ -185,6 +189,65 @@ public class PostMetaPillView: UIVisualEffectView {
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Makes the pill a control, or furniture again with nil.
+    ///
+    /// ⚠️ `cancelsTouchesInView`, and it is the whole reason this is a
+    /// recognizer rather than a `point(inside:)` trick. The row's own tap opens
+    /// the post; without swallowing the touch, pressing a chip would open the
+    /// post AND do the chip's job — both, in an order nobody chose.
+    ///
+    /// The chip is 32pt tall and `point(inside:)` already grows its target to
+    /// 44, so this inherits a finger-sized region without the capsule growing
+    /// to match.
+    public func setTapHandler(_ handler: (() -> Void)?) {
+        tapHandler = handler
+        isUserInteractionEnabled = handler != nil
+        guard handler != nil, tap == nil else { return }
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        recognizer.cancelsTouchesInView = true
+        addGestureRecognizer(recognizer)
+        tap = recognizer
+        // A press response, because the capsule is the app's own statement that
+        // what is in one can be pressed — and a control that answers a finger
+        // with nothing until its screen changes reads as a miss. Scale rather
+        // than a fill: the chip's ground is a material, and darkening a
+        // material is how it stops looking like one.
+        let press = UILongPressGestureRecognizer(target: self, action: #selector(handlePress))
+        press.minimumPressDuration = 0
+        press.cancelsTouchesInView = false
+        press.delegate = self
+        addGestureRecognizer(press)
+    }
+
+    private var tapHandler: (() -> Void)?
+    private weak var tap: UITapGestureRecognizer?
+
+    @objc private func handleTap() {
+        tapHandler?()
+    }
+
+    @objc private func handlePress(_ recognizer: UIGestureRecognizer) {
+        let held = recognizer.state == .began || recognizer.state == .changed
+        UIView.animate(
+            withDuration: 0.42, delay: 0,
+            usingSpringWithDamping: 0.55, initialSpringVelocity: 0.8,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.transform = held ? CGAffineTransform(scaleX: 0.9, y: 0.9) : .identity
+        }
+    }
+
+    #if DEBUG
+    /// Fires whatever the chip is wired to, for a simulator that injects no
+    /// touches. Reports whether there was anything to fire — "the chip did
+    /// nothing" and "the chip is not a control" are different answers.
+    public func debugTap() -> Bool {
+        guard let tapHandler else { return false }
+        tapHandler()
+        return true
+    }
+    #endif
 
     /// Extends the touch area to `minimumTouchTarget` without growing the chip.
     ///
@@ -268,6 +331,34 @@ public class PostMetaPillView: UIVisualEffectView {
     /// passes under it.
     static func makeBackdrop() -> UIVisualEffect {
         UIBlurEffect(style: .systemThinMaterial)
+    }
+}
+
+extension UIView {
+    /// Whether this view and every ancestor up to its cell are actually shown.
+    ///
+    /// ⚠️ `isHidden` on the view itself is not the question. Both comment chips
+    /// exist on every row; which one is SHOWN is decided by hiding a container
+    /// several levels up — the media box or the closing line — so a chip can be
+    /// perfectly visible in its own right and part of a branch nobody sees.
+    var superviewChainIsVisible: Bool {
+        var view: UIView? = self
+        while let current = view {
+            if current.isHidden || current.alpha == 0 { return false }
+            view = current.superview
+        }
+        return true
+    }
+}
+
+extension PostMetaPillView: UIGestureRecognizerDelegate {
+    /// The press is a highlight, not a claim: it runs alongside the tap it
+    /// belongs to, and alongside whatever the row is doing with the same touch.
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        true
     }
 }
 

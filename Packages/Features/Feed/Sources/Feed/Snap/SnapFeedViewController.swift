@@ -176,6 +176,9 @@ final class SnapFeedViewController: UIViewController {
     /// `openMediaPage(_:for:)`. Stored on the class because an extension
     /// cannot hold state, which is where the seam it belongs to lives.
     private var pendingMediaPage: (id: PostID, page: Int)?
+    /// The post that must open ALREADY SHOWING its comments — see
+    /// `openComments(for:)`.
+    private var pendingCommentsID: PostID?
     private var commentsEngagedID: PostID?
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
@@ -393,6 +396,13 @@ final class SnapFeedViewController: UIViewController {
         // containers are in the window and the walk-up reaches them.
         syncEngagementAfterAppearance()
         setNativePopSuppressed(true)
+        // The no-flight route into an opening request: a text row has no hero
+        // to land, and an ordinary push has no transition at all, so neither
+        // reaches `zoomTransitionDidEnd`. Guarded on the flight rather than on
+        // the route, because on the hero path this fires WITH the transition
+        // and would spend the engagement's layout inside the flight's last
+        // frames — the one place this screen refuses to spend it.
+        if !isAwaitingZoomPresentation { applyPendingComments() }
         #if DEBUG
         runDebugAppearanceHooks()
         #endif
@@ -2573,6 +2583,33 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         pendingMediaPage = (id, page)
     }
 
+    /// Opens a post with its comments already engaged.
+    ///
+    /// A ONE-SHOT instruction, on the same terms as `openMediaPage(_:for:)` and
+    /// for the same reason: the feed is scrolled, and a remembered preference
+    /// would make paging back to this post — or a cell recycling onto it —
+    /// behave differently from a fresh open, on history nobody can see.
+    ///
+    /// ⚠️ APPLIED ON LANDING, never at push time. The engagement is ~115ms of
+    /// layout, and the flight is the one stretch of this screen's life where
+    /// that cost is visible: `prewarmComments` refuses to run during a
+    /// transition for exactly this reason, having measured the present leg's
+    /// first layout go from 36–64ms to 139–145ms. So the post arrives, and then
+    /// its comments come up — which is also the honest reading of the gesture,
+    /// since the card the viewer pressed is what the flight is carrying.
+    public func openComments(for id: PostID) {
+        pendingCommentsID = id
+    }
+
+    /// Engages the comments a card asked for, once there is a page to engage
+    /// them on. Reading the request clears it, so a dismissal and a second open
+    /// start from nothing.
+    func applyPendingComments() {
+        guard let id = pendingCommentsID else { return }
+        pendingCommentsID = nil
+        presentComments(for: id)
+    }
+
     /// Takes the pending page for `id`, if there is one. Reading it clears it —
     /// see `openMediaPage`.
     func consumeInitialMediaPage(for id: PostID) -> Int? {
@@ -2909,6 +2946,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // without it. That is the flight's stall moved rather than removed:
         // off the card, but still inside the settle a viewer is watching.
         scheduleIdleCommentsWarm()
+        // …unless a card asked to land IN the comments, in which case there is
+        // nothing to warm for: the engagement is happening now.
+        applyPendingComments()
     }
 
     /// The hero transition's dismiss-leg live seam: mirrors the active cell's

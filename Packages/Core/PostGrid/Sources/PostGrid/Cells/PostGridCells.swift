@@ -881,6 +881,36 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// separately. See `MediaCarouselView.onTapped`.
     public var onMediaTapped: (() -> Void)?
 
+    /// Fired when the viewer taps the COMMENT COUNT, on either card shape.
+    ///
+    /// ⚠️ A different destination from the row's own tap, not a shortcut to it.
+    /// Tapping the card opens the post; tapping this opens the post AT ITS
+    /// COMMENTS. The count is the only thing on the card that names the thread,
+    /// so it is the only place the shorter route belongs — and a viewer who
+    /// wanted the photograph has the whole rest of the card to press.
+    ///
+    /// Wired on BOTH the media overlay's chip and the closing line's, because
+    /// which one a post wears depends on whether it happens to carry a
+    /// photograph, and an affordance that comes and goes with that is not one.
+    public var onCommentsTapped: (() -> Void)?
+
+    #if DEBUG
+    /// Presses the comment count the row is ACTUALLY wearing.
+    ///
+    /// The point of asking the row rather than naming a chip: a card shows the
+    /// overlay pair over its media and the closing line's pair when it has
+    /// none, and wiring only one of the two is a defect that no test naming the
+    /// other would ever see.
+    public func debugTapCommentsChip() -> Bool {
+        for pill in [commentsPill, closingCommentsPill] as [PostMetaPillView?] {
+            guard let pill, !pill.isHidden, pill.window != nil || pill.superview != nil,
+                  pill.superviewChainIsVisible else { continue }
+            if pill.debugTap() { return true }
+        }
+        return false
+    }
+    #endif
+
     /// Moves this row's carousel, e.g. to follow the page an opened post is on.
     /// Ignored by a row with no collection.
     public func setMediaPage(_ page: Int, animated: Bool = true) {
@@ -1581,6 +1611,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // flat fill, which a material would resolve to and vanish into.
         closingLikesPill = PostCardPillView(contents: [reactions])
         closingCommentsPill = PostCardPillView(contents: [comments])
+        closingCommentsPill.setTapHandler { [weak self] in self?.onCommentsTapped?() }
         // ⚠️ The DATE stays a bare label, and that asymmetry is deliberate.
         //
         // On the preview it wears a capsule because a word over a photograph has
@@ -1683,6 +1714,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // leading edge the way the trailing date does.
         likesPill = PostMetaPillView(contents: [overlayReactions])
         commentsPill = PostMetaPillView(contents: [overlayComments])
+        commentsPill.setTapHandler { [weak self] in self?.onCommentsTapped?() }
         // ⚠️ A SLOT, not a pill: the date is bare text on a fading material.
         //
         // It keeps the row's rhythm and loses the capsule, because a capsule is
@@ -1930,6 +1962,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         onAuthorTapped = nil
         authorMenuActions = nil
         onMediaTapped = nil
+        onCommentsTapped = nil
         // Both capture the POST they were built for, like the two above: a
         // recycled row would otherwise save someone else's post.
         onRepostTapped = nil

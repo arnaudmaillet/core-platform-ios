@@ -470,6 +470,9 @@ final class ForYouViewController: UIViewController {
         pager.onItemTapped = { [weak self] format, index in
             self?.openFeed(from: format, at: index)
         }
+        pager.onItemCommentsTapped = { [weak self] format, index in
+            self?.openFeed(from: format, at: index, showingComments: true)
+        }
         pager.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
         pager.onRefresh = { [weak self] in self?.viewModel.refresh() }
         // An ordinary push onto whatever stack this screen is on — the app's
@@ -1032,7 +1035,9 @@ final class ForYouViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    private func openFeed(from format: GalleryFilter.Format, at index: Int) {
+    private func openFeed(
+        from format: GalleryFilter.Format, at index: Int, showingComments: Bool = false
+    ) {
         // One flight at a time: a second tap while a card is in the air would
         // stage a transition over a live one. Same guard as the map's.
         guard activeTransition == nil else { return }
@@ -1081,6 +1086,14 @@ final class ForYouViewController: UIViewController {
                     print("[sync] card asked page=\(page)")
                 }
                 #endif
+            }
+            // A post opened FROM ITS COMMENT COUNT arrives with the thread
+            // already up. Handed over with the page instruction rather than
+            // acted on here, for the same reason: this screen knows what was
+            // pressed, and only the destination knows when it is safe to spend
+            // the engagement's layout.
+            if showingComments {
+                seedable.openComments(for: tapped.id)
             }
             // …and the traffic runs the other way too, live. The card behind
             // follows the post's carousel, which is what makes the dismissal
@@ -2056,7 +2069,12 @@ final class ForYouViewController: UIViewController {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
         }
-        guard let position = arguments.firstIndex(of: "-foryou-open"), position + 1 < arguments.count,
+        // `-foryou-open-comments N` is `-foryou-open N` through the comment
+        // count instead of the card, so the shorter route is exercised by the
+        // same waiting-for-content machinery rather than by a second one.
+        let viaComments = arguments.firstIndex(of: "-foryou-open-comments")
+        guard let position = viaComments ?? arguments.firstIndex(of: "-foryou-open"),
+              position + 1 < arguments.count,
               let index = Int(arguments[position + 1])
         else { return }
         // Polls rather than firing on a fixed delay: the tap needs landed
@@ -2086,7 +2104,11 @@ final class ForYouViewController: UIViewController {
             // Through the page's own selection path, so a scripted open runs
             // the same code a tap does — including the scroll-into-view
             // bookkeeping that `openFeed` alone would skip.
-            if pager.page(for: format)?.debugSelectItem(at: index) != true {
+            if viaComments != nil {
+                if pager.page(for: format)?.debugTapComments(at: index) != true {
+                    print("[foryou-comments] row \(index) has no comment chip to press")
+                }
+            } else if pager.page(for: format)?.debugSelectItem(at: index) != true {
                 openFeed(from: format, at: index)
             }
             // `-zoom-repeat`: open, pop, open again (twice over). The hero's

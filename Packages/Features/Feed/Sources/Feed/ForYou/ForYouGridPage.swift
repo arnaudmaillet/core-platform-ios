@@ -41,6 +41,16 @@ final class ForYouGridPage: UIView {
 
     /// The tapped item's index into `posts`.
     var onItemTapped: ((Int) -> Void)?
+
+    /// The same open, with the comments already engaged — see
+    /// `PostGridListRowCell.onCommentsTapped`.
+    ///
+    /// ⚠️ FALLS BACK TO `onItemTapped` when unset, and that is not politeness.
+    /// The chip is drawn by the cell on every screen this page appears on; a
+    /// host that has not wired the shorter route must still get the ordinary
+    /// one, or the count becomes a control that does nothing on exactly the
+    /// screens nobody thought about.
+    var onItemCommentsTapped: ((Int) -> Void)?
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
@@ -886,6 +896,19 @@ final class ForYouGridPage: UIView {
         guard posts.indices.contains(index) else { return false }
         collectionView(collectionView, didSelectItemAt: indexPath(for: index))
         return true
+    }
+
+    /// Presses a row's comment count, the control a finger reaches — not the
+    /// route behind it. Reports false when the row is not on screen or wears no
+    /// chip, which is what separates "the shortcut is broken" from "there was
+    /// nothing to press".
+    func debugTapComments(at index: Int) -> Bool {
+        guard posts.indices.contains(index),
+              let row = collectionView.cellForItem(
+                  at: indexPath(for: index)
+              ) as? PostGridListRowCell
+        else { return false }
+        return row.debugTapCommentsChip()
     }
 
     /// `-foryou-scroll-demo`: scrolls the page the way a finger would, since
@@ -1945,6 +1968,16 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                       let path = self.collectionView.indexPath(for: cell) else { return }
                 self.collectionView(self.collectionView, didSelectItemAt: path)
             }
+            // The comment count opens the same post at its thread. Resolved
+            // through the CELL's index path rather than through this closure's
+            // captured one: rows are recycled and the list re-renders under
+            // them, so the index that was true at configure time is not
+            // necessarily true when the finger arrives.
+            cell.onCommentsTapped = { [weak self, weak cell] in
+                guard let self, let cell,
+                      let path = self.collectionView.indexPath(for: cell) else { return }
+                self.open(at: path, showingComments: true)
+            }
             // ⚠️ Paging a MIXED collection changes what should be playing, and
             // nothing else would ask.
             //
@@ -2007,8 +2040,21 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // The reveal is remembered and applied once the post has covered the
         // grid (`applyPendingReveal`), where it costs nothing to look at and
         // is finished long before the dismissal flies home to it.
-        pendingRevealPostID = posts[flatIndex(for: indexPath)].id
-        onItemTapped?(flatIndex(for: indexPath))
+        open(at: indexPath, showingComments: false)
+    }
+
+    /// Both ways into a post, so the flight is staged identically either way —
+    /// the reveal is remembered here, and forgetting it on one route is how a
+    /// dismissal lands on the wrong row.
+    private func open(at indexPath: IndexPath, showingComments: Bool) {
+        let index = flatIndex(for: indexPath)
+        guard posts.indices.contains(index) else { return }
+        pendingRevealPostID = posts[index].id
+        if showingComments, let openComments = onItemCommentsTapped {
+            openComments(index)
+        } else {
+            onItemTapped?(index)
+        }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
