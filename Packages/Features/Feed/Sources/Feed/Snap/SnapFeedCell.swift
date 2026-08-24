@@ -41,6 +41,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private let pauseGlyph = UIImageView()
 
     private var representedID: PostID?
+
+    /// Which post this cell's playback belongs to, for the pool's sharing rule.
+    ///
+    /// ⚠️ Two posts carrying the same file are two playbacks. Sharing a player
+    /// between them makes pausing one freeze the other — see `playingScope` in
+    /// `VideoPlaybackController`. The card and this page sharing one is the case
+    /// the rule exists FOR, and they agree here because they name the same post.
+    private var playbackScope: String? { representedID?.rawValue }
     private var mediaURL: URL?
     private var mediaKind: MediaKind = .image
 
@@ -174,8 +182,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // configure. The collection path is now the same: poster first, and the
         // first decoded frame retires it.
         surface.setPoster(mediaCard.currentPageCover)
+        let scope = playbackScope
         Task { [weak self] in
-            await videoPlayback.play(url, in: surface)
+            await videoPlayback.play(url, in: surface, scope: scope)
             self?.auditPagePlayback()
             // ⚠️ AFTER, and that ordering is the whole safety of this.
             //
@@ -229,8 +238,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // Cancellation alone would not do it. The pool's await is not
             // cooperative, so the binding can still happen; what makes this safe
             // is asking again on the other side of it.
+            let scope = playbackScope
             let task = Task { [weak self] in
-                await videoPlayback.prewarm(url, in: surface)
+                await videoPlayback.prewarm(url, in: surface, scope: scope)
                 guard let self, self.isActive else {
                     videoPlayback.stop(surface)
                     return
@@ -1195,8 +1205,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             mediaCard.hostRenderViewOnCurrentPage()
             let view = mediaCard.renderView
+            let scope = playbackScope
             Task { [weak self] in
-                await videoPlayback.play(url, in: view)
+                await videoPlayback.play(url, in: view, scope: scope)
                 // ⚠️ ACTIVATION IS ITS OWN DOOR, and it bypasses the page
                 // reconcile entirely — which is why warming hung off that
                 // reconcile alone did nothing at all for the case that matters
@@ -1298,7 +1309,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             view.revealOnFirstFrame()
             return
         }
-        Task { await videoPlayback.play(url, in: view) }
+        let scope = playbackScope
+        Task { await videoPlayback.play(url, in: view, scope: scope) }
     }
 
     /// Whether this page's media area has something REAL on screen — the

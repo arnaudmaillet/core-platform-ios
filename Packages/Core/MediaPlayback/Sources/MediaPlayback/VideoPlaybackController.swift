@@ -29,6 +29,22 @@ public final class VideoPlaybackController {
     /// Where each paused player's picture was, so a resume can put it back.
     /// Keyed by PLAYER: two surfaces can share one, and they share its playhead.
     private var pausedAnchors: [ObjectIdentifier: CMTime] = [:]
+    /// Which POST each bound view is playing for.
+    ///
+    /// ⚠️ THE URL IS NOT AN IDENTITY, and treating it as one is a defect the
+    /// fixtures made visible and production would have hit on any repost.
+    ///
+    /// "One asset, one player" was written for a real case: a card holds a clip
+    /// paused on its page while the post opens the SAME clip, and minting a
+    /// second player there gives one asset two decoders on two clocks. But the
+    /// rule was applied by URL alone — so two DIFFERENT posts that happen to
+    /// carry the same file also shared a player, and pausing one froze the
+    /// other. Three mock posts share `trailer.mp4`, which is how it was found;
+    /// two posts of the same reposted video would do it in production.
+    ///
+    /// Sharing is therefore scoped: same asset AND same post.
+    private var playingScope: [ObjectIdentifier: String] = [:]
+
     /// The media URL each bound view is playing, so a parked player can be
     /// matched back to the same asset.
     private var playingURL: [ObjectIdentifier: URL] = [:]
@@ -90,7 +106,15 @@ public final class VideoPlaybackController {
     /// in bits per second; `0` (the default) means uncapped. See
     /// `setPeakBitRate(_:in:)` for why this is a property of the item and not
     /// of the URL.
-    public func play(_ mediaURL: URL, in view: VideoRenderView, peakBitRate: Double = 0) async {
+    /// - Parameter scope: which POST this playback belongs to. Two surfaces
+    ///   may share one player only when the asset AND the scope match — see
+    ///   `playingScope` for why the asset alone is not an identity. Passing nil
+    ///   means "share with nobody", which is the safe answer for a caller that
+    ///   does not know whose media this is.
+    public func play(
+        _ mediaURL: URL, in view: VideoRenderView,
+        peakBitRate: Double = 0, scope: String? = nil
+    ) async {
         let key = ObjectIdentifier(view)
         let token = (generation[key] ?? 0) + 1
         generation[key] = token
@@ -114,6 +138,7 @@ public final class VideoPlaybackController {
             bind(parked.player, to: view)
             activePlayers[key] = parked.player
             playingURL[key] = mediaURL
+            playingScope[key] = scope
             parked.player.play()
             return
         }
@@ -146,13 +171,14 @@ public final class VideoPlaybackController {
         //
         // Joining is cheap and synchronous — no resolution, no await — so it
         // also removes a start-up delay on the second surface.
-        if let shared = sharedActivePlayer(playing: mediaURL),
+        if let shared = sharedActivePlayer(playing: mediaURL, scope: scope),
            shared !== activePlayers[key] {
             detach(key: key, view: view)
             shared.currentItem?.preferredPeakBitRate = peakBitRate
             bind(shared, to: view)
             activePlayers[key] = shared
             playingURL[key] = mediaURL
+            playingScope[key] = scope
             shared.play()
             return
         }
@@ -170,12 +196,13 @@ public final class VideoPlaybackController {
         // asset that two surfaces reach for simultaneously.
         //
         // Cheap: one dictionary lookup on a path that has just done I/O.
-        if let shared = sharedActivePlayer(playing: mediaURL), shared !== activePlayers[key] {
+        if let shared = sharedActivePlayer(playing: mediaURL, scope: scope), shared !== activePlayers[key] {
             detach(key: key, view: view)
             shared.currentItem?.preferredPeakBitRate = peakBitRate
             bind(shared, to: view)
             activePlayers[key] = shared
             playingURL[key] = mediaURL
+            playingScope[key] = scope
             shared.play()
             return
         }
@@ -197,6 +224,7 @@ public final class VideoPlaybackController {
         bind(player, to: view)
         activePlayers[key] = player
         playingURL[key] = mediaURL
+        playingScope[key] = scope
         player.play()
     }
 
@@ -218,8 +246,11 @@ public final class VideoPlaybackController {
     /// Every duplicate-avoiding rule in `play` applies unchanged: prewarming a
     /// clip another surface is already running joins that player rather than
     /// minting a second.
-    public func prewarm(_ mediaURL: URL, in view: VideoRenderView, peakBitRate: Double = 0) async {
-        await play(mediaURL, in: view, peakBitRate: peakBitRate)
+    public func prewarm(
+        _ mediaURL: URL, in view: VideoRenderView,
+        peakBitRate: Double = 0, scope: String? = nil
+    ) async {
+        await play(mediaURL, in: view, peakBitRate: peakBitRate, scope: scope)
         _ = setPaused(true, in: view)
     }
 
@@ -251,6 +282,7 @@ public final class VideoPlaybackController {
         generation[key] = (generation[key] ?? 0) + 1
         activePlayers[key] = nil
         playingURL[key] = nil
+        playingScope[key] = nil
         if !keepingSurfaceAttached { view.detach() }
         parked = (url, player)
         return true
@@ -636,8 +668,23 @@ public final class VideoPlaybackController {
     /// A player bound to some surface and playing `mediaURL`. Deliberately
     /// blind to the parked slot: parking is the handoff's own mechanism and has
     /// its own branch in `play`, which un-parks rather than sharing.
-    private func sharedActivePlayer(playing mediaURL: URL) -> AVPlayer? {
-        guard let key = playingURL.first(where: { $0.value == mediaURL })?.key else { return nil }
+    /// A player already running this asset FOR THIS POST, if any.
+    ///
+    /// ⚠️ Both halves, and the scope is the half that was missing. Matching on
+    /// the asset alone made two different posts carrying the same file share one
+    /// player and one clock: pausing either froze both, with the other left
+    /// attached and still — which is exactly how it was reported.
+    ///
+    /// ⚠️ NIL IS A SCOPE, not an absence of one — two unscoped requests for the
+    /// same asset are the same media as far as anyone here can tell, and they
+    /// share. Refusing to share on nil was tried and broke the rule this exists
+    /// to keep: every caller that does not distinguish posts would get its own
+    /// decoder for an asset already playing.
+    private func sharedActivePlayer(playing mediaURL: URL, scope: String?) -> AVPlayer? {
+        let key = playingURL.first {
+            $0.value == mediaURL && playingScope[$0.key] == scope
+        }?.key
+        guard let key else { return nil }
         return activePlayers[key]
     }
 
@@ -683,6 +730,7 @@ public final class VideoPlaybackController {
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
         view.detach(reason: "controller.stop")
         playingURL[key] = nil
+        playingScope[key] = nil
         guard let player = activePlayers.removeValue(forKey: key) else { return }
         // ⚠️ STILL IN USE? Then this is one surface leaving, not the end of a
         // playback.

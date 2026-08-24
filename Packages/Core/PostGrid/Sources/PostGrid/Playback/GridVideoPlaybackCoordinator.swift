@@ -844,7 +844,9 @@ public final class GridVideoPlaybackCoordinator {
             return
         }
         startTasks[id] = Task { [weak self, pool] in
-            await pool.play(url, in: renderView, peakBitRate: cap)
+            // Scoped to the POST: two rows carrying the same file are two
+            // playbacks and must not share a clock. See `playingScope`.
+            await pool.play(url, in: renderView, peakBitRate: cap, scope: id.rawValue)
             // A candidate that arrives already paused — its carousel is resting
             // on another page — is started and held on its first frame, which is
             // what makes the frame there to show at all.
@@ -901,7 +903,7 @@ public final class GridVideoPlaybackCoordinator {
             guard !pool.hasPlayer(in: clip.surface) else { continue }
             let id = candidate.id
             Task { [weak self] in
-                await self?.pool.prewarm(clip.url, in: clip.surface)
+                await self?.pool.prewarm(clip.url, in: clip.surface, scope: id.rawValue)
                 guard let self, self.loans[id] != nil else {
                     self?.pool.stop(clip.surface)
                     return
