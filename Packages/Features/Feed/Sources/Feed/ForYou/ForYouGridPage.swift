@@ -582,8 +582,20 @@ final class ForYouGridPage: UIView {
             // on another page of the same collection — the clip is still on
             // screen there, peeking, and stopping it would put that page's
             // thumbnail back.
-            let advancing = (cell as? PostGridListRowCell)
-                .map { $0.currentPageVideoURL == held } ?? true
+            // ⚠️ A SINGLE ATTACHMENT IS ALWAYS ON ITS OWN PAGE.
+            //
+            // `currentPageVideoURL` answers for a CAROUSEL and is nil for a row
+            // showing one video — so comparing it to the held URL said "not
+            // advancing" for every single-video row in the feed, and the
+            // coordinator dutifully started each one and paused it on its first
+            // frame. Reported as "the first frame is there but the media does
+            // not advance", with a recording that shows exactly that.
+            //
+            // The question only means anything for a collection: is the viewer
+            // on the clip's page, or on a photograph beside it.
+            let advancing = (cell as? PostGridListRowCell).map {
+                !$0.showsCarousel || $0.currentPageVideoURL == held
+            } ?? true
 
             // Measured against the cell's MEDIA, which each shape locates for
             // itself (`videoMediaRect`) — a tile's is its bounds, a row's is

@@ -209,6 +209,40 @@ struct RowClipRetentionTests {
         #expect(cell.retainedPlaybackSurfaces.contains { $0 === replaced } == false)
     }
 
+    // MARK: - What a single attachment says about itself
+
+    /// ⚠️ A ROW WITH ONE VIDEO IS NOT A CAROUSEL, AND ANSWERS NIL FOR ITS PAGE.
+    ///
+    /// Both halves matter to the caller that decides whether a row should be
+    /// advancing. It asked only the second — comparing `currentPageVideoURL` to
+    /// the held clip — and nil never equals a URL, so every single-video row in
+    /// the feed was declared paused: started, then stopped on its first frame.
+    /// Reported as "the first frame is there but the media does not advance",
+    /// and measured as every renderer heartbeat reading `rated=0`.
+    ///
+    /// The question "is the viewer on the clip's page" only means anything for a
+    /// collection. `showsCarousel` is what tells the two apart, which is why it
+    /// is public.
+    @Test func aSingleVideoRowIsNotACarouselAndHasNoCurrentPage() {
+        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 500))
+        let clip = url("clip-only")
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("solo"), kind: .video, isRepost: false,
+                thumbnailURL: url("thumb-solo"), videoURL: clip,
+                caption: "Short.", publishedAtMS: 0
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        cell.layoutIfNeeded()
+
+        #expect(cell.showsCarousel == false)
+        #expect(cell.currentPageVideoURL == nil)
+        // And it still tells the pool which clip it holds — the answer the
+        // caller actually needs.
+        #expect(cell.retainedVideoURL == nil || cell.retainedVideoURL == clip)
+    }
+
     // MARK: - Where the mark sits
 
     /// ⚠️ THE CORNER, and the SAME corner the row's own badge uses.

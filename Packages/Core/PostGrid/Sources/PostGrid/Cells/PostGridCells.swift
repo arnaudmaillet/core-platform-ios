@@ -179,7 +179,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// True while this row is drawing its collection rather than a single
     /// preview. Asked in several places, and each of them was a `!(x?.y ?? true)`
     /// before, which is one negation too many to read at a glance.
-    private var showsCarousel: Bool { !(carousel?.isHidden ?? true) }
+    /// Whether this row is drawing a COLLECTION rather than one attachment.
+    ///
+    /// Public because the question "is this row on its clip's page" only means
+    /// anything for a collection — a single attachment is always on its own —
+    /// and the caller that decides whether a row should be advancing has to be
+    /// able to tell the two apart. It could not, and every single-video row in
+    /// the feed was declared paused as a result.
+    public var showsCarousel: Bool { !(carousel?.isHidden ?? true) }
 
     /// The stream the CURRENT page carries, nil when the page is a still.
     ///
