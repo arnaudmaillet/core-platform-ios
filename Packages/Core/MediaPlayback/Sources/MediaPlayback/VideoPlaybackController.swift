@@ -23,6 +23,9 @@ public final class VideoPlaybackController {
     /// that lost the race is discarded instead of attaching to a recycled cell.
     private var generation: [ObjectIdentifier: Int] = [:]
     private var loopObservers: [ObjectIdentifier: NSObjectProtocol] = [:]
+    /// Stall observers, kept only so they outlive this call. Diagnostic, armed
+    /// by `-carousel-audit` and empty otherwise.
+    private var stallObservers: [NSObjectProtocol] = []
     /// The media URL each bound view is playing, so a parked player can be
     /// matched back to the same asset.
     private var playingURL: [ObjectIdentifier: URL] = [:]
@@ -675,8 +678,35 @@ public final class VideoPlaybackController {
         }
     }
 
+    /// Records the one thing that can move a playhead without anyone asking.
+    ///
+    /// ⚠️ THE OBJECTION THAT REDIRECTED THIS: a pause cannot make a video run
+    /// fast. Whatever is happening is not pause-then-resume, so the remaining
+    /// candidate is playback that ran out of data and jumped when it came back
+    /// — which is also the only mechanism that would explain the effect showing
+    /// on a long remote HLS stream and never on a short one.
+    ///
+    /// A stall next to a `fast` dispatch in the log is that story confirmed. A
+    /// `fast` dispatch with no stall anywhere near it kills it, and the cause is
+    /// ours after all. The instrument is what makes those two distinguishable
+    /// instead of arguable.
+    private func observeStalls(for item: AVPlayerItem) {
+        guard VideoPlaybackTrace.isEnabled else { return }
+        stallObservers.append(NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.playbackStalledNotification,
+            object: item, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                VideoPlaybackTrace.emit(
+                    String(format: "STALLED at=%.3fs", item.currentTime().seconds)
+                )
+            }
+        })
+    }
+
     private func installLoop(for player: AVPlayer, item: AVPlayerItem) {
         removeLoop(for: player)
+        observeStalls(for: item)
         loopObservers[ObjectIdentifier(player)] = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,

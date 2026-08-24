@@ -53,7 +53,7 @@ final class CarouselRetentionUITests: XCTestCase {
     private func launch(startIndex: Int) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
-            "-mock-auto-login", "-open-feed", "-rich-media",
+            "-mock-auto-login", "-open-feed", "-rich-media", "-carousel-audit",
             "-snap-start-index", "\(startIndex)",
         ]
         app.launch()
