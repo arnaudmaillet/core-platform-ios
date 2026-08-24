@@ -38,6 +38,18 @@ final class VideoFrameSource {
         }
         output = nil
         observedItem = nil
+        // ⚠️ THE CATCH-UP STATE BELONGS TO THE ITEM, NOT TO THE PLAYER.
+        //
+        // Players are pooled and reused, so without this the numbers a previous
+        // post left behind are the ones the next post is judged against: a
+        // half-drained backlog would carry over as a "gap that is closing" and
+        // keep dropping frames for a clip that never had a backlog at all. The
+        // picture would sit frozen with a player attached, which is exactly how
+        // it was reported — every post after the carousel.
+        isCatchingUp = false
+        stalledDrops = 0
+        totalDrops = 0
+        lastBehind = .infinity
         guard let item else { return }
 
         // `outputSettings: nil` asks for the decoder's native format, which is
@@ -77,30 +89,17 @@ final class VideoFrameSource {
         // Before playback starts the timebase has no rate and the answer comes
         // back invalid or negative; both mean "nothing to show yet".
         guard itemTime.isValid, itemTime >= .zero else { return nil }
-        // ⚠️ THE OUTPUT'S CLOCK CAN FALL BEHIND THE PLAYER'S, AND IT DOES.
-        //
-        // Measured on a paused-then-resumed adaptive stream: `out=10.500s` while
-        // `player=21.231s` — the output ten and a half seconds behind, which is
-        // exactly how long the clip had been held. Asking it for the frame at
-        // 10.5s while playback is really at 21.2s makes it deliver its backlog
-        // as fast as the display link asks, and THAT is the reported
-        // fast-forward. The viewer's own words for it were "as if it were trying
-        // to catch up on a delay"; it was, and the delay was ten seconds.
-        //
-        // The player's position is the truth about where playback is, so a
-        // disagreement is resolved in its favour. The threshold keeps this off
-        // the normal path, where the two agree within a frame or two and
-        // `itemTime(forHostTime:)` is the better answer — it is anchored to the
-        // upcoming refresh rather than to now.
-        let playerTime = player.currentTime()
-        var wantedTime = itemTime
-        if playerTime.isValid, abs((playerTime - itemTime).seconds) > 0.5 {
-            wantedTime = playerTime
-            VideoPlaybackTrace.emit(String(
-                format: "resynced output=%.3fs player=%.3fs",
-                itemTime.seconds, playerTime.seconds
-            ))
-        }
+        // A note kept because the idea was wrong in an instructive way: this
+        // once re-requested `player.currentTime()` whenever the output's clock
+        // disagreed with it by more than half a second, on the theory that the
+        // output's clock was the thing lagging. It is not — measured, the two
+        // agree; what lags is the queue of decoded FRAMES, handled below. And
+        // the re-request could wedge the pipeline outright: a pooled player
+        // given a fresh item has an output still reading the old one, so it
+        // asked for a time no frame existed for and `hasNewPixelBuffer` said no
+        // for ever. Reported as "the player is attached but the picture is
+        // frozen", on every post after the carousel.
+        let wantedTime = itemTime
         guard output.hasNewPixelBuffer(forItemTime: wantedTime) else {
             // ⚠️ Nothing new is not a catch-up, and saying otherwise leaves a
             // spinner turning over a clip that has simply been paused. A drain
@@ -171,13 +170,26 @@ final class VideoFrameSource {
             // it is the only one it should ever have covered.
             let closing = !lastBehind.isFinite || behind < lastBehind - 0.001
             lastBehind = behind
-            if closing || stalledDrops < Self.maxStalledDrops {
+            totalDrops += 1
+            // ⚠️ AND AN ABSOLUTE CEILING ON TOP OF THE STALL CHECK.
+            //
+            // "Keep waiting while the gap closes" has no end of its own: a gap
+            // that closes a millisecond at a time satisfies it for ever, and the
+            // picture would sit frozen with a player attached and a spinner
+            // turning. Two seconds' worth of frames is far longer than any drain
+            // measured here and still an end.
+            //
+            // This is the second time this guard has been given a way to be
+            // wrong safely. It is worth the two lines: the failure it prevents
+            // looks exactly like the player having died.
+            if (closing || stalledDrops < Self.maxStalledDrops),
+               totalDrops < Self.maxTotalDrops {
                 stalledDrops = closing ? 0 : stalledDrops + 1
                 isCatchingUp = true
                 return nil
             }
             VideoPlaybackTrace.emit(String(
-                format: "gave up catching up behind=%.3fs", behind
+                format: "gave up catching up behind=%.3fs after=%d", behind, totalDrops
             ))
         }
         isCatchingUp = false
@@ -204,6 +216,11 @@ final class VideoFrameSource {
     private static let maxStalledDrops = 60
     private var stalledDrops = 0
     private var lastBehind: Double = .infinity
+
+    /// The end that "while the gap is closing" does not have on its own.
+    /// Two seconds of frames at 120Hz.
+    private static let maxTotalDrops = 240
+    private var totalDrops = 0
 
     /// Whether the picture is waiting for playback to catch up to it.
     ///
