@@ -26,6 +26,9 @@ public final class VideoPlaybackController {
     /// Stall observers, kept only so they outlive this call. Diagnostic, armed
     /// by `-carousel-audit` and empty otherwise.
     private var stallObservers: [NSObjectProtocol] = []
+    /// Where each paused player's picture was, so a resume can put it back.
+    /// Keyed by PLAYER: two surfaces can share one, and they share its playhead.
+    private var pausedAnchors: [ObjectIdentifier: CMTime] = [:]
     /// The media URL each bound view is playing, so a parked player can be
     /// matched back to the same asset.
     private var playingURL: [ObjectIdentifier: URL] = [:]
@@ -397,6 +400,15 @@ public final class VideoPlaybackController {
     public func setPaused(_ paused: Bool, in view: VideoRenderView) -> Bool {
         guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
         if paused {
+            // ⚠️ WHERE THE PICTURE WAS, remembered — because an adaptive stream
+            // does not necessarily come back to it.
+            //
+            // A progressive file resumes exactly where it stopped. An HLS one
+            // re-anchors its timebase on resume and makes up the interval it was
+            // stopped for: measured at 5x to 17.5x for seconds, with the clock
+            // itself advancing 0.111s per 0.017s of real time. That is not the
+            // display being wrong — playback really is somewhere else.
+            pausedAnchors[ObjectIdentifier(player)] = player.currentTime()
             player.pause()
         } else {
             // ⚠️ Whatever is queued belongs to BEFORE the pause.
@@ -408,6 +420,30 @@ public final class VideoPlaybackController {
             // ten-second one, where it wraps. Dropped, the surface holds its
             // frozen frame for one dispatch and then shows the present.
             view.flushPendingSamples()
+            // ⚠️ PINNED BACK to where it was, and only when it has drifted.
+            //
+            // The seek is exact on both sides — a tolerant one would let the
+            // player choose a keyframe further on and reintroduce the jump it is
+            // there to prevent. The threshold keeps it off the common path: a
+            // progressive file returns within a frame of its anchor and is left
+            // alone, so this costs nothing where nothing is wrong.
+            let key = ObjectIdentifier(player)
+            if let anchor = pausedAnchors.removeValue(forKey: key), anchor.isValid {
+                let drift = (player.currentTime() - anchor).seconds
+                // ⚠️ Reported on EVERY resume, not only when it acts.
+                //
+                // "The re-pin never fired" and "there was never any drift to
+                // pin" are the same silence, and this session has spent four
+                // runs mistaking one for the other. The number is printed so the
+                // next run says which — and so a threshold that turns out to be
+                // wrong is visibly wrong rather than quietly inert.
+                VideoPlaybackTrace.emit(String(
+                    format: "resume drift=%.3fs anchor=%.3fs", drift, anchor.seconds
+                ))
+                if drift.isFinite, abs(drift) > 0.15 {
+                    player.seek(to: anchor, toleranceBefore: .zero, toleranceAfter: .zero)
+                }
+            }
             player.play()
         }
         return true

@@ -289,9 +289,20 @@ final class VideoFrameRenderer {
                 let clockNow = source.lastClockTime
                 let clockElapsed = (lastClockTime.isValid && clockNow.isValid)
                     ? (clockNow - lastClockTime).seconds : Double.nan
+                // ⚠️ And the PLAYER's own time beside the output's reading.
+                //
+                // Everything so far has been read through
+                // `AVPlayerItemVideoOutput.itemTime(forHostTime:)`, which is the
+                // output's mapping of host time onto the item — not the player's
+                // position. An adaptive stream switches rendition mid-playback,
+                // and if that mapping is re-established wrongly we would be
+                // ASKING for frames further ahead than playback actually is:
+                // the pictures race while the player is perfectly fine. The two
+                // numbers agreeing kills that idea; diverging, it names it.
                 VideoPlaybackTrace.emit(String(
-                    format: "fast frames=%.3fs clock=%.3fs real=%.3fs rate=%.1fx at=%.3fs",
-                    mediaElapsed, clockElapsed, gap, rate, itemTime.seconds
+                    format: "fast frames=%.3fs clock=%.3fs real=%.3fs rate=%.1fx out=%.3fs player=%.3fs",
+                    mediaElapsed, clockElapsed, gap, rate,
+                    itemTime.seconds, player.currentTime().seconds
                 ))
             }
             maxRateSinceTraceSample = max(maxRateSinceTraceSample, rate)
