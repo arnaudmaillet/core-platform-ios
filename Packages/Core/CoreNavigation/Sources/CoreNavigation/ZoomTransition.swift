@@ -237,9 +237,21 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// destination that computed its own copy of that curve would be one
     /// edit away from disagreeing with the thing it is drawn against.
     ///
+    /// ⚠️ `settling` SEPARATES THE TWO CHANNELS THE CARD ITSELF HAS.
+    ///
+    /// While the finger is down the card's POSITION is assigned live on every
+    /// event and only its SIZE is ever on a spring. A destination that animated
+    /// its position too would be chasing a centre the card had already left,
+    /// and would trail it by the whole of the detach dip. False means "this is
+    /// where the card IS" — take the position immediately. True is the release,
+    /// where the card is genuinely springing somewhere and its follower should
+    /// spring with it.
+    ///
     /// Called on every pan event, and once more with the outcome's value when
     /// the grab is released. Default is nothing.
-    func setZoomDismissProgress(_ progress: CGFloat, card: CGRect, cornerRadius: CGFloat)
+    func setZoomDismissProgress(
+        _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat, settling: Bool
+    )
 
     /// Detaches the destination's live player and parks it for whoever plays
     /// the same asset next — the source it is flying home to. Called on the
@@ -324,7 +336,9 @@ public extension ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin() {}
-    func setZoomDismissProgress(_ progress: CGFloat, card: CGRect, cornerRadius: CGFloat) {}
+    func setZoomDismissProgress(
+        _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat, settling: Bool
+    ) {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }
 }

@@ -291,7 +291,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // the page it is already showing: nothing changes on screen, and every
         // event after this one is a move from somewhere rather than an arrival
         // from nowhere.
-        destination?.setZoomDismissProgress(0, card: pageFrame, cornerRadius: screenRadius)
+        destination?.setZoomDismissProgress(
+            0, card: pageFrame, cornerRadius: screenRadius, settling: false
+        )
 
         // The detach: a real spring, not a scrubbed keyframe — it registers
         // the instant the grab starts, however slowly the finger then moves.
@@ -355,7 +357,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             // on the dip's own spring. Same block, same curve, nothing to keep
             // in step by hand.
             self.destination?.setZoomDismissProgress(
-                progress, card: flight.card.frame, cornerRadius: radius
+                progress, card: flight.card.frame, cornerRadius: radius, settling: false
             )
         }
     }
@@ -446,7 +448,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             // what it is showing and a direct set is exact. See `springDetach`
             // for the branch where that stops being true.
             destination?.setZoomDismissProgress(
-                progress, card: flight.card.frame, cornerRadius: radius
+                progress, card: flight.card.frame, cornerRadius: radius, settling: false
             )
         }
         dim?.alpha = 1 - progress
@@ -570,7 +572,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             self.destination?.setZoomDismissProgress(
                 commit ? 1 : 0,
                 card: commit ? landing : flight.pageFrame,
-                cornerRadius: commit ? flight.card.zoomRestingCornerRadius : screenRadius
+                cornerRadius: commit ? flight.card.zoomRestingCornerRadius : screenRadius,
+                settling: true
             )
             if commit {
                 flight.poseAtSource(at: landing)
@@ -661,7 +664,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // same completeTransition turn, so no restored frame can render.
         toolbar?.alpha = 1
         // Restore the feed content for the cancel path; moot when finished.
-        destination?.setZoomDismissProgress(0, card: .zero, cornerRadius: 0)
+        destination?.setZoomDismissProgress(0, card: .zero, cornerRadius: 0, settling: false)
         destination?.setZoomContentHidden(false)
         destination?.zoomTransitionDidEnd()
         // Unconditional, cancel included: a cancelled grab that left the source

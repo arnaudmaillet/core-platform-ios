@@ -977,7 +977,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// release's own animation block, so UIKit interpolates it on the card's
     /// spring rather than on a second one.)
     func setEngagedDismissalProgress(
-        _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat
+        _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat, settling: Bool
     ) {
         guard isEngagedDismissing else { return }
         let t = min(max(progress, 0), 1)
@@ -1016,10 +1016,34 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // layout pass, a spring in flight and a gesture event are three
         // different moments, and four layers told the same thing at three
         // moments is four chances to be told late.
-        pageStage.transform = CGAffineTransform(
-            translationX: card.midX - contentView.bounds.midX,
-            y: card.midY - contentView.bounds.midY
-        ).scaledBy(x: fill, y: fill)
+        // ⚠️ TWO CHANNELS, BECAUSE THE CARD HAS TWO — and folding them into one
+        // transform is what put the page BEHIND the card.
+        //
+        // The flight's grab drives the card's POSITION directly on every pan
+        // event and its SIZE on a spring (the detach dip). A single affine
+        // carrying both meant the page's position was animating toward a centre
+        // the card had already left: told inside the dip's block, it chased a
+        // moving target and lagged it by the whole of the dip. On screen that
+        // is the comments and the wash sitting a few dozen points behind the
+        // photograph — the same numbers, arriving late.
+        //
+        // So the page is decomposed exactly as the card is: the centre is
+        // assigned, live, and only the scale is left to whatever animation is
+        // in flight.
+        // ⚠️ AND THE CENTRE IS ASSIGNED OUTSIDE ANY ANIMATION while the finger
+        // is down. Inside the dip's block it animated like everything else, so
+        // it was interpolating toward a position the card had already left —
+        // measured trailing it by 7pt across and 12pt down at a tenth of the
+        // gesture, which is the comments and the wash sitting visibly behind
+        // the photograph. The release is the one time it should spring, and
+        // that is what `settling` says.
+        let centre = CGPoint(x: card.midX, y: card.midY)
+        if settling {
+            pageStage.center = centre
+        } else {
+            UIView.performWithoutAnimation { pageStage.center = centre }
+        }
+        pageStage.transform = CGAffineTransform(scaleX: fill, y: fill)
         // ⚠️ THE CARD'S RADIUS, HANDED OVER — never a second copy of the curve.
         //
         // The window computed its own interpolation from the display's corner
@@ -1036,9 +1060,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // The two rects that must be the same rect: where the window is,
             // and where the page actually landed after its transform. A gap
             // between them is the gap on screen, and nothing else can be.
-            print(String(format: "[grab] t=%.2f fill=%.3f window=%@ stage=%@",
+            // The card's PRESENTATION frame beside the page's, in the same
+            // space — the only comparison that can catch one lagging the
+            // other. Comparing the window's rect to the page's proved nothing:
+            // both are derived from the same converted number in the same
+            // breath, so they agreed while the card was somewhere else.
+            print(String(format: "[grab] t=%.2f fill=%.3f card=%@ stage=%@",
                          t, fill, NSCoder.string(for: card),
-                         NSCoder.string(for: pageStage.frame)))
+                         NSCoder.string(for: pageStage.layer.presentation()?.frame
+                                            ?? pageStage.frame)))
         }
         #endif
     }
@@ -1053,6 +1083,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     override func layoutSubviews() {
         super.layoutSubviews()
         pageStage.bounds = CGRect(origin: .zero, size: contentView.bounds.size)
+        // ⚠️ NOT WHILE A TRANSITION IS MOVING IT. The centre is one of the two
+        // channels the grab drives (see `setEngagedDismissalProgress`), and a
+        // layout pass re-centring the stage mid-gesture would drag the page
+        // back to the middle of the screen between two events.
+        guard !isEngagedDismissing else { return }
         pageStage.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
     }
 
@@ -1097,6 +1132,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard isEngagedDismissing else { return }
         isEngagedDismissing = false
         pageStage.transform = .identity
+        pageStage.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
         for (view, resting) in zip(dismissalTravellers, restingAlphas) {
             view.alpha = resting
         }
