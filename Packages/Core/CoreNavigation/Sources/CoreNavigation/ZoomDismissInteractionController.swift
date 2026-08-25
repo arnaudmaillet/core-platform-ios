@@ -505,6 +505,21 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             initialSpringVelocity: springVelocity,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
+            // ⚠️ THE DESTINATION RIDES THIS BLOCK, it does not run a spring of
+            // its own.
+            //
+            // A destination that is more than its media has been tracking the
+            // card frame by frame, and the release is where a second animation
+            // would start drifting from the first. Told the OUTCOME's values
+            // from inside this block, every property it sets in answer — its
+            // window, its transform, its alpha — is interpolated by UIKit on
+            // exactly the spring the card is on. Cancel therefore carries the
+            // interface back to full screen with the card, and commit carries
+            // it onto the tile and to nothing, which is also the state its
+            // teardown expects: there is no frame where the two disagree.
+            self.destination?.setZoomDismissProgress(
+                commit ? 1 : 0, card: commit ? landing : flight.pageFrame
+            )
             if commit {
                 flight.poseAtSource(at: landing)
                 dim?.alpha = 0
