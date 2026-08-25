@@ -1248,6 +1248,19 @@ final class ForYouGridPage: UIView {
         guard let row = cell(for: postID) as? PostGridListRowCell,
               row.mediaHeroRect == nil
         else { return nil }
+        return rowFrame(for: postID, in: space)
+    }
+
+    /// **OPTION A — `-comments-reveal`.** The same rect for ANY list row,
+    /// media included.
+    ///
+    /// The guard above is a policy, not arithmetic: a row with media has a
+    /// hero, so it flies rather than opens. A comments-open is the one case
+    /// where a row with media might want the window instead — the thread it is
+    /// opening is a hosted child controller, and `RevealTransition` records
+    /// what happens to every attempt at impersonating one.
+    func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let row = cell(for: postID) as? PostGridListRowCell else { return nil }
         // The WHOLE card. Departing from below the author band was the first
         // attempt and the frames killed it: a window that stops short of the
         // card's top leaves the band outside the transition, so the card gains

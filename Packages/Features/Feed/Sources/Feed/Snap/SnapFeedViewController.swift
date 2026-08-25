@@ -179,6 +179,11 @@ final class SnapFeedViewController: UIViewController {
     /// The post that must open ALREADY SHOWING its comments — see
     /// `openComments(for:)`.
     private var pendingCommentsID: PostID?
+    /// **OPTION B — `-comments-masked-hero`.** Where the thread's window opens
+    /// FROM, in this view's own coordinates. Non-nil only when the opener asked
+    /// for the masked variant.
+    private var pendingCommentsRevealRect: CGRect?
+    private var isMaskedRevealActive = false
     private var commentsEngagedID: PostID?
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
@@ -2641,8 +2646,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// first layout go from 36–64ms to 139–145ms. So the post arrives, and then
     /// its comments come up — which is also the honest reading of the gesture,
     /// since the card the viewer pressed is what the flight is carrying.
-    public func openComments(for id: PostID) {
+    public func openComments(for id: PostID, revealingFrom rect: CGRect? = nil) {
         pendingCommentsID = id
+        pendingCommentsRevealRect = rect
         // ⚠️ NOW, IF THERE IS ANYTHING TO DO IT TO — before the push, not after
         // the landing.
         //
@@ -2952,6 +2958,21 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public func setZoomContentHidden(_ hidden: Bool) {
+        // ⚠️ A MASKED-HERO OPENING STAYS VISIBLE, and that inversion is the
+        // whole of option B. The flight hides the destination because the card
+        // is its stand-in; here the destination is NOT being stood in for — the
+        // real thread is what the window shows, drawn over the card carrying
+        // the photograph. Hiding it would leave the window empty.
+        //
+        // ⚠️ AND THE WINDOW OPENS FROM HERE, not from `zoomTransitionWillBegin`.
+        // That hook runs in the transition controller's `init`, BEFORE the push
+        // — deliberately, so playback can be suppressed early enough — which is
+        // before this screen has laid out or realized the page it is about to
+        // show. Asked there, it had no active cell to mask and silently did
+        // nothing: the flight carried the photograph correctly and the thread
+        // still arrived in one frame at the landing.
+        if hidden { beginMaskedRevealIfRequested() }
+        guard !isMaskedRevealActive else { return view.alpha = 1 }
         view.alpha = hidden ? 0 : 1
     }
 
@@ -2962,6 +2983,35 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         isAwaitingZoomPresentation = true
         activeSnapCell?.defersPlaybackForFlight = true
         activeSnapCell?.setChromeHeldForFlight(true)
+    }
+
+    /// **OPTION B.** Opens the thread's window on the same spring the card
+    /// flies on. Silent unless the opener asked for it and the page is engaged.
+    private func beginMaskedRevealIfRequested() {
+        guard let rect = pendingCommentsRevealRect, let cell = activeSnapCell,
+              commentsEngagedID != nil, !commentsEngagementIsResting
+        else { return }
+        pendingCommentsRevealRect = nil
+        isMaskedRevealActive = true
+        view.alpha = 1
+        // Every floor between the window and the card, for the same reason the
+        // cell's own has to go: three opaque blacks stacked between a thread
+        // and the photograph it is supposed to be lying on.
+        view.backgroundColor = .clear
+        collectionView.backgroundColor = .clear
+        // The rect arrives in the OPENER's view space. Both screens are
+        // full-bleed in the same window, so the two spaces differ by nothing —
+        // and this one is asked before the destination has a window of its own
+        // to convert through.
+        cell.beginMaskedRevealForFlight(
+            from: view.convert(rect, to: cell.contentView),
+            cornerRadius: PostGridListRowCell.cardCornerRadius
+        )
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[masked-hero] window opens from \(NSCoder.string(for: rect))")
+        }
+        #endif
     }
 
     /// Parks the active page's player for the source it is flying home to.
@@ -3048,6 +3098,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // …unless a card asked to land IN the comments, in which case there is
         // nothing to warm for: the engagement is happening now.
         applyPendingComments(animated: true)
+        if isMaskedRevealActive {
+            isMaskedRevealActive = false
+            activeSnapCell?.endMaskedRevealForFlight()
+            view.backgroundColor = .black
+            collectionView.backgroundColor = .black
+        }
     }
 
     /// The hero transition's dismiss-leg live seam: mirrors the active cell's

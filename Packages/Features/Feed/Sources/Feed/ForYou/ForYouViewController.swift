@@ -792,14 +792,23 @@ final class ForYouViewController: UIViewController {
     /// frame 0 and dissolves as the page grows past it.
     @discardableResult
     private func installTextReveal(
-        feed: UIViewController, format: GalleryFilter.Format, postID: PostID
+        feed: UIViewController, format: GalleryFilter.Format, postID: PostID,
+        allowingMedia: Bool = false
     ) -> Bool {
         textSlideDismissal.revealGeometry = nil
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
+        // **OPTION A** widens the reveal's own gate: a row WITH media may open
+        // as a window too, when what it is opening is the thread rather than
+        // the photograph.
+        func sourceFrame(_ space: UICoordinateSpace) -> CGRect? {
+            allowingMedia
+                ? pager.page(for: format)?.rowFrame(for: postID, in: space)
+                : pager.page(for: format)?.textRowFrame(for: postID, in: space)
+        }
         guard TextRevealInstaller.isEnabled,
               let page = pager.page(for: format),
-              page.textRowFrame(for: postID, in: view) != nil
+              sourceFrame(view) != nil
         else { return false }
         // The grid's inset state at each stage of a round trip. It exists
         // because a rect alone cannot say why a landing missed, and the first
@@ -810,7 +819,7 @@ final class ForYouViewController: UIViewController {
             print("[text-reveal] \(stage) \(page.debugInsetState)")
         }
         log("atTap        ")
-        if trace, let rect = page.textRowFrame(for: postID, in: view) {
+        if trace, let rect = sourceFrame(view) {
             // The row's rect BEFORE the push hides the tab bar. Compared with
             // the animator's `source=`, this says whether the grid moved
             // between the tap and the opening — which is what a pre-opening
@@ -845,9 +854,7 @@ final class ForYouViewController: UIViewController {
         textSlideDismissal.revealGeometry = TextRevealInstaller.geometry(
             feed: feed,
             origin: TextRevealOrigin(
-                rowFrame: { [weak page] space in
-                    page?.textRowFrame(for: postID, in: space)
-                },
+                rowFrame: { space in sourceFrame(space) },
                 // Read ONCE, at staging, and deliberately not re-asked at
                 // dismissal: `applyPendingReveal` may have scrolled the row,
                 // and a row that scrolled out is not realized to answer. The
@@ -1035,6 +1042,36 @@ final class ForYouViewController: UIViewController {
         present(alert, animated: true)
     }
 
+    /// Which opening a COMMENTS tap gets, so the three can be compared on a
+    /// device rather than argued about.
+    ///
+    /// - `standard`: the flight carries the photograph and the thread is there
+    ///   when it lands. What ships.
+    /// - `reveal` (`-comments-reveal`): **option A**. No flight at all — the
+    ///   real page is installed at full size and a window opens onto it from
+    ///   the card's rect, which is exactly what a text post does. ⚠️ The page
+    ///   moves by TRANSLATION only, never scale, so the photograph is seen at
+    ///   1:1 through the window: at t=0 that is a tighter crop than the card
+    ///   was showing. This is the handshake the hero exists to make, and the
+    ///   thing to look for when judging it.
+    /// - `maskedHero` (`-comments-masked-hero`): **option B**. The flight keeps
+    ///   the photograph, at the row's crop, and the REAL thread is revealed
+    ///   over it through a window opening on the same spring. Nothing
+    ///   impersonates anything. ⚠️ Two animations held in phase by sharing one
+    ///   spring rather than one timeline — look for them parting company.
+    enum CommentsOpening {
+        case standard, reveal, maskedHero
+    }
+
+    static var commentsOpening: CommentsOpening {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-comments-reveal") { return .reveal }
+        if arguments.contains("-comments-masked-hero") { return .maskedHero }
+        #endif
+        return .standard
+    }
+
     private func openFeed(
         from format: GalleryFilter.Format, at index: Int, showingComments: Bool = false
     ) {
@@ -1093,7 +1130,14 @@ final class ForYouViewController: UIViewController {
             // pressed, and only the destination knows when it is safe to spend
             // the engagement's layout.
             if showingComments {
-                seedable.openComments(for: tapped.id)
+                // **OPTION B — `-comments-masked-hero`** hands over WHERE the
+                // thread's window should open from; without it the opening is
+                // the plain one and the thread is simply there on landing.
+                let maskedHero = Self.commentsOpening == .maskedHero
+                let from = maskedHero
+                    ? pager.page(for: format)?.hero(for: tapped.id, in: view)?.frame
+                    : nil
+                seedable.openComments(for: tapped.id, revealingFrom: from)
             }
             // …and the traffic runs the other way too, live. The card behind
             // follows the post's carousel, which is what makes the dismissal
@@ -1136,13 +1180,22 @@ final class ForYouViewController: UIViewController {
         // Hiding it and putting it back was tried and is worse: UIKit runs its
         // own show/hide animation on the bar, and a second one fighting it left
         // the bar sitting fully opaque OVER the landed page for ~0.25s.
-        let revealing = installTextReveal(feed: feed, format: format, postID: tapped.id)
+        // **OPTION A — `-comments-reveal`**: a comments-open on a row WITH media
+        // takes the window instead of the flight.
+        let revealing = installTextReveal(
+            feed: feed, format: format, postID: tapped.id,
+            allowingMedia: showingComments && Self.commentsOpening == .reveal
+        )
         if !revealing {
             tabBarController?.setTabBarHidden(true, animated: true)
         }
 
         guard let page = pager.page(for: format),
               let destination = feed as? any ZoomTransitionDestination,
+              // A reveal never also flies a hero. For a TEXT row this changes
+              // nothing — it has no hero to fly — and for OPTION A it is what
+              // sends a media row down the window's path instead.
+              !revealing,
               page.hero(for: tapped.id, in: view) != nil
         else {
             // No hero available — a text-only row has no media to fly, and a

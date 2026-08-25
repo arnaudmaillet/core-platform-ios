@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import MediaPlayback
 import PostGrid
@@ -480,6 +481,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// thread data, scroll position, and a half-typed reply never live in a
     /// recycled cell. Z-order: above the media (which vacates the region),
     /// below the chrome (the action rail floats over it).
+    /// The window a masked-hero opening is seen through — see
+    /// `beginMaskedRevealForFlight`. Non-nil only for the length of a flight.
+    private var flightMask: UIView?
+    private var mediaHiddenForMaskedReveal = false
+    private var groundForMaskedReveal: UIColor?
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
     /// The engaged header's frost: a dissolving blur band across the top
@@ -745,6 +751,74 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The four layers the engagement fades, in no particular order.
     private var engagementFadeLayers: [CALayer] {
         [commentsContainer.layer, headerFrost.layer, mediaBackdrop.layer, chrome.layer]
+    }
+
+    /// **OPTION B — `-comments-masked-hero`.** Opens the REAL engaged thread
+    /// through a window that grows with the flight, over the card flying the
+    /// photograph.
+    ///
+    /// ⚠️ NO STAND-IN ANYWHERE. `RevealTransition` records why that matters:
+    /// five text-hero attempts flew a replica of the destination and every one
+    /// of them died of impersonation — a skeleton in the photographed still
+    /// being the first symptom on the list, and the one a still of this page
+    /// reproduced exactly. What is masked here IS the page.
+    ///
+    /// The destination stays visible for this (see `setZoomContentHidden`) and
+    /// sits ABOVE the flight card in the container, so the thread draws over
+    /// the photograph the card is carrying. The page's own media is hidden for
+    /// the duration — the card has it, at the crop the row was showing, which
+    /// is the handshake a plain reveal cannot make.
+    func beginMaskedRevealForFlight(from rect: CGRect, cornerRadius: CGFloat) {
+        guard isCommentsEngaged, flightMask == nil else { return }
+        mediaHiddenForMaskedReveal = mediaCard.isHidden
+        mediaCard.isHidden = true
+        // ⚠️ AND THE GROUND HAS TO GO TRANSPARENT, or the window reveals a
+        // black page.
+        //
+        // The page's floor is opaque black by design — it is what a media page
+        // rests on. Masking only decides WHERE the page draws, not what it
+        // draws, so the window opened correctly onto the thread and the thread
+        // was standing on black, with the card's photograph shut out behind it.
+        // The whole point of this variant is that the two are composited.
+        groundForMaskedReveal = contentView.backgroundColor
+        contentView.backgroundColor = .clear
+        let mask = UIView(frame: rect)
+        // Opaque: a mask reads its alpha channel, so a clear view masks
+        // everything away — a blank screen rather than a clipped one. The rule
+        // `RevealTransition` states, and the first thing to get wrong here.
+        mask.backgroundColor = .black
+        mask.layer.cornerCurve = .continuous
+        mask.layer.cornerRadius = cornerRadius
+        contentView.mask = mask
+        flightMask = mask
+        UIView.animate(
+            withDuration: ZoomFlightSpring.duration, delay: 0,
+            usingSpringWithDamping: ZoomFlightSpring.damping,
+            initialSpringVelocity: ZoomFlightSpring.velocity,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            mask.frame = self.contentView.bounds
+        }
+        // ⚠️ SEPARATELY, because `cornerRadius` is a layer property and a
+        // `UIView.animate` block does not carry it — the same trap the page
+        // indicator's dots hit, where a shrinking dot went briefly square.
+        // Here it would be a window that opens with its corners already sharp.
+        let corners = CABasicAnimation(keyPath: "cornerRadius")
+        corners.fromValue = cornerRadius
+        corners.toValue = 0
+        corners.duration = ZoomFlightSpring.duration
+        corners.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        mask.layer.cornerRadius = 0
+        mask.layer.add(corners, forKey: "cornerRadius")
+    }
+
+    /// Retires the window and gives the page its media back.
+    func endMaskedRevealForFlight() {
+        guard flightMask != nil else { return }
+        contentView.mask = nil
+        flightMask = nil
+        mediaCard.isHidden = mediaHiddenForMaskedReveal
+        contentView.backgroundColor = groundForMaskedReveal
     }
 
     /// Materializes the header band's blur AHEAD of the engagement.
