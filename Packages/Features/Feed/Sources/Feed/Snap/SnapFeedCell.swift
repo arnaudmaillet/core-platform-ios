@@ -1005,8 +1005,24 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // card is undimmed, so any gap read as a sliver of light on a dark
         // page. So the page is drawn a little larger than the card it covers.
         // The error is still there and now falls the other way — a hair of wash
-        // over the dimmed feed, which nothing can see.
-        let card = card.insetBy(dx: -Self.dismissalBleed, dy: -Self.dismissalBleed)
+        // over the dimmed feed.
+        //
+        // ⚠️ HALF A POINT, AND ONLY WHILE THE FINGER IS DOWN.
+        //
+        // Two points was visible on both counts: the wash overhung the
+        // photograph on all four sides, and a cancelled grab animated to a page
+        // two points too large and then snapped to its real size when the
+        // gesture was torn down. A bleed exists to swallow SUB-PIXEL error —
+        // fractional rects, one rounding — and half a point is already three
+        // device pixels. Anything a bleed would have to be to hide a real lag
+        // is a bleed you can see.
+        //
+        // The release carries none: `settling` means the card is going to a
+        // known rect and the page must arrive exactly there, so a cancelled
+        // grab lands on its own size and the teardown has nothing to correct.
+        let card = settling
+            ? card
+            : card.insetBy(dx: -Self.dismissalBleed, dy: -Self.dismissalBleed)
         // ⚠️ FILL, NOT FIT — and it moves the THREAD now, which is all that is
         // left to move.
         //
@@ -1133,7 +1149,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// How far the page overhangs the card it covers. Small enough to be
     /// invisible where it spills, large enough to swallow a follower's error.
-    private static let dismissalBleed: CGFloat = 2
+    private static let dismissalBleed: CGFloat = 0.5
 
     /// The dismissal's window, made on the first event that has a card to
     /// follow rather than at `begin` — a mask installed at a rect nobody has
