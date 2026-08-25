@@ -827,16 +827,31 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             mask.frame = self.contentView.bounds
             revealed.forEach { $0.transform = .identity }
         }
-        // ⚠️ SEPARATELY, because `cornerRadius` is a layer property and a
-        // `UIView.animate` block does not carry it — the same trap the page
+        // ⚠️ IT LANDS ON THE DEVICE'S RADIUS, NEVER ON ZERO.
+        //
+        // The flight card rounds its corners to the physical display so its
+        // landing sits flush in the bezel — `ZoomFlight.screenCornerRadius`,
+        // and `ScreenGeometry` is where the number is shared so that every
+        // surface impersonating the screen rounds identically. This window is
+        // now one of those surfaces. Opening it to square corners put the
+        // thread's edges outside the photograph's for the whole flight: the
+        // media curved, the comments over it did not.
+        //
+        // The two cannot share a container — the card lives in the transition's
+        // own hierarchy and the thread in the destination's — so they agree on
+        // the numbers instead: the card's radius at the row, the screen's at
+        // the page.
+        //
+        // Animated SEPARATELY, because `cornerRadius` is a layer property and
+        // a `UIView.animate` block does not carry it — the same trap the page
         // indicator's dots hit, where a shrinking dot went briefly square.
-        // Here it would be a window that opens with its corners already sharp.
+        let landedRadius = ScreenGeometry.cornerRadius(behind: self)
         let corners = CABasicAnimation(keyPath: "cornerRadius")
         corners.fromValue = cornerRadius
-        corners.toValue = 0
+        corners.toValue = landedRadius
         corners.duration = ZoomFlightSpring.duration
         corners.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        mask.layer.cornerRadius = 0
+        mask.layer.cornerRadius = landedRadius
         mask.layer.add(corners, forKey: "cornerRadius")
     }
 
