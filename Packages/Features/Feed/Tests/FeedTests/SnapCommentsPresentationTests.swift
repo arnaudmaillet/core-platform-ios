@@ -333,20 +333,18 @@ struct SnapCommentsPresentationTests {
         #expect(colour.getWhite(nil, alpha: &alpha))
         #expect(alpha == 0)
         // And it sits ABOVE the media and the backdrop, never below them.
-        // ⚠️ THE STAGE'S SUBVIEWS, found through one of them rather than named.
+        // ⚠️ ORDER ACROSS TWO DEPTHS, because the page is not one flat stack.
         //
-        // The page's layers are siblings inside a frame-managed container, so a
-        // transition can move the whole page as one object. WHICH view that is
-        // is not this suite's business; that they are stacked in a particular
-        // order still is.
-        let subviews = try #require(
-            firstDescendant(of: cell.contentView, ofType: SnapMediaCardView.self)?.superview
-        ).subviews
-        let mediaIndex = try #require(subviews.firstIndex(of: mediaCard(of: cell)))
-        let backdropIndex = try #require(subviews.firstIndex(of: backdrop(of: cell)))
-        let streamIndex = try #require(subviews.firstIndex(of: container))
-        #expect(mediaIndex < backdropIndex)
-        #expect(backdropIndex < streamIndex)
+        // Its thread and its wash live on a STAGE — a frame-managed container a
+        // flight can borrow and carry whole — while the media stays behind on
+        // the cell, since the flight is already carrying the photograph. So the
+        // claim is: the media is behind the stage, and inside the stage the
+        // wash is behind the stream. What is drawn over what has not changed;
+        // where each view is parented has.
+        let wash = try backdrop(of: cell)
+        let media = try mediaCard(of: cell)
+        #expect(drawsAbove(wash, media))
+        #expect(drawsAbove(container, wash))
     }
 
     /// The engaged cell has NO rail to collide with: the column is faded
@@ -473,14 +471,11 @@ struct SnapCommentsPresentationTests {
         // …with the media at the BACK of the stack, under the readability
         // layer — never z-lifted over the stream (the lift is what let the
         // docked tile's invisible full-bleed frame eat stream touches).
-        let media = try #require(subviews.compactMap { $0 as? SnapMediaCardView }.first)
-        let backdrop = try #require(subviews.compactMap { $0 as? SnapMediaBackdropView }.first)
-        let mediaIndex = try #require(subviews.firstIndex(of: media))
-        let backdropIndex = try #require(subviews.firstIndex(of: backdrop))
-        let containerIndex = try #require(subviews.firstIndex(of: container))
-        #expect(mediaIndex == 0)
-        #expect(mediaIndex < backdropIndex)
-        #expect(backdropIndex < containerIndex)
+        let media = try #require(firstDescendant(of: cell.contentView, ofType: SnapMediaCardView.self))
+        let backdrop = try #require(firstDescendant(of: cell.contentView, ofType: SnapMediaBackdropView.self))
+        #expect(cell.contentView.subviews.firstIndex(of: media) == 0)
+        #expect(drawsAbove(backdrop, media))
+        #expect(drawsAbove(container, backdrop))
         // The backdrop covers the WHOLE cell — the stream reads over media
         // at every row, not only under the card.
         #expect(backdrop.frame == cell.contentView.bounds)
@@ -798,6 +793,30 @@ struct SnapCommentsPresentationTests {
     /// them as a single object) failed nine tests that were not about nesting
     /// at all. What each of them means is "the cell has one of these", and that
     /// is what this asks.
+    /// Whether `top` is drawn over `bottom`, at whatever depth each sits.
+    ///
+    /// The page's layers are no longer one flat stack — the thread and its wash
+    /// are on a stage a flight can borrow — so "is above" is a question about
+    /// the RENDERING order, not about two indices in one array. Walks each up
+    /// to their common ancestor and compares there, which is what the eye does.
+    private func drawsAbove(_ top: UIView, _ bottom: UIView) -> Bool {
+        func chain(_ view: UIView) -> [UIView] {
+            var chain: [UIView] = []
+            var node: UIView? = view
+            while let current = node { chain.append(current); node = current.superview }
+            return chain.reversed()
+        }
+        let a = chain(top), b = chain(bottom)
+        for (x, y) in zip(a, b) where x !== y {
+            guard let siblings = x.superview?.subviews,
+                  let i = siblings.firstIndex(of: x),
+                  let j = siblings.firstIndex(of: y)
+            else { return false }
+            return i > j
+        }
+        return false
+    }
+
     private func firstDescendant<V: UIView>(of view: UIView, ofType: V.Type) -> V? {
         for child in view.subviews {
             if let match = child as? V { return match }

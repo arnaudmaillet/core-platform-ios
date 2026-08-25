@@ -494,10 +494,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// dismissal on the stored ground being nil. A masked OPENING leaves that
     /// ground stored, so the dismissal that followed it declined to run and
     /// the thread stopped receding on exactly the pages that opened with one.
-    private var isEngagedDismissing = false
+    private var isStageOnLoan = false
     /// Everything the page draws, in one frame-managed view — see
     /// `buildLayout`. A transition moves this and nothing inside it.
     private let pageStage = UIView()
+    /// Where the stage lives when nothing has borrowed it — see
+    /// `lendPageStage`.
+    private weak var stageHome: UIView?
     /// The grab's current mapping of page onto card — the scale, and the rect
     /// it is mapping onto — held so a layout pass cannot be the last word on
     /// where the page is.
@@ -629,15 +632,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // happened to `contentView` and then to each layer in turn. So this one
         // is positioned by `bounds`/`center` in `layoutSubviews`, both of which
         // are transform-safe, and nothing else ever writes its geometry.
-        pageStage.frame = contentView.bounds
-        contentView.addSubview(pageStage)
-
         // Text-only posts' gradient page background lives inside the chrome
         // (shared with the hero flight's replica, so the landing swap can't
         // mismatch), not here. The media card hosts both render surfaces
         // full-bleed — in both states: it is the page at rest AND the
         // background of the engaged screen.
-        mediaCard.pin(to: pageStage)
+        // ⚠️ THE MEDIA IS NOT ON THE STAGE. The stage is what a flight BORROWS
+        // (see `lendPageStage`), and the flight is already carrying the
+        // photograph — a page that lent its media too would put two copies of
+        // one picture inside one card.
+        mediaCard.pin(to: contentView)
+        // …and the stage goes in ON TOP of it, which is why it is added here
+        // rather than first: the media is the page's floor in both states.
+        pageStage.frame = contentView.bounds
+        contentView.addSubview(pageStage)
+        stageHome = contentView
 
         // The readability layer, directly over the media: inert until the
         // engagement materializes it, and never moved again (it covers the
@@ -880,270 +889,63 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     }
 
-    /// **THE DISMISSING GRAB'S OTHER HALF.** The whole page travels with the
-    /// card, as one object.
-    ///
-    /// ⚠️ ONE TRANSFORM, HELD AGAINST THE LAYOUT THAT KEEPS ERASING IT.
-    ///
-    /// Three ways to move the page were tried and two of them are silently
-    /// undone. A `transform` on `contentView` does nothing at all: a cell's
-    /// content view belongs to UIKit, `layoutSubviews` assigns its FRAME on
-    /// every pass, and assigning a frame to a transformed view re-derives
-    /// bounds and centre from it. Transforms on the page's own top-level views
-    /// are correct arithmetic and fail the same way one level down — they are
-    /// pinned by constraints, so a layout pass writes their frames back and the
-    /// page freezes while its WINDOW carries on. That is the interface and the
-    /// media visibly disagreeing, and it comes and goes with whatever else
-    /// happens to trigger a layout.
-    ///
-    /// (`sublayerTransform` survives layout and was the third try. It is
-    /// applied about a different origin than a view transform, and the page
-    /// landed roughly twice as far out as the card — mapping page onto card
-    /// through it is not the same arithmetic, and getting it wrong is invisible
-    /// until something is on screen to compare against.)
-    ///
-    /// So the transform stays a view transform, and `layoutSubviews`
-    /// re-asserts it. The layout is not fought, it is answered: whatever it
-    /// writes, the grab's own state is put back in the same pass.
-    ///
-    /// ⚠️ AND THE PAGE KEEPS ITS OWN FACE. It used to hide its media and clear
-    /// its floor, on the reasoning that the card behind was carrying the
-    /// photograph. But the card is only guaranteed to be DRAWING after a
-    /// display tick — the deferred content hide waits for exactly that — so the
-    /// page went transparent over a card that had not painted yet, and with the
-    /// readability wash lifting at three times the rate of the text, what got
-    /// uncovered was the container: the background dropped to black at the
-    /// instant of the grab.
-    ///
-    /// - Parameter hidingMedia: the one case where the page cannot show its own
-    ///   media — its live surface has been DONATED to the card, so its media
-    ///   view is an empty hole. Then, and only then, it is hidden and the card
-    ///   underneath is what shows.
-    func beginEngagedDismissal() {
-        guard isCommentsEngaged, !isEngagedDismissing else { return }
-        isEngagedDismissing = true
-        // ⚠️ THE PAGE STOPS DRAWING THE PHOTOGRAPH; THE CARD IS THE ONE COPY.
-        //
-        // The page kept its own media for a while, and every mapping of page
-        // onto card was then a mapping of one CROP onto another: the photograph
-        // is aspect-filled into a 402x874 page, and squeezing that result into
-        // a 312x433 tile is not the same picture as aspect-filling the
-        // photograph into the tile directly. Fit stretched it, fill re-cropped
-        // it — both a visible zoom against the card at the handover.
-        //
-        // There is nothing to reconcile if there is only one picture. The card
-        // is behind the page, carrying the media at the crop the row will land
-        // on, and it has been doing that correctly since long before this
-        // existed. So the page draws the thread and nothing else, and what is
-        // dragged home is the card's own image the whole way — identical at the
-        // last frame because it was never a copy.
-        // ⚠️ ALPHA, NOT `isHidden`, and on a video post that is the whole
-        // difference between the card flying frames and flying a thumbnail.
-        //
-        // The card does not take this page's surface: it attaches a SECOND one
-        // to the same player, ALONGSIDE this one, so both draw the same frames.
-        // Alongside is the operative word — a hidden view is out of the render
-        // path, and with this one hidden the sibling stopped being fed. The
-        // card ended up holding a live surface with a single frame on it and
-        // its cover image showing through: the thumbnail in the window.
-        //
-        // Alpha 0 is invisible and still rendered, which is exactly what the
-        // flight does to the destination as a whole, for the same reason.
-        alphaForMaskedReveal = mediaCard.alpha
-        mediaCard.alpha = 0
-        groundForMaskedReveal = contentView.backgroundColor
-        contentView.backgroundColor = .clear
-        // ⚠️ EACH LAYER STARTS FROM ITS OWN OPACITY, not from 1.
-        //
-        // Fading them as `1 - t` assumes they were all opaque, and the wash is
-        // not: at rest it carries whatever the engagement left it at. Driven
-        // from 1 it went FULLY opaque on the grab's first frame and the
-        // photograph vanished behind it — the page changing the moment it was
-        // touched, which is the one thing the first frame of a gesture must
-        // never do.
-        //
-        // Captured here and scaled from, so t=0 is exactly the page that was on
-        // screen and t=1 is nothing.
-        restingAlphas = dismissalTravellers.map(\.alpha)
-    }
-
-    /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
-    ///
-    /// The grab can be pushed forward, dragged back and abandoned; anything
-    /// that animated towards a target here would be chasing a value that has
-    /// already moved, and a cancelled grab would leave the page mid-flight.
-    /// The dim and the toolbar recede on exactly these terms. (The RELEASE is
-    /// the exception, and it is not one: the same call is made from inside the
-    /// release's own animation block, so UIKit interpolates it on the card's
-    /// spring rather than on a second one.)
-    func setEngagedDismissalProgress(
-        _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat, settling: Bool
-    ) {
-        guard isEngagedDismissing else { return }
-        let t = min(max(progress, 0), 1)
-        // The thread and its wash recede together, on one value — each from
-        // where it already was. The photograph is the card's and is not this
-        // method's business at all — see `beginEngagedDismissal`.
-        for (view, resting) in zip(dismissalTravellers, restingAlphas) {
-            view.alpha = resting * (1 - t)
-        }
-        guard card.width > 0, card.height > 0 else { return }
-        // ⚠️ FILL, NOT FIT — and it moves the THREAD now, which is all that is
-        // left to move.
-        //
-        // The arithmetic is kept because it is why the photograph is no longer
-        // here. Three mappings were tried while the page still drew its own:
-        // by WIDTH it ended a different shape from the card (`x=0.776 y=0.495`
-        // at the release — 57% too tall); by BOTH AXES the frames agreed and
-        // the image was squashed; FILL kept the ratio and still re-cropped,
-        // because a crop of a crop is not the crop. Only removing the second
-        // copy settles it.
-        //
-        // Fill stays for the thread: it keeps the text's proportions while the
-        // window takes the overflow.
-        let fill = max(
-            card.width / max(contentView.bounds.width, 1),
-            card.height / max(contentView.bounds.height, 1)
-        )
-        // ⚠️ ONE VIEW, ONE TRANSFORM. Everything the page draws is inside
-        // `pageStage`, so the mapping is applied once, about one centre, in one
-        // assignment — and a layout pass cannot erase it, because nothing but
-        // this cell writes that view's geometry.
-        //
-        // It was a transform per layer before, which is correct arithmetic (a
-        // view transform is applied about its own centre, so each needed its
-        // own translation) and a permanent source of one-frame disagreements: a
-        // layout pass, a spring in flight and a gesture event are three
-        // different moments, and four layers told the same thing at three
-        // moments is four chances to be told late.
-        // ⚠️ TWO CHANNELS, BECAUSE THE CARD HAS TWO — and folding them into one
-        // transform is what put the page BEHIND the card.
-        //
-        // The flight's grab drives the card's POSITION directly on every pan
-        // event and its SIZE on a spring (the detach dip). A single affine
-        // carrying both meant the page's position was animating toward a centre
-        // the card had already left: told inside the dip's block, it chased a
-        // moving target and lagged it by the whole of the dip. On screen that
-        // is the comments and the wash sitting a few dozen points behind the
-        // photograph — the same numbers, arriving late.
-        //
-        // So the page is decomposed exactly as the card is: the centre is
-        // assigned, live, and only the scale is left to whatever animation is
-        // in flight.
-        // ⚠️ AND THE CENTRE IS ASSIGNED OUTSIDE ANY ANIMATION while the finger
-        // is down. Inside the dip's block it animated like everything else, so
-        // it was interpolating toward a position the card had already left —
-        // measured trailing it by 7pt across and 12pt down at a tenth of the
-        // gesture, which is the comments and the wash sitting visibly behind
-        // the photograph. The release is the one time it should spring, and
-        // that is what `settling` says.
-        let centre = CGPoint(x: card.midX, y: card.midY)
-        if settling {
-            pageStage.center = centre
-        } else {
-            UIView.performWithoutAnimation { pageStage.center = centre }
-        }
-        pageStage.transform = CGAffineTransform(scaleX: fill, y: fill)
-        // ⚠️ THE CARD'S RADIUS, HANDED OVER — never a second copy of the curve.
-        //
-        // The window computed its own interpolation from the display's corner
-        // to the row's, which is the right shape and was not the card's: the
-        // card held the display's radius flat for the whole drag, so the two
-        // silhouettes were rounded differently for the length of the gesture.
-        // The card interpolates now (`grabCornerRadius`) and passes the number
-        // it used, so there is one curve and no way to disagree about it.
-        let window = flightMask ?? makeDismissalWindow()
-        window.frame = card
-        window.layer.cornerRadius = cornerRadius
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
-            // The two rects that must be the same rect: where the window is,
-            // and where the page actually landed after its transform. A gap
-            // between them is the gap on screen, and nothing else can be.
-            // The card's PRESENTATION frame beside the page's, in the same
-            // space — the only comparison that can catch one lagging the
-            // other. Comparing the window's rect to the page's proved nothing:
-            // both are derived from the same converted number in the same
-            // breath, so they agreed while the card was somewhere else.
-            print(String(format: "[grab] t=%.2f fill=%.3f card=%@ stage=%@",
-                         t, fill, NSCoder.string(for: card),
-                         NSCoder.string(for: pageStage.layer.presentation()?.frame
-                                            ?? pageStage.frame)))
-        }
-        #endif
-    }
-
     /// ⚠️ `bounds` AND `center`, NEVER `frame`.
     ///
-    /// The stage carries the transition's transform, and assigning a frame to a
+    /// The stage carries a transition's transform, and assigning a frame to a
     /// transformed view re-derives its bounds and centre from that frame —
     /// which cancels the transform. Setting the two directly is the same
-    /// geometry and leaves the transform alone, so a layout pass landing in the
-    /// middle of a gesture costs nothing.
+    /// geometry and leaves the transform alone.
     override func layoutSubviews() {
         super.layoutSubviews()
+        // ⚠️ NOT WHILE IT IS ON LOAN. A flight holds the stage inside its card
+        // and poses it every frame; this cell must not reach into another
+        // hierarchy and re-centre it there.
+        guard !isStageOnLoan else { return }
         pageStage.bounds = CGRect(origin: .zero, size: contentView.bounds.size)
-        // ⚠️ NOT WHILE A TRANSITION IS MOVING IT. The centre is one of the two
-        // channels the grab drives (see `setEngagedDismissalProgress`), and a
-        // layout pass re-centring the stage mid-gesture would drag the page
-        // back to the middle of the screen between two events.
-        guard !isEngagedDismissing else { return }
         pageStage.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
     }
 
-    /// Every layer that makes up the page's face — one list, so the grab has
-    /// one thing to move and the layout one thing to put back.
-    /// The layers whose OPACITY the grab drives. Their geometry is the stage's
-    /// — see `setEngagedDismissalProgress`.
+    /// **THE DISMISSING GRAB'S OTHER HALF.** The flight BORROWS the thread and
+    /// carries it home itself.
     ///
-    /// ⚠️ THE WASH IS ONE OF THEM, on the thread's own value.
+    /// ⚠️ NOTHING FOLLOWS ANYTHING ANY MORE, and that is the point.
     ///
-    /// It exists to hold text off a photograph, so it belongs to the text: it
-    /// leaves at exactly the rate the text does, and the page looks like itself
-    /// at the moment the grab begins rather than brightening in one frame.
+    /// Every version before this had the page mirroring the card: told the
+    /// card's rect on a channel, applying it a hop later, in a different view
+    /// hierarchy and a different animation context. Each hop was a defect in
+    /// turn — the layout erasing the transform, a spring being overwritten
+    /// mid-flight, the position interpolating toward a centre the card had
+    /// already left — and each fix left the next one. A follower can be made
+    /// arbitrarily close and never exact, and at the start of a grab the gap
+    /// showed as a bright sliver of card past the page's edge: a light leak on
+    /// a dark page.
     ///
-    /// It can only be here because the page no longer draws the media. Over the
-    /// page's own photograph it was a second dimming of a picture the card was
-    /// already showing undimmed; over nothing at all it was the black rectangle
-    /// this spent two rounds chasing. Over the CARD's photograph, through a
-    /// cleared ground, it is what it always was — a wash on the picture, fading
-    /// out with the words it serves.
-    private var dismissalTravellers: [UIView] {
-        [commentsContainer, headerFrost, mediaBackdrop]
+    /// `ZoomFlight` already has the answer, built for the presenting leg and
+    /// documented there: a view handed to the card rides INSIDE it, posed by
+    /// the card's own matrix, "geometrically incapable of drifting". The page's
+    /// stage is handed over as exactly that. There is no channel, no
+    /// re-assertion, no mask, and no second animation — the thread is a
+    /// passenger.
+    ///
+    /// The media stays behind: the card is already carrying the photograph, and
+    /// the stage deliberately does not hold it (see `buildLayout`).
+    func lendPageStage() -> UIView? {
+        guard isCommentsEngaged, !isStageOnLoan else { return nil }
+        isStageOnLoan = true
+        pageStage.removeFromSuperview()
+        return pageStage
     }
 
-    /// The dismissal's window, made on the first event that has a card to
-    /// follow rather than at `begin` — a mask installed at a rect nobody has
-    /// computed yet is a blank page.
-    private func makeDismissalWindow() -> UIView {
-        let mask = UIView()
-        // Opaque: a mask reads its alpha channel, so a clear view masks
-        // everything away — a blank screen rather than a clipped one.
-        mask.backgroundColor = .black
-        mask.layer.cornerCurve = .continuous
-        contentView.mask = mask
-        flightMask = mask
-        return mask
-    }
-
-    /// Puts the page back, on either outcome. An abandoned grab returns to a
-    /// page that must be exactly what it was.
-    func endEngagedDismissal() {
-        guard isEngagedDismissing else { return }
-        isEngagedDismissing = false
+    /// Takes the stage back, wherever the flight left it. Called on every
+    /// outcome — committed, cancelled, interrupted — because a page whose
+    /// stage is still inside a retired card is a page with no thread on it.
+    func reclaimPageStage() {
+        guard isStageOnLoan, let home = stageHome else { return }
+        isStageOnLoan = false
         pageStage.transform = .identity
-        pageStage.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
-        for (view, resting) in zip(dismissalTravellers, restingAlphas) {
-            view.alpha = resting
-        }
-        restingAlphas = []
-        // The wash comes back with everything else: an abandoned grab returns
-        // to a page that has to be readable again.
-        contentView.mask = nil
-        flightMask = nil
-        mediaCard.alpha = alphaForMaskedReveal
-        contentView.backgroundColor = groundForMaskedReveal
-        groundForMaskedReveal = nil
+        pageStage.alpha = 1
+        home.addSubview(pageStage)
+        setNeedsLayout()
     }
 
     /// Retires the window and gives the page its media back.
