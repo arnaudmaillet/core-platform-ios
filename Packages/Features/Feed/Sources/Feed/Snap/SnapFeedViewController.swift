@@ -3030,12 +3030,11 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
     #endif
 
-    public func setZoomDismissProgress(
-        _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat, settling: Bool
-    ) {
+    public func setZoomDismissState(_ state: ZoomDismissState) {
         guard commentsEngagedID != nil, !commentsEngagementIsResting,
               let cell = activeSnapCell
         else { return }
+        let progress = state.progress
         if !isEngagedDismissalActive {
             isEngagedDismissalActive = true
             view.alpha = 1
@@ -3067,10 +3066,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // The rect arrives in the CONTAINER's coordinates, which are this
         // view's: both are full-bleed in it. The same assumption the opening
         // makes about the rect it is handed.
-        cell.setEngagedDismissalProgress(
-            progress, card: view.convert(card, to: cell.contentView),
-            cornerRadius: cornerRadius, settling: settling
-        )
+        cell.setEngagedDismissal(state.with(card: view.convert(state.card, to: cell.contentView)))
     }
 
     /// Puts the page back together after a grab, committed or abandoned. Safe

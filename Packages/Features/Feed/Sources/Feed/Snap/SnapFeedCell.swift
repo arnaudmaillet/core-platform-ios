@@ -976,18 +976,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the exception, and it is not one: the same call is made from inside the
     /// release's own animation block, so UIKit interpolates it on the card's
     /// spring rather than on a second one.)
-    func setEngagedDismissalProgress(
-        _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat, settling: Bool
-    ) {
+    func setEngagedDismissal(_ state: ZoomDismissState) {
         guard isEngagedDismissing else { return }
-        let t = min(max(progress, 0), 1)
+        let settling = state.isSettling
+        let t = min(max(state.progress, 0), 1)
         // The thread and its wash recede together, on one value — each from
         // where it already was. The photograph is the card's and is not this
         // method's business at all — see `beginEngagedDismissal`.
         for (view, resting) in zip(dismissalTravellers, restingAlphas) {
             view.alpha = resting * (1 - t)
         }
-        guard card.width > 0, card.height > 0 else { return }
+        guard state.card.width > 0, state.card.height > 0 else { return }
         // ⚠️ THE PAGE OVERHANGS THE CARD BY A HAIR, and this is the answer to a
         // light leak rather than a cosmetic tweak.
         //
@@ -1021,8 +1020,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // known rect and the page must arrive exactly there, so a cancelled
         // grab lands on its own size and the teardown has nothing to correct.
         let card = settling
-            ? card
-            : card.insetBy(dx: -Self.dismissalBleed, dy: -Self.dismissalBleed)
+            ? state.card
+            : state.card.insetBy(dx: -Self.dismissalBleed, dy: -Self.dismissalBleed)
         // ⚠️ FILL, NOT FIT — and it moves the THREAD now, which is all that is
         // left to move.
         //
@@ -1089,7 +1088,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // it used, so there is one curve and no way to disagree about it.
         let window = flightMask ?? makeDismissalWindow()
         window.frame = card
-        window.layer.cornerRadius = cornerRadius
+        window.layer.cornerRadius = state.cornerRadius
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-grab-log") {
             // The two rects that must be the same rect: where the window is,
