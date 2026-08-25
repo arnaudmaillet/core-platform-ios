@@ -934,18 +934,33 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainer.alpha = 1 - t
         headerFrost.alpha = 1 - t
         guard card.width > 0, card.height > 0 else { return }
-        // ⚠️ BOTH AXES. A uniform scale is right for the whole DRAG — the card
-        // deliberately keeps the page's aspect while it is held — and wrong for
-        // the release, where it morphs to the tile's. Mapped by width alone the
-        // page ended a different shape from the card it was handing over to,
-        // which is the media's jump at the last frame. During the drag the two
-        // numbers are equal and this is the same transform it always was.
-        let scaleX = card.width / max(contentView.bounds.width, 1)
-        let scaleY = card.height / max(contentView.bounds.height, 1)
+        // ⚠️ ASPECT FILL, CROPPED BY THE WINDOW — never a fit and never a
+        // stretch.
+        //
+        // Three mappings, and only one of them is right.
+        //
+        // By WIDTH alone the page ends a different shape from the card it is
+        // handing over to: at the release the card morphs to the tile's aspect
+        // (measured `x=0.776 y=0.495`), so the page finished 57% too tall and
+        // the media jumped at the last frame.
+        //
+        // By BOTH AXES the frames agree and the picture is stretched — the
+        // photograph visibly squashed for the length of the release, which is
+        // the one thing a hero must never do to what it is carrying.
+        //
+        // FILL is what the flight card itself does with its media
+        // (`resizeAspectFill`, re-cropping on every frame of the morph): scale
+        // by whichever axis needs more, keep the ratio, and let the window take
+        // the overflow. The page is already being clipped to the card's rect,
+        // so the crop costs nothing that was not already hidden.
+        let fill = max(
+            card.width / max(contentView.bounds.width, 1),
+            card.height / max(contentView.bounds.height, 1)
+        )
         let travel = CGAffineTransform(
             translationX: card.midX - contentView.bounds.midX,
             y: card.midY - contentView.bounds.midY
-        ).scaledBy(x: scaleX, y: scaleY)
+        ).scaledBy(x: fill, y: fill)
         dismissalTravel = travel
         applyDismissalTravel()
         // ⚠️ THE RADIUS TRAVELS TOO, from the screen's to the ROW's.
@@ -964,8 +979,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             screenRadius + (PostGridListRowCell.mediaCornerRadius - screenRadius) * t
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-grab-log") {
-            print(String(format: "[grab] t=%.2f x=%.3f y=%.3f card=%@",
-                         t, scaleX, scaleY, NSCoder.string(for: card)))
+            print(String(format: "[grab] t=%.2f fill=%.3f card=%@",
+                         t, fill, NSCoder.string(for: card)))
         }
         #endif
     }
