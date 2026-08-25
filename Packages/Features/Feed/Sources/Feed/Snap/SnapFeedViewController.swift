@@ -3050,6 +3050,20 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // page mid-grab is undone on the next frame the finger produces, so a
         // race can cost one frame instead of the whole gesture.
         view.alpha = 1
+        // ⚠️ AND THE NAVIGATION BAR RECEDES WITH IT.
+        //
+        // The bar is the navigation controller's, above the transition's
+        // container — the flight leaves it there deliberately, because on an
+        // ordinary dismissal the page underneath is hidden and the bar is
+        // simply chrome over a shrinking card. Here the page is VISIBLE and
+        // travelling, so a bar pinned to the screen's corners while everything
+        // under it moves reads as two layers coming apart. It carries the
+        // engaged interface's own controls — the close, the sort, the author —
+        // so it belongs to the thread and leaves with it.
+        //
+        // The toolbar needs nothing: the interaction controller already fades
+        // it on this same channel.
+        navigationController?.navigationBar.alpha = 1 - min(max(progress, 0), 1)
         // The rect arrives in the CONTAINER's coordinates, which are this
         // view's: both are full-bleed in it. The same assumption the opening
         // makes about the rect it is handed.
@@ -3064,6 +3078,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     private func endEngagedDismissalIfNeeded() {
         guard isEngagedDismissalActive else { return }
         isEngagedDismissalActive = false
+        navigationController?.navigationBar.alpha = 1
         activeSnapCell?.endEngagedDismissal()
         view.backgroundColor = .black
         collectionView.backgroundColor = .black

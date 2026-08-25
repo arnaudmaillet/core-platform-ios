@@ -1033,8 +1033,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         window.layer.cornerRadius = cornerRadius
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-grab-log") {
-            print(String(format: "[grab] t=%.2f fill=%.3f radius=%.1f card=%@",
-                         t, fill, cornerRadius, NSCoder.string(for: card)))
+            // The two rects that must be the same rect: where the window is,
+            // and where the page actually landed after its transform. A gap
+            // between them is the gap on screen, and nothing else can be.
+            print(String(format: "[grab] t=%.2f fill=%.3f window=%@ stage=%@",
+                         t, fill, NSCoder.string(for: card),
+                         NSCoder.string(for: pageStage.frame)))
         }
         #endif
     }
