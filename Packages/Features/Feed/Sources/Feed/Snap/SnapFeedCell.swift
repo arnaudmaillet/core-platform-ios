@@ -874,9 +874,32 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The dim and the toolbar recede on exactly these terms, which is what
     /// makes the two halves of the screen agree about how far the gesture has
     /// gone.
-    func setEngagedDismissalProgress(_ progress: CGFloat) {
+    func setEngagedDismissalProgress(_ progress: CGFloat, card: CGRect) {
         guard isEngagedDismissing else { return }
         let t = min(max(progress, 0), 1)
+        // ⚠️ IT TRAVELS WITH THE CARD, it does not merely dim in place.
+        //
+        // Fading alone left the thread full-screen over a card that had
+        // already shrunk and moved under the finger — the page's furniture
+        // hanging in space while the thing it belongs to was being carried
+        // away. The window follows the card's rect and the content takes its
+        // scale, which is the opening's two channels run backwards.
+        //
+        // Guarded on a real rect: the release hands `.zero` when it resets, and
+        // a window of nothing would blank the page for the frame before the
+        // teardown puts it back.
+        if card.width > 0, card.height > 0 {
+            let mask = flightMask ?? makeDismissalMask()
+            mask.frame = card
+            mask.layer.cornerRadius = ScreenGeometry.cornerRadius(behind: self)
+            let scale = card.width / max(contentView.bounds.width, 1)
+            let shift = CGAffineTransform(
+                translationX: card.midX - contentView.bounds.midX,
+                y: card.midY - contentView.bounds.midY
+            ).scaledBy(x: scale, y: scale)
+            commentsContainer.transform = shift
+            mediaBackdrop.transform = shift
+        }
         commentsContainer.alpha = 1 - t
         headerFrost.alpha = 1 - t
         // ⚠️ THE WASH LEAVES FASTER THAN THE TEXT, and the first version had
@@ -892,6 +915,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaBackdrop.alpha = 1 - min(1, t * Self.dismissWashRate)
     }
 
+    /// The dismissal's window, made on the first event that has a card to
+    /// follow rather than at `begin` — the grab stages before it moves, and a
+    /// mask installed at a rect nobody has computed yet is a blank page.
+    private func makeDismissalMask() -> UIView {
+        let mask = UIView()
+        // Opaque: a mask reads its alpha channel, so a clear view masks
+        // everything away.
+        mask.backgroundColor = .black
+        mask.layer.cornerCurve = .continuous
+        contentView.mask = mask
+        flightMask = mask
+        return mask
+    }
+
     /// How much faster the readability wash leaves than the thread it serves.
     /// Three: gone by the first third of a grab, which is about where the card
     /// has shrunk enough to read as an object being carried rather than a page.
@@ -905,6 +942,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainer.alpha = 1
         headerFrost.alpha = 1
         mediaBackdrop.alpha = 1
+        commentsContainer.transform = .identity
+        mediaBackdrop.transform = .identity
+        contentView.mask = nil
+        flightMask = nil
         contentView.backgroundColor = groundForMaskedReveal
         groundForMaskedReveal = nil
         mediaCard.isHidden = mediaHiddenForMaskedReveal

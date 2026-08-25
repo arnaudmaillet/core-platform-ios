@@ -2989,36 +2989,41 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // honoured here, unanimated, so the post still LANDS in its thread
         // rather than rearranging itself afterwards.
         if hidden { beginMaskedRevealIfRequested() }
-        // ⚠️ AND AN ENGAGED PAGE STAYS VISIBLE THROUGH A DISMISSING GRAB, for
-        // the same reason it does through the opening: the card impersonates
-        // the page's MEDIA, and a thread is not media. Hidden with everything
-        // else, it vanished on the grab's second tick and the viewer pulled a
-        // photograph home from a screen that had already stopped showing what
-        // they were reading.
-        if hidden, isDismissingEngaged { return prepareEngagedDismissal() }
         guard !isMaskedRevealActive else { return view.alpha = 1 }
         view.alpha = hidden ? 0 : 1
     }
 
-    /// Whether a dismissal is taking away a page that is showing its thread.
-    private var isDismissingEngaged: Bool {
-        commentsEngagedID != nil && !commentsEngagementIsResting
-            && !isAwaitingZoomPresentation
-    }
-
-    /// Keeps the thread on screen for the grab and hands the media to the card.
-    private func prepareEngagedDismissal() {
-        guard !isEngagedDismissalActive else { return }
-        isEngagedDismissalActive = true
-        view.alpha = 1
-        view.backgroundColor = .clear
-        collectionView.backgroundColor = .clear
-        activeSnapCell?.beginEngagedDismissal()
-    }
-
-    public func setZoomDismissProgress(_ progress: CGFloat) {
-        guard isEngagedDismissalActive else { return }
-        activeSnapCell?.setEngagedDismissalProgress(progress)
+    /// ⚠️ AN ENGAGED PAGE STAYS VISIBLE THROUGH A DISMISSING GRAB, for the same
+    /// reason it does through the opening: the card impersonates the page's
+    /// MEDIA, and a thread is not media. Hidden with everything else it
+    /// vanished on the grab's second tick, and the viewer pulled a photograph
+    /// home from a screen that had already stopped showing what they were
+    /// reading.
+    ///
+    /// ⚠️ ARMED FROM HERE, not from `setZoomContentHidden`, and the difference
+    /// is a whole dismissal. Both routes home hide the content — the grab and
+    /// the back button — but only the grab drives a progress channel. Arming on
+    /// the hide left a back-button dismissal showing a full-screen thread over
+    /// a card flying away underneath it, with nothing to ever take it down.
+    /// This method is the grab's alone, so it is the honest signal that one is
+    /// running.
+    public func setZoomDismissProgress(_ progress: CGFloat, card: CGRect) {
+        guard commentsEngagedID != nil, !commentsEngagementIsResting,
+              let cell = activeSnapCell
+        else { return }
+        if !isEngagedDismissalActive {
+            isEngagedDismissalActive = true
+            view.alpha = 1
+            view.backgroundColor = .clear
+            collectionView.backgroundColor = .clear
+            cell.beginEngagedDismissal()
+        }
+        // The rect arrives in the CONTAINER's coordinates, which are this
+        // view's: both are full-bleed in it. The same assumption the opening
+        // makes about the rect it is handed.
+        cell.setEngagedDismissalProgress(
+            progress, card: view.convert(card, to: cell.contentView)
+        )
     }
 
     /// Puts the page back together after a grab, committed or abandoned. Safe

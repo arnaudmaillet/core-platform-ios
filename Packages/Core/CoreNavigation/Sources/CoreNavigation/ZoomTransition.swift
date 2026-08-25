@@ -225,9 +225,16 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// dim and the toolbar, so the two halves of the screen agree about how far
     /// the gesture has gone.
     ///
+    /// `card` is where the flying card IS, in the container's coordinates —
+    /// which are the destination's own, both being full-bleed in the same
+    /// container. Progress alone cannot place it: the grab is a free 2D float,
+    /// so the card's position is the finger's, not a function of how far the
+    /// gesture has gone. A destination that only faded would leave its
+    /// interface full-screen over a card that had already shrunk and moved.
+    ///
     /// Called on every pan event, and once more with the outcome's value when
     /// the grab is released. Default is nothing.
-    func setZoomDismissProgress(_ progress: CGFloat)
+    func setZoomDismissProgress(_ progress: CGFloat, card: CGRect)
 
     /// Detaches the destination's live player and parks it for whoever plays
     /// the same asset next — the source it is flying home to. Called on the
@@ -312,7 +319,7 @@ public extension ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin() {}
-    func setZoomDismissProgress(_ progress: CGFloat) {}
+    func setZoomDismissProgress(_ progress: CGFloat, card: CGRect) {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }
 }

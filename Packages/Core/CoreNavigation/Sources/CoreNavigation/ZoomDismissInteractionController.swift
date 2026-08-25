@@ -401,8 +401,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // And the source's own chrome arrives on the mirror of it.
         returningChrome?.alpha = progress
         // A destination that is more than its media recedes on the same
-        // channel — see `setZoomDismissProgress`.
-        destination?.setZoomDismissProgress(progress)
+        // channel — see `setZoomDismissProgress`. Read AFTER the card has been
+        // posed for this event, so what it reports is where the card is now
+        // rather than where it was an event ago.
+        destination?.setZoomDismissProgress(progress, card: flight.card.frame)
         let mapScale = ZoomFlight.presenterDepthScale + (1 - ZoomFlight.presenterDepthScale) * progress
         presentingView?.transform = CGAffineTransform(scaleX: mapScale, y: mapScale)
         context.updateInteractiveTransition(progress)
@@ -592,7 +594,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // same completeTransition turn, so no restored frame can render.
         toolbar?.alpha = 1
         // Restore the feed content for the cancel path; moot when finished.
-        destination?.setZoomDismissProgress(0)
+        destination?.setZoomDismissProgress(0, card: .zero)
         destination?.setZoomContentHidden(false)
         destination?.zoomTransitionDidEnd()
         // Unconditional, cancel included: a cancelled grab that left the source
