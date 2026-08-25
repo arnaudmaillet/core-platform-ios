@@ -891,11 +891,28 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     ///   media — its live surface has been DONATED to the card, so its media
     ///   view is an empty hole. Then, and only then, it is hidden and the card
     ///   underneath is what shows.
-    func beginEngagedDismissal(hidingMedia: Bool) {
+    func beginEngagedDismissal() {
         guard isCommentsEngaged, !isEngagedDismissing else { return }
         isEngagedDismissing = true
+        // ⚠️ THE PAGE STOPS DRAWING THE PHOTOGRAPH; THE CARD IS THE ONE COPY.
+        //
+        // The page kept its own media for a while, and every mapping of page
+        // onto card was then a mapping of one CROP onto another: the photograph
+        // is aspect-filled into a 402x874 page, and squeezing that result into
+        // a 312x433 tile is not the same picture as aspect-filling the
+        // photograph into the tile directly. Fit stretched it, fill re-cropped
+        // it — both a visible zoom against the card at the handover.
+        //
+        // There is nothing to reconcile if there is only one picture. The card
+        // is behind the page, carrying the media at the crop the row will land
+        // on, and it has been doing that correctly since long before this
+        // existed. So the page draws the thread and nothing else, and what is
+        // dragged home is the card's own image the whole way — identical at the
+        // last frame because it was never a copy.
         mediaHiddenForMaskedReveal = mediaCard.isHidden
-        if hidingMedia { mediaCard.isHidden = true }
+        mediaCard.isHidden = true
+        groundForMaskedReveal = contentView.backgroundColor
+        contentView.backgroundColor = .clear
         // ⚠️ THE WASH GOES, AND IT GOES AT ONCE.
         //
         // It is a readability layer for text over a photograph, and it is
@@ -923,36 +940,24 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setEngagedDismissalProgress(_ progress: CGFloat, card: CGRect) {
         guard isEngagedDismissing else { return }
         let t = min(max(progress, 0), 1)
-        // ⚠️ THE THREAD RECEDES; THE PHOTOGRAPH DOES NOT.
-        //
-        // The media stays at full opacity all the way home, and it can: with
-        // the wash gone (see `beginEngagedDismissal`) the page's picture and
-        // the card's are the same picture at the same rect and the same shape,
-        // so there is nothing to cross-fade and nothing to step between when
-        // one replaces the other. Fading it too was tried; all that can do is
-        // find a difference where there is none.
+        // The thread recedes with the finger. The photograph is the card's and
+        // is not this method's business at all — see `beginEngagedDismissal`.
         commentsContainer.alpha = 1 - t
         headerFrost.alpha = 1 - t
         guard card.width > 0, card.height > 0 else { return }
-        // ⚠️ ASPECT FILL, CROPPED BY THE WINDOW — never a fit and never a
-        // stretch.
+        // ⚠️ FILL, NOT FIT — and it moves the THREAD now, which is all that is
+        // left to move.
         //
-        // Three mappings, and only one of them is right.
+        // The arithmetic is kept because it is why the photograph is no longer
+        // here. Three mappings were tried while the page still drew its own:
+        // by WIDTH it ended a different shape from the card (`x=0.776 y=0.495`
+        // at the release — 57% too tall); by BOTH AXES the frames agreed and
+        // the image was squashed; FILL kept the ratio and still re-cropped,
+        // because a crop of a crop is not the crop. Only removing the second
+        // copy settles it.
         //
-        // By WIDTH alone the page ends a different shape from the card it is
-        // handing over to: at the release the card morphs to the tile's aspect
-        // (measured `x=0.776 y=0.495`), so the page finished 57% too tall and
-        // the media jumped at the last frame.
-        //
-        // By BOTH AXES the frames agree and the picture is stretched — the
-        // photograph visibly squashed for the length of the release, which is
-        // the one thing a hero must never do to what it is carrying.
-        //
-        // FILL is what the flight card itself does with its media
-        // (`resizeAspectFill`, re-cropping on every frame of the morph): scale
-        // by whichever axis needs more, keep the ratio, and let the window take
-        // the overflow. The page is already being clipped to the card's rect,
-        // so the crop costs nothing that was not already hidden.
+        // Fill stays for the thread: it keeps the text's proportions while the
+        // window takes the overflow.
         let fill = max(
             card.width / max(contentView.bounds.width, 1),
             card.height / max(contentView.bounds.height, 1)
@@ -1001,7 +1006,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Every layer that makes up the page's face — one list, so the grab has
     /// one thing to move and the layout one thing to put back.
     private var dismissalTravellers: [UIView] {
-        [mediaCard, mediaBackdrop, commentsContainer, headerFrost]
+        [commentsContainer, headerFrost]
     }
 
     private func applyDismissalTravel() {
@@ -1040,6 +1045,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         contentView.mask = nil
         flightMask = nil
         mediaCard.isHidden = mediaHiddenForMaskedReveal
+        contentView.backgroundColor = groundForMaskedReveal
+        groundForMaskedReveal = nil
+        mediaBackdrop.alpha = 1
     }
 
     /// Retires the window and gives the page its media back.

@@ -3042,10 +3042,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             // the flight, not this screen's black.
             view.backgroundColor = .clear
             collectionView.backgroundColor = .clear
-            // The page shows its own media unless it has GIVEN that media away:
-            // a donated live surface leaves its media view an empty hole, and
-            // only then does the card underneath have to be what shows.
-            cell.beginEngagedDismissal(hidingMedia: donatedLiveView != nil)
+            cell.beginEngagedDismissal()
         }
         // Re-asserted every event, not just at arming: anything that hides the
         // page mid-grab is undone on the next frame the finger produces, so a
