@@ -311,7 +311,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             self.detachDeadline = CACurrentMediaTime() + Self.detachDuration
             // Progress is still ~0 one runloop turn in, so this is the same dip
             // it always was; pan events re-aim it from here.
-            self.springDetach(flight, to: Self.grabScale(at: 0))
+            self.springDetach(flight, to: Self.grabScale(at: 0), progress: 0)
         }
         context.updateInteractiveTransition(0)
     }
@@ -324,13 +324,27 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// which is the very jump this replaces. Winding the duration down to the
     /// deadline makes the animation vanish into a direct set exactly when the
     /// window closes, so there is nothing left to discharge.
-    private func springDetach(_ flight: ZoomFlight, to scale: CGFloat) {
+    private func springDetach(_ flight: ZoomFlight, to scale: CGFloat, progress: CGFloat) {
         let remaining = max(detachDeadline - CACurrentMediaTime(), 0)
         UIView.animate(
             withDuration: remaining, delay: 0, usingSpringWithDamping: 0.8,
             initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
             flight.poseFloating(scale: scale, cornerRadius: self.screenRadius)
+            // ⚠️ THE DESTINATION RIDES THE DIP TOO, from inside the block.
+            //
+            // The dip is the one stretch of a grab where the card is ANIMATING
+            // rather than tracking: it springs to the detached scale on its own
+            // curve while the finger may not have moved at all. A destination
+            // told the card's model frame jumped straight to the target and sat
+            // there while the card was still on its way — the interface and the
+            // media visibly out of step at the start of every grab, which is
+            // what "they are not synchronised" was.
+            //
+            // Told the same target from in here, UIKit interpolates its answer
+            // on the dip's own spring. Same block, same curve, nothing to keep
+            // in step by hand.
+            self.destination?.setZoomDismissProgress(progress, card: flight.card.frame)
         }
     }
 
@@ -403,9 +417,13 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // finger's travel is never banked up to be released in one frame.
         let scale = Self.grabScale(at: progress)
         if isDetachSettling {
-            springDetach(flight, to: scale)
+            springDetach(flight, to: scale, progress: progress)
         } else {
             flight.poseFloating(scale: scale, cornerRadius: screenRadius)
+            // Outside the dip the card is not animating, so its model frame IS
+            // what it is showing and a direct set is exact. See `springDetach`
+            // for the branch where that stops being true.
+            destination?.setZoomDismissProgress(progress, card: flight.card.frame)
         }
         dim?.alpha = 1 - progress
         // The toolbar recedes on the same channel as the dim: pure function
@@ -413,11 +431,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         toolbar?.alpha = 1 - progress
         // And the source's own chrome arrives on the mirror of it.
         returningChrome?.alpha = progress
-        // A destination that is more than its media recedes on the same
-        // channel — see `setZoomDismissProgress`. Read AFTER the card has been
-        // posed for this event, so what it reports is where the card is now
-        // rather than where it was an event ago.
-        destination?.setZoomDismissProgress(progress, card: flight.card.frame)
         let mapScale = ZoomFlight.presenterDepthScale + (1 - ZoomFlight.presenterDepthScale) * progress
         presentingView?.transform = CGAffineTransform(scaleX: mapScale, y: mapScale)
         context.updateInteractiveTransition(progress)

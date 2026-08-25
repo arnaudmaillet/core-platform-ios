@@ -494,6 +494,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// ground stored, so the dismissal that followed it declined to run and
     /// the thread stopped receding on exactly the pages that opened with one.
     private var isEngagedDismissing = false
+    /// The grab's current mapping of page onto card, held so a layout pass
+    /// cannot be the last word on where the page is.
+    private var dismissalTravel: CGAffineTransform?
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
     /// The engaged header's frost: a dissolving blur band across the top
@@ -852,19 +855,28 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// **THE DISMISSING GRAB'S OTHER HALF.** The whole page travels with the
     /// card, as one object.
     ///
-    /// ⚠️ THE PARENT CANNOT BE THE THING THAT MOVES, and it was tried.
+    /// ⚠️ ONE TRANSFORM, HELD AGAINST THE LAYOUT THAT KEEPS ERASING IT.
     ///
-    /// `contentView` holds every layer this needs to carry, so transforming it
-    /// once is the obvious answer — and it does nothing at all. A cell's
-    /// content view belongs to UIKit: `layoutSubviews` assigns its FRAME on
-    /// every pass, and assigning a frame to a transformed view re-derives its
-    /// bounds and centre from that frame, cancelling the transform. The page
-    /// sat still through an entire grab while the finger moved.
+    /// Three ways to move the page were tried and two of them are silently
+    /// undone. A `transform` on `contentView` does nothing at all: a cell's
+    /// content view belongs to UIKit, `layoutSubviews` assigns its FRAME on
+    /// every pass, and assigning a frame to a transformed view re-derives
+    /// bounds and centre from it. Transforms on the page's own top-level views
+    /// are correct arithmetic and fail the same way one level down — they are
+    /// pinned by constraints, so a layout pass writes their frames back and the
+    /// page freezes while its WINDOW carries on. That is the interface and the
+    /// media visibly disagreeing, and it comes and goes with whatever else
+    /// happens to trigger a layout.
     ///
-    /// So the transform is applied to the page's top-level layers instead —
-    /// from ONE computation, in one call, which is what the parent was wanted
-    /// for. They cannot drift from each other: there is a single number, not a
-    /// number each.
+    /// (`sublayerTransform` survives layout and was the third try. It is
+    /// applied about a different origin than a view transform, and the page
+    /// landed roughly twice as far out as the card — mapping page onto card
+    /// through it is not the same arithmetic, and getting it wrong is invisible
+    /// until something is on screen to compare against.)
+    ///
+    /// So the transform stays a view transform, and `layoutSubviews`
+    /// re-asserts it. The layout is not fought, it is answered: whatever it
+    /// writes, the grab's own state is put back in the same pass.
     ///
     /// ⚠️ AND THE PAGE KEEPS ITS OWN FACE. It used to hide its media and clear
     /// its floor, on the reasoning that the card behind was carrying the
@@ -884,12 +896,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isEngagedDismissing = true
         mediaHiddenForMaskedReveal = mediaCard.isHidden
         if hidingMedia { mediaCard.isHidden = true }
-    }
-
-    /// Every layer that makes up the page's face, in one list so the grab has
-    /// one thing to move and the teardown one thing to put back.
-    private var dismissalTravellers: [UIView] {
-        [mediaCard, mediaBackdrop, commentsContainer, headerFrost]
     }
 
     /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
@@ -916,7 +922,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             translationX: card.midX - contentView.bounds.midX,
             y: card.midY - contentView.bounds.midY
         ).scaledBy(x: scale, y: scale)
-        dismissalTravellers.forEach { $0.transform = travel }
+        dismissalTravel = travel
+        applyDismissalTravel()
         #if DEBUG
         // `-grab-log`: the numbers the page is being moved by. It exists
         // because a filmed grab has twice now been the wrong instrument —
@@ -928,11 +935,46 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                          t, scale, NSCoder.string(for: card)))
         }
         #endif
-        // The window the page is seen through, at the card's own rect and the
-        // display's radius — the corners the card is wearing all the way home.
+        // ⚠️ THE RADIUS TRAVELS TOO, from the screen's to the ROW's.
+        //
+        // The card is going home to a rounded media rect inside a card, so the
+        // corners it lands on are the row's, not the display's — and holding
+        // the display's radius the whole way made the page arrive square-ish
+        // against a rounded landing. It moves on the grab's own rate, like the
+        // thread's opacity, and the release finishes it: commit hands t=1 from
+        // inside the flight's spring, so the last of the rounding happens on
+        // the same curve as the last of the travel.
         let window = flightMask ?? makeDismissalWindow()
         window.frame = card
-        window.layer.cornerRadius = ScreenGeometry.cornerRadius(behind: self)
+        let screenRadius = ScreenGeometry.cornerRadius(behind: self)
+        window.layer.cornerRadius =
+            screenRadius + (PostGridListRowCell.mediaCornerRadius - screenRadius) * t
+    }
+
+    /// ⚠️ THE LAST WORD ON WHERE THE PAGE IS, and it has to be here.
+    ///
+    /// Auto Layout writes the page's frames on every pass, which erases the
+    /// grab's transform — sometimes. It depends on what else asked for a
+    /// layout, so the page followed the finger on one run and froze on the
+    /// next. Re-asserting after `super` means the layout is answered rather
+    /// than fought: whatever it writes, the gesture's own state goes back in
+    /// the same pass.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        applyDismissalTravel()
+    }
+
+    /// Every layer that makes up the page's face — one list, so the grab has
+    /// one thing to move and the layout one thing to put back.
+    private var dismissalTravellers: [UIView] {
+        [mediaCard, mediaBackdrop, commentsContainer, headerFrost]
+    }
+
+    private func applyDismissalTravel() {
+        guard let dismissalTravel else { return }
+        for view in dismissalTravellers where view.transform != dismissalTravel {
+            view.transform = dismissalTravel
+        }
     }
 
     /// The dismissal's window, made on the first event that has a card to
@@ -956,7 +998,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isEngagedDismissing = false
         commentsContainer.alpha = 1
         headerFrost.alpha = 1
-        dismissalTravellers.forEach { $0.transform = .identity }
+        dismissalTravel = nil
+        for view in dismissalTravellers { view.transform = .identity }
         contentView.mask = nil
         flightMask = nil
         mediaCard.isHidden = mediaHiddenForMaskedReveal
