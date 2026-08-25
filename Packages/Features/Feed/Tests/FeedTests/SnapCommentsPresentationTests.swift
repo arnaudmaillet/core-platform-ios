@@ -162,7 +162,7 @@ struct SnapCommentsPresentationTests {
         // the screen's edge and only fade.
         #expect(container.transform == .identity)
         let frost = try #require(
-            cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
+            firstDescendant(of: cell.contentView, ofType: ProgressiveFrostView.self)
         )
         #expect(frost.transform == .identity)
         #expect(abs(frost.alpha - 0.5) < 0.01)
@@ -326,14 +326,22 @@ struct SnapCommentsPresentationTests {
     @Test func theCommentsContainerNeverPaintsOverTheMedia() throws {
         let cell = makeEngagedCell()
         let container = try #require(
-            cell.contentView.subviews.compactMap { $0 as? SnapCommentsContainerView }.first
+            firstDescendant(of: cell.contentView, ofType: SnapCommentsContainerView.self)
         )
         let colour = try #require(container.backgroundColor)
         var alpha: CGFloat = -1
         #expect(colour.getWhite(nil, alpha: &alpha))
         #expect(alpha == 0)
         // And it sits ABOVE the media and the backdrop, never below them.
-        let subviews = cell.contentView.subviews
+        // ⚠️ THE STAGE'S SUBVIEWS, found through one of them rather than named.
+        //
+        // The page's layers are siblings inside a frame-managed container, so a
+        // transition can move the whole page as one object. WHICH view that is
+        // is not this suite's business; that they are stacked in a particular
+        // order still is.
+        let subviews = try #require(
+            firstDescendant(of: cell.contentView, ofType: SnapMediaCardView.self)?.superview
+        ).subviews
         let mediaIndex = try #require(subviews.firstIndex(of: mediaCard(of: cell)))
         let backdropIndex = try #require(subviews.firstIndex(of: backdrop(of: cell)))
         let streamIndex = try #require(subviews.firstIndex(of: container))
@@ -417,8 +425,16 @@ struct SnapCommentsPresentationTests {
         // screen top to where the stream's content begins — and ramps
         // across all of it. It must not overhang: blur spilling past the
         // chrome it serves lands on the content. Hit-inert throughout.
-        let subviews = cell.contentView.subviews
-        let frost = try #require(subviews.compactMap { $0 as? ProgressiveFrostView }.first)
+        // ⚠️ THE STAGE'S SUBVIEWS, found through one of them rather than named.
+        //
+        // The page's layers are siblings inside a frame-managed container, so a
+        // transition can move the whole page as one object. WHICH view that is
+        // is not this suite's business; that they are stacked in a particular
+        // order still is.
+        let subviews = try #require(
+            firstDescendant(of: cell.contentView, ofType: SnapMediaCardView.self)?.superview
+        ).subviews
+        let frost = try #require(firstDescendant(of: cell.contentView, ofType: ProgressiveFrostView.self))
         #expect(frost.isHidden == false)
         #expect(frost.frame == CGRect(
             x: 0, y: 0,
@@ -477,8 +493,11 @@ struct SnapCommentsPresentationTests {
         #expect(frost.isHidden == true)
         #expect(frost.effect == nil)
         #expect(backdrop.dimOpacity == 0)
-        // The media never moved, so there is no z-order to restore.
-        #expect(cell.contentView.subviews.firstIndex(of: media) == 0)
+        // The media never moved, so there is no z-order to restore. Asked of
+        // its own parent rather than the cell's: the page's layers are
+        // siblings inside a stage, and this claim is about their order, not
+        // about how deep they sit.
+        #expect(media.superview?.subviews.firstIndex(of: media) == 0)
     }
 
     /// REGRESSION, inverted (stranded center tile): the outbound push's
@@ -584,7 +603,7 @@ struct SnapCommentsPresentationTests {
         // The frost band came out of hiding with the install; the pose is
         // what keeps it from being seen.
         let frost = try #require(
-            cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
+            firstDescendant(of: cell.contentView, ofType: ProgressiveFrostView.self)
         )
         #expect(frost.alpha == 0)
         // And the page's own chrome is fully present, as at rest.
@@ -771,15 +790,31 @@ struct SnapCommentsPresentationTests {
         return cell
     }
 
-    /// The media component — the render surfaces now live inside it, not as
-    /// loose cell subviews.
+    /// ⚠️ FOUND BY SEARCH, not by depth.
+    ///
+    /// These used to read `contentView.subviews` directly, which made the
+    /// page's nesting part of every assertion about its behaviour: putting the
+    /// page's layers inside one frame-managed stage (so a transition can move
+    /// them as a single object) failed nine tests that were not about nesting
+    /// at all. What each of them means is "the cell has one of these", and that
+    /// is what this asks.
+    private func firstDescendant<V: UIView>(of view: UIView, ofType: V.Type) -> V? {
+        for child in view.subviews {
+            if let match = child as? V { return match }
+            if let match = firstDescendant(of: child, ofType: V.self) { return match }
+        }
+        return nil
+    }
+
+    /// The media component — the render surfaces live inside it, not as loose
+    /// cell subviews.
     private func mediaCard(of cell: SnapFeedCell) throws -> SnapMediaCardView {
-        try #require(cell.contentView.subviews.compactMap { $0 as? SnapMediaCardView }.first)
+        try #require(firstDescendant(of: cell.contentView, ofType: SnapMediaCardView.self))
     }
 
     /// The readability layer between the media and the stream.
     private func backdrop(of cell: SnapFeedCell) throws -> SnapMediaBackdropView {
-        try #require(cell.contentView.subviews.compactMap { $0 as? SnapMediaBackdropView }.first)
+        try #require(firstDescendant(of: cell.contentView, ofType: SnapMediaBackdropView.self))
     }
 
     /// The STREAM's entrance choreography: it fades AND expands into place,
@@ -801,7 +836,7 @@ struct SnapCommentsPresentationTests {
         cell.installComments(hosted)
         let container = try #require(hosted.superview)
         let frost = try #require(
-            cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
+            firstDescendant(of: cell.contentView, ofType: ProgressiveFrostView.self)
         )
 
         // Offstage: transparent, and NOT transformed.
@@ -940,7 +975,7 @@ struct SnapCommentsPresentationTests {
             #expect(cell.engagedCommentsTopInset(safeAreaTop: Self.topInset)
                 == SnapCommentsLayout.commentsTopInset(topInset: Self.topInset))
             let frost = try #require(
-                cell.contentView.subviews.compactMap { $0 as? ProgressiveFrostView }.first
+                firstDescendant(of: cell.contentView, ofType: ProgressiveFrostView.self)
             )
             #expect(frost.frame.height == SnapCommentsLayout.commentsTopInset(topInset: Self.topInset))
             // The dead-end lock and the armed page-drive, both formats.

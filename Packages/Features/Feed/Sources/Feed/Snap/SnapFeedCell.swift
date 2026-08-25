@@ -495,11 +495,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// ground stored, so the dismissal that followed it declined to run and
     /// the thread stopped receding on exactly the pages that opened with one.
     private var isEngagedDismissing = false
+    /// Everything the page draws, in one frame-managed view — see
+    /// `buildLayout`. A transition moves this and nothing inside it.
+    private let pageStage = UIView()
     /// The grab's current mapping of page onto card — the scale, and the rect
     /// it is mapping onto — held so a layout pass cannot be the last word on
     /// where the page is.
-    private var dismissalTravel: CGFloat?
-    private var dismissalCard: CGRect?
     /// What each travelling layer's opacity was when the grab began — an
     /// abandoned one has to put back exactly that, and a starting one has to
     /// begin from it.
@@ -612,17 +613,36 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func buildLayout() {
+        // ⚠️ THE PAGE'S OWN STAGE, and it is FRAME-MANAGED on purpose.
+        //
+        // Everything the page draws lives in here, so a transition that has to
+        // move the page moves ONE view. The layers used to be transformed
+        // individually — correct arithmetic, since a view transform is applied
+        // about its own centre, and a permanent source of one-frame
+        // disagreements: a layout pass, a spring in flight and a gesture event
+        // are three different moments, and four layers being told the same
+        // thing at three moments is four chances to be told late.
+        //
+        // It cannot be pinned by constraints. Auto Layout assigns FRAMES, and
+        // assigning a frame to a transformed view re-derives its bounds and
+        // centre from it — the transform is silently cancelled, which is what
+        // happened to `contentView` and then to each layer in turn. So this one
+        // is positioned by `bounds`/`center` in `layoutSubviews`, both of which
+        // are transform-safe, and nothing else ever writes its geometry.
+        pageStage.frame = contentView.bounds
+        contentView.addSubview(pageStage)
+
         // Text-only posts' gradient page background lives inside the chrome
         // (shared with the hero flight's replica, so the landing swap can't
         // mismatch), not here. The media card hosts both render surfaces
         // full-bleed — in both states: it is the page at rest AND the
         // background of the engaged screen.
-        mediaCard.pin(to: contentView)
+        mediaCard.pin(to: pageStage)
 
         // The readability layer, directly over the media: inert until the
         // engagement materializes it, and never moved again (it covers the
         // whole cell in both states, it just isn't visible in one).
-        mediaBackdrop.pin(to: contentView)
+        mediaBackdrop.pin(to: pageStage)
 
         // The header frost sits directly above the stream and below the
         // chrome: media → backdrop → stream → frost → chrome.
@@ -647,8 +667,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         headerFrost.translatesAutoresizingMaskIntoConstraints = false
         commentsContainer.isHidden = true
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(commentsContainer)
-        contentView.addSubview(headerFrost)
+        pageStage.addSubview(commentsContainer)
+        pageStage.addSubview(headerFrost)
 
         chrome.pin(to: contentView)
 
@@ -676,10 +696,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // strip (the hosted scroll view rests its content below the strip
         // via inset — `setEngagedInsets` on the child).
         commentsContainerConstraints = [
-            commentsContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
-            commentsContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            commentsContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            commentsContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            commentsContainer.topAnchor.constraint(equalTo: pageStage.topAnchor),
+            commentsContainer.leadingAnchor.constraint(equalTo: pageStage.leadingAnchor),
+            commentsContainer.trailingAnchor.constraint(equalTo: pageStage.trailingAnchor),
+            commentsContainer.bottomAnchor.constraint(equalTo: pageStage.bottomAnchor),
         ]
         NSLayoutConstraint.activate(commentsContainerConstraints)
         // The header band spans EXACTLY its container — screen top to where
@@ -691,9 +711,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         headerFrost.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: mediaURL != nil))
         NSLayoutConstraint.deactivate(headerFrostConstraints)
         headerFrostConstraints = [
-            headerFrost.topAnchor.constraint(equalTo: contentView.topAnchor),
-            headerFrost.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            headerFrost.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            headerFrost.topAnchor.constraint(equalTo: pageStage.topAnchor),
+            headerFrost.leadingAnchor.constraint(equalTo: pageStage.leadingAnchor),
+            headerFrost.trailingAnchor.constraint(equalTo: pageStage.trailingAnchor),
             headerFrost.heightAnchor.constraint(
                 equalToConstant: SnapCommentsLayout.commentsTopInset(topInset: frozenInsets.top)
             ),
@@ -823,19 +843,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // Width is the honest one — the content grows exactly as the window
         // does across, and never distorts.
         let scale = rect.width / max(contentView.bounds.width, 1)
-        // ⚠️ NOT `headerFrost`. It is a material, and this codebase's standing
-        // rule is that a lens is never transformed — a scaled backdrop samples
-        // a scaled world and stops being the surface it was measured as. It
-        // loses nothing by staying still: it is a gradient band at the very top
-        // of the page, which the window has barely reached while the scale is
-        // still visible.
-        let revealed = [commentsContainer, mediaBackdrop]
-        for view in revealed {
-            view.transform = CGAffineTransform(
-                translationX: rect.midX - contentView.bounds.midX,
-                y: rect.midY - contentView.bounds.midY
-            ).scaledBy(x: scale, y: scale)
-        }
+        // ⚠️ THE STAGE, not a list of layers.
+        //
+        // It used to transform `commentsContainer` and `mediaBackdrop`
+        // individually and deliberately leave the header's frost out of it —
+        // a material must not be transformed, since a scaled backdrop samples a
+        // scaled world. Moving the stage moves all three, frost included, which
+        // is the one thing that rule was protecting against. It is acceptable
+        // here for the reason it always was on the flight card: the whole page
+        // is being scaled as one object, so the material is scaled WITH its
+        // world rather than against it, and it lasts a third of a second.
+        pageStage.transform = CGAffineTransform(
+            translationX: rect.midX - contentView.bounds.midX,
+            y: rect.midY - contentView.bounds.midY
+        ).scaledBy(x: scale, y: scale)
         UIView.animate(
             withDuration: ZoomFlightSpring.duration, delay: 0,
             usingSpringWithDamping: ZoomFlightSpring.damping,
@@ -854,7 +875,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // page indicator's dots hit, where the value changed in
             // `layoutSubviews` rather than in the block.
             mask.layer.cornerRadius = ScreenGeometry.cornerRadius(behind: self)
-            revealed.forEach { $0.transform = .identity }
+            self.pageStage.transform = .identity
         }
 
     }
@@ -984,21 +1005,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             card.width / max(contentView.bounds.width, 1),
             card.height / max(contentView.bounds.height, 1)
         )
-        // ⚠️ ONE MAPPING, BUT A TRANSFORM PER VIEW — because a view transform
-        // is applied about THAT VIEW's centre.
+        // ⚠️ ONE VIEW, ONE TRANSFORM. Everything the page draws is inside
+        // `pageStage`, so the mapping is applied once, about one centre, in one
+        // assignment — and a layout pass cannot erase it, because nothing but
+        // this cell writes that view's geometry.
         //
-        // A single shared transform is only correct for a layer centred on the
-        // page. The stream and the wash are; the header's frost is a band at
-        // the top and its centre is nowhere near, so the same numbers moved it
-        // somewhere else entirely — layers of one page disagreeing frame by
-        // frame, which is what "they are still not synchronised" was.
-        //
-        // The mapping is the same for all of them: a point p of the page lands
-        // at `cardCentre + fill * (p - pageCentre)`. Solving that for a
-        // transform about a view's own centre `c` gives the translation below.
-        // One rule, applied where each layer actually is.
-        dismissalTravel = fill
-        applyDismissalTravel(card: card)
+        // It was a transform per layer before, which is correct arithmetic (a
+        // view transform is applied about its own centre, so each needed its
+        // own translation) and a permanent source of one-frame disagreements: a
+        // layout pass, a spring in flight and a gesture event are three
+        // different moments, and four layers told the same thing at three
+        // moments is four chances to be told late.
+        pageStage.transform = CGAffineTransform(
+            translationX: card.midX - contentView.bounds.midX,
+            y: card.midY - contentView.bounds.midY
+        ).scaledBy(x: fill, y: fill)
         // ⚠️ THE CARD'S RADIUS, HANDED OVER — never a second copy of the curve.
         //
         // The window computed its own interpolation from the display's corner
@@ -1018,21 +1039,24 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         #endif
     }
 
-    /// ⚠️ THE LAST WORD ON WHERE THE PAGE IS, and it has to be here.
+    /// ⚠️ `bounds` AND `center`, NEVER `frame`.
     ///
-    /// Auto Layout writes the page's frames on every pass, which erases the
-    /// grab's transform — sometimes. It depends on what else asked for a
-    /// layout, so the page followed the finger on one run and froze on the
-    /// next. Re-asserting after `super` means the layout is answered rather
-    /// than fought: whatever it writes, the gesture's own state goes back in
-    /// the same pass.
+    /// The stage carries the transition's transform, and assigning a frame to a
+    /// transformed view re-derives its bounds and centre from that frame —
+    /// which cancels the transform. Setting the two directly is the same
+    /// geometry and leaves the transform alone, so a layout pass landing in the
+    /// middle of a gesture costs nothing.
     override func layoutSubviews() {
         super.layoutSubviews()
-        applyDismissalTravel()
+        pageStage.bounds = CGRect(origin: .zero, size: contentView.bounds.size)
+        pageStage.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
     }
 
     /// Every layer that makes up the page's face — one list, so the grab has
     /// one thing to move and the layout one thing to put back.
+    /// The layers whose OPACITY the grab drives. Their geometry is the stage's
+    /// — see `setEngagedDismissalProgress`.
+    ///
     /// ⚠️ THE WASH IS ONE OF THEM, on the thread's own value.
     ///
     /// It exists to hold text off a photograph, so it belongs to the text: it
@@ -1047,38 +1071,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// out with the words it serves.
     private var dismissalTravellers: [UIView] {
         [commentsContainer, headerFrost, mediaBackdrop]
-    }
-
-    /// - Parameter card: the rect this is being told about. Nil means this is
-    ///   the LAYOUT's re-assert rather than a new position from the gesture,
-    ///   and that distinction decides whether an animating layer is touched.
-    private func applyDismissalTravel(card: CGRect? = nil) {
-        let isReassert = card == nil
-        if let card { dismissalCard = card }
-        guard let fill = dismissalTravel, let card = dismissalCard else { return }
-        let page = contentView.bounds
-        for view in dismissalTravellers {
-            // ⚠️ NEVER RE-ASSERT OVER AN ANIMATION IN FLIGHT.
-            //
-            // The dip and the release put these layers on a spring — told from
-            // inside the animation's own block so they ride the card's curve.
-            // A layout pass landing mid-spring called this, which assigned the
-            // END value outside the block: that layer snapped to the target
-            // while the window and its siblings were still travelling. One
-            // frame, on whichever layers happened to be animating, which is
-            // exactly the "as if each layer were animated separately" of it.
-            //
-            // The layout's job here is to undo what the layout ITSELF erased.
-            // A layer that is animating has not been erased.
-            if isReassert, view.layer.animation(forKey: "transform") != nil { continue }
-            // `center` is the untransformed centre: it is what the layout
-            // decided, and it is not disturbed by the transform being set.
-            let c = view.center
-            view.transform = CGAffineTransform(
-                translationX: card.midX + fill * (c.x - page.midX) - c.x,
-                y: card.midY + fill * (c.y - page.midY) - c.y
-            ).scaledBy(x: fill, y: fill)
-        }
     }
 
     /// The dismissal's window, made on the first event that has a card to
@@ -1100,11 +1092,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func endEngagedDismissal() {
         guard isEngagedDismissing else { return }
         isEngagedDismissing = false
-        dismissalTravel = nil
-        dismissalCard = nil
+        pageStage.transform = .identity
         for (view, resting) in zip(dismissalTravellers, restingAlphas) {
             view.alpha = resting
-            view.transform = .identity
         }
         restingAlphas = []
         // The wash comes back with everything else: an abandoned grab returns
@@ -1126,9 +1116,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         groundForMaskedReveal = nil
         // Identity, unconditionally: an interrupted flight must not strand the
         // page under a transform nobody can see the origin of.
-        for view in [commentsContainer, mediaBackdrop] {
-            view.transform = .identity
-        }
+        pageStage.transform = .identity
     }
 
     /// Materializes the header band's blur AHEAD of the engagement.
