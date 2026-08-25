@@ -896,6 +896,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isEngagedDismissing = true
         mediaHiddenForMaskedReveal = mediaCard.isHidden
         if hidingMedia { mediaCard.isHidden = true }
+        // ⚠️ THE WASH GOES, AND IT GOES AT ONCE.
+        //
+        // It is a readability layer for text over a photograph, and it is
+        // nearly opaque — which is why an engaged page reads so dark. Carried
+        // into the grab it covered the picture for the whole gesture and then
+        // handed over to a card that has no wash at all: the black rectangle
+        // being dragged around, and a step in exposure at the last frame.
+        //
+        // Interpolating it was tried twice and is the wrong shape. It is not
+        // part of what the gesture is about — it serves text that is leaving —
+        // so it goes with the DECISION, not with the finger. What is being
+        // dragged is a photograph, and from the first frame it looks like one.
+        mediaBackdrop.alpha = 0
     }
 
     /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
@@ -910,22 +923,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setEngagedDismissalProgress(_ progress: CGFloat, card: CGRect) {
         guard isEngagedDismissing else { return }
         let t = min(max(progress, 0), 1)
-        // ⚠️ THE WHOLE PAGE RECEDES, WASH INCLUDED — and that reverses an
-        // earlier rule for a reason worth stating.
+        // ⚠️ THE THREAD RECEDES; THE PHOTOGRAPH DOES NOT.
         //
-        // The wash was frozen because fading it turned the background black at
-        // the START of a grab. That was never the wash: the page was also
-        // hiding its media and clearing its ground at the time, so lifting it
-        // uncovered the container. The page is whole now, so what a fading wash
-        // uncovers is the CARD's copy of the same photograph — invisible while
-        // they coincide, and exactly right at the end.
-        //
-        // Which is what this is for. The card carries no wash, so a page still
-        // opaque at the landing handed over to a brighter picture in one frame:
-        // the step in exposure at the end of the dismissal. Everything the page
-        // draws now reaches zero as the card reaches home, and there is nothing
-        // left to hand over.
-        for view in dismissalTravellers { view.alpha = 1 - t }
+        // The media stays at full opacity all the way home, and it can: with
+        // the wash gone (see `beginEngagedDismissal`) the page's picture and
+        // the card's are the same picture at the same rect and the same shape,
+        // so there is nothing to cross-fade and nothing to step between when
+        // one replaces the other. Fading it too was tried; all that can do is
+        // find a difference where there is none.
+        commentsContainer.alpha = 1 - t
+        headerFrost.alpha = 1 - t
         guard card.width > 0, card.height > 0 else { return }
         // ⚠️ BOTH AXES. A uniform scale is right for the whole DRAG — the card
         // deliberately keeps the page's aspect while it is held — and wrong for
@@ -1013,6 +1020,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             view.alpha = 1
             view.transform = .identity
         }
+        // The wash comes back with everything else: an abandoned grab returns
+        // to a page that has to be readable again.
         contentView.mask = nil
         flightMask = nil
         mediaCard.isHidden = mediaHiddenForMaskedReveal
