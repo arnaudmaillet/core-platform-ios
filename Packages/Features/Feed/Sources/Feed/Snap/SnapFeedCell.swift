@@ -910,31 +910,37 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setEngagedDismissalProgress(_ progress: CGFloat, card: CGRect) {
         guard isEngagedDismissing else { return }
         let t = min(max(progress, 0), 1)
-        // ⚠️ ONLY THE THREAD RECEDES. The readability wash over the media does
-        // not, and it used to go three times faster than the text it serves —
-        // which, over a hidden media and a cleared ground, is what uncovered
-        // the black. A page being carried away should look like the page.
-        commentsContainer.alpha = 1 - t
-        headerFrost.alpha = 1 - t
+        // ⚠️ THE WHOLE PAGE RECEDES, WASH INCLUDED — and that reverses an
+        // earlier rule for a reason worth stating.
+        //
+        // The wash was frozen because fading it turned the background black at
+        // the START of a grab. That was never the wash: the page was also
+        // hiding its media and clearing its ground at the time, so lifting it
+        // uncovered the container. The page is whole now, so what a fading wash
+        // uncovers is the CARD's copy of the same photograph — invisible while
+        // they coincide, and exactly right at the end.
+        //
+        // Which is what this is for. The card carries no wash, so a page still
+        // opaque at the landing handed over to a brighter picture in one frame:
+        // the step in exposure at the end of the dismissal. Everything the page
+        // draws now reaches zero as the card reaches home, and there is nothing
+        // left to hand over.
+        for view in dismissalTravellers { view.alpha = 1 - t }
         guard card.width > 0, card.height > 0 else { return }
-        let scale = card.width / max(contentView.bounds.width, 1)
+        // ⚠️ BOTH AXES. A uniform scale is right for the whole DRAG — the card
+        // deliberately keeps the page's aspect while it is held — and wrong for
+        // the release, where it morphs to the tile's. Mapped by width alone the
+        // page ended a different shape from the card it was handing over to,
+        // which is the media's jump at the last frame. During the drag the two
+        // numbers are equal and this is the same transform it always was.
+        let scaleX = card.width / max(contentView.bounds.width, 1)
+        let scaleY = card.height / max(contentView.bounds.height, 1)
         let travel = CGAffineTransform(
             translationX: card.midX - contentView.bounds.midX,
             y: card.midY - contentView.bounds.midY
-        ).scaledBy(x: scale, y: scale)
+        ).scaledBy(x: scaleX, y: scaleY)
         dismissalTravel = travel
         applyDismissalTravel()
-        #if DEBUG
-        // `-grab-log`: the numbers the page is being moved by. It exists
-        // because a filmed grab has twice now been the wrong instrument —
-        // a scripted one drives events continuously and papered over a
-        // once-only assignment, and a sampled recording cannot tell a
-        // transition that was skipped from one that was fast.
-        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
-            print(String(format: "[grab] t=%.2f scale=%.3f card=%@",
-                         t, scale, NSCoder.string(for: card)))
-        }
-        #endif
         // ⚠️ THE RADIUS TRAVELS TOO, from the screen's to the ROW's.
         //
         // The card is going home to a rounded media rect inside a card, so the
@@ -949,6 +955,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let screenRadius = ScreenGeometry.cornerRadius(behind: self)
         window.layer.cornerRadius =
             screenRadius + (PostGridListRowCell.mediaCornerRadius - screenRadius) * t
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print(String(format: "[grab] t=%.2f x=%.3f y=%.3f card=%@",
+                         t, scaleX, scaleY, NSCoder.string(for: card)))
+        }
+        #endif
     }
 
     /// ⚠️ THE LAST WORD ON WHERE THE PAGE IS, and it has to be here.
@@ -996,10 +1008,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func endEngagedDismissal() {
         guard isEngagedDismissing else { return }
         isEngagedDismissing = false
-        commentsContainer.alpha = 1
-        headerFrost.alpha = 1
         dismissalTravel = nil
-        for view in dismissalTravellers { view.transform = .identity }
+        for view in dismissalTravellers {
+            view.alpha = 1
+            view.transform = .identity
+        }
         contentView.mask = nil
         flightMask = nil
         mediaCard.isHidden = mediaHiddenForMaskedReveal
