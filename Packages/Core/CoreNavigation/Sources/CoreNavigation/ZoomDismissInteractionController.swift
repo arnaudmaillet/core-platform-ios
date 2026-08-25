@@ -279,6 +279,19 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         self.screenRadius = screenRadius
         self.pageCenter = CGPoint(x: pageFrame.midX, y: pageFrame.midY)
         stagedLanding = sourceFrame
+        // ⚠️ ARMED AT REST, HERE, BEFORE ANYTHING HAS MOVED.
+        //
+        // A destination that tracks the card used to hear about the grab on
+        // its FIRST PAN EVENT, which already carries a travelled card and a
+        // non-zero rate — so it armed and jumped in the same frame, and the
+        // deferred content hide could land in the gap before it. That is the
+        // flash and the half-frame of misalignment at the start of a grab.
+        //
+        // Told the identity state now, it installs a window that is exactly
+        // the page it is already showing: nothing changes on screen, and every
+        // event after this one is a move from somewhere rather than an arrival
+        // from nowhere.
+        destination?.setZoomDismissProgress(0, card: pageFrame)
 
         // The detach: a real spring, not a scrubbed keyframe — it registers
         // the instant the grab starts, however slowly the finger then moves.
