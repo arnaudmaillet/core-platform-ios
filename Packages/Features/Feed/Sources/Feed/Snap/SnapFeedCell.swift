@@ -791,6 +791,33 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mask.layer.cornerRadius = cornerRadius
         contentView.mask = mask
         flightMask = mask
+        // ⚠️ THE CONTENT GROWS WITH THE WINDOW; a mask alone does not move it.
+        //
+        // Opening the window over a page at 1:1 reads as a shutter sweeping
+        // across something already there, while the card beside it is visibly
+        // growing — two channels of one opening disagreeing about what is
+        // happening. So the revealed views take the window's own scale and
+        // ride it back to identity.
+        //
+        // ⚠️ SCALED BY WIDTH, and it is deliberately the smaller of the two
+        // numbers. The card's media grows 1.09× in width and 2.36× in height:
+        // no uniform scale is both, and a non-uniform one would stretch text.
+        // Width is the honest one — the content grows exactly as the window
+        // does across, and never distorts.
+        let scale = rect.width / max(contentView.bounds.width, 1)
+        // ⚠️ NOT `headerFrost`. It is a material, and this codebase's standing
+        // rule is that a lens is never transformed — a scaled backdrop samples
+        // a scaled world and stops being the surface it was measured as. It
+        // loses nothing by staying still: it is a gradient band at the very top
+        // of the page, which the window has barely reached while the scale is
+        // still visible.
+        let revealed = [commentsContainer, mediaBackdrop]
+        for view in revealed {
+            view.transform = CGAffineTransform(
+                translationX: rect.midX - contentView.bounds.midX,
+                y: rect.midY - contentView.bounds.midY
+            ).scaledBy(x: scale, y: scale)
+        }
         UIView.animate(
             withDuration: ZoomFlightSpring.duration, delay: 0,
             usingSpringWithDamping: ZoomFlightSpring.damping,
@@ -798,6 +825,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
             mask.frame = self.contentView.bounds
+            revealed.forEach { $0.transform = .identity }
         }
         // ⚠️ SEPARATELY, because `cornerRadius` is a layer property and a
         // `UIView.animate` block does not carry it — the same trap the page
@@ -819,6 +847,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         flightMask = nil
         mediaCard.isHidden = mediaHiddenForMaskedReveal
         contentView.backgroundColor = groundForMaskedReveal
+        // Identity, unconditionally: an interrupted flight must not strand the
+        // page under a transform nobody can see the origin of.
+        for view in [commentsContainer, mediaBackdrop] {
+            view.transform = .identity
+        }
     }
 
     /// Materializes the header band's blur AHEAD of the engagement.
