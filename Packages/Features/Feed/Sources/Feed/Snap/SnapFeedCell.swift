@@ -494,9 +494,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// ground stored, so the dismissal that followed it declined to run and
     /// the thread stopped receding on exactly the pages that opened with one.
     private var isEngagedDismissing = false
-    /// The grab's current mapping of page onto card, held so a layout pass
-    /// cannot be the last word on where the page is.
-    private var dismissalTravel: CGAffineTransform?
+    /// The grab's current mapping of page onto card — the scale, and the rect
+    /// it is mapping onto — held so a layout pass cannot be the last word on
+    /// where the page is.
+    private var dismissalTravel: CGFloat?
+    private var dismissalCard: CGRect?
     /// What each travelling layer's opacity was when the grab began — an
     /// abandoned one has to put back exactly that, and a starting one has to
     /// begin from it.
@@ -967,12 +969,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             card.width / max(contentView.bounds.width, 1),
             card.height / max(contentView.bounds.height, 1)
         )
-        let travel = CGAffineTransform(
-            translationX: card.midX - contentView.bounds.midX,
-            y: card.midY - contentView.bounds.midY
-        ).scaledBy(x: fill, y: fill)
-        dismissalTravel = travel
-        applyDismissalTravel()
+        // ⚠️ ONE MAPPING, BUT A TRANSFORM PER VIEW — because a view transform
+        // is applied about THAT VIEW's centre.
+        //
+        // A single shared transform is only correct for a layer centred on the
+        // page. The stream and the wash are; the header's frost is a band at
+        // the top and its centre is nowhere near, so the same numbers moved it
+        // somewhere else entirely — layers of one page disagreeing frame by
+        // frame, which is what "they are still not synchronised" was.
+        //
+        // The mapping is the same for all of them: a point p of the page lands
+        // at `cardCentre + fill * (p - pageCentre)`. Solving that for a
+        // transform about a view's own centre `c` gives the translation below.
+        // One rule, applied where each layer actually is.
+        dismissalTravel = fill
+        applyDismissalTravel(card: card)
         // ⚠️ THE RADIUS TRAVELS TOO, from the screen's to the ROW's.
         //
         // The card is going home to a rounded media rect inside a card, so the
@@ -1026,10 +1037,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         [commentsContainer, headerFrost, mediaBackdrop]
     }
 
-    private func applyDismissalTravel() {
-        guard let dismissalTravel else { return }
-        for view in dismissalTravellers where view.transform != dismissalTravel {
-            view.transform = dismissalTravel
+    private func applyDismissalTravel(card: CGRect? = nil) {
+        if let card { dismissalCard = card }
+        guard let fill = dismissalTravel, let card = dismissalCard else { return }
+        let page = contentView.bounds
+        for view in dismissalTravellers {
+            // `center` is the untransformed centre: it is what the layout
+            // decided, and it is not disturbed by the transform being set.
+            let c = view.center
+            view.transform = CGAffineTransform(
+                translationX: card.midX + fill * (c.x - page.midX) - c.x,
+                y: card.midY + fill * (c.y - page.midY) - c.y
+            ).scaledBy(x: fill, y: fill)
         }
     }
 
@@ -1053,6 +1072,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard isEngagedDismissing else { return }
         isEngagedDismissing = false
         dismissalTravel = nil
+        dismissalCard = nil
         for (view, resting) in zip(dismissalTravellers, restingAlphas) {
             view.alpha = resting
             view.transform = .identity
