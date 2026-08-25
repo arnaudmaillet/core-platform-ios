@@ -802,19 +802,13 @@ final class ForYouViewController: UIViewController {
     /// frame 0 and dissolves as the page grows past it.
     @discardableResult
     private func installTextReveal(
-        feed: UIViewController, format: GalleryFilter.Format, postID: PostID,
-        allowingMedia: Bool = false
+        feed: UIViewController, format: GalleryFilter.Format, postID: PostID
     ) -> Bool {
         textSlideDismissal.revealGeometry = nil
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        // **OPTION A** widens the reveal's own gate: a row WITH media may open
-        // as a window too, when what it is opening is the thread rather than
-        // the photograph.
         func sourceFrame(_ space: UICoordinateSpace) -> CGRect? {
-            allowingMedia
-                ? pager.page(for: format)?.rowFrame(for: postID, in: space)
-                : pager.page(for: format)?.textRowFrame(for: postID, in: space)
+            pager.page(for: format)?.textRowFrame(for: postID, in: space)
         }
         guard TextRevealInstaller.isEnabled,
               let page = pager.page(for: format),
@@ -1052,36 +1046,6 @@ final class ForYouViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    /// Which opening a COMMENTS tap gets, so the three can be compared on a
-    /// device rather than argued about.
-    ///
-    /// - `standard`: the flight carries the photograph and the thread is there
-    ///   when it lands. What ships.
-    /// - `reveal` (`-comments-reveal`): **option A**. No flight at all — the
-    ///   real page is installed at full size and a window opens onto it from
-    ///   the card's rect, which is exactly what a text post does. ⚠️ The page
-    ///   moves by TRANSLATION only, never scale, so the photograph is seen at
-    ///   1:1 through the window: at t=0 that is a tighter crop than the card
-    ///   was showing. This is the handshake the hero exists to make, and the
-    ///   thing to look for when judging it.
-    /// - `maskedHero` (`-comments-masked-hero`): **option B**. The flight keeps
-    ///   the photograph, at the row's crop, and the REAL thread is revealed
-    ///   over it through a window opening on the same spring. Nothing
-    ///   impersonates anything. ⚠️ Two animations held in phase by sharing one
-    ///   spring rather than one timeline — look for them parting company.
-    enum CommentsOpening {
-        case standard, reveal, maskedHero
-    }
-
-    static var commentsOpening: CommentsOpening {
-        #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-comments-reveal") { return .reveal }
-        if arguments.contains("-comments-masked-hero") { return .maskedHero }
-        #endif
-        return .standard
-    }
-
     private func openFeed(
         from format: GalleryFilter.Format, at index: Int, showingComments: Bool = false
     ) {
@@ -1140,14 +1104,13 @@ final class ForYouViewController: UIViewController {
             // pressed, and only the destination knows when it is safe to spend
             // the engagement's layout.
             if showingComments {
-                // **OPTION B — `-comments-masked-hero`** hands over WHERE the
-                // thread's window should open from; without it the opening is
-                // the plain one and the thread is simply there on landing.
-                let maskedHero = Self.commentsOpening == .maskedHero
-                let from = maskedHero
-                    ? pager.page(for: format)?.hero(for: tapped.id, in: view)?.frame
-                    : nil
-                seedable.openComments(for: tapped.id, revealingFrom: from)
+                // WHERE the thread's window opens from: the media rect the
+                // flight is about to fly, so the thread is revealed out of the
+                // photograph rather than arriving over it.
+                seedable.openComments(
+                    for: tapped.id,
+                    revealingFrom: pager.page(for: format)?.hero(for: tapped.id, in: view)?.frame
+                )
             }
             // …and the traffic runs the other way too, live. The card behind
             // follows the post's carousel, which is what makes the dismissal
@@ -1190,12 +1153,7 @@ final class ForYouViewController: UIViewController {
         // Hiding it and putting it back was tried and is worse: UIKit runs its
         // own show/hide animation on the bar, and a second one fighting it left
         // the bar sitting fully opaque OVER the landed page for ~0.25s.
-        // **OPTION A — `-comments-reveal`**: a comments-open on a row WITH media
-        // takes the window instead of the flight.
-        let revealing = installTextReveal(
-            feed: feed, format: format, postID: tapped.id,
-            allowingMedia: showingComments && Self.commentsOpening == .reveal
-        )
+        let revealing = installTextReveal(feed: feed, format: format, postID: tapped.id)
         if !revealing {
             tabBarController?.setTabBarHidden(true, animated: true)
         }

@@ -1611,7 +1611,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // flat fill, which a material would resolve to and vanish into.
         closingLikesPill = PostCardPillView(contents: [reactions])
         closingCommentsPill = PostCardPillView(contents: [comments])
-        closingCommentsPill.setTapHandler { [weak self] in self?.onCommentsTapped?() }
         // ⚠️ The DATE stays a bare label, and that asymmetry is deliberate.
         //
         // On the preview it wears a capsule because a word over a photograph has
@@ -1714,7 +1713,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // leading edge the way the trailing date does.
         likesPill = PostMetaPillView(contents: [overlayReactions])
         commentsPill = PostMetaPillView(contents: [overlayComments])
-        commentsPill.setTapHandler { [weak self] in self?.onCommentsTapped?() }
         // ⚠️ A SLOT, not a pill: the date is bare text on a fading material.
         //
         // It keeps the row's rhythm and loses the capsule, because a capsule is
@@ -2083,6 +2081,26 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // exactly as it would on a photograph.
         closingLikesPill.syncVisibilityToContents()
         closingCommentsPill.syncVisibilityToContents()
+        // ⚠️ ON A TEXT POST THE COUNT IS NOT A CONTROL, and the pill stays
+        // exactly as it is drawn.
+        //
+        // The shortcut exists because a media post opens onto its PHOTOGRAPH
+        // and its thread is a second surface — pressing the count is the only
+        // way to ask for the thread directly. A text post's page IS its thread:
+        // tapping anywhere on the card already arrives there, by its own
+        // reveal. A chip promising a shortcut to where the card goes anyway is
+        // a second control for one destination, and it took the wrong route to
+        // get there — the media flight instead of the text reveal.
+        //
+        // Turned off rather than hidden: the touch then falls through to the
+        // row, which opens the post the way it always did. A dead control that
+        // swallows the touch would be worse than either.
+        let opensThread = post.kind != .text
+        let openComments: (() -> Void)? = opensThread
+            ? { [weak self] in self?.onCommentsTapped?() }
+            : nil
+        commentsPill.setTapHandler(openComments)
+        closingCommentsPill.setTapHandler(openComments)
         views.set(post.viewCount)
         overlayReactions.set(post.reactionCount)
         overlayComments.set(post.commentCount)
