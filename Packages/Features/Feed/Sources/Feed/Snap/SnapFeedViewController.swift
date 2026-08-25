@@ -184,6 +184,7 @@ final class SnapFeedViewController: UIViewController {
     /// for the masked variant.
     private var pendingCommentsRevealRect: CGRect?
     private var isMaskedRevealActive = false
+    private var isEngagedDismissalActive = false
     private var commentsEngagedID: PostID?
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
@@ -2593,23 +2594,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // mask that opens from the row's rect. That is the shape of the answer
         // here too, and it is not a line of code — see the notes on this
         // commit.
-        // ⚠️ AN ENGAGED PAGE LENDS ITS THREAD TO THE CARD.
-        //
-        // On the presenting leg this returns nil: there is nothing to fly, and
-        // a replica of the resting arrangement would be a picture of the layout
-        // the viewer chose not to open.
-        //
-        // On the DISMISSING leg it is the whole answer. The thread rides inside
-        // the card, posed by the card's own matrix — "geometrically incapable
-        // of drifting", as this method's own contract puts it — instead of
-        // being driven from a channel one hop behind. Every follower before it
-        // was a hair out, and at the start of a grab that hair was a bright
-        // sliver of card past the page's edge.
-        if commentsEngagedID != nil, !commentsEngagementIsResting {
-            flightChrome = nil
-            guard !isAwaitingZoomPresentation else { return nil }
-            return activeSnapCell?.lendPageStage()
-        }
+        if commentsEngagedID != nil, !commentsEngagementIsResting { return nil }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
         // Captured, not ambient: the replica must render at the live cell's
@@ -3004,39 +2989,99 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // honoured here, unanimated, so the post still LANDS in its thread
         // rather than rearranging itself afterwards.
         if hidden { beginMaskedRevealIfRequested() }
-        guard !isMaskedRevealActive else { return view.alpha = 1 }
+        // ⚠️ AN ARMED GRAB REFUSES THE HIDE, and refusing it once is not enough.
+        //
+        // The hide does not run at the grab's start: it is deferred by a commit
+        // and a display tick, so it lands AFTER the first pan events. Arming
+        // the dismissal set the page visible once and the hide then arrived and
+        // won, which is "the thread disappears the instant I grab" exactly.
+        // Declining here is what makes the visibility hold for the length of
+        // the gesture.
+        guard !isMaskedRevealActive, !isEngagedDismissalActive else {
+            return view.alpha = 1
+        }
         view.alpha = hidden ? 0 : 1
     }
 
-    /// ⚠️ THE NAVIGATION BAR RECEDES WITH THE THREAD, and it is the only thing
-    /// this channel still does.
+    /// ⚠️ AN ENGAGED PAGE STAYS VISIBLE THROUGH A DISMISSING GRAB, for the same
+    /// reason it does through the opening: the card impersonates the page's
+    /// MEDIA, and a thread is not media. Hidden with everything else it
+    /// vanished on the grab's second tick, and the viewer pulled a photograph
+    /// home from a screen that had already stopped showing what they were
+    /// reading.
     ///
-    /// The page needs nothing from it: the flight BORROWS the page's stage and
-    /// carries it (`zoomFlightChrome`), so the thread is a passenger rather
-    /// than a follower. Every earlier version drove the page from here and each
-    /// one was a hair out — a follower can be made arbitrarily close and never
-    /// exact.
+    /// ⚠️ ARMED FROM HERE, not from `setZoomContentHidden`, and the difference
+    /// is a whole dismissal. Both routes home hide the content — the grab and
+    /// the back button — but only the grab drives a progress channel. Arming on
+    /// the hide left a back-button dismissal showing a full-screen thread over
+    /// a card flying away underneath it, with nothing to ever take it down.
+    /// This method is the grab's alone, so it is the honest signal that one is
+    /// running.
+    #if DEBUG
+    /// Arms the engaged dismissal WITHOUT a real engagement, so a test can
+    /// pin the ordering rule the flag exists for.
     ///
-    /// The bar cannot be a passenger: it belongs to the navigation controller,
-    /// above the transition's container, and the flight deliberately leaves it
-    /// there. On an engaged page it carries that interface's own controls — the
-    /// close, the sort, the author — so a bar pinned to the screen's corners
-    /// while everything under it travels reads as two layers coming apart. It
-    /// recedes on the gesture's own value instead.
-    ///
-    /// The toolbar needs nothing: the interaction controller already fades it
-    /// on this same channel.
+    /// The rule is about two public entry points meeting in the wrong order —
+    /// the hide is deferred by a commit and a display tick, so it lands after
+    /// the grab has begun — and the engagement itself is not what is under
+    /// test. This flips the flag and nothing else.
+    func debugArmEngagedDismissal() {
+        isEngagedDismissalActive = true
+    }
+    #endif
+
     public func setZoomDismissProgress(
         _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat, settling: Bool
     ) {
-        guard commentsEngagedID != nil, !commentsEngagementIsResting else { return }
+        guard commentsEngagedID != nil, !commentsEngagementIsResting,
+              let cell = activeSnapCell
+        else { return }
+        if !isEngagedDismissalActive {
+            isEngagedDismissalActive = true
+            view.alpha = 1
+            // The floors between the page and the card go transparent — the
+            // page itself stays whole, so what shows around it as it shrinks is
+            // the flight, not this screen's black.
+            view.backgroundColor = .clear
+            collectionView.backgroundColor = .clear
+            cell.beginEngagedDismissal()
+        }
+        // Re-asserted every event, not just at arming: anything that hides the
+        // page mid-grab is undone on the next frame the finger produces, so a
+        // race can cost one frame instead of the whole gesture.
+        view.alpha = 1
+        // ⚠️ AND THE NAVIGATION BAR RECEDES WITH IT.
+        //
+        // The bar is the navigation controller's, above the transition's
+        // container — the flight leaves it there deliberately, because on an
+        // ordinary dismissal the page underneath is hidden and the bar is
+        // simply chrome over a shrinking card. Here the page is VISIBLE and
+        // travelling, so a bar pinned to the screen's corners while everything
+        // under it moves reads as two layers coming apart. It carries the
+        // engaged interface's own controls — the close, the sort, the author —
+        // so it belongs to the thread and leaves with it.
+        //
+        // The toolbar needs nothing: the interaction controller already fades
+        // it on this same channel.
         navigationController?.navigationBar.alpha = 1 - min(max(progress, 0), 1)
+        // The rect arrives in the CONTAINER's coordinates, which are this
+        // view's: both are full-bleed in it. The same assumption the opening
+        // makes about the rect it is handed.
+        cell.setEngagedDismissalProgress(
+            progress, card: view.convert(card, to: cell.contentView),
+            cornerRadius: cornerRadius, settling: settling
+        )
     }
 
-    /// Puts the page back together after a flight, on every outcome.
+    /// Puts the page back together after a grab, committed or abandoned. Safe
+    /// to call when no grab ran: the flag is the whole guard.
     private func endEngagedDismissalIfNeeded() {
+        guard isEngagedDismissalActive else { return }
+        isEngagedDismissalActive = false
         navigationController?.navigationBar.alpha = 1
-        activeSnapCell?.reclaimPageStage()
+        activeSnapCell?.endEngagedDismissal()
+        view.backgroundColor = .black
+        collectionView.backgroundColor = .black
     }
 
     /// A presenting flight is staging. The active page must not start its own
