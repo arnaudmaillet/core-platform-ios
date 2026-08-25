@@ -497,6 +497,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The grab's current mapping of page onto card, held so a layout pass
     /// cannot be the last word on where the page is.
     private var dismissalTravel: CGAffineTransform?
+    /// What each travelling layer's opacity was when the grab began — an
+    /// abandoned one has to put back exactly that, and a starting one has to
+    /// begin from it.
+    private var restingAlphas: [CGFloat] = []
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
     /// The engaged header's frost: a dissolving blur band across the top
@@ -913,6 +917,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.isHidden = true
         groundForMaskedReveal = contentView.backgroundColor
         contentView.backgroundColor = .clear
+        // ⚠️ EACH LAYER STARTS FROM ITS OWN OPACITY, not from 1.
+        //
+        // Fading them as `1 - t` assumes they were all opaque, and the wash is
+        // not: at rest it carries whatever the engagement left it at. Driven
+        // from 1 it went FULLY opaque on the grab's first frame and the
+        // photograph vanished behind it — the page changing the moment it was
+        // touched, which is the one thing the first frame of a gesture must
+        // never do.
+        //
+        // Captured here and scaled from, so t=0 is exactly the page that was on
+        // screen and t=1 is nothing.
+        restingAlphas = dismissalTravellers.map(\.alpha)
     }
 
     /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
@@ -927,10 +943,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setEngagedDismissalProgress(_ progress: CGFloat, card: CGRect) {
         guard isEngagedDismissing else { return }
         let t = min(max(progress, 0), 1)
-        // The thread and its wash recede together, on one value. The
-        // photograph is the card's and is not this method's business at all —
-        // see `beginEngagedDismissal`.
-        for view in dismissalTravellers { view.alpha = 1 - t }
+        // The thread and its wash recede together, on one value — each from
+        // where it already was. The photograph is the card's and is not this
+        // method's business at all — see `beginEngagedDismissal`.
+        for (view, resting) in zip(dismissalTravellers, restingAlphas) {
+            view.alpha = resting * (1 - t)
+        }
         guard card.width > 0, card.height > 0 else { return }
         // ⚠️ FILL, NOT FIT — and it moves the THREAD now, which is all that is
         // left to move.
@@ -1035,10 +1053,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard isEngagedDismissing else { return }
         isEngagedDismissing = false
         dismissalTravel = nil
-        for view in dismissalTravellers {
-            view.alpha = 1
+        for (view, resting) in zip(dismissalTravellers, restingAlphas) {
+            view.alpha = resting
             view.transform = .identity
         }
+        restingAlphas = []
         // The wash comes back with everything else: an abandoned grab returns
         // to a page that has to be readable again.
         contentView.mask = nil
