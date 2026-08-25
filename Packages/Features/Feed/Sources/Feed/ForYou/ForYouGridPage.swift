@@ -51,6 +51,17 @@ final class ForYouGridPage: UIView {
     /// one, or the count becomes a control that does nothing on exactly the
     /// screens nobody thought about.
     var onItemCommentsTapped: ((Int) -> Void)?
+
+    /// The posts whose cards are ON SCREEN and worth warming — their first page
+    /// of comments, and anything else a host wants ready before a tap.
+    ///
+    /// ⚠️ IT RIDES THE AUTOPLAY RECONCILE, deliberately, which is what gives it
+    /// the fling gate for free. A feed that warms while the viewer is throwing
+    /// it spends a request per card it will never show for longer than a
+    /// glance; the same argument that stops a player being ATTACHED above
+    /// `maximumStartVelocity` stops the warm above it, and the two can never
+    /// drift apart because they are one decision.
+    var onWarmRequested: (([GalleryPost]) -> Void)?
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
@@ -576,6 +587,7 @@ final class ForYouGridPage: UIView {
     /// new — the mid-fling case, where anything started is gone before its first
     /// frame.
     func updateAutoplay(allowingStarts: Bool = true) {
+        requestWarm(allowingStarts)
         guard let playback else { return }
         let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
         let centreY = viewport.midY
@@ -2096,6 +2108,30 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         guard remaining < Self.prefetchDistance else { return }
         onNearEnd?()
     }
+
+    /// Asks the host to warm what is on screen. Silent during a fling, and
+    /// silent while the page is showing skeletons — there is nothing on screen
+    /// then but the shape of what is coming.
+    private func requestWarm(_ allowing: Bool) {
+        guard allowing, !showsSkeleton, onWarmRequested != nil else { return }
+        let visible = collectionView.indexPathsForVisibleItems
+            .sorted()
+            .map(flatIndex(for:))
+            .filter(posts.indices.contains)
+            .prefix(Self.warmWindow)
+            .map { posts[$0] }
+        guard !visible.isEmpty else { return }
+        onWarmRequested?(visible)
+    }
+
+    /// ⚠️ A CEILING ON THE BURST, because "visible" is not always three cards.
+    ///
+    /// These rows SELF-SIZE, and until a cell has been measured the layout
+    /// holds it at its estimate — so the first reconcile after a render reports
+    /// a dozen items inside the viewport, and the trace showed exactly that:
+    /// twelve posts asked for at once, each in its own task. Four is what fits
+    /// on screen once the heights are real, plus room for the one arriving.
+    private static let warmWindow = 4
 
     /// Reconcile cadence during a scroll, in seconds. ~30 Hz: fast enough that
     /// a tile is playing by the time the eye has settled on it, slow enough

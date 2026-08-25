@@ -41,6 +41,10 @@ final class ForYouViewController: UIViewController {
     /// Loads a post's first page of comments into the panel's synchronous
     /// cache. Optional so the other entry points need not supply one.
     private let prefetchTopComments: ((PostID) async -> Void)?
+    /// Posts whose first page of comments has been asked for. A set, because
+    /// the reconcile that feeds it runs at ~30Hz while a finger is moving and
+    /// the same three cards are on screen for most of it.
+    private var warmedComments: Set<PostID> = []
     /// How this screen leaves itself. Weak, and held by the composition root —
     /// the screen never builds a destination, it names one.
     private weak var router: (any Router)?
@@ -473,6 +477,7 @@ final class ForYouViewController: UIViewController {
         pager.onItemCommentsTapped = { [weak self] format, index in
             self?.openFeed(from: format, at: index, showingComments: true)
         }
+        pager.onWarmRequested = { [weak self] posts in self?.warmVisible(posts) }
         pager.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
         pager.onRefresh = { [weak self] in self?.viewModel.refresh() }
         // An ordinary push onto whatever stack this screen is on — the app's
@@ -497,7 +502,12 @@ final class ForYouViewController: UIViewController {
             auditPostMenu()
             #endif
         }
-        viewModel.onCorpusReset = { [weak self] in self?.pager.invalidateIncrementalUpdates() }
+        viewModel.onCorpusReset = { [weak self] in
+            self?.pager.invalidateIncrementalUpdates()
+            // A new corpus is new posts under old ids' places; what was warmed
+            // says nothing about what is on screen now.
+            self?.warmedComments.removeAll()
+        }
         viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
         viewModel.onPagingChange = { [weak self] paging in self?.pager.setPaging(paging) }
         viewModel.onUnreadChange = { [weak self] counts in self?.applyBadges(counts) }
@@ -1702,8 +1712,75 @@ final class ForYouViewController: UIViewController {
         // warming the post that will actually be tapped.
         let onPage = pager.posts(for: viewModel.format).prefix(12)
         let textIDs = onPage.filter { $0.kind == .text }.map(\.id)
-        guard !textIDs.isEmpty, let prefetchTopComments else { return }
-        Task { for id in textIDs { await prefetchTopComments(id) } }
+        guard !textIDs.isEmpty else { return }
+        warm(textIDs, immediate: false)
+    }
+
+    /// Warms what the viewer can actually see — see
+    /// `ForYouGridPage.onWarmRequested`, which decides WHEN by riding the
+    /// autoplay reconcile and its fling gate.
+    ///
+    /// ⚠️ EVERY KIND NOW, not just text. The rule this replaces was sound when
+    /// it was written — "a media post opens onto its media and its comments are
+    /// a secondary surface, so warming those would be a dozen extra requests to
+    /// remove nothing visible" — and the comment count broke it: pressing it
+    /// opens a media post STRAIGHT INTO its thread, where an unwarmed page
+    /// shows a skeleton for the length of the flight and resolves after it.
+    ///
+    /// What keeps the request count honest is no longer the kind but the
+    /// VISIBILITY: the ahead-of-time pass above still warms text posts down the
+    /// page, and everything else is warmed only once its card is on screen and
+    /// the feed is not being flung.
+    private func warmVisible(_ posts: [GalleryPost]) {
+        warm(posts.map(\.id), immediate: true)
+    }
+
+    /// ⚠️ TWO QUEUES, AND THE DIFFERENCE IS THE WHOLE FEATURE.
+    ///
+    /// `immediate` is what the viewer is LOOKING AT: one task per post, started
+    /// now. Serial is wrong here — the first version ran every warm through one
+    /// `for` loop, so the post whose card filled the screen waited behind
+    /// eleven others down the page and was still fetching when the chip was
+    /// pressed. The trace says it plainly: `asking [… post-new-04]` with the
+    /// opened post LAST.
+    ///
+    /// Everything else is a queue, and it claims an id only when it REACHES
+    /// it. Claiming the whole batch up front is how the ahead-of-time pass
+    /// starved the visible one: it had already put its name on every post on
+    /// the page, so when a card came into view there was nothing left to ask
+    /// for and nothing to jump the queue with.
+    private func warm(_ ids: [PostID], immediate: Bool) {
+        guard let prefetchTopComments else { return }
+        #if DEBUG
+        // `-warm-log`: what was asked for and when it answered. It exists to
+        // tell "the warm never ran" from "the warm ran and the tap beat it" —
+        // two failures that look identical on screen, both a skeleton.
+        let trace = ProcessInfo.processInfo.arguments.contains("-warm-log")
+        #endif
+        guard immediate else {
+            let queued = ids.filter { !warmedComments.contains($0) }
+            guard !queued.isEmpty else { return }
+            Task { @MainActor in
+                for id in queued where self.warmedComments.insert(id).inserted {
+                    #if DEBUG
+                    if trace { print("[warm] queued \(id.rawValue)") }
+                    #endif
+                    await prefetchTopComments(id)
+                }
+            }
+            return
+        }
+        for id in ids where warmedComments.insert(id).inserted {
+            #if DEBUG
+            if trace { print("[warm] asking \(id.rawValue)") }
+            #endif
+            Task {
+                await prefetchTopComments(id)
+                #if DEBUG
+                if trace { print("[warm] ready \(id.rawValue)") }
+                #endif
+            }
+        }
     }
 
     #if DEBUG
