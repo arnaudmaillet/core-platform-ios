@@ -494,6 +494,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// ground stored, so the dismissal that followed it declined to run and
     /// the thread stopped receding on exactly the pages that opened with one.
     private var isEngagedDismissing = false
+    private var restingCornerRadiusForDismissal: CGFloat = 0
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
     /// The engaged header's frost: a dissolving blur band across the top
@@ -849,90 +850,78 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     }
 
-    /// **THE DISMISSING GRAB'S OTHER HALF.** Hands the media to the card and
-    /// keeps the thread on screen so it can recede with the finger.
+    /// **THE DISMISSING GRAB'S OTHER HALF.** The whole page travels with the
+    /// card, as one object.
     ///
-    /// The mirror of `beginMaskedRevealForFlight`, and it needs the same two
-    /// preparations for the same reasons: the page's media goes, because the
-    /// card is carrying it home at the crop the row will land on, and the
-    /// page's opaque floor goes, because a thread standing on black shuts the
-    /// photograph out from behind it.
-    func beginEngagedDismissal() {
+    /// ⚠️ ONE TRANSFORM ON THE PARENT, never a transform per layer.
+    ///
+    /// The first version moved the thread and the wash independently inside a
+    /// window that moved too — three things being told the same geometry, and
+    /// three chances for one of them to be told a frame late. That is what a
+    /// flash and a half-frame of misalignment at the start of a grab are made
+    /// of. `contentView` holds every one of them, so it is the thing that
+    /// moves: what is inside it cannot drift from what is beside it, because
+    /// nothing inside it is being animated at all.
+    ///
+    /// ⚠️ AND THE PAGE KEEPS ITS OWN FACE. It used to hide its media and clear
+    /// its floor, on the reasoning that the card was carrying the photograph
+    /// and should show through. But the card is only guaranteed to be DRAWING
+    /// after a display tick — the deferred content hide waits for exactly that
+    /// — so the page went transparent over a card that had not painted yet and
+    /// the background dropped to black at the instant of the grab. Left whole,
+    /// the page IS the photograph for the length of the gesture, and the card
+    /// behind it is what lands.
+    ///
+    /// - Parameter hidingMedia: the one case where the page cannot show its own
+    ///   media — its live surface has been DONATED to the card, so its media
+    ///   view is an empty hole. Then, and only then, it is hidden and the card
+    ///   underneath is what shows.
+    func beginEngagedDismissal(hidingMedia: Bool) {
         guard isCommentsEngaged, !isEngagedDismissing else { return }
         isEngagedDismissing = true
         mediaHiddenForMaskedReveal = mediaCard.isHidden
-        mediaCard.isHidden = true
-        groundForMaskedReveal = contentView.backgroundColor
-        contentView.backgroundColor = .clear
+        if hidingMedia { mediaCard.isHidden = true }
+        restingCornerRadiusForDismissal = contentView.layer.cornerRadius
+        contentView.layer.cornerCurve = .continuous
+        contentView.clipsToBounds = true
     }
 
     /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
     ///
-    /// The grab can be pushed forward, dragged back, and abandoned; anything
-    /// that animates towards a target here would be chasing a value that has
-    /// already moved, and a cancelled grab would leave the thread mid-fade.
-    /// The dim and the toolbar recede on exactly these terms, which is what
-    /// makes the two halves of the screen agree about how far the gesture has
-    /// gone.
+    /// The grab can be pushed forward, dragged back and abandoned; anything
+    /// that animated towards a target here would be chasing a value that has
+    /// already moved, and a cancelled grab would leave the page mid-flight.
+    /// The dim and the toolbar recede on exactly these terms. (The RELEASE is
+    /// the exception, and it is not one: the same call is made from inside the
+    /// release's own animation block, so UIKit interpolates it on the card's
+    /// spring rather than on a second one.)
     func setEngagedDismissalProgress(_ progress: CGFloat, card: CGRect) {
         guard isEngagedDismissing else { return }
         let t = min(max(progress, 0), 1)
-        // ⚠️ IT TRAVELS WITH THE CARD, it does not merely dim in place.
+        // ⚠️ ONLY THE THREAD RECEDES. The readability wash over the media does
+        // not, and it used to go three times faster than the text it serves.
         //
-        // Fading alone left the thread full-screen over a card that had
-        // already shrunk and moved under the finger — the page's furniture
-        // hanging in space while the thing it belongs to was being carried
-        // away. The window follows the card's rect and the content takes its
-        // scale, which is the opening's two channels run backwards.
-        //
-        // Guarded on a real rect: the release hands `.zero` when it resets, and
-        // a window of nothing would blank the page for the frame before the
-        // teardown puts it back.
-        if card.width > 0, card.height > 0 {
-            let mask = flightMask ?? makeDismissalMask()
-            mask.frame = card
-            mask.layer.cornerRadius = ScreenGeometry.cornerRadius(behind: self)
-            let scale = card.width / max(contentView.bounds.width, 1)
-            let shift = CGAffineTransform(
-                translationX: card.midX - contentView.bounds.midX,
-                y: card.midY - contentView.bounds.midY
-            ).scaledBy(x: scale, y: scale)
-            commentsContainer.transform = shift
-            mediaBackdrop.transform = shift
-        }
+        // What that produced was not a lighter photograph but a BLACK one: the
+        // page was also hiding its media and clearing its ground at the time,
+        // so lifting the wash uncovered the container rather than the picture.
+        // Both of those are gone now, and the wash stays where it is on its own
+        // account — a page being carried away should look like the page, and
+        // its ground is not part of what the gesture is about.
         commentsContainer.alpha = 1 - t
         headerFrost.alpha = 1 - t
-        // ⚠️ THE WASH LEAVES FASTER THAN THE TEXT, and the first version had
-        // them on one curve.
-        //
-        // The dim exists to make the thread readable over a photograph. Faded
-        // at the thread's own rate it was still three-quarters opaque a
-        // quarter of the way through the grab, and since the page's media is
-        // hidden by then the thing it was darkening was the CARD — so the
-        // viewer pulled home a picture that stayed nearly black until the
-        // gesture was almost over. It is furniture for text that is leaving:
-        // it goes first, and what the finger is dragging is a photograph.
-        mediaBackdrop.alpha = 1 - min(1, t * Self.dismissWashRate)
+        guard card.width > 0, card.height > 0 else { return }
+        let scale = card.width / max(contentView.bounds.width, 1)
+        contentView.transform = CGAffineTransform(
+            translationX: card.midX - contentView.bounds.midX,
+            y: card.midY - contentView.bounds.midY
+        ).scaledBy(x: scale, y: scale)
+        // ⚠️ DIVIDED BY THE SCALE, because the transform scales the radius too.
+        // The card's corners sit at the display's radius the whole way, so the
+        // page's have to LOOK like that number after being shrunk — which means
+        // holding a larger one before it.
+        contentView.layer.cornerRadius =
+            ScreenGeometry.cornerRadius(behind: self) / max(scale, 0.01)
     }
-
-    /// The dismissal's window, made on the first event that has a card to
-    /// follow rather than at `begin` — the grab stages before it moves, and a
-    /// mask installed at a rect nobody has computed yet is a blank page.
-    private func makeDismissalMask() -> UIView {
-        let mask = UIView()
-        // Opaque: a mask reads its alpha channel, so a clear view masks
-        // everything away.
-        mask.backgroundColor = .black
-        mask.layer.cornerCurve = .continuous
-        contentView.mask = mask
-        flightMask = mask
-        return mask
-    }
-
-    /// How much faster the readability wash leaves than the thread it serves.
-    /// Three: gone by the first third of a grab, which is about where the card
-    /// has shrunk enough to read as an object being carried rather than a page.
-    private static let dismissWashRate: CGFloat = 3
 
     /// Puts the page back, on either outcome. An abandoned grab returns to a
     /// page that must be exactly what it was.
@@ -941,13 +930,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         isEngagedDismissing = false
         commentsContainer.alpha = 1
         headerFrost.alpha = 1
-        mediaBackdrop.alpha = 1
-        commentsContainer.transform = .identity
-        mediaBackdrop.transform = .identity
-        contentView.mask = nil
-        flightMask = nil
-        contentView.backgroundColor = groundForMaskedReveal
-        groundForMaskedReveal = nil
+        contentView.transform = .identity
+        contentView.clipsToBounds = false
+        contentView.layer.cornerRadius = restingCornerRadiusForDismissal
         mediaCard.isHidden = mediaHiddenForMaskedReveal
     }
 

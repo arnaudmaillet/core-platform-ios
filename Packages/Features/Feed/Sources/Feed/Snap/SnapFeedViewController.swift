@@ -3037,9 +3037,15 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         if !isEngagedDismissalActive {
             isEngagedDismissalActive = true
             view.alpha = 1
+            // The floors between the page and the card go transparent — the
+            // page itself stays whole, so what shows around it as it shrinks is
+            // the flight, not this screen's black.
             view.backgroundColor = .clear
             collectionView.backgroundColor = .clear
-            cell.beginEngagedDismissal()
+            // The page shows its own media unless it has GIVEN that media away:
+            // a donated live surface leaves its media view an empty hole, and
+            // only then does the card underneath have to be what shows.
+            cell.beginEngagedDismissal(hidingMedia: donatedLiveView != nil)
         }
         // Re-asserted every event, not just at arming: anything that hides the
         // page mid-grab is undone on the next frame the finger produces, so a
