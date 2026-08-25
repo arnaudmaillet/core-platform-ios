@@ -1049,11 +1049,28 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         [commentsContainer, headerFrost, mediaBackdrop]
     }
 
+    /// - Parameter card: the rect this is being told about. Nil means this is
+    ///   the LAYOUT's re-assert rather than a new position from the gesture,
+    ///   and that distinction decides whether an animating layer is touched.
     private func applyDismissalTravel(card: CGRect? = nil) {
+        let isReassert = card == nil
         if let card { dismissalCard = card }
         guard let fill = dismissalTravel, let card = dismissalCard else { return }
         let page = contentView.bounds
         for view in dismissalTravellers {
+            // ⚠️ NEVER RE-ASSERT OVER AN ANIMATION IN FLIGHT.
+            //
+            // The dip and the release put these layers on a spring — told from
+            // inside the animation's own block so they ride the card's curve.
+            // A layout pass landing mid-spring called this, which assigned the
+            // END value outside the block: that layer snapped to the target
+            // while the window and its siblings were still travelling. One
+            // frame, on whichever layers happened to be animating, which is
+            // exactly the "as if each layer were animated separately" of it.
+            //
+            // The layout's job here is to undo what the layout ITSELF erased.
+            // A layer that is animating has not been erased.
+            if isReassert, view.layer.animation(forKey: "transform") != nil { continue }
             // `center` is the untransformed centre: it is what the layout
             // decided, and it is not disturbed by the transform being set.
             let c = view.center
