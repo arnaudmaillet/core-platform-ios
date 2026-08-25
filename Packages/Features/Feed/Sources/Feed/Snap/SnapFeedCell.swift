@@ -913,19 +913,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.isHidden = true
         groundForMaskedReveal = contentView.backgroundColor
         contentView.backgroundColor = .clear
-        // ⚠️ THE WASH GOES, AND IT GOES AT ONCE.
-        //
-        // It is a readability layer for text over a photograph, and it is
-        // nearly opaque — which is why an engaged page reads so dark. Carried
-        // into the grab it covered the picture for the whole gesture and then
-        // handed over to a card that has no wash at all: the black rectangle
-        // being dragged around, and a step in exposure at the last frame.
-        //
-        // Interpolating it was tried twice and is the wrong shape. It is not
-        // part of what the gesture is about — it serves text that is leaving —
-        // so it goes with the DECISION, not with the finger. What is being
-        // dragged is a photograph, and from the first frame it looks like one.
-        mediaBackdrop.alpha = 0
     }
 
     /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
@@ -940,10 +927,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setEngagedDismissalProgress(_ progress: CGFloat, card: CGRect) {
         guard isEngagedDismissing else { return }
         let t = min(max(progress, 0), 1)
-        // The thread recedes with the finger. The photograph is the card's and
-        // is not this method's business at all — see `beginEngagedDismissal`.
-        commentsContainer.alpha = 1 - t
-        headerFrost.alpha = 1 - t
+        // The thread and its wash recede together, on one value. The
+        // photograph is the card's and is not this method's business at all —
+        // see `beginEngagedDismissal`.
+        for view in dismissalTravellers { view.alpha = 1 - t }
         guard card.width > 0, card.height > 0 else { return }
         // ⚠️ FILL, NOT FIT — and it moves the THREAD now, which is all that is
         // left to move.
@@ -1005,8 +992,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Every layer that makes up the page's face — one list, so the grab has
     /// one thing to move and the layout one thing to put back.
+    /// ⚠️ THE WASH IS ONE OF THEM, on the thread's own value.
+    ///
+    /// It exists to hold text off a photograph, so it belongs to the text: it
+    /// leaves at exactly the rate the text does, and the page looks like itself
+    /// at the moment the grab begins rather than brightening in one frame.
+    ///
+    /// It can only be here because the page no longer draws the media. Over the
+    /// page's own photograph it was a second dimming of a picture the card was
+    /// already showing undimmed; over nothing at all it was the black rectangle
+    /// this spent two rounds chasing. Over the CARD's photograph, through a
+    /// cleared ground, it is what it always was — a wash on the picture, fading
+    /// out with the words it serves.
     private var dismissalTravellers: [UIView] {
-        [commentsContainer, headerFrost]
+        [commentsContainer, headerFrost, mediaBackdrop]
     }
 
     private func applyDismissalTravel() {
@@ -1047,7 +1046,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.isHidden = mediaHiddenForMaskedReveal
         contentView.backgroundColor = groundForMaskedReveal
         groundForMaskedReveal = nil
-        mediaBackdrop.alpha = 1
     }
 
     /// Retires the window and gives the page its media back.
