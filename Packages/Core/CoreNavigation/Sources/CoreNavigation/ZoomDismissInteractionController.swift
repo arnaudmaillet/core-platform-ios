@@ -291,7 +291,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // the page it is already showing: nothing changes on screen, and every
         // event after this one is a move from somewhere rather than an arrival
         // from nowhere.
-        destination?.setZoomDismissProgress(0, card: pageFrame)
+        destination?.setZoomDismissProgress(0, card: pageFrame, cornerRadius: screenRadius)
 
         // The detach: a real spring, not a scrubbed keyframe — it registers
         // the instant the grab starts, however slowly the finger then moves.
@@ -324,13 +324,23 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// which is the very jump this replaces. Winding the duration down to the
     /// deadline makes the animation vanish into a direct set exactly when the
     /// window closes, so there is nothing left to discharge.
+    /// The card's corner for a drag progress: the display's at the page, the
+    /// source's own at the landing. One curve, so the card and anything drawing
+    /// beside it can never be rounded differently.
+    private static func grabCornerRadius(
+        at progress: CGFloat, screen: CGFloat, flight: ZoomFlight
+    ) -> CGFloat {
+        screen + (flight.card.zoomRestingCornerRadius - screen) * min(max(progress, 0), 1)
+    }
+
     private func springDetach(_ flight: ZoomFlight, to scale: CGFloat, progress: CGFloat) {
         let remaining = max(detachDeadline - CACurrentMediaTime(), 0)
+        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius, flight: flight)
         UIView.animate(
             withDuration: remaining, delay: 0, usingSpringWithDamping: 0.8,
             initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
-            flight.poseFloating(scale: scale, cornerRadius: self.screenRadius)
+            flight.poseFloating(scale: scale, cornerRadius: radius)
             // ⚠️ THE DESTINATION RIDES THE DIP TOO, from inside the block.
             //
             // The dip is the one stretch of a grab where the card is ANIMATING
@@ -344,7 +354,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             // Told the same target from in here, UIKit interpolates its answer
             // on the dip's own spring. Same block, same curve, nothing to keep
             // in step by hand.
-            self.destination?.setZoomDismissProgress(progress, card: flight.card.frame)
+            self.destination?.setZoomDismissProgress(
+                progress, card: flight.card.frame, cornerRadius: radius
+            )
         }
     }
 
@@ -416,14 +428,26 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // curve is handed to it as a moving target rather than skipped, so the
         // finger's travel is never banked up to be released in one frame.
         let scale = Self.grabScale(at: progress)
+        // ⚠️ THE CARD ROUNDS AS IT GOES, rather than snapping at the release.
+        //
+        // It held the display's radius for the whole drag and jumped to the
+        // source's on release, which is a step in the one channel the eye is
+        // most sensitive to — and it made anything ELSE that rounds with the
+        // gesture disagree with it for the length of the grab. Interpolated,
+        // the release inherits the shape the drag already had, and a
+        // destination that draws alongside the card can be told the same
+        // number instead of guessing it.
+        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius, flight: flight)
         if isDetachSettling {
             springDetach(flight, to: scale, progress: progress)
         } else {
-            flight.poseFloating(scale: scale, cornerRadius: screenRadius)
+            flight.poseFloating(scale: scale, cornerRadius: radius)
             // Outside the dip the card is not animating, so its model frame IS
             // what it is showing and a direct set is exact. See `springDetach`
             // for the branch where that stops being true.
-            destination?.setZoomDismissProgress(progress, card: flight.card.frame)
+            destination?.setZoomDismissProgress(
+                progress, card: flight.card.frame, cornerRadius: radius
+            )
         }
         dim?.alpha = 1 - progress
         // The toolbar recedes on the same channel as the dim: pure function
@@ -544,7 +568,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             // it onto the tile and to nothing, which is also the state its
             // teardown expects: there is no frame where the two disagree.
             self.destination?.setZoomDismissProgress(
-                commit ? 1 : 0, card: commit ? landing : flight.pageFrame
+                commit ? 1 : 0,
+                card: commit ? landing : flight.pageFrame,
+                cornerRadius: commit ? flight.card.zoomRestingCornerRadius : screenRadius
             )
             if commit {
                 flight.poseAtSource(at: landing)
@@ -635,7 +661,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // same completeTransition turn, so no restored frame can render.
         toolbar?.alpha = 1
         // Restore the feed content for the cancel path; moot when finished.
-        destination?.setZoomDismissProgress(0, card: .zero)
+        destination?.setZoomDismissProgress(0, card: .zero, cornerRadius: 0)
         destination?.setZoomContentHidden(false)
         destination?.zoomTransitionDidEnd()
         // Unconditional, cancel included: a cancelled grab that left the source

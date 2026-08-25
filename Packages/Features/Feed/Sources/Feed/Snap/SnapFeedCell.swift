@@ -942,7 +942,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the exception, and it is not one: the same call is made from inside the
     /// release's own animation block, so UIKit interpolates it on the card's
     /// spring rather than on a second one.)
-    func setEngagedDismissalProgress(_ progress: CGFloat, card: CGRect) {
+    func setEngagedDismissalProgress(
+        _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat
+    ) {
         guard isEngagedDismissing else { return }
         let t = min(max(progress, 0), 1)
         // The thread and its wash recede together, on one value — each from
@@ -984,24 +986,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // One rule, applied where each layer actually is.
         dismissalTravel = fill
         applyDismissalTravel(card: card)
-        // ⚠️ THE RADIUS TRAVELS TOO, from the screen's to the ROW's.
+        // ⚠️ THE CARD'S RADIUS, HANDED OVER — never a second copy of the curve.
         //
-        // The card is going home to a rounded media rect inside a card, so the
-        // corners it lands on are the row's, not the display's — and holding
-        // the display's radius the whole way made the page arrive square-ish
-        // against a rounded landing. It moves on the grab's own rate, like the
-        // thread's opacity, and the release finishes it: commit hands t=1 from
-        // inside the flight's spring, so the last of the rounding happens on
-        // the same curve as the last of the travel.
+        // The window computed its own interpolation from the display's corner
+        // to the row's, which is the right shape and was not the card's: the
+        // card held the display's radius flat for the whole drag, so the two
+        // silhouettes were rounded differently for the length of the gesture.
+        // The card interpolates now (`grabCornerRadius`) and passes the number
+        // it used, so there is one curve and no way to disagree about it.
         let window = flightMask ?? makeDismissalWindow()
         window.frame = card
-        let screenRadius = ScreenGeometry.cornerRadius(behind: self)
-        window.layer.cornerRadius =
-            screenRadius + (PostGridListRowCell.mediaCornerRadius - screenRadius) * t
+        window.layer.cornerRadius = cornerRadius
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-grab-log") {
-            print(String(format: "[grab] t=%.2f fill=%.3f card=%@",
-                         t, fill, NSCoder.string(for: card)))
+            print(String(format: "[grab] t=%.2f fill=%.3f radius=%.1f card=%@",
+                         t, fill, cornerRadius, NSCoder.string(for: card)))
         }
         #endif
     }

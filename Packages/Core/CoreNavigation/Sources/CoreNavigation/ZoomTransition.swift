@@ -232,9 +232,14 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// gesture has gone. A destination that only faded would leave its
     /// interface full-screen over a card that had already shrunk and moved.
     ///
+    /// `cornerRadius` is the card's own, for the same reason: it rounds from
+    /// the display's corner to the source's across the gesture, and a
+    /// destination that computed its own copy of that curve would be one
+    /// edit away from disagreeing with the thing it is drawn against.
+    ///
     /// Called on every pan event, and once more with the outcome's value when
     /// the grab is released. Default is nothing.
-    func setZoomDismissProgress(_ progress: CGFloat, card: CGRect)
+    func setZoomDismissProgress(_ progress: CGFloat, card: CGRect, cornerRadius: CGFloat)
 
     /// Detaches the destination's live player and parks it for whoever plays
     /// the same asset next — the source it is flying home to. Called on the
@@ -319,7 +324,7 @@ public extension ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin() {}
-    func setZoomDismissProgress(_ progress: CGFloat, card: CGRect) {}
+    func setZoomDismissProgress(_ progress: CGFloat, card: CGRect, cornerRadius: CGFloat) {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }
 }

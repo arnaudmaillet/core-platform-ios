@@ -3030,7 +3030,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
     #endif
 
-    public func setZoomDismissProgress(_ progress: CGFloat, card: CGRect) {
+    public func setZoomDismissProgress(
+        _ progress: CGFloat, card: CGRect, cornerRadius: CGFloat
+    ) {
         guard commentsEngagedID != nil, !commentsEngagementIsResting,
               let cell = activeSnapCell
         else { return }
@@ -3052,7 +3054,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // view's: both are full-bleed in it. The same assumption the opening
         // makes about the rect it is handed.
         cell.setEngagedDismissalProgress(
-            progress, card: view.convert(card, to: cell.contentView)
+            progress, card: view.convert(card, to: cell.contentView),
+            cornerRadius: cornerRadius
         )
     }
 
