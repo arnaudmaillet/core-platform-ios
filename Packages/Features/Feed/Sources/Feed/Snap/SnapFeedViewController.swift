@@ -2709,10 +2709,21 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// until its first render, and the landing seam is what picks the request up
     /// then. Which is why the request is only cleared once it is USED.
     func applyPendingComments(animated: Bool) {
-        guard let id = pendingCommentsID,
-              dataSource.indexPath(for: id) != nil else { return }
-        pendingCommentsID = nil
+        guard let id = pendingCommentsID else { return }
         presentComments(for: id, animated: animated)
+        // ⚠️ CONSUMED ONLY IF IT LANDED, and the difference is a whole defect.
+        //
+        // `presentComments` needs a REALIZED CELL, not just a row in the data
+        // source — and before the push this screen has been laid out at
+        // whatever size it was born with, so on the first open of a process
+        // there is often no cell yet. The request was cleared anyway, the
+        // engagement bailed silently, and the post opened in its ordinary
+        // layout. The SECOND open worked, because the feed controller is
+        // reused and by then has both.
+        //
+        // "I asked" and "it happened" are different facts, and only the second
+        // one may clear a one-shot.
+        if commentsEngagedID == id { pendingCommentsID = nil }
     }
 
     /// Takes the pending page for `id`, if there is one. Reading it clears it —
@@ -2971,6 +2982,11 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // show. Asked there, it had no active cell to mask and silently did
         // nothing: the flight carried the photograph correctly and the thread
         // still arrived in one frame at the landing.
+        // ⚠️ ON EVERY OPENING, not just the masked one: this is the last seam
+        // before the card covers the screen, and the first where the page is
+        // real. A request that could not be honoured before the push is
+        // honoured here, unanimated, so the post still LANDS in its thread
+        // rather than rearranging itself afterwards.
         if hidden { beginMaskedRevealIfRequested() }
         guard !isMaskedRevealActive else { return view.alpha = 1 }
         view.alpha = hidden ? 0 : 1
@@ -2988,6 +3004,11 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// **OPTION B.** Opens the thread's window on the same spring the card
     /// flies on. Silent unless the opener asked for it and the page is engaged.
     private func beginMaskedRevealIfRequested() {
+        // The second attempt at the engagement itself, and for a cold open it
+        // is the one that works: by here the destination is in the container
+        // at its real size, so the page it is about to show is realized. A
+        // no-op when the pre-push attempt already succeeded.
+        applyPendingComments(animated: false)
         guard let rect = pendingCommentsRevealRect, let cell = activeSnapCell,
               commentsEngagedID != nil, !commentsEngagementIsResting
         else { return }
