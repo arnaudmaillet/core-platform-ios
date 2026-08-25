@@ -485,6 +485,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// `beginMaskedRevealForFlight`. Non-nil only for the length of a flight.
     private var flightMask: UIView?
     private var mediaHiddenForMaskedReveal = false
+    private var alphaForMaskedReveal: CGFloat = 1
     private var groundForMaskedReveal: UIColor?
     /// ⚠️ ITS OWN FLAG, not a re-read of `groundForMaskedReveal`.
     ///
@@ -915,8 +916,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // existed. So the page draws the thread and nothing else, and what is
         // dragged home is the card's own image the whole way — identical at the
         // last frame because it was never a copy.
-        mediaHiddenForMaskedReveal = mediaCard.isHidden
-        mediaCard.isHidden = true
+        // ⚠️ ALPHA, NOT `isHidden`, and on a video post that is the whole
+        // difference between the card flying frames and flying a thumbnail.
+        //
+        // The card does not take this page's surface: it attaches a SECOND one
+        // to the same player, ALONGSIDE this one, so both draw the same frames.
+        // Alongside is the operative word — a hidden view is out of the render
+        // path, and with this one hidden the sibling stopped being fed. The
+        // card ended up holding a live surface with a single frame on it and
+        // its cover image showing through: the thumbnail in the window.
+        //
+        // Alpha 0 is invisible and still rendered, which is exactly what the
+        // flight does to the destination as a whole, for the same reason.
+        alphaForMaskedReveal = mediaCard.alpha
+        mediaCard.alpha = 0
         groundForMaskedReveal = contentView.backgroundColor
         contentView.backgroundColor = .clear
         // ⚠️ EACH LAYER STARTS FROM ITS OWN OPACITY, not from 1.
@@ -1081,7 +1094,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // to a page that has to be readable again.
         contentView.mask = nil
         flightMask = nil
-        mediaCard.isHidden = mediaHiddenForMaskedReveal
+        mediaCard.alpha = alphaForMaskedReveal
         contentView.backgroundColor = groundForMaskedReveal
         groundForMaskedReveal = nil
     }
