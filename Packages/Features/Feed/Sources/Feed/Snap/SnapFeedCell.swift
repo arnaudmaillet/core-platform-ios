@@ -825,34 +825,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
             mask.frame = self.contentView.bounds
+            // ⚠️ THE RADIUS RIDES THIS SPRING, in this block, with the frame.
+            //
+            // It was a separate `CABasicAnimation` on an ease-out curve, which
+            // is a second opinion about the same corner: the card interpolates
+            // its own radius inside the flight's property animator, so the two
+            // silhouettes travelled the same distance at different rates and
+            // only agreed at the ends. `cornerRadius` on a view's OWN layer is
+            // animatable inside a UIView block — the exception to the trap the
+            // page indicator's dots hit, where the value changed in
+            // `layoutSubviews` rather than in the block.
+            mask.layer.cornerRadius = ScreenGeometry.cornerRadius(behind: self)
             revealed.forEach { $0.transform = .identity }
         }
-        // ⚠️ IT LANDS ON THE DEVICE'S RADIUS, NEVER ON ZERO.
-        //
-        // The flight card rounds its corners to the physical display so its
-        // landing sits flush in the bezel — `ZoomFlight.screenCornerRadius`,
-        // and `ScreenGeometry` is where the number is shared so that every
-        // surface impersonating the screen rounds identically. This window is
-        // now one of those surfaces. Opening it to square corners put the
-        // thread's edges outside the photograph's for the whole flight: the
-        // media curved, the comments over it did not.
-        //
-        // The two cannot share a container — the card lives in the transition's
-        // own hierarchy and the thread in the destination's — so they agree on
-        // the numbers instead: the card's radius at the row, the screen's at
-        // the page.
-        //
-        // Animated SEPARATELY, because `cornerRadius` is a layer property and
-        // a `UIView.animate` block does not carry it — the same trap the page
-        // indicator's dots hit, where a shrinking dot went briefly square.
-        let landedRadius = ScreenGeometry.cornerRadius(behind: self)
-        let corners = CABasicAnimation(keyPath: "cornerRadius")
-        corners.fromValue = cornerRadius
-        corners.toValue = landedRadius
-        corners.duration = ZoomFlightSpring.duration
-        corners.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        mask.layer.cornerRadius = landedRadius
-        mask.layer.add(corners, forKey: "cornerRadius")
+
     }
 
     /// Retires the window and gives the page its media back.

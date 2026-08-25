@@ -3026,7 +3026,13 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // to convert through.
         cell.beginMaskedRevealForFlight(
             from: view.convert(rect, to: cell.contentView),
-            cornerRadius: PostGridListRowCell.cardCornerRadius
+            // ⚠️ THE MEDIA'S RADIUS, NOT THE CARD'S. The window opens from the
+            // media rect, and the flight card starts at exactly this number
+            // (`PostGridFlightCard.Style.listMedia.cornerRadius`). The card's
+            // own radius is 26 against the media's 16: close enough to look
+            // deliberate and wrong enough that the two silhouettes never sat
+            // on each other.
+            cornerRadius: PostGridListRowCell.mediaCornerRadius
         )
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
