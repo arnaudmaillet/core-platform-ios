@@ -2989,7 +2989,17 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // honoured here, unanimated, so the post still LANDS in its thread
         // rather than rearranging itself afterwards.
         if hidden { beginMaskedRevealIfRequested() }
-        guard !isMaskedRevealActive else { return view.alpha = 1 }
+        // ⚠️ AN ARMED GRAB REFUSES THE HIDE, and refusing it once is not enough.
+        //
+        // The hide does not run at the grab's start: it is deferred by a commit
+        // and a display tick, so it lands AFTER the first pan events. Arming
+        // the dismissal set the page visible once and the hide then arrived and
+        // won, which is "the thread disappears the instant I grab" exactly.
+        // Declining here is what makes the visibility hold for the length of
+        // the gesture.
+        guard !isMaskedRevealActive, !isEngagedDismissalActive else {
+            return view.alpha = 1
+        }
         view.alpha = hidden ? 0 : 1
     }
 
@@ -3007,6 +3017,19 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// a card flying away underneath it, with nothing to ever take it down.
     /// This method is the grab's alone, so it is the honest signal that one is
     /// running.
+    #if DEBUG
+    /// Arms the engaged dismissal WITHOUT a real engagement, so a test can
+    /// pin the ordering rule the flag exists for.
+    ///
+    /// The rule is about two public entry points meeting in the wrong order —
+    /// the hide is deferred by a commit and a display tick, so it lands after
+    /// the grab has begun — and the engagement itself is not what is under
+    /// test. This flips the flag and nothing else.
+    func debugArmEngagedDismissal() {
+        isEngagedDismissalActive = true
+    }
+    #endif
+
     public func setZoomDismissProgress(_ progress: CGFloat, card: CGRect) {
         guard commentsEngagedID != nil, !commentsEngagementIsResting,
               let cell = activeSnapCell
@@ -3018,6 +3041,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             collectionView.backgroundColor = .clear
             cell.beginEngagedDismissal()
         }
+        // Re-asserted every event, not just at arming: anything that hides the
+        // page mid-grab is undone on the next frame the finger produces, so a
+        // race can cost one frame instead of the whole gesture.
+        view.alpha = 1
         // The rect arrives in the CONTAINER's coordinates, which are this
         // view's: both are full-bleed in it. The same assumption the opening
         // makes about the rect it is handed.
