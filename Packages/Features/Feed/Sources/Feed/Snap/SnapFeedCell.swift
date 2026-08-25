@@ -486,6 +486,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private var flightMask: UIView?
     private var mediaHiddenForMaskedReveal = false
     private var groundForMaskedReveal: UIColor?
+    /// ⚠️ ITS OWN FLAG, not a re-read of `groundForMaskedReveal`.
+    ///
+    /// The opening and the dismissal borrow the same two preparations — the
+    /// media hidden, the ground cleared — and the first version guarded the
+    /// dismissal on the stored ground being nil. A masked OPENING leaves that
+    /// ground stored, so the dismissal that followed it declined to run and
+    /// the thread stopped receding on exactly the pages that opened with one.
+    private var isEngagedDismissing = false
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
     /// The engaged header's frost: a dissolving blur band across the top
@@ -841,6 +849,67 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     }
 
+    /// **THE DISMISSING GRAB'S OTHER HALF.** Hands the media to the card and
+    /// keeps the thread on screen so it can recede with the finger.
+    ///
+    /// The mirror of `beginMaskedRevealForFlight`, and it needs the same two
+    /// preparations for the same reasons: the page's media goes, because the
+    /// card is carrying it home at the crop the row will land on, and the
+    /// page's opaque floor goes, because a thread standing on black shuts the
+    /// photograph out from behind it.
+    func beginEngagedDismissal() {
+        guard isCommentsEngaged, !isEngagedDismissing else { return }
+        isEngagedDismissing = true
+        mediaHiddenForMaskedReveal = mediaCard.isHidden
+        mediaCard.isHidden = true
+        groundForMaskedReveal = contentView.backgroundColor
+        contentView.backgroundColor = .clear
+    }
+
+    /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
+    ///
+    /// The grab can be pushed forward, dragged back, and abandoned; anything
+    /// that animates towards a target here would be chasing a value that has
+    /// already moved, and a cancelled grab would leave the thread mid-fade.
+    /// The dim and the toolbar recede on exactly these terms, which is what
+    /// makes the two halves of the screen agree about how far the gesture has
+    /// gone.
+    func setEngagedDismissalProgress(_ progress: CGFloat) {
+        guard isEngagedDismissing else { return }
+        let t = min(max(progress, 0), 1)
+        commentsContainer.alpha = 1 - t
+        headerFrost.alpha = 1 - t
+        // ⚠️ THE WASH LEAVES FASTER THAN THE TEXT, and the first version had
+        // them on one curve.
+        //
+        // The dim exists to make the thread readable over a photograph. Faded
+        // at the thread's own rate it was still three-quarters opaque a
+        // quarter of the way through the grab, and since the page's media is
+        // hidden by then the thing it was darkening was the CARD — so the
+        // viewer pulled home a picture that stayed nearly black until the
+        // gesture was almost over. It is furniture for text that is leaving:
+        // it goes first, and what the finger is dragging is a photograph.
+        mediaBackdrop.alpha = 1 - min(1, t * Self.dismissWashRate)
+    }
+
+    /// How much faster the readability wash leaves than the thread it serves.
+    /// Three: gone by the first third of a grab, which is about where the card
+    /// has shrunk enough to read as an object being carried rather than a page.
+    private static let dismissWashRate: CGFloat = 3
+
+    /// Puts the page back, on either outcome. An abandoned grab returns to a
+    /// page that must be exactly what it was.
+    func endEngagedDismissal() {
+        guard isEngagedDismissing else { return }
+        isEngagedDismissing = false
+        commentsContainer.alpha = 1
+        headerFrost.alpha = 1
+        mediaBackdrop.alpha = 1
+        contentView.backgroundColor = groundForMaskedReveal
+        groundForMaskedReveal = nil
+        mediaCard.isHidden = mediaHiddenForMaskedReveal
+    }
+
     /// Retires the window and gives the page its media back.
     func endMaskedRevealForFlight() {
         guard flightMask != nil else { return }
@@ -848,6 +917,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         flightMask = nil
         mediaCard.isHidden = mediaHiddenForMaskedReveal
         contentView.backgroundColor = groundForMaskedReveal
+        groundForMaskedReveal = nil
         // Identity, unconditionally: an interrupted flight must not strand the
         // page under a transform nobody can see the origin of.
         for view in [commentsContainer, mediaBackdrop] {

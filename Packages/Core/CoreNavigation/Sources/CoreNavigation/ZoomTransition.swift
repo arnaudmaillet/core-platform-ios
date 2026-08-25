@@ -216,6 +216,19 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// Default is nothing — a destination with no media has nothing to defer.
     func zoomTransitionWillBegin()
 
+    /// How far a dismissing GRAB has travelled: 0 at the page, 1 at the source.
+    ///
+    /// The card impersonates the page's MEDIA, which is all a page usually is.
+    /// A destination that is more than that — one showing a comment thread over
+    /// its media — has an interface the card cannot carry, and it recedes on
+    /// this channel: a pure function of the finger, on the same terms as the
+    /// dim and the toolbar, so the two halves of the screen agree about how far
+    /// the gesture has gone.
+    ///
+    /// Called on every pan event, and once more with the outcome's value when
+    /// the grab is released. Default is nothing.
+    func setZoomDismissProgress(_ progress: CGFloat)
+
     /// Detaches the destination's live player and parks it for whoever plays
     /// the same asset next — the source it is flying home to. Called on the
     /// DISMISS leg once the card has taken over rendering.
@@ -299,6 +312,7 @@ public extension ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin() {}
+    func setZoomDismissProgress(_ progress: CGFloat) {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }
 }
