@@ -311,16 +311,50 @@ struct CarouselPagingLimitTests {
         dots.layoutIfNeeded()
 
         let sizes = dots.debugDotSizes
+        let full = MediaPageIndicatorView.dotDiameter
         #expect(sizes.count == 5)
-        // Small, semi, full, semi, small — a slope on both ends.
+        // Small, semi, full — the slope on the side the viewer came from.
         #expect(sizes[0] < sizes[1])
         #expect(sizes[1] < sizes[2])
-        #expect(sizes[3] < sizes[2])
+        #expect(abs(sizes[2] - full) < 0.5)
+        // ⚠️ And the far side tapers in ONE step here, because the slot its
+        // second step would use is where the MARK is — and the mark never
+        // shrinks (see `theMarkIsNeverTapered`). The window trails the gesture,
+        // so this is the ordinary case rather than a corner of it.
+        #expect(abs(sizes[3] - full) < 0.5)
         #expect(sizes[4] < sizes[3])
-        #expect(abs(sizes[2] - MediaPageIndicatorView.dotDiameter) < 0.5)
-        // And the two ends taper alike.
+        // The two ends still meet the run at the same size.
         #expect(abs(sizes[0] - sizes[4]) < 0.5)
-        #expect(abs(sizes[1] - sizes[3]) < 0.5)
+    }
+
+    /// ⚠️ THE MARK IS FULL SIZE WHEREVER THE WINDOW PUTS IT.
+    ///
+    /// The taper says "the run continues past here" and the mark says "you are
+    /// here"; shrinking the second to tell you the first trades the one thing
+    /// the indicator exists for against a hint its neighbours already give.
+    ///
+    /// Walked across the whole run rather than asserted at one page, because
+    /// which slot the mark occupies is decided by the windowing rule — the very
+    /// thing this must not depend on.
+    @Test func theMarkIsNeverTapered() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.chipWidth(forDots: 5), height: 6)
+        dots.configure(count: 12)
+
+        for page in 0..<12 {
+            dots.setCurrent(page)
+            dots.layoutIfNeeded()
+            let mark = dots.debugAllDotFrames[page]
+            #expect(abs(mark.width - MediaPageIndicatorView.dotDiameter) < 0.5)
+        }
+        // And walked BACK, since the window sits on the other side of the mark
+        // when the direction reverses.
+        for page in (0..<12).reversed() {
+            dots.setCurrent(page)
+            dots.layoutIfNeeded()
+            let mark = dots.debugAllDotFrames[page]
+            #expect(abs(mark.width - MediaPageIndicatorView.dotDiameter) < 0.5)
+        }
     }
 
     /// ⚠️ AND ONLY ON THE SIDE THAT CONTINUES — including the middle dot.

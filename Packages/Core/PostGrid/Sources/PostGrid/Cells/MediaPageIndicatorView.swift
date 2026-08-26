@@ -696,14 +696,27 @@ final class PageDotsView: UIView {
             // nothing more.
             let continuesBefore = start > 0
             let continuesAfter = start + visible < count
+            // ⚠️ THE MARK NEVER TAPERS, wherever the window happens to put it.
+            //
+            // The taper says "the run continues past here"; the mark says
+            // "you are here". Shrinking the second to tell you the first
+            // trades the one thing the indicator exists for against a hint
+            // its neighbours are already giving — and the two collide
+            // constantly rather than rarely, because the window trails the
+            // gesture: the current page sits one slot in from an end, which is
+            // exactly the slot the taper's second step lands on.
             let scale: CGFloat
-            switch offset {
-            case 0 where continuesBefore, visible - 1 where continuesAfter:
-                scale = Self.edgeDotScale
-            case 1 where continuesBefore, visible - 2 where continuesAfter:
-                scale = Self.penultimateDotScale
-            default:
+            if index == current {
                 scale = 1
+            } else {
+                switch offset {
+                case 0 where continuesBefore, visible - 1 where continuesAfter:
+                    scale = Self.edgeDotScale
+                case 1 where continuesBefore, visible - 2 where continuesAfter:
+                    scale = Self.penultimateDotScale
+                default:
+                    scale = 1
+                }
             }
             // ⚠️ SCALED BY TRANSFORM, NEVER BY RESIZING.
             //
