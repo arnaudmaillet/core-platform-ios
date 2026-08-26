@@ -356,9 +356,18 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         guard view.superview !== mediaView else { return }
         view.removeFromSuperview()
         view.translatesAutoresizingMaskIntoConstraints = false
-        mediaView.addSubview(view)
         view.pin(to: mediaView)
-        mediaView.addSubview(view)
+        // ⚠️ BEHIND EVERY OTHER SUBVIEW OF THE PREVIEW, and it takes a second
+        // line to say so because `pin(to:)` begins with `addSubview` — which
+        // puts the view at the FRONT. The preview's own subviews are its
+        // furniture (the counters, the date, the page indicator), so a surface
+        // left where it lands covers all of it: measured as "the counters and
+        // the date disappear on single-video cards".
+        //
+        // The clip is CONTENT and the furniture is chrome, so the order is not
+        // a detail of this one call — it is the same rule the cover obeys,
+        // stated where the only view that can break it is inserted.
+        mediaView.sendSubviewToBack(view)
     }
 
     public private(set) var loadedVideoRenderView: VideoRenderView?

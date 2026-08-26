@@ -2130,6 +2130,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
+    /// See `SnapCellLifecycle.releaseRetainedNeighbourClips`. Idempotent, and
+    /// safe on a cell that never played: the card reports what it let go of,
+    /// and a cell holding nothing reports nothing.
+    func releaseRetainedNeighbourClips() {
+        guard let videoPlayback else { return }
+        cancelPrewarming()
+        // `releaseRetainedSurfaces` spares the watched surface by construction,
+        // which is the whole reason this is safe to call while a dismissal
+        // flight is still in the air.
+        for view in mediaCard.releaseRetainedSurfaces() {
+            videoPlayback.stop(view)
+        }
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace(
+                "depart released neighbours, players=\(videoPlayback.activePlayerCount)"
+            )
+        }
+        #endif
+    }
+
     /// Re-asserts the engaged treatment after the screen re-appears from an
     /// outbound push: the backdrop's blur is window-guarded, so an
     /// engagement that began off-window never materialized it. Layout runs
