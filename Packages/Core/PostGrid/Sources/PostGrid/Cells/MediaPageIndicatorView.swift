@@ -49,10 +49,50 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// lens is the thing this codebase already tried once and rejected.
     public func useInteractiveGlass() {
         prefersInteractiveGlass = true
-        if window != nil { effect = makeGround() }
+        // ⚠️ Records the CHOICE, and does not put the ground up.
+        //
+        // It used to attach the glass on the spot, which is what a chip whose
+        // capsule is always there wants. This one's appears under a finger (see
+        // `showsGroundAtRest`), and attaching here would leave the post screen
+        // the one surface still wearing a capsule at rest. A ground already up
+        // — the preference arriving mid-scrub — is swapped for the glass rather
+        // than left as the material it was.
+        if effect != nil { effect = makeGround() }
     }
 
     private var prefersInteractiveGlass = false
+
+    /// ⚠️ NO GROUND UNTIL A FINGER ARRIVES.
+    ///
+    /// Every other chip on these surfaces is a NUMBER, and a number over a
+    /// photograph needs a floor to be legible on. The dots do not: they are
+    /// their own contrast, drawn light with a shadow, and the capsule behind
+    /// them was doing nothing except claiming — on a card that shows no other
+    /// button — that something here can be pressed. Which is true, and is worth
+    /// saying at the moment it becomes relevant rather than for the whole life
+    /// of the row.
+    ///
+    /// So the ground fades in under the finger and back out when it leaves. On
+    /// the post screen that ground is glass and on a card it is a material;
+    /// both cross-fade the same way, because `effect` is animatable on a
+    /// `UIVisualEffectView` and the chip IS one.
+    override public var showsGroundAtRest: Bool { false }
+
+    /// Fades the chip's ground in or out. Idempotent — the scrub flag it rides
+    /// changes on every gesture edge and only some of those are transitions.
+    private func setGroundShown(_ shown: Bool) {
+        guard shown != (effect != nil), window != nil else { return }
+        UIView.animate(
+            withDuration: shown ? 0.18 : 0.28, delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            // ⚠️ Built INSIDE the animation, and only ever with a window: the
+            // pill's own note records that attaching an effect off-screen
+            // stalls a headless simulator for tens of seconds. A chip being
+            // touched is on screen by definition.
+            self.effect = shown ? self.makeGround() : nil
+        }
+    }
 
     /// The chip's own press response, for the surfaces that have no glass to
     /// give them one.
@@ -234,6 +274,7 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     public private(set) var isScrubbing = false {
         didSet {
             guard isScrubbing != oldValue else { return }
+            setGroundShown(isScrubbing)
             applyPressFeedback()
             onScrubbingChanged?(isScrubbing)
         }
@@ -458,7 +499,26 @@ final class PageDotsView: UIView {
         dots.forEach { $0.removeFromSuperview() }
         dots = (0..<count).map { _ in
             let dot = UIView()
-            dot.backgroundColor = PostMetaPillView.foreground
+            // ⚠️ THE DATE'S INK, because the dots stand on the same thing the
+            // date does: a photograph.
+            //
+            // They were `PostMetaPillView.foreground` — a dark grey chosen for
+            // a LIGHT material — which was right for exactly as long as there
+            // was always a capsule under them. There is not: the ground now
+            // arrives with the finger, so at rest these are dark marks on
+            // whatever the picture happens to be, and on a dark frame they were
+            // measured as invisible. A control nobody can see is a worse answer
+            // than the capsule that was removed.
+            //
+            // Light fill plus a counter-toned halo is what `MediaDateInk`
+            // already worked out for the same problem, and it holds under the
+            // material too: that ground is translucent and follows the picture,
+            // so ink that survives the picture survives the ground.
+            dot.backgroundColor = MediaDateInk.colour
+            dot.layer.shadowColor = MediaDateInk.halo.cgColor
+            dot.layer.shadowOffset = .zero
+            dot.layer.shadowRadius = MediaDateInk.haloRadius
+            dot.layer.shadowOpacity = MediaDateInk.haloOpacity
             dot.layer.cornerRadius = MediaPageIndicatorView.dotDiameter / 2
             addSubview(dot)
             return dot
@@ -582,6 +642,15 @@ final class PageDotsView: UIView {
     /// says the run is cut off there, and the eye reads it without being told.
     static let edgeDotScale: CGFloat = 0.55
 
+    /// The step between `edgeDotScale` and full size, worn by the dot one in
+    /// from each continuing end.
+    ///
+    /// Half way in AREA rather than in diameter, which is what the eye reads:
+    /// the dots are filled circles, so a linear midpoint between the two
+    /// diameters looks closer to the small one than to the large. `sqrt` of the
+    /// mid-area lands where "half way between them" actually looks.
+    static let penultimateDotScale: CGFloat = ((edgeDotScale * edgeDotScale + 1) / 2).squareRoot()
+
     /// The drawn size of each VISIBLE dot, in order — how a test asks which
     /// ones were cut without reading the layout arithmetic back to itself.
     var debugDotSizes: [CGFloat] {
@@ -612,11 +681,30 @@ final class PageDotsView: UIView {
             // simply are not seen — and when the window shifts they travel in
             // from where they already were.
             let isVisible = offset >= 0 && offset < visible
-            // The outermost dot shrinks when the run continues past it, on
-            // whichever side it continues.
-            let continuesBefore = offset == 0 && start > 0
-            let continuesAfter = offset == visible - 1 && start + visible < count
-            let scale: CGFloat = (continuesBefore || continuesAfter) ? Self.edgeDotScale : 1
+            // ⚠️ THE RUN TAPERS OVER TWO DOTS, not one.
+            //
+            // The outermost dot shrinking says "there is more past here"; the
+            // one beside it, at an intermediate size, says how the row is
+            // GOING. A single step from full size to the smallest reads as a
+            // dot that has been cut off, and one taper on each end reads as a
+            // row that continues — the same information, told as a slope
+            // instead of a cliff.
+            //
+            // Both tiers are conditional on the same thing: the run continuing
+            // past that end. A window sitting on the true first or last page
+            // tapers on one side only, because on the other there is genuinely
+            // nothing more.
+            let continuesBefore = start > 0
+            let continuesAfter = start + visible < count
+            let scale: CGFloat
+            switch offset {
+            case 0 where continuesBefore, visible - 1 where continuesAfter:
+                scale = Self.edgeDotScale
+            case 1 where continuesBefore, visible - 2 where continuesAfter:
+                scale = Self.penultimateDotScale
+            default:
+                scale = 1
+            }
             // ⚠️ SCALED BY TRANSFORM, NEVER BY RESIZING.
             //
             // A dot laid out at a smaller SIZE needs a smaller corner radius to

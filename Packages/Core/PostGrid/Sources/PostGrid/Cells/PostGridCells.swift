@@ -2253,9 +2253,13 @@ public final class PostGridTileCell: UICollectionViewCell {
     private static let metaFont = UIFont.postGridSystemFont(
         matching: .preferredFont(forTextStyle: .caption2), weight: .semibold
     )
-    private let reactions = PostMetricLabel(
-        symbol: "heart.fill", font: metaFont, color: .white, shadowed: true
-    )
+    /// ⚠️ ONE NUMBER, and it is REACH rather than approval.
+    ///
+    /// A brick is small and read at a glance, in a mosaic of a dozen others.
+    /// Two numbers on it are two things to compare across every tile at once,
+    /// and the second one earns its place least here: the heart is what the
+    /// POST is for and the card carries it, but a tile is a way in — how many
+    /// got here is the number that says whether it is worth being one of them.
     private let views = PostMetricLabel(
         symbol: "eye.fill", font: metaFont, color: .white, shadowed: true
     )
@@ -2274,21 +2278,18 @@ public final class PostGridTileCell: UICollectionViewCell {
         imageView.contentMode = .scaleAspectFill
         imageView.pin(to: contentView)
 
-        // Views lead, reactions follow — reach first, then resonance.
-        let counters = UIStackView(arrangedSubviews: [views, reactions])
-        counters.axis = .horizontal
-        counters.spacing = 8
-        // ⚠️ COUNTERS CLOSE THE ROW, as they do on both of a card's placements.
+        // ⚠️ THE COUNT CLOSES THE ROW, as it does on both of a card's
+        // placements.
         //
         // A tile carries no date, so only half of the card's arrangement has
         // anything to say here — but that half is the half that matters: the
         // numbers gather at the trailing edge on every surface, and a mosaic of
         // bricks whose counters sat on the other side would be the one place
         // the eye had to look somewhere else for them.
-        counters.constrain(in: contentView) { parent in
-            counters.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
-            counters.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
-            counters.leadingAnchor.constraint(
+        views.constrain(in: contentView) { parent in
+            views.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
+            views.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
+            views.leadingAnchor.constraint(
                 greaterThanOrEqualTo: parent.leadingAnchor, constant: 8
             )
         }
@@ -2379,7 +2380,6 @@ public final class PostGridTileCell: UICollectionViewCell {
         // (or plain black in the simulator), and the glyph needs a stage.
         contentView.backgroundColor = post.kind == .video ? .darkGray : .secondarySystemBackground
 
-        reactions.set(post.reactionCount)
         views.set(post.viewCount)
 
         imageView.image = nil

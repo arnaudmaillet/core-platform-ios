@@ -36,16 +36,22 @@ struct MockForYouArrivalTests {
             }
     }
 
-    /// Five, and all of them ahead of the clock — which is what makes them
+    /// Six, and all of them ahead of the clock — which is what makes them
     /// arrivals rather than just the top of the corpus.
-    @Test func fivePostsAreStagedAheadOfTheClock() {
-        #expect(arrivals().count == 5)
+    ///
+    /// ⚠️ THE ONE PLACE THE COUNT IS A LITERAL. The tests below derive it, so
+    /// a seventh arrival breaks exactly this one — deliberately, because
+    /// "someone added a fixture" is worth being told about once and not five
+    /// times. The sixth is the over-capacity gallery (`post-new-05`), staged
+    /// first in the feed so the pool's limits are reachable without scrolling.
+    @Test func sixPostsAreStagedAheadOfTheClock() {
+        #expect(arrivals().count == 6)
     }
 
     /// The unfiltered lens counts every one of them: the badge For You opens
     /// with.
-    @Test func theUnfilteredLensCountsAllFive() {
-        #expect(ContentContext.all.filtering(arrivals()).count == 5)
+    @Test func theUnfilteredLensCountsThemAll() {
+        #expect(ContentContext.all.filtering(arrivals()).count == arrivals().count)
     }
 
     @Test func workCountsThree() {
@@ -69,15 +75,20 @@ struct MockForYouArrivalTests {
     @Test func theArrivalsLeadTheCorpus() {
         let posts = MockSocialDataset().posts
         let nowMS = Int64(Date().timeIntervalSince1970 * 1000)
-        #expect(posts.prefix(5).allSatisfy { $0.publishedAtMS > nowMS })
-        #expect(posts.dropFirst(5).allSatisfy { $0.publishedAtMS < nowMS })
+        // Counted rather than written down: this test is about the arrivals
+        // being CONTIGUOUS at the front, and a literal here would fail for the
+        // unrelated reason that the fixture grew.
+        let staged = arrivals().count
+        #expect(posts.prefix(staged).allSatisfy { $0.publishedAtMS > nowMS })
+        #expect(posts.dropFirst(staged).allSatisfy { $0.publishedAtMS < nowMS })
     }
 
     /// Distinct ids in their own namespace, so they cannot collide with the
     /// `post-NNNN` corpus that other fixtures address by index.
     @Test func theArrivalsHaveTheirOwnIDs() {
-        let ids = MockSocialDataset().posts.prefix(5).map(\.postID)
-        #expect(Set(ids).count == 5)
+        let staged = arrivals().count
+        let ids = MockSocialDataset().posts.prefix(staged).map(\.postID)
+        #expect(Set(ids).count == staged)
         #expect(ids.allSatisfy { $0.hasPrefix("post-new-") })
     }
 }

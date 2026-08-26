@@ -152,8 +152,6 @@ public struct MockSocialDataset: Sendable {
         authors: [Author],
         mediaCatalog: MediaCatalog
     ) -> [PostRecord] {
-        // Ahead of the clock by enough that a slow launch cannot overtake it.
-        let epochMS = Int64(Date().timeIntervalSince1970 * 1000) + 5 * 60_000
         // TWO OF THESE ARE LONG ON PURPOSE, and the lengths are as load-bearing
         // as the keywords: the timeline card truncates a caption at
         // `PostGridListRowCell.captionLineLimit` and offers the rest, and
@@ -190,6 +188,17 @@ public struct MockSocialDataset: Sendable {
             "Golden hour over the harbour.",
             "Every clip from the trip, back to back."
         ]
+        // ⚠️ THE LEAD SCALES WITH THE COUNT, because the stamps step BACK a
+        // minute each: the newest is `epochMS` and the oldest is that minus one
+        // minute per arrival. A fixed five minutes was five arrivals' worth
+        // exactly, so the sixth landed ON the clock and stopped being an
+        // arrival at all — measured as `theArrivalsLeadTheCorpus` failing for
+        // the one post that was added, not for anything it does.
+        //
+        // Five minutes of margin PAST the oldest, so a slow launch cannot
+        // overtake the run.
+        let epochMS = Int64(Date().timeIntervalSince1970 * 1000)
+            + Int64(captions.count + 5) * 60_000
         // One entry PER ARRIVAL rather than a short roster cycled by modulus,
         // because with five arrivals and a `% 3` roster only two of the shapes
         // were ever reachable here: media lands on indices 0, 1, 3 and 4, which

@@ -222,6 +222,42 @@ struct MediaMetaPillPlacementTests {
     }
 }
 
+/// What a mosaic BRICK carries, which is deliberately less than a card does.
+@MainActor
+struct TileMetaTests {
+    /// ⚠️ ONE NUMBER ON A TILE, and it is reach rather than approval.
+    ///
+    /// A brick is small and read at a glance in a mosaic of a dozen others; two
+    /// numbers on it are two things to compare across every tile at once. The
+    /// heart is what the POST is for and the card carries it — a tile is a way
+    /// IN, so how many got here is the number that earns the space.
+    ///
+    /// Counted by walking for metric labels rather than by naming a field: a
+    /// second counter added back under another name is the regression.
+    @Test func aTileCarriesTheViewCountAlone() {
+        func metrics(_ view: UIView) -> [PostMetricLabel] {
+            if let label = view as? PostMetricLabel { return [label] }
+            return view.subviews.flatMap(metrics)
+        }
+        let cell = PostGridTileCell(frame: CGRect(x: 0, y: 0, width: 160, height: 160))
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("post-1"), kind: .photo, isRepost: false,
+                thumbnailURL: URL(string: "mock://photo/1"), caption: "A caption.",
+                publishedAtMS: 0, reactionCount: 160, commentCount: 12, viewCount: 4_200
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        cell.layoutIfNeeded()
+
+        let visible = metrics(cell.contentView).filter { isVisible($0, within: cell.contentView) }
+        #expect(visible.count == 1)
+        // And it closes the row, like the counters on both of a card's shapes.
+        let frame = visible[0].convert(visible[0].bounds, to: cell.contentView)
+        #expect(cell.contentView.bounds.maxX - frame.maxX < frame.minX)
+    }
+}
+
 @MainActor
 struct MediaMetaPillContentTests {
     /// A pill tracks its contents' ANSWER, not their presence.

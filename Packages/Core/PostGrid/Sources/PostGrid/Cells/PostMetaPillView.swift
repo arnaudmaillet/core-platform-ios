@@ -282,9 +282,22 @@ public class PostMetaPillView: UIVisualEffectView {
     /// cost once per row rather than once per screen.
     override public func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil, effect == nil else { return }
+        guard showsGroundAtRest, window != nil, effect == nil else { return }
         effect = makeGround()
     }
+
+    /// Whether the ground is there before anyone touches the chip.
+    ///
+    /// True for every chip that is a LABEL: a count with no capsule under it is
+    /// a number floating on a photograph, and the ground is what makes it
+    /// readable. False for the page indicator, which is a CONTROL — the dots
+    /// carry their own contrast, and a capsule around them at rest is a button
+    /// nobody pressed. See `MediaPageIndicatorView`.
+    ///
+    /// A property rather than a parameter because it is a property of the KIND
+    /// of chip, which the class already says — the same reasoning `makeGround`
+    /// records for choosing the material.
+    public var showsGroundAtRest: Bool { true }
 
     /// The pill's ground, chosen by the pill.
     ///

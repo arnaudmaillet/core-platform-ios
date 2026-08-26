@@ -297,6 +297,80 @@ struct CarouselPagingLimitTests {
         #expect(sizes.last ?? 0 < MediaPageIndicatorView.dotDiameter)
     }
 
+    /// ⚠️ AND THE TAPER IS TWO DOTS DEEP, not one.
+    ///
+    /// One step from full size to the smallest reads as a row that was CUT; a
+    /// second dot at an intermediate size reads as a row that continues. The
+    /// tests above assert only the outermost dot, so they pass on either shape
+    /// — which is exactly why this one asserts the whole profile.
+    @Test func theRunTapersOverTwoDotsOnEachContinuingSide() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.chipWidth(forDots: 5), height: 6)
+        dots.configure(count: 12)
+        dots.setCurrent(6)
+        dots.layoutIfNeeded()
+
+        let sizes = dots.debugDotSizes
+        #expect(sizes.count == 5)
+        // Small, semi, full, semi, small — a slope on both ends.
+        #expect(sizes[0] < sizes[1])
+        #expect(sizes[1] < sizes[2])
+        #expect(sizes[3] < sizes[2])
+        #expect(sizes[4] < sizes[3])
+        #expect(abs(sizes[2] - MediaPageIndicatorView.dotDiameter) < 0.5)
+        // And the two ends taper alike.
+        #expect(abs(sizes[0] - sizes[4]) < 0.5)
+        #expect(abs(sizes[1] - sizes[3]) < 0.5)
+    }
+
+    /// ⚠️ AND ONLY ON THE SIDE THAT CONTINUES — including the middle dot.
+    ///
+    /// At the first page there is nothing before, so the leading THREE are full
+    /// size and the taper is on the trailing end alone. A taper drawn on a side
+    /// with nothing past it says "there is more" where there is not.
+    @Test func theTaperIsOneSidedAtTheEndsOfTheRun() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.chipWidth(forDots: 5), height: 6)
+        dots.configure(count: 12)
+        dots.setCurrent(0)
+        dots.layoutIfNeeded()
+
+        let sizes = dots.debugDotSizes
+        let full = MediaPageIndicatorView.dotDiameter
+        #expect(sizes.prefix(3).allSatisfy { abs($0 - full) < 0.5 })
+        #expect(sizes[3] < full)
+        #expect(sizes[4] < sizes[3])
+    }
+
+    /// ⚠️ THE CHIP HAS NO GROUND UNTIL IT IS TOUCHED, and it comes back when
+    /// the finger leaves.
+    ///
+    /// Every other chip on these surfaces is a number, and a number over a
+    /// photograph needs a floor to be legible on. The dots are their own
+    /// contrast; a capsule around them at rest is a button nobody pressed.
+    ///
+    /// Asserted on the effect the chip is WEARING rather than on a flag of its
+    /// own — the chip is a `UIVisualEffectView`, so that is the thing a viewer
+    /// would see.
+    @Test func theChipsGroundArrivesWithTheFinger() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 60))
+        let chip = MediaPageIndicatorView()
+        chip.configure(count: 8, current: 0)
+        window.addSubview(chip)
+        window.isHidden = false
+        chip.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+        chip.layoutIfNeeded()
+
+        #expect(chip.effect == nil)
+
+        chip.debugScrub(.began, atX: 60)
+        #expect(chip.effect != nil)
+
+        chip.debugScrub(.ended, atX: 60)
+        #expect(chip.effect == nil)
+        window.isHidden = true
+    }
+
     /// A gallery that fits has no continuation on either side, so nothing is
     /// cut — the shrink must mean something rather than being decoration.
     @Test func aGalleryThatFitsHasNoShrunkenEdges() {
