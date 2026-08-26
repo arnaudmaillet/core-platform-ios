@@ -272,13 +272,10 @@ final class SnapChromeView: UIView {
         // it — ticker, caption — is text starting at the margin: a chip sharing
         // that edge attaches itself to the first line of the caption rather than
         // to the photograph it describes.
-        // ⚠️ GLASS HERE, FLAT ON THE CARD, and the difference is what is behind
-        // it. A card's chip stands on the card's own fill, where a material
-        // resolves to that fill and vanishes; this one stands on a full-bleed
-        // photograph, which is the one place a lens has something to take its
-        // cue from. It is also the only chip on this screen a finger touches,
-        // so it gets the system's interactive response rather than a look-alike.
-        mediaPageIndicator.useInteractiveGlass()
+        // ⚠️ AND NO GROUND UNDER IT, here as on the card. This chip used to
+        // wear the system's interactive glass — the one place on this screen a
+        // lens had a photograph to take its cue from — and it is now the dots
+        // alone on every surface. See `MediaPageIndicatorView.makeGround`.
         mediaPageIndicator.isHidden = true
         mediaPageIndicator.constrain(in: self) { parent in
             mediaPageIndicator.centerXAnchor.constraint(equalTo: parent.centerXAnchor)

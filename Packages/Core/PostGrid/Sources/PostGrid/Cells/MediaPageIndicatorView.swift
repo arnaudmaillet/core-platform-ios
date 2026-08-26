@@ -32,91 +32,14 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// itself would be a second thing deciding where the pages are.
     public var onPageRequested: ((Int) -> Void)?
 
-    /// Asks for the system's interactive glass instead of the card's flat
-    /// ground.
+    /// The chip's press response, and now the ONLY one it has.
     ///
-    /// ⚠️ FOR THE POST SCREEN ONLY, and the distinction is the one this
-    /// package's chip rule already draws. On a CARD the chip sits on the card's
-    /// own fill, where a material resolves to that fill and disappears — which
-    /// is why the card's chips carry a flat ground rather than a lens. Over a
-    /// full-bleed photograph there IS something behind it, so glass is finally
-    /// the honest answer: it takes its cue from the picture instead of pretending
-    /// to a colour of its own.
-    ///
-    /// `isInteractive` is the system's own press response — the material flexes
-    /// under a finger. That is the whole of the feedback; there is no scale or
-    /// spring of ours near it, and there must not be: a transform on a glass
-    /// lens is the thing this codebase already tried once and rejected.
-    public func useInteractiveGlass() {
-        prefersInteractiveGlass = true
-        // ⚠️ Records the CHOICE, and does not put the ground up.
-        //
-        // It used to attach the glass on the spot, which is what a chip whose
-        // capsule is always there wants. This one's appears under a finger (see
-        // `showsGroundAtRest`), and attaching here would leave the post screen
-        // the one surface still wearing a capsule at rest. A ground already up
-        // — the preference arriving mid-scrub — is swapped for the glass rather
-        // than left as the material it was.
-        if effect != nil { effect = makeGround() }
-    }
-
-    private var prefersInteractiveGlass = false
-
-    /// ⚠️ NO GROUND UNTIL A FINGER ARRIVES.
-    ///
-    /// Every other chip on these surfaces is a NUMBER, and a number over a
-    /// photograph needs a floor to be legible on. The dots do not: they are
-    /// their own contrast, drawn light with a shadow, and the capsule behind
-    /// them was doing nothing except claiming — on a card that shows no other
-    /// button — that something here can be pressed. Which is true, and is worth
-    /// saying at the moment it becomes relevant rather than for the whole life
-    /// of the row.
-    ///
-    /// So the ground fades in under the finger and back out when it leaves. On
-    /// the post screen that ground is glass and on a card it is a material;
-    /// both cross-fade the same way, because `effect` is animatable on a
-    /// `UIVisualEffectView` and the chip IS one.
-    override public var showsGroundAtRest: Bool { false }
-
-    /// Fades the chip's ground in or out. Idempotent — the scrub flag it rides
-    /// changes on every gesture edge and only some of those are transitions.
-    ///
-    /// ⚠️ NOTHING AT ALL ON A CARD, in any state.
-    ///
-    /// The two surfaces disagree, and it comes from what is around the chip. On
-    /// the post screen it is a control among controls on a full-bleed
-    /// photograph, and the glass that answers a finger there is the same glass
-    /// every other control wears. On a CARD the row is furniture — two counters
-    /// and a date — and a capsule appearing under the dots was the only thing
-    /// on the whole card that changed shape when touched: a lens opening in the
-    /// middle of a caption. The dots move under the finger, which is the
-    /// feedback that was actually being asked for.
-    private func setGroundShown(_ shown: Bool) {
-        guard prefersInteractiveGlass else { return }
-        guard shown != (effect != nil), window != nil else { return }
-        UIView.animate(
-            withDuration: shown ? 0.18 : 0.28, delay: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            // ⚠️ Built INSIDE the animation, and only ever with a window: the
-            // pill's own note records that attaching an effect off-screen
-            // stalls a headless simulator for tens of seconds. A chip being
-            // touched is on screen by definition.
-            self.effect = shown ? self.makeGround() : nil
-        }
-    }
-
-    /// The chip's own press response, for the surfaces that have no glass to
-    /// give them one.
-    ///
-    /// ⚠️ ONLY WHERE THERE IS NO LENS. On the post screen the chip IS glass, and
-    /// `isInteractive` already flexes the material under a finger — adding a
-    /// transform there would be a second effect fighting the system's, and this
-    /// codebase has already tried transforming a glass lens once and rejected
-    /// it. On a card the chip is a flat capsule with no such response, so it
-    /// gets one of its own: the same read, arrived at differently.
+    /// It used to be skipped on the post screen, where the chip was a glass
+    /// lens and `isInteractive` flexed the material under a finger — a
+    /// transform there would have been a second effect fighting the system's.
+    /// There is no lens on either surface any more, so the dots' own movement
+    /// is what answers the finger everywhere.
     private func applyPressFeedback() {
-        guard !prefersInteractiveGlass else { return }
         UIView.animate(
             withDuration: 0.5, delay: 0,
             usingSpringWithDamping: 0.52, initialSpringVelocity: 0.9,
@@ -138,16 +61,22 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// arithmetic reads either way.
     private static let pressedScale: CGFloat = 1.26
 
-    override public func makeGround() -> UIVisualEffect? {
-        guard prefersInteractiveGlass else { return super.makeGround() }
-        // Shape before material, for the reason `PagedTabBar` records: a glass
-        // effect switched on over a layer that has not been given its radius
-        // yet draws one frame of hard corners.
-        layoutIfNeeded()
-        let glass = UIGlassEffect(style: .regular)
-        glass.isInteractive = true
-        return glass
-    }
+    /// ⚠️ NO GROUND, ON ANY SURFACE, IN ANY STATE.
+    ///
+    /// Every other chip in this row is a NUMBER, and a number over a photograph
+    /// needs a floor to be legible on. The dots do not — they are their own
+    /// contrast, light ink over a counter-toned halo, the same treatment the
+    /// date wears for the same reason. What the capsule added was a claim that
+    /// something here could be pressed, made permanently, in the middle of a
+    /// row that is otherwise furniture.
+    ///
+    /// This went through a shorter-lived version where the ground appeared
+    /// under a finger and faded out behind it. It is recorded because the
+    /// reasoning survives the decision: a lens opening in the middle of a
+    /// caption is a strange answer to a drag, and the dots moving under the
+    /// finger — see `applyPressFeedback` — was the feedback being asked for all
+    /// along.
+    override public func makeGround() -> UIVisualEffect? { nil }
 
     /// The scrub, exposed so a host can make its OWN pan yield to it.
     ///
@@ -286,7 +215,6 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     public private(set) var isScrubbing = false {
         didSet {
             guard isScrubbing != oldValue else { return }
-            setGroundShown(isScrubbing)
             applyPressFeedback()
             onScrubbingChanged?(isScrubbing)
         }

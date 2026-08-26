@@ -376,46 +376,35 @@ struct CarouselPagingLimitTests {
         #expect(sizes[4] < sizes[3])
     }
 
-    /// ⚠️ A CARD'S CHIP HAS NO GROUND IN ANY STATE; THE POST'S ARRIVES WITH THE
-    /// FINGER.
+    /// ⚠️ NO INDICATOR EVER WEARS A GROUND, on any surface, in any state.
     ///
-    /// The two surfaces disagree because of what surrounds the chip. On the
-    /// post screen it is a control among controls on a full-bleed photograph,
-    /// and the glass answering a finger is the glass every other control wears.
-    /// On a CARD the row is furniture — two counters and a date — and a capsule
-    /// appearing under the dots was the only thing on the card that changed
-    /// shape when touched.
+    /// Every other chip in that row is a NUMBER, and a number over a photograph
+    /// needs a floor to be legible on. The dots are their own contrast, and
+    /// what the capsule added was a claim that something could be pressed —
+    /// made permanently, in the middle of a row that is otherwise furniture.
     ///
-    /// Both are asserted together, because they are one rule read on two
-    /// surfaces and half of it is how they drifted apart in the first place.
-    /// Asserted on the effect the chip is WEARING rather than on a flag — the
-    /// chip is a `UIVisualEffectView`, so that is what a viewer sees.
-    @Test func onlyThePostsChipEverGrounds() {
+    /// Asserted on the effect the chip is WEARING rather than on a flag, and
+    /// through a scrub rather than at rest alone: this went through a version
+    /// where the ground appeared under the finger, so "at rest it is bare" is
+    /// exactly the half that could pass while the other half remained.
+    @Test func noIndicatorEverWearsAGround() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
         window.isHidden = false
+        let chip = MediaPageIndicatorView()
+        chip.configure(count: 8, current: 0)
+        window.addSubview(chip)
+        chip.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+        chip.layoutIfNeeded()
 
-        func chip(interactiveGlass: Bool) -> MediaPageIndicatorView {
-            let chip = MediaPageIndicatorView()
-            if interactiveGlass { chip.useInteractiveGlass() }
-            chip.configure(count: 8, current: 0)
-            window.addSubview(chip)
-            chip.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
-            chip.layoutIfNeeded()
-            return chip
-        }
+        #expect(chip.effect == nil)
+        #expect(chip.makeGround() == nil)
 
-        let card = chip(interactiveGlass: false)
-        #expect(card.effect == nil)
-        card.debugScrub(.began, atX: 60)
-        #expect(card.effect == nil)
-        card.debugScrub(.ended, atX: 60)
-
-        let post = chip(interactiveGlass: true)
-        #expect(post.effect == nil)
-        post.debugScrub(.began, atX: 60)
-        #expect(post.effect != nil)
-        post.debugScrub(.ended, atX: 60)
-        #expect(post.effect == nil)
+        chip.debugScrub(.began, atX: 60)
+        #expect(chip.effect == nil)
+        chip.debugScrub(.changed, atX: 80)
+        #expect(chip.effect == nil)
+        chip.debugScrub(.ended, atX: 80)
+        #expect(chip.effect == nil)
         window.isHidden = true
     }
 
