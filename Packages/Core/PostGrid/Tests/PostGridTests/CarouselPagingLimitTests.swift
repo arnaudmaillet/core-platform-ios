@@ -376,32 +376,46 @@ struct CarouselPagingLimitTests {
         #expect(sizes[4] < sizes[3])
     }
 
-    /// ⚠️ THE CHIP HAS NO GROUND UNTIL IT IS TOUCHED, and it comes back when
-    /// the finger leaves.
+    /// ⚠️ A CARD'S CHIP HAS NO GROUND IN ANY STATE; THE POST'S ARRIVES WITH THE
+    /// FINGER.
     ///
-    /// Every other chip on these surfaces is a number, and a number over a
-    /// photograph needs a floor to be legible on. The dots are their own
-    /// contrast; a capsule around them at rest is a button nobody pressed.
+    /// The two surfaces disagree because of what surrounds the chip. On the
+    /// post screen it is a control among controls on a full-bleed photograph,
+    /// and the glass answering a finger is the glass every other control wears.
+    /// On a CARD the row is furniture — two counters and a date — and a capsule
+    /// appearing under the dots was the only thing on the card that changed
+    /// shape when touched.
     ///
-    /// Asserted on the effect the chip is WEARING rather than on a flag of its
-    /// own — the chip is a `UIVisualEffectView`, so that is the thing a viewer
-    /// would see.
-    @Test func theChipsGroundArrivesWithTheFinger() {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 60))
-        let chip = MediaPageIndicatorView()
-        chip.configure(count: 8, current: 0)
-        window.addSubview(chip)
+    /// Both are asserted together, because they are one rule read on two
+    /// surfaces and half of it is how they drifted apart in the first place.
+    /// Asserted on the effect the chip is WEARING rather than on a flag — the
+    /// chip is a `UIVisualEffectView`, so that is what a viewer sees.
+    @Test func onlyThePostsChipEverGrounds() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
         window.isHidden = false
-        chip.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
-        chip.layoutIfNeeded()
 
-        #expect(chip.effect == nil)
+        func chip(interactiveGlass: Bool) -> MediaPageIndicatorView {
+            let chip = MediaPageIndicatorView()
+            if interactiveGlass { chip.useInteractiveGlass() }
+            chip.configure(count: 8, current: 0)
+            window.addSubview(chip)
+            chip.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+            chip.layoutIfNeeded()
+            return chip
+        }
 
-        chip.debugScrub(.began, atX: 60)
-        #expect(chip.effect != nil)
+        let card = chip(interactiveGlass: false)
+        #expect(card.effect == nil)
+        card.debugScrub(.began, atX: 60)
+        #expect(card.effect == nil)
+        card.debugScrub(.ended, atX: 60)
 
-        chip.debugScrub(.ended, atX: 60)
-        #expect(chip.effect == nil)
+        let post = chip(interactiveGlass: true)
+        #expect(post.effect == nil)
+        post.debugScrub(.began, atX: 60)
+        #expect(post.effect != nil)
+        post.debugScrub(.ended, atX: 60)
+        #expect(post.effect == nil)
         window.isHidden = true
     }
 
@@ -521,7 +535,7 @@ struct CarouselPagingLimitTests {
         // would pin whichever rule was in force the day it was written — and
         // this test is about the RUNWAY, not about where the window starts.
         let visible = 5
-        let start = PageDotsView.windowStart(current: 6, visible: visible, count: 12, direction: 1)
+        let start = dots.debugWindowStart
         let frames = dots.debugAllDotFrames
         #expect(frames[start - 1].minX > 0)
         #expect(frames[start + visible].maxX < dots.bounds.width)

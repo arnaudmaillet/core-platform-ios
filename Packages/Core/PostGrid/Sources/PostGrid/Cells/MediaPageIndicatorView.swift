@@ -80,7 +80,19 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
 
     /// Fades the chip's ground in or out. Idempotent — the scrub flag it rides
     /// changes on every gesture edge and only some of those are transitions.
+    ///
+    /// ⚠️ NOTHING AT ALL ON A CARD, in any state.
+    ///
+    /// The two surfaces disagree, and it comes from what is around the chip. On
+    /// the post screen it is a control among controls on a full-bleed
+    /// photograph, and the glass that answers a finger there is the same glass
+    /// every other control wears. On a CARD the row is furniture — two counters
+    /// and a date — and a capsule appearing under the dots was the only thing
+    /// on the whole card that changed shape when touched: a lens opening in the
+    /// middle of a caption. The dots move under the finger, which is the
+    /// feedback that was actually being asked for.
     private func setGroundShown(_ shown: Bool) {
+        guard prefersInteractiveGlass else { return }
         guard shown != (effect != nil), window != nil else { return }
         UIView.animate(
             withDuration: shown ? 0.18 : 0.28, delay: 0,
@@ -422,8 +434,8 @@ final class PageDotsView: UIView {
     private var count = 0
     private var current = 0
     /// Which way the viewer last moved: +1 forward, -1 back, 0 before anyone
-    /// has moved at all. See `currentSlot`.
-    private var travelDirection = 0
+    /// has moved at all. See `slotBounds`.
+    private var windowOrigin = 0
     private var dots: [UIView] = []
 
     /// ⚠️ THE STRIP ENDS IN A FADE, NOT IN A CUT.
@@ -495,7 +507,7 @@ final class PageDotsView: UIView {
         // previous tenant, the direction would offset the window of a viewer
         // who has not touched this one — the recycled-cell fault this file's
         // neighbours have met in half a dozen other shapes.
-        travelDirection = 0
+        windowOrigin = 0
         dots.forEach { $0.removeFromSuperview() }
         dots = (0..<count).map { _ in
             let dot = UIView()
@@ -529,29 +541,23 @@ final class PageDotsView: UIView {
 
     func setCurrent(_ page: Int) {
         guard page != current else { return }
-        let previousStart = Self.windowStart(
-            current: current,
-            visible: Self.visibleDots(in: windowWidth, count: count),
-            count: count,
-            direction: travelDirection
-        )
-        // ⚠️ REMEMBERED, because `layoutSubviews` decides the window too and the
-        // two must agree. A direction computed here and forgotten would be
-        // undone by the next unrelated layout pass — a rotation, a re-measure —
-        // which would slide the row back to centre under a finger that has not
-        // moved.
-        travelDirection = page > current ? 1 : -1
+        let previousStart = windowOrigin
         current = page
         // ⚠️ EVERYTHING — position, size and opacity — is decided in
         // `layoutSubviews` and nowhere else. Opacity was set here as well, and
         // two places deciding one dot's appearance is how an edge dot ended up
         // full-size and half-lit at the same time.
-        let start = Self.windowStart(
+        // ⚠️ REMEMBERED, because `layoutSubviews` decides the window too and the
+        // two must agree — and because the rule is defined against the window
+        // the viewer is already looking at. Recomputed from the page alone it
+        // would be a fixed slot again, which is the whole of what this replaces.
+        windowOrigin = Self.windowStart(
             current: page,
             visible: Self.visibleDots(in: windowWidth, count: count),
             count: count,
-            direction: travelDirection
+            from: windowOrigin
         )
+        let start = windowOrigin
         // ⚠️ TWO DURATIONS, because two different things move.
         //
         // The mark passing between dots that stay put is a change of STATE; the
@@ -565,6 +571,14 @@ final class PageDotsView: UIView {
         // the mark is where the finger is on the frame it gets there, and only
         // its APPEARANCE catches up.
         setNeedsLayout()
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            let visible = Self.visibleDots(in: windowWidth, count: count)
+            CarouselPlaybackAudit.trace(
+                "dots page=\(page) start=\(start) slot=\(page - start) visible=\(visible)"
+            )
+        }
+        #endif
         let travelling = start != previousStart
         UIView.animate(
             withDuration: travelling ? 0.44 : 0.32, delay: 0,
@@ -602,36 +616,39 @@ final class PageDotsView: UIView {
         return min(count, max(fitted, minimumVisibleDots))
     }
 
-    /// Which slot of the window the current page occupies, given the direction
-    /// the viewer is travelling.
+    /// The slots the mark is allowed to occupy — one in from each end.
     ///
-    /// ⚠️ THE WINDOW TRAILS THE GESTURE — it does not centre on it.
+    /// ⚠️ THE MARK WALKS; THE WINDOW ONLY FOLLOWS WHEN IT HAS TO.
     ///
-    /// Centred, the mark never moves: every page change slides the whole row
-    /// under a dot that stays put in the middle, so the thing that is actually
-    /// happening — the viewer moving ALONG the run — is the one thing the
-    /// indicator does not show. Trailing, the mark sits toward the edge it is
-    /// heading for and the row behind it stays put, which reads as travel.
+    /// Recomputing the window from the current page alone gives the mark a
+    /// FIXED slot, and then the whole row slides under it on every page change
+    /// — so the one thing actually happening, the viewer moving along the run,
+    /// is the one thing the indicator does not show. Worse when the direction
+    /// changes: the fixed slot moves from one side of the middle to the other,
+    /// so a single page back jumped the row by TWO. Reported exactly that way,
+    /// as the mark landing on the second dot where the third was expected.
     ///
-    /// Moving forward the current page is the fourth of five, moving back the
-    /// second — one slot either side of the middle, so a direction change costs
-    /// two slots of travel rather than a jump across the window. At rest
-    /// (`direction` 0, which is only ever the first layout) it is centred, the
-    /// only honest answer before anyone has moved.
+    /// So the window is KEPT and only pushed. The mark moves one dot per page
+    /// until it reaches the slot one in from the end it is heading for, and
+    /// from then on the row scrolls under it — which is where "fourth of five
+    /// going forward, second going back" comes from: it is the STEADY STATE of
+    /// travelling in one direction, not a rule applied per page.
     ///
-    /// Clamped into the window, because a narrow chip can be three dots wide
-    /// and "one past the middle" of three is the last one — and of two, off the
-    /// end entirely.
-    static func currentSlot(visible: Int, direction: Int) -> Int {
-        min(max(visible / 2 + direction, 0), max(visible - 1, 0))
+    /// Both bounds collapse gracefully on a narrow chip: with three dots the
+    /// mark holds the middle, with two the trailing one, with one there is
+    /// nowhere to walk.
+    static func slotBounds(visible: Int) -> (lowest: Int, highest: Int) {
+        let lowest = min(1, max(visible - 1, 0))
+        return (lowest, max(visible - 2, lowest))
     }
 
-    /// The first dot of the window, chosen so the current page sits in its
-    /// direction-dependent slot and the window never runs off either end.
-    static func windowStart(current: Int, visible: Int, count: Int, direction: Int = 0) -> Int {
+    /// The first dot of the window: the previous one, moved as little as the
+    /// mark's bounds allow, and never off either end of the run.
+    static func windowStart(current: Int, visible: Int, count: Int, from previous: Int) -> Int {
         guard count > visible else { return 0 }
-        return min(max(current - currentSlot(visible: visible, direction: direction), 0),
-                   count - visible)
+        let bounds = slotBounds(visible: visible)
+        let pushed = min(max(previous, current - bounds.highest), current - bounds.lowest)
+        return min(max(pushed, 0), count - visible)
     }
 
     /// How small an edge dot goes when the run continues past it.
@@ -651,6 +668,10 @@ final class PageDotsView: UIView {
     /// mid-area lands where "half way between them" actually looks.
     static let penultimateDotScale: CGFloat = ((edgeDotScale * edgeDotScale + 1) / 2).squareRoot()
 
+    /// The window the view actually settled on, so a test can ask WHICH dots
+    /// are on screen without re-deriving the walk that produced them.
+    var debugWindowStart: Int { windowOrigin }
+
     /// The drawn size of each VISIBLE dot, in order — how a test asks which
     /// ones were cut without reading the layout arithmetic back to itself.
     var debugDotSizes: [CGFloat] {
@@ -661,9 +682,10 @@ final class PageDotsView: UIView {
         super.layoutSubviews()
         guard !dots.isEmpty else { return }
         let visible = Self.visibleDots(in: windowWidth, count: count)
-        let start = Self.windowStart(
-            current: current, visible: visible, count: count, direction: travelDirection
-        )
+        // The window the last page change settled on — never recomputed here,
+        // or an unrelated layout pass would slide the row under a finger that
+        // has not moved.
+        let start = min(max(windowOrigin, 0), max(count - visible, 0))
         let diameter = MediaPageIndicatorView.dotDiameter
         let spacing = MediaPageIndicatorView.dotSpacing
         // Centred in whatever width the row left: a window narrower than the

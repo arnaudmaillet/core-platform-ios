@@ -46,52 +46,64 @@ struct PageDotsWindowTests {
     /// Before anyone has moved there is no direction, and centred is the only
     /// honest answer.
     @Test func theWindowFollowsTheCurrentPage() {
-        #expect(PageDotsView.windowStart(current: 5, visible: 3, count: 10) == 4)
-        #expect(PageDotsView.windowStart(current: 0, visible: 3, count: 10) == 0)
+        #expect(PageDotsView.windowStart(current: 5, visible: 3, count: 10, from: 0) == 4)
+        #expect(PageDotsView.windowStart(current: 0, visible: 3, count: 10, from: 0) == 0)
     }
 
-    /// ⚠️ AND IT TRAILS THE DIRECTION OF TRAVEL: fourth of five going forward,
-    /// second of five going back.
+    /// ⚠️ THE MARK WALKS AND THE WINDOW ONLY FOLLOWS WHEN IT HAS TO.
     ///
-    /// Centred on every move, the mark never goes anywhere — the row slides
-    /// under a dot fixed in the middle, so the one thing happening, the viewer
-    /// moving ALONG the run, is the one thing the indicator does not show.
+    /// A window recomputed from the current page alone gives the mark a FIXED
+    /// slot, so the whole row slides under it on every page change and the one
+    /// thing happening — the viewer moving along the run — is the one thing the
+    /// indicator does not show. Worse across a direction change: the fixed slot
+    /// swaps sides of the middle, and a single page back moved the row by TWO.
     ///
-    /// Asserted as the SLOT the current page lands in, because that is the rule
-    /// as stated; the start index is arithmetic downstream of it.
-    @Test func theWindowTrailsTheDirectionOfTravel() {
-        let forward = PageDotsView.windowStart(current: 6, visible: 5, count: 12, direction: 1)
-        let backward = PageDotsView.windowStart(current: 6, visible: 5, count: 12, direction: -1)
+    /// Walked a page at a time, which is the only way this shows up: every
+    /// answer below is a function of the window the previous step settled on.
+    @Test func theMarkWalksBeforeTheWindowMoves() {
+        let visible = 5, count = 12
+        var start = 0
+        var slots: [Int] = []
+        for page in 0...6 {
+            start = PageDotsView.windowStart(current: page, visible: visible, count: count, from: start)
+            slots.append(page - start)
+        }
+        // The mark walks out to the fourth slot and then stays there, the row
+        // scrolling under it.
+        #expect(slots == [0, 1, 2, 3, 3, 3, 3])
 
-        #expect(6 - forward == 3)   // the fourth of five
-        #expect(6 - backward == 1)  // the second of five
-        // A direction change costs two slots of travel, never a jump across the
-        // window: the two answers are adjacent-but-one, not opposite ends.
-        #expect(forward == backward - 2)
+        // Coming back, it walks in the other direction from where it is —
+        // one dot per page, no jump — until it reaches the second slot.
+        var backwards: [Int] = []
+        for page in (2...5).reversed() {
+            start = PageDotsView.windowStart(current: page, visible: visible, count: count, from: start)
+            backwards.append(page - start)
+        }
+        #expect(backwards == [2, 1, 1, 1])
     }
 
-    /// ⚠️ AND THE MARK STAYS INSIDE THE WINDOW on a chip too narrow to have a
-    /// slot either side of the middle.
+    /// ⚠️ AND THE MARK IS ALWAYS INSIDE THE WINDOW, on a chip too narrow to
+    /// have a slot either side of the middle.
     ///
-    /// "One past the middle" of three dots is the last one, and of two it is off
-    /// the end — a window whose current page is not in it draws no mark at all.
-    @Test func theTrailingSlotIsClampedIntoNarrowWindows() {
+    /// "One in from the end" of three dots is the middle, and of two there is
+    /// only one slot to be in — a window whose current page is not in it draws
+    /// no mark at all.
+    @Test func theMarksSlotIsClampedIntoNarrowWindows() {
         for visible in 1...5 {
-            for direction in [-1, 0, 1] {
-                let slot = PageDotsView.currentSlot(visible: visible, direction: direction)
-                #expect(slot >= 0)
-                #expect(slot <= visible - 1)
-            }
+            let bounds = PageDotsView.slotBounds(visible: visible)
+            #expect(bounds.lowest >= 0)
+            #expect(bounds.lowest <= bounds.highest)
+            #expect(bounds.highest <= max(visible - 1, 0))
         }
     }
 
     /// And it never runs off either end: at the last page the window sits on the
     /// tail rather than half past it.
     @Test func theWindowStopsAtBothEnds() {
-        #expect(PageDotsView.windowStart(current: 9, visible: 3, count: 10) == 7)
-        #expect(PageDotsView.windowStart(current: 0, visible: 4, count: 4) == 0)
+        #expect(PageDotsView.windowStart(current: 9, visible: 3, count: 10, from: 0) == 7)
+        #expect(PageDotsView.windowStart(current: 0, visible: 4, count: 4, from: 0) == 0)
         // Nothing to window when everything fits.
-        #expect(PageDotsView.windowStart(current: 2, visible: 5, count: 5) == 0)
+        #expect(PageDotsView.windowStart(current: 2, visible: 5, count: 5, from: 0) == 0)
     }
 
     /// ⚠️ EVERY PAGE IS REACHABLE THOUGH ONLY FIVE DOTS ARE DRAWN, and the
