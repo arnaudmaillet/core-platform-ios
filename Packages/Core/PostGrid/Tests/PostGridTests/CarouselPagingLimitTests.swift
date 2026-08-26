@@ -408,11 +408,15 @@ struct CarouselPagingLimitTests {
         dots.setCurrent(6)
         dots.layoutIfNeeded()
 
-        // Window of 5 centred on page 6 starts at 4, so pages 3 and 9 are the
-        // dots one slot outside it on either side.
+        // ⚠️ WHICH pages sit one slot out is ASKED, not assumed: the window
+        // trails the direction of travel, so hard-coding the pair either side
+        // would pin whichever rule was in force the day it was written — and
+        // this test is about the RUNWAY, not about where the window starts.
+        let visible = 5
+        let start = PageDotsView.windowStart(current: 6, visible: visible, count: 12, direction: 1)
         let frames = dots.debugAllDotFrames
-        #expect(frames[3].minX > 0)
-        #expect(frames[9].maxX < dots.bounds.width)
+        #expect(frames[start - 1].minX > 0)
+        #expect(frames[start + visible].maxX < dots.bounds.width)
     }
 
     /// And a gallery that fits is not masked at all: nothing arrives or leaves,
