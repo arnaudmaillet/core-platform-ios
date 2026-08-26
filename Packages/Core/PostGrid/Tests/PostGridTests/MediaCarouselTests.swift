@@ -851,18 +851,47 @@ struct CarouselChipsAreFixedTests {
         }
     }
 
-    /// And the indicator sits centred BETWEEN the two groups rather than on the
-    /// preview: the two dynamic spaces are equal, whatever the counters took.
-    @Test func theIndicatorFloatsBetweenTheGroups() {
+    /// ⚠️ AND NONE OF THE FURNITURE IS BEHIND THE PAGES.
+    ///
+    /// The chips are laid out against the preview and the carousel scrolls
+    /// underneath them, which is a Z-ORDER promise no frame assertion can see:
+    /// every test in this file went on passing while the date sat correctly
+    /// placed and completely covered. It happened for a reason worth pinning —
+    /// the carousel was inserted below a NAMED chip, which was the lowest one
+    /// only for as long as nobody reordered them.
+    ///
+    /// Asserted against every chip rather than the date alone: the next
+    /// reordering will move a different one to the bottom.
+    @Test func theCarouselIsBehindEveryChip() throws {
+        let cell = spaciousRow()
+        let carousel = try #require(cell.debugCarousel)
+        let box = try #require(carousel.superview)
+        let order = box.subviews
+        let carouselIndex = try #require(order.firstIndex(of: carousel))
+
+        let chips = order.enumerated().filter { isChip($0.element) }
+        #expect(chips.count == 4)
+        #expect(chips.allSatisfy { $0.offset > carouselIndex })
+    }
+
+    /// ⚠️ And the indicator CLOSES THE ROW WITH THE COUNTERS: date, all the
+    /// slack, then indicator-comments-likes packed at one gap each.
+    ///
+    /// It used to float between two guides of equal width, centred on the
+    /// preview — which capped the counters' room at half of it whatever they
+    /// needed. The trailing group now takes the width it needs and the give is
+    /// all in front of it.
+    @Test func theIndicatorClosesTheRowWithTheCounters() {
         let chips = chipFrames(in: spaciousRow())
         #expect(chips.count == 4)
 
-        let leading = chips[2].minX - chips[1].maxX
-        let trailing = chips[3].minX - chips[2].maxX
-        #expect(abs(leading - trailing) < 0.5)
-        // And there is genuine slack here, so the equality above is a measured
-        // result and not two gaps clamped at the same minimum.
-        #expect(leading > PostGridListRowCell.chipGap + 1)
-        #expect(leading >= PostGridListRowCell.chipGap - 0.5)
+        let gap = PostGridListRowCell.chipGap
+        // Packed: indicator to comments, comments to likes.
+        #expect(abs((chips[2].minX - chips[1].maxX) - gap) < 0.5)
+        #expect(abs((chips[3].minX - chips[2].maxX) - gap) < 0.5)
+        // And the slack is genuine — this row has room to spare, so "packed"
+        // above is a measured result rather than three chips clamped against a
+        // width they could not exceed.
+        #expect(chips[1].minX - chips[0].maxX > gap + 1)
     }
 }

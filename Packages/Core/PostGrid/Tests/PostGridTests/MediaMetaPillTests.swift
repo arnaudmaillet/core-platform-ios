@@ -176,8 +176,13 @@ struct MediaMetaPillPlacementTests {
         #expect(trailingGap > PostGridListRowCell.captionInset + 1)
     }
 
-    /// Every chip rests on the preview's bottom edge — likes and comments
-    /// leading, age trailing, the closing line's own reading order kept.
+    /// Every chip rests on the preview's bottom edge — the DATE leading, the
+    /// counters closing the row at the trailing edge.
+    ///
+    /// ⚠️ Which end each lands on is asserted by IDENTITY, not by position
+    /// alone: "leftmost sits at the leading inset" is true of any order, so it
+    /// would have gone on passing when the row was reversed. The date is the
+    /// one chip with no capsule, which is exactly what tells them apart.
     @Test func thePillsRestOnThePreviewsBottomEdge() throws {
         let cell = row(kind: .photo)
         let preview = try #require(cell.mediaHeroRect)
@@ -190,12 +195,19 @@ struct MediaMetaPillPlacementTests {
             let frame = pill.convert(pill.bounds, to: cell.contentView)
             #expect(abs(preview.maxY - frame.maxY - inset) < 0.5)
         }
-        let ordered = visible.map { $0.convert($0.bounds, to: cell.contentView) }
-            .sorted { $0.minX < $1.minX }
-        #expect(abs(ordered[0].minX - preview.minX - inset) < 0.5)
-        #expect(abs(preview.maxX - ordered[2].maxX - inset) < 0.5)
+        let ordered = visible.sorted {
+            $0.convert($0.bounds, to: cell.contentView).minX
+                < $1.convert($1.bounds, to: cell.contentView).minX
+        }
+        let frames = ordered.map { $0.convert($0.bounds, to: cell.contentView) }
+        #expect(abs(frames[0].minX - preview.minX - inset) < 0.5)
+        #expect(abs(preview.maxX - frames[2].maxX - inset) < 0.5)
+        // The date leads and wears no capsule; the counters close the row.
+        #expect(ordered[0] is PostChipSlotView)
+        #expect(ordered[1] is PostMetaPillView)
+        #expect(ordered[2] is PostMetaPillView)
         // And they never touch: one gap between the two counters.
-        #expect(ordered[1].minX - ordered[0].maxX >= PostGridListRowCell.chipGap - 0.5)
+        #expect(frames[2].minX - frames[1].maxX >= PostGridListRowCell.chipGap - 0.5)
     }
 }
 
@@ -212,14 +224,14 @@ struct MediaMetaPillContentTests {
         let boxes = chips(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
 
         // NO capsule at all — and the age still drawn, in its own bare box at
-        // the trailing edge. Counting boxes and capsules separately is the point
+        // the LEADING edge. Counting boxes and capsules separately is the point
         // of the test: a regression that gave the date a capsule back, or one
         // that dropped the date with the counters, moves exactly one of them.
         #expect(capsules.isEmpty)
         #expect(boxes.count == 1)
         let preview = try #require(cell.mediaHeroRect)
         let frame = boxes[0].convert(boxes[0].bounds, to: cell.contentView)
-        #expect(abs(preview.maxX - frame.maxX - PostGridListRowCell.mediaFurnitureInset) < 0.5)
+        #expect(abs(frame.minX - preview.minX - PostGridListRowCell.mediaFurnitureInset) < 0.5)
     }
 
     /// ⚠️ THE PREVIEW'S DATE IS WHITE ON A BLACK HALO, and the halo is not

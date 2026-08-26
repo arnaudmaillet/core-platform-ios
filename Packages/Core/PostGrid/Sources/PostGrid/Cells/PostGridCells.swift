@@ -17,9 +17,16 @@ import UIKit
 ///
 /// * **Text row** — a quiet line closing the card, counters leading and the age
 ///   trailing, `.secondaryLabel` against the card's own fill.
-/// * **Media row** — the same four values ON the preview, as two material chips
-///   resting on its bottom edge (counters leading, age trailing). The card then
-///   ENDS at the preview, so the line below it is gone rather than duplicated.
+/// * **Media row** — the same four values ON the preview, as material chips
+///   resting on its bottom edge, and here the reading order is REVERSED: the
+///   age leads and the counters close the row, with the page indicator joining
+///   them at the trailing end. The card then ENDS at the preview, so the line
+///   below it is gone rather than duplicated.
+///
+/// ⚠️ The two placements therefore disagree about which end the date sits on.
+/// That is not an oversight — over a photograph the pressable things gather at
+/// the trailing edge and the date is the quiet fact opposite them — but it is
+/// the sort of asymmetry a reader should find recorded rather than deduce.
 ///
 /// The second is not decoration. A card with a preview closed on a strip of
 /// card-coloured furniture below the image, which is the widest thing on the
@@ -1696,34 +1703,38 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // still measures the same box.
         agePill = PostChipSlotView(contents: [overlayAge])
 
-        likesPill.constrain(in: mediaView) { parent in
-            likesPill.leadingAnchor.constraint(
+        // ⚠️ THE DATE LEADS AND THE COUNTERS CLOSE THE ROW:
+        //
+        //     [date]  ·······  [indicator][comments][likes]
+        //
+        // The counters and the indicator are one group at the trailing edge —
+        // things you can press, plus the mark saying where you are among the
+        // pages you press them on — and the date is the quiet fact at the other
+        // end. It reads left to right as "when, then what you can do with it".
+        agePill.constrain(in: mediaView) { parent in
+            agePill.leadingAnchor.constraint(
                 equalTo: parent.leadingAnchor, constant: Self.mediaFurnitureInset
+            )
+            agePill.bottomAnchor.constraint(
+                equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
+            )
+        }
+        likesPill.constrain(in: mediaView) { parent in
+            likesPill.trailingAnchor.constraint(
+                equalTo: parent.trailingAnchor, constant: -Self.mediaFurnitureInset
             )
             likesPill.bottomAnchor.constraint(
                 equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
             )
         }
         commentsPill.constrain(in: mediaView) { parent in
-            commentsPill.leadingAnchor.constraint(
-                equalTo: likesPill.trailingAnchor, constant: Self.chipGap
+            commentsPill.trailingAnchor.constraint(
+                equalTo: likesPill.leadingAnchor, constant: -Self.chipGap
             )
             commentsPill.bottomAnchor.constraint(
                 equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
             )
         }
-        agePill.constrain(in: mediaView) { parent in
-            agePill.trailingAnchor.constraint(
-                equalTo: parent.trailingAnchor, constant: -Self.mediaFurnitureInset
-            )
-            agePill.bottomAnchor.constraint(
-                equalTo: parent.bottomAnchor, constant: -Self.mediaFurnitureInset
-            )
-        }
-        // The page indicator sits BETWEEN the two, centred on the preview
-        // rather than on the space left over — the row reads as three chips on
-        // one baseline, and centring on the gap would slide it whenever a
-        // counter gained a digit.
         // Centred on the age chip's CENTRE, not aligned to its bottom.
         //
         // The three chips are different heights — a row of 6pt dots is shorter
@@ -1746,35 +1757,28 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             // together.
             pageIndicator.heightAnchor.constraint(equalTo: agePill.heightAnchor)
         }
-        // ⚠️ Centred BETWEEN the two groups, not on the preview.
+        // ⚠️ THE INDICATOR TRAVELS WITH THE COUNTERS, and the whole of the
+        // row's give is the one space in front of it.
         //
-        // Centring on the preview looked like the same thing and is not: it
-        // fixes the indicator's leading edge, which caps the room left of it at
-        // half the preview regardless of what the counters need. Measured, with
-        // the chips at control size: the comments count truncated to "…" while
-        // 60pt of preview sat empty to the right of the dots.
-        //
-        // Two guides of equal width give the row the shape it was asked for —
-        // counters, dynamic space, indicator, dynamic space, date. The SPACES
-        // absorb the difference, so the counters take the width they need and
-        // the indicator floats in what is left.
-        let leadingSpace = UILayoutGuide()
-        let trailingSpace = UILayoutGuide()
-        mediaView.addLayoutGuide(leadingSpace)
-        mediaView.addLayoutGuide(trailingSpace)
+        // It used to float between two guides of equal width, which kept it
+        // centred on the preview at the cost of capping the counters' room at
+        // half of it — measured at control size, the comments count truncated
+        // to "…" while 60pt of preview sat empty beside the dots. Now the
+        // trailing group takes exactly the width it needs and the date holds
+        // the other end; what is left over is between them.
         NSLayoutConstraint.activate([
-            leadingSpace.leadingAnchor.constraint(equalTo: commentsPill.trailingAnchor),
-            leadingSpace.trailingAnchor.constraint(equalTo: pageIndicator.leadingAnchor),
-            trailingSpace.leadingAnchor.constraint(equalTo: pageIndicator.trailingAnchor),
-            trailingSpace.trailingAnchor.constraint(equalTo: agePill.leadingAnchor),
-            // ⚠️ REQUIRED: the gaps are what keep the chips from overlapping, and
+            // ⚠️ REQUIRED: the gap is what keeps the chips from overlapping, and
             // two capsules touching on a photograph reads as one broken shape.
-            leadingSpace.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.chipGap),
-            trailingSpace.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.chipGap),
-            // And when there is no indicator at all, the counters still have to
-            // stay off the date.
-            agePill.leadingAnchor.constraint(
-                greaterThanOrEqualTo: commentsPill.trailingAnchor, constant: Self.chipGap
+            pageIndicator.leadingAnchor.constraint(
+                greaterThanOrEqualTo: agePill.trailingAnchor, constant: Self.chipGap
+            ),
+            pageIndicator.trailingAnchor.constraint(
+                equalTo: commentsPill.leadingAnchor, constant: -Self.chipGap
+            ),
+            // And when there is no indicator at all — a post with one piece of
+            // media — the counters still have to stay off the date.
+            commentsPill.leadingAnchor.constraint(
+                greaterThanOrEqualTo: agePill.trailingAnchor, constant: Self.chipGap
             )
         ])
         // A ladder, because at the largest accessibility sizes four chips do not
@@ -1783,20 +1787,16 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         //
         //   749  the indicator's two-dot floor — a shorter run of dots still
         //        says "there is more, you are here"
-        //   900  the two spaces being equal — an off-centre indicator is a
-        //        cosmetic loss, and it buys the counters real width
         //   999  the counts and the date themselves (set on the labels), which
         //        must never truncate: a clipped count is a WRONG count
         //
-        // The gaps above sit above all three at required, so the failure mode is
+        // The gaps above sit above both at required, so the failure mode is
         // always an indicator that gave way, never chips that overlap.
-        let centred = leadingSpace.widthAnchor.constraint(equalTo: trailingSpace.widthAnchor)
-        centred.priority = UILayoutPriority(900)
         let dotFloor = pageIndicator.widthAnchor.constraint(
             greaterThanOrEqualToConstant: pageIndicator.minimumChipWidth
         )
         dotFloor.priority = UILayoutPriority(749)
-        NSLayoutConstraint.activate([centred, dotFloor])
+        dotFloor.isActive = true
 
         // The chip's width never changes now — five dots at any length, with
         // the window sliding under them — so there is nothing for this row to
@@ -1845,7 +1845,19 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             view?.setPage(page, animated: false)
         }
         view.onTapped = { [weak self] in self?.onMediaTapped?() }
-        mediaView.insertSubview(view, belowSubview: likesPill)
+        // ⚠️ AT THE BOTTOM, not below a NAMED chip.
+        //
+        // This used to go in below `likesPill` — which was the first chip added
+        // and therefore the lowest, so "below the first one" and "below all of
+        // them" were the same thing by accident. Reversing the row's reading
+        // order made likes the LAST chip added, and the carousel went in above
+        // the date and drew over it: a chip laid out correctly, in front of
+        // nothing. Measured as a media row with no date on it at all.
+        //
+        // Index zero says what was meant, and cannot be undone by reordering
+        // the chips again. The preview's cover is the image view's own content
+        // rather than a subview, so nothing of the row's is below this.
+        mediaView.insertSubview(view, at: 0)
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: mediaView.leadingAnchor),
