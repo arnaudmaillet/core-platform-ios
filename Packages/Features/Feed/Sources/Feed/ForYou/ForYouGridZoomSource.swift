@@ -142,6 +142,22 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         return card
     }
 
+    /// The same donation, asked again while the card is already in the air.
+    ///
+    /// The build-time ask above can only report what the grid held AT THE TAP,
+    /// and a tile is routinely granted its player by that very tap: the focus
+    /// pass starts it, the URL resolves a turn later, the first frame decodes
+    /// after that. Answering nil once therefore says "not yet", never "never",
+    /// and the flight is entitled to keep asking for as long as the answer
+    /// could still change.
+    ///
+    /// PRESENT only, for exactly the reason the build-time ask is: a dismissal
+    /// must fly the page's playhead, not the tile's.
+    func zoomLiveMediaSurfaceIfReady() -> UIView? {
+        guard !isStagingDismissal, let donateLive else { return nil }
+        return donateLive()
+    }
+
     /// Takes the card's live surface at landing, so the tile renders the frame
     /// the card was showing instead of starting a blank layer.
     /// True once the landing tile's own surface is rendering — or when the tile

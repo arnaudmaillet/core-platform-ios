@@ -32,6 +32,27 @@ public protocol ZoomTransitionSource: AnyObject {
     /// neither.
     func setZoomSourceHidden(_ hidden: Bool)
 
+    /// ⚠️ ASKED AGAIN, LATER, when the card took off carrying a still.
+    ///
+    /// A hero can only fly what is already playing, and at flight-build time a
+    /// tile may hold no player yet — it was denied one while the feed was
+    /// decelerating, or its stream is still resolving. The flight then carries
+    /// the thumbnail for its whole length even though the picture arrives a few
+    /// frames later: the intermittent "the player did not attach" that nobody
+    /// could reproduce on demand, because it depends on how long the viewer
+    /// waited before tapping.
+    ///
+    /// So `ZoomLiveMediaRetry` keeps asking for a bounded window and adopts a
+    /// surface the moment one exists. Returning nil is always allowed and
+    /// always means the same thing — nothing to fly YET.
+    ///
+    /// ⚠️ A REQUIREMENT, not merely a defaulted extension member: the retry
+    /// holds sources as `any ZoomTransitionSource`, and a protocol-extension
+    /// method with no requirement behind it dispatches STATICALLY — every
+    /// conformer's override is invisible through the existential and the
+    /// default's `nil` is the only answer anyone ever gets.
+    func zoomLiveMediaSurfaceIfReady() -> UIView?
+
     /// The view the depth cue should recede, when it is not the presenter's
     /// whole view.
     ///
@@ -118,6 +139,7 @@ public protocol ZoomTransitionSource: AnyObject {
 }
 
 public extension ZoomTransitionSource {
+    func zoomLiveMediaSurfaceIfReady() -> UIView? { nil }
     var zoomPresenterDepthView: UIView? { nil }
     func zoomSourceWillStageDismissal() {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}

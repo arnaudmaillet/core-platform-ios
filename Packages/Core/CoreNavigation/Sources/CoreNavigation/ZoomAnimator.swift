@@ -293,6 +293,14 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let presentingView = source.zoomPresenterDepthView ?? context.viewController(forKey: .from)?.view
         ZoomFlight.applyRecededChrome(to: presentingView, radius: screenRadius)
 
+        // A card that took off with nothing live keeps asking for the rest of
+        // the flight. The tile it left may have been granted a player only as
+        // the tap resolved, and its first decoded frame lands mid-air — so the
+        // difference between a hero that shows video and one that shows a
+        // poster is often a hundred milliseconds nobody can schedule around.
+        // Retained by its own display link; it stops itself.
+        ZoomLiveMediaRetry.arm(card: flight.card, pageSize: flight.pageFrame.size, source: source)
+
         #if DEBUG
         Self.debugTrackFlightGeometry(card: flight.card)
         #endif

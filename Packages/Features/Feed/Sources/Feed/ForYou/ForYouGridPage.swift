@@ -877,6 +877,10 @@ final class ForYouGridPage: UIView {
     /// grid's full complement of players after a dismissal.
     func endPlaybackHandoff() {
         playback?.endHandoff()
+        // The claim ends with the round trip: the post is back to being one
+        // tile among others, and holding the claim would pin a player to
+        // whatever the viewer opened last, for ever.
+        playback?.focus(nil)
         updateAutoplay()
         #if DEBUG
         logVisibility("return-complete")
@@ -1032,6 +1036,14 @@ final class ForYouGridPage: UIView {
               let url = row?.currentPageVideoURL ?? posts[index].videoURL
         else { return nil }
         let made = playback.makeAttachedSurface(for: postID, url: url)
+        // Nothing to join. Ask for the player rather than reporting its
+        // absence: this call is repeated every frame of the flight (see
+        // `ZoomLiveMediaRetry`), so a start kicked here is picked up by the
+        // next ask — which is the difference between a hero that shows video
+        // 100ms in and one that shows a poster all the way home.
+        if made == nil, let row {
+            playback.demandFlightPlayback(of: postID, url: url, in: row)
+        }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print(String(format: "[zoom-live] %.3f producer GRID liveFlightSurface -> %@",
@@ -2064,6 +2076,20 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         let index = flatIndex(for: indexPath)
         guard posts.indices.contains(index) else { return }
         pendingRevealPostID = posts[index].id
+        // ⚠️ CLAIM THE POOL BEFORE THE FLIGHT IS STAGED.
+        //
+        // A hero can only fly what is already playing: the card asks this page
+        // for a live surface while the flight is being built, and the answer is
+        // nil for a tile that holds no player. Until the tap is known this tile
+        // competed on distance like any other, so the one that MUST be playing
+        // could be the one that was not — the flight then carried the thumbnail.
+        //
+        // Claimed and reconciled in the same breath, so the grant is at least
+        // in flight by the time the card asks. It cannot always be finished —
+        // a cold tile has to resolve a URL first — which is why the flight
+        // keeps asking (see `ZoomFlight`'s live-media retry).
+        playback?.focus(posts[index].id)
+        updateAutoplay()
         if showingComments, let openComments = onItemCommentsTapped {
             openComments(index)
         } else {

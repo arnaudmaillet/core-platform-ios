@@ -129,6 +129,65 @@ public final class GridVideoPlaybackCoordinator {
     /// Fires when a hosted surface is torn down, so the host can forget it.
     public var onHostedSurfaceReleased: ((PostID) -> Void)?
 
+    /// **THE POST THE VIEWER IS REACHING FOR**, which outranks everything.
+    ///
+    /// ⚠️ A HERO CAN ONLY FLY WHAT IS ALREADY PLAYING. The card asks the grid
+    /// for a live surface at flight-build time, and the grid can only answer
+    /// for a tile that holds a player — `grid attach ask … playing=N` in the
+    /// log, and a flight that carries the thumbnail instead of the picture.
+    /// Until now the tapped tile competed with its neighbours on distance
+    /// alone: it could be outside the budget, or denied a start because the
+    /// feed was still decelerating, and then the one tile that MUST be playing
+    /// was the one that was not.
+    ///
+    /// Focus is a claim, not a preference. A focused post is chosen whatever
+    /// its rank, started even while a fling is suppressing every other start,
+    /// and never stopped to make room. Everything else keeps competing on
+    /// distance exactly as before.
+    public private(set) var focusedID: PostID?
+
+    /// Claims the pool for `id` — or releases the claim with nil.
+    ///
+    /// Called the moment a tap is known, before the flight is staged, so the
+    /// grant is already in flight when the card asks for a surface.
+    public func focus(_ id: PostID?) {
+        guard focusedID != id else { return }
+        focusedID = id
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace("focus \(id?.rawValue ?? "-")")
+        }
+        #endif
+    }
+
+    /// ⚠️ THE FLIGHT MAY *DEMAND* A PLAYER, not merely wait for one.
+    ///
+    /// `focus` claims the pool at the tap, and for a tile the grid had already
+    /// ranked that is enough. It cannot cover a tile that was never a candidate
+    /// — the row had not been measured, the page was inactive, the grid was
+    /// already covered — because by the time the card is in the air the handoff
+    /// scope has closed every ordinary door: `isSurfaceVisible` is false, so
+    /// nothing is chosen, and the flying post is filtered out of the ranking on
+    /// purpose. A retry asking through that door would ask forever.
+    ///
+    /// So the flight asks directly, and the exemptions are safe precisely
+    /// BECAUSE of the state it asks from: there is no loan, so there is nothing
+    /// for a start to interrupt, and the card is carrying a poster, so there is
+    /// no live surface for a second one to compete with. Both facts are
+    /// re-checked here rather than trusted from the caller.
+    ///
+    /// One start per flight, by construction: the moment this succeeds the post
+    /// holds a loan and every later call returns immediately.
+    public func demandFlightPlayback(of id: PostID, url: URL, in cell: any GridPlaybackCell) {
+        guard loans[id] == nil, startTasks[id] == nil else { return }
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace("demand \(id.rawValue) url=\(url.lastPathComponent)")
+        }
+        #endif
+        start(Candidate(id: id, url: url, cell: cell, distanceFromCentre: 0))
+    }
+
     public init(pool: VideoPlaybackController, maxConcurrent: Int = 6) {
         self.pool = pool
         self.maxConcurrent = maxConcurrent
@@ -146,16 +205,25 @@ public final class GridVideoPlaybackCoordinator {
         // kill the player the card is rendering; starting it would attach a
         // competing layer. Its lifecycle belongs to the handoff scope until
         // `endHandoff`.
+        // ⚠️ THE FOCUSED POST SORTS FIRST, whatever it is worth on distance.
+        //
+        // A tile can be perfectly central and still lose — a wide row is
+        // measured from its centre, and a tap lands wherever the finger is. The
+        // one the viewer is opening is not a candidate among candidates.
         let ranked = candidates
             .filter { $0.id != handoffID }
-            .sorted { $0.distanceFromCentre < $1.distanceFromCentre }
+            .sorted {
+                if ($0.id == focusedID) != ($1.id == focusedID) { return $0.id == focusedID }
+                return $0.distanceFromCentre < $1.distanceFromCentre
+            }
         let chosen = isSurfaceVisible ? Array(ranked.prefix(maxConcurrent)) : []
         let chosenIDs = Set(chosen.map(\.id))
         #if DEBUG
         logRankingIfChanged(ranked, chosen: chosenIDs)
         #endif
 
-        for (id, cell) in loans where !chosenIDs.contains(id) && id != handoffID {
+        for (id, cell) in loans
+        where !chosenIDs.contains(id) && id != handoffID && id != focusedID {
             stop(id: id, cell: cell)
         }
         // A post that is still chosen but on a DIFFERENT stream — the viewer
@@ -244,14 +312,6 @@ public final class GridVideoPlaybackCoordinator {
                 stop(id: candidate.id, cell: candidate.cell)
             }
         }
-        // Paused or resumed to match, every time, for everything still chosen.
-        // Reconciliation and not an edge: a row can arrive already paused (its
-        // carousel was left on another page), and a start below is followed by
-        // the same call for the same reason.
-        // Paused or resumed to match, every time, for everything still chosen.
-        // Reconciliation and not an edge: a row can arrive already paused (its
-        // carousel was left on another page), and a start below is followed by
-        // the same call for the same reason.
         // ⚠️ A LOAN WITH NO PLAYER BEHIND IT IS RELEASED, not resumed.
         //
         // This is what the derived `isPlaying` buys. A row whose player went to
@@ -277,10 +337,26 @@ public final class GridVideoPlaybackCoordinator {
             && !isPlaying(candidate.id) {
             releaseStaleLoan(id: candidate.id)
         }
+        // Paused or resumed to match, every time, for everything still chosen.
+        // Reconciliation and not an edge: a row can arrive already paused (its
+        // carousel was left on another page), and a start below is followed by
+        // the same call for the same reason.
         for candidate in chosen where isPlaying(candidate.id) {
             candidate.cell.loadedVideoRenderView.map {
                 pool.setPaused(candidate.isPaused, in: $0)
             }
+        }
+        // ⚠️ THE FOCUSED POST STARTS DURING A FLING TOO.
+        //
+        // Suppressing starts at speed is right for everything else: a tile
+        // crossing the viewport in a fifth of a second costs an item and a
+        // segment fetch for something already gone. The post being OPENED is
+        // the opposite case — the scroll is about to stop existing, and the
+        // flight is a few frames away. Denying it a player here is denying the
+        // hero its picture.
+        for candidate in chosen
+        where candidate.id == focusedID && loans[candidate.id] == nil {
+            start(candidate)
         }
         guard allowingStarts else { return }
         for candidate in chosen where loans[candidate.id] == nil {
