@@ -179,7 +179,29 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// True while this row is drawing its collection rather than a single
     /// preview. Asked in several places, and each of them was a `!(x?.y ?? true)`
     /// before, which is one negation too many to read at a glance.
-    private var showsCarousel: Bool { !(carousel?.isHidden ?? true) }
+    @objc private func handleMediaHold(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            onMediaHoldChanged?(true)
+        case .ended, .cancelled, .failed:
+            // ⚠️ `.cancelled` is the COMMON case, not an edge one: it fires when
+            // a finger rests and then drags to page or to scroll. Treating it as
+            // anything but "the hold is over" leaves the clip paused for good
+            // after an ordinary swipe.
+            onMediaHoldChanged?(false)
+        default:
+            break
+        }
+    }
+
+    /// Whether this row is drawing a COLLECTION rather than one attachment.
+    ///
+    /// Public because the question "is this row on its clip's page" only means
+    /// anything for a collection — a single attachment is always on its own —
+    /// and the caller that decides whether a row should be advancing has to be
+    /// able to tell the two apart. It could not, and every single-video row in
+    /// the feed was declared paused as a result.
+    public var showsCarousel: Bool { !(carousel?.isHidden ?? true) }
 
     /// The stream the CURRENT page carries, nil when the page is a still.
     ///
@@ -214,6 +236,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// a video — is the surface's business, not the cell's.
     public var onMediaPageChanged: ((Int) -> Void)?
 
+    /// A finger is resting on this row's media (`true`), or has lifted
+    /// (`false`). Relayed from the carousel, or from the preview itself for a
+    /// single attachment — the gesture is the same on both, and so is what it
+    /// means.
+    public var onMediaHoldChanged: ((Bool) -> Void)?
+
     // MARK: - Autoplay surface
 
     /// The surface an autoplaying row renders into, built on first use so a
@@ -226,7 +254,47 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// `setHeroMediaConcealed` applies while a twin is in the air. A sibling
     /// surface would have needed concealing separately, and would have been
     /// the thing left visible over a flight.
+    ///
+    /// ⚠️ For a collection it answers PER PAGE, once a budget has bought the row
+    /// a second surface. Until then `pageSurfaces` holds at most the watched
+    /// page and this behaves exactly as the single-surface version every
+    /// existing caller was written against.
     public func makeVideoRenderViewIfNeeded() -> VideoRenderView {
+        // ⚠️ GATED ON A GRANTED BUDGET, and this is not an optimisation.
+        //
+        // Minting per page regardless meant a row with no allowance still ended
+        // up holding two surfaces — and the coordinator reads exactly that
+        // ("more than one surface") to decide it may release a loan instead of
+        // stopping it. So a row nobody had given anything to would leave the
+        // previous clip's player bound, untracked and unreclaimable. With the
+        // gate, a budget of zero is the old single-surface behaviour, exactly.
+        if showsCarousel, clipBudget > 0, let carousel, carousel.currentPageVideoURL != nil {
+            let page = carousel.currentPage
+            if let existing = pageSurfaces[page] {
+                loadedVideoRenderView = existing
+                install(existing)
+                return existing
+            }
+            // The row's first surface belongs to the first clip page that asks
+            // for one: minting a second here would leave the original hanging
+            // with a live player and no page to draw it on.
+            if let inherited = loadedVideoRenderView,
+               !pageSurfaces.values.contains(where: { $0 === inherited }) {
+                pageSurfaces[page] = inherited
+                install(inherited)
+                return inherited
+            }
+            let view = VideoRenderView()
+            #if DEBUG
+            view.debugLabel = "row-p\(page)"
+            #endif
+            view.isHidden = true
+            view.isUserInteractionEnabled = false
+            pageSurfaces[page] = view
+            loadedVideoRenderView = view
+            install(view)
+            return view
+        }
         if let loadedVideoRenderView {
             // ⚠️ RE-INSTALLED, not just returned.
             //
@@ -295,6 +363,131 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     public private(set) var loadedVideoRenderView: VideoRenderView?
 
+    // MARK: - Retained clips
+
+    /// A surface per clip page this row is keeping warm, keyed by page.
+    ///
+    /// ⚠️ THE ROW'S BUDGET IS WHAT IS LEFT OVER, not the pool's whole capacity.
+    ///
+    /// A post open full-screen is the only thing drawing and may spend the lot.
+    /// A row is one of several on screen, and the coordinator hands every chosen
+    /// row a player before anything is kept warm — so a row helping itself to
+    /// the same window would starve its neighbours, which is precisely the
+    /// budget `maxConcurrent` exists to divide. `retainClips(budget:)` is told
+    /// how much is spare; when the answer is nothing, this holds one entry and
+    /// the row behaves as it always did.
+    private var pageSurfaces: [Int: VideoRenderView] = [:]
+
+    /// How many EXTRA clips this row has been allowed to keep. Zero until a
+    /// coordinator says otherwise, which is what makes the retention opt-in
+    /// rather than something a row helps itself to.
+    private var clipBudget = 0
+
+    /// The surface belonging to the page the viewer is actually looking at.
+    ///
+    /// ⚠️ ASKED OF THE CAROUSEL, NEVER REMEMBERED — and that is the whole of a
+    /// reported defect.
+    ///
+    /// `loadedVideoRenderView` is re-pointed when someone asks the cell for a
+    /// surface, which happens in the coordinator's START pass. Anything running
+    /// BEFORE that — the pause pass, in particular — reads the page the viewer
+    /// has just left. Pausing "everything except the watched one" then spared
+    /// the clip being left and paused the one arriving, so a card's carousel
+    /// ended up with two clips playing at once.
+    ///
+    /// A still page has no watched clip, which is the honest answer: nothing on
+    /// it should be advancing.
+    public var watchedClipSurface: VideoRenderView? {
+        guard showsCarousel, let carousel else { return loadedVideoRenderView }
+        return pageSurfaces[carousel.currentPage]
+    }
+
+    public var retainedPlaybackSurfaces: [VideoRenderView] {
+        var surfaces = Array(pageSurfaces.values)
+        if let loadedVideoRenderView,
+           !surfaces.contains(where: { $0 === loadedVideoRenderView }) {
+            surfaces.append(loadedVideoRenderView)
+        }
+        return surfaces
+    }
+
+    @discardableResult
+    public func retainClips(budget: Int) -> [VideoRenderView] {
+        clipBudget = budget
+        guard showsCarousel, let carousel else { return [] }
+        // One policy, in one place: the same window the post page uses. The
+        // budget is the EXTRA allowance, so the watched clip is added back — a
+        // row granted nothing still keeps the one it is playing.
+        let keep = Set(CarouselRetentionWindow.pagesToRetain(
+            videoPages: carousel.videoPageIndices,
+            currentPage: carousel.currentPage,
+            capacity: budget + 1
+        ))
+        var dropped: [VideoRenderView] = []
+        for (page, view) in pageSurfaces where !keep.contains(page) {
+            guard view !== loadedVideoRenderView else { continue }
+            carousel.evictSurface(onPage: page)
+            view.removeFromSuperview()
+            pageSurfaces[page] = nil
+            dropped.append(view)
+        }
+        // Re-hung every time, and idempotent: a page whose surface is still its
+        // own but whose carousel was re-laid out has to be put back.
+        for (page, view) in pageSurfaces {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            carousel.host(view, onPage: page)
+        }
+        return dropped
+    }
+
+    /// The clips this row would like brought to their first frame, each with a
+    /// surface ready to receive one.
+    ///
+    /// The surface carries THAT page's cover as its poster: hosted without one
+    /// it is a black rectangle over the photograph until the stream fills,
+    /// which is a worse fault than the delay the warming is there to remove.
+    public func clipsToPrewarm() -> [(url: URL, surface: VideoRenderView)] {
+        guard showsCarousel, clipBudget > 0, let carousel else { return [] }
+        let pages = CarouselRetentionWindow.pagesToPrewarm(
+            videoPages: carousel.videoPageIndices,
+            currentPage: carousel.currentPage,
+            budget: clipBudget
+        )
+        return pages.compactMap { page in
+            guard let url = carousel.videoURL(onPage: page) else { return nil }
+            let view: VideoRenderView
+            if let existing = pageSurfaces[page] {
+                view = existing
+            } else {
+                view = VideoRenderView()
+                #if DEBUG
+                view.debugLabel = "row-warm-p\(page)"
+                #endif
+                view.isUserInteractionEnabled = false
+                pageSurfaces[page] = view
+            }
+            view.setPoster(carousel.cover(onPage: page))
+            view.isHidden = false
+            view.translatesAutoresizingMaskIntoConstraints = true
+            carousel.host(view, onPage: page)
+            return (url, view)
+        }
+    }
+
+    /// Gives up every clip surface but the watched one — for reuse, and for the
+    /// end of this row's playback.
+    @discardableResult
+    public func releaseRetainedClips() -> [VideoRenderView] {
+        var dropped: [VideoRenderView] = []
+        for (page, view) in pageSurfaces where view !== loadedVideoRenderView {
+            carousel?.evictSurface(onPage: page)
+            view.removeFromSuperview()
+            pageSurfaces[page] = nil
+            dropped.append(view)
+        }
+        return dropped
+    }
+
     /// For a collection: only while the surface hangs in the page being looked
     /// at. A paused clip one page over is rendering, and is not what the viewer
     /// is looking at.
@@ -337,6 +530,22 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         }
         view.transform = .identity
         view.isHidden = false
+        // ⚠️ THE ADOPTED VIEW IS THIS PAGE'S SURFACE FROM HERE ON.
+        //
+        // Without this the page map still names the surface the landing just
+        // replaced, and the live one — the view actually carrying the adopted
+        // player — is in no map at all. Nothing can pause what it cannot name,
+        // so that player ran on for as long as the row lived: returning to its
+        // page found playback seconds ahead of where it was left, and the
+        // picture raced to reach it.
+        //
+        // Reported precisely: "in the post it pauses properly, in the card the
+        // video catches up as if it had kept going". It had. The post's card
+        // view took this same line when its own landing was fixed; the row
+        // never got it, and that asymmetry is exactly what was observed.
+        if showsCarousel, let carousel, carousel.currentPageVideoURL != nil {
+            pageSurfaces[carousel.currentPage] = view
+        }
         install(view)
         loadedVideoRenderView = view
     }
@@ -672,6 +881,36 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// separately. See `MediaCarouselView.onTapped`.
     public var onMediaTapped: (() -> Void)?
 
+    /// Fired when the viewer taps the COMMENT COUNT, on either card shape.
+    ///
+    /// ⚠️ A different destination from the row's own tap, not a shortcut to it.
+    /// Tapping the card opens the post; tapping this opens the post AT ITS
+    /// COMMENTS. The count is the only thing on the card that names the thread,
+    /// so it is the only place the shorter route belongs — and a viewer who
+    /// wanted the photograph has the whole rest of the card to press.
+    ///
+    /// Wired on BOTH the media overlay's chip and the closing line's, because
+    /// which one a post wears depends on whether it happens to carry a
+    /// photograph, and an affordance that comes and goes with that is not one.
+    public var onCommentsTapped: (() -> Void)?
+
+    #if DEBUG
+    /// Presses the comment count the row is ACTUALLY wearing.
+    ///
+    /// The point of asking the row rather than naming a chip: a card shows the
+    /// overlay pair over its media and the closing line's pair when it has
+    /// none, and wiring only one of the two is a defect that no test naming the
+    /// other would ever see.
+    public func debugTapCommentsChip() -> Bool {
+        for pill in [commentsPill, closingCommentsPill] as [PostMetaPillView?] {
+            guard let pill, !pill.isHidden, pill.window != nil || pill.superview != nil,
+                  pill.superviewChainIsVisible else { continue }
+            if pill.debugTap() { return true }
+        }
+        return false
+    }
+    #endif
+
     /// Moves this row's carousel, e.g. to follow the page an opened post is on.
     /// Ignored by a row with no collection.
     public func setMediaPage(_ page: Int, animated: Bool = true) {
@@ -741,12 +980,103 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // chips with it and brought the whole strip back in one frame at the
         // landing, which is the pop this rule exists to prevent, rebuilt inside
         // the preview it was written for.
+        // ⚠️ REMEMBERED, because a flight outlives a configure.
+        //
+        // A row can be re-dequeued and reconfigured while its twin is in the
+        // air, and `prepareForReuse` resets the furniture to visible. The
+        // concealment was applied to the instance that flew, so the fresh one
+        // came back with its play badge lit in the MIDDLE of a dismissal —
+        // on single-media rows only, because a collection's badge is hidden
+        // outright by `post.isCollection` and so has nothing to reveal.
+        // ⚠️ Only a flight ENDING earns the settle. `prepareForReuse` comes
+        // through here too, and animating there would flutter the chips of
+        // every row a scroll recycles — a cost paid continuously for an effect
+        // that belongs to one moment.
+        let wasConcealed = isHeroMediaConcealed
+        isHeroMediaConcealed = concealed
+        // ⚠️ THE FURNITURE GOES IN BOTH SHAPES, and that is the unification.
+        //
+        // A single attachment hid its chips for free — they are subviews of the
+        // preview, and the preview went to alpha 0. A collection conceals only
+        // the PAGE, so its counters, date and indicator stayed lit through the
+        // whole flight while the single-media version's vanished. Same gesture,
+        // two behaviours, which is exactly the doubt raised about whether this
+        // was ever really unified. It was not.
+        //
+        // What the flight carries is the media. What it does not carry is the
+        // furniture — so the furniture goes, in both.
+        for view in furnitureViews { view.alpha = concealed ? 0 : 1 }
         if let carousel, !carousel.isHidden {
             carousel.setCurrentPageConcealed(concealed)
-            return
+        } else {
+            mediaView.alpha = concealed ? 0 : 1
         }
-        mediaView.alpha = concealed ? 0 : 1
-        playBadge.alpha = concealed ? 0 : 1
+        if wasConcealed, !concealed { animateFurnitureIn() }
+    }
+
+    /// Everything the preview wears that the flight does not reproduce.
+    private var furnitureViews: [UIView] {
+        [likesPill, commentsPill, agePill, pageIndicator, playBadge]
+    }
+
+    /// Whether a flight is currently standing in for this row's media.
+    private(set) var isHeroMediaConcealed = false
+
+    /// Brings the chips, the date and the badge back with a settle rather than
+    /// a switch.
+    ///
+    /// ⚠️ The MEDIA is deliberately not animated. The flight has just handed the
+    /// picture over; fading THAT in would show the hand-off instead of hiding
+    /// it. What pops is the furniture — counters, date, badge — which the flight
+    /// never carried and which therefore arrives from nothing on the landing
+    /// frame.
+    private func animateFurnitureIn() {
+        // ⚠️ NOT ALL AT ONCE, AND NOT AS ONE PIECE.
+        //
+        // Four chips arriving on the same frame with the same curve read as a
+        // single sheet being switched on — the eye sees one event, not four
+        // objects. A few hundredths of a second between them is enough for it
+        // to read as things settling into a row.
+        //
+        // And each capsule's CONTENTS lag its shape by a couple of points. A
+        // label transformed with its capsule is one object sliding; a label that
+        // arrives a moment after the shape it sits in makes the shape read as a
+        // container the text drops into. It is a small dishonesty about physics
+        // and it is what makes the row feel alive rather than assembled.
+        // ⚠️ FADE AND SCALE, NO TRANSLATION.
+        //
+        // A chip that slides in comes FROM somewhere, and there is nowhere for
+        // it to have come from — it was always at that spot, merely invisible.
+        // Growing into place says the true thing: this was here, and it is
+        // arriving. The spring is deliberately shallow; a pronounced bounce on
+        // four small capsules reads as a toy.
+        for (index, view) in furnitureViews.enumerated() where !view.isHidden {
+            let contents = (view as? PostMetaPillView)?.contentRow
+            view.alpha = 0
+            view.transform = CGAffineTransform(scaleX: 0.88, y: 0.88)
+            contents?.alpha = 0
+            contents?.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+            let step = 0.04 * Double(index)
+            UIView.animate(
+                withDuration: 0.36, delay: step,
+                usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
+                view.alpha = 1
+                view.transform = .identity
+            }
+            // The contents run the same curve a beat later, so the capsule
+            // reads as a container the text grows into rather than as one solid
+            // thing changing size.
+            UIView.animate(
+                withDuration: 0.36, delay: step + 0.06,
+                usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
+                contents?.alpha = 1
+                contents?.transform = .identity
+            }
+        }
     }
 
     /// Hides whatever THIS row's flight is carrying, for as long as it is in
@@ -1126,6 +1456,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// Built on first use: most posts have one piece of media.
     private var carousel: MediaCarouselView?
 
+    /// The carousel, for a test that needs to ask where a page put something.
+    var debugCarousel: MediaCarouselView? { carousel }
+
     private var loadTask: Task<Void, Never>?
     /// The metadata line always hangs off the caption; what changes per
     /// configure is whether it CLOSES the card. A media row's line is hidden
@@ -1223,6 +1556,32 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // The same inset as the chips at the other end, and as everything on the
         // card above it — furniture on the preview is held off it exactly as the
         // preview is held off the card.
+        // ⚠️ HOLD TO PAUSE LIVES ON THE MEDIA, NOT ON THE CAROUSEL.
+        //
+        // A post with one attachment is a gallery of one — the gesture means the
+        // same thing on both and there is no reason for two implementations to
+        // drift apart. It sat on the carousel first, which gave the behaviour to
+        // collections only and left single-video cards without it.
+        //
+        // On `mediaView`, an ancestor of the carousel, so the pages still
+        // receive the pan.
+        //
+        // ⚠️ IT MUST CANCEL THE TOUCH, and this is where the two shapes were not
+        // really unified. A collection opens by its carousel's own tap; a single
+        // attachment opens by the COLLECTION VIEW selecting the cell, which is
+        // driven by plain touch delivery. Letting the touch through therefore
+        // opened the post the moment a hold ended — on single-media cards only,
+        // which is exactly how it was reported.
+        //
+        // Cancelling costs the pans nothing: a gesture recognizer is not touch
+        // delivery, so the carousel still pages and the feed still scrolls. What
+        // it stops is the cell's own selection tracking — and only once the hold
+        // has actually recognised, so an ordinary tap still opens the post.
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleMediaHold))
+        hold.minimumPressDuration = MediaCarouselView.holdToPauseDuration
+        hold.cancelsTouchesInView = true
+        mediaView.addGestureRecognizer(hold)
+
         playBadge.constrain(in: mediaView) { parent in
             playBadge.topAnchor.constraint(
                 equalTo: parent.topAnchor, constant: Self.mediaFurnitureInset
@@ -1463,6 +1822,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         )
         dotFloor.priority = UILayoutPriority(749)
         NSLayoutConstraint.activate([centred, dotFloor])
+
+        // The chip's width never changes now — five dots at any length, with
+        // the window sliding under them — so there is nothing for this row to
+        // make room for. It briefly grew under a finger instead, which moved
+        // the dots the finger had just landed on: a control whose targets shift
+        // when you touch it cannot be aimed, and every scrub began with a jump.
     }
 
     /// The carousel, built on first use — most posts have one piece of media and
@@ -1497,7 +1862,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // half reaches the other, which is what keeps the carousel the only
         // thing that decides where the pages are.
         pageIndicator.onPageRequested = { [weak view] page in
-            view?.setPage(page)
+            // ⚠️ NOT ANIMATED. The chip is a scrubber: the viewer's finger is
+            // the clock, and an animation would run its own on top — a drag
+            // across twelve pages would queue twelve scroll animations and
+            // arrive late at every one of them. Teleporting keeps the page under
+            // the finger where the finger is.
+            view?.setPage(page, animated: false)
         }
         view.onTapped = { [weak self] in self?.onMediaTapped?() }
         mediaView.insertSubview(view, belowSubview: likesPill)
@@ -1590,6 +1960,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         onAuthorTapped = nil
         authorMenuActions = nil
         onMediaTapped = nil
+        onCommentsTapped = nil
         // Both capture the POST they were built for, like the two above: a
         // recycled row would otherwise save someone else's post.
         onRepostTapped = nil
@@ -1690,6 +2061,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // pages the box has no single answer, and a badge over the whole
         // preview would sit on a photograph as often as on a clip.
         playBadge.isHidden = post.kind != .video || post.isCollection
+        // ⚠️ RE-ASSERTED, not assumed. A flight can be in the air while this
+        // row is reconfigured, and everything above has just set the furniture
+        // visible. Without this the badge lights up mid-dismissal.
+        if isHeroMediaConcealed { setHeroMediaConcealed(true) }
         // The line and the pills are the same four values in two placements, so
         // exactly one of them is on screen. The line is hidden rather than
         // unconstrained: it keeps hanging off the caption under the preview,
@@ -1706,6 +2081,26 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // exactly as it would on a photograph.
         closingLikesPill.syncVisibilityToContents()
         closingCommentsPill.syncVisibilityToContents()
+        // ⚠️ ON A TEXT POST THE COUNT IS NOT A CONTROL, and the pill stays
+        // exactly as it is drawn.
+        //
+        // The shortcut exists because a media post opens onto its PHOTOGRAPH
+        // and its thread is a second surface — pressing the count is the only
+        // way to ask for the thread directly. A text post's page IS its thread:
+        // tapping anywhere on the card already arrives there, by its own
+        // reveal. A chip promising a shortcut to where the card goes anyway is
+        // a second control for one destination, and it took the wrong route to
+        // get there — the media flight instead of the text reveal.
+        //
+        // Turned off rather than hidden: the touch then falls through to the
+        // row, which opens the post the way it always did. A dead control that
+        // swallows the touch would be worse than either.
+        let opensThread = post.kind != .text
+        let openComments: (() -> Void)? = opensThread
+            ? { [weak self] in self?.onCommentsTapped?() }
+            : nil
+        commentsPill.setTapHandler(openComments)
+        closingCommentsPill.setTapHandler(openComments)
         views.set(post.viewCount)
         overlayReactions.set(post.reactionCount)
         overlayComments.set(post.commentCount)

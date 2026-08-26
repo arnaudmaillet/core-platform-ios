@@ -41,6 +41,27 @@ final class ForYouGridPage: UIView {
 
     /// The tapped item's index into `posts`.
     var onItemTapped: ((Int) -> Void)?
+
+    /// The same open, with the comments already engaged — see
+    /// `PostGridListRowCell.onCommentsTapped`.
+    ///
+    /// ⚠️ FALLS BACK TO `onItemTapped` when unset, and that is not politeness.
+    /// The chip is drawn by the cell on every screen this page appears on; a
+    /// host that has not wired the shorter route must still get the ordinary
+    /// one, or the count becomes a control that does nothing on exactly the
+    /// screens nobody thought about.
+    var onItemCommentsTapped: ((Int) -> Void)?
+
+    /// The posts whose cards are ON SCREEN and worth warming — their first page
+    /// of comments, and anything else a host wants ready before a tap.
+    ///
+    /// ⚠️ IT RIDES THE AUTOPLAY RECONCILE, deliberately, which is what gives it
+    /// the fling gate for free. A feed that warms while the viewer is throwing
+    /// it spends a request per card it will never show for longer than a
+    /// glance; the same argument that stops a player being ATTACHED above
+    /// `maximumStartVelocity` stops the warm above it, and the two can never
+    /// drift apart because they are one decision.
+    var onWarmRequested: (([GalleryPost]) -> Void)?
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
@@ -566,6 +587,7 @@ final class ForYouGridPage: UIView {
     /// new — the mid-fling case, where anything started is gone before its first
     /// frame.
     func updateAutoplay(allowingStarts: Bool = true) {
+        requestWarm(allowingStarts)
         guard let playback else { return }
         let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
         let centreY = viewport.midY
@@ -582,8 +604,20 @@ final class ForYouGridPage: UIView {
             // on another page of the same collection — the clip is still on
             // screen there, peeking, and stopping it would put that page's
             // thumbnail back.
-            let advancing = (cell as? PostGridListRowCell)
-                .map { $0.currentPageVideoURL == held } ?? true
+            // ⚠️ A SINGLE ATTACHMENT IS ALWAYS ON ITS OWN PAGE.
+            //
+            // `currentPageVideoURL` answers for a CAROUSEL and is nil for a row
+            // showing one video — so comparing it to the held URL said "not
+            // advancing" for every single-video row in the feed, and the
+            // coordinator dutifully started each one and paused it on its first
+            // frame. Reported as "the first frame is there but the media does
+            // not advance", with a recording that shows exactly that.
+            //
+            // The question only means anything for a collection: is the viewer
+            // on the clip's page, or on a photograph beside it.
+            let advancing = (cell as? PostGridListRowCell).map {
+                !$0.showsCarousel || $0.currentPageVideoURL == held
+            } ?? true
 
             // Measured against the cell's MEDIA, which each shape locates for
             // itself (`videoMediaRect`) — a tile's is its bounds, a row's is
@@ -874,6 +908,19 @@ final class ForYouGridPage: UIView {
         guard posts.indices.contains(index) else { return false }
         collectionView(collectionView, didSelectItemAt: indexPath(for: index))
         return true
+    }
+
+    /// Presses a row's comment count, the control a finger reaches — not the
+    /// route behind it. Reports false when the row is not on screen or wears no
+    /// chip, which is what separates "the shortcut is broken" from "there was
+    /// nothing to press".
+    func debugTapComments(at index: Int) -> Bool {
+        guard posts.indices.contains(index),
+              let row = collectionView.cellForItem(
+                  at: indexPath(for: index)
+              ) as? PostGridListRowCell
+        else { return false }
+        return row.debugTapCommentsChip()
     }
 
     /// `-foryou-scroll-demo`: scrolls the page the way a finger would, since
@@ -1213,6 +1260,8 @@ final class ForYouGridPage: UIView {
         guard let row = cell(for: postID) as? PostGridListRowCell,
               row.mediaHeroRect == nil
         else { return nil }
+        // ⚠️ THE GUARD ABOVE IS A POLICY, not arithmetic: a row WITH media has
+        // a hero, so it flies rather than opening as a window.
         // The WHOLE card. Departing from below the author band was the first
         // attempt and the frames killed it: a window that stops short of the
         // card's top leaves the band outside the transition, so the card gains
@@ -1933,6 +1982,16 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                       let path = self.collectionView.indexPath(for: cell) else { return }
                 self.collectionView(self.collectionView, didSelectItemAt: path)
             }
+            // The comment count opens the same post at its thread. Resolved
+            // through the CELL's index path rather than through this closure's
+            // captured one: rows are recycled and the list re-renders under
+            // them, so the index that was true at configure time is not
+            // necessarily true when the finger arrives.
+            cell.onCommentsTapped = { [weak self, weak cell] in
+                guard let self, let cell,
+                      let path = self.collectionView.indexPath(for: cell) else { return }
+                self.open(at: path, showingComments: true)
+            }
             // ⚠️ Paging a MIXED collection changes what should be playing, and
             // nothing else would ask.
             //
@@ -1942,6 +2001,14 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // page three, and a clip on page three would never start.
             cell.onMediaPageChanged = { [weak self] _ in
                 self?.updateAutoplay()
+            }
+            // Hold to pause, the same gesture the post screen carries. Captured
+            // by POST rather than by cell for the reason the handlers below
+            // state: the row that received the touch can have been recycled by
+            // the time the finger lifts, and the clip that must resume is the
+            // one belonging to the post, not to whatever the cell shows now.
+            cell.onMediaHoldChanged = { [weak self] held in
+                self?.playback?.setHeld(held, for: post.id)
             }
             // The band's identity and its "...", if the post carries an author.
             // Captured by AUTHOR and by POST for the same reason the caption's
@@ -1987,8 +2054,21 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // The reveal is remembered and applied once the post has covered the
         // grid (`applyPendingReveal`), where it costs nothing to look at and
         // is finished long before the dismissal flies home to it.
-        pendingRevealPostID = posts[flatIndex(for: indexPath)].id
-        onItemTapped?(flatIndex(for: indexPath))
+        open(at: indexPath, showingComments: false)
+    }
+
+    /// Both ways into a post, so the flight is staged identically either way —
+    /// the reveal is remembered here, and forgetting it on one route is how a
+    /// dismissal lands on the wrong row.
+    private func open(at indexPath: IndexPath, showingComments: Bool) {
+        let index = flatIndex(for: indexPath)
+        guard posts.indices.contains(index) else { return }
+        pendingRevealPostID = posts[index].id
+        if showingComments, let openComments = onItemCommentsTapped {
+            openComments(index)
+        } else {
+            onItemTapped?(index)
+        }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -2017,6 +2097,30 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         guard remaining < Self.prefetchDistance else { return }
         onNearEnd?()
     }
+
+    /// Asks the host to warm what is on screen. Silent during a fling, and
+    /// silent while the page is showing skeletons — there is nothing on screen
+    /// then but the shape of what is coming.
+    private func requestWarm(_ allowing: Bool) {
+        guard allowing, !showsSkeleton, onWarmRequested != nil else { return }
+        let visible = collectionView.indexPathsForVisibleItems
+            .sorted()
+            .map(flatIndex(for:))
+            .filter(posts.indices.contains)
+            .prefix(Self.warmWindow)
+            .map { posts[$0] }
+        guard !visible.isEmpty else { return }
+        onWarmRequested?(visible)
+    }
+
+    /// ⚠️ A CEILING ON THE BURST, because "visible" is not always three cards.
+    ///
+    /// These rows SELF-SIZE, and until a cell has been measured the layout
+    /// holds it at its estimate — so the first reconcile after a render reports
+    /// a dozen items inside the viewport, and the trace showed exactly that:
+    /// twelve posts asked for at once, each in its own task. Four is what fits
+    /// on screen once the heights are real, plus room for the one arriving.
+    private static let warmWindow = 4
 
     /// Reconcile cadence during a scroll, in seconds. ~30 Hz: fast enough that
     /// a tile is playing by the time the eye has settled on it, slow enough

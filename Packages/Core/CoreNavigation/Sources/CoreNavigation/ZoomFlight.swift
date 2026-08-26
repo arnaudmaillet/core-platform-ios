@@ -14,6 +14,21 @@ import UIKit
 /// parameter, so the chrome and video layers stay exactly full-bleed within the
 /// morphing card on every frame ("lockstep" is a property of the math, not of
 /// synchronized clocks).
+/// The flight's spring, for anything OUTSIDE this module that has to move with
+/// it.
+///
+/// ⚠️ ONE SOURCE, deliberately. A feature that opens a window on the same beat
+/// as a flight needs the same duration and the same damping, and a second copy
+/// of three numbers agrees on the day it is written and drifts from the first
+/// correction onward — the reasoning `TextRevealInstaller` already records for
+/// its thirteen fields.
+@MainActor
+public enum ZoomFlightSpring {
+    public static var duration: TimeInterval { ZoomFlight.springDuration }
+    public static var damping: CGFloat { ZoomFlight.springDamping }
+    public static var velocity: CGFloat { ZoomFlight.springVelocity }
+}
+
 @MainActor
 struct ZoomFlight {
     let card: any ZoomFlightCard

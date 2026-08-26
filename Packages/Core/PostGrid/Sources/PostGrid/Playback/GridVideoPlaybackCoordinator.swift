@@ -163,11 +163,86 @@ public final class GridVideoPlaybackCoordinator {
         // the start below can pick it up. Restarting rather than retargeting
         // the existing player: the pool binds an item to a render surface, and
         // the surface has moved to another page too.
+        // ⚠️ THE BUDGET IS IN PLAYERS, NOT ROWS — and the difference is the only
+        // honest way to let a row keep a clip warm.
+        //
+        // Every chosen row is about to hold one player, so what a carousel may
+        // additionally keep is whatever the pool can carry beyond that. It goes
+        // to the most central row, because a viewer swiping a card's pages is
+        // looking at it. When the screen is full of playing rows the spare is
+        // zero and every row behaves exactly as it did before — the feature
+        // yields to its neighbours rather than competing with them.
+        let spare = max(0, pool.capacity - chosen.count)
+        for (rank, candidate) in chosen.enumerated() where candidate.id != handoffID {
+            for surface in candidate.cell.retainClips(budget: rank == 0 ? spare : 0) {
+                pool.stop(surface)
+            }
+            // ⚠️ ONE CLIP ADVANCES IN A CAROUSEL, AND IT IS THE WATCHED ONE.
+            //
+            // Two halves, and the second was wrong. A kept clip must be paused,
+            // or in a card the page just left goes on playing while still
+            // peeking on screen — "keeps its last frame" turning into "keeps
+            // running". And the one spared must be the page the viewer is ON.
+            //
+            // Read from `loadedVideoRenderView`, it was not: that field is
+            // re-pointed only when someone asks the cell for a surface, which
+            // happens in the START pass below. So this pass spared the page
+            // being LEFT and paused the one arriving — reported as several
+            // clips playing at once in a card's carousel, and reproduced as the
+            // wrong surface being the one that advanced.
+            let watched = candidate.cell.watchedClipSurface
+            for surface in candidate.cell.retainedPlaybackSurfaces
+            where surface !== watched {
+                // ⚠️ A PAUSE THAT FINDS NOTHING IS REPORTED, not shrugged off.
+                //
+                // `setPaused` answers whether there was a player to pause, and
+                // the answer was being discarded. A surface the pool has no
+                // registration for is one whose clip is running somewhere this
+                // loop cannot reach — which is a clip that never stops, and it
+                // took a viewer noticing the card and the post behaving
+                // differently to find one.
+                let paused = pool.setPaused(true, in: surface)
+                #if DEBUG
+                if !paused, CarouselPlaybackAudit.isEnabled {
+                    CarouselPlaybackAudit.trace(
+                        "pause found no player \(candidate.id.rawValue)"
+                    )
+                }
+                #endif
+            }
+            prewarm(candidate)
+        }
         for candidate in chosen
         where candidate.id != handoffID
             && loans[candidate.id] != nil
             && playingURLs[candidate.id] != candidate.url {
-            stop(id: candidate.id, cell: candidate.cell)
+            // ⚠️ RELEASED, not stopped, when the row is keeping the old clip.
+            //
+            // Paging a mixed carousel from one clip to another used to stop the
+            // loan so the start below could pick up the new stream — which threw
+            // away the player for the page just left, so coming back re-decoded
+            // and the page showed its thumbnail meanwhile. Exactly the cut fixed
+            // on the post page.
+            //
+            // A row holding more than one surface has somewhere to put the old
+            // clip, so only the BOOKKEEPING is undone: the start loop then binds
+            // the new page's own surface and the old one stays paused on its
+            // page. A row holding one surface has nowhere, and still stops.
+            #if DEBUG
+            if CarouselPlaybackAudit.isEnabled {
+                CarouselPlaybackAudit.trace(
+                    "grid url-changed \(candidate.id.rawValue) "
+                    + "was=\(playingURLs[candidate.id]?.lastPathComponent ?? "nil") "
+                    + "now=\(candidate.url.lastPathComponent) "
+                    + "surfaces=\(candidate.cell.retainedPlaybackSurfaces.count)"
+                )
+            }
+            #endif
+            if candidate.cell.retainedPlaybackSurfaces.count > 1 {
+                releaseStaleLoan(id: candidate.id)
+            } else {
+                stop(id: candidate.id, cell: candidate.cell)
+            }
         }
         // Paused or resumed to match, every time, for everything still chosen.
         // Reconciliation and not an edge: a row can arrive already paused (its
@@ -188,7 +263,18 @@ public final class GridVideoPlaybackCoordinator {
         // Released rather than stopped: there is nothing to tear down, and
         // `stop` would fade the cover back in for the one frame before the
         // restart.
-        for candidate in chosen where loans[candidate.id] != nil && !isPlaying(candidate.id) {
+        // ⚠️ A START STILL IN FLIGHT IS NOT A STALE LOAN.
+        //
+        // `isPlaying` asks the pool whether a player is bound, and between
+        // `start` and its `await` landing the honest answer is "not yet". Read
+        // as staleness, the loan was released and the whole start thrown away
+        // and reissued — cancelling the resolution that was about to succeed and
+        // beginning the clip again from zero. Seen in the audit as a released
+        // loan followed immediately by a second `start` for the same post.
+        for candidate in chosen
+        where loans[candidate.id] != nil
+            && startTasks[candidate.id] == nil
+            && !isPlaying(candidate.id) {
             releaseStaleLoan(id: candidate.id)
         }
         for candidate in chosen where isPlaying(candidate.id) {
@@ -200,8 +286,62 @@ public final class GridVideoPlaybackCoordinator {
         for candidate in chosen where loans[candidate.id] == nil {
             start(candidate)
         }
+        // ⚠️ THE ONE PLACE THE RULE IS APPLIED: in a carousel, the watched clip
+        // advances and nothing else does.
+        //
+        // Three passes above can each leave it stopped, and between them they
+        // did. A warmed clip is paused by construction — that is what warming
+        // IS — so arriving at one found a player already bound and nothing that
+        // would resume it: the pause pass had just paused everything, the loan
+        // had been released as stale, and the start pass skips a row whose
+        // player exists. The result was a carousel where nothing played at all,
+        // which is the mirror image of the reported fault and was produced by
+        // fixing it.
+        //
+        // Stated once, at the end, against the surface the CAROUSEL says is
+        // being watched — rather than left as an emergent property of three
+        // passes that each know a piece of it.
+        for candidate in chosen
+        where candidate.id != handoffID && !candidate.isPaused {
+            guard let watched = candidate.cell.watchedClipSurface,
+                  pool.hasPlayer(in: watched) else { continue }
+            pool.setPaused(false, in: watched)
+        }
         #if DEBUG
         Self.logPool(loans.count, handoff: handoffID)
+        // ⚠️ THE REPORTED SYMPTOM, NAMED.
+        //
+        // "The player is attached but the image stays frozen" is a state, and
+        // until now nothing in this file could say it out loud: a row with a
+        // loan and a bound player that is not advancing, while nobody asked for
+        // it to be paused. Every probe so far measured somewhere else and came
+        // back clean, which is what four rounds of fixing real-but-unrelated
+        // faults looks like.
+        if CarouselPlaybackAudit.isEnabled {
+            for candidate in chosen where !candidate.isPaused {
+                guard let surface = candidate.cell.watchedClipSurface else {
+                    CarouselPlaybackAudit.trace(
+                        "STUCK \(candidate.id.rawValue) no-surface loan=\(loans[candidate.id] != nil)"
+                    )
+                    continue
+                }
+                let bound = pool.hasPlayer(in: surface)
+                let moving = pool.isAdvancing(in: surface)
+                // ⚠️ Three states, not two. "Not paused" is not "playing":
+                // a player stalled fetching data reports the first and not the
+                // second, and looks identical on screen to a frozen picture.
+                let playing = pool.isPlayingForReal(in: surface)
+                if bound && !(moving && playing) {
+                    CarouselPlaybackAudit.trace(
+                        "STUCK \(candidate.id.rawValue) "
+                        + (moving ? "waiting-to-play" : "not-advancing") + " "
+                        + "loan=\(loans[candidate.id] != nil) "
+                        + "starting=\(startTasks[candidate.id] != nil) "
+                        + "held=\(heldIDs.contains(candidate.id))"
+                    )
+                }
+            }
+        }
         #endif
     }
 
@@ -694,6 +834,13 @@ public final class GridVideoPlaybackCoordinator {
     private func start(_ candidate: Candidate) {
         #if DEBUG
         Self.logTransition("start", candidate.id, count: loans.count + 1)
+        if CarouselPlaybackAudit.isEnabled {
+            let surface = candidate.cell.watchedClipSurface
+            CarouselPlaybackAudit.trace(
+                "grid start \(candidate.id.rawValue) url=\(candidate.url.lastPathComponent) "
+                + "warm=\(surface.map { pool.hasPlayer(in: $0) } ?? false)"
+            )
+        }
         #endif
         loans[candidate.id] = candidate.cell
         playingURLs[candidate.id] = candidate.url
@@ -708,8 +855,31 @@ public final class GridVideoPlaybackCoordinator {
         // A tile that is already flying full screen keeps its lifted cap.
         let cap = uncappedIDs.contains(id) ? Self.uncapped : Self.tileBitRateCap
         let paused = candidate.isPaused
+        // ⚠️ A CLIP THAT IS ALREADY WARM IS RESUMED, NOT RE-PLAYED.
+        //
+        // `play` on a surface already bound to this asset replaces the item and
+        // begins again at zero — so arriving at a clip prepared for exactly this
+        // moment threw the preparation away and restarted it. Reported as "the
+        // last video's player jumps, it always resumes from the beginning", and
+        // read off the audit as `grid start … warm=true`: the coordinator was
+        // told the surface was ready and started it anyway.
+        //
+        // Worst on the last page of that gallery only because its stream is
+        // HLS, so re-filling the pipeline takes long enough to see as black.
+        // The fault had nothing to do with being last.
+        if pool.isBound(url, in: renderView) {
+            #if DEBUG
+            if CarouselPlaybackAudit.isEnabled {
+                CarouselPlaybackAudit.trace("grid resumed warm \(candidate.id.rawValue)")
+            }
+            #endif
+            pool.setPaused(paused, in: renderView)
+            return
+        }
         startTasks[id] = Task { [weak self, pool] in
-            await pool.play(url, in: renderView, peakBitRate: cap)
+            // Scoped to the POST: two rows carrying the same file are two
+            // playbacks and must not share a clock. See `playingScope`.
+            await pool.play(url, in: renderView, peakBitRate: cap, scope: id.rawValue)
             // A candidate that arrives already paused — its carousel is resting
             // on another page — is started and held on its first frame, which is
             // what makes the frame there to show at all.
@@ -726,6 +896,52 @@ public final class GridVideoPlaybackCoordinator {
             // by then the same id may hold a fresh start's task.
             guard let self, !Task.isCancelled else { return }
             startTasks.removeValue(forKey: id)
+        }
+    }
+
+    /// Holds a row's clip still while a finger rests on it, and lets it go when
+    /// the finger lifts.
+    ///
+    /// ⚠️ It resumes only what IT stopped. A clip that was already paused — one
+    /// page over, or resting because its row lost the ranking — must not start
+    /// playing because somebody held and released it. The held id is recorded
+    /// for exactly that reason, and a hold that found nothing running records
+    /// nothing.
+    public func setHeld(_ held: Bool, for id: PostID) {
+        guard let surface = loans[id]?.watchedClipSurface else { return }
+        if held {
+            guard pool.isAdvancing(in: surface) else { return }
+            if pool.setPaused(true, in: surface) { heldIDs.insert(id) }
+        } else {
+            guard heldIDs.remove(id) != nil else { return }
+            pool.setPaused(false, in: surface)
+        }
+    }
+
+    /// Rows whose clip this coordinator stopped for a hold.
+    private var heldIDs: Set<PostID> = []
+
+    /// Brings a row's next clip to its first frame, so swiping the card's pages
+    /// shows a picture rather than a thumbnail and a wait.
+    ///
+    /// ⚠️ A WARM-UP THAT LANDS AFTER THE ROW LOST ITS LOAN IS UNDONE.
+    ///
+    /// `prewarm` binds its player on the far side of an await, and a feed is
+    /// scrolling the whole time — so a row that left the viewport in between
+    /// would end up holding a decoder acquired after it gave everything back,
+    /// with no loan left to reclaim it by. The same leak the post page's
+    /// accumulation battery caught, arriving here by a different door.
+    private func prewarm(_ candidate: Candidate) {
+        for clip in candidate.cell.clipsToPrewarm() {
+            guard !pool.hasPlayer(in: clip.surface) else { continue }
+            let id = candidate.id
+            Task { [weak self] in
+                await self?.pool.prewarm(clip.url, in: clip.surface, scope: id.rawValue)
+                guard let self, self.loans[id] != nil else {
+                    self?.pool.stop(clip.surface)
+                    return
+                }
+            }
         }
     }
 
@@ -756,8 +972,18 @@ public final class GridVideoPlaybackCoordinator {
         Self.logTransition("stop ", id, count: loans.count - 1)
         #endif
         startTasks.removeValue(forKey: id)?.cancel()
-        if let renderView = cell.loadedVideoRenderView {
-            pool.stop(renderView)
+        // ⚠️ EVERY surface the row holds, not just the watched one.
+        //
+        // A loan is per POST, and a row with a collection can be holding a
+        // paused clip on a page the viewer left. Stopping `loadedVideoRenderView`
+        // alone released the loan while those players stayed bound — untracked,
+        // uncounted, and impossible to reclaim, because nothing was left that
+        // knew about them.
+        for surface in cell.retainedPlaybackSurfaces {
+            pool.stop(surface)
+        }
+        for surface in cell.releaseRetainedClips() {
+            pool.stop(surface)
         }
         cell.endVideoPreview()
         cell.onReuse = nil

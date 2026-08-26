@@ -90,4 +90,56 @@ public protocol GridPlaybackCell: UIView {
     /// a player takes it back. A recycled cell that kept its loan would render
     /// the previous post's video under the new post's cover.
     var onReuse: (() -> Void)? { get set }
+
+    /// Every surface this cell is holding a player on.
+    ///
+    /// ⚠️ NOT the same question as `loadedVideoRenderView`, and the difference is
+    /// what makes a loan releasable. A cell with a collection can keep a paused
+    /// clip on a page the viewer left, so "the surface" and "the surfaces" stop
+    /// being the same set — and a release that stopped only the watched one
+    /// would leave the rest bound to players nobody is tracking.
+    var retainedPlaybackSurfaces: [VideoRenderView] { get }
+
+    /// Keeps at most `budget` extra clips warm besides the one being watched,
+    /// and reports the surfaces it gave up so the caller can end their playback.
+    ///
+    /// A budget of zero is the old behaviour exactly: one clip at a time.
+    @discardableResult
+    func retainClips(budget: Int) -> [VideoRenderView]
+
+    /// Gives up every kept clip but the watched one, reporting them.
+    @discardableResult
+    func releaseRetainedClips() -> [VideoRenderView]
+
+    /// The clips worth bringing to their first frame before the viewer reaches
+    /// them, each with a surface hosted and postered ready to receive one.
+    func clipsToPrewarm() -> [(url: URL, surface: VideoRenderView)]
+
+    /// The surface for the media the viewer is looking at RIGHT NOW — the one
+    /// clip in this cell allowed to advance.
+    ///
+    /// ⚠️ Distinct from `loadedVideoRenderView`, which is re-pointed only when a
+    /// caller asks the cell for a surface. Anything deciding what may play must
+    /// ask THIS, or it decides against a page the viewer has already left.
+    var watchedClipSurface: VideoRenderView? { get }
+}
+
+public extension GridPlaybackCell {
+    /// A cell that draws one attachment holds one surface, and there is nothing
+    /// for a window to choose between.
+    var retainedPlaybackSurfaces: [VideoRenderView] {
+        loadedVideoRenderView.map { [$0] } ?? []
+    }
+
+    @discardableResult
+    func retainClips(budget: Int) -> [VideoRenderView] { [] }
+
+    @discardableResult
+    func releaseRetainedClips() -> [VideoRenderView] { [] }
+
+    /// A cell showing one attachment has no neighbour to prepare.
+    func clipsToPrewarm() -> [(url: URL, surface: VideoRenderView)] { [] }
+
+    /// With one attachment there is one surface, and it is the watched one.
+    var watchedClipSurface: VideoRenderView? { loadedVideoRenderView }
 }

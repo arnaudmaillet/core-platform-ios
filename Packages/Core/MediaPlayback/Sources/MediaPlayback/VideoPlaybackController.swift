@@ -23,6 +23,28 @@ public final class VideoPlaybackController {
     /// that lost the race is discarded instead of attaching to a recycled cell.
     private var generation: [ObjectIdentifier: Int] = [:]
     private var loopObservers: [ObjectIdentifier: NSObjectProtocol] = [:]
+    /// Stall observers, kept only so they outlive this call. Diagnostic, armed
+    /// by `-carousel-audit` and empty otherwise.
+    private var stallObservers: [NSObjectProtocol] = []
+    /// Where each paused player's picture was, so a resume can put it back.
+    /// Keyed by PLAYER: two surfaces can share one, and they share its playhead.
+    private var pausedAnchors: [ObjectIdentifier: CMTime] = [:]
+    /// Which POST each bound view is playing for.
+    ///
+    /// ⚠️ THE URL IS NOT AN IDENTITY, and treating it as one is a defect the
+    /// fixtures made visible and production would have hit on any repost.
+    ///
+    /// "One asset, one player" was written for a real case: a card holds a clip
+    /// paused on its page while the post opens the SAME clip, and minting a
+    /// second player there gives one asset two decoders on two clocks. But the
+    /// rule was applied by URL alone — so two DIFFERENT posts that happen to
+    /// carry the same file also shared a player, and pausing one froze the
+    /// other. Three mock posts share `trailer.mp4`, which is how it was found;
+    /// two posts of the same reposted video would do it in production.
+    ///
+    /// Sharing is therefore scoped: same asset AND same post.
+    private var playingScope: [ObjectIdentifier: String] = [:]
+
     /// The media URL each bound view is playing, so a parked player can be
     /// matched back to the same asset.
     private var playingURL: [ObjectIdentifier: URL] = [:]
@@ -38,15 +60,41 @@ public final class VideoPlaybackController {
     /// Empty when the flag is off.
     private var renderers: [ObjectIdentifier: VideoFrameRenderer] = [:]
 
+    /// How many players may be bound to surfaces at once.
+    ///
+    /// ⚠️ NOT `poolSize`, and the two were conflated for as long as nothing
+    /// asked. `poolSize` is the idle cache; this is the working set. A caller
+    /// deciding how much of the budget it may hold — a carousel keeping its
+    /// clips warm across a page change — asks THIS one.
+    ///
+    /// It is a budget rather than an enforced ceiling: `play` still binds what
+    /// it is told to bind, because a surface that asked for a picture and got
+    /// silence is a worse failure than one player too many. What the number
+    /// buys is that every claimant can size itself against the same figure
+    /// instead of inventing its own.
+    ///
+    /// Six, because the ceiling that actually bites is the device's video
+    /// decoders, not memory — simultaneous hardware decode sessions are a small
+    /// number on every phone this ships to, and a seventh clip does not stutter
+    /// politely, it starves one of the six already playing.
+    public let capacity: Int
+
+    /// How many surfaces are holding a player right now. The measurement the
+    /// capacity claim is worth nothing without — see `VideoPoolIdentityTests`,
+    /// which asserts it against the number of distinct clips on screen.
+    public var activePlayerCount: Int { activePlayers.count }
+
     /// `poolSize` is the size of the **idle-player cache**, not a concurrency
     /// limit: `play` mints a new `AVPlayer` when the cache is empty, and the
-    /// number of simultaneous players is set by the calling surface (the grid's
-    /// `maxConcurrent`). Sizing it to match that surface is what keeps a scroll
-    /// from allocating and discarding players continuously — a cache smaller
-    /// than the working set drops every returned player on the floor.
-    public init(source: any VideoSource, poolSize: Int = 6) {
+    /// number of simultaneous players is `capacity`. Sizing the cache to match
+    /// the working set is what keeps a scroll from allocating and discarding
+    /// players continuously — a cache smaller than the working set drops every
+    /// returned player on the floor. They default to the same number for that
+    /// reason, and are separate because they answer different questions.
+    public init(source: any VideoSource, poolSize: Int = 6, capacity: Int = 6) {
         self.source = source
         self.poolSize = poolSize
+        self.capacity = capacity
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)
     }
 
@@ -58,7 +106,15 @@ public final class VideoPlaybackController {
     /// in bits per second; `0` (the default) means uncapped. See
     /// `setPeakBitRate(_:in:)` for why this is a property of the item and not
     /// of the URL.
-    public func play(_ mediaURL: URL, in view: VideoRenderView, peakBitRate: Double = 0) async {
+    /// - Parameter scope: which POST this playback belongs to. Two surfaces
+    ///   may share one player only when the asset AND the scope match — see
+    ///   `playingScope` for why the asset alone is not an identity. Passing nil
+    ///   means "share with nobody", which is the safe answer for a caller that
+    ///   does not know whose media this is.
+    public func play(
+        _ mediaURL: URL, in view: VideoRenderView,
+        peakBitRate: Double = 0, scope: String? = nil
+    ) async {
         let key = ObjectIdentifier(view)
         let token = (generation[key] ?? 0) + 1
         generation[key] = token
@@ -82,6 +138,7 @@ public final class VideoPlaybackController {
             bind(parked.player, to: view)
             activePlayers[key] = parked.player
             playingURL[key] = mediaURL
+            playingScope[key] = scope
             parked.player.play()
             return
         }
@@ -114,18 +171,35 @@ public final class VideoPlaybackController {
         //
         // Joining is cheap and synchronous — no resolution, no await — so it
         // also removes a start-up delay on the second surface.
-        if let shared = sharedActivePlayer(playing: mediaURL),
+        if let shared = sharedActivePlayer(playing: mediaURL, scope: scope),
            shared !== activePlayers[key] {
             detach(key: key, view: view)
             shared.currentItem?.preferredPeakBitRate = peakBitRate
             bind(shared, to: view)
             activePlayers[key] = shared
             playingURL[key] = mediaURL
+            playingScope[key] = scope
             shared.play()
             return
         }
 
-        guard let playableURL = try? await source.playableURL(for: mediaURL) else { return }
+        // ⚠️ THE ONE STEP THAT COULD FAIL IN SILENCE.
+        //
+        // A resolution that throws returned from here with nothing bound, no
+        // trace, and no way to tell the result apart from a player that simply
+        // had not arrived yet. Four starts, zero frames and zero "attached but
+        // frozen" reports pointed straight at it: the picture was never frozen,
+        // it was never started.
+        let resolved: URL
+        do {
+            resolved = try await source.playableURL(for: mediaURL)
+        } catch {
+            VideoPlaybackTrace.emit(
+                "resolve FAILED \(mediaURL.lastPathComponent): \(error)"
+            )
+            return
+        }
+        let playableURL = resolved
         // Lost the race to a newer play/stop while resolving: drop this result.
         guard generation[key] == token else { return }
         // ⚠️ AND ASK AGAIN, because the check above happened before an await.
@@ -138,12 +212,13 @@ public final class VideoPlaybackController {
         // asset that two surfaces reach for simultaneously.
         //
         // Cheap: one dictionary lookup on a path that has just done I/O.
-        if let shared = sharedActivePlayer(playing: mediaURL), shared !== activePlayers[key] {
+        if let shared = sharedActivePlayer(playing: mediaURL, scope: scope), shared !== activePlayers[key] {
             detach(key: key, view: view)
             shared.currentItem?.preferredPeakBitRate = peakBitRate
             bind(shared, to: view)
             activePlayers[key] = shared
             playingURL[key] = mediaURL
+            playingScope[key] = scope
             shared.play()
             return
         }
@@ -151,6 +226,7 @@ public final class VideoPlaybackController {
         detach(key: key, view: view)
         let player = idlePlayers.popLast() ?? AVPlayer()
         let item = AVPlayerItem(url: playableURL)
+        itemCreations += 1
         // Set BEFORE the item goes live, so the very first segment request
         // already asks for the capped rung — set afterwards, the player has
         // usually committed to a higher one and the cap only takes effect at
@@ -164,7 +240,35 @@ public final class VideoPlaybackController {
         bind(player, to: view)
         activePlayers[key] = player
         playingURL[key] = mediaURL
+        playingScope[key] = scope
         player.play()
+        VideoPlaybackTrace.emit("bound \(mediaURL.lastPathComponent) scope=\(scope ?? "-")")
+    }
+
+    /// Brings a clip to its first frame and stops there, so arriving at it
+    /// later costs nothing.
+    ///
+    /// ⚠️ PLAY-THEN-PAUSE, deliberately, rather than a player left un-started.
+    ///
+    /// A player that has never run has not necessarily decoded anything: under
+    /// the sample-buffer backing the frames come from a video output that only
+    /// fills while playback is running, so a "prepared" player would still show
+    /// the poster and the delay would simply move. Starting and stopping puts a
+    /// real frame on the surface, which is the whole point — the picture is
+    /// there before the viewer is.
+    ///
+    /// It advances a few frames doing so. That is invisible on a muted looping
+    /// preview and is the honest price of having something to show.
+    ///
+    /// Every duplicate-avoiding rule in `play` applies unchanged: prewarming a
+    /// clip another surface is already running joins that player rather than
+    /// minting a second.
+    public func prewarm(
+        _ mediaURL: URL, in view: VideoRenderView,
+        peakBitRate: Double = 0, scope: String? = nil
+    ) async {
+        await play(mediaURL, in: view, peakBitRate: peakBitRate, scope: scope)
+        _ = setPaused(true, in: view)
     }
 
     /// Detaches the player bound to `view` but keeps it **running**, parked
@@ -195,6 +299,7 @@ public final class VideoPlaybackController {
         generation[key] = (generation[key] ?? 0) + 1
         activePlayers[key] = nil
         playingURL[key] = nil
+        playingScope[key] = nil
         if !keepingSurfaceAttached { view.detach() }
         parked = (url, player)
         return true
@@ -294,10 +399,47 @@ public final class VideoPlaybackController {
     /// bound to a player, that is not moving. Paused is a legitimate state —
     /// a clip one page over is meant to be paused — so the question only means
     /// something next to whether the viewer is looking at it.
+    /// Whether `view`'s player is REALLY playing, as opposed to merely not
+    /// paused.
+    ///
+    /// ⚠️ THE DISTINCTION `isAdvancing` CANNOT MAKE, and it cost a whole round
+    /// of diagnosis. `timeControlStatus != .paused` is true for
+    /// `.waitingToPlayAtSpecifiedRate` — a player that has been asked to play,
+    /// has bound its item, and is stalled fetching data it may never get. From
+    /// outside, that is indistinguishable from playing: attached, unpaused, and
+    /// showing nothing. Which is exactly the state reported as "the player is
+    /// attached but the image stays frozen".
+    ///
+    /// `isAdvancing` keeps its meaning because callers use it to read INTENT —
+    /// did a pause take, did a resume take — and intent is what they need. This
+    /// answers the other question, and diagnostics should ask this one.
+    public func isPlayingForReal(in view: VideoRenderView) -> Bool {
+        activePlayers[ObjectIdentifier(view)]?.timeControlStatus == .playing
+    }
+
     public func isAdvancing(in view: VideoRenderView) -> Bool {
         guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
         return player.timeControlStatus != .paused
     }
+
+    /// Whether `view` is already bound to a player for **this** asset.
+    ///
+    /// ⚠️ The question a caller must ask before starting something, or it throws
+    /// away a decode it has already paid for. `play` on a surface that is
+    /// already showing the URL replaces the item and begins again at zero — so
+    /// arriving at a clip that was warmed for exactly this moment restarted it
+    /// from the beginning, which is the opposite of the point.
+    public func isBound(_ mediaURL: URL, in view: VideoRenderView) -> Bool {
+        let key = ObjectIdentifier(view)
+        return activePlayers[key] != nil && playingURL[key] == mediaURL
+    }
+
+    /// How many `AVPlayerItem`s this pool has created.
+    ///
+    /// The only honest way to see a restart from outside: a resumed clip keeps
+    /// its item, a restarted one gets a new one, and nothing else about them
+    /// differs from the caller's side.
+    public private(set) var itemCreations = 0
 
     /// Whether `view` currently has a player bound to it.
     ///
@@ -325,8 +467,50 @@ public final class VideoPlaybackController {
     public func setPaused(_ paused: Bool, in view: VideoRenderView) -> Bool {
         guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
         if paused {
+            // ⚠️ WHERE THE PICTURE WAS, remembered — because an adaptive stream
+            // does not necessarily come back to it.
+            //
+            // A progressive file resumes exactly where it stopped. An HLS one
+            // re-anchors its timebase on resume and makes up the interval it was
+            // stopped for: measured at 5x to 17.5x for seconds, with the clock
+            // itself advancing 0.111s per 0.017s of real time. That is not the
+            // display being wrong — playback really is somewhere else.
+            pausedAnchors[ObjectIdentifier(player)] = player.currentTime()
             player.pause()
         } else {
+            // ⚠️ Whatever is queued belongs to BEFORE the pause.
+            //
+            // The picture resumes at the playhead, and anything still waiting in
+            // the layer was decoded for a moment that has passed. Shown, those
+            // frames read as the video hurrying to catch up — the effect
+            // reported on a long stream, where the gap can grow, and never on a
+            // ten-second one, where it wraps. Dropped, the surface holds its
+            // frozen frame for one dispatch and then shows the present.
+            view.flushPendingSamples()
+            // ⚠️ PINNED BACK to where it was, and only when it has drifted.
+            //
+            // The seek is exact on both sides — a tolerant one would let the
+            // player choose a keyframe further on and reintroduce the jump it is
+            // there to prevent. The threshold keeps it off the common path: a
+            // progressive file returns within a frame of its anchor and is left
+            // alone, so this costs nothing where nothing is wrong.
+            let key = ObjectIdentifier(player)
+            if let anchor = pausedAnchors.removeValue(forKey: key), anchor.isValid {
+                let drift = (player.currentTime() - anchor).seconds
+                // ⚠️ Reported on EVERY resume, not only when it acts.
+                //
+                // "The re-pin never fired" and "there was never any drift to
+                // pin" are the same silence, and this session has spent four
+                // runs mistaking one for the other. The number is printed so the
+                // next run says which — and so a threshold that turns out to be
+                // wrong is visibly wrong rather than quietly inert.
+                VideoPlaybackTrace.emit(String(
+                    format: "resume drift=%.3fs anchor=%.3fs", drift, anchor.seconds
+                ))
+                if drift.isFinite, abs(drift) > 0.15 {
+                    player.seek(to: anchor, toleranceBefore: .zero, toleranceAfter: .zero)
+                }
+            }
             player.play()
         }
         return true
@@ -519,8 +703,23 @@ public final class VideoPlaybackController {
     /// A player bound to some surface and playing `mediaURL`. Deliberately
     /// blind to the parked slot: parking is the handoff's own mechanism and has
     /// its own branch in `play`, which un-parks rather than sharing.
-    private func sharedActivePlayer(playing mediaURL: URL) -> AVPlayer? {
-        guard let key = playingURL.first(where: { $0.value == mediaURL })?.key else { return nil }
+    /// A player already running this asset FOR THIS POST, if any.
+    ///
+    /// ⚠️ Both halves, and the scope is the half that was missing. Matching on
+    /// the asset alone made two different posts carrying the same file share one
+    /// player and one clock: pausing either froze both, with the other left
+    /// attached and still — which is exactly how it was reported.
+    ///
+    /// ⚠️ NIL IS A SCOPE, not an absence of one — two unscoped requests for the
+    /// same asset are the same media as far as anyone here can tell, and they
+    /// share. Refusing to share on nil was tried and broke the rule this exists
+    /// to keep: every caller that does not distinguish posts would get its own
+    /// decoder for an asset already playing.
+    private func sharedActivePlayer(playing mediaURL: URL, scope: String?) -> AVPlayer? {
+        let key = playingURL.first {
+            $0.value == mediaURL && playingScope[$0.key] == scope
+        }?.key
+        guard let key else { return nil }
         return activePlayers[key]
     }
 
@@ -566,6 +765,7 @@ public final class VideoPlaybackController {
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
         view.detach(reason: "controller.stop")
         playingURL[key] = nil
+        playingScope[key] = nil
         guard let player = activePlayers.removeValue(forKey: key) else { return }
         // ⚠️ STILL IN USE? Then this is one surface leaving, not the end of a
         // playback.
@@ -597,8 +797,35 @@ public final class VideoPlaybackController {
         }
     }
 
+    /// Records the one thing that can move a playhead without anyone asking.
+    ///
+    /// ⚠️ THE OBJECTION THAT REDIRECTED THIS: a pause cannot make a video run
+    /// fast. Whatever is happening is not pause-then-resume, so the remaining
+    /// candidate is playback that ran out of data and jumped when it came back
+    /// — which is also the only mechanism that would explain the effect showing
+    /// on a long remote HLS stream and never on a short one.
+    ///
+    /// A stall next to a `fast` dispatch in the log is that story confirmed. A
+    /// `fast` dispatch with no stall anywhere near it kills it, and the cause is
+    /// ours after all. The instrument is what makes those two distinguishable
+    /// instead of arguable.
+    private func observeStalls(for item: AVPlayerItem) {
+        guard VideoPlaybackTrace.isEnabled else { return }
+        stallObservers.append(NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.playbackStalledNotification,
+            object: item, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                VideoPlaybackTrace.emit(
+                    String(format: "STALLED at=%.3fs", item.currentTime().seconds)
+                )
+            }
+        })
+    }
+
     private func installLoop(for player: AVPlayer, item: AVPlayerItem) {
         removeLoop(for: player)
+        observeStalls(for: item)
         loopObservers[ObjectIdentifier(player)] = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,

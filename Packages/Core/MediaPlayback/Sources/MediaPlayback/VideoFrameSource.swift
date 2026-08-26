@@ -38,6 +38,18 @@ final class VideoFrameSource {
         }
         output = nil
         observedItem = nil
+        // ⚠️ THE CATCH-UP STATE BELONGS TO THE ITEM, NOT TO THE PLAYER.
+        //
+        // Players are pooled and reused, so without this the numbers a previous
+        // post left behind are the ones the next post is judged against: a
+        // half-drained backlog would carry over as a "gap that is closing" and
+        // keep dropping frames for a clip that never had a backlog at all. The
+        // picture would sit frozen with a player attached, which is exactly how
+        // it was reported — every post after the carousel.
+        isCatchingUp = false
+        stalledDrops = 0
+        totalDrops = 0
+        lastBehind = .infinity
         guard let item else { return }
 
         // `outputSettings: nil` asks for the decoder's native format, which is
@@ -67,7 +79,7 @@ final class VideoFrameSource {
     /// `VideoFrameRenderer` for why holding one is the memory bug in this
     /// design.
     func copyFrame(atHostTime hostTime: CFTimeInterval) -> (buffer: CVPixelBuffer, itemTime: CMTime)? {
-        guard let output else { return nil }
+        guard let output else { noFrameReason = "no-output"; return nil }
         let itemTime = output.itemTime(forHostTime: hostTime)
         // `itemTime(forHostTime:)` reads the PLAYER's timebase — the same clock
         // its audio renderer runs on. That is the entire A/V sync answer for
@@ -76,14 +88,183 @@ final class VideoFrameSource {
         //
         // Before playback starts the timebase has no rate and the answer comes
         // back invalid or negative; both mean "nothing to show yet".
-        guard itemTime.isValid, itemTime >= .zero else { return nil }
-        guard output.hasNewPixelBuffer(forItemTime: itemTime) else { return nil }
-        guard let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) else {
+        guard itemTime.isValid, itemTime >= .zero else {
+            noFrameReason = itemTime.isValid ? "negative-time" : "invalid-time"
             return nil
         }
+        // A note kept because the idea was wrong in an instructive way: this
+        // once re-requested `player.currentTime()` whenever the output's clock
+        // disagreed with it by more than half a second, on the theory that the
+        // output's clock was the thing lagging. It is not — measured, the two
+        // agree; what lags is the queue of decoded FRAMES, handled below. And
+        // the re-request could wedge the pipeline outright: a pooled player
+        // given a fresh item has an output still reading the old one, so it
+        // asked for a time no frame existed for and `hasNewPixelBuffer` said no
+        // for ever. Reported as "the player is attached but the picture is
+        // frozen", on every post after the carousel.
+        let wantedTime = itemTime
+        guard output.hasNewPixelBuffer(forItemTime: wantedTime) else {
+            // ⚠️ Nothing new is not a catch-up, and saying otherwise leaves a
+            // spinner turning over a clip that has simply been paused. A drain
+            // always HAS frames waiting — that is what makes it a drain — so
+            // reaching here means the wait, whatever it was, is over.
+            isCatchingUp = false
+            noFrameReason = "no-new-buffer"
+            return nil
+        }
+        // ⚠️ THE BUFFER'S OWN TIME, not the clock's.
+        //
+        // These are not the same number and the difference is a whole
+        // investigation. `itemTime(forHostTime:)` is the player's TIMEBASE — at
+        // rate 1 it advances at exactly 1x by construction, so a probe built on
+        // it can only ever report that the clock is on time. It reported that
+        // for four runs while the viewer was plainly watching the picture race.
+        //
+        // What the eye sees is which FRAME is on screen, and that is this: the
+        // presentation time of the buffer the output actually handed back.
+        // When the two disagree, the pictures are running away from the clock —
+        // which is the only shape left that fits "fast for a few seconds, then
+        // normal" with a playhead measured at 1x throughout.
+        var displayTime = CMTime.invalid
+        guard let buffer = output.copyPixelBuffer(
+            forItemTime: wantedTime, itemTimeForDisplay: &displayTime
+        ) else {
+            return nil
+        }
+        // ⚠️ A FRAME FROM THE PAST IS DROPPED, NOT SHOWN.
+        //
+        // This is the reported fast-forward, finally located. The output's clock
+        // agrees with the player — that was measured and is why re-requesting a
+        // different time changed nothing — but its queue of DECODED frames can
+        // be seconds behind, and `copyPixelBuffer` serves the oldest it has
+        // rather than refusing. Asked for the frame at 18.5s it returns the one
+        // from 15.6s, and the next tick 15.75s, and so on: an entire backlog
+        // delivered one frame per display refresh, which on screen is the
+        // picture racing until it catches up. Measured across one burst, the gap
+        // closing 2.90 → 2.75 → 2.56 → … → 0.24 while the player advanced
+        // normally throughout.
+        //
+        // The copy above already consumed the frame, so dropping it here is what
+        // drains the queue: the surface holds its last picture for the fraction
+        // of a second that takes, then resumes at the place playback is actually
+        // at. A cut, rather than a scrub through everything that was missed.
+        //
+        // ⚠️ AND BOUNDED, because a guard that drops frames must not be able to
+        // freeze the picture. If the output is steadily behind rather than
+        // draining a backlog, dropping every frame would show nothing at all —
+        // a worse fault than the one being fixed, and one that would look like
+        // the player dying. After `maxConsecutiveDrops` the next frame is shown
+        // whatever its age: late video beats no video.
+        let behind = displayTime.isValid
+            ? (wantedTime - displayTime).seconds : 0
+        if behind > Self.staleFrameTolerance {
+            // ⚠️ THE QUESTION IS WHETHER THE GAP IS CLOSING, not how many frames
+            // have been dropped.
+            //
+            // This was a fixed cap of 24, and the cap is what the viewer saw:
+            // after a fifth of a second it started letting stale frames through
+            // again, so a long backlog came out as a fast, stuttering scramble
+            // instead of a wait — "it advances very fast, stuttering, to get the
+            // cursor back". Dropping is right; stopping early is what made it
+            // ugly.
+            //
+            // A closing gap resolves itself, however long it takes, so it is
+            // waited out. A gap that stops closing never will, and then a late
+            // picture beats none — that is the case the old cap existed for, and
+            // it is the only one it should ever have covered.
+            let closing = !lastBehind.isFinite || behind < lastBehind - 0.001
+            lastBehind = behind
+            totalDrops += 1
+            // ⚠️ AND AN ABSOLUTE CEILING ON TOP OF THE STALL CHECK.
+            //
+            // "Keep waiting while the gap closes" has no end of its own: a gap
+            // that closes a millisecond at a time satisfies it for ever, and the
+            // picture would sit frozen with a player attached and a spinner
+            // turning. Two seconds' worth of frames is far longer than any drain
+            // measured here and still an end.
+            //
+            // This is the second time this guard has been given a way to be
+            // wrong safely. It is worth the two lines: the failure it prevents
+            // looks exactly like the player having died.
+            if (closing || stalledDrops < Self.maxStalledDrops),
+               totalDrops < Self.maxTotalDrops {
+                stalledDrops = closing ? 0 : stalledDrops + 1
+                isCatchingUp = true
+                return nil
+            }
+            VideoPlaybackTrace.emit(String(
+                format: "gave up catching up behind=%.3fs after=%d", behind, totalDrops
+            ))
+        }
+        isCatchingUp = false
+        stalledDrops = 0
+        lastBehind = .infinity
         Self.ensureColorAttachments(on: buffer)
-        return (buffer, itemTime)
+        lastClockTime = wantedTime
+        return (buffer, displayTime.isValid ? displayTime : itemTime)
     }
+
+    /// How far behind the requested time a frame may be and still be shown.
+    ///
+    /// Generous on purpose. Normal delivery is within a frame or two, and the
+    /// fault this guards against is measured in SECONDS — so half a second
+    /// separates them with room to spare, and no ordinary frame is ever at risk
+    /// of being dropped for being slightly late.
+    private static let staleFrameTolerance: Double = 0.5
+
+    /// How many frames the gap may fail to close before the wait is abandoned.
+    ///
+    /// The safety valve, and only that: an output that is permanently behind
+    /// rather than draining would otherwise never show anything again. Half a
+    /// second at 120Hz, which no real catch-up spends standing still.
+    private static let maxStalledDrops = 60
+    private var stalledDrops = 0
+    private var lastBehind: Double = .infinity
+
+    /// The end that "while the gap is closing" does not have on its own.
+    /// Two seconds of frames at 120Hz.
+    private static let maxTotalDrops = 240
+    private var totalDrops = 0
+
+    /// Whether the picture is waiting for playback to catch up to it.
+    ///
+    /// Read by the renderer so the surface can say so. The honest state during
+    /// a drain is "the frame you are looking at is old and the next one is not
+    /// ready" — which is a load, and looks like one.
+    private(set) var isCatchingUp = false
+
+    /// What the ITEM says about itself: ready, failed, or still deciding.
+    ///
+    /// ⚠️ The question `why=no-new-buffer` cannot answer. An output with nothing
+    /// to give looks the same whether its item is still loading, has failed
+    /// outright, or is fine and merely between frames — and the first two are
+    /// not render faults at all. Everything upstream of here was measured before
+    /// this was, which is how five fixes went into the wrong layer.
+    var itemDiagnosis: String {
+        guard let item = observedItem else { return "no-item" }
+        switch item.status {
+        case .readyToPlay:
+            return "ready keepUp=\(item.isPlaybackLikelyToKeepUp ? "Y" : "N")"
+        case .failed:
+            let reason = item.error.map { "\($0)" } ?? "unknown"
+            return "FAILED \(reason.prefix(120))"
+        default:
+            return "loading"
+        }
+    }
+
+    /// Why the last tick produced nothing — the question a `rated=0` heartbeat
+    /// cannot answer on its own, and four runs were spent not knowing it.
+    private(set) var noFrameReason = "none"
+
+    /// The clock reading that went with the last frame handed out.
+    ///
+    /// ⚠️ Kept so the two can be compared. The frames racing while the clock
+    /// keeps time and the clock itself running fast look identical from the
+    /// screen, and they are different faults: one is the output handing back
+    /// buffers ahead of what was asked for, the other is the timebase. Only
+    /// logging both in one line tells them apart.
+    private(set) var lastClockTime: CMTime = .invalid
 
     /// Gives a buffer default Rec. 709 colour attachments when it carries none.
     ///

@@ -125,7 +125,19 @@ final class PostGridFlightCard: UIView {
         addSubview(restingChromeView)
 
         playBadge.tintColor = .white
-        playBadge.isHidden = post.kind != .video
+        // ⚠️ THE CARD WEARS WHAT THE ROW WORE, and the two rules had drifted.
+        //
+        // The row hides its badge for a collection AND the flight fades its
+        // furniture out — but this card's rule was `kind != .video` alone, so a
+        // single-video post flew with a play badge lit in the transition window
+        // while a collection flew without one. Reported as the badge appearing
+        // during a dismissal, on single media only.
+        //
+        // A timeline row shows no furniture on the card at all — the note on
+        // `showsCounters` states the reason and it applies to the badge for
+        // exactly the same reason: conjuring furniture the flight never had is
+        // the defect, whichever piece it is.
+        playBadge.isHidden = post.kind != .video || post.isCollection || !style.showsCounters
         playBadge.layer.shadowColor = UIColor.black.cgColor
         playBadge.layer.shadowOpacity = 0.55
         playBadge.layer.shadowRadius = 4

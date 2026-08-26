@@ -57,15 +57,34 @@ struct PageDotsWindowTests {
         #expect(PageDotsView.windowStart(current: 2, visible: 5, count: 5) == 0)
     }
 
-    /// ⚠️ A touch maps across the WHOLE run of pages, even when only a window is
-    /// drawn — the chip is a scrubber, not a row of discrete targets.
+    /// ⚠️ EVERY PAGE IS REACHABLE THOUGH ONLY FIVE DOTS ARE DRAWN, and the
+    /// chip's width is not what bounds it.
     ///
-    /// Mapping onto the visible dots would make the far right mean "the last dot
-    /// I can see" rather than "the end", and which page that is would change as
-    /// the window moved. One rule at every width, every page reachable at every
-    /// width.
-    @Test func aTouchReachesEveryPageEvenWhenTheWindowIsShort() {
-        #expect(MediaPageIndicatorView.page(at: 100, width: 100, count: 10) == 9)
-        #expect(MediaPageIndicatorView.page(at: 0, width: 100, count: 10) == 0)
+    /// The drag is a rate, not a position: one dot slot per page, tracked by a
+    /// long press whose movement limit is lifted, so the finger keeps counting
+    /// well outside the chip. A ten-page post is crossed in nine slots — about
+    /// a hundred points — on a chip that only draws five dots.
+    ///
+    /// ⚠️ `@MainActor` ON THE TEST, because this suite is not. Every other test
+    /// here calls a pure static function, so nothing forced the question — and a
+    /// UIKit view built from a nonisolated test COMPILES (the package defaults
+    /// its own code to the main actor) and then dies on a cooperative queue at
+    /// `UIView.init`. The failure reads as "the whole run crashed", not as this
+    /// test's own.
+    @MainActor
+    @Test func everyPageIsReachableThoughOnlyAWindowIsDrawn() {
+        let indicator = MediaPageIndicatorView()
+        indicator.frame = CGRect(x: 0, y: 0, width: PageDotsView.chipWidth(forDots: 5), height: 20)
+        indicator.configure(count: 10, current: 0)
+        var requested: [Int] = []
+        indicator.onPageRequested = { requested.append($0) }
+
+        let slot = MediaPageIndicatorView.pointsPerPage
+        indicator.debugScrub(.began, atX: 0)
+        for step in 1...9 {
+            indicator.debugScrub(.changed, atX: slot * CGFloat(step))
+        }
+
+        #expect(requested == Array(1...9))
     }
 }

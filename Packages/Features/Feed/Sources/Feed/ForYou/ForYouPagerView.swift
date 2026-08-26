@@ -34,6 +34,13 @@ final class ForYouPagerView: UIView {
 
     /// The tapped post's index into the *given format page's* posts.
     var onItemTapped: ((GalleryFilter.Format, Int) -> Void)?
+
+    /// The same open, at the post's comments — see
+    /// `ForYouGridPage.onItemCommentsTapped`.
+    var onItemCommentsTapped: ((GalleryFilter.Format, Int) -> Void)?
+
+    /// What is on screen and worth warming — see `ForYouGridPage.onWarmRequested`.
+    var onWarmRequested: (([GalleryPost]) -> Void)?
     /// A row's author was tapped, on whichever page is showing.
     var onAuthorTapped: ((GalleryPost) -> Void)?
     /// What a row's "..." offers — see `ForYouGridPage.authorMenuActions`.
@@ -114,6 +121,10 @@ final class ForYouPagerView: UIView {
             leading = page.trailingAnchor
             let format = Self.pageOrder[index]
             page.onItemTapped = { [weak self] item in self?.onItemTapped?(format, item) }
+            page.onItemCommentsTapped = { [weak self] item in
+                self?.onItemCommentsTapped?(format, item)
+            }
+            page.onWarmRequested = { [weak self] posts in self?.onWarmRequested?(posts) }
             page.onRefresh = { [weak self] in self?.onRefresh?() }
             page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
             page.authorMenuActions = { [weak self] context in

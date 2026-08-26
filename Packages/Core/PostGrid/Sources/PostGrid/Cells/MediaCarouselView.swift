@@ -113,24 +113,78 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         pages.indices.contains(currentPage) ? pages[currentPage].videoURL : nil
     }
 
-    /// Puts a playback surface on the current page, sized to it.
+    /// Puts a playback surface on a given page, sized to it.
     ///
-    /// The surface belongs to the HOST — a row cell owns exactly one and the
-    /// coordinator hands its player around — so this only re-parents it. That
-    /// is what lets a mixed carousel play without a second render view per page
-    /// and without the pool learning that pages exist.
-    public func host(_ surface: UIView) {
-        guard pageViews.indices.contains(currentPage) else { return }
-        // ⚠️ Off the old page FIRST, always.
+    /// The surfaces belong to the HOST — this only re-parents them, and the
+    /// pool never learns that pages exist. What changed when clips began being
+    /// kept warm is how many a carousel may hold: **one per page**, not one in
+    /// total.
+    public func host(_ surface: UIView, onPage index: Int) {
+        guard pageViews.indices.contains(index) else { return }
+        // ⚠️ Off its OLD page first — but only this surface, never theirs.
         //
-        // Re-parenting alone moves the view, and leaves the page it came from
-        // still believing it holds one — which is enough to keep that page's
-        // badge hidden for ever. A caller that evicted before asking makes this
-        // a no-op; one that did not is exactly the case it exists for.
-        for view in pageViews where view !== pageViews[currentPage] {
+        // This loop used to evict every other page unconditionally, which was
+        // exactly right while a host owned one surface and walked it from page
+        // to page: re-parenting alone leaves the page it came from still
+        // believing it holds one, which is enough to keep that page's badge
+        // hidden for ever. Now that neighbours keep their own clip warm, the
+        // same loop would tear down everything the retention window just paid
+        // for. So the question narrowed from "is this a different page" to "is
+        // this page holding the view I am moving".
+        for (position, view) in pageViews.enumerated()
+        where position != index && view.hosts(surface) {
             _ = view.evictHostedSurface()
         }
-        pageViews[currentPage].host(surface)
+        pageViews[index].host(surface)
+    }
+
+    /// Puts a surface on the page being looked at.
+    public func host(_ surface: UIView) { host(surface, onPage: currentPage) }
+
+    /// The surface hanging on `index`, if any — how a host finds the view it
+    /// left there rather than keeping a second map of its own.
+    public func hostedSurface(onPage index: Int) -> UIView? {
+        pageViews.indices.contains(index) ? pageViews[index].hostedSurface : nil
+    }
+
+    /// Takes the surface off one page and reports it.
+    @discardableResult
+    public func evictSurface(onPage index: Int) -> UIView? {
+        guard pageViews.indices.contains(index) else { return nil }
+        return pageViews[index].evictHostedSurface()
+    }
+
+    /// Which page is holding `view`, nil when none is.
+    public func page(hosting view: UIView) -> Int? {
+        pageViews.firstIndex { $0.hosts(view) }
+    }
+
+    /// How many pages the carousel is showing.
+    public var pageCount: Int { pages.count }
+
+    /// The picture a given page is showing.
+    ///
+    /// ⚠️ Needed by anything that puts a surface on a page the viewer is NOT on.
+    /// `renderedCover` answers for the current page, which is the right answer
+    /// for a flight and the wrong one for a prewarm: handing a clip on page
+    /// three the cover of page one, or none at all, is what makes a freshly
+    /// hosted surface draw black over a photograph.
+    public func cover(onPage index: Int) -> UIImage? {
+        pageViews.indices.contains(index) ? pageViews[index].cover.image : nil
+    }
+
+    /// The indices of every page with a stream behind it, in order.
+    ///
+    /// The retention window's domain: it is chosen among THESE, never among all
+    /// pages, so a gallery of twenty photographs and two clips keeps two
+    /// players and not a window's worth of nothing.
+    public var videoPageIndices: [Int] {
+        pages.indices.filter { pages[$0].videoURL != nil }
+    }
+
+    /// The stream on a given page.
+    public func videoURL(onPage index: Int) -> URL? {
+        pages.indices.contains(index) ? pages[index].videoURL : nil
     }
 
     /// Whether `view` is already hanging in the page being looked at — the
@@ -213,6 +267,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         // and the post would not open. An ancestor recognizer still receives
         // touches that land on the pages.
         addGestureRecognizer(tap)
+
         switch style {
         case .card:
             // The card's own fill, so the gutter between two pages and the
@@ -334,6 +389,10 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         onTapped?()
     }
 
+    /// How long a press must last before it is a hold rather than a tap.
+    /// Matches the post screen's, so the gesture feels the same on both.
+    public static let holdToPauseDuration: TimeInterval = 0.2
+
     // MARK: - Hero concealment
 
     /// Hides ONLY the page a flight is carrying.
@@ -396,6 +455,10 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     }
 
     /// Where page `index` rests, clamped so the last one lands flush.
+    /// The resting offset of a page, so a test can state its expectation in
+    /// pages rather than in arithmetic it would have to duplicate.
+    func debugOffset(forPage index: Int) -> CGFloat { offset(forPage: index) }
+
     private func offset(forPage index: Int) -> CGFloat {
         let maximum = max(scrollView.contentSize.width - bounds.width, 0)
         return min(CGFloat(index) * stride, maximum)
@@ -417,15 +480,30 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         // Snap from the PROJECTED offset, not the current one: a flick that has
         // barely moved the content still means "next page", and reading the
         // live offset here would answer "stay".
+        // ⚠️ THE PAGE THE GESTURE STARTED ON is the anchor, and every outcome is
+        // measured from it.
+        //
+        // Where the finger LEFT the content is the honest reading of where the
+        // viewer is — the projected offset says where a flick would coast to,
+        // which on a hard swipe is three or four pages away. That is a scroll,
+        // not paging: the viewer asked for the next photograph and got a blur
+        // and a stranger.
+        let from = page(nearest: scrollView.contentOffset.x)
         var index = page(nearest: targetContentOffset.pointee.x)
         // A deliberate flick always advances at least one page, which is what
         // makes a short swipe feel like paging rather than like a nudge that
         // sprang back.
         if abs(velocity.x) > 0.2 {
-            let from = page(nearest: scrollView.contentOffset.x)
             index = velocity.x > 0 ? max(index, from + 1) : min(index, from - 1)
-            index = min(max(index, 0), max(pageViews.count - 1, 0))
         }
+        // ⚠️ AND AT MOST ONE, however hard the flick.
+        //
+        // One gesture, one page. Momentum decides how FAST it gets there, never
+        // how far — so a violent swipe and a careful one land on the same
+        // photograph, and the viewer can always predict what a swipe will do
+        // without calibrating their thumb.
+        index = min(max(index, from - 1), from + 1)
+        index = min(max(index, 0), max(pageViews.count - 1, 0))
         targetContentOffset.pointee.x = offset(forPage: index)
     }
 
@@ -526,13 +604,25 @@ final class CarouselPageView: UIView {
         badge.isHidden = !isPlayable || (hidesBadgeWhilePlaying && surface != nil)
     }
 
-    /// The host's playback surface while this page is the one holding it.
+    /// The host's playback surface while this page is holding it.
     private weak var surface: UIView?
+
+    /// The surface this page is REALLY holding — both halves again, for the
+    /// same reason `hosts(_:)` asks both: a weak reference outlives the view
+    /// being taken away by a flight, and a page that answered from the
+    /// reference alone would hand back a view hanging nowhere.
+    var hostedSurface: UIView? {
+        guard let surface, surface.superview === self else { return nil }
+        return surface
+    }
 
     /// Whether this page is REALLY holding `view` — both halves, for the reason
     /// `host` states: a weak reference outlives the view being taken away.
     func hosts(_ view: UIView) -> Bool { surface === view && view.superview === self }
-    private let badge = UIImageView(image: UIImage(systemName: "play.fill"))
+    /// Readable inside the package so a test can ask WHERE the mark sits — the
+    /// one property of it that a screenshot proves and a walk for image views
+    /// does not.
+    let badge = UIImageView(image: UIImage(systemName: "play.fill"))
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -563,17 +653,32 @@ final class CarouselPageView: UIView {
         super.layoutSubviews()
         cover.frame = bounds
         surface?.frame = bounds
-        let side = min(bounds.width, bounds.height) * Self.badgeFraction
+        // ⚠️ IN THE CORNER, not the middle — and this is the row's own rule,
+        // not a new one.
+        //
+        // A single-video card has always put its play badge at the media's top
+        // trailing corner, held off it by `mediaFurnitureInset` like every other
+        // piece of furniture. Only the carousel's pages sat it in the centre, so
+        // a collection and a single clip disagreed about where the mark lives
+        // and the collection's version covered the photograph it was describing.
+        //
+        // The badge says "this page is a video". It does not need the middle of
+        // the picture to say it.
+        let side = badge.intrinsicContentSize.width
+        let inset = PostGridListRowCell.mediaFurnitureInset
         badge.frame = CGRect(
-            x: (bounds.width - side) / 2, y: (bounds.height - side) / 2,
-            width: side, height: side
+            x: bounds.width - side - inset, y: inset, width: side, height: side
         )
     }
 
-    /// A twelfth of the page's short side, clamped — the row's badge is sized
-    /// against its preview the same way, so a page and a single-video card
-    /// carry the same mark at the same weight.
-    private static let badgeFraction: CGFloat = 0.12
+    /// The badge is sized by its SYMBOL now, not by the page.
+    ///
+    /// It used to be a twelfth of the short side, which is the right rule for a
+    /// mark in the middle of a picture — it has to scale with what it sits on.
+    /// A mark in the corner is furniture, and furniture on this card is sized
+    /// and inset like the rest of it: the row's own badge is a plain symbol at
+    /// its natural size, and the two now match by construction rather than by
+    /// two constants agreeing.
 
     func host(_ surface: UIView) {
         // ⚠️ IDENTITY IS NOT ENOUGH — ask whether it is actually here.

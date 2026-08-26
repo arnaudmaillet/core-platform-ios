@@ -133,6 +133,66 @@ public extension ZoomTransitionSource {
     func zoomReleaseHoistedMedia() -> UIView? { nil }
 }
 
+/// **WHERE A DISMISSING FLIGHT IS**, in one value.
+///
+/// ⚠️ A VALUE RATHER THAN A PARAMETER LIST, and the reason is its own history.
+/// This began as a single `progress` and gained a field every time a follower
+/// was found to be guessing at something the flight already knew — the card's
+/// rect, then its corner, then whether it was being dragged or settling. Each
+/// was discovered as a defect on screen. A struct makes the next one an
+/// addition rather than a fourth call-site edit, and says plainly that what
+/// crosses this seam is the flight's STATE, not a number.
+///
+/// Everything here is in the CONTAINER's coordinates, which are the
+/// destination's own — both are full-bleed in the same container.
+public struct ZoomDismissState: Sendable {
+    /// 0 at the page, 1 at the source.
+    ///
+    /// Never sufficient on its own: the grab is a free 2D float, so the card's
+    /// position is the finger's rather than a function of how far the gesture
+    /// has gone. A destination that only faded on this would leave its
+    /// interface full-screen over a card that had already shrunk and moved.
+    public let progress: CGFloat
+
+    /// Where the card is.
+    public let card: CGRect
+
+    /// The card's corner at this instant — it rounds from the display's radius
+    /// to the source's across the gesture. Handed over rather than recomputed:
+    /// a destination carrying its own copy of that curve is one edit away from
+    /// disagreeing with the thing it is drawn against.
+    public let cornerRadius: CGFloat
+
+    /// ⚠️ THE TWO CHANNELS THE CARD ITSELF HAS.
+    ///
+    /// While the finger is down the card's POSITION is assigned live on every
+    /// event and only its SIZE is ever on a spring. A follower that animated
+    /// its position too would chase a centre the card had already left, and
+    /// would trail it by the whole of the detach dip — measured at 7pt across
+    /// and 12pt down a tenth of the way in.
+    ///
+    /// False means "this is where the card IS": take the position immediately.
+    /// True is the release, where the card is genuinely springing somewhere and
+    /// its follower should spring with it.
+    public let isSettling: Bool
+
+    public init(progress: CGFloat, card: CGRect, cornerRadius: CGFloat, isSettling: Bool) {
+        self.progress = progress
+        self.card = card
+        self.cornerRadius = cornerRadius
+        self.isSettling = isSettling
+    }
+
+    /// The same state, with the card's rect expressed somewhere else — what a
+    /// destination does before handing it to a view of its own.
+    public func with(card: CGRect) -> ZoomDismissState {
+        ZoomDismissState(
+            progress: progress, card: card,
+            cornerRadius: cornerRadius, isSettling: isSettling
+        )
+    }
+}
+
 @MainActor
 public protocol ZoomTransitionDestination: AnyObject {
     /// Whether the destination has content to reveal yet.
@@ -215,6 +275,13 @@ public protocol ZoomTransitionDestination: AnyObject {
     ///
     /// Default is nothing — a destination with no media has nothing to defer.
     func zoomTransitionWillBegin()
+
+    /// Where a dismissing flight IS, so a destination that draws beside the
+    /// card can be drawn with it. See `ZoomDismissState`.
+    ///
+    /// Called on every pan event, and once more with the outcome's values when
+    /// the grab is released. Default is nothing.
+    func setZoomDismissState(_ state: ZoomDismissState)
 
     /// Detaches the destination's live player and parks it for whoever plays
     /// the same asset next — the source it is flying home to. Called on the
@@ -299,6 +366,7 @@ public extension ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin() {}
+    func setZoomDismissState(_ state: ZoomDismissState) {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }
 }

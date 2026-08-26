@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import MediaPlayback
 import PostGrid
@@ -41,6 +42,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private let pauseGlyph = UIImageView()
 
     private var representedID: PostID?
+
+    /// Which post this cell's playback belongs to, for the pool's sharing rule.
+    ///
+    /// ⚠️ Two posts carrying the same file are two playbacks. Sharing a player
+    /// between them makes pausing one freeze the other — see `playingScope` in
+    /// `VideoPlaybackController`. The card and this page sharing one is the case
+    /// the rule exists FOR, and they agree here because they name the same post.
+    private var playbackScope: String? { representedID?.rawValue }
     private var mediaURL: URL?
     private var mediaKind: MediaKind = .image
 
@@ -73,7 +82,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// viewer moved to.
     private func reconcilePagePlayback() {
         guard mediaCard.showsCollection, let videoPlayback else { return }
-        let surface = mediaCard.renderView
+        reconcileRetainedClips()
         setPauseGlyphVisible(false)
         // ⚠️ PAUSED IN PLACE, never stopped and evicted.
         //
@@ -87,7 +96,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             #if DEBUG
             CarouselPlaybackAudit.trace("post setPaused true page=\(mediaCard.currentPage)")
             #endif
-            videoPlayback.setPaused(true, in: surface)
+            videoPlayback.setPaused(true, in: mediaCard.renderView)
+            // ⚠️ A STILL PAGE WARMS TOO — the case the probe caught.
+            //
+            // Warming hung only off the paths that START something, so a viewer
+            // landing on a photograph warmed nothing at all and the clip two
+            // pages away was still a cold decode when they got there. Which is
+            // the whole complaint: the players should be in place whether or not
+            // the viewer is on them.
+            prewarmNeighbouringClips()
             return
         }
         // ⚠️ A FLIGHT OWNS THE START while it is in the air.
@@ -115,9 +132,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // `setPaused` already answers whether there was anything to resume. Two
         // states looked alike from outside and the return value is what tells
         // them apart, so it is read rather than discarded.
-        let wasHosted = mediaCard.hostsRenderViewOnCurrentPage
-        // Idempotent, and it is also what un-hides the surface.
+        // ⚠️ RE-POINTED FIRST, then asked — the order is the whole of the
+        // resume.
+        //
+        // `renderView` names the WATCHED page's surface, so until this call it
+        // is still the page the viewer just left. Asking "is it hosted here"
+        // before re-pointing therefore asked about the wrong view, always
+        // answered no, and every return to a kept clip re-played it from a cold
+        // decode — the retention would have been paid for and never spent.
         mediaCard.hostRenderViewOnCurrentPage()
+        let surface = mediaCard.renderView
+        // And the question is asked of the POOL, not of the hosting. A surface
+        // can be hanging on its page with no player behind it — a dismissed and
+        // reopened post is exactly that — and only the pool can tell the two
+        // apart. See `GridVideoPlaybackCoordinator.isPlaying` for the same rule
+        // on the other surface.
+        let wasHosted = videoPlayback.hasPlayer(in: surface)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-media-log") {
             print(String(format: "[page-play] %.3f page=%d hosted=%@ url=%@",
@@ -133,6 +163,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             auditPagePlayback()
             #endif
+            // The resumed path warms too: arriving back at a kept clip is the
+            // moment the NEXT one becomes reachable in a swipe.
+            prewarmNeighbouringClips()
             return
         }
         // ⚠️ The page's own cover, and NOT nil — clearing it is what hid the
@@ -150,11 +183,194 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // configure. The collection path is now the same: poster first, and the
         // first decoded frame retires it.
         surface.setPoster(mediaCard.currentPageCover)
+        let scope = playbackScope
         Task { [weak self] in
-            await videoPlayback.play(url, in: surface)
+            await videoPlayback.play(url, in: surface, scope: scope)
             self?.auditPagePlayback()
+            // ⚠️ AFTER, and that ordering is the whole safety of this.
+            //
+            // Prewarming opens streams. Doing it alongside the watched clip's
+            // start would put them in competition for bandwidth with the only
+            // picture on screen — trading a delay the viewer might never meet
+            // for a stutter in the one they are certainly looking at.
+            self?.prewarmNeighbouringClips()
         }
     }
+
+    /// Brings the clips within one swipe to their first frame, so arriving at
+    /// them shows a picture instead of a thumbnail and a wait.
+    ///
+    /// The retention window makes the RETURN to a clip free; this is the other
+    /// half, and the one the viewer meets first. Bounded harder than retention
+    /// — see `CarouselRetentionWindow.prewarmDepth` for why the two numbers are
+    /// deliberately not the same.
+    /// Warm-ups in flight, so a page that goes away can call them off.
+    private var prewarmTasks: [Task<Void, Never>] = []
+
+    /// Ends every warm-up in flight. Called wherever playback is given back.
+    private func cancelPrewarming() {
+        for task in prewarmTasks { task.cancel() }
+        prewarmTasks.removeAll()
+    }
+
+    private func prewarmNeighbouringClips() {
+        guard let videoPlayback, mediaCard.showsCollection, isActive else { return }
+        guard !defersPlaybackForFlight else { return }
+        prewarmTasks.removeAll { $0.isCancelled }
+        let pages = CarouselRetentionWindow.pagesToPrewarm(
+            videoPages: mediaCard.videoPageIndices,
+            currentPage: mediaCard.currentPage,
+            budget: max(0, videoPlayback.capacity - 1)
+        )
+        for page in pages {
+            guard let url = mediaCard.videoURL(onPage: page) else { continue }
+            let surface = mediaCard.prepareSurface(forPage: page)
+            // Already warm: a clip kept from an earlier visit needs nothing, and
+            // asking would restart a player that is holding a good frame.
+            guard !videoPlayback.hasPlayer(in: surface) else { continue }
+            // ⚠️ A WARM-UP THAT LANDS AFTER THE PAGE HAS GONE IS UNDONE.
+            //
+            // `prewarm` resolves a URL and binds a player, and both happen after
+            // an await — so a viewer who scrolls away in the meantime left the
+            // cell holding a decoder it acquired AFTER giving everything back.
+            // Caught by the accumulation battery, which is precisely the leak it
+            // exists to find: one player survived every open/close cycle.
+            //
+            // Cancellation alone would not do it. The pool's await is not
+            // cooperative, so the binding can still happen; what makes this safe
+            // is asking again on the other side of it.
+            let scope = playbackScope
+            let task = Task { [weak self] in
+                await videoPlayback.prewarm(url, in: surface, scope: scope)
+                guard let self, self.isActive else {
+                    videoPlayback.stop(surface)
+                    return
+                }
+                #if DEBUG
+                // ⚠️ REPUBLISHED once the warm-up has actually landed.
+                //
+                // The probe was written where warming is REQUESTED, so it
+                // reported the state before any of it had happened and went on
+                // saying so for ever. Reading `players=1` off that and calling
+                // the warming broken would have been believing a stale snapshot
+                // — the same mistake as trusting a log nothing had written to.
+                self.publishRetentionProbe(pool: videoPlayback)
+                #endif
+            }
+            prewarmTasks.append(task)
+        }
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace("prewarm pages=\(pages)")
+        }
+        publishRetentionProbe(pool: videoPlayback)
+        #endif
+    }
+
+    /// Decides which of a collection's clips keep their player while the viewer
+    /// is on one page, and ends the rest.
+    ///
+    /// ## Retention is EARNED, never speculative
+    ///
+    /// A page gets a player when the viewer actually lands on it. Leaving pauses
+    /// it in place — surface, last decoded frame and playhead all kept — so
+    /// coming back costs nothing and looks like nothing happened. A clip the
+    /// viewer has never reached is not started early: it would spend a decoder
+    /// on a guess, and the poster it shows meanwhile is the same picture the
+    /// viewer would see anyway.
+    ///
+    /// What this method does is the OTHER half — deciding when a paused clip has
+    /// drifted far enough to stop being worth its player. `CarouselRetentionWindow`
+    /// answers that against the pool's stated capacity, so a gallery of twenty
+    /// clips holds the same number of players as a gallery of three.
+    private func reconcileRetainedClips() {
+        guard let videoPlayback, mediaCard.showsCollection else { return }
+        // ⚠️ Never mid-flight. The window would drop the surface the flight is
+        // carrying, or re-host a neighbour over the card in the air.
+        guard !defersPlaybackForFlight else { return }
+        // ⚠️ RE-POINTED BEFORE THE WINDOW IS APPLIED.
+        //
+        // `renderView` names the watched page's surface, and the window spares
+        // it — so applying the window first meant sparing the page just left,
+        // one clip beyond the budget, on every page change. Only for a clip
+        // page: a still has nothing to watch, and minting it a surface here
+        // would spend one on a photograph.
+        if mediaCard.currentPageVideoURL != nil {
+            mediaCard.hostRenderViewOnCurrentPage()
+        }
+        let keep = CarouselRetentionWindow.pagesToRetain(
+            videoPages: mediaCard.videoPageIndices,
+            currentPage: mediaCard.currentPage,
+            capacity: videoPlayback.capacity
+        )
+        // The watched surface is spared only when there IS one — on a still page
+        // the previous clip has no claim on the budget beyond the window's.
+        let watched = mediaCard.currentPageVideoURL != nil ? mediaCard.renderView : nil
+        for view in mediaCard.retainSurfaces(onPages: keep, sparing: watched) {
+            // The card gave these up; the pool is told here, because the card
+            // does not own playback.
+            videoPlayback.stop(view)
+        }
+        // ⚠️ EVERY page but the watched one is paused, and this is the half that
+        // re-pointing `renderView` quietly removed.
+        //
+        // While one surface walked from page to page, leaving a page took its
+        // player with it and the clip stopped by construction. Now the clip
+        // keeps its own surface — so nothing stops it, and in a full-bleed
+        // carousel the page just left is still on screen: the viewer moves to a
+        // photograph and a video goes on playing beside it. Pausing here is what
+        // makes "keeps its last frame" true rather than "keeps running".
+        for page in mediaCard.surfacedPages where page != mediaCard.currentPage {
+            // Adaptive streams are held paused exactly like files. They were
+            // briefly released here instead, on the theory that resuming one was
+            // what produced the fast-forward — it was not; the frames were
+            // stale, not the playback (see `VideoFrameSource`). Keeping the
+            // distinction would have cost the instant return on precisely the
+            // long clips that benefit from it most, to work around a fault that
+            // is fixed.
+            videoPlayback.setPaused(true, in: mediaCard.surface(forPage: page))
+        }
+        mediaCard.hostRetainedSurfaces()
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace(
+                "retain page=\(mediaCard.currentPage) keep=\(keep) "
+                + "surfaced=\(mediaCard.surfacedPages) "
+                + "players=\(videoPlayback.activePlayerCount)/\(videoPlayback.capacity)"
+            )
+        }
+        publishRetentionProbe(pool: videoPlayback)
+        #endif
+    }
+
+    #if DEBUG
+    /// Publishes the retention state where a UI test can read it.
+    ///
+    /// ⚠️ A UI test drives REAL gestures and sees only the screen — and none of
+    /// what this feature promises is visible in a screenshot. "The clip kept its
+    /// player" and "the clip was decoded again" produce the same picture; the
+    /// difference is a cut the eye catches and a still frame cannot.
+    ///
+    /// So the invariant is published as an accessibility identifier rather than
+    /// inferred from pixels. It is the same reasoning as the audit's file sink:
+    /// an assertion needs something that can be WRONG, and a screenshot of a
+    /// carousel is not it.
+    private func publishRetentionProbe(pool: VideoPlaybackController) {
+        mediaCard.isAccessibilityElement = true
+        mediaCard.accessibilityIdentifier = [
+            "carousel",
+            "page=\(mediaCard.currentPage)",
+            // Total pages as well as clip count: a caller walking the carousel
+            // needs to know how far it goes, and the clips are not necessarily
+            // the pages it starts on.
+            "pages=\(mediaCard.pageCount)",
+            "clips=\(mediaCard.videoPageIndices.count)",
+            "kept=\(mediaCard.surfacedPages.count)",
+            "players=\(pool.activePlayerCount)",
+            "capacity=\(pool.capacity)",
+        ].joined(separator: ";")
+    }
+    #endif
 
     /// The post page's half of the carousel audit.
     ///
@@ -265,6 +481,30 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// thread data, scroll position, and a half-typed reply never live in a
     /// recycled cell. Z-order: above the media (which vacates the region),
     /// below the chrome (the action rail floats over it).
+    /// The window a masked-hero opening is seen through — see
+    /// `beginMaskedRevealForFlight`. Non-nil only for the length of a flight.
+    private var flightMask: UIView?
+    private var mediaHiddenForMaskedReveal = false
+    private var alphaForMaskedReveal: CGFloat = 1
+    private var groundForMaskedReveal: UIColor?
+    /// ⚠️ ITS OWN FLAG, not a re-read of `groundForMaskedReveal`.
+    ///
+    /// The opening and the dismissal borrow the same two preparations — the
+    /// media hidden, the ground cleared — and the first version guarded the
+    /// dismissal on the stored ground being nil. A masked OPENING leaves that
+    /// ground stored, so the dismissal that followed it declined to run and
+    /// the thread stopped receding on exactly the pages that opened with one.
+    private var isEngagedDismissing = false
+    /// Everything the page draws, in one frame-managed view — see
+    /// `buildLayout`. A transition moves this and nothing inside it.
+    private let pageStage = UIView()
+    /// The grab's current mapping of page onto card — the scale, and the rect
+    /// it is mapping onto — held so a layout pass cannot be the last word on
+    /// where the page is.
+    /// What each travelling layer's opacity was when the grab began — an
+    /// abandoned one has to put back exactly that, and a starting one has to
+    /// begin from it.
+    private var restingAlphas: [CGFloat] = []
     private let commentsContainer = SnapCommentsContainerView()
     private var commentsContainerConstraints: [NSLayoutConstraint] = []
     /// The engaged header's frost: a dissolving blur band across the top
@@ -313,6 +553,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         tap.delegate = self
         contentView.addGestureRecognizer(tap)
 
+        // Hold to pause: the clip stops while the finger is down and resumes
+        // when it lifts.
+        //
+        // ⚠️ IT MUST NOT CANCEL THE TAP, and the two must not fight. A hold is
+        // a tap that outstayed its welcome, so the recognizers overlap by
+        // construction: `cancelsTouchesInView = false` keeps the rest of the
+        // cell reachable, and the short duration is what separates "toggle" from
+        // "hold" in the hand rather than in the code.
+        //
+        // Deliberately NOT a toggle. A hold has an end, and playback resumes at
+        // it — which is why it reads as "look at this frame" rather than as a
+        // second way to press pause. The pause glyph stays out of it for the
+        // same reason: nothing was chosen, so nothing should be announced.
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleMediaHold))
+        hold.minimumPressDuration = Self.holdToPauseDuration
+        hold.cancelsTouchesInView = false
+        hold.delegate = self
+        contentView.addGestureRecognizer(hold)
+
         // The glass card's swipe exit. TWO locks keep it strictly inside
         // the engagement lifecycle — this recognizer paralyzed the whole
         // feed when it had neither:
@@ -343,7 +602,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             self.onMediaPageChanged?(page)
         }
         chrome.onMediaPageRequested = { [weak self] page in
-            self?.mediaCard.setPage(page)
+            // Teleport, for the reason the card's own indicator does: the
+            // scrubbing finger is the clock, and a scroll animation would run a
+            // second one against it.
+            self?.mediaCard.setPage(page, animated: false)
         }
     }
 
@@ -351,17 +613,36 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func buildLayout() {
+        // ⚠️ THE PAGE'S OWN STAGE, and it is FRAME-MANAGED on purpose.
+        //
+        // Everything the page draws lives in here, so a transition that has to
+        // move the page moves ONE view. The layers used to be transformed
+        // individually — correct arithmetic, since a view transform is applied
+        // about its own centre, and a permanent source of one-frame
+        // disagreements: a layout pass, a spring in flight and a gesture event
+        // are three different moments, and four layers being told the same
+        // thing at three moments is four chances to be told late.
+        //
+        // It cannot be pinned by constraints. Auto Layout assigns FRAMES, and
+        // assigning a frame to a transformed view re-derives its bounds and
+        // centre from it — the transform is silently cancelled, which is what
+        // happened to `contentView` and then to each layer in turn. So this one
+        // is positioned by `bounds`/`center` in `layoutSubviews`, both of which
+        // are transform-safe, and nothing else ever writes its geometry.
+        pageStage.frame = contentView.bounds
+        contentView.addSubview(pageStage)
+
         // Text-only posts' gradient page background lives inside the chrome
         // (shared with the hero flight's replica, so the landing swap can't
         // mismatch), not here. The media card hosts both render surfaces
         // full-bleed — in both states: it is the page at rest AND the
         // background of the engaged screen.
-        mediaCard.pin(to: contentView)
+        mediaCard.pin(to: pageStage)
 
         // The readability layer, directly over the media: inert until the
         // engagement materializes it, and never moved again (it covers the
         // whole cell in both states, it just isn't visible in one).
-        mediaBackdrop.pin(to: contentView)
+        mediaBackdrop.pin(to: pageStage)
 
         // The header frost sits directly above the stream and below the
         // chrome: media → backdrop → stream → frost → chrome.
@@ -386,8 +667,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         headerFrost.translatesAutoresizingMaskIntoConstraints = false
         commentsContainer.isHidden = true
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(commentsContainer)
-        contentView.addSubview(headerFrost)
+        pageStage.addSubview(commentsContainer)
+        pageStage.addSubview(headerFrost)
 
         chrome.pin(to: contentView)
 
@@ -415,10 +696,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // strip (the hosted scroll view rests its content below the strip
         // via inset — `setEngagedInsets` on the child).
         commentsContainerConstraints = [
-            commentsContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
-            commentsContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            commentsContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            commentsContainer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            commentsContainer.topAnchor.constraint(equalTo: pageStage.topAnchor),
+            commentsContainer.leadingAnchor.constraint(equalTo: pageStage.leadingAnchor),
+            commentsContainer.trailingAnchor.constraint(equalTo: pageStage.trailingAnchor),
+            commentsContainer.bottomAnchor.constraint(equalTo: pageStage.bottomAnchor),
         ]
         NSLayoutConstraint.activate(commentsContainerConstraints)
         // The header band spans EXACTLY its container — screen top to where
@@ -430,9 +711,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         headerFrost.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: mediaURL != nil))
         NSLayoutConstraint.deactivate(headerFrostConstraints)
         headerFrostConstraints = [
-            headerFrost.topAnchor.constraint(equalTo: contentView.topAnchor),
-            headerFrost.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            headerFrost.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            headerFrost.topAnchor.constraint(equalTo: pageStage.topAnchor),
+            headerFrost.leadingAnchor.constraint(equalTo: pageStage.leadingAnchor),
+            headerFrost.trailingAnchor.constraint(equalTo: pageStage.trailingAnchor),
             headerFrost.heightAnchor.constraint(
                 equalToConstant: SnapCommentsLayout.commentsTopInset(topInset: frozenInsets.top)
             ),
@@ -508,6 +789,412 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The four layers the engagement fades, in no particular order.
     private var engagementFadeLayers: [CALayer] {
         [commentsContainer.layer, headerFrost.layer, mediaBackdrop.layer, chrome.layer]
+    }
+
+    /// **OPTION B — `-comments-masked-hero`.** Opens the REAL engaged thread
+    /// through a window that grows with the flight, over the card flying the
+    /// photograph.
+    ///
+    /// ⚠️ NO STAND-IN ANYWHERE. `RevealTransition` records why that matters:
+    /// five text-hero attempts flew a replica of the destination and every one
+    /// of them died of impersonation — a skeleton in the photographed still
+    /// being the first symptom on the list, and the one a still of this page
+    /// reproduced exactly. What is masked here IS the page.
+    ///
+    /// The destination stays visible for this (see `setZoomContentHidden`) and
+    /// sits ABOVE the flight card in the container, so the thread draws over
+    /// the photograph the card is carrying. The page's own media is hidden for
+    /// the duration — the card has it, at the crop the row was showing, which
+    /// is the handshake a plain reveal cannot make.
+    func beginMaskedRevealForFlight(from rect: CGRect, cornerRadius: CGFloat) {
+        guard isCommentsEngaged, flightMask == nil else { return }
+        mediaHiddenForMaskedReveal = mediaCard.isHidden
+        mediaCard.isHidden = true
+        // ⚠️ AND THE GROUND HAS TO GO TRANSPARENT, or the window reveals a
+        // black page.
+        //
+        // The page's floor is opaque black by design — it is what a media page
+        // rests on. Masking only decides WHERE the page draws, not what it
+        // draws, so the window opened correctly onto the thread and the thread
+        // was standing on black, with the card's photograph shut out behind it.
+        // The whole point of this variant is that the two are composited.
+        groundForMaskedReveal = contentView.backgroundColor
+        contentView.backgroundColor = .clear
+        let mask = UIView(frame: rect)
+        // Opaque: a mask reads its alpha channel, so a clear view masks
+        // everything away — a blank screen rather than a clipped one. The rule
+        // `RevealTransition` states, and the first thing to get wrong here.
+        mask.backgroundColor = .black
+        mask.layer.cornerCurve = .continuous
+        mask.layer.cornerRadius = cornerRadius
+        contentView.mask = mask
+        flightMask = mask
+        // ⚠️ THE CONTENT GROWS WITH THE WINDOW; a mask alone does not move it.
+        //
+        // Opening the window over a page at 1:1 reads as a shutter sweeping
+        // across something already there, while the card beside it is visibly
+        // growing — two channels of one opening disagreeing about what is
+        // happening. So the revealed views take the window's own scale and
+        // ride it back to identity.
+        //
+        // ⚠️ SCALED BY WIDTH, and it is deliberately the smaller of the two
+        // numbers. The card's media grows 1.09× in width and 2.36× in height:
+        // no uniform scale is both, and a non-uniform one would stretch text.
+        // Width is the honest one — the content grows exactly as the window
+        // does across, and never distorts.
+        let scale = rect.width / max(contentView.bounds.width, 1)
+        // ⚠️ THE STAGE, not a list of layers.
+        //
+        // It used to transform `commentsContainer` and `mediaBackdrop`
+        // individually and deliberately leave the header's frost out of it —
+        // a material must not be transformed, since a scaled backdrop samples a
+        // scaled world. Moving the stage moves all three, frost included, which
+        // is the one thing that rule was protecting against. It is acceptable
+        // here for the reason it always was on the flight card: the whole page
+        // is being scaled as one object, so the material is scaled WITH its
+        // world rather than against it, and it lasts a third of a second.
+        pageStage.transform = CGAffineTransform(
+            translationX: rect.midX - contentView.bounds.midX,
+            y: rect.midY - contentView.bounds.midY
+        ).scaledBy(x: scale, y: scale)
+        UIView.animate(
+            withDuration: ZoomFlightSpring.duration, delay: 0,
+            usingSpringWithDamping: ZoomFlightSpring.damping,
+            initialSpringVelocity: ZoomFlightSpring.velocity,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            mask.frame = self.contentView.bounds
+            // ⚠️ THE RADIUS RIDES THIS SPRING, in this block, with the frame.
+            //
+            // It was a separate `CABasicAnimation` on an ease-out curve, which
+            // is a second opinion about the same corner: the card interpolates
+            // its own radius inside the flight's property animator, so the two
+            // silhouettes travelled the same distance at different rates and
+            // only agreed at the ends. `cornerRadius` on a view's OWN layer is
+            // animatable inside a UIView block — the exception to the trap the
+            // page indicator's dots hit, where the value changed in
+            // `layoutSubviews` rather than in the block.
+            mask.layer.cornerRadius = ScreenGeometry.cornerRadius(behind: self)
+            self.pageStage.transform = .identity
+        }
+
+    }
+
+    /// **THE DISMISSING GRAB'S OTHER HALF.** The whole page travels with the
+    /// card, as one object.
+    ///
+    /// ⚠️ ONE TRANSFORM, HELD AGAINST THE LAYOUT THAT KEEPS ERASING IT.
+    ///
+    /// Three ways to move the page were tried and two of them are silently
+    /// undone. A `transform` on `contentView` does nothing at all: a cell's
+    /// content view belongs to UIKit, `layoutSubviews` assigns its FRAME on
+    /// every pass, and assigning a frame to a transformed view re-derives
+    /// bounds and centre from it. Transforms on the page's own top-level views
+    /// are correct arithmetic and fail the same way one level down — they are
+    /// pinned by constraints, so a layout pass writes their frames back and the
+    /// page freezes while its WINDOW carries on. That is the interface and the
+    /// media visibly disagreeing, and it comes and goes with whatever else
+    /// happens to trigger a layout.
+    ///
+    /// (`sublayerTransform` survives layout and was the third try. It is
+    /// applied about a different origin than a view transform, and the page
+    /// landed roughly twice as far out as the card — mapping page onto card
+    /// through it is not the same arithmetic, and getting it wrong is invisible
+    /// until something is on screen to compare against.)
+    ///
+    /// So the transform stays a view transform, and `layoutSubviews`
+    /// re-asserts it. The layout is not fought, it is answered: whatever it
+    /// writes, the grab's own state is put back in the same pass.
+    ///
+    /// ⚠️ AND THE PAGE KEEPS ITS OWN FACE. It used to hide its media and clear
+    /// its floor, on the reasoning that the card behind was carrying the
+    /// photograph. But the card is only guaranteed to be DRAWING after a
+    /// display tick — the deferred content hide waits for exactly that — so the
+    /// page went transparent over a card that had not painted yet, and with the
+    /// readability wash lifting at three times the rate of the text, what got
+    /// uncovered was the container: the background dropped to black at the
+    /// instant of the grab.
+    ///
+    /// - Parameter hidingMedia: the one case where the page cannot show its own
+    ///   media — its live surface has been DONATED to the card, so its media
+    ///   view is an empty hole. Then, and only then, it is hidden and the card
+    ///   underneath is what shows.
+    func beginEngagedDismissal() {
+        guard isCommentsEngaged, !isEngagedDismissing else { return }
+        isEngagedDismissing = true
+        // ⚠️ THE PAGE STOPS DRAWING THE PHOTOGRAPH; THE CARD IS THE ONE COPY.
+        //
+        // The page kept its own media for a while, and every mapping of page
+        // onto card was then a mapping of one CROP onto another: the photograph
+        // is aspect-filled into a 402x874 page, and squeezing that result into
+        // a 312x433 tile is not the same picture as aspect-filling the
+        // photograph into the tile directly. Fit stretched it, fill re-cropped
+        // it — both a visible zoom against the card at the handover.
+        //
+        // There is nothing to reconcile if there is only one picture. The card
+        // is behind the page, carrying the media at the crop the row will land
+        // on, and it has been doing that correctly since long before this
+        // existed. So the page draws the thread and nothing else, and what is
+        // dragged home is the card's own image the whole way — identical at the
+        // last frame because it was never a copy.
+        // ⚠️ ALPHA, NOT `isHidden`, and on a video post that is the whole
+        // difference between the card flying frames and flying a thumbnail.
+        //
+        // The card does not take this page's surface: it attaches a SECOND one
+        // to the same player, ALONGSIDE this one, so both draw the same frames.
+        // Alongside is the operative word — a hidden view is out of the render
+        // path, and with this one hidden the sibling stopped being fed. The
+        // card ended up holding a live surface with a single frame on it and
+        // its cover image showing through: the thumbnail in the window.
+        //
+        // Alpha 0 is invisible and still rendered, which is exactly what the
+        // flight does to the destination as a whole, for the same reason.
+        alphaForMaskedReveal = mediaCard.alpha
+        mediaCard.alpha = 0
+        groundForMaskedReveal = contentView.backgroundColor
+        contentView.backgroundColor = .clear
+        // ⚠️ EACH LAYER STARTS FROM ITS OWN OPACITY, not from 1.
+        //
+        // Fading them as `1 - t` assumes they were all opaque, and the wash is
+        // not: at rest it carries whatever the engagement left it at. Driven
+        // from 1 it went FULLY opaque on the grab's first frame and the
+        // photograph vanished behind it — the page changing the moment it was
+        // touched, which is the one thing the first frame of a gesture must
+        // never do.
+        //
+        // Captured here and scaled from, so t=0 is exactly the page that was on
+        // screen and t=1 is nothing.
+        restingAlphas = dismissalTravellers.map(\.alpha)
+    }
+
+    /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
+    ///
+    /// The grab can be pushed forward, dragged back and abandoned; anything
+    /// that animated towards a target here would be chasing a value that has
+    /// already moved, and a cancelled grab would leave the page mid-flight.
+    /// The dim and the toolbar recede on exactly these terms. (The RELEASE is
+    /// the exception, and it is not one: the same call is made from inside the
+    /// release's own animation block, so UIKit interpolates it on the card's
+    /// spring rather than on a second one.)
+    func setEngagedDismissal(_ state: ZoomDismissState) {
+        guard isEngagedDismissing else { return }
+        let settling = state.isSettling
+        let t = min(max(state.progress, 0), 1)
+        // The thread and its wash recede together, on one value — each from
+        // where it already was. The photograph is the card's and is not this
+        // method's business at all — see `beginEngagedDismissal`.
+        for (view, resting) in zip(dismissalTravellers, restingAlphas) {
+            view.alpha = resting * (1 - t)
+        }
+        guard state.card.width > 0, state.card.height > 0 else { return }
+        // ⚠️ THE PAGE OVERHANGS THE CARD BY A HAIR, and this is the answer to a
+        // light leak rather than a cosmetic tweak.
+        //
+        // Nothing here can be exact. The page FOLLOWS the card — told its rect
+        // on a channel, applied a hop later, from another view hierarchy — and
+        // a follower can be made arbitrarily close and never identical. (Being
+        // a passenger inside the card would be exact, and is not available: the
+        // thread is a hosted child controller's view, and UIKit throws
+        // `UIViewControllerHierarchyInconsistency` the moment such a view is
+        // moved out of its parent's hierarchy. Tried; it crashes on the first
+        // grab.)
+        //
+        // What a fraction of a point exposed was a BRIGHT edge: inside the
+        // window the card's photograph carries the page's wash, outside it the
+        // card is undimmed, so any gap read as a sliver of light on a dark
+        // page. So the page is drawn a little larger than the card it covers.
+        // The error is still there and now falls the other way — a hair of wash
+        // over the dimmed feed.
+        //
+        // ⚠️ HALF A POINT, AND ONLY WHILE THE FINGER IS DOWN.
+        //
+        // Two points was visible on both counts: the wash overhung the
+        // photograph on all four sides, and a cancelled grab animated to a page
+        // two points too large and then snapped to its real size when the
+        // gesture was torn down. A bleed exists to swallow SUB-PIXEL error —
+        // fractional rects, one rounding — and half a point is already three
+        // device pixels. Anything a bleed would have to be to hide a real lag
+        // is a bleed you can see.
+        //
+        // The release carries none: `settling` means the card is going to a
+        // known rect and the page must arrive exactly there, so a cancelled
+        // grab lands on its own size and the teardown has nothing to correct.
+        let card = settling
+            ? state.card
+            : state.card.insetBy(dx: -Self.dismissalBleed, dy: -Self.dismissalBleed)
+        // ⚠️ FILL, NOT FIT — and it moves the THREAD now, which is all that is
+        // left to move.
+        //
+        // The arithmetic is kept because it is why the photograph is no longer
+        // here. Three mappings were tried while the page still drew its own:
+        // by WIDTH it ended a different shape from the card (`x=0.776 y=0.495`
+        // at the release — 57% too tall); by BOTH AXES the frames agreed and
+        // the image was squashed; FILL kept the ratio and still re-cropped,
+        // because a crop of a crop is not the crop. Only removing the second
+        // copy settles it.
+        //
+        // Fill stays for the thread: it keeps the text's proportions while the
+        // window takes the overflow.
+        let fill = max(
+            card.width / max(contentView.bounds.width, 1),
+            card.height / max(contentView.bounds.height, 1)
+        )
+        // ⚠️ ONE VIEW, ONE TRANSFORM. Everything the page draws is inside
+        // `pageStage`, so the mapping is applied once, about one centre, in one
+        // assignment — and a layout pass cannot erase it, because nothing but
+        // this cell writes that view's geometry.
+        //
+        // It was a transform per layer before, which is correct arithmetic (a
+        // view transform is applied about its own centre, so each needed its
+        // own translation) and a permanent source of one-frame disagreements: a
+        // layout pass, a spring in flight and a gesture event are three
+        // different moments, and four layers told the same thing at three
+        // moments is four chances to be told late.
+        // ⚠️ TWO CHANNELS, BECAUSE THE CARD HAS TWO — and folding them into one
+        // transform is what put the page BEHIND the card.
+        //
+        // The flight's grab drives the card's POSITION directly on every pan
+        // event and its SIZE on a spring (the detach dip). A single affine
+        // carrying both meant the page's position was animating toward a centre
+        // the card had already left: told inside the dip's block, it chased a
+        // moving target and lagged it by the whole of the dip. On screen that
+        // is the comments and the wash sitting a few dozen points behind the
+        // photograph — the same numbers, arriving late.
+        //
+        // So the page is decomposed exactly as the card is: the centre is
+        // assigned, live, and only the scale is left to whatever animation is
+        // in flight.
+        // ⚠️ AND THE CENTRE IS ASSIGNED OUTSIDE ANY ANIMATION while the finger
+        // is down. Inside the dip's block it animated like everything else, so
+        // it was interpolating toward a position the card had already left —
+        // measured trailing it by 7pt across and 12pt down at a tenth of the
+        // gesture, which is the comments and the wash sitting visibly behind
+        // the photograph. The release is the one time it should spring, and
+        // that is what `settling` says.
+        let centre = CGPoint(x: card.midX, y: card.midY)
+        if settling {
+            pageStage.center = centre
+        } else {
+            UIView.performWithoutAnimation { pageStage.center = centre }
+        }
+        pageStage.transform = CGAffineTransform(scaleX: fill, y: fill)
+        // ⚠️ THE CARD'S RADIUS, HANDED OVER — never a second copy of the curve.
+        //
+        // The window computed its own interpolation from the display's corner
+        // to the row's, which is the right shape and was not the card's: the
+        // card held the display's radius flat for the whole drag, so the two
+        // silhouettes were rounded differently for the length of the gesture.
+        // The card interpolates now (`grabCornerRadius`) and passes the number
+        // it used, so there is one curve and no way to disagree about it.
+        let window = flightMask ?? makeDismissalWindow()
+        window.frame = card
+        window.layer.cornerRadius = state.cornerRadius
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            // The two rects that must be the same rect: where the window is,
+            // and where the page actually landed after its transform. A gap
+            // between them is the gap on screen, and nothing else can be.
+            // The card's PRESENTATION frame beside the page's, in the same
+            // space — the only comparison that can catch one lagging the
+            // other. Comparing the window's rect to the page's proved nothing:
+            // both are derived from the same converted number in the same
+            // breath, so they agreed while the card was somewhere else.
+            print(String(format: "[grab] t=%.2f fill=%.3f card=%@ stage=%@",
+                         t, fill, NSCoder.string(for: card),
+                         NSCoder.string(for: pageStage.layer.presentation()?.frame
+                                            ?? pageStage.frame)))
+        }
+        #endif
+    }
+
+    /// ⚠️ `bounds` AND `center`, NEVER `frame`.
+    ///
+    /// The stage carries the transition's transform, and assigning a frame to a
+    /// transformed view re-derives its bounds and centre from that frame —
+    /// which cancels the transform. Setting the two directly is the same
+    /// geometry and leaves the transform alone, so a layout pass landing in the
+    /// middle of a gesture costs nothing.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        pageStage.bounds = CGRect(origin: .zero, size: contentView.bounds.size)
+        // ⚠️ NOT WHILE A TRANSITION IS MOVING IT. The centre is one of the two
+        // channels the grab drives (see `setEngagedDismissalProgress`), and a
+        // layout pass re-centring the stage mid-gesture would drag the page
+        // back to the middle of the screen between two events.
+        guard !isEngagedDismissing else { return }
+        pageStage.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
+    }
+
+    /// Every layer that makes up the page's face — one list, so the grab has
+    /// one thing to move and the layout one thing to put back.
+    /// The layers whose OPACITY the grab drives. Their geometry is the stage's
+    /// — see `setEngagedDismissalProgress`.
+    ///
+    /// ⚠️ THE WASH IS ONE OF THEM, on the thread's own value.
+    ///
+    /// It exists to hold text off a photograph, so it belongs to the text: it
+    /// leaves at exactly the rate the text does, and the page looks like itself
+    /// at the moment the grab begins rather than brightening in one frame.
+    ///
+    /// It can only be here because the page no longer draws the media. Over the
+    /// page's own photograph it was a second dimming of a picture the card was
+    /// already showing undimmed; over nothing at all it was the black rectangle
+    /// this spent two rounds chasing. Over the CARD's photograph, through a
+    /// cleared ground, it is what it always was — a wash on the picture, fading
+    /// out with the words it serves.
+    private var dismissalTravellers: [UIView] {
+        [commentsContainer, headerFrost, mediaBackdrop]
+    }
+
+    /// How far the page overhangs the card it covers. Small enough to be
+    /// invisible where it spills, large enough to swallow a follower's error.
+    private static let dismissalBleed: CGFloat = 0.5
+
+    /// The dismissal's window, made on the first event that has a card to
+    /// follow rather than at `begin` — a mask installed at a rect nobody has
+    /// computed yet is a blank page.
+    private func makeDismissalWindow() -> UIView {
+        let mask = UIView()
+        // Opaque: a mask reads its alpha channel, so a clear view masks
+        // everything away — a blank screen rather than a clipped one.
+        mask.backgroundColor = .black
+        mask.layer.cornerCurve = .continuous
+        contentView.mask = mask
+        flightMask = mask
+        return mask
+    }
+
+    /// Puts the page back, on either outcome. An abandoned grab returns to a
+    /// page that must be exactly what it was.
+    func endEngagedDismissal() {
+        guard isEngagedDismissing else { return }
+        isEngagedDismissing = false
+        pageStage.transform = .identity
+        pageStage.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
+        for (view, resting) in zip(dismissalTravellers, restingAlphas) {
+            view.alpha = resting
+        }
+        restingAlphas = []
+        // The wash comes back with everything else: an abandoned grab returns
+        // to a page that has to be readable again.
+        contentView.mask = nil
+        flightMask = nil
+        mediaCard.alpha = alphaForMaskedReveal
+        contentView.backgroundColor = groundForMaskedReveal
+        groundForMaskedReveal = nil
+    }
+
+    /// Retires the window and gives the page its media back.
+    func endMaskedRevealForFlight() {
+        guard flightMask != nil else { return }
+        contentView.mask = nil
+        flightMask = nil
+        mediaCard.isHidden = mediaHiddenForMaskedReveal
+        contentView.backgroundColor = groundForMaskedReveal
+        groundForMaskedReveal = nil
+        // Identity, unconditionally: an interrupted flight must not strand the
+        // page under a transform nobody can see the origin of.
+        pageStage.transform = .identity
     }
 
     /// Materializes the header band's blur AHEAD of the engagement.
@@ -780,6 +1467,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             if let initialMediaPage { mediaCard.setPage(initialMediaPage, animated: false) }
             chrome.setMediaPageCount(model.mediaPages.count, current: mediaCard.currentPage)
             #if DEBUG
+            // ⚠️ Published HERE as well as from the window, because the window
+            // only runs once the page is active or the viewer has moved — so a
+            // post sitting on page one, untouched, had no probe at all, and a UI
+            // test read that absence as "no collection here". The state it
+            // reports is the true one either way: nothing retained yet.
+            if let videoPlayback { publishRetentionProbe(pool: videoPlayback) }
+            #endif
+            #if DEBUG
             // ⚠️ Both halves on one line: what was ASKED and where the carousel
             // ENDED UP. A sender that says nothing and a receiver that stays are
             // each behaving correctly on their own — the defect only exists
@@ -795,6 +1490,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // the moment it arrives, exactly as a single-video post does.
             if isActive { reconcilePagePlayback() }
             return
+        }
+        // A cell rebound from a collection to a single attachment without going
+        // through reuse would otherwise keep the old post's clips alive behind
+        // a hidden carousel.
+        for view in mediaCard.releaseRetainedSurfaces() {
+            videoPlayback?.stop(view)
         }
         mediaCard.hideCollection()
         chrome.setMediaPageCount(0, current: 0)
@@ -957,13 +1658,26 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
             mediaCard.hostRenderViewOnCurrentPage()
             let view = mediaCard.renderView
-            Task { await videoPlayback.play(url, in: view) }
+            let scope = playbackScope
+            Task { [weak self] in
+                await videoPlayback.play(url, in: view, scope: scope)
+                // ⚠️ ACTIVATION IS ITS OWN DOOR, and it bypasses the page
+                // reconcile entirely — which is why warming hung off that
+                // reconcile alone did nothing at all for the case that matters
+                // most: opening a post. The test read "page one was never
+                // prepared", and it was right.
+                self?.prewarmNeighbouringClips()
+            }
         case false:
             // Nothing to start: a photo page's media is STATIC. The slow
             // zoom that used to prove activation here is gone (see
             // `SnapMediaCardView`), and video is the only kind with
             // motion of its own.
-            break
+            //
+            // But a collection opening on a photograph still has clips further
+            // in, and they are exactly the ones a viewer meets cold. Nothing to
+            // play here does not mean nothing to prepare.
+            prewarmNeighbouringClips()
         }
     }
 
@@ -1048,7 +1762,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             view.revealOnFirstFrame()
             return
         }
-        Task { await videoPlayback.play(url, in: view) }
+        let scope = playbackScope
+        Task { await videoPlayback.play(url, in: view, scope: scope) }
     }
 
     /// Whether this page's media area has something REAL on screen — the
@@ -1244,6 +1959,37 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         togglePlayback()
     }
 
+    /// How long a press must last before it counts as a hold rather than a tap.
+    ///
+    /// Short, because the gesture's whole value is that it feels immediate —
+    /// hold to look, let go to carry on. Long enough that an ordinary tap on
+    /// the way to play/pause never trips it.
+    static let holdToPauseDuration: TimeInterval = 0.2
+
+    /// Whether a hold is what stopped playback, so its end knows to resume.
+    ///
+    /// ⚠️ Recorded rather than assumed. A clip the viewer had ALREADY paused by
+    /// tapping must not start playing because a later hold ended on it — the
+    /// release undoes the hold, and nothing else.
+    private var isHeldPaused = false
+
+    @objc private func handleMediaHold(_ recognizer: UILongPressGestureRecognizer) {
+        guard playsVideo, let videoPlayback else { return }
+        switch recognizer.state {
+        case .began:
+            // Only a clip that is actually running can be held. Holding a
+            // paused one and letting go would otherwise start it.
+            guard videoPlayback.isAdvancing(in: mediaCard.renderView) else { return }
+            isHeldPaused = videoPlayback.setPaused(true, in: mediaCard.renderView)
+        case .ended, .cancelled, .failed:
+            guard isHeldPaused else { return }
+            isHeldPaused = false
+            videoPlayback.setPaused(false, in: mediaCard.renderView)
+        default:
+            break
+        }
+    }
+
     /// Toggles the active video's playback and reflects it in the pause glyph.
     /// No-op for image/text cells (no player).
     func togglePlayback() {
@@ -1281,7 +2027,66 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     #if DEBUG
     /// The page's playback surface, for a test that needs to ask the pool about
     /// it. Playback ownership is the pool's, so a test has to name the surface.
+    /// Holds the page's own chrome back while a flight's REPLICA stands in for
+    /// it, then brings it in.
+    ///
+    /// ⚠️ The replica exists precisely so the real chrome need not be visible in
+    /// the air. It was anyway — nothing ever hid it — so the card simply lifted
+    /// off a fully drawn page, and at the landing the replica vanished and the
+    /// real thing was revealed on one frame. That is the pop: not something
+    /// appearing, but something that had been there all along stopping being
+    /// covered.
+    func setChromeHeldForFlight(_ held: Bool) {
+        if held {
+            chrome.alpha = 0
+            return
+        }
+        guard chrome.alpha < 1 else { return }
+        // ⚠️ NOT WHEN THE COMMENTS ALREADY OWN THE CHROME.
+        //
+        // `chrome` is one of the engagement's own fade layers: engaged, it is
+        // deliberately at zero. This restore is unconditional — it exists to
+        // undo the HOLD, and it wrote the same property — so a post opened
+        // straight into its thread landed wearing both interfaces at once, the
+        // ticker and the caption and the page dots sitting under a comment
+        // stream.
+        //
+        // The hold's opposite is not "visible", it is "whatever the page was
+        // doing before it was covered".
+        guard !isCommentsEngaged else { return }
+        UIView.animate(
+            withDuration: 0.26, delay: 0.02,
+            usingSpringWithDamping: 0.85, initialSpringVelocity: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.chrome.alpha = 1
+        }
+    }
+
+    /// The page indicator's scrub, so the screen can make its dismissal yield.
+    var mediaScrubGesture: UIGestureRecognizer { chrome.mediaScrubGesture }
+
     var debugRenderSurface: VideoRenderView { mediaCard.renderView }
+
+    /// Moves the collection to a page as a viewer's swipe would.
+    ///
+    /// The simulator injects no touches and a unit test has no gesture, so this
+    /// is how the event this whole file turns on is reached. It goes through
+    /// `setPage`, not around it — the page change must arrive by the same path
+    /// a real swipe takes, or a test would be pinning a route nobody uses.
+    func debugShowPage(_ index: Int) {
+        mediaCard.setPage(index, animated: false)
+    }
+
+    /// Which pages are holding a playback surface — the retention window's
+    /// footprint, which is otherwise invisible from outside.
+    var debugSurfacedPages: [Int] { mediaCard.surfacedPages }
+
+    /// The surface a given page is holding, so a test can ask the POOL what is
+    /// behind it rather than trusting the cell's own account.
+    func debugSurface(forPage page: Int) -> VideoRenderView {
+        mediaCard.surface(forPage: page)
+    }
     #endif
 
     func didResignActive(releasingPlayback: Bool) {
@@ -1293,6 +2098,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.setSubtitlesActive(false)
         // Video is the only kind with anything to stop: a photo page's media
         // is static, so resigning leaves it exactly as it was.
+        cancelPrewarming()
         guard playsVideo, let videoPlayback else { return }
         // ⚠️ PAUSED unless the page is actually going away.
         //
@@ -1309,6 +2115,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // the feed keeps alive rather than by how far the viewer has scrolled.
         if releasingPlayback {
             videoPlayback.stop(mediaCard.renderView)
+            // ⚠️ The neighbours go too, and they are invisible from here.
+            //
+            // A retained clip's player is bound to a surface this method never
+            // names, so stopping only the watched one left every kept neighbour
+            // holding a decoder for a cell that had scrolled away — the leak the
+            // whole bound exists to prevent, arriving by the one path that does
+            // not go through the window.
+            for view in mediaCard.releaseRetainedSurfaces() {
+                videoPlayback.stop(view)
+            }
         } else {
             videoPlayback.setPaused(true, in: mediaCard.renderView)
         }
@@ -1342,7 +2158,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onRequestCommentsClose = nil
         onRequestCommentsPageDrive = nil
         setPauseGlyphVisible(false)
+        // ⚠️ A held chrome must never ride a recycled cell. A flight that is
+        // cancelled, or a dismissal that ends the page instead of landing it,
+        // leaves the hold un-released — and the next post to use this cell would
+        // arrive with no chrome at all and nothing on the way to bring it back.
+        chrome.alpha = 1
+        cancelPrewarming()
         videoPlayback?.stop(mediaCard.renderView)
+        // Reuse is the other door out, and a retained clip must not walk
+        // through it into the next post.
+        for view in mediaCard.releaseRetainedSurfaces() {
+            videoPlayback?.stop(view)
+        }
         representedID = nil
         mediaURL = nil
         mediaKind = .image

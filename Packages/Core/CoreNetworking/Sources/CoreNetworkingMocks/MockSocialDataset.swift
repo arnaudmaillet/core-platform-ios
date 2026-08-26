@@ -283,8 +283,83 @@ public struct MockSocialDataset: Sendable {
             // — with a single clip, a duplicate and a correct reuse look the
             // same from outside.
             let videoPagePositions: Set<Int> = [1, 2]
+            // ⚠️ THE FEED'S FIRST POST IS THE LARGE GALLERY — index 0.
+            //
+            // Posts are ordered newest first, so index zero is what a viewer
+            // meets on launch. The limits are what want looking at, and they
+            // are not reachable by scrolling past three other cards first.
+            //
+            // Three pages exercise the seams; they do not exercise the LIMITS.
+            // A dozen does: the indicator has to stop drawing one dot per page
+            // and start windowing, the retention window has to refuse most of
+            // what it is offered, and a scrub across the chip has to reach pages
+            // that are nowhere near the screen. None of that is observable on a
+            // gallery small enough for every page to be a dot.
+            //
+            // Two of its pages are clips, for the same reason the small one has
+            // two: with a single clip, a duplicated player and a correctly
+            // reused one look identical from outside.
+            // ⚠️ ELEVEN extra pages, not twelve — the post's own media is page
+            // one. Counting the extras as the total is how a "twelve-page
+            // gallery" quietly becomes thirteen.
+            let bigShapes: [(Int, Int)] = (0..<11).map { position in
+                switch position % 3 {
+                case 0: (1600, 900)
+                case 1: (1080, 1080)
+                default: (900, 1600)
+                }
+            }
+            let bigVideoPositions: Set<Int> = [3, 8]
+            // ⚠️ A THIRD GALLERY, small — index 1.
+            //
+            // The indicator now expands only when the full run of dots wants
+            // more room than it already has, and that rule has two outcomes.
+            // Testing it needs both near the top of the feed, where a viewer
+            // opening the app meets them without scrolling: twelve pages, which
+            // must expand and displace the counters, and three, which must not
+            // move anything at all. One of each proves the condition; either
+            // alone proves only that something happens.
+            let smallShapes: [(Int, Int)] = [(1080, 1080), (1600, 900)]
+            // ⚠️ CHOSEN BY CAPTION, NOT BY INDEX, and the arithmetic is why.
+            //
+            // These are seeded oldest-index-first and the feed presents them the
+            // other way round, so "index 0" is the LAST card a viewer sees —
+            // the opposite of what was asked for. Rather than re-derive that
+            // inversion here and have it rot the next time the ordering moves,
+            // the post is named: this caption is empirically the first card in
+            // the feed, and a mock may know that about itself.
+            let isFirstInFeed = caption == "Golden hour over the harbour."
             let extraMedia: [(url: String, width: Int, height: Int)] =
-                index == 4
+                isFirstInFeed
+                ? bigShapes.enumerated().map { position, shape in
+                    switch (mediaCatalog, bigVideoPositions.contains(position)) {
+                    case (.synthetic, false):
+                        ("mock://media/new-0-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case (.synthetic, true):
+                        ("mock://video/new-0-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case (.realAssets, false):
+                        (MockMediaFixtures.imageURL(index: 60 + position, width: shape.0, height: shape.1),
+                         shape.0, shape.1)
+                    case (.realAssets, true):
+                        // Distinct clips again, and distinct from the small
+                        // gallery's: two posts sharing a file is its own test
+                        // (see `PlaybackScopeTests`) and must not be smuggled in
+                        // here by accident.
+                        { let fixture = MockMediaFixtures.videos[position % MockMediaFixtures.videos.count]
+                          return (fixture.url, fixture.width, fixture.height) }()
+                    }
+                }
+                : index == 1
+                ? smallShapes.enumerated().map { position, shape in
+                    switch mediaCatalog {
+                    case .synthetic:
+                        ("mock://media/new-1-\(position)?w=\(shape.0)&h=\(shape.1)", shape.0, shape.1)
+                    case .realAssets:
+                        (MockMediaFixtures.imageURL(index: 80 + position, width: shape.0, height: shape.1),
+                         shape.0, shape.1)
+                    }
+                }
+                : index == 4
                 ? collectionShapes.enumerated().map { position, shape in
                     switch (mediaCatalog, videoPagePositions.contains(position)) {
                     case (.synthetic, false):

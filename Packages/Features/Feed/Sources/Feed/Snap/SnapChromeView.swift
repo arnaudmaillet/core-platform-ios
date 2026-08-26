@@ -272,6 +272,13 @@ final class SnapChromeView: UIView {
         // it — ticker, caption — is text starting at the margin: a chip sharing
         // that edge attaches itself to the first line of the caption rather than
         // to the photograph it describes.
+        // ⚠️ GLASS HERE, FLAT ON THE CARD, and the difference is what is behind
+        // it. A card's chip stands on the card's own fill, where a material
+        // resolves to that fill and vanishes; this one stands on a full-bleed
+        // photograph, which is the one place a lens has something to take its
+        // cue from. It is also the only chip on this screen a finger touches,
+        // so it gets the system's interactive response rather than a look-alike.
+        mediaPageIndicator.useInteractiveGlass()
         mediaPageIndicator.isHidden = true
         mediaPageIndicator.constrain(in: self) { parent in
             mediaPageIndicator.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
@@ -758,6 +765,10 @@ final class SnapChromeView: UIView {
         get { mediaPageIndicator.onPageRequested }
         set { mediaPageIndicator.onPageRequested = newValue }
     }
+
+    /// The indicator's scrub, passed up so the screen's own pans can yield to
+    /// it. See `MediaPageIndicatorView.scrubGesture`.
+    var mediaScrubGesture: UIGestureRecognizer { mediaPageIndicator.scrubGesture }
 
     func setTickerActive(_ active: Bool) {
         commentTicker.setActive(active)

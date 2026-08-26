@@ -41,6 +41,10 @@ final class ForYouViewController: UIViewController {
     /// Loads a post's first page of comments into the panel's synchronous
     /// cache. Optional so the other entry points need not supply one.
     private let prefetchTopComments: ((PostID) async -> Void)?
+    /// Posts whose first page of comments has been asked for. A set, because
+    /// the reconcile that feeds it runs at ~30Hz while a finger is moving and
+    /// the same three cards are on screen for most of it.
+    private var warmedComments: Set<PostID> = []
     /// How this screen leaves itself. Weak, and held by the composition root —
     /// the screen never builds a destination, it names one.
     private weak var router: (any Router)?
@@ -470,6 +474,10 @@ final class ForYouViewController: UIViewController {
         pager.onItemTapped = { [weak self] format, index in
             self?.openFeed(from: format, at: index)
         }
+        pager.onItemCommentsTapped = { [weak self] format, index in
+            self?.openFeed(from: format, at: index, showingComments: true)
+        }
+        pager.onWarmRequested = { [weak self] posts in self?.warmVisible(posts) }
         pager.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded() }
         pager.onRefresh = { [weak self] in self?.viewModel.refresh() }
         // An ordinary push onto whatever stack this screen is on — the app's
@@ -494,7 +502,12 @@ final class ForYouViewController: UIViewController {
             auditPostMenu()
             #endif
         }
-        viewModel.onCorpusReset = { [weak self] in self?.pager.invalidateIncrementalUpdates() }
+        viewModel.onCorpusReset = { [weak self] in
+            self?.pager.invalidateIncrementalUpdates()
+            // A new corpus is new posts under old ids' places; what was warmed
+            // says nothing about what is on screen now.
+            self?.warmedComments.removeAll()
+        }
         viewModel.onLoadSettled = { [weak self] in self?.pager.endRefreshing() }
         viewModel.onPagingChange = { [weak self] paging in self?.pager.setPaging(paging) }
         viewModel.onUnreadChange = { [weak self] counts in self?.applyBadges(counts) }
@@ -794,9 +807,12 @@ final class ForYouViewController: UIViewController {
         textSlideDismissal.revealGeometry = nil
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
+        func sourceFrame(_ space: UICoordinateSpace) -> CGRect? {
+            pager.page(for: format)?.textRowFrame(for: postID, in: space)
+        }
         guard TextRevealInstaller.isEnabled,
               let page = pager.page(for: format),
-              page.textRowFrame(for: postID, in: view) != nil
+              sourceFrame(view) != nil
         else { return false }
         // The grid's inset state at each stage of a round trip. It exists
         // because a rect alone cannot say why a landing missed, and the first
@@ -807,7 +823,7 @@ final class ForYouViewController: UIViewController {
             print("[text-reveal] \(stage) \(page.debugInsetState)")
         }
         log("atTap        ")
-        if trace, let rect = page.textRowFrame(for: postID, in: view) {
+        if trace, let rect = sourceFrame(view) {
             // The row's rect BEFORE the push hides the tab bar. Compared with
             // the animator's `source=`, this says whether the grid moved
             // between the tap and the opening — which is what a pre-opening
@@ -842,9 +858,7 @@ final class ForYouViewController: UIViewController {
         textSlideDismissal.revealGeometry = TextRevealInstaller.geometry(
             feed: feed,
             origin: TextRevealOrigin(
-                rowFrame: { [weak page] space in
-                    page?.textRowFrame(for: postID, in: space)
-                },
+                rowFrame: { space in sourceFrame(space) },
                 // Read ONCE, at staging, and deliberately not re-asked at
                 // dismissal: `applyPendingReveal` may have scrolled the row,
                 // and a row that scrolled out is not realized to answer. The
@@ -1032,7 +1046,9 @@ final class ForYouViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    private func openFeed(from format: GalleryFilter.Format, at index: Int) {
+    private func openFeed(
+        from format: GalleryFilter.Format, at index: Int, showingComments: Bool = false
+    ) {
         // One flight at a time: a second tap while a card is in the air would
         // stage a transition over a live one. Same guard as the map's.
         guard activeTransition == nil else { return }
@@ -1082,6 +1098,20 @@ final class ForYouViewController: UIViewController {
                 }
                 #endif
             }
+            // A post opened FROM ITS COMMENT COUNT arrives with the thread
+            // already up. Handed over with the page instruction rather than
+            // acted on here, for the same reason: this screen knows what was
+            // pressed, and only the destination knows when it is safe to spend
+            // the engagement's layout.
+            if showingComments {
+                // WHERE the thread's window opens from: the media rect the
+                // flight is about to fly, so the thread is revealed out of the
+                // photograph rather than arriving over it.
+                seedable.openComments(
+                    for: tapped.id,
+                    revealingFrom: pager.page(for: format)?.hero(for: tapped.id, in: view)?.frame
+                )
+            }
             // …and the traffic runs the other way too, live. The card behind
             // follows the post's carousel, which is what makes the dismissal
             // land on the photograph the viewer is actually looking at rather
@@ -1130,6 +1160,10 @@ final class ForYouViewController: UIViewController {
 
         guard let page = pager.page(for: format),
               let destination = feed as? any ZoomTransitionDestination,
+              // A reveal never also flies a hero. For a TEXT row this changes
+              // nothing — it has no hero to fly — and for OPTION A it is what
+              // sends a media row down the window's path instead.
+              !revealing,
               page.hero(for: tapped.id, in: view) != nil
         else {
             // No hero available — a text-only row has no media to fly, and a
@@ -1636,8 +1670,75 @@ final class ForYouViewController: UIViewController {
         // warming the post that will actually be tapped.
         let onPage = pager.posts(for: viewModel.format).prefix(12)
         let textIDs = onPage.filter { $0.kind == .text }.map(\.id)
-        guard !textIDs.isEmpty, let prefetchTopComments else { return }
-        Task { for id in textIDs { await prefetchTopComments(id) } }
+        guard !textIDs.isEmpty else { return }
+        warm(textIDs, immediate: false)
+    }
+
+    /// Warms what the viewer can actually see — see
+    /// `ForYouGridPage.onWarmRequested`, which decides WHEN by riding the
+    /// autoplay reconcile and its fling gate.
+    ///
+    /// ⚠️ EVERY KIND NOW, not just text. The rule this replaces was sound when
+    /// it was written — "a media post opens onto its media and its comments are
+    /// a secondary surface, so warming those would be a dozen extra requests to
+    /// remove nothing visible" — and the comment count broke it: pressing it
+    /// opens a media post STRAIGHT INTO its thread, where an unwarmed page
+    /// shows a skeleton for the length of the flight and resolves after it.
+    ///
+    /// What keeps the request count honest is no longer the kind but the
+    /// VISIBILITY: the ahead-of-time pass above still warms text posts down the
+    /// page, and everything else is warmed only once its card is on screen and
+    /// the feed is not being flung.
+    private func warmVisible(_ posts: [GalleryPost]) {
+        warm(posts.map(\.id), immediate: true)
+    }
+
+    /// ⚠️ TWO QUEUES, AND THE DIFFERENCE IS THE WHOLE FEATURE.
+    ///
+    /// `immediate` is what the viewer is LOOKING AT: one task per post, started
+    /// now. Serial is wrong here — the first version ran every warm through one
+    /// `for` loop, so the post whose card filled the screen waited behind
+    /// eleven others down the page and was still fetching when the chip was
+    /// pressed. The trace says it plainly: `asking [… post-new-04]` with the
+    /// opened post LAST.
+    ///
+    /// Everything else is a queue, and it claims an id only when it REACHES
+    /// it. Claiming the whole batch up front is how the ahead-of-time pass
+    /// starved the visible one: it had already put its name on every post on
+    /// the page, so when a card came into view there was nothing left to ask
+    /// for and nothing to jump the queue with.
+    private func warm(_ ids: [PostID], immediate: Bool) {
+        guard let prefetchTopComments else { return }
+        #if DEBUG
+        // `-warm-log`: what was asked for and when it answered. It exists to
+        // tell "the warm never ran" from "the warm ran and the tap beat it" —
+        // two failures that look identical on screen, both a skeleton.
+        let trace = ProcessInfo.processInfo.arguments.contains("-warm-log")
+        #endif
+        guard immediate else {
+            let queued = ids.filter { !warmedComments.contains($0) }
+            guard !queued.isEmpty else { return }
+            Task { @MainActor in
+                for id in queued where self.warmedComments.insert(id).inserted {
+                    #if DEBUG
+                    if trace { print("[warm] queued \(id.rawValue)") }
+                    #endif
+                    await prefetchTopComments(id)
+                }
+            }
+            return
+        }
+        for id in ids where warmedComments.insert(id).inserted {
+            #if DEBUG
+            if trace { print("[warm] asking \(id.rawValue)") }
+            #endif
+            Task {
+                await prefetchTopComments(id)
+                #if DEBUG
+                if trace { print("[warm] ready \(id.rawValue)") }
+                #endif
+            }
+        }
     }
 
     #if DEBUG
@@ -2056,7 +2157,12 @@ final class ForYouViewController: UIViewController {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: attempt)
         }
-        guard let position = arguments.firstIndex(of: "-foryou-open"), position + 1 < arguments.count,
+        // `-foryou-open-comments N` is `-foryou-open N` through the comment
+        // count instead of the card, so the shorter route is exercised by the
+        // same waiting-for-content machinery rather than by a second one.
+        let viaComments = arguments.firstIndex(of: "-foryou-open-comments")
+        guard let position = viaComments ?? arguments.firstIndex(of: "-foryou-open"),
+              position + 1 < arguments.count,
               let index = Int(arguments[position + 1])
         else { return }
         // Polls rather than firing on a fixed delay: the tap needs landed
@@ -2086,7 +2192,11 @@ final class ForYouViewController: UIViewController {
             // Through the page's own selection path, so a scripted open runs
             // the same code a tap does — including the scroll-into-view
             // bookkeeping that `openFeed` alone would skip.
-            if pager.page(for: format)?.debugSelectItem(at: index) != true {
+            if viaComments != nil {
+                if pager.page(for: format)?.debugTapComments(at: index) != true {
+                    print("[foryou-comments] row \(index) has no comment chip to press")
+                }
+            } else if pager.page(for: format)?.debugSelectItem(at: index) != true {
                 openFeed(from: format, at: index)
             }
             // `-zoom-repeat`: open, pop, open again (twice over). The hero's

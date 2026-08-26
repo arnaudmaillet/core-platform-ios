@@ -116,6 +116,52 @@ public final class VideoRenderView: UIView {
         updatePosterVisibility(ready: isReadyForDisplay)
     }
 
+    /// Says the picture is waiting for playback to reach it.
+    ///
+    /// ⚠️ AFTER A DELAY, never immediately. Most catch-ups last a few frames and
+    /// resolve before anyone could read a spinner; showing one for those would
+    /// replace a defect nobody noticed with a flicker everybody does. The
+    /// indicator is for the case the viewer actually experiences as a wait.
+    func setCatchingUp(_ catchingUp: Bool) {
+        guard catchingUp != isCatchingUp else { return }
+        isCatchingUp = catchingUp
+        catchUpWorkItem?.cancel()
+        catchUpWorkItem = nil
+        guard catchingUp else {
+            spinner?.stopAnimating()
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isCatchingUp else { return }
+            self.installSpinnerIfNeeded()
+            self.spinner?.startAnimating()
+        }
+        catchUpWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.catchUpIndicatorDelay, execute: work)
+    }
+
+    /// How long a catch-up must last before it is worth telling the viewer.
+    private static let catchUpIndicatorDelay: TimeInterval = 0.4
+    private var isCatchingUp = false
+    private var catchUpWorkItem: DispatchWorkItem?
+    private var spinner: UIActivityIndicatorView?
+
+    /// Built on first use: a timeline of stills must never allocate one.
+    private func installSpinnerIfNeeded() {
+        guard spinner == nil else { return }
+        let view = UIActivityIndicatorView(style: .medium)
+        view.color = .white
+        view.hidesWhenStopped = true
+        view.isUserInteractionEnabled = false
+        view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(view)
+        NSLayoutConstraint.activate([
+            view.centerXAnchor.constraint(equalTo: centerXAnchor),
+            view.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        spinner = view
+    }
+
     private func updatePosterVisibility(ready: Bool) {
         let wasVisible = !posterView.isHidden
         let shouldHide = (posterView.image == nil) || ready
@@ -221,6 +267,19 @@ public final class VideoRenderView: UIView {
     func attach(_ player: AVPlayer, renderer: VideoFrameRenderer? = nil) {
         if let renderer {
             guard self.renderer !== renderer else { return }
+            // ⚠️ A NEW SOURCE MAKES WHAT IS QUEUED STALE.
+            //
+            // The companion to the flush on resume, and it exists because the
+            // card reaches the same state by paths that never pause: a player
+            // reclaimed after a dismissal, a surface joining a running clip, a
+            // mirror, a handoff. Each rebinds this view to a different clock
+            // while frames from the previous one are still waiting — and those,
+            // shown, are the video appearing to hurry.
+            //
+            // Only when the renderer actually CHANGES. A rebind to the same
+            // source is a no-op above and must stay one: flushing a healthy
+            // playing surface would cost it the frames it is about to show.
+            flushPendingSamples()
             self.renderer?.removeSurface(self)
             self.renderer = renderer
             renderer.addSurface(self)
@@ -551,6 +610,28 @@ public final class VideoRenderView: UIView {
             updatePosterVisibility(ready: true)
             logFirstFrame()
         }
+    }
+
+    /// Drops frames queued but not yet shown, keeping the one on screen.
+    ///
+    /// ⚠️ For RESUMING, and the distinction from a teardown flush is the whole
+    /// point: `flush()` discards what is pending and leaves the displayed image
+    /// alone, so the surface holds its frozen frame until the next dispatch
+    /// replaces it with the CURRENT one.
+    ///
+    /// Why a resume needs it: a clip that went on running while the viewer was
+    /// elsewhere — which is exactly what a parked player does, deliberately, so
+    /// the post it was handed to keeps the playhead — comes back further along
+    /// than the frame the surface froze on. Whatever is still queued belongs to
+    /// the past. Shown, it reads as the video hurrying to catch up; dropped, the
+    /// picture simply resumes where the clip actually is.
+    ///
+    /// A short clip loops, so the gap wraps and stays small — which is why this
+    /// was reported on a long stream and not on a ten-second one.
+    func flushPendingSamples() {
+        guard let sampleBufferLayer else { return }
+        sampleBufferLayer.sampleBufferRenderer.flush()
+        enqueuedFrameCount = 0
     }
 
     private func flushSampleBuffers() {

@@ -196,7 +196,17 @@ final class VideoFrameRenderer {
         // thing it watches breaks is the exact failure #83 has been caught by
         // twice. Stalled means `fps=0` on the line, not the absence of a line.
         sampleFrameRate(atHostTime: hostTime)
-        guard let frame = source.copyFrame(atHostTime: hostTime) else { return }
+        // Before the "no new frame" return, for the same reason as the line
+        // above: a probe that goes quiet when its subject stalls is worthless.
+        sampleDispatchRate(atHostTime: hostTime)
+        let frame = source.copyFrame(atHostTime: hostTime)
+        // Told on every tick, including the ones that produce nothing — a drain
+        // IS a run of ticks that produce nothing, so a state set only when a
+        // frame arrives could never describe it.
+        for surface in targets {
+            surface.setCatchingUp(source.isCatchingUp)
+        }
+        guard let frame else { return }
         noteDispatch(itemTime: frame.itemTime, hostTime: hostTime)
         guard let format = formatDescription(matching: frame.buffer) else { return }
 
@@ -229,6 +239,51 @@ final class VideoFrameRenderer {
 
     /// Records the inter-frame gap, and reports it when the item time jumps
     /// backwards — i.e. when the clip has looped.
+    /// ⚠️ THE DENOMINATOR for the rate probe above.
+    ///
+    /// "No fast dispatches" and "the probe never ran" produce the same silence,
+    /// and this session has already been fooled by that shape twice. So the
+    /// heartbeat carries how many dispatches were RATED: `max=1.0x rated=58` is
+    /// a measurement, `rated=0` is a broken instrument.
+    private var maxRateSinceTraceSample: Double = 0
+    private var ratedDispatchesSinceTraceSample = 0
+    private var lastTraceSampleHostTime: CFTimeInterval = 0
+
+    private func sampleDispatchRate(atHostTime hostTime: CFTimeInterval) {
+        guard VideoPlaybackTrace.isEnabled else { return }
+        if lastTraceSampleHostTime == 0 {
+            lastTraceSampleHostTime = hostTime
+            return
+        }
+        guard hostTime - lastTraceSampleHostTime >= 1 else { return }
+        VideoPlaybackTrace.emit(String(
+            format: "rate max=%.2fx rated=%d surfaces=%d why=%@ item=%@",
+            maxRateSinceTraceSample, ratedDispatchesSinceTraceSample,
+            surfaces.allObjects.count, source.noFrameReason,
+            source.itemDiagnosis
+        ))
+        // ⚠️ THE FAULT, STATED WITHOUT REFERENCE TO ANY LAYER.
+        //
+        // A clip nobody paused, whose item is ready, with a surface attached,
+        // that drew nothing for a whole second. That is the reported bug and
+        // nothing else is — and it took this long to say because every earlier
+        // probe measured a piece of the machinery instead of the outcome. Twice
+        // I read `rated=0` as a fault when it was the correct state for a
+        // deliberately paused warm clip; this cannot make that mistake, because
+        // being paused is the first thing it excludes.
+        if ratedDispatchesSinceTraceSample == 0,
+           player.timeControlStatus != .paused,
+           surfaces.allObjects.contains(where: { $0.window != nil }) {
+            VideoPlaybackTrace.emit(
+                "FROZEN unpaused clip drew nothing: \(source.itemDiagnosis) "
+                + "status=\(player.timeControlStatus.rawValue)"
+            )
+        }
+        lastTraceSampleHostTime = hostTime
+        maxRateSinceTraceSample = 0
+        ratedDispatchesSinceTraceSample = 0
+    }
+
     private func noteDispatch(itemTime: CMTime, hostTime: CFTimeInterval) {
         let gap = lastDispatchHostTime == 0 ? 0 : hostTime - lastDispatchHostTime
         maxGapSinceRateSample = max(maxGapSinceRateSample, gap)
@@ -237,9 +292,66 @@ final class VideoFrameRenderer {
             log(String(format: "WRAP %.3fs -> %.3fs gap=%.1fms",
                        lastItemTime.seconds, itemTime.seconds, gap * 1000))
         }
+        // ⚠️ IS THE PICTURE RUNNING FAST? The one question a frame counter
+        // cannot answer.
+        //
+        // Reported as "the video accelerates, as if catching up on a delay" and
+        // measured off the recording's burned-in timecode at 8–10× for about a
+        // third of a second. That rules nothing out on its own: media time can
+        // outrun real time because the PLAYHEAD jumped, or because the display
+        // is flushing a backlog of frames it could not show. The two want
+        // opposite fixes, and only this ratio separates them — a playhead jump
+        // moves item time without the dispatch rate changing, a display backlog
+        // moves both.
+        if VideoPlaybackTrace.isEnabled, lastItemTime.isValid,
+           gap > 0, itemTime > lastItemTime {
+            let mediaElapsed = (itemTime - lastItemTime).seconds
+            let rate = mediaElapsed / gap
+            if rate > 1.5 {
+                // Both readings on one line: what the FRAMES did and what the
+                // CLOCK did over the same interval. Equal, and the timebase is
+                // racing; the frames alone, and the output is handing back
+                // buffers ahead of the time it was asked for.
+                let clockNow = source.lastClockTime
+                let clockElapsed = (lastClockTime.isValid && clockNow.isValid)
+                    ? (clockNow - lastClockTime).seconds : Double.nan
+                // ⚠️ And the PLAYER's own time beside the output's reading.
+                //
+                // Everything so far has been read through
+                // `AVPlayerItemVideoOutput.itemTime(forHostTime:)`, which is the
+                // output's mapping of host time onto the item — not the player's
+                // position. An adaptive stream switches rendition mid-playback,
+                // and if that mapping is re-established wrongly we would be
+                // ASKING for frames further ahead than playback actually is:
+                // the pictures race while the player is perfectly fine. The two
+                // numbers agreeing kills that idea; diverging, it names it.
+                // ⚠️ And what the player says its SPEED is.
+                //
+                // The last question worth asking cheaply: a clock advancing six
+                // times faster than real time is either obeying a rate somebody
+                // set, or disagreeing with its own. `playerRate=1.00` next to a
+                // 6x clock means the timebase is inconsistent with the player's
+                // own declared speed — an AVFoundation behaviour to design
+                // around, not a call of ours to take back. Anything above 1
+                // means the opposite, and then it IS ours.
+                VideoPlaybackTrace.emit(String(
+                    format: "fast frames=%.3fs clock=%.3fs real=%.3fs rate=%.1fx "
+                          + "out=%.3fs player=%.3fs playerRate=%.2f",
+                    mediaElapsed, clockElapsed, gap, rate,
+                    itemTime.seconds, player.currentTime().seconds, player.rate
+                ))
+            }
+            maxRateSinceTraceSample = max(maxRateSinceTraceSample, rate)
+            ratedDispatchesSinceTraceSample += 1
+        }
         lastItemTime = itemTime
+        lastClockTime = source.lastClockTime
         lastDispatchHostTime = hostTime
     }
+
+    /// The clock reading that accompanied the previous frame — the other half of
+    /// the comparison above.
+    private var lastClockTime: CMTime = .invalid
 
     /// Per-second dispatch rate under `-avsbdl-log`.
     ///

@@ -176,6 +176,15 @@ final class SnapFeedViewController: UIViewController {
     /// `openMediaPage(_:for:)`. Stored on the class because an extension
     /// cannot hold state, which is where the seam it belongs to lives.
     private var pendingMediaPage: (id: PostID, page: Int)?
+    /// The post that must open ALREADY SHOWING its comments — see
+    /// `openComments(for:)`.
+    private var pendingCommentsID: PostID?
+    /// **OPTION B — `-comments-masked-hero`.** Where the thread's window opens
+    /// FROM, in this view's own coordinates. Non-nil only when the opener asked
+    /// for the masked variant.
+    private var pendingCommentsRevealRect: CGRect?
+    private var isMaskedRevealActive = false
+    private var isEngagedDismissalActive = false
     private var commentsEngagedID: PostID?
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
@@ -393,6 +402,13 @@ final class SnapFeedViewController: UIViewController {
         // containers are in the window and the walk-up reaches them.
         syncEngagementAfterAppearance()
         setNativePopSuppressed(true)
+        // The no-flight route into an opening request: a text row has no hero
+        // to land, and an ordinary push has no transition at all, so neither
+        // reaches `zoomTransitionDidEnd`. Guarded on the flight rather than on
+        // the route, because on the hero path this fires WITH the transition
+        // and would spend the engagement's layout inside the flight's last
+        // frames — the one place this screen refuses to spend it.
+        if !isAwaitingZoomPresentation { applyPendingComments(animated: true) }
         #if DEBUG
         runDebugAppearanceHooks()
         #endif
@@ -723,6 +739,22 @@ final class SnapFeedViewController: UIViewController {
                 // the feed — see `onMediaPageChanged`.
                 cell.onMediaPageChanged = { [weak self] page in
                     self?.onMediaPageChanged?(id, page)
+                }
+                // ⚠️ THE DISMISSAL STANDS DOWN FOR A SCRUB.
+                //
+                // Both are horizontal-ish drags on the same pixels, and the
+                // dismissal's pan lives on this screen's own view — an ancestor
+                // — so no amount of `cancelsTouchesInView` on the chip can stop
+                // it seeing the touch first. It has to be told, and told for
+                // every cell, because the chip is a different object each time
+                // one is configured. Reported as scrubbing the indicator
+                // dismissing the post instead of paging it.
+                //
+                // `require(toFail:)` and not a delegate: a delegate would let
+                // both run and the dismissal would still move the screen.
+                for pan in self.view.gestureRecognizers ?? []
+                where pan is UIPanGestureRecognizer && pan !== cell.mediaScrubGesture {
+                    pan.require(toFail: cell.mediaScrubGesture)
                 }
                 // The post's interaction zone is bounded by the SCREEN's
                 // header/footer thresholds (nav bar bottom, toolbar top),
@@ -1628,7 +1660,7 @@ final class SnapFeedViewController: UIViewController {
     /// path (user taps a comment surface on a media post) — the animated
     /// reveal, the pager lock, and the toolbar swap all fire together;
     /// text pages take the pre-rendered resting path instead.
-    private func presentComments(for id: PostID) {
+    private func presentComments(for id: PostID, animated: Bool = true) {
         guard commentsEngagedID == nil,
               let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell
@@ -1679,7 +1711,7 @@ final class SnapFeedViewController: UIViewController {
                 detail?.setCommentSortOrder(order)
             }
         }
-        setEngagedChrome(true, hasMedia: true, animated: true)
+        setEngagedChrome(true, hasMedia: true, animated: animated)
         // LAYOUT FIRST, UNANIMATED. Inside the spring, `layoutIfNeeded`
         // turns every frame the layout resolves into an animated property —
         // and the tree under it is the whole comments panel. On a warm panel
@@ -1687,6 +1719,18 @@ final class SnapFeedViewController: UIViewController {
         // frame is what we want the spring to animate FROM, not something
         // for it to interpolate towards.
         UIView.performWithoutAnimation { cell.contentView.layoutIfNeeded() }
+        // ⚠️ NOTHING TO ANIMATE FROM. A post opened AT its comments has never
+        // been seen in the other layout, so there is no previous state for a
+        // spring to carry the eye between — animating here would show the
+        // viewer the arrangement they did not ask for, for a fifth of a second,
+        // on their way to the one they did.
+        if !animated {
+            UIView.performWithoutAnimation {
+                cell.setCommentsEngaged(true)
+                detail?.animateEngagedTransition(toEngaged: true, duration: 0)
+                cell.contentView.layoutIfNeeded()
+            }
+        } else {
         // ONE MOTION, still — but built out of explicit animations rather
         // than a `UIView.animate` block. The block's own commit was the last
         // thing standing between this transition and a whole frame budget:
@@ -1696,6 +1740,7 @@ final class SnapFeedViewController: UIViewController {
         detail?.animateEngagedTransition(
             toEngaged: true, duration: SnapCommentsLayout.engageDuration
         )
+        }
         #if DEBUG
         // The discriminating measurement: frame gaps once the animation is
         // OVER and the engaged interface is simply sitting there. If it drops
@@ -1709,9 +1754,10 @@ final class SnapFeedViewController: UIViewController {
         // The whole tap-time cost, in one number. It is a hitch budget: any
         // main-thread work here is a frame the video is not shown on.
         if ProcessInfo.processInfo.arguments.contains("-engage-profile") {
-            print(String(format: "[engage] TAP→animating %6.2f ms (warm=%@)",
+            print(String(format: "[engage] TAP→animating %6.2f ms (warm=%@ animated=%@)",
                          (CACurrentMediaTime() - __engageStart) * 1000,
-                         wasPrewarmed ? "yes" : "NO"))
+                         wasPrewarmed ? "yes" : "NO",
+                         animated ? "yes" : "no"))
         }
         #endif
     }
@@ -2519,6 +2565,36 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // the replica's doing: the destination itself is already engaged
         // before the push (`destinationEngaged=true` at flight-build time).
         //
+        // ⚠️ AN ENGAGED PAGE GETS NO REPLICA, and the reason is written out in
+        // `RevealTransition` — which is where this should have been read first.
+        //
+        // A post opened from its COMMENT COUNT engages before the push. The
+        // replica, built from the RESTING arrangement, then flew the caption,
+        // the rail and the page dots for the whole flight and swapped to the
+        // thread as the card was removed: half a second of the layout the
+        // viewer had chosen not to open.
+        //
+        // ❌ A STILL OF THE ENGAGED PAGE was tried in its place and is reverted.
+        // It is the sixth instance of a mistake this codebase has already
+        // catalogued: "every previous attempt at a text hero flew a replica of
+        // the row and made it impersonate the destination, and all five of them
+        // died of the same thing — a text page IS its comment stream, a hosted
+        // child controller with its own self-sizing layout, and no stand-in can
+        // be that. The artifacts were the symptoms (A SKELETON IN THE
+        // PHOTOGRAPHED STILL, a blank card, the wrong safe area, two captions);
+        // impersonation was the disease."
+        //
+        // Every one of those symptoms turned up again, in order: the caption's
+        // glass missing because a lens has nothing to sample when detached,
+        // then the whole panel frozen mid-skeleton on two runs in three,
+        // because the still races a fetch it cannot outrun. A still that shows
+        // the WRONG content is worse than a landing that is merely late.
+        //
+        // What the text page does instead is show the REAL page through a
+        // mask that opens from the row's rect. That is the shape of the answer
+        // here too, and it is not a line of code — see the notes on this
+        // commit.
+        if commentsEngagedID != nil, !commentsEngagementIsResting { return nil }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
         // Captured, not ambient: the replica must render at the live cell's
@@ -2555,6 +2631,100 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// depending on history nobody can see.
     public func openMediaPage(_ page: Int, for id: PostID) {
         pendingMediaPage = (id, page)
+    }
+
+    /// Opens a post with its comments already engaged.
+    ///
+    /// A ONE-SHOT instruction, on the same terms as `openMediaPage(_:for:)` and
+    /// for the same reason: the feed is scrolled, and a remembered preference
+    /// would make paging back to this post — or a cell recycling onto it —
+    /// behave differently from a fresh open, on history nobody can see.
+    ///
+    /// ⚠️ APPLIED ON LANDING, never at push time. The engagement is ~115ms of
+    /// layout, and the flight is the one stretch of this screen's life where
+    /// that cost is visible: `prewarmComments` refuses to run during a
+    /// transition for exactly this reason, having measured the present leg's
+    /// first layout go from 36–64ms to 139–145ms. So the post arrives, and then
+    /// its comments come up — which is also the honest reading of the gesture,
+    /// since the card the viewer pressed is what the flight is carrying.
+    public func openComments(for id: PostID, revealingFrom rect: CGRect? = nil) {
+        pendingCommentsID = id
+        pendingCommentsRevealRect = rect
+        // ⚠️ NOW, IF THERE IS ANYTHING TO DO IT TO — before the push, not after
+        // the landing.
+        //
+        // Applied on landing, the viewer watched the post arrive in its ordinary
+        // layout and THEN rearrange itself into the thread: two screens for one
+        // press. The engagement has to be the state the page is already in when
+        // it becomes visible, which means it has to happen before the flight
+        // starts, because during the flight is the one window this screen
+        // refuses to spend layout in.
+        //
+        // The cost is real and it moves rather than disappears: the delay now
+        // sits between the finger lifting and the card leaving, where it reads
+        // as latency, instead of inside the animation, where it reads as jank.
+        // Of the two that is the one to take — and there is nothing to animate
+        // yet, so the engagement is applied UNANIMATED and simply is the layout
+        // the page opens in.
+        loadViewIfNeeded()
+        // One layout pass, to give the request a cell to engage.
+        //
+        // ⚠️ WHERE THIS OPENING'S COST ACTUALLY IS, because two plausible
+        // answers were measured and are both wrong.
+        //
+        // Filmed against the same post opened the ordinary way: 350ms
+        // tap-to-settled, against 650–800ms here. The extra is NOT this call
+        // (57ms) and NOT an unresolved layout — a second `layoutIfNeeded` after
+        // the engagement measures 0.02ms, so `presentComments` has already
+        // resolved the tree. It is a stall of ~270–300ms at the LANDING, which
+        // shows up as the flight card sitting at full size for a quarter of a
+        // second before the thread appears under it.
+        //
+        // `syncEngagementAfterAppearance` is where that work is: at
+        // `viewDidAppear` it re-seats the composer and re-materializes its
+        // frost, saying in as many words that the window guard makes every
+        // earlier call a no-op and "the didAppear pass the one that lands".
+        // Moving the header frost AND the composer's into
+        // `zoomTransitionWillBegin` — the first moment there is a window and
+        // the last one where the card still hides everything — did not move the
+        // number, so the cost is not the materials alone. Both attempts were
+        // reverted rather than kept on a story.
+        view.layoutIfNeeded()
+        #if DEBUG
+        let __engaged = CACurrentMediaTime()
+        #endif
+        applyPendingComments(animated: false)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-engage-profile") {
+            print(String(format: "[engage] pre-push engage %6.2f ms",
+                         (CACurrentMediaTime() - __engaged) * 1000))
+        }
+        #endif
+    }
+
+    /// Engages the comments a card asked for, once there is a page to engage
+    /// them on. Reading the request clears it, so a dismissal and a second open
+    /// start from nothing.
+    ///
+    /// Silent when the post has no cell yet — a feed pushed cold has no pages
+    /// until its first render, and the landing seam is what picks the request up
+    /// then. Which is why the request is only cleared once it is USED.
+    func applyPendingComments(animated: Bool) {
+        guard let id = pendingCommentsID else { return }
+        presentComments(for: id, animated: animated)
+        // ⚠️ CONSUMED ONLY IF IT LANDED, and the difference is a whole defect.
+        //
+        // `presentComments` needs a REALIZED CELL, not just a row in the data
+        // source — and before the push this screen has been laid out at
+        // whatever size it was born with, so on the first open of a process
+        // there is often no cell yet. The request was cleared anyway, the
+        // engagement bailed silently, and the post opened in its ordinary
+        // layout. The SECOND open worked, because the feed controller is
+        // reused and by then has both.
+        //
+        // "I asked" and "it happened" are different facts, and only the second
+        // one may clear a one-shot.
+        if commentsEngagedID == id { pendingCommentsID = nil }
     }
 
     /// Takes the pending page for `id`, if there is one. Reading it clears it —
@@ -2800,7 +2970,114 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     public func setZoomContentHidden(_ hidden: Bool) {
+        // ⚠️ A MASKED-HERO OPENING STAYS VISIBLE, and that inversion is the
+        // whole of option B. The flight hides the destination because the card
+        // is its stand-in; here the destination is NOT being stood in for — the
+        // real thread is what the window shows, drawn over the card carrying
+        // the photograph. Hiding it would leave the window empty.
+        //
+        // ⚠️ AND THE WINDOW OPENS FROM HERE, not from `zoomTransitionWillBegin`.
+        // That hook runs in the transition controller's `init`, BEFORE the push
+        // — deliberately, so playback can be suppressed early enough — which is
+        // before this screen has laid out or realized the page it is about to
+        // show. Asked there, it had no active cell to mask and silently did
+        // nothing: the flight carried the photograph correctly and the thread
+        // still arrived in one frame at the landing.
+        // ⚠️ ON EVERY OPENING, not just the masked one: this is the last seam
+        // before the card covers the screen, and the first where the page is
+        // real. A request that could not be honoured before the push is
+        // honoured here, unanimated, so the post still LANDS in its thread
+        // rather than rearranging itself afterwards.
+        if hidden { beginMaskedRevealIfRequested() }
+        // ⚠️ AN ARMED GRAB REFUSES THE HIDE, and refusing it once is not enough.
+        //
+        // The hide does not run at the grab's start: it is deferred by a commit
+        // and a display tick, so it lands AFTER the first pan events. Arming
+        // the dismissal set the page visible once and the hide then arrived and
+        // won, which is "the thread disappears the instant I grab" exactly.
+        // Declining here is what makes the visibility hold for the length of
+        // the gesture.
+        guard !isMaskedRevealActive, !isEngagedDismissalActive else {
+            return view.alpha = 1
+        }
         view.alpha = hidden ? 0 : 1
+    }
+
+    /// ⚠️ AN ENGAGED PAGE STAYS VISIBLE THROUGH A DISMISSING GRAB, for the same
+    /// reason it does through the opening: the card impersonates the page's
+    /// MEDIA, and a thread is not media. Hidden with everything else it
+    /// vanished on the grab's second tick, and the viewer pulled a photograph
+    /// home from a screen that had already stopped showing what they were
+    /// reading.
+    ///
+    /// ⚠️ ARMED FROM HERE, not from `setZoomContentHidden`, and the difference
+    /// is a whole dismissal. Both routes home hide the content — the grab and
+    /// the back button — but only the grab drives a progress channel. Arming on
+    /// the hide left a back-button dismissal showing a full-screen thread over
+    /// a card flying away underneath it, with nothing to ever take it down.
+    /// This method is the grab's alone, so it is the honest signal that one is
+    /// running.
+    #if DEBUG
+    /// Arms the engaged dismissal WITHOUT a real engagement, so a test can
+    /// pin the ordering rule the flag exists for.
+    ///
+    /// The rule is about two public entry points meeting in the wrong order —
+    /// the hide is deferred by a commit and a display tick, so it lands after
+    /// the grab has begun — and the engagement itself is not what is under
+    /// test. This flips the flag and nothing else.
+    func debugArmEngagedDismissal() {
+        isEngagedDismissalActive = true
+    }
+    #endif
+
+    public func setZoomDismissState(_ state: ZoomDismissState) {
+        guard commentsEngagedID != nil, !commentsEngagementIsResting,
+              let cell = activeSnapCell
+        else { return }
+        let progress = state.progress
+        if !isEngagedDismissalActive {
+            isEngagedDismissalActive = true
+            view.alpha = 1
+            // The floors between the page and the card go transparent — the
+            // page itself stays whole, so what shows around it as it shrinks is
+            // the flight, not this screen's black.
+            view.backgroundColor = .clear
+            collectionView.backgroundColor = .clear
+            cell.beginEngagedDismissal()
+        }
+        // Re-asserted every event, not just at arming: anything that hides the
+        // page mid-grab is undone on the next frame the finger produces, so a
+        // race can cost one frame instead of the whole gesture.
+        view.alpha = 1
+        // ⚠️ AND THE NAVIGATION BAR RECEDES WITH IT.
+        //
+        // The bar is the navigation controller's, above the transition's
+        // container — the flight leaves it there deliberately, because on an
+        // ordinary dismissal the page underneath is hidden and the bar is
+        // simply chrome over a shrinking card. Here the page is VISIBLE and
+        // travelling, so a bar pinned to the screen's corners while everything
+        // under it moves reads as two layers coming apart. It carries the
+        // engaged interface's own controls — the close, the sort, the author —
+        // so it belongs to the thread and leaves with it.
+        //
+        // The toolbar needs nothing: the interaction controller already fades
+        // it on this same channel.
+        navigationController?.navigationBar.alpha = 1 - min(max(progress, 0), 1)
+        // The rect arrives in the CONTAINER's coordinates, which are this
+        // view's: both are full-bleed in it. The same assumption the opening
+        // makes about the rect it is handed.
+        cell.setEngagedDismissal(state.with(card: view.convert(state.card, to: cell.contentView)))
+    }
+
+    /// Puts the page back together after a grab, committed or abandoned. Safe
+    /// to call when no grab ran: the flag is the whole guard.
+    private func endEngagedDismissalIfNeeded() {
+        guard isEngagedDismissalActive else { return }
+        isEngagedDismissalActive = false
+        navigationController?.navigationBar.alpha = 1
+        activeSnapCell?.endEngagedDismissal()
+        view.backgroundColor = .black
+        collectionView.backgroundColor = .black
     }
 
     /// A presenting flight is staging. The active page must not start its own
@@ -2809,6 +3086,47 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     public func zoomTransitionWillBegin() {
         isAwaitingZoomPresentation = true
         activeSnapCell?.defersPlaybackForFlight = true
+        activeSnapCell?.setChromeHeldForFlight(true)
+    }
+
+    /// **OPTION B.** Opens the thread's window on the same spring the card
+    /// flies on. Silent unless the opener asked for it and the page is engaged.
+    private func beginMaskedRevealIfRequested() {
+        // The second attempt at the engagement itself, and for a cold open it
+        // is the one that works: by here the destination is in the container
+        // at its real size, so the page it is about to show is realized. A
+        // no-op when the pre-push attempt already succeeded.
+        applyPendingComments(animated: false)
+        guard let rect = pendingCommentsRevealRect, let cell = activeSnapCell,
+              commentsEngagedID != nil, !commentsEngagementIsResting
+        else { return }
+        pendingCommentsRevealRect = nil
+        isMaskedRevealActive = true
+        view.alpha = 1
+        // Every floor between the window and the card, for the same reason the
+        // cell's own has to go: three opaque blacks stacked between a thread
+        // and the photograph it is supposed to be lying on.
+        view.backgroundColor = .clear
+        collectionView.backgroundColor = .clear
+        // The rect arrives in the OPENER's view space. Both screens are
+        // full-bleed in the same window, so the two spaces differ by nothing —
+        // and this one is asked before the destination has a window of its own
+        // to convert through.
+        cell.beginMaskedRevealForFlight(
+            from: view.convert(rect, to: cell.contentView),
+            // ⚠️ THE MEDIA'S RADIUS, NOT THE CARD'S. The window opens from the
+            // media rect, and the flight card starts at exactly this number
+            // (`PostGridFlightCard.Style.listMedia.cornerRadius`). The card's
+            // own radius is 26 against the media's 16: close enough to look
+            // deliberate and wrong enough that the two silhouettes never sat
+            // on each other.
+            cornerRadius: PostGridListRowCell.mediaCornerRadius
+        )
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+            print("[masked-hero] window opens from \(NSCoder.string(for: rect))")
+        }
+        #endif
     }
 
     /// Parks the active page's player for the source it is flying home to.
@@ -2873,6 +3191,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         #endif
         flightChrome = nil
         isAwaitingZoomPresentation = false
+        // The replica is gone; the page's own chrome comes in rather than
+        // simply stopping being covered.
+        activeSnapCell?.setChromeHeldForFlight(false)
         // A flight card may have mirrored the active cell's player; with the
         // card gone, the cell reclaims the render slot (only the most
         // recently attached layer of a shared player is guaranteed to
@@ -2889,6 +3210,16 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // without it. That is the flight's stall moved rather than removed:
         // off the card, but still inside the settle a viewer is watching.
         scheduleIdleCommentsWarm()
+        // …unless a card asked to land IN the comments, in which case there is
+        // nothing to warm for: the engagement is happening now.
+        applyPendingComments(animated: true)
+        if isMaskedRevealActive {
+            isMaskedRevealActive = false
+            activeSnapCell?.endMaskedRevealForFlight()
+            view.backgroundColor = .black
+            collectionView.backgroundColor = .black
+        }
+        endEngagedDismissalIfNeeded()
     }
 
     /// The hero transition's dismiss-leg live seam: mirrors the active cell's
