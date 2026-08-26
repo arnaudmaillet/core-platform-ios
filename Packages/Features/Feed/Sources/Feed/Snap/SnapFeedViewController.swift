@@ -2649,6 +2649,32 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// depending on history nobody can see.
     public func openMediaPage(_ page: Int, for id: PostID) {
         pendingMediaPage = (id, page)
+        // ⚠️ AND APPLIED NOW IF THERE IS ANYTHING TO APPLY IT TO.
+        //
+        // The pending value is consumed by the data source's cell provider,
+        // which only runs when a cell is CONFIGURED. That covers the first
+        // open and nothing else: this screen is reused, so opening the same
+        // post again reaches a cell that is already built and still sitting on
+        // the page the viewer left it on. The instruction was then recorded and
+        // never read.
+        //
+        // What that looked like, measured with the page traced at activation:
+        // `card asked page=9` immediately followed by `cell activate page=4
+        // url=trailer.mp4`. The page displayed page 9 while warming page FOUR's
+        // clip — so it arrived showing page 9's poster, and the dismissal
+        // donated the surface it had warmed, sending the card home carrying the
+        // PREVIOUS clip. Reported precisely: "B arrives on the thumbnail, and
+        // the dismiss shows A".
+        //
+        // Cleared on success so the configure path cannot apply it a second
+        // time, and left pending when the cell is not realized yet — which is
+        // the first-open case the provider already handles.
+        guard let index = orderedIDs.firstIndex(of: id),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+                  as? SnapFeedCell
+        else { return }
+        cell.showMediaPage(page)
+        pendingMediaPage = nil
     }
 
     /// Opens a post with its comments already engaged.

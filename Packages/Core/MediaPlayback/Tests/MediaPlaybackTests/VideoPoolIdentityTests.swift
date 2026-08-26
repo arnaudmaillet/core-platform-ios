@@ -32,6 +32,83 @@ struct VideoPoolIdentityTests {
         controller.playerCountByURL[url] ?? 0
     }
 
+    // MARK: - Surfaces that vanish
+
+    /// ⚠️ A RENDER VIEW CAN DIE WITHOUT SAYING SO, and the pool must survive it.
+    ///
+    /// Every table here is keyed by `ObjectIdentifier(view)` and none of them
+    /// keeps the view alive — deliberately; a pool that retained surfaces would
+    /// pin whole screens. So a page torn down by a pop, or a cell released
+    /// while its `play` was still resolving, leaves its player bound to a key
+    /// nobody will ever call `stop` on: a decoder held for the life of the app,
+    /// and an ADDRESS the allocator may hand to the next render view, which
+    /// then inherits a stranger's playback.
+    ///
+    /// That is the reported "the new video's player disappeared and the
+    /// transition shows the old one", and this is its root: nothing tells the
+    /// pool a view is gone, so the next question it is asked has to be the
+    /// moment it notices.
+    /// ⚠️ THE PROBE IS ALLOCATED FIRST, and that is what makes this test mean
+    /// something.
+    ///
+    /// The first version of it triggered the sweep with a throwaway
+    /// `VideoRenderView()` — and passed with the sweep DISABLED, because that
+    /// throwaway can land on the address the orphan just freed and clean the
+    /// entry up by aliasing onto it. The very effect under test was hiding the
+    /// bug from the test. A view that already exists cannot occupy an address
+    /// freed after it, so this one is a genuinely independent surface.
+    @Test func aSurfaceThatDiesInSilenceGivesItsPlayerBack() async {
+        let controller = pool()
+        let orphanURL = URL(string: "mock://video/orphan")!
+        let probeURL = URL(string: "mock://video/probe")!
+        let probe = VideoRenderView()
+        do {
+            let orphan = VideoRenderView()
+            await controller.play(orphanURL, in: orphan)
+            #expect(controller.activePlayerCount == 1)
+        }
+
+        // The sweep rides the ordinary calls rather than a timer: nothing tells
+        // the pool a view is gone, so the next question is the moment it can
+        // notice.
+        await controller.play(probeURL, in: probe)
+
+        #expect(controller.activePlayerCount == 1)
+        #expect(players(controller, on: orphanURL) == 0)
+        // GIVEN BACK, not merely forgotten — and the evidence is that the probe
+        // is playing without the pool having minted a second player. The idle
+        // cache is empty at this point precisely because the recovered one went
+        // straight back out; a player dropped on the floor instead would leave
+        // the same count with a decoder lost for the life of the app.
+        #expect(controller.idlePlayerCount == 0)
+        #expect(controller.itemCreations == 2)
+    }
+
+    /// ⚠️ AND A SURVIVING SIBLING KEEPS ITS PICTURE.
+    ///
+    /// The sweep reaches the same teardown `detach` does, including the rule
+    /// that matters most: a player two surfaces share is not torn down when one
+    /// of them leaves. Without that half, a page dying would freeze the tile
+    /// behind it.
+    @Test func aDyingSurfaceDoesNotStopASharedPlayback() async {
+        let controller = pool()
+        let url = URL(string: "mock://video/shared")!
+        let survivor = VideoRenderView()
+        let probe = VideoRenderView()
+        await controller.play(url, in: survivor)
+        do {
+            let doomed = VideoRenderView()
+            #expect(controller.attachSurface(doomed, to: url))
+        }
+
+        // Same rule as above: the trigger must not be able to alias the view
+        // whose disappearance is under test.
+        #expect(controller.attachSurface(probe, to: url))
+
+        #expect(players(controller, on: url) == 1)
+        #expect(controller.isAdvancing(in: survivor))
+    }
+
     // MARK: - One video, opened and closed many times
 
     /// ⚠️ THE REPORTED SHAPE: a gallery with one clip, opened and dismissed

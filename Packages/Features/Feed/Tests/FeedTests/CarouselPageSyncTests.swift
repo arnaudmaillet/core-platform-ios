@@ -69,6 +69,57 @@ struct CarouselPageSyncTests {
         #expect(controller.consumeInitialMediaPage(for: id) == nil)
     }
 
+    /// ⚠️ THE CHANNEL IS NOT THE DELIVERY, and every test above this one pins
+    /// only the channel.
+    ///
+    /// `consumeInitialMediaPage` is read by the data source's cell provider,
+    /// which runs when a cell is CONFIGURED — the first open, and nothing else.
+    /// This screen is reused, so opening the same post a second time reaches a
+    /// cell that is already built and still sitting on the page the viewer left
+    /// it on: the instruction was recorded and never read.
+    ///
+    /// Measured, with the page traced at activation: `card asked page=9`
+    /// followed by `cell activate page=4 url=trailer.mp4`. The post displayed
+    /// page nine while warming page FOUR's clip, so it arrived on page nine's
+    /// poster and the dismissal sent the card home carrying the previous clip.
+    ///
+    /// Asserted against the CARD's own page, never against the instruction —
+    /// the instruction being correct is exactly what the defect looked like.
+    @Test func anAlreadyBuiltPageIsMovedWithoutAConfigure() {
+        let cell = SnapFeedCell(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-collection"),
+                authorID: ProfileID("profile-1"),
+                authorName: "Ava",
+                metaText: "@ava · 3m",
+                avatarURL: nil,
+                caption: "caption",
+                mediaURL: URL(string: "mock://media/0"),
+                mediaKind: .image,
+                thumbnailURL: URL(string: "mock://media/0"),
+                audioText: nil,
+                likeCount: 0,
+                timestampText: "now",
+                extraMedia: (1...4).map {
+                    GalleryPost.MediaPage(
+                        thumbnailURL: URL(string: "mock://media/\($0)"),
+                        videoURL: nil
+                    )
+                }
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil
+        )
+        cell.layoutIfNeeded()
+        cell.debugShowPage(3)
+        #expect(cell.debugCurrentMediaPage == 3)
+
+        cell.showMediaPage(1)
+
+        #expect(cell.debugCurrentMediaPage == 1)
+    }
+
     /// An instruction is addressed to ONE post. A feed opens on a window of
     /// them, and the cells around the tapped one must not inherit its page.
     @Test func anInstructionIsNotDeliveredToAnotherPost() {
