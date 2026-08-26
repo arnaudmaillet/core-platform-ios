@@ -1779,11 +1779,42 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// area and nothing to wait for.
     var isMediaContentRendering: Bool {
         guard mediaURL != nil else { return true }
-        // ⚠️ A collection answers for its CAROUSEL even when the page it is on
-        // is a clip: the pages either side are photographs, and the landing is
-        // presentable the moment they are. Asking the render surface would make
-        // the whole page wait on a decode that only one of its pages needs.
-        if mediaCard.showsCollection { return mediaCard.isImageReady }
+        // ⚠️ A COLLECTION ANSWERS FOR THE PAGE IT IS LANDING ON, not for the
+        // carousel — and the difference is a whole class of reported defect.
+        //
+        // Resting on a photograph, the landing is presentable the moment that
+        // photograph is: asking the render surface would make the page wait on
+        // a decode only one of its pages needs. That was the original rule, and
+        // it is still the right one for a still page.
+        //
+        // Resting on a CLIP it is the opposite. The card in the air is carrying
+        // live video — the tile's own player, mid-playback — and this answer is
+        // what lets the animator drop it. Answered from the image alone, the
+        // card is dropped the instant the page's POSTER is up, so a moving
+        // picture is replaced by a still one at the end of every flight. It
+        // reads as "the player does not attach", it happens ONLY to galleries
+        // (a single-video page already waits, below), and it is at its most
+        // brutal under `-rich-media`, where a clip's poster is deliberately an
+        // unrelated photograph — the media appears to change entirely.
+        //
+        // The hold is bounded by the animator's `maximumHydrationHold`, so a
+        // clip that never draws still lands; it just no longer hands over to a
+        // still while it had something better to show.
+        // ⚠️ HAS A FRAME, not "is compositing" — the difference is a deadlock.
+        //
+        // `isCompositingContent` also asks whether the surface is VISIBLE, and
+        // during a flight this page is deliberately hidden: the card is
+        // standing in for it. Gating the card's removal on visibility means the
+        // page cannot show until the card leaves and the card cannot leave
+        // until the page shows, so every gallery landing ran to the animator's
+        // ceiling. Measured as `render[hidden=Y frames=18]` — eighteen decoded
+        // frames, reported as "not rendering". What the hand-over needs is that
+        // there is a PICTURE to hand over to.
+        if mediaCard.showsCollection {
+            return mediaCard.currentPageVideoURL == nil
+                ? mediaCard.isImageReady
+                : mediaCard.renderView.hasFrame
+        }
         switch mediaKind {
         case .video:
             return mediaCard.renderView.isCompositingContent

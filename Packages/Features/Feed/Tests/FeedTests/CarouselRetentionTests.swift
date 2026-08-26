@@ -83,6 +83,52 @@ struct CarouselRetentionTests {
         )
     }
 
+    // MARK: - Landing readiness
+
+    /// ⚠️ A COLLECTION RESTING ON A CLIP IS NOT PRESENTABLE UNTIL THE CLIP HAS
+    /// A PICTURE.
+    ///
+    /// This answer is what lets the hero animator drop its card, and the card
+    /// is carrying the tile's LIVE video. Answered from the poster — which is
+    /// what a collection used to do on every page, clip or not — the card is
+    /// dropped the instant the still is up, so a moving picture hands over to a
+    /// frozen one at the end of the flight. It reads as "the player did not
+    /// attach", and it happened ONLY to galleries: a single-video page has
+    /// always waited for its surface.
+    ///
+    /// Nothing decodes in a unit environment, which is exactly what makes the
+    /// clip case assertable here: the surface exists, playback is bound, and
+    /// there is still no frame — the state the old rule called presentable.
+    @Test func aCollectionOnAClipWaitsForItsClipToHaveAFrame() async {
+        let pool = pool()
+        let cell = collectionCell([false, true], pool: pool)
+
+        await page(cell, through: [1], pool: pool)
+
+        #expect(cell.debugRenderSurface.hasFrame == false)
+        #expect(cell.isMediaContentRendering == false)
+    }
+
+    /// ⚠️ AND RESTING ON A STILL IT IS PRESENTABLE AS SOON AS THE STILL IS.
+    ///
+    /// The other half of the same rule, and the reason it is not simply "always
+    /// wait for the surface": the pages either side of a clip are photographs,
+    /// and making the whole page wait on a decode none of them needs would hold
+    /// every landing for nothing.
+    @Test func aCollectionOnAStillDoesNotWaitForAnyClip() async {
+        let pool = pool()
+        let cell = collectionCell([false, true], pool: pool)
+        await page(cell, through: [1], pool: pool)
+
+        cell.debugShowPage(0)
+        await settle { cell.isMediaContentRendering }
+
+        // The clip still has no frame — so an answer of `true` here can only
+        // have come from the page the viewer is actually on.
+        #expect(cell.debugRenderSurface.hasFrame == false)
+        #expect(cell.isMediaContentRendering)
+    }
+
     // MARK: - One clip, one player
 
     /// ⚠️ THE CENTRAL CLAIM: as many players as clips visited, never more.
