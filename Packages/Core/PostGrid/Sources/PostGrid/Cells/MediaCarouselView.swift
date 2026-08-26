@@ -458,6 +458,28 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
 
     // MARK: - Snapping
 
+    /// The page the CURRENT drag started on.
+    ///
+    /// ⚠️ WHERE THE FINGER WENT DOWN, not where it came up — and the difference
+    /// is the whole of "one gesture, one page".
+    ///
+    /// The clamp below allows one page either side of an anchor, and that
+    /// anchor used to be read when the finger LIFTED. By then the drag has
+    /// already moved the content: throw across the width of the card and the
+    /// content is a page along before the flick is even considered, so the
+    /// clamp permits one MORE and the gesture lands two pages away. Measured
+    /// with four identical throws — `from=1 -> 2`, `from=2 -> 3`, `from=3 -> 4`,
+    /// then `from=5`, a page nobody stopped on.
+    ///
+    /// Reported as "if I slide hard I scroll several photos at once", and it is
+    /// the same complaint the projected-offset rule was written for, one layer
+    /// further in: momentum decides how fast a page arrives, never how many.
+    private var dragAnchorPage: Int?
+
+    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        dragAnchorPage = page(nearest: scrollView.contentOffset.x)
+    }
+
     public func scrollViewWillEndDragging(
         _ scrollView: UIScrollView,
         withVelocity velocity: CGPoint,
@@ -467,15 +489,18 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         // barely moved the content still means "next page", and reading the
         // live offset here would answer "stay".
         // ⚠️ THE PAGE THE GESTURE STARTED ON is the anchor, and every outcome is
-        // measured from it.
+        // measured from it — see `dragAnchorPage` for why it is not read here.
         //
-        // Where the finger LEFT the content is the honest reading of where the
-        // viewer is — the projected offset says where a flick would coast to,
-        // which on a hard swipe is three or four pages away. That is a scroll,
-        // not paging: the viewer asked for the next photograph and got a blur
-        // and a stranger.
-        let from = page(nearest: scrollView.contentOffset.x)
+        // The projected offset says where a flick would coast to, which on a
+        // hard swipe is three or four pages away. That is a scroll, not paging:
+        // the viewer asked for the next photograph and got a blur and a
+        // stranger.
+        // Falls back to the live offset only if a drag somehow ended without
+        // beginning — the honest answer for a gesture nobody saw start.
+        let from = dragAnchorPage ?? page(nearest: scrollView.contentOffset.x)
+        dragAnchorPage = nil
         var index = page(nearest: targetContentOffset.pointee.x)
+        let coasted = index
         // A deliberate flick always advances at least one page, which is what
         // makes a short swipe feel like paging rather than like a nudge that
         // sprang back.
@@ -491,6 +516,18 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         index = min(max(index, from - 1), from + 1)
         index = min(max(index, 0), max(pageViews.count - 1, 0))
         targetContentOffset.pointee.x = offset(forPage: index)
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            // The whole decision in one line, because "did the clamp run?" is
+            // otherwise indistinguishable from "the clamp ran and the gesture
+            // genuinely started a page further along" — which is what two
+            // swipes in quick succession look like.
+            CarouselPlaybackAudit.trace(
+                String(format: "snap from=%d coast=%d -> %d v=%.2f",
+                       from, coasted, index, velocity.x)
+            )
+        }
+        #endif
     }
 
     /// Moves to a page. Returns false when there is no such page — the answer a

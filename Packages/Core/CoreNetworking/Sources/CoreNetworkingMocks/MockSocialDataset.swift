@@ -187,7 +187,8 @@ public struct MockSocialDataset: Sendable {
             already in the doc.
             """,
             "Quiet morning, notes and a long walk before anything else.",
-            "Golden hour over the harbour."
+            "Golden hour over the harbour.",
+            "Every clip from the trip, back to back."
         ]
         // One entry PER ARRIVAL rather than a short roster cycled by modulus,
         // because with five arrivals and a `% 3` roster only two of the shapes
@@ -217,9 +218,29 @@ public struct MockSocialDataset: Sendable {
             // ONE of the five is text-only (index 2), on the corpus's own
             // `index % 3 == 2` rule so the arrivals do not all land in one cell
             // path.
-            let hasMedia = index % 3 != 2
-            let shape = shapes[index % shapes.count]
-            let isVideo = index % 2 == 1
+            // ⚠️ ARRIVAL 5 IS THE OVER-CAPACITY GALLERY, and it is the first
+            // card in the feed.
+            //
+            // The pool carries `capacity` players — six — and every limit this
+            // seed exercises so far sits UNDER that number, so nothing here
+            // ever showed what a gallery does when it asks for more than the
+            // pool can hold. This one holds seven clips, one per distinct
+            // fixture in the catalog: one more than the budget, which is the
+            // smallest number that makes the retention window refuse something
+            // and therefore the easiest to reason about when it misbehaves.
+            //
+            // Its own page is a PHOTOGRAPH, like every other collection here —
+            // page one decides the post's kind, and a clip there would make
+            // this a video post that happens to have pages rather than the
+            // gallery under test.
+            //
+            // Placed LAST in this array because the New section presents these
+            // in reverse (see arrival 4's note), so the highest index is the
+            // card a cold launch opens on.
+            let isOverCapacityGallery = index == 5
+            let hasMedia = isOverCapacityGallery || index % 3 != 2
+            let shape = isOverCapacityGallery ? (1600, 900) : shapes[index % shapes.count]
+            let isVideo = !isOverCapacityGallery && index % 2 == 1
             let host = isVideo ? "video" : "media"
             // Same branch as the main corpus, and the same reason for the
             // asymmetry inside it: a real video's declared size must come FROM
@@ -326,11 +347,47 @@ public struct MockSocialDataset: Sendable {
             // other way round, so "index 0" is the LAST card a viewer sees —
             // the opposite of what was asked for. Rather than re-derive that
             // inversion here and have it rot the next time the ordering moves,
-            // the post is named: this caption is empirically the first card in
+            // the post is named: this caption was empirically the first card in
             // the feed, and a mock may know that about itself.
+            //
+            // ⚠️ It is the SECOND card now — the over-capacity gallery above was
+            // seeded after it and takes the top slot. The name is kept rather
+            // than renamed to `isLargeGallery`, because what this flag selects
+            // is still "the twelve-page one near the top", and a reader chasing
+            // the ordering should find this note rather than a flag that
+            // silently claims a position it no longer holds.
             let isFirstInFeed = caption == "Golden hour over the harbour."
             let extraMedia: [(url: String, width: Int, height: Int)] =
-                isFirstInFeed
+                isOverCapacityGallery
+                // ⚠️ ONE PER DISTINCT PLAYABLE FIXTURE, and both words are
+                // load-bearing.
+                //
+                // DISTINCT, because the pool keeps one player per ASSET: seven
+                // pages sharing three files would be three players and would
+                // prove nothing about a budget of six.
+                //
+                // PLAYABLE, because `videos` includes a synthetic `mock://`
+                // entry that exists to cover an aspect ratio no public asset
+                // has — under the real catalog it never plays, so a gallery
+                // built from the array as it stands offers six real clips,
+                // which is the budget exactly rather than one over. The
+                // remote ones plus `mapPreviewLoop`, which is a real asset the
+                // array leaves out, are seven.
+                //
+                // Each keeps its fixture's own dimensions for the reason the
+                // notes above give: the client pre-layouts from the declared
+                // size, and a number the file does not have shows up as a crop.
+                ? (MockMediaFixtures.videos.filter(\.isRemote)
+                    + [MockMediaFixtures.mapPreviewLoop]
+                  ).enumerated().map { position, fixture in
+                    switch mediaCatalog {
+                    case .synthetic:
+                        ("mock://video/cap-\(position)?w=1600&h=900", 1600, 900)
+                    case .realAssets:
+                        (fixture.url, fixture.width, fixture.height)
+                    }
+                }
+                : isFirstInFeed
                 ? bigShapes.enumerated().map { position, shape in
                     switch (mediaCatalog, bigVideoPositions.contains(position)) {
                     case (.synthetic, false):

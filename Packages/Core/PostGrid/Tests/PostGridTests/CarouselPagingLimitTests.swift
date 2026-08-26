@@ -43,6 +43,62 @@ struct CarouselPagingLimitTests {
         #expect(target.x == view.debugOffset(forPage: 5))
     }
 
+    /// ⚠️ AND THE DRAG ITSELF COUNTS AS PART OF THE GESTURE.
+    ///
+    /// The clamp allows one page either side of an anchor, and the anchor used
+    /// to be read when the finger LIFTED. By then a long swipe has already
+    /// carried the content a page along, so the clamp permitted one MORE and
+    /// the gesture landed two pages away — "if I slide hard I scroll several
+    /// photos at once". Every test above this one set the offset to the anchor
+    /// page and never moved it, so none of them could see it.
+    ///
+    /// Here the content is moved between the two delegate calls, which is what
+    /// a real drag does.
+    @Test func aLongDragEndingInAFlickStillMovesOnlyOnePage() {
+        let view = carousel(pages: 12)
+        view.setPage(4, animated: false)
+        let scrollView = UIScrollView()
+        scrollView.contentOffset = CGPoint(x: view.debugOffset(forPage: 4), y: 0)
+        view.scrollViewWillBeginDragging(scrollView)
+        // The finger has dragged a full page before letting go.
+        scrollView.contentOffset = CGPoint(x: view.debugOffset(forPage: 5), y: 0)
+
+        var target = CGPoint(x: view.debugOffset(forPage: 8), y: 0)
+        withUnsafeMutablePointer(to: &target) {
+            view.scrollViewWillEndDragging(
+                scrollView, withVelocity: CGPoint(x: 6, y: 0), targetContentOffset: $0
+            )
+        }
+
+        #expect(target.x == view.debugOffset(forPage: 5))
+    }
+
+    /// ⚠️ AND THE ANCHOR IS SPENT, so the NEXT gesture measures from where this
+    /// one landed rather than from where the last one began.
+    ///
+    /// A stale anchor would pin the carousel to one page for ever: every
+    /// subsequent flick would be clamped to within one page of a gesture the
+    /// viewer finished long ago.
+    @Test func eachGestureAnchorsWhereItStarts() {
+        let view = carousel(pages: 12)
+        let scrollView = UIScrollView()
+        var landed = 0
+
+        for expected in 1...3 {
+            scrollView.contentOffset = CGPoint(x: view.debugOffset(forPage: landed), y: 0)
+            view.scrollViewWillBeginDragging(scrollView)
+            scrollView.contentOffset = CGPoint(x: view.debugOffset(forPage: landed + 1), y: 0)
+            var target = CGPoint(x: view.debugOffset(forPage: 11), y: 0)
+            withUnsafeMutablePointer(to: &target) {
+                view.scrollViewWillEndDragging(
+                    scrollView, withVelocity: CGPoint(x: 8, y: 0), targetContentOffset: $0
+                )
+            }
+            #expect(target.x == view.debugOffset(forPage: expected))
+            landed = expected
+        }
+    }
+
     /// And the same in the other direction, asserted beside it: a rule applied
     /// to one sign only is half a rule.
     @Test func aViolentFlickBackwardsAlsoMovesOnlyOnePage() {
