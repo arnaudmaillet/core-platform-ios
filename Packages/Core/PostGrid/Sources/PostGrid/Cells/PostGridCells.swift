@@ -15,18 +15,18 @@ import UIKit
 /// Views, reactions, comments and the post's compact age, and there are two
 /// placements because there are two shapes of card:
 ///
-/// * **Text row** — a quiet line closing the card, counters leading and the age
-///   trailing, `.secondaryLabel` against the card's own fill.
+/// * **Text row** — a quiet line closing the card, the age leading and the
+///   counters trailing, `.secondaryLabel` against the card's own fill.
 /// * **Media row** — the same four values ON the preview, as material chips
-///   resting on its bottom edge, and here the reading order is REVERSED: the
-///   age leads and the counters close the row, with the page indicator joining
-///   them at the trailing end. The card then ENDS at the preview, so the line
+///   resting on its bottom edge: the age leads and the counters close the row,
+///   with the page indicator joining them at the trailing end. The card then
+///   ENDS at the preview, so the line
 ///   below it is gone rather than duplicated.
 ///
-/// ⚠️ The two placements therefore disagree about which end the date sits on.
-/// That is not an oversight — over a photograph the pressable things gather at
-/// the trailing edge and the date is the quiet fact opposite them — but it is
-/// the sort of asymmetry a reader should find recorded rather than deduce.
+/// ⚠️ Both placements read the same way round, and a mosaic TILE follows the
+/// half of the rule it can: it carries no date, but its counters close its row
+/// at the trailing edge like everything else. The numbers are in the same
+/// corner on every surface, so the eye never has to look elsewhere for them.
 ///
 /// The second is not decoration. A card with a preview closed on a strip of
 /// card-coloured furniture below the image, which is the widest thing on the
@@ -1599,8 +1599,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // no floor. Here it has one, and a capsule on this card would be read as
         // a control — the very thing the two beside it are about to become. So
         // the card says it plainly: what is in a capsule can be pressed.
+        //
+        // ⚠️ DATE FIRST, COUNTERS LAST — the media row's order, and the two
+        // shapes have to agree about it. The same four values in two placements
+        // reading in opposite directions is a card that changes its mind
+        // depending on whether the post has a photograph.
         let metaRow = UIStackView(
-            arrangedSubviews: [closingLikesPill, closingCommentsPill, spacer, ageLabel]
+            arrangedSubviews: [ageLabel, spacer, closingCommentsPill, closingLikesPill]
         )
         self.metaRow = metaRow
         metaRow.axis = .horizontal
@@ -1610,27 +1615,28 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // up everything else.
         metaRow.spacing = Self.chipGap
         metaRow.constrain(in: card) { parent in
-            metaRow.leadingAnchor.constraint(
-                equalTo: parent.leadingAnchor, constant: Self.captionInset
-            )
             // ⚠️ The DATE is inset by a pill's padding on top of the row's, so
-            // the row's INK is symmetric.
+            // the row's INK is symmetric — and it is the LEADING side that
+            // carries the extra now that the date leads.
             //
-            // The row is pinned at `captionInset` on both sides, which aligns
-            // the two capsules' EDGES with the caption above and looks correct
-            // stated as a constraint. On screen it is lopsided: the leading
-            // number starts 12 inside its capsule, so the row's ink runs from 24
-            // on the left to 12 on the right and the date appears shoved against
+            // Pinned at `captionInset` on both sides, the row aligns the
+            // capsules' EDGES with the caption above and looks correct stated
+            // as a constraint. On screen it is lopsided: a capsule's number
+            // starts 12 inside it, so the row's ink runs from 12 on the date's
+            // side to 24 on the counters' and the date appears shoved against
             // the card.
             //
             // Adding the pill's own padding puts the date where it would sit if
             // it wore one — which is what a reader compares it to, the two
-            // capsules beside it. Its ink then lands ~24 from the trailing edge
-            // and ~21 from the bottom, the same corner the leading chip's number
-            // makes on the other side.
+            // capsules opposite. Its ink then lands ~24 from the leading edge,
+            // the same corner the trailing chip's number makes on the other
+            // side.
+            metaRow.leadingAnchor.constraint(
+                equalTo: parent.leadingAnchor,
+                constant: Self.captionInset + PostMetaPillView.insets.leading
+            )
             metaRow.trailingAnchor.constraint(
-                equalTo: parent.trailingAnchor,
-                constant: -(Self.captionInset + PostMetaPillView.insets.trailing)
+                equalTo: parent.trailingAnchor, constant: -Self.captionInset
             )
         }
         metaFollowsCaption = metaRow.topAnchor.constraint(
@@ -2272,10 +2278,19 @@ public final class PostGridTileCell: UICollectionViewCell {
         let counters = UIStackView(arrangedSubviews: [views, reactions])
         counters.axis = .horizontal
         counters.spacing = 8
+        // ⚠️ COUNTERS CLOSE THE ROW, as they do on both of a card's placements.
+        //
+        // A tile carries no date, so only half of the card's arrangement has
+        // anything to say here — but that half is the half that matters: the
+        // numbers gather at the trailing edge on every surface, and a mosaic of
+        // bricks whose counters sat on the other side would be the one place
+        // the eye had to look somewhere else for them.
         counters.constrain(in: contentView) { parent in
-            counters.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 8)
+            counters.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
             counters.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
-            counters.trailingAnchor.constraint(lessThanOrEqualTo: parent.trailingAnchor, constant: -8)
+            counters.leadingAnchor.constraint(
+                greaterThanOrEqualTo: parent.leadingAnchor, constant: 8
+            )
         }
     }
 

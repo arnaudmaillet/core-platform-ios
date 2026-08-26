@@ -125,22 +125,27 @@ struct MediaMetaPillPlacementTests {
         // an arc. On a card with no preview it would only indent the closing
         // line away from the caption above it, trading a real alignment for an
         // abstract one.
+        //
+        // Measured at the TRAILING edge, which is the counters' side on both of
+        // a card's placements: the date leads and the numbers close the row.
         for pill in visible {
             let frame = pill.convert(pill.bounds, to: cell.contentView)
-            #expect(frame.minX >= PostGridListRowCell.captionInset - 0.5)
+            #expect(cell.contentView.bounds.maxX - frame.maxX
+                        >= PostGridListRowCell.captionInset - 0.5)
         }
-        let leading = visible
-            .map { $0.convert($0.bounds, to: cell.contentView).minX }
+        let trailing = visible
+            .map { cell.contentView.bounds.maxX - $0.convert($0.bounds, to: cell.contentView).maxX }
             .min() ?? 0
-        #expect(abs(leading - PostGridListRowCell.captionInset) < 0.5)
+        #expect(abs(trailing - PostGridListRowCell.captionInset) < 0.5)
     }
 
     /// ⚠️ The closing line's INK is symmetric, which its constraints are not.
     ///
     /// Pinning the row at `captionInset` on both sides aligns the capsules'
-    /// EDGES with the caption and reads correctly as code. On screen the leading
-    /// number starts a pill's padding further in, so the ink ran 24 on the left
-    /// against 12 on the right and the date looked shoved against the card.
+    /// EDGES with the caption and reads correctly as code. On screen a capsule's
+    /// number starts a pill's padding further in, so the ink ran 12 on the
+    /// date's side against 24 on the counters' and the date looked shoved
+    /// against the card.
     ///
     /// Measured off the DATE's own frame rather than the row's, because the row
     /// is exactly the thing that was already symmetric while the card was not.
@@ -162,18 +167,24 @@ struct MediaMetaPillPlacementTests {
             }
         )
         let frame = date.convert(date.bounds, to: cell.contentView)
-        let trailingGap = cell.contentView.bounds.maxX - frame.maxX
+        let dateGap = frame.minX
 
+        // The OUTERMOST capsule, not the first one found: the counters sit at
+        // the trailing edge and their ink is what the date is compared to.
         let chip = try #require(
-            pills(in: cell.contentView).first { isVisible($0, within: cell.contentView) }
+            pills(in: cell.contentView)
+                .filter { isVisible($0, within: cell.contentView) }
+                .max { $0.convert($0.bounds, to: cell.contentView).maxX
+                        < $1.convert($1.bounds, to: cell.contentView).maxX }
         )
-        let leadingGap = chip.convert(chip.bounds, to: cell.contentView).minX
-            + PostMetaPillView.insets.leading
+        let countersGap = cell.contentView.bounds.maxX
+            - chip.convert(chip.bounds, to: cell.contentView).maxX
+            + PostMetaPillView.insets.trailing
 
-        #expect(abs(trailingGap - leadingGap) < 1)
+        #expect(abs(dateGap - countersGap) < 1)
         // And it really moved: the naive pinning would put it at the row's own
         // inset, which is a pill's padding closer to the edge.
-        #expect(trailingGap > PostGridListRowCell.captionInset + 1)
+        #expect(dateGap > PostGridListRowCell.captionInset + 1)
     }
 
     /// Every chip rests on the preview's bottom edge — the DATE leading, the
