@@ -358,7 +358,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         view.translatesAutoresizingMaskIntoConstraints = false
         mediaView.addSubview(view)
         view.pin(to: mediaView)
-        sendVideoSurfaceBelowBadge(view)
+        mediaView.addSubview(view)
     }
 
     public private(set) var loadedVideoRenderView: VideoRenderView?
@@ -548,18 +548,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         }
         install(view)
         loadedVideoRenderView = view
-    }
-
-    /// Keeps the ▶ glyph over the video, the way the tile keeps its furniture
-    /// over a playing brick: the badge is what tells a video row apart, and it
-    /// should read the same whether the preview is a still or moving.
-    ///
-    /// Separate from the `pin` above, and it has to be — `pin(to:)` begins with
-    /// `addSubview`, which moves the view to the FRONT. Ordering the surface
-    /// before pinning it is therefore silently undone, which is exactly what
-    /// happened: the first playing row rendered correctly with its badge gone.
-    private func sendVideoSurfaceBelowBadge(_ view: VideoRenderView) {
-        mediaView.insertSubview(view, belowSubview: playBadge)
     }
 
     public func donateVideoRenderView() -> VideoRenderView? {
@@ -965,11 +953,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// floating on an empty rounded box for the length of a flight is the same
     /// defect as a caption that vanishes, on a smaller scale, and the way not
     /// to have it is to have no second channel to keep in step.
-    ///
-    /// (The `playBadge` line below is that second channel, and it is redundant
-    /// for exactly this reason — the badge is inside the preview too. Kept,
-    /// because a reader checking whether the badge is concealed should find an
-    /// answer rather than infer one.)
     public func setHeroMediaConcealed(_ concealed: Bool) {
         // A COLLECTION conceals one PAGE, not the preview.
         //
@@ -1016,7 +999,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     /// Everything the preview wears that the flight does not reproduce.
     private var furnitureViews: [UIView] {
-        [likesPill, commentsPill, agePill, pageIndicator, playBadge]
+        [likesPill, commentsPill, agePill, pageIndicator]
     }
 
     /// Whether a flight is currently standing in for this row's media.
@@ -1402,7 +1385,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// `captionTapped`.
     private var showMoreRange: NSRange?
     private let mediaView = UIImageView()
-    private let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))
     private static let metaFont = UIFont.preferredFont(forTextStyle: .footnote)
     /// The closing line's counters — same type, colour and glyph as the two a
     /// media card wears, because they are the same two numbers and will be the
@@ -1548,14 +1530,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         card.addSubview(mediaView)
         mediaView.translatesAutoresizingMaskIntoConstraints = false
 
-        playBadge.tintColor = .white
-        playBadge.layer.shadowColor = UIColor.black.cgColor
-        playBadge.layer.shadowOpacity = 0.55
-        playBadge.layer.shadowRadius = 4
-        playBadge.layer.shadowOffset = .zero
-        // The same inset as the chips at the other end, and as everything on the
-        // card above it — furniture on the preview is held off it exactly as the
-        // preview is held off the card.
         // ⚠️ HOLD TO PAUSE LIVES ON THE MEDIA, NOT ON THE CAROUSEL.
         //
         // A post with one attachment is a gallery of one — the gesture means the
@@ -1582,14 +1556,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         hold.cancelsTouchesInView = true
         mediaView.addGestureRecognizer(hold)
 
-        playBadge.constrain(in: mediaView) { parent in
-            playBadge.topAnchor.constraint(
-                equalTo: parent.topAnchor, constant: Self.mediaFurnitureInset
-            )
-            playBadge.trailingAnchor.constraint(
-                equalTo: parent.trailingAnchor, constant: -Self.mediaFurnitureInset
-            )
-        }
         buildMediaMetaPills()
 
         ageLabel.font = Self.metaFont
@@ -1931,7 +1897,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // longer has, and keep the preview it now uses at alpha 0.
         setHeroMediaConcealed(false)
         mediaView.alpha = 1
-        playBadge.alpha = 1
         loadTask?.cancel()
         loadTask = nil
         mediaView.image = nil
@@ -2060,7 +2025,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // A COLLECTION's badge belongs to the page, not to the box: with mixed
         // pages the box has no single answer, and a badge over the whole
         // preview would sit on a photograph as often as on a clip.
-        playBadge.isHidden = post.kind != .video || post.isCollection
         // ⚠️ RE-ASSERTED, not assumed. A flight can be in the air while this
         // row is reconfigured, and everything above has just set the furniture
         // visible. Without this the badge lights up mid-dismissal.
@@ -2259,7 +2223,6 @@ public final class PostGridTileCell: UICollectionViewCell {
     public var onReuse: (() -> Void)?
 
     private let imageView = UIImageView()
-    private let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))
     private static let metaFont = UIFont.postGridSystemFont(
         matching: .preferredFont(forTextStyle: .caption2), weight: .semibold
     )
@@ -2283,18 +2246,6 @@ public final class PostGridTileCell: UICollectionViewCell {
 
         imageView.contentMode = .scaleAspectFill
         imageView.pin(to: contentView)
-
-        // The badge sits over media of any brightness: a soft shadow instead
-        // of a scrim keeps the thumbnail unobstructed.
-        playBadge.tintColor = .white
-        playBadge.layer.shadowColor = UIColor.black.cgColor
-        playBadge.layer.shadowOpacity = 0.55
-        playBadge.layer.shadowRadius = 4
-        playBadge.layer.shadowOffset = .zero
-        playBadge.constrain(in: contentView) { parent in
-            playBadge.topAnchor.constraint(equalTo: parent.topAnchor, constant: 8)
-            playBadge.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
-        }
 
         // Views lead, reactions follow — reach first, then resonance.
         let counters = UIStackView(arrangedSubviews: [views, reactions])
@@ -2388,7 +2339,6 @@ public final class PostGridTileCell: UICollectionViewCell {
     }
 
     public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
-        playBadge.isHidden = post.kind != .video
         // Video tiles keep a dark floor: their poster may be unrenderable
         // (or plain black in the simulator), and the glyph needs a stage.
         contentView.backgroundColor = post.kind == .video ? .darkGray : .secondarySystemBackground

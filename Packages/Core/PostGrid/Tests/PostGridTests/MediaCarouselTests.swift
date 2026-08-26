@@ -292,31 +292,24 @@ struct MixedCarouselTests {
         #expect(view.currentPageVideoURL == nil)
     }
 
-    /// The badge is per page too, and it is the only thing that says a page in
-    /// the middle of a run of photographs is a clip — the row's own badge sits
-    /// over the whole preview and has no single answer to give.
-    @Test func onlyAPlayablePageWearsABadge() {
-        let view = mixed()
-
-        #expect(view.pageViews.map(\.isPlayable) == [false, true, false])
-        // And the badge really follows that flag rather than merely agreeing
-        // with it today: a still page draws its cover and nothing else, a
-        // playable one draws the mark as well.
-        let drawn = view.pageViews.map { page in
-            page.subviews.filter { !$0.isHidden }.count
-        }
-        #expect(drawn == [1, 2, 1])
+    /// Which pages can play is still per page — nothing is DRAWN for it.
+    @Test func playabilityIsPerPage() {
+        #expect(mixed().pageViews.map(\.isPlayable) == [false, true, false])
     }
 
-    /// ⚠️ The badge's fate under playback is decided by the SURFACE, not by the
-    /// page — and the two surfaces disagree on purpose.
+    /// ⚠️ A PAGE DRAWS ITS PICTURE AND NOTHING ELSE — no play badge, on either
+    /// style.
     ///
-    /// On a card the badge is what tells a clip apart from the photographs
-    /// either side of it while the viewer scrolls past. Full-bleed there is
-    /// nothing to tell it apart from, and a single-video post shows no badge on
-    /// that screen at all — keeping one would make two posts of the same kind
-    /// disagree on the same page.
-    @Test func aPlayingPageKeepsItsBadgeOnACardAndLosesItOnAPage() {
+    /// The mark used to say "this page is a clip". It says it to a viewer who
+    /// is about to watch the clip start by itself a beat later, over a picture
+    /// that is already moving on every other visit — a label on the thing it
+    /// describes. Worse over one that has NOT started: a glyph shaped like a
+    /// button, on a page where pressing it opens the post.
+    ///
+    /// Both styles and both states are asserted together, because the deleted
+    /// rule had a per-style exception and half of it surviving is exactly the
+    /// disagreement this replaces.
+    @Test func aPageDrawsItsCoverAndItsSurfaceOnly() {
         for style in [MediaCarouselView.Style.card, .page] {
             let view = MediaCarouselView(style: style)
             view.frame = CGRect(x: 0, y: 0, width: 340, height: 200)
@@ -329,14 +322,13 @@ struct MixedCarouselTests {
             )
             view.layoutIfNeeded()
             let page = view.pageViews[0]
-            let restingBadges = page.subviews.filter { !$0.isHidden }.count
+            let atRest = page.subviews.filter { !$0.isHidden }.count
 
             view.host(UIView())
-            let playingBadges = page.subviews.filter { !$0.isHidden }.count
+            let playing = page.subviews.filter { !$0.isHidden }.count
 
-            #expect(restingBadges == 2)
-            // Card: cover, surface, badge. Page: cover and surface only.
-            #expect(playingBadges == (style == .card ? 3 : 2))
+            #expect(atRest == 1)
+            #expect(playing == 2)
         }
     }
 

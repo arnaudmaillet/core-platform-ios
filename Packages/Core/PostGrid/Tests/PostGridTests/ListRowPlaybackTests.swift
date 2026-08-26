@@ -79,11 +79,15 @@ struct ListRowPlaybackTests {
         #expect(cell.makeVideoRenderViewIfNeeded() === made, "a second ask must reuse the first surface")
     }
 
-    /// The regression the first playing row showed on screen: `pin(to:)` begins
-    /// with `addSubview`, which moves the view to the FRONT — so ordering the
-    /// surface before pinning it was silently undone and the ▶ badge, the thing
-    /// that marks a row as video, disappeared the moment it started playing.
-    @Test func theSurfaceSitsUnderneathThePlayBadge() {
+    /// ⚠️ NOTHING SITS OVER THE PICTURE.
+    ///
+    /// A row used to carry a ▶ glyph the surface had to be ordered beneath, and
+    /// getting that order wrong was a real regression once ("the badge vanishes
+    /// the moment it plays"). The mark is gone — a clip on a card starts by
+    /// itself, so the picture moving is the signal — and with it the whole
+    /// class of ordering bugs. Asserted as "the surface is topmost", which is
+    /// the property that was actually wanted all along.
+    @Test func nothingIsDrawnOverThePlayingSurface() {
         let cell = row()
         let surface = cell.makeVideoRenderViewIfNeeded()
 
@@ -91,14 +95,8 @@ struct ListRowPlaybackTests {
             Issue.record("the surface was never parented")
             return
         }
-        guard let badge = box.subviews.compactMap({ $0 as? UIImageView }).last,
-              badge !== surface else {
-            Issue.record("no badge alongside the surface")
-            return
-        }
-        let surfaceIndex = box.subviews.firstIndex(of: surface)
-        let badgeIndex = box.subviews.firstIndex(of: badge)
-        #expect(surfaceIndex! < badgeIndex!, "the badge must keep reading over moving video")
+
+        #expect(box.subviews.last === surface)
     }
 
     /// The surface goes INSIDE the preview box, which is what makes a flight's

@@ -247,30 +247,21 @@ struct RowClipRetentionTests {
 
     /// ⚠️ THE CORNER, and the SAME corner the row's own badge uses.
     ///
-    /// A single-video card has always put its play badge at the media's top
-    /// trailing corner. Only a carousel's pages sat it in the middle, so a
-    /// collection and a single clip disagreed about where the mark lives — and
-    /// the collection's version covered the photograph it was describing.
+    /// ⚠️ A VIDEO PAGE CARRIES NO MARK AT ALL.
     ///
-    /// Asserted as a QUADRANT rather than a coordinate: the exact inset is the
-    /// card's furniture rule and may move with it, but "top trailing, off the
-    /// edge, clear of the middle" is the decision.
-    @Test func aVideoPagesMarkSitsInTheTopTrailingCorner() {
+    /// The play badge is gone from every surface — a clip on a card starts by
+    /// itself, so the picture moving is what says "video". Asserted from the
+    /// outside, by walking the page for anything drawn over its cover, so the
+    /// test keeps holding if someone reintroduces a mark under another name.
+    @Test func aVideoPageDrawsNoPlayMark() {
         let cell = row([true, true])
-        let carousel = cell.debugCarousel
-        let page = try? #require(carousel?.pageViews.first)
-        let badge = try? #require(page?.badge)
-        let bounds = try? #require(page?.bounds)
-        guard let badge, let bounds, bounds.width > 0 else {
-            Issue.record("the page was never laid out, so its badge proves nothing")
+        let page = try? #require(cell.debugCarousel?.pageViews.first)
+        guard let page, page.bounds.width > 0 else {
+            Issue.record("the page was never laid out, so its contents prove nothing")
             return
         }
 
-        #expect(badge.frame.maxX <= bounds.maxX)
-        #expect(badge.frame.minX > bounds.midX)
-        #expect(badge.frame.maxY < bounds.midY)
-        // Clear of the centre it used to occupy.
-        #expect(badge.frame.contains(CGPoint(x: bounds.midX, y: bounds.midY)) == false)
+        #expect(page.subviews.filter { !$0.isHidden }.count == 1)
     }
 
     // MARK: - Hold to pause

@@ -638,11 +638,53 @@ final class ForYouGridPage: UIView {
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
         preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
         #if DEBUG
+        logRejectedCandidates(chosen: Set(candidates.map(\.id)))
         auditCarouselPlayback()
         #endif
     }
 
     #if DEBUG
+    /// ⚠️ THE DENOMINATOR THE RANKING LOG NEVER HAD.
+    ///
+    /// `[grid-rank]` reports what was CHOSEN, and an empty ranking reads
+    /// exactly like a page of photographs — which is how "no video row on this
+    /// page plays at all" stayed invisible while the log looked clean. Each
+    /// rejection below is a different reason a row can hold a clip and still
+    /// never reach the coordinator, and each is a different bug when it is the
+    /// wrong answer.
+    private func logRejectedCandidates(chosen: Set<PostID>) {
+        guard ProcessInfo.processInfo.arguments.contains("-grid-playback-log"),
+              !showsSkeleton
+        else { return }
+        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        for indexPath in collectionView.indexPathsForVisibleItems.sorted() {
+            let index = flatIndex(for: indexPath)
+            guard posts.indices.contains(index) else { continue }
+            let post = posts[index]
+            guard !chosen.contains(post.id),
+                  let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell
+            else { continue }
+            let row = cell as? PostGridListRowCell
+            let held = playableURL(for: post, in: cell)
+            // A row with no clip anywhere is the ordinary case and says
+            // nothing; everything else is worth a line.
+            guard held != nil || post.kind == .video || post.isCollection else { continue }
+            let frame = cell.convert(cell.videoMediaRect, to: collectionView)
+            let visible = frame.intersection(viewport)
+            let fraction = visible.isNull || frame.width <= 0 || frame.height <= 0
+                ? 0
+                : (visible.height * visible.width) / (frame.height * frame.width)
+            print("[grid-reject] \(post.id.rawValue) kind=\(post.kind)"
+                + " collection=\(post.isCollection ? "Y" : "N")"
+                + " carousel=\(row.map { $0.showsCarousel ? "Y" : "N" } ?? "-")"
+                + " page=\(row?.currentPageVideoURL?.lastPathComponent ?? "nil")"
+                + " held=\(held?.lastPathComponent ?? "nil")"
+                + " cover=\(hasCover(for: post, in: cell) ? "Y" : "N")"
+                + " flying=\(post.id == heroFlyingPostID ? "Y" : "N")"
+                + String(format: " frac=%.2f", fraction))
+        }
+    }
+
     /// Asks every visible collection row the audit's four questions.
     ///
     /// Run after the reconcile rather than inside it: what matters is the state

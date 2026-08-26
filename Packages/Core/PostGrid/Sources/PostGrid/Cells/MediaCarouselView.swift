@@ -126,8 +126,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         // This loop used to evict every other page unconditionally, which was
         // exactly right while a host owned one surface and walked it from page
         // to page: re-parenting alone leaves the page it came from still
-        // believing it holds one, which is enough to keep that page's badge
-        // hidden for ever. Now that neighbours keep their own clip warm, the
+        // believing it holds one. Now that neighbours keep their own clip warm, the
         // same loop would tear down everything the retention window just paid
         // for. So the question narrowed from "is this a different page" to "is
         // this page holding the view I am moving".
@@ -233,8 +232,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     ///
     /// Readable inside the package so a test can ask which PAGE is dimmed.
     /// Concealment applies to the page, and a walk for image views answers for
-    /// the layers inside one — two of them now, since a playable page carries a
-    /// badge as well as a cover.
+    /// the layers inside one.
     private(set) var pageViews: [CarouselPageView] = []
     private var loadTasks: [Task<Void, Never>] = []
     private var pages: [GalleryPost.MediaPage] = []
@@ -312,18 +310,6 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
             // asked the POST whether it was a video would answer for page one
             // and be wrong about every other page.
             view.isPlayable = page.videoURL != nil
-            // ⚠️ Whether the badge SURVIVES playback is a property of the
-            // surface, not of the page.
-            //
-            // On a card the badge is what tells a clip apart from the
-            // photographs either side of it while the viewer scrolls past, so
-            // it stays — the row's own badge follows the same rule over a
-            // playing preview. Full-bleed there is nothing to tell it apart
-            // FROM: the viewer is looking at one thing, it is moving, and a
-            // single-video post shows no badge at all on that screen. Keeping
-            // one there would make two posts of the same kind disagree on the
-            // same page.
-            view.hidesBadgeWhilePlaying = self.style == .page
             switch self.style {
             case .card:
                 view.backgroundColor = .tertiarySystemFill
@@ -579,30 +565,27 @@ private final class EdgeYieldingScrollView: UIScrollView {
     }
 }
 
-/// One page of a carousel: a cover, a play badge when the page is playable, and
-/// room for a playback surface between them.
+/// One page of a carousel: a cover, and room for a playback surface over it.
 ///
 /// A page used to BE its `UIImageView`, which was right while a collection was
 /// photographs. It cannot be once the pages disagree about their type: a video
-/// page has three layers where a still has one, and the badge has to sit over
-/// whichever of the other two is showing.
+/// page has two layers where a still has one.
+///
+/// ⚠️ NO PLAY BADGE, deliberately — see `isPlayable`.
 final class CarouselPageView: UIView {
     let cover = UIImageView()
 
-    /// Whether this page has a stream behind it — the badge follows.
-    var isPlayable = false {
-        didSet { applyBadgeVisibility() }
-    }
-
-    /// Whether a hosted surface takes the badge away. See the note at the
-    /// assignment site: it is the SURFACE that decides, not the page.
-    var hidesBadgeWhilePlaying = false {
-        didSet { applyBadgeVisibility() }
-    }
-
-    private func applyBadgeVisibility() {
-        badge.isHidden = !isPlayable || (hidesBadgeWhilePlaying && surface != nil)
-    }
+    /// Whether this page has a stream behind it.
+    ///
+    /// ⚠️ NOTHING IS DRAWN FOR IT ANY MORE, and that is the point: a clip on
+    /// this card STARTS BY ITSELF, so the picture moving is what says "video",
+    /// and it says it better than a glyph can. A badge over a playing clip is a
+    /// label on the thing it describes; a badge over one that has not started
+    /// yet is an invitation to press something that is not a button.
+    ///
+    /// Kept as a flag because the carousel still reasons about which pages can
+    /// play — the badge was a rendering of this answer, never the answer.
+    var isPlayable = false
 
     /// The host's playback surface while this page is holding it.
     private weak var surface: UIView?
@@ -619,29 +602,12 @@ final class CarouselPageView: UIView {
     /// Whether this page is REALLY holding `view` — both halves, for the reason
     /// `host` states: a weak reference outlives the view being taken away.
     func hosts(_ view: UIView) -> Bool { surface === view && view.superview === self }
-    /// Readable inside the package so a test can ask WHERE the mark sits — the
-    /// one property of it that a screenshot proves and a walk for image views
-    /// does not.
-    let badge = UIImageView(image: UIImage(systemName: "play.fill"))
-
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = true
         cover.contentMode = .scaleAspectFill
         cover.clipsToBounds = true
         addSubview(cover)
-
-        badge.tintColor = .white
-        badge.contentMode = .scaleAspectFit
-        badge.isHidden = true
-        // The same shadow the row's own badge carries: a white glyph over an
-        // arbitrary frame needs its own edge, and a scrim over the media would
-        // be a heavier answer to a smaller problem.
-        badge.layer.shadowColor = UIColor.black.cgColor
-        badge.layer.shadowOpacity = 0.5
-        badge.layer.shadowRadius = 3
-        badge.layer.shadowOffset = .zero
-        addSubview(badge)
     }
 
     @available(*, unavailable)
@@ -653,32 +619,7 @@ final class CarouselPageView: UIView {
         super.layoutSubviews()
         cover.frame = bounds
         surface?.frame = bounds
-        // ⚠️ IN THE CORNER, not the middle — and this is the row's own rule,
-        // not a new one.
-        //
-        // A single-video card has always put its play badge at the media's top
-        // trailing corner, held off it by `mediaFurnitureInset` like every other
-        // piece of furniture. Only the carousel's pages sat it in the centre, so
-        // a collection and a single clip disagreed about where the mark lives
-        // and the collection's version covered the photograph it was describing.
-        //
-        // The badge says "this page is a video". It does not need the middle of
-        // the picture to say it.
-        let side = badge.intrinsicContentSize.width
-        let inset = PostGridListRowCell.mediaFurnitureInset
-        badge.frame = CGRect(
-            x: bounds.width - side - inset, y: inset, width: side, height: side
-        )
     }
-
-    /// The badge is sized by its SYMBOL now, not by the page.
-    ///
-    /// It used to be a twelfth of the short side, which is the right rule for a
-    /// mark in the middle of a picture — it has to scale with what it sits on.
-    /// A mark in the corner is furniture, and furniture on this card is sized
-    /// and inset like the rest of it: the row's own badge is a plain symbol at
-    /// its natural size, and the two now match by construction rather than by
-    /// two constants agreeing.
 
     func host(_ surface: UIView) {
         // ⚠️ IDENTITY IS NOT ENOUGH — ask whether it is actually here.
@@ -694,12 +635,9 @@ final class CarouselPageView: UIView {
         // attempt always worked and the first never did.
         guard surface !== self.surface || surface.superview !== self else { return }
         self.surface = surface
-        // ⚠️ BELOW the badge, above the cover. The badge is what says the page
-        // is a video, and a surface inserted on top of it takes that away at
-        // the exact moment the viewer needs it least — while the first frame is
-        // still decoding and the page is otherwise a still.
-        insertSubview(surface, belowSubview: badge)
-        applyBadgeVisibility()
+        // Over the cover: the picture replaces the poster the moment it has a
+        // frame of its own, and nothing sits above it.
+        addSubview(surface)
         setNeedsLayout()
     }
 
@@ -709,7 +647,6 @@ final class CarouselPageView: UIView {
         guard let surface else { return nil }
         surface.removeFromSuperview()
         self.surface = nil
-        applyBadgeVisibility()
         return surface
     }
 }
