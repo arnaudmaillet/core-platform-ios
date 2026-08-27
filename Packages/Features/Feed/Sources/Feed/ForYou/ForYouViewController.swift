@@ -801,8 +801,13 @@ final class ForYouViewController: UIViewController {
     /// growing. Driven by the flight instead, the bar is fully in place on
     /// frame 0 and dissolves as the page grows past it.
     @discardableResult
+    /// `presenting` is whether this call is setting up an OPENING. False when a
+    /// screen that was opened by a flight rebuilds the geometry at the grab,
+    /// for a post it has since paged to — see `attachCardCloseAlongsideFlight`.
+    /// A reveal must not claim a push that has already happened.
     private func installTextReveal(
-        feed: UIViewController, format: GalleryFilter.Format, postID: PostID
+        feed: UIViewController, format: GalleryFilter.Format, postID: PostID,
+        presenting: Bool = true
     ) -> Bool {
         // Cleared together: a stale geometry from the previous post would be
         // read by the next close, and a stale `revealPresents` would put a
@@ -879,7 +884,7 @@ final class ForYouViewController: UIViewController {
         // The OPENING is the reveal's — see `revealPresents`. Set alongside
         // the geometry rather than derived from it, because a media post will
         // carry a geometry too and must still open with its flight.
-        textSlideDismissal.revealPresents = true
+        textSlideDismissal.revealPresents = presenting
         textSlideDismissal.revealGeometry = TextRevealInstaller.geometry(
             feed: feed,
             origin: TextRevealOrigin(
@@ -1396,6 +1401,20 @@ final class ForYouViewController: UIViewController {
         (feed as? SnapFeedViewController)?
             .prepareForHeroPresentation(in: navigationController.view.bounds)
         navigationController.pushViewController(feed, animated: true)
+        // ⚠️ THE OTHER DRIVER RIDES ALONG, for the post this screen may end on.
+        //
+        // A flight opened this feed, and the feed is a PAGER: swipe to a
+        // text-only post and there is no media left for a hero to carry home.
+        // The card-shaped close is attached here so that case has a driver at
+        // all — the two grabs gate on `zoomDismissalKind` from opposite sides,
+        // so exactly one of them claims any drag.
+        //
+        // AFTER the push, deliberately: `install` takes the navigation delegate
+        // slot, and taking it before would hand this opening's animator to a
+        // driver with no flight to offer. Taking it after leaves the flight
+        // controller as `savedDelegate`, which is where a hero pop is forwarded
+        // back to.
+        attachCardCloseAlongsideFlight(feed: feed, format: format, departureID: tapped.id)
         #if DEBUG
         zoomProfilerNote("push returned")
         #endif
@@ -1437,6 +1456,39 @@ final class ForYouViewController: UIViewController {
     /// interactive dismissal and a cancelled grab reaches none of the completion
     /// callbacks. It is idempotent and costs a layout pass, so running it when
     /// nothing was wrong is not worth guarding against.
+    /// Attaches the card-shaped close to a screen that was opened by a FLIGHT,
+    /// for the case where the viewer pages onto a post that has no media.
+    ///
+    /// Nothing here changes an opening: no geometry is built and
+    /// `revealPresents` stays false, so the slide has nothing to say about a
+    /// push that has already happened. What it gains is a grab that can claim a
+    /// drag when the destination says the post on screen travels as a card, and
+    /// a hook to build that card's geometry at the moment it does.
+    private func attachCardCloseAlongsideFlight(
+        feed: UIViewController, format: GalleryFilter.Format, departureID: PostID
+    ) {
+        guard let navigationController else { return }
+        textSlideDismissal.arbitratesWithHeroGrab = true
+        textSlideDismissal.attach(to: feed, axes: [.horizontal, .vertical])
+        // ⚠️ ADOPT FIRST, BUILD SECOND, and the order is not stylistic.
+        //
+        // The geometry's caption cut, its band and its stand-in are all read
+        // off the landed post's ROW, so that row has to be in the departure
+        // slot before any of them is asked for — otherwise they describe a card
+        // sitting somewhere off screen. `adoptPost` is what puts it there.
+        textSlideDismissal.prepareForSwipe = { [weak self, weak feed] in
+            guard let self, let feed,
+                  let page = pager.page(for: format),
+                  let landed = (feed as? SnapFeedViewController)?.activePostID
+            else { return }
+            if landed != departureID {
+                page.adoptPost(landed, intoSlotOf: departureID)
+            }
+            installTextReveal(feed: feed, format: format, postID: landed, presenting: false)
+        }
+        textSlideDismissal.install(on: navigationController)
+    }
+
     private func restoreChromeAfterTransition() {
         tabBar.restoreAfterTransition()
     }

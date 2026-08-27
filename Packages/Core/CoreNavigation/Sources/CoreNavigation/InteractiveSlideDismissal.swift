@@ -112,6 +112,10 @@ public final class InteractiveSlideDismissal: NSObject {
     /// text sets it.
     public var revealPresents = false
 
+    /// Called at the instant a swipe claims the screen, before anything reads
+    /// `revealGeometry`. See `beginSwipe`.
+    public var prepareForSwipe: (() -> Void)?
+
     /// The recognizer, so an owner can order a competing one behind it —
     /// `require(toFail:)` needs the object, and a caller that cannot see it
     /// has to duplicate the pan to get one.
@@ -223,6 +227,18 @@ public final class InteractiveSlideDismissal: NSObject {
         guard interaction == nil, revealGrab == nil,
               let nav = navigationController,
               let feed = feedViewController, nav.topViewController === feed else { return }
+        // ⚠️ THE GEOMETRY IS ASKED FOR HERE, not carried from the opening.
+        //
+        // What a card-shaped close carries — the row's rect, the caption's cut,
+        // the band, the stand-in — belongs to the post being DISMISSED, and on
+        // a pager that is not always the post this screen opened with. The host
+        // rebuilds it for whatever is on screen now; a host with nothing to
+        // rebuild leaves it alone.
+        //
+        // Before the geometry is read three lines down, and that ordering is
+        // the whole point: `onWillBeginPop` fires after the grab exists, which
+        // is too late to decide what the grab is carrying.
+        prepareForSwipe?()
         // Freeze the pager so a diagonal drag can't page mid-pop.
         (feed as? any ZoomTransitionDestination)?.setContentScrollEnabled(false)
         if let revealGeometry {
@@ -398,6 +414,20 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         didShow viewController: UIViewController,
         animated: Bool
     ) {
+        // ⚠️ FORWARDED FIRST, and unconditionally: this is a NOTIFICATION, not
+        // a choice.
+        //
+        // Displacing a delegate takes its `animationControllerFor` — which this
+        // driver answers or forwards — and silently takes its news as well. The
+        // driver it displaced keeps its own bookkeeping on this call (a flight
+        // controller releases the interruptor that served the flight just
+        // ended), and losing it leaks that state for the life of the screen.
+        //
+        // Before the teardown below, which hands the slot back and forgets who
+        // to forward to.
+        savedDelegate?.navigationController?(
+            navigationController, didShow: viewController, animated: animated
+        )
         // Completed transitions only (a cancelled swipe reports nothing): once
         // the feed is off the stack, hand the delegate slot back.
         let feedStillOnStack = feedViewController.map {
