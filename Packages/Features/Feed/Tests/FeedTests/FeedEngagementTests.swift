@@ -211,10 +211,23 @@ struct FeedEngagementTests {
 }
 
 /// Main-actor polling helper for callback-driven expectations.
+///
+/// ⚠️ BOUNDED BY TRIES, NOT BY A CLOCK — and the difference is a red CI.
+///
+/// This waited two seconds of WALL TIME, which is a statement about how fast
+/// the machine is rather than about the work being waited on. Locally the
+/// reconcile it polls for settles in tens of milliseconds; on CI, running every
+/// package's tests at once, `reconnectReconcilesCountsAgainstAuthoritativeRead`
+/// took twelve seconds to run and the two-second budget expired inside it. The
+/// test was reported as an assertion failure — "updates.count == 1" — which
+/// reads exactly like a broken reconcile and is nothing of the kind.
+///
+/// A try count spends nothing when the condition is already true (the common
+/// case returns on the first pass) and gives a loaded machine room to finish.
+/// The ceiling is what a genuine failure costs, and it is paid once.
 @MainActor
-private func eventuallyMain(timeout: TimeInterval = 2, _ condition: () -> Bool) async -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+private func eventuallyMain(tries: Int = 1500, _ condition: () -> Bool) async -> Bool {
+    for _ in 0..<tries {
         if condition() { return true }
         try? await Task.sleep(nanoseconds: 10_000_000)
     }
