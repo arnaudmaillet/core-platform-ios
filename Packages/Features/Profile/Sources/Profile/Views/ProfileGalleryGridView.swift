@@ -680,6 +680,16 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // row.
             captionExpanded: captionExpansion.isExpanded(postID),
             showsAuthorMenu: showsAuthorMenu(for: post),
+            // ⚠️ NEITHER control, because this surface wires neither: nothing
+            // here sets `onRepostTapped` or `onBookmarkTapped`, so the row's
+            // header carries the "..." alone and a stand-in drawing a repost
+            // would end every dismissal with a control vanishing. If this
+            // screen ever wires them, this is the line that has to know.
+            actions: .none,
+            // The row's own date when there is a row — a compact age is a
+            // function of the clock, and the row worked its own out when it was
+            // configured.
+            ageText: (cell(for: postID) as? PostGridListRowCell)?.renderedAgeText,
             // The ROW's own height when it is realized — the card is centred
             // in the window, so a height that disagrees with the row's puts
             // every line inside it half the difference out.
@@ -714,13 +724,6 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         posts.first { $0.id == postID }.flatMap(PostAuthorBandView.Model.init(post:))
     }
 
-
-    /// Brings the landed row's own furniture in gently — see
-    /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that is
-    /// not realized, which is the honest answer: nothing is on screen to fade.
-    func fadeInRevealedFurniture(for postID: PostID) {
-        (cell(for: postID) as? PostGridListRowCell)?.fadeInRevealedFurniture()
-    }
 
     /// Hides just what the flight is carrying: a tile goes whole, a row loses
     /// only its preview. Same invariant the For You grid keeps.

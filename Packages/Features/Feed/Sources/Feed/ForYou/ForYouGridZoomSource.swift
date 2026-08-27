@@ -142,6 +142,22 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         return card
     }
 
+    /// The same donation, asked again while the card is already in the air.
+    ///
+    /// The build-time ask above can only report what the grid held AT THE TAP,
+    /// and a tile is routinely granted its player by that very tap: the focus
+    /// pass starts it, the URL resolves a turn later, the first frame decodes
+    /// after that. Answering nil once therefore says "not yet", never "never",
+    /// and the flight is entitled to keep asking for as long as the answer
+    /// could still change.
+    ///
+    /// PRESENT only, for exactly the reason the build-time ask is: a dismissal
+    /// must fly the page's playhead, not the tile's.
+    func zoomLiveMediaSurfaceIfReady() -> UIView? {
+        guard !isStagingDismissal, let donateLive else { return nil }
+        return donateLive()
+    }
+
     /// Takes the card's live surface at landing, so the tile renders the frame
     /// the card was showing instead of starting a blank layer.
     /// True once the landing tile's own surface is rendering — or when the tile
@@ -215,7 +231,25 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // pop animates the safe area, and an unpinned grid keeps drifting under
         // the flight. See `ForYouGridPage.beginHeroFreeze`.
         page?.beginHeroFreeze()
-        if let landed = activePostID(), page?.adoptPost(landed, intoSlotOf: departureID) == true {
+        // ⚠️ ONLY A POST THIS FLIGHT CAN LAND ON.
+        //
+        // The adoption is what makes a dismissal return to the card the viewer
+        // ENDED on, and until now it could not reach a list at all, so the
+        // question never arose. It does now: page from a photograph to a
+        // TEXT-only post and the landed row has no media to fly to —
+        // `heroAppearance` answers nil for one on purpose, and the note there
+        // records why (a card impersonating a page of comments is the disease
+        // the reveal exists to avoid). Adopting it anyway would leave the
+        // flight with no rect and collapse it to the middle of the screen.
+        //
+        // So a text landing is declined and the flight goes home to the tile it
+        // left from — the wrong post, and the honest answer this driver can
+        // give. What that case actually wants is the REVEAL, chosen at the
+        // grab rather than at the tap, which is a change to which driver is
+        // installed rather than to where it lands.
+        let landedCanFly = activePostID().map { page?.heroAppearance(for: $0) != nil } ?? false
+        if landedCanFly, let landed = activePostID(),
+           page?.adoptPost(landed, intoSlotOf: departureID) == true {
             // The active post now occupies the departure slot, so anchoring to
             // it lands on that tile without moving anything.
             anchorID = landed

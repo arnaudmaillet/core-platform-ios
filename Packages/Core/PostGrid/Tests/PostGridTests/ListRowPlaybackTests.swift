@@ -79,26 +79,30 @@ struct ListRowPlaybackTests {
         #expect(cell.makeVideoRenderViewIfNeeded() === made, "a second ask must reuse the first surface")
     }
 
-    /// The regression the first playing row showed on screen: `pin(to:)` begins
-    /// with `addSubview`, which moves the view to the FRONT — so ordering the
-    /// surface before pinning it was silently undone and the ▶ badge, the thing
-    /// that marks a row as video, disappeared the moment it started playing.
-    @Test func theSurfaceSitsUnderneathThePlayBadge() {
+    /// ⚠️ THE CLIP GOES UNDER THE ROW'S FURNITURE — every piece of it.
+    ///
+    /// The preview box holds the counters, the date and the page indicator as
+    /// its own subviews, and `pin(to:)` begins with `addSubview`, which puts
+    /// the pinned view at the FRONT. Skip the re-ordering and the player covers
+    /// the lot: measured on a single-video card as "the counters and the
+    /// timestamp have disappeared".
+    ///
+    /// Asserted against EVERY sibling rather than against one named glyph. The
+    /// previous version of this test pinned the surface against the play badge
+    /// alone; the badge went away and the assertion went with it, taking the
+    /// rule it was standing for.
+    @Test func thePlayingSurfaceSitsUnderTheRowsFurniture() {
         let cell = row()
         let surface = cell.makeVideoRenderViewIfNeeded()
 
-        guard let box = surface.superview else {
+        guard let box = surface.superview, let index = box.subviews.firstIndex(of: surface) else {
             Issue.record("the surface was never parented")
             return
         }
-        guard let badge = box.subviews.compactMap({ $0 as? UIImageView }).last,
-              badge !== surface else {
-            Issue.record("no badge alongside the surface")
-            return
-        }
-        let surfaceIndex = box.subviews.firstIndex(of: surface)
-        let badgeIndex = box.subviews.firstIndex(of: badge)
-        #expect(surfaceIndex! < badgeIndex!, "the badge must keep reading over moving video")
+        // The furniture has to actually BE there, or "underneath all of it" is
+        // a claim about an empty set.
+        #expect(box.subviews.count > 1)
+        #expect(index == 0)
     }
 
     /// The surface goes INSIDE the preview box, which is what makes a flight's

@@ -1643,12 +1643,39 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // `startDeferredPlayback`.
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-                print(String(format: "[zoom-live] %.3f cell activate defers=%@",
-                             CACurrentMediaTime(), defersPlaybackForFlight ? "true" : "false"))
+                // The PAGE matters as much as the flag: a collection warms
+                // `renderView`, and which surface that names is a function of
+                // the page the card believes it is on.
+                print(String(format: "[zoom-live] %.3f cell activate defers=%@ page=%d collection=%@ url=%@",
+                             CACurrentMediaTime(), defersPlaybackForFlight ? "true" : "false",
+                             mediaCard.currentPage,
+                             mediaCard.showsCollection ? "Y" : "N",
+                             url.lastPathComponent))
             }
             #endif
             guard !defersPlaybackForFlight else {
                 hasDeferredPlayback = true
+                // ⚠️ WHICH SURFACE, BEFORE WARMING IT — and the deferred path
+                // is the one that forgot to ask.
+                //
+                // `renderView` names the WATCHED page's surface, and a
+                // collection re-points it per page. The line below this guard
+                // does that before playing; the deferred branch went straight
+                // to warming, so on a second visit to the same post it warmed
+                // the surface belonging to the page the viewer opened LAST
+                // TIME. Everything downstream then agreed with it: the landing
+                // saw a surface full of frames and handed over — to a page
+                // whose own surface was never hosted, so its poster showed —
+                // and the dismissal donated that same stale view, so the card
+                // flew home carrying the PREVIOUS clip. Reported exactly:
+                // "open clip A, then clip B; B arrives on the thumbnail and the
+                // dismiss shows A".
+                //
+                // Re-pointing is not playback: it moves no player and steals no
+                // render slot from the flying card, which is what this guard
+                // exists to protect. It is a no-op for a single attachment,
+                // which is why the fault was galleries-only.
+                mediaCard.hostRenderViewOnCurrentPage()
                 // Warm THIS page's own layer now, hidden, instead of waiting.
                 // It has the whole flight to decode, so by landing it is ready
                 // and the handoff is a visibility flip rather than a re-parent
@@ -1779,11 +1806,42 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// area and nothing to wait for.
     var isMediaContentRendering: Bool {
         guard mediaURL != nil else { return true }
-        // ⚠️ A collection answers for its CAROUSEL even when the page it is on
-        // is a clip: the pages either side are photographs, and the landing is
-        // presentable the moment they are. Asking the render surface would make
-        // the whole page wait on a decode that only one of its pages needs.
-        if mediaCard.showsCollection { return mediaCard.isImageReady }
+        // ⚠️ A COLLECTION ANSWERS FOR THE PAGE IT IS LANDING ON, not for the
+        // carousel — and the difference is a whole class of reported defect.
+        //
+        // Resting on a photograph, the landing is presentable the moment that
+        // photograph is: asking the render surface would make the page wait on
+        // a decode only one of its pages needs. That was the original rule, and
+        // it is still the right one for a still page.
+        //
+        // Resting on a CLIP it is the opposite. The card in the air is carrying
+        // live video — the tile's own player, mid-playback — and this answer is
+        // what lets the animator drop it. Answered from the image alone, the
+        // card is dropped the instant the page's POSTER is up, so a moving
+        // picture is replaced by a still one at the end of every flight. It
+        // reads as "the player does not attach", it happens ONLY to galleries
+        // (a single-video page already waits, below), and it is at its most
+        // brutal under `-rich-media`, where a clip's poster is deliberately an
+        // unrelated photograph — the media appears to change entirely.
+        //
+        // The hold is bounded by the animator's `maximumHydrationHold`, so a
+        // clip that never draws still lands; it just no longer hands over to a
+        // still while it had something better to show.
+        // ⚠️ HAS A FRAME, not "is compositing" — the difference is a deadlock.
+        //
+        // `isCompositingContent` also asks whether the surface is VISIBLE, and
+        // during a flight this page is deliberately hidden: the card is
+        // standing in for it. Gating the card's removal on visibility means the
+        // page cannot show until the card leaves and the card cannot leave
+        // until the page shows, so every gallery landing ran to the animator's
+        // ceiling. Measured as `render[hidden=Y frames=18]` — eighteen decoded
+        // frames, reported as "not rendering". What the hand-over needs is that
+        // there is a PICTURE to hand over to.
+        if mediaCard.showsCollection {
+            return mediaCard.currentPageVideoURL == nil
+                ? mediaCard.isImageReady
+                : mediaCard.renderView.hasFrame
+        }
         switch mediaKind {
         case .video:
             return mediaCard.renderView.isCompositingContent
@@ -2078,6 +2136,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.setPage(index, animated: false)
     }
 
+    /// Moves an ALREADY CONFIGURED page's collection to `page`.
+    ///
+    /// The twin of `configure(initialMediaPage:)`, for the case that has no
+    /// configure to ride: this screen is reused, so a post opened a second time
+    /// arrives at a cell that is already built and already sitting on the page
+    /// the viewer left it on. See `SnapFeedViewController.openMediaPage`.
+    func showMediaPage(_ page: Int) {
+        mediaCard.setPage(page, animated: false)
+    }
+
+    /// The page this post's collection is actually showing, so a test can ask
+    /// the CARD rather than trusting the instruction that was sent to it.
+    var debugCurrentMediaPage: Int { mediaCard.currentPage }
+
     /// Which pages are holding a playback surface — the retention window's
     /// footprint, which is otherwise invisible from outside.
     var debugSurfacedPages: [Int] { mediaCard.surfacedPages }
@@ -2128,6 +2200,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         } else {
             videoPlayback.setPaused(true, in: mediaCard.renderView)
         }
+    }
+
+    /// See `SnapCellLifecycle.releaseRetainedNeighbourClips`. Idempotent, and
+    /// safe on a cell that never played: the card reports what it let go of,
+    /// and a cell holding nothing reports nothing.
+    func releaseRetainedNeighbourClips() {
+        guard let videoPlayback else { return }
+        cancelPrewarming()
+        // `releaseRetainedSurfaces` spares the watched surface by construction,
+        // which is the whole reason this is safe to call while a dismissal
+        // flight is still in the air.
+        for view in mediaCard.releaseRetainedSurfaces() {
+            videoPlayback.stop(view)
+        }
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace(
+                "depart released neighbours, players=\(videoPlayback.activePlayerCount)"
+            )
+        }
+        #endif
     }
 
     /// Re-asserts the engaged treatment after the screen re-appears from an

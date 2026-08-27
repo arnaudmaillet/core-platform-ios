@@ -292,31 +292,24 @@ struct MixedCarouselTests {
         #expect(view.currentPageVideoURL == nil)
     }
 
-    /// The badge is per page too, and it is the only thing that says a page in
-    /// the middle of a run of photographs is a clip — the row's own badge sits
-    /// over the whole preview and has no single answer to give.
-    @Test func onlyAPlayablePageWearsABadge() {
-        let view = mixed()
-
-        #expect(view.pageViews.map(\.isPlayable) == [false, true, false])
-        // And the badge really follows that flag rather than merely agreeing
-        // with it today: a still page draws its cover and nothing else, a
-        // playable one draws the mark as well.
-        let drawn = view.pageViews.map { page in
-            page.subviews.filter { !$0.isHidden }.count
-        }
-        #expect(drawn == [1, 2, 1])
+    /// Which pages can play is still per page — nothing is DRAWN for it.
+    @Test func playabilityIsPerPage() {
+        #expect(mixed().pageViews.map(\.isPlayable) == [false, true, false])
     }
 
-    /// ⚠️ The badge's fate under playback is decided by the SURFACE, not by the
-    /// page — and the two surfaces disagree on purpose.
+    /// ⚠️ A PAGE DRAWS ITS PICTURE AND NOTHING ELSE — no play badge, on either
+    /// style.
     ///
-    /// On a card the badge is what tells a clip apart from the photographs
-    /// either side of it while the viewer scrolls past. Full-bleed there is
-    /// nothing to tell it apart from, and a single-video post shows no badge on
-    /// that screen at all — keeping one would make two posts of the same kind
-    /// disagree on the same page.
-    @Test func aPlayingPageKeepsItsBadgeOnACardAndLosesItOnAPage() {
+    /// The mark used to say "this page is a clip". It says it to a viewer who
+    /// is about to watch the clip start by itself a beat later, over a picture
+    /// that is already moving on every other visit — a label on the thing it
+    /// describes. Worse over one that has NOT started: a glyph shaped like a
+    /// button, on a page where pressing it opens the post.
+    ///
+    /// Both styles and both states are asserted together, because the deleted
+    /// rule had a per-style exception and half of it surviving is exactly the
+    /// disagreement this replaces.
+    @Test func aPageDrawsItsCoverAndItsSurfaceOnly() {
         for style in [MediaCarouselView.Style.card, .page] {
             let view = MediaCarouselView(style: style)
             view.frame = CGRect(x: 0, y: 0, width: 340, height: 200)
@@ -329,14 +322,13 @@ struct MixedCarouselTests {
             )
             view.layoutIfNeeded()
             let page = view.pageViews[0]
-            let restingBadges = page.subviews.filter { !$0.isHidden }.count
+            let atRest = page.subviews.filter { !$0.isHidden }.count
 
             view.host(UIView())
-            let playingBadges = page.subviews.filter { !$0.isHidden }.count
+            let playing = page.subviews.filter { !$0.isHidden }.count
 
-            #expect(restingBadges == 2)
-            // Card: cover, surface, badge. Page: cover and surface only.
-            #expect(playingBadges == (style == .card ? 3 : 2))
+            #expect(atRest == 1)
+            #expect(playing == 2)
         }
     }
 
@@ -859,18 +851,47 @@ struct CarouselChipsAreFixedTests {
         }
     }
 
-    /// And the indicator sits centred BETWEEN the two groups rather than on the
-    /// preview: the two dynamic spaces are equal, whatever the counters took.
-    @Test func theIndicatorFloatsBetweenTheGroups() {
+    /// ⚠️ AND NONE OF THE FURNITURE IS BEHIND THE PAGES.
+    ///
+    /// The chips are laid out against the preview and the carousel scrolls
+    /// underneath them, which is a Z-ORDER promise no frame assertion can see:
+    /// every test in this file went on passing while the date sat correctly
+    /// placed and completely covered. It happened for a reason worth pinning —
+    /// the carousel was inserted below a NAMED chip, which was the lowest one
+    /// only for as long as nobody reordered them.
+    ///
+    /// Asserted against every chip rather than the date alone: the next
+    /// reordering will move a different one to the bottom.
+    @Test func theCarouselIsBehindEveryChip() throws {
+        let cell = spaciousRow()
+        let carousel = try #require(cell.debugCarousel)
+        let box = try #require(carousel.superview)
+        let order = box.subviews
+        let carouselIndex = try #require(order.firstIndex(of: carousel))
+
+        let chips = order.enumerated().filter { isChip($0.element) }
+        #expect(chips.count == 4)
+        #expect(chips.allSatisfy { $0.offset > carouselIndex })
+    }
+
+    /// ⚠️ And the indicator CLOSES THE ROW WITH THE COUNTERS: date, all the
+    /// slack, then indicator-comments-likes packed at one gap each.
+    ///
+    /// It used to float between two guides of equal width, centred on the
+    /// preview — which capped the counters' room at half of it whatever they
+    /// needed. The trailing group now takes the width it needs and the give is
+    /// all in front of it.
+    @Test func theIndicatorClosesTheRowWithTheCounters() {
         let chips = chipFrames(in: spaciousRow())
         #expect(chips.count == 4)
 
-        let leading = chips[2].minX - chips[1].maxX
-        let trailing = chips[3].minX - chips[2].maxX
-        #expect(abs(leading - trailing) < 0.5)
-        // And there is genuine slack here, so the equality above is a measured
-        // result and not two gaps clamped at the same minimum.
-        #expect(leading > PostGridListRowCell.chipGap + 1)
-        #expect(leading >= PostGridListRowCell.chipGap - 0.5)
+        let gap = PostGridListRowCell.chipGap
+        // Packed: indicator to comments, comments to likes.
+        #expect(abs((chips[2].minX - chips[1].maxX) - gap) < 0.5)
+        #expect(abs((chips[3].minX - chips[2].maxX) - gap) < 0.5)
+        // And the slack is genuine — this row has room to spare, so "packed"
+        // above is a measured result rather than three chips clamped against a
+        // width they could not exceed.
+        #expect(chips[1].minX - chips[0].maxX > gap + 1)
     }
 }

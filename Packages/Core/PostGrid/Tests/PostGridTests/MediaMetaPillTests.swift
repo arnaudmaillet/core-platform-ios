@@ -125,22 +125,27 @@ struct MediaMetaPillPlacementTests {
         // an arc. On a card with no preview it would only indent the closing
         // line away from the caption above it, trading a real alignment for an
         // abstract one.
+        //
+        // Measured at the TRAILING edge, which is the counters' side on both of
+        // a card's placements: the date leads and the numbers close the row.
         for pill in visible {
             let frame = pill.convert(pill.bounds, to: cell.contentView)
-            #expect(frame.minX >= PostGridListRowCell.captionInset - 0.5)
+            #expect(cell.contentView.bounds.maxX - frame.maxX
+                        >= PostGridListRowCell.captionInset - 0.5)
         }
-        let leading = visible
-            .map { $0.convert($0.bounds, to: cell.contentView).minX }
+        let trailing = visible
+            .map { cell.contentView.bounds.maxX - $0.convert($0.bounds, to: cell.contentView).maxX }
             .min() ?? 0
-        #expect(abs(leading - PostGridListRowCell.captionInset) < 0.5)
+        #expect(abs(trailing - PostGridListRowCell.captionInset) < 0.5)
     }
 
     /// ⚠️ The closing line's INK is symmetric, which its constraints are not.
     ///
     /// Pinning the row at `captionInset` on both sides aligns the capsules'
-    /// EDGES with the caption and reads correctly as code. On screen the leading
-    /// number starts a pill's padding further in, so the ink ran 24 on the left
-    /// against 12 on the right and the date looked shoved against the card.
+    /// EDGES with the caption and reads correctly as code. On screen a capsule's
+    /// number starts a pill's padding further in, so the ink ran 12 on the
+    /// date's side against 24 on the counters' and the date looked shoved
+    /// against the card.
     ///
     /// Measured off the DATE's own frame rather than the row's, because the row
     /// is exactly the thing that was already symmetric while the card was not.
@@ -162,22 +167,33 @@ struct MediaMetaPillPlacementTests {
             }
         )
         let frame = date.convert(date.bounds, to: cell.contentView)
-        let trailingGap = cell.contentView.bounds.maxX - frame.maxX
+        let dateGap = frame.minX
 
+        // The OUTERMOST capsule, not the first one found: the counters sit at
+        // the trailing edge and their ink is what the date is compared to.
         let chip = try #require(
-            pills(in: cell.contentView).first { isVisible($0, within: cell.contentView) }
+            pills(in: cell.contentView)
+                .filter { isVisible($0, within: cell.contentView) }
+                .max { $0.convert($0.bounds, to: cell.contentView).maxX
+                        < $1.convert($1.bounds, to: cell.contentView).maxX }
         )
-        let leadingGap = chip.convert(chip.bounds, to: cell.contentView).minX
-            + PostMetaPillView.insets.leading
+        let countersGap = cell.contentView.bounds.maxX
+            - chip.convert(chip.bounds, to: cell.contentView).maxX
+            + PostMetaPillView.insets.trailing
 
-        #expect(abs(trailingGap - leadingGap) < 1)
+        #expect(abs(dateGap - countersGap) < 1)
         // And it really moved: the naive pinning would put it at the row's own
         // inset, which is a pill's padding closer to the edge.
-        #expect(trailingGap > PostGridListRowCell.captionInset + 1)
+        #expect(dateGap > PostGridListRowCell.captionInset + 1)
     }
 
-    /// Every chip rests on the preview's bottom edge — likes and comments
-    /// leading, age trailing, the closing line's own reading order kept.
+    /// Every chip rests on the preview's bottom edge — the DATE leading, the
+    /// counters closing the row at the trailing edge.
+    ///
+    /// ⚠️ Which end each lands on is asserted by IDENTITY, not by position
+    /// alone: "leftmost sits at the leading inset" is true of any order, so it
+    /// would have gone on passing when the row was reversed. The date is the
+    /// one chip with no capsule, which is exactly what tells them apart.
     @Test func thePillsRestOnThePreviewsBottomEdge() throws {
         let cell = row(kind: .photo)
         let preview = try #require(cell.mediaHeroRect)
@@ -190,12 +206,55 @@ struct MediaMetaPillPlacementTests {
             let frame = pill.convert(pill.bounds, to: cell.contentView)
             #expect(abs(preview.maxY - frame.maxY - inset) < 0.5)
         }
-        let ordered = visible.map { $0.convert($0.bounds, to: cell.contentView) }
-            .sorted { $0.minX < $1.minX }
-        #expect(abs(ordered[0].minX - preview.minX - inset) < 0.5)
-        #expect(abs(preview.maxX - ordered[2].maxX - inset) < 0.5)
+        let ordered = visible.sorted {
+            $0.convert($0.bounds, to: cell.contentView).minX
+                < $1.convert($1.bounds, to: cell.contentView).minX
+        }
+        let frames = ordered.map { $0.convert($0.bounds, to: cell.contentView) }
+        #expect(abs(frames[0].minX - preview.minX - inset) < 0.5)
+        #expect(abs(preview.maxX - frames[2].maxX - inset) < 0.5)
+        // The date leads and wears no capsule; the counters close the row.
+        #expect(ordered[0] is PostChipSlotView)
+        #expect(ordered[1] is PostMetaPillView)
+        #expect(ordered[2] is PostMetaPillView)
         // And they never touch: one gap between the two counters.
-        #expect(ordered[1].minX - ordered[0].maxX >= PostGridListRowCell.chipGap - 0.5)
+        #expect(frames[2].minX - frames[1].maxX >= PostGridListRowCell.chipGap - 0.5)
+    }
+}
+
+/// What a mosaic BRICK carries, which is deliberately less than a card does.
+@MainActor
+struct TileMetaTests {
+    /// ⚠️ ONE NUMBER ON A TILE, and it is reach rather than approval.
+    ///
+    /// A brick is small and read at a glance in a mosaic of a dozen others; two
+    /// numbers on it are two things to compare across every tile at once. The
+    /// heart is what the POST is for and the card carries it — a tile is a way
+    /// IN, so how many got here is the number that earns the space.
+    ///
+    /// Counted by walking for metric labels rather than by naming a field: a
+    /// second counter added back under another name is the regression.
+    @Test func aTileCarriesTheViewCountAlone() {
+        func metrics(_ view: UIView) -> [PostMetricLabel] {
+            if let label = view as? PostMetricLabel { return [label] }
+            return view.subviews.flatMap(metrics)
+        }
+        let cell = PostGridTileCell(frame: CGRect(x: 0, y: 0, width: 160, height: 160))
+        cell.configure(
+            with: GalleryPost(
+                id: PostID("post-1"), kind: .photo, isRepost: false,
+                thumbnailURL: URL(string: "mock://photo/1"), caption: "A caption.",
+                publishedAtMS: 0, reactionCount: 160, commentCount: 12, viewCount: 4_200
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        cell.layoutIfNeeded()
+
+        let visible = metrics(cell.contentView).filter { isVisible($0, within: cell.contentView) }
+        #expect(visible.count == 1)
+        // And it closes the row, like the counters on both of a card's shapes.
+        let frame = visible[0].convert(visible[0].bounds, to: cell.contentView)
+        #expect(cell.contentView.bounds.maxX - frame.maxX < frame.minX)
     }
 }
 
@@ -212,14 +271,14 @@ struct MediaMetaPillContentTests {
         let boxes = chips(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
 
         // NO capsule at all — and the age still drawn, in its own bare box at
-        // the trailing edge. Counting boxes and capsules separately is the point
+        // the LEADING edge. Counting boxes and capsules separately is the point
         // of the test: a regression that gave the date a capsule back, or one
         // that dropped the date with the counters, moves exactly one of them.
         #expect(capsules.isEmpty)
         #expect(boxes.count == 1)
         let preview = try #require(cell.mediaHeroRect)
         let frame = boxes[0].convert(boxes[0].bounds, to: cell.contentView)
-        #expect(abs(preview.maxX - frame.maxX - PostGridListRowCell.mediaFurnitureInset) < 0.5)
+        #expect(abs(frame.minX - preview.minX - PostGridListRowCell.mediaFurnitureInset) < 0.5)
     }
 
     /// ⚠️ THE PREVIEW'S DATE IS WHITE ON A BLACK HALO, and the halo is not

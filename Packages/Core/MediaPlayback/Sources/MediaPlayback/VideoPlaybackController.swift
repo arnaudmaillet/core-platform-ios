@@ -19,6 +19,27 @@ public final class VideoPlaybackController {
     private var idlePlayers: [AVPlayer] = []
     /// Player currently bound to each render view.
     private var activePlayers: [ObjectIdentifier: AVPlayer] = [:]
+    /// ⚠️ WHO EACH KEY ACTUALLY NAMES — held weakly, and the reason it exists
+    /// is that `ObjectIdentifier` is an ADDRESS.
+    ///
+    /// Every table here is keyed by `ObjectIdentifier(view)` and none of them
+    /// keeps the view alive. A surface deallocated without `stop` — a feed page
+    /// torn down by a pop, a cell released mid-resolution — therefore leaves
+    /// its entries behind, and the allocator is free to hand the same address
+    /// to the NEXT render view. That view then inherits a stranger's player:
+    /// `play` finds a binding that is already "correct" and starts nothing, the
+    /// clip the viewer asked for never appears, and a flight that donates the
+    /// surface carries the PREVIOUS clip. Reported exactly that way — "the new
+    /// video's player disappeared, and the transition shows the old one".
+    ///
+    /// A weak box turns a stale key into a detectable one: `forgetDeadSurfaces`
+    /// sweeps every entry whose view is gone, giving its player back properly
+    /// instead of leaving it decoding for nobody.
+    private var surfaces: [ObjectIdentifier: WeakSurface] = [:]
+
+    private struct WeakSurface {
+        weak var view: VideoRenderView?
+    }
     /// Bumped on every play/stop for a view so a slow `playableURL` resolution
     /// that lost the race is discarded instead of attaching to a recycled cell.
     private var generation: [ObjectIdentifier: Int] = [:]
@@ -115,6 +136,10 @@ public final class VideoPlaybackController {
         _ mediaURL: URL, in view: VideoRenderView,
         peakBitRate: Double = 0, scope: String? = nil
     ) async {
+        // ⚠️ BEFORE THE KEY IS COMPUTED, because the key is an address and the
+        // previous tenant of this one may still be on file. Swept here, the
+        // bookkeeping below describes THIS view; swept later, it inherits.
+        forgetDeadSurfaces()
         let key = ObjectIdentifier(view)
         let token = (generation[key] ?? 0) + 1
         generation[key] = token
@@ -137,6 +162,7 @@ public final class VideoPlaybackController {
             parked.player.currentItem?.preferredPeakBitRate = peakBitRate
             bind(parked.player, to: view)
             activePlayers[key] = parked.player
+            surfaces[key] = WeakSurface(view: view)
             playingURL[key] = mediaURL
             playingScope[key] = scope
             parked.player.play()
@@ -177,6 +203,7 @@ public final class VideoPlaybackController {
             shared.currentItem?.preferredPeakBitRate = peakBitRate
             bind(shared, to: view)
             activePlayers[key] = shared
+            surfaces[key] = WeakSurface(view: view)
             playingURL[key] = mediaURL
             playingScope[key] = scope
             shared.play()
@@ -217,6 +244,7 @@ public final class VideoPlaybackController {
             shared.currentItem?.preferredPeakBitRate = peakBitRate
             bind(shared, to: view)
             activePlayers[key] = shared
+            surfaces[key] = WeakSurface(view: view)
             playingURL[key] = mediaURL
             playingScope[key] = scope
             shared.play()
@@ -239,6 +267,7 @@ public final class VideoPlaybackController {
         player.actionAtItemEnd = .none
         bind(player, to: view)
         activePlayers[key] = player
+        surfaces[key] = WeakSurface(view: view)
         playingURL[key] = mediaURL
         playingScope[key] = scope
         player.play()
@@ -321,6 +350,7 @@ public final class VideoPlaybackController {
         let key = ObjectIdentifier(view)
         bind(parked.player, to: view)
         activePlayers[key] = parked.player
+        surfaces[key] = WeakSurface(view: view)
         playingURL[key] = mediaURL
         parked.player.play()
         return true
@@ -364,7 +394,38 @@ public final class VideoPlaybackController {
 
     /// Unbinds `view` and returns its player to the pool. Also cancels any
     /// in-flight `play` for the view.
+    /// ⚠️ DROPS EVERY KEY WHOSE SURFACE IS GONE, and gives its player back.
+    ///
+    /// Called before any lookup that could ALIAS — see `surfaces`. The window
+    /// is not theoretical: a render view is deallocated with its cell, and
+    /// nothing in this file is notified, so the only honest moment to notice is
+    /// the next question somebody asks.
+    ///
+    /// The player is released exactly as `detach` would, minus the view calls a
+    /// deallocated view cannot receive: paused, un-looped, and returned to the
+    /// idle cache — unless another surface is still rendering it, which is the
+    /// same "one leaving, not the end of a playback" rule.
+    private func forgetDeadSurfaces() {
+        let dead = surfaces.filter { $0.value.view == nil }.map(\.key)
+        guard !dead.isEmpty else { return }
+        for key in dead {
+            VideoPlaybackTrace.emit(
+                "forget dead surface \(playingURL[key]?.lastPathComponent ?? "-")"
+            )
+            surfaces[key] = nil
+            generation[key] = nil
+            playingURL[key] = nil
+            playingScope[key] = nil
+            guard let player = activePlayers.removeValue(forKey: key) else { continue }
+            let stillInUse = activePlayers.values.contains { $0 === player }
+                || parked.map { $0.player === player } ?? false
+            guard !stillInUse else { continue }
+            retire(player)
+        }
+    }
+
     public func stop(_ view: VideoRenderView) {
+        forgetDeadSurfaces()
         let key = ObjectIdentifier(view)
         VideoPlaybackTrace.emit("stop \(playingURL[key]?.lastPathComponent ?? "-")")
         generation[key] = (generation[key] ?? 0) + 1
@@ -584,6 +645,7 @@ public final class VideoPlaybackController {
     /// real difference in behaviour rather than a difference in code paths.
     @discardableResult
     public func attachSurface(_ view: VideoRenderView, to mediaURL: URL) -> Bool {
+        forgetDeadSurfaces()
         guard let player = activePlayer(playing: mediaURL) else {
             VideoPlaybackTrace.emit("attachSurface REFUSED \(mediaURL.lastPathComponent)")
             return false
@@ -683,6 +745,7 @@ public final class VideoPlaybackController {
         // cannot attach a second item over the one just adopted.
         generation[key] = (generation[key] ?? 0) + 1
         activePlayers[key] = player
+        surfaces[key] = WeakSurface(view: view)
         playingURL[key] = mediaURL
         bind(player, to: view)
         player.play()
@@ -764,6 +827,7 @@ public final class VideoPlaybackController {
 
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
         view.detach(reason: "controller.stop")
+        surfaces[key] = nil
         playingURL[key] = nil
         playingScope[key] = nil
         guard let player = activePlayers.removeValue(forKey: key) else { return }
@@ -777,6 +841,13 @@ public final class VideoPlaybackController {
         // player, and tearing it down here would pause the asset — and return it
         // to the idle pool — while another surface is still rendering it. That
         // is a frozen picture with no cause visible from the side that froze it.
+        retire(player)
+    }
+
+    /// Winds a player down and returns it to the idle cache. The tail of
+    /// `detach`, shared with `forgetDeadSurfaces` — which reaches the same
+    /// state by a different route and must leave the pool in the same one.
+    private func retire(_ player: AVPlayer) {
         player.pause()
         removeLoop(for: player)
         player.replaceCurrentItem(with: nil)

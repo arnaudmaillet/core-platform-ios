@@ -533,15 +533,14 @@ final class ProfileViewController: UIViewController {
                     // applies its pending reveal on `viewDidDisappear`, which
                     // is before any of this is asked.
                     dismissalDidEnd: { [weak self] committed in
-                        // The card is alone again: bring in the two things it
-                        // has and the page never did — its metric line and its
-                        // affordance. Deferred by a turn, because this fires
-                        // immediately before `completeTransition` re-parents
-                        // the grid and cancels animations just started on its
-                        // cells.
+                        // ⚠️ NOTHING IS BROUGHT IN HERE any more. The metric
+                        // line used to be faded up once the card was alone, on
+                        // the reasoning that the page never had one — which is
+                        // true of the PUSH and irrelevant here: a dismissal's
+                        // window carries a whole row, metric line included, so
+                        // the fade blinked something already on screen.
                         guard committed else { return }
                         DispatchQueue.main.async {
-                            self?.galleryPager.fadeInRevealedFurniture(for: post.id)
                             #if DEBUG
                             // Where the row ACTUALLY is once everything has
                             // settled, against the rect the close was aimed at.

@@ -25,4 +25,28 @@ protocol SnapCellLifecycle: AnyObject {
     ///   cell fully off screen is the other case, and there the loan genuinely
     ///   has to go back: the grid behind is waiting for it.
     func didResignActive(releasingPlayback: Bool)
+
+    /// The screen this cell lives on is LEAVING — popped or dismissed, not
+    /// merely covered — so give back every player the viewer is not looking at.
+    ///
+    /// ⚠️ A THIRD CASE, and it is the one the two above cannot express.
+    ///
+    /// Resigning without releasing is right for a page swipe and for a screen
+    /// that will come back: a paused clip keeps its surface, its frame and its
+    /// playhead, and returning to it is free. A screen being popped never comes
+    /// back — but it takes the same route, so a gallery's kept neighbours stayed
+    /// bound to a decoder nothing could reach again. Measured after opening and
+    /// closing one gallery: players still held by a controller on its way out,
+    /// and the next tile to be tapped was the one that could not get a decoder.
+    ///
+    /// The WATCHED surface is deliberately not released here: the dismissal
+    /// flight is carrying that very player home to the grid, and taking it back
+    /// mid-flight is the thumbnail this whole seam exists to avoid. It goes
+    /// through the handoff, as it always did.
+    func releaseRetainedNeighbourClips()
+}
+
+extension SnapCellLifecycle {
+    /// A cell with no clips to keep has nothing to give back.
+    func releaseRetainedNeighbourClips() {}
 }

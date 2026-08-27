@@ -43,6 +43,62 @@ struct CarouselPagingLimitTests {
         #expect(target.x == view.debugOffset(forPage: 5))
     }
 
+    /// ⚠️ AND THE DRAG ITSELF COUNTS AS PART OF THE GESTURE.
+    ///
+    /// The clamp allows one page either side of an anchor, and the anchor used
+    /// to be read when the finger LIFTED. By then a long swipe has already
+    /// carried the content a page along, so the clamp permitted one MORE and
+    /// the gesture landed two pages away — "if I slide hard I scroll several
+    /// photos at once". Every test above this one set the offset to the anchor
+    /// page and never moved it, so none of them could see it.
+    ///
+    /// Here the content is moved between the two delegate calls, which is what
+    /// a real drag does.
+    @Test func aLongDragEndingInAFlickStillMovesOnlyOnePage() {
+        let view = carousel(pages: 12)
+        view.setPage(4, animated: false)
+        let scrollView = UIScrollView()
+        scrollView.contentOffset = CGPoint(x: view.debugOffset(forPage: 4), y: 0)
+        view.scrollViewWillBeginDragging(scrollView)
+        // The finger has dragged a full page before letting go.
+        scrollView.contentOffset = CGPoint(x: view.debugOffset(forPage: 5), y: 0)
+
+        var target = CGPoint(x: view.debugOffset(forPage: 8), y: 0)
+        withUnsafeMutablePointer(to: &target) {
+            view.scrollViewWillEndDragging(
+                scrollView, withVelocity: CGPoint(x: 6, y: 0), targetContentOffset: $0
+            )
+        }
+
+        #expect(target.x == view.debugOffset(forPage: 5))
+    }
+
+    /// ⚠️ AND THE ANCHOR IS SPENT, so the NEXT gesture measures from where this
+    /// one landed rather than from where the last one began.
+    ///
+    /// A stale anchor would pin the carousel to one page for ever: every
+    /// subsequent flick would be clamped to within one page of a gesture the
+    /// viewer finished long ago.
+    @Test func eachGestureAnchorsWhereItStarts() {
+        let view = carousel(pages: 12)
+        let scrollView = UIScrollView()
+        var landed = 0
+
+        for expected in 1...3 {
+            scrollView.contentOffset = CGPoint(x: view.debugOffset(forPage: landed), y: 0)
+            view.scrollViewWillBeginDragging(scrollView)
+            scrollView.contentOffset = CGPoint(x: view.debugOffset(forPage: landed + 1), y: 0)
+            var target = CGPoint(x: view.debugOffset(forPage: 11), y: 0)
+            withUnsafeMutablePointer(to: &target) {
+                view.scrollViewWillEndDragging(
+                    scrollView, withVelocity: CGPoint(x: 8, y: 0), targetContentOffset: $0
+                )
+            }
+            #expect(target.x == view.debugOffset(forPage: expected))
+            landed = expected
+        }
+    }
+
     /// And the same in the other direction, asserted beside it: a rule applied
     /// to one sign only is half a rule.
     @Test func aViolentFlickBackwardsAlsoMovesOnlyOnePage() {
@@ -241,6 +297,117 @@ struct CarouselPagingLimitTests {
         #expect(sizes.last ?? 0 < MediaPageIndicatorView.dotDiameter)
     }
 
+    /// ⚠️ AND THE TAPER IS TWO DOTS DEEP, not one.
+    ///
+    /// One step from full size to the smallest reads as a row that was CUT; a
+    /// second dot at an intermediate size reads as a row that continues. The
+    /// tests above assert only the outermost dot, so they pass on either shape
+    /// — which is exactly why this one asserts the whole profile.
+    @Test func theRunTapersOverTwoDotsOnEachContinuingSide() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.chipWidth(forDots: 5), height: 6)
+        dots.configure(count: 12)
+        dots.setCurrent(6)
+        dots.layoutIfNeeded()
+
+        let sizes = dots.debugDotSizes
+        let full = MediaPageIndicatorView.dotDiameter
+        #expect(sizes.count == 5)
+        // Small, semi, full — the slope on the side the viewer came from.
+        #expect(sizes[0] < sizes[1])
+        #expect(sizes[1] < sizes[2])
+        #expect(abs(sizes[2] - full) < 0.5)
+        // ⚠️ And the far side tapers in ONE step here, because the slot its
+        // second step would use is where the MARK is — and the mark never
+        // shrinks (see `theMarkIsNeverTapered`). The window trails the gesture,
+        // so this is the ordinary case rather than a corner of it.
+        #expect(abs(sizes[3] - full) < 0.5)
+        #expect(sizes[4] < sizes[3])
+        // The two ends still meet the run at the same size.
+        #expect(abs(sizes[0] - sizes[4]) < 0.5)
+    }
+
+    /// ⚠️ THE MARK IS FULL SIZE WHEREVER THE WINDOW PUTS IT.
+    ///
+    /// The taper says "the run continues past here" and the mark says "you are
+    /// here"; shrinking the second to tell you the first trades the one thing
+    /// the indicator exists for against a hint its neighbours already give.
+    ///
+    /// Walked across the whole run rather than asserted at one page, because
+    /// which slot the mark occupies is decided by the windowing rule — the very
+    /// thing this must not depend on.
+    @Test func theMarkIsNeverTapered() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.chipWidth(forDots: 5), height: 6)
+        dots.configure(count: 12)
+
+        for page in 0..<12 {
+            dots.setCurrent(page)
+            dots.layoutIfNeeded()
+            let mark = dots.debugAllDotFrames[page]
+            #expect(abs(mark.width - MediaPageIndicatorView.dotDiameter) < 0.5)
+        }
+        // And walked BACK, since the window sits on the other side of the mark
+        // when the direction reverses.
+        for page in (0..<12).reversed() {
+            dots.setCurrent(page)
+            dots.layoutIfNeeded()
+            let mark = dots.debugAllDotFrames[page]
+            #expect(abs(mark.width - MediaPageIndicatorView.dotDiameter) < 0.5)
+        }
+    }
+
+    /// ⚠️ AND ONLY ON THE SIDE THAT CONTINUES — including the middle dot.
+    ///
+    /// At the first page there is nothing before, so the leading THREE are full
+    /// size and the taper is on the trailing end alone. A taper drawn on a side
+    /// with nothing past it says "there is more" where there is not.
+    @Test func theTaperIsOneSidedAtTheEndsOfTheRun() {
+        let dots = PageDotsView()
+        dots.frame = CGRect(x: 0, y: 0, width: PageDotsView.chipWidth(forDots: 5), height: 6)
+        dots.configure(count: 12)
+        dots.setCurrent(0)
+        dots.layoutIfNeeded()
+
+        let sizes = dots.debugDotSizes
+        let full = MediaPageIndicatorView.dotDiameter
+        #expect(sizes.prefix(3).allSatisfy { abs($0 - full) < 0.5 })
+        #expect(sizes[3] < full)
+        #expect(sizes[4] < sizes[3])
+    }
+
+    /// ⚠️ NO INDICATOR EVER WEARS A GROUND, on any surface, in any state.
+    ///
+    /// Every other chip in that row is a NUMBER, and a number over a photograph
+    /// needs a floor to be legible on. The dots are their own contrast, and
+    /// what the capsule added was a claim that something could be pressed —
+    /// made permanently, in the middle of a row that is otherwise furniture.
+    ///
+    /// Asserted on the effect the chip is WEARING rather than on a flag, and
+    /// through a scrub rather than at rest alone: this went through a version
+    /// where the ground appeared under the finger, so "at rest it is bare" is
+    /// exactly the half that could pass while the other half remained.
+    @Test func noIndicatorEverWearsAGround() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
+        window.isHidden = false
+        let chip = MediaPageIndicatorView()
+        chip.configure(count: 8, current: 0)
+        window.addSubview(chip)
+        chip.frame = CGRect(x: 0, y: 0, width: 120, height: 20)
+        chip.layoutIfNeeded()
+
+        #expect(chip.effect == nil)
+        #expect(chip.makeGround() == nil)
+
+        chip.debugScrub(.began, atX: 60)
+        #expect(chip.effect == nil)
+        chip.debugScrub(.changed, atX: 80)
+        #expect(chip.effect == nil)
+        chip.debugScrub(.ended, atX: 80)
+        #expect(chip.effect == nil)
+        window.isHidden = true
+    }
+
     /// A gallery that fits has no continuation on either side, so nothing is
     /// cut — the shrink must mean something rather than being decoration.
     @Test func aGalleryThatFitsHasNoShrunkenEdges() {
@@ -352,11 +519,15 @@ struct CarouselPagingLimitTests {
         dots.setCurrent(6)
         dots.layoutIfNeeded()
 
-        // Window of 5 centred on page 6 starts at 4, so pages 3 and 9 are the
-        // dots one slot outside it on either side.
+        // ⚠️ WHICH pages sit one slot out is ASKED, not assumed: the window
+        // trails the direction of travel, so hard-coding the pair either side
+        // would pin whichever rule was in force the day it was written — and
+        // this test is about the RUNWAY, not about where the window starts.
+        let visible = 5
+        let start = dots.debugWindowStart
         let frames = dots.debugAllDotFrames
-        #expect(frames[3].minX > 0)
-        #expect(frames[9].maxX < dots.bounds.width)
+        #expect(frames[start - 1].minX > 0)
+        #expect(frames[start + visible].maxX < dots.bounds.width)
     }
 
     /// And a gallery that fits is not masked at all: nothing arrives or leaves,

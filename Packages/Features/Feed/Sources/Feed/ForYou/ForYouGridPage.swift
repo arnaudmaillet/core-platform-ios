@@ -638,11 +638,53 @@ final class ForYouGridPage: UIView {
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
         preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
         #if DEBUG
+        logRejectedCandidates(chosen: Set(candidates.map(\.id)))
         auditCarouselPlayback()
         #endif
     }
 
     #if DEBUG
+    /// ⚠️ THE DENOMINATOR THE RANKING LOG NEVER HAD.
+    ///
+    /// `[grid-rank]` reports what was CHOSEN, and an empty ranking reads
+    /// exactly like a page of photographs — which is how "no video row on this
+    /// page plays at all" stayed invisible while the log looked clean. Each
+    /// rejection below is a different reason a row can hold a clip and still
+    /// never reach the coordinator, and each is a different bug when it is the
+    /// wrong answer.
+    private func logRejectedCandidates(chosen: Set<PostID>) {
+        guard ProcessInfo.processInfo.arguments.contains("-grid-playback-log"),
+              !showsSkeleton
+        else { return }
+        let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        for indexPath in collectionView.indexPathsForVisibleItems.sorted() {
+            let index = flatIndex(for: indexPath)
+            guard posts.indices.contains(index) else { continue }
+            let post = posts[index]
+            guard !chosen.contains(post.id),
+                  let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell
+            else { continue }
+            let row = cell as? PostGridListRowCell
+            let held = playableURL(for: post, in: cell)
+            // A row with no clip anywhere is the ordinary case and says
+            // nothing; everything else is worth a line.
+            guard held != nil || post.kind == .video || post.isCollection else { continue }
+            let frame = cell.convert(cell.videoMediaRect, to: collectionView)
+            let visible = frame.intersection(viewport)
+            let fraction = visible.isNull || frame.width <= 0 || frame.height <= 0
+                ? 0
+                : (visible.height * visible.width) / (frame.height * frame.width)
+            print("[grid-reject] \(post.id.rawValue) kind=\(post.kind)"
+                + " collection=\(post.isCollection ? "Y" : "N")"
+                + " carousel=\(row.map { $0.showsCarousel ? "Y" : "N" } ?? "-")"
+                + " page=\(row?.currentPageVideoURL?.lastPathComponent ?? "nil")"
+                + " held=\(held?.lastPathComponent ?? "nil")"
+                + " cover=\(hasCover(for: post, in: cell) ? "Y" : "N")"
+                + " flying=\(post.id == heroFlyingPostID ? "Y" : "N")"
+                + String(format: " frac=%.2f", fraction))
+        }
+    }
+
     /// Asks every visible collection row the audit's four questions.
     ///
     /// Run after the reconcile rather than inside it: what matters is the state
@@ -877,6 +919,10 @@ final class ForYouGridPage: UIView {
     /// grid's full complement of players after a dismissal.
     func endPlaybackHandoff() {
         playback?.endHandoff()
+        // The claim ends with the round trip: the post is back to being one
+        // tile among others, and holding the claim would pin a player to
+        // whatever the viewer opened last, for ever.
+        playback?.focus(nil)
         updateAutoplay()
         #if DEBUG
         logVisibility("return-complete")
@@ -1032,6 +1078,14 @@ final class ForYouGridPage: UIView {
               let url = row?.currentPageVideoURL ?? posts[index].videoURL
         else { return nil }
         let made = playback.makeAttachedSurface(for: postID, url: url)
+        // Nothing to join. Ask for the player rather than reporting its
+        // absence: this call is repeated every frame of the flight (see
+        // `ZoomLiveMediaRetry`), so a start kicked here is picked up by the
+        // next ask — which is the difference between a hero that shows video
+        // 100ms in and one that shows a poster all the way home.
+        if made == nil, let row {
+            playback.demandFlightPlayback(of: postID, url: url, in: row)
+        }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print(String(format: "[zoom-live] %.3f producer GRID liveFlightSurface -> %@",
@@ -1324,21 +1378,6 @@ final class ForYouGridPage: UIView {
         return row?.currentMediaPage
     }
 
-    /// Brings the landed row's own furniture in gently — see
-    /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that
-    /// is not realized, which is the honest answer: nothing is on screen to
-    /// fade.
-    func fadeInRevealedFurniture(for postID: PostID) {
-        let row = cell(for: postID) as? PostGridListRowCell
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
-            print("[text-reveal] landing fade: row=\(row == nil ? "MISSING" : "found")"
-                  + " window=\(row?.window == nil ? "no" : "yes")")
-        }
-        #endif
-        row?.fadeInRevealedFurniture()
-    }
-
     /// Where the page stops matching the row, in the row's own space — the
     /// reveal's cut line. `nil` when the row is not realized.
     /// The card a dismissal carries home, drawn at the ROW's own width so its
@@ -1361,6 +1400,16 @@ final class ForYouGridPage: UIView {
             // is showing the whole thing.
             captionExpanded: captionExpansion.isExpanded(postID),
             showsAuthorMenu: showsAuthorMenu(for: post),
+            // ⚠️ Both controls, because every row on THIS surface wires both —
+            // see `configure`, where the repost and bookmark handlers are set
+            // unconditionally. The saved state is read from the same store the
+            // row reads, so a post saved a moment ago flies home filled in.
+            actions: .init(
+                repost: true, bookmark: true, saved: bookmarks.isSaved(postID.rawValue)
+            ),
+            // The row's own date when there is a row — see
+            // `PostGridListRowCell.renderedAgeText`.
+            ageText: (cell(for: postID) as? PostGridListRowCell)?.renderedAgeText,
             // The ROW's own height when it is realized — see the profile's
             // twin, and `RevealDismissCardView.init`.
             height: cell(for: postID)?.bounds.height
@@ -1488,14 +1537,26 @@ final class ForYouGridPage: UIView {
     /// lets the rest of the machinery go on addressing cells by post with no
     /// idea this happened.
     ///
-    /// **Geometry cannot shift.** The chaotic layout maps *index* to frame, so
-    /// exchanging the contents of two indices moves nothing. What does change is
-    /// the shape each of the two posts is cropped to: `PostGridSliceArrangement`
-    /// paired them with slots chosen for their own aspects, and a swap trades
-    /// those pairings.
+    /// **Geometry cannot shift — in the MOSAIC.** The chaotic layout maps
+    /// *index* to frame, so exchanging the contents of two indices moves
+    /// nothing. What does change is the shape each of the two posts is cropped
+    /// to: `PostGridSliceArrangement` paired them with slots chosen for their
+    /// own aspects, and a swap trades those pairings.
+    ///
+    /// ⚠️ IN A LIST IT SHIFTS, AND THAT IS ALLOWED. This was gated to `.grid`
+    /// on the reasoning above, which left the list — where a viewer scrolls a
+    /// post open, pages to another and closes it — landing on the card they
+    /// LEFT rather than the one they ended on. Rows self-size, so the adopted
+    /// post's height is its own and everything below it moves.
+    ///
+    /// What matters is that nothing the return depends on moves: rows ABOVE the
+    /// slot are untouched, so the slot's origin is exactly where it was, and
+    /// the landing rect is read after this returns. What shifts is off the
+    /// bottom of a screen the flight is covering — and it has to shift, because
+    /// the alternative is a card of the wrong height standing in for the post.
     @discardableResult
     func adoptPost(_ postID: PostID, intoSlotOf occupantID: PostID) -> Bool {
-        guard style == .grid, !showsSkeleton,
+        guard !showsSkeleton,
               let slot = posts.firstIndex(where: { $0.id == occupantID }),
               let current = posts.firstIndex(where: { $0.id == postID }),
               slot != current
@@ -2064,6 +2125,20 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         let index = flatIndex(for: indexPath)
         guard posts.indices.contains(index) else { return }
         pendingRevealPostID = posts[index].id
+        // ⚠️ CLAIM THE POOL BEFORE THE FLIGHT IS STAGED.
+        //
+        // A hero can only fly what is already playing: the card asks this page
+        // for a live surface while the flight is being built, and the answer is
+        // nil for a tile that holds no player. Until the tap is known this tile
+        // competed on distance like any other, so the one that MUST be playing
+        // could be the one that was not — the flight then carried the thumbnail.
+        //
+        // Claimed and reconciled in the same breath, so the grant is at least
+        // in flight by the time the card asks. It cannot always be finished —
+        // a cold tile has to resolve a URL first — which is why the flight
+        // keeps asking (see `ZoomFlight`'s live-media retry).
+        playback?.focus(posts[index].id)
+        updateAutoplay()
         if showingComments, let openComments = onItemCommentsTapped {
             openComments(index)
         } else {

@@ -32,39 +32,14 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// itself would be a second thing deciding where the pages are.
     public var onPageRequested: ((Int) -> Void)?
 
-    /// Asks for the system's interactive glass instead of the card's flat
-    /// ground.
+    /// The chip's press response, and now the ONLY one it has.
     ///
-    /// ⚠️ FOR THE POST SCREEN ONLY, and the distinction is the one this
-    /// package's chip rule already draws. On a CARD the chip sits on the card's
-    /// own fill, where a material resolves to that fill and disappears — which
-    /// is why the card's chips carry a flat ground rather than a lens. Over a
-    /// full-bleed photograph there IS something behind it, so glass is finally
-    /// the honest answer: it takes its cue from the picture instead of pretending
-    /// to a colour of its own.
-    ///
-    /// `isInteractive` is the system's own press response — the material flexes
-    /// under a finger. That is the whole of the feedback; there is no scale or
-    /// spring of ours near it, and there must not be: a transform on a glass
-    /// lens is the thing this codebase already tried once and rejected.
-    public func useInteractiveGlass() {
-        prefersInteractiveGlass = true
-        if window != nil { effect = makeGround() }
-    }
-
-    private var prefersInteractiveGlass = false
-
-    /// The chip's own press response, for the surfaces that have no glass to
-    /// give them one.
-    ///
-    /// ⚠️ ONLY WHERE THERE IS NO LENS. On the post screen the chip IS glass, and
-    /// `isInteractive` already flexes the material under a finger — adding a
-    /// transform there would be a second effect fighting the system's, and this
-    /// codebase has already tried transforming a glass lens once and rejected
-    /// it. On a card the chip is a flat capsule with no such response, so it
-    /// gets one of its own: the same read, arrived at differently.
+    /// It used to be skipped on the post screen, where the chip was a glass
+    /// lens and `isInteractive` flexed the material under a finger — a
+    /// transform there would have been a second effect fighting the system's.
+    /// There is no lens on either surface any more, so the dots' own movement
+    /// is what answers the finger everywhere.
     private func applyPressFeedback() {
-        guard !prefersInteractiveGlass else { return }
         UIView.animate(
             withDuration: 0.5, delay: 0,
             usingSpringWithDamping: 0.52, initialSpringVelocity: 0.9,
@@ -86,16 +61,22 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// arithmetic reads either way.
     private static let pressedScale: CGFloat = 1.26
 
-    override public func makeGround() -> UIVisualEffect? {
-        guard prefersInteractiveGlass else { return super.makeGround() }
-        // Shape before material, for the reason `PagedTabBar` records: a glass
-        // effect switched on over a layer that has not been given its radius
-        // yet draws one frame of hard corners.
-        layoutIfNeeded()
-        let glass = UIGlassEffect(style: .regular)
-        glass.isInteractive = true
-        return glass
-    }
+    /// ⚠️ NO GROUND, ON ANY SURFACE, IN ANY STATE.
+    ///
+    /// Every other chip in this row is a NUMBER, and a number over a photograph
+    /// needs a floor to be legible on. The dots do not — they are their own
+    /// contrast, light ink over a counter-toned halo, the same treatment the
+    /// date wears for the same reason. What the capsule added was a claim that
+    /// something here could be pressed, made permanently, in the middle of a
+    /// row that is otherwise furniture.
+    ///
+    /// This went through a shorter-lived version where the ground appeared
+    /// under a finger and faded out behind it. It is recorded because the
+    /// reasoning survives the decision: a lens opening in the middle of a
+    /// caption is a strange answer to a drag, and the dots moving under the
+    /// finger — see `applyPressFeedback` — was the feedback being asked for all
+    /// along.
+    override public func makeGround() -> UIVisualEffect? { nil }
 
     /// The scrub, exposed so a host can make its OWN pan yield to it.
     ///
@@ -380,6 +361,9 @@ final class PageDotsView: UIView {
 
     private var count = 0
     private var current = 0
+    /// Which way the viewer last moved: +1 forward, -1 back, 0 before anyone
+    /// has moved at all. See `slotBounds`.
+    private var windowOrigin = 0
     private var dots: [UIView] = []
 
     /// ⚠️ THE STRIP ENDS IN A FADE, NOT IN A CUT.
@@ -447,10 +431,34 @@ final class PageDotsView: UIView {
     func configure(count: Int) {
         guard count != self.count else { return }
         self.count = count
+        // ⚠️ A NEW POST HAS NOT BEEN TRAVELLED YET. Inherited from the row's
+        // previous tenant, the direction would offset the window of a viewer
+        // who has not touched this one — the recycled-cell fault this file's
+        // neighbours have met in half a dozen other shapes.
+        windowOrigin = 0
         dots.forEach { $0.removeFromSuperview() }
         dots = (0..<count).map { _ in
             let dot = UIView()
-            dot.backgroundColor = PostMetaPillView.foreground
+            // ⚠️ THE DATE'S INK, because the dots stand on the same thing the
+            // date does: a photograph.
+            //
+            // They were `PostMetaPillView.foreground` — a dark grey chosen for
+            // a LIGHT material — which was right for exactly as long as there
+            // was always a capsule under them. There is not: the ground now
+            // arrives with the finger, so at rest these are dark marks on
+            // whatever the picture happens to be, and on a dark frame they were
+            // measured as invisible. A control nobody can see is a worse answer
+            // than the capsule that was removed.
+            //
+            // Light fill plus a counter-toned halo is what `MediaDateInk`
+            // already worked out for the same problem, and it holds under the
+            // material too: that ground is translucent and follows the picture,
+            // so ink that survives the picture survives the ground.
+            dot.backgroundColor = MediaDateInk.colour
+            dot.layer.shadowColor = MediaDateInk.halo.cgColor
+            dot.layer.shadowOffset = .zero
+            dot.layer.shadowRadius = MediaDateInk.haloRadius
+            dot.layer.shadowOpacity = MediaDateInk.haloOpacity
             dot.layer.cornerRadius = MediaPageIndicatorView.dotDiameter / 2
             addSubview(dot)
             return dot
@@ -461,21 +469,23 @@ final class PageDotsView: UIView {
 
     func setCurrent(_ page: Int) {
         guard page != current else { return }
-        let previousStart = Self.windowStart(
-            current: current,
-            visible: Self.visibleDots(in: windowWidth, count: count),
-            count: count
-        )
+        let previousStart = windowOrigin
         current = page
         // ⚠️ EVERYTHING — position, size and opacity — is decided in
         // `layoutSubviews` and nowhere else. Opacity was set here as well, and
         // two places deciding one dot's appearance is how an edge dot ended up
         // full-size and half-lit at the same time.
-        let start = Self.windowStart(
+        // ⚠️ REMEMBERED, because `layoutSubviews` decides the window too and the
+        // two must agree — and because the rule is defined against the window
+        // the viewer is already looking at. Recomputed from the page alone it
+        // would be a fixed slot again, which is the whole of what this replaces.
+        windowOrigin = Self.windowStart(
             current: page,
             visible: Self.visibleDots(in: windowWidth, count: count),
-            count: count
+            count: count,
+            from: windowOrigin
         )
+        let start = windowOrigin
         // ⚠️ TWO DURATIONS, because two different things move.
         //
         // The mark passing between dots that stay put is a change of STATE; the
@@ -489,6 +499,14 @@ final class PageDotsView: UIView {
         // the mark is where the finger is on the frame it gets there, and only
         // its APPEARANCE catches up.
         setNeedsLayout()
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            let visible = Self.visibleDots(in: windowWidth, count: count)
+            CarouselPlaybackAudit.trace(
+                "dots page=\(page) start=\(start) slot=\(page - start) visible=\(visible)"
+            )
+        }
+        #endif
         let travelling = start != previousStart
         UIView.animate(
             withDuration: travelling ? 0.44 : 0.32, delay: 0,
@@ -526,12 +544,39 @@ final class PageDotsView: UIView {
         return min(count, max(fitted, minimumVisibleDots))
     }
 
-    /// The first dot of the window, chosen so the current page sits in the
-    /// middle of it and the window never runs off either end.
-    static func windowStart(current: Int, visible: Int, count: Int) -> Int {
+    /// The slots the mark is allowed to occupy — one in from each end.
+    ///
+    /// ⚠️ THE MARK WALKS; THE WINDOW ONLY FOLLOWS WHEN IT HAS TO.
+    ///
+    /// Recomputing the window from the current page alone gives the mark a
+    /// FIXED slot, and then the whole row slides under it on every page change
+    /// — so the one thing actually happening, the viewer moving along the run,
+    /// is the one thing the indicator does not show. Worse when the direction
+    /// changes: the fixed slot moves from one side of the middle to the other,
+    /// so a single page back jumped the row by TWO. Reported exactly that way,
+    /// as the mark landing on the second dot where the third was expected.
+    ///
+    /// So the window is KEPT and only pushed. The mark moves one dot per page
+    /// until it reaches the slot one in from the end it is heading for, and
+    /// from then on the row scrolls under it — which is where "fourth of five
+    /// going forward, second going back" comes from: it is the STEADY STATE of
+    /// travelling in one direction, not a rule applied per page.
+    ///
+    /// Both bounds collapse gracefully on a narrow chip: with three dots the
+    /// mark holds the middle, with two the trailing one, with one there is
+    /// nowhere to walk.
+    static func slotBounds(visible: Int) -> (lowest: Int, highest: Int) {
+        let lowest = min(1, max(visible - 1, 0))
+        return (lowest, max(visible - 2, lowest))
+    }
+
+    /// The first dot of the window: the previous one, moved as little as the
+    /// mark's bounds allow, and never off either end of the run.
+    static func windowStart(current: Int, visible: Int, count: Int, from previous: Int) -> Int {
         guard count > visible else { return 0 }
-        let half = visible / 2
-        return min(max(current - half, 0), count - visible)
+        let bounds = slotBounds(visible: visible)
+        let pushed = min(max(previous, current - bounds.highest), current - bounds.lowest)
+        return min(max(pushed, 0), count - visible)
     }
 
     /// How small an edge dot goes when the run continues past it.
@@ -541,6 +586,19 @@ final class PageDotsView: UIView {
     /// it says "five pages, you are on the first". A shrunken dot at the edge
     /// says the run is cut off there, and the eye reads it without being told.
     static let edgeDotScale: CGFloat = 0.55
+
+    /// The step between `edgeDotScale` and full size, worn by the dot one in
+    /// from each continuing end.
+    ///
+    /// Half way in AREA rather than in diameter, which is what the eye reads:
+    /// the dots are filled circles, so a linear midpoint between the two
+    /// diameters looks closer to the small one than to the large. `sqrt` of the
+    /// mid-area lands where "half way between them" actually looks.
+    static let penultimateDotScale: CGFloat = ((edgeDotScale * edgeDotScale + 1) / 2).squareRoot()
+
+    /// The window the view actually settled on, so a test can ask WHICH dots
+    /// are on screen without re-deriving the walk that produced them.
+    var debugWindowStart: Int { windowOrigin }
 
     /// The drawn size of each VISIBLE dot, in order — how a test asks which
     /// ones were cut without reading the layout arithmetic back to itself.
@@ -552,7 +610,10 @@ final class PageDotsView: UIView {
         super.layoutSubviews()
         guard !dots.isEmpty else { return }
         let visible = Self.visibleDots(in: windowWidth, count: count)
-        let start = Self.windowStart(current: current, visible: visible, count: count)
+        // The window the last page change settled on — never recomputed here,
+        // or an unrelated layout pass would slide the row under a finger that
+        // has not moved.
+        let start = min(max(windowOrigin, 0), max(count - visible, 0))
         let diameter = MediaPageIndicatorView.dotDiameter
         let spacing = MediaPageIndicatorView.dotSpacing
         // Centred in whatever width the row left: a window narrower than the
@@ -570,11 +631,43 @@ final class PageDotsView: UIView {
             // simply are not seen — and when the window shifts they travel in
             // from where they already were.
             let isVisible = offset >= 0 && offset < visible
-            // The outermost dot shrinks when the run continues past it, on
-            // whichever side it continues.
-            let continuesBefore = offset == 0 && start > 0
-            let continuesAfter = offset == visible - 1 && start + visible < count
-            let scale: CGFloat = (continuesBefore || continuesAfter) ? Self.edgeDotScale : 1
+            // ⚠️ THE RUN TAPERS OVER TWO DOTS, not one.
+            //
+            // The outermost dot shrinking says "there is more past here"; the
+            // one beside it, at an intermediate size, says how the row is
+            // GOING. A single step from full size to the smallest reads as a
+            // dot that has been cut off, and one taper on each end reads as a
+            // row that continues — the same information, told as a slope
+            // instead of a cliff.
+            //
+            // Both tiers are conditional on the same thing: the run continuing
+            // past that end. A window sitting on the true first or last page
+            // tapers on one side only, because on the other there is genuinely
+            // nothing more.
+            let continuesBefore = start > 0
+            let continuesAfter = start + visible < count
+            // ⚠️ THE MARK NEVER TAPERS, wherever the window happens to put it.
+            //
+            // The taper says "the run continues past here"; the mark says
+            // "you are here". Shrinking the second to tell you the first
+            // trades the one thing the indicator exists for against a hint
+            // its neighbours are already giving — and the two collide
+            // constantly rather than rarely, because the window trails the
+            // gesture: the current page sits one slot in from an end, which is
+            // exactly the slot the taper's second step lands on.
+            let scale: CGFloat
+            if index == current {
+                scale = 1
+            } else {
+                switch offset {
+                case 0 where continuesBefore, visible - 1 where continuesAfter:
+                    scale = Self.edgeDotScale
+                case 1 where continuesBefore, visible - 2 where continuesAfter:
+                    scale = Self.penultimateDotScale
+                default:
+                    scale = 1
+                }
+            }
             // ⚠️ SCALED BY TRANSFORM, NEVER BY RESIZING.
             //
             // A dot laid out at a smaller SIZE needs a smaller corner radius to

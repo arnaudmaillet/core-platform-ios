@@ -807,8 +807,25 @@ final class ForYouViewController: UIViewController {
         textSlideDismissal.revealGeometry = nil
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
+        // ⚠️ THE POST THE CLOSE FLIES TO IS NOT ALWAYS THE ONE THAT OPENED.
+        //
+        // The feed is a pager: open a post, swipe to the next, and the card the
+        // viewer is entitled to land on is the one they ENDED on. Every hook
+        // below used to be bound to the id captured at the tap, so a dismissal
+        // after any paging flew home to the wrong card — showing another post's
+        // words, at another post's height, and revealing a row the viewer had
+        // not been reading.
+        //
+        // A captured `var` rather than a parameter, because the hooks are
+        // escaping closures that all have to see the same answer, and the
+        // answer is decided between them: `willStageDismissal` adopts the
+        // landed post into the departure slot and rewrites this, and everything
+        // downstream — the rect, the stand-in, the concealment — reads it back.
+        // It is the same shape `ForYouGridZoomSource.anchorID` already has for
+        // the hero.
+        var anchorID = postID
         func sourceFrame(_ space: UICoordinateSpace) -> CGRect? {
-            pager.page(for: format)?.textRowFrame(for: postID, in: space)
+            pager.page(for: format)?.textRowFrame(for: anchorID, in: space)
         }
         guard TextRevealInstaller.isEnabled,
               let page = pager.page(for: format),
@@ -877,13 +894,13 @@ final class ForYouViewController: UIViewController {
                 // read off the page, so a viewer who scrolled the comments
                 // still lands on the card they came from — see
                 // `RevealDismissCardView`.
-                makeDismissStandIn: { [weak page] in page?.makeDismissStandIn(for: postID) },
+                makeDismissStandIn: { [weak page] in page?.makeDismissStandIn(for: anchorID) },
                 // The reveal's OWN concealment slot, not the hero's — see
                 // `ForYouGridPage.revealConcealedPostID`. Applied on every
                 // dequeue too, so a row that recycles mid-flight comes back
                 // still hidden.
                 setConcealed: { [weak page] concealed in
-                    page?.setRevealConcealed(concealed, for: postID)
+                    page?.setRevealConcealed(concealed, for: anchorID)
                 },
                 presentationDidEnd: { [weak self] landed in
                     // The flight faded the bar to nothing; take it down for
@@ -897,30 +914,41 @@ final class ForYouViewController: UIViewController {
                 // animates the safe area and this collection view adds it to
                 // its own inset, so an unpinned grid keeps drifting under a
                 // close that has already measured where it is going.
-                willStageDismissal: { [weak page] in
+                willStageDismissal: { [weak page, weak feed] in
                     log("freeze    pre")
                     page?.beginHeroFreeze()
+                    // ⚠️ THE CARD THE VIEWER ENDED ON TAKES THE DEPARTURE SLOT,
+                    // before anything measures where the close is going.
+                    //
+                    // The slot is where they left from and is still exactly
+                    // where they left it, so the swap costs no scrolling and
+                    // the card flies home to the frame it launched from. The
+                    // alternative — flying to wherever the landed post happens
+                    // to sit — moves the whole grid under a viewer who is
+                    // holding it.
+                    //
+                    // Ordered first: `anchorID` is what the rect, the stand-in
+                    // and the concealment all resolve through, and every one of
+                    // them is read after this.
+                    if let landed = (feed as? SnapFeedViewController)?.activePostID,
+                       landed != anchorID,
+                       page?.adoptPost(landed, intoSlotOf: anchorID) == true {
+                        anchorID = landed
+                    }
                     log("freeze   post")
                 },
                 dismissalDidEnd: { [weak self, weak page] committed in
                     page?.endHeroFreeze()
-                    // The card is alone again: bring in the two things it has
-                    // and the page never did — its metric line and its
-                    // affordance — rather than letting them arrive in one
-                    // frame. Committed pops only; a cancelled swipe leaves the
-                    // page up, and the card stays covered.
+                    // ⚠️ NOTHING IS BROUGHT IN HERE any more.
                     //
-                    // DEFERRED BY A TURN, and it has to be: this fires from the
-                    // close's completion, which is immediately followed by
-                    // `completeTransition` — and that re-parents the grid out
-                    // of the transition container, which cancels any animation
-                    // just started on its cells. Measured: the dissolve simply
-                    // did not appear, the card arriving whole in a single frame
-                    // exactly as before. Run after the turn, the hierarchy is
-                    // settled and the animation survives.
-                    if committed {
-                        DispatchQueue.main.async { page?.fadeInRevealedFurniture(for: postID) }
-                    }
+                    // The card's metric line used to be faded up once the card
+                    // was alone, because "the page never had one". That is true
+                    // of the reveal's PUSH and irrelevant to this leg: a
+                    // dismissal's window carries `RevealDismissCardView`, a
+                    // whole row including that line, so the viewer had been
+                    // looking at it for the length of the flight. Dropping it
+                    // to zero and bringing it back is a blink of something
+                    // already on screen — reported exactly that way.
                     // A cancelled swipe leaves the post on screen, so the bar
                     // restored at grab-begin has to go back down — unanimated
                     // and behind the page that sprang back, where nothing

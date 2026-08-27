@@ -246,4 +246,126 @@ struct GridVideoPlaybackCoordinatorTests {
         #expect(GridVideoPlaybackCoordinator.tileBitRateCap < 916_000)
         #expect(GridVideoPlaybackCoordinator.uncapped == 0)
     }
+
+    // MARK: - Focus
+
+    /// ⚠️ THE POST BEING OPENED PLAYS, WHATEVER IT IS WORTH ON DISTANCE.
+    ///
+    /// The hero can only fly a picture the grid is already decoding, so the
+    /// tile under the finger is not a candidate among candidates. Pinned at the
+    /// far end of the ranking — eighth of eight, budget of three — because that
+    /// is where the ordinary rule would put a tap that landed on the edge of a
+    /// wide row, and it is exactly the case that flew a thumbnail.
+    @Test func theFocusedPostPlaysFromOutsideTheBudget() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let candidates = (0..<8).map { makeCandidate($0, distance: CGFloat($0)) }
+
+        coordinator.focus(PostID("post-7"))
+        coordinator.update(candidates: candidates)
+
+        #expect(coordinator.playingIDs.contains(PostID("post-7")))
+        // And it displaces one, rather than being added on top of the budget:
+        // the cap is what makes the grid affordable.
+        #expect(coordinator.playingIDs.count == 3)
+    }
+
+    /// ⚠️ AND IT STARTS DURING A FLING, when nothing else may.
+    ///
+    /// Suppressing starts at speed is right for every tile crossing the
+    /// viewport. The one being opened is the opposite case: the scroll is about
+    /// to stop existing and the flight is a few frames away, so the gate that
+    /// protects a fling would otherwise deny the hero its picture.
+    ///
+    /// Both halves asserted together — a focus that started everything would
+    /// pass a test that only looked at the focused post.
+    @Test func aFlingStillStartsTheFocusedPost() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let candidates = (0..<4).map { makeCandidate($0, distance: CGFloat($0)) }
+
+        coordinator.focus(PostID("post-2"))
+        coordinator.update(candidates: candidates, allowingStarts: false)
+
+        #expect(coordinator.playingIDs == [PostID("post-2")])
+    }
+
+    /// ⚠️ AND IT IS NEVER STOPPED TO MAKE ROOM.
+    ///
+    /// A grid keeps reconciling while the flight is being staged, and the tile
+    /// the card is flying can leave the candidate list entirely — the page
+    /// scrolls, the row recycles, the grid goes behind a covering screen.
+    /// Stopping it there kills the player mid-flight, which is the thumbnail
+    /// appearing PART WAY through a transition rather than at its start.
+    @Test func theFocusedPostSurvivesLeavingTheViewport() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let candidates = (0..<4).map { makeCandidate($0, distance: CGFloat($0)) }
+        coordinator.focus(PostID("post-0"))
+        coordinator.update(candidates: candidates)
+
+        coordinator.update(candidates: Array(candidates.dropFirst()))
+
+        #expect(coordinator.playingIDs.contains(PostID("post-0")))
+    }
+
+    /// ⚠️ AND THE CLAIM IS RELEASED, or the grid would carry a player for a
+    /// post nobody is looking at for the rest of the session.
+    ///
+    /// The release is what makes the claim affordable: it is held for the
+    /// length of a transition, not the length of a screen.
+    @Test func releasingTheFocusReturnsThePlayer() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let candidates = (0..<4).map { makeCandidate($0, distance: CGFloat($0)) }
+        coordinator.focus(PostID("post-3"))
+        coordinator.update(candidates: candidates)
+        #expect(coordinator.playingIDs.contains(PostID("post-3")))
+
+        coordinator.focus(nil)
+        coordinator.update(candidates: candidates)
+
+        #expect(coordinator.playingIDs.contains(PostID("post-3")) == false)
+    }
+
+    /// ⚠️ AND WHEN EVERY ORDINARY DOOR IS SHUT, THE FLIGHT KNOCKS ANYWAY.
+    ///
+    /// A handoff deliberately closes them all: `isSurfaceVisible` goes false so
+    /// nothing new is chosen, and the flying post is filtered out of the
+    /// ranking so reconcile can neither start nor stop it. That is right for a
+    /// post whose player is already in the air — and wrong for the case this
+    /// exists for, a tile that reached the flight holding nothing. Asked
+    /// through `update`, it would wait forever; asked directly, it plays.
+    @Test func aFlightCanDemandAPlayerAfterTheHandoffShutTheDoors() {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let candidate = makeCandidate(0, distance: 0)
+        coordinator.beginHandoff(candidate.id)
+
+        // The ordinary route is genuinely closed — this is the premise, not a
+        // formality, and a change that reopened it would make the demand below
+        // pass for the wrong reason.
+        coordinator.update(candidates: [candidate])
+        #expect(coordinator.playingIDs.isEmpty)
+
+        coordinator.demandFlightPlayback(of: candidate.id, url: candidate.url, in: candidate.cell)
+
+        #expect(coordinator.playingIDs.contains(candidate.id))
+    }
+
+    /// ⚠️ AND IT IS ASKED EVERY FRAME, so it must cost nothing after the first.
+    ///
+    /// The retry calls the producer once per display refresh for the length of
+    /// a flight — twenty-odd times. A demand that restarted the clip on each
+    /// one would rebuild the item, throw away the decode it just paid for, and
+    /// begin the video again from zero, repeatedly, for the whole transition.
+    @Test func demandingAPlayerEveryFrameStartsItOnce() async {
+        let pool = makePool()
+        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        let candidate = makeCandidate(0, distance: 0)
+        coordinator.beginHandoff(candidate.id)
+
+        for _ in 0..<20 {
+            coordinator.demandFlightPlayback(of: candidate.id, url: candidate.url, in: candidate.cell)
+        }
+        await coordinator.debugAwaitStarts()
+
+        #expect(coordinator.playingIDs == [candidate.id])
+        #expect(pool.itemCreations == 1)
+    }
 }

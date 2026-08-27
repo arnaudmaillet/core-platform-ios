@@ -627,6 +627,24 @@ final class SnapFeedViewController: UIViewController {
         settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
+        // ⚠️ GOING versus GONE, and the resign above cannot tell them apart.
+        //
+        // `refreshVisibility` resigns the active page WITHOUT releasing its
+        // playback, which is right for every screen that comes back — a tab
+        // switch, a push on top, the app backgrounding. A pop does not come
+        // back, and a gallery page resigning that way left its kept neighbours
+        // bound to decoders belonging to a controller on its way out. Measured
+        // by opening one gallery clip and closing it: the pool never recovered
+        // those players, and the next tile tapped was the one that could not get
+        // one — which reads on screen as a hero flying a thumbnail.
+        //
+        // Every visible page, not just the active one: a neighbour cell can
+        // hold retained clips of its own, and `didEndDisplaying` only fires for
+        // the ones the collection view actually recycles on the way out.
+        guard isBeingDismissed || isMovingFromParent else { return }
+        for cell in collectionView.visibleCells {
+            (cell as? SnapCellLifecycle)?.releaseRetainedNeighbourClips()
+        }
         // Leaving the screen finalizes the session's boosts, same as paging
         // away — "undo until you move on", and you just moved on. (The
         // retained timeline can come back to the same post; the spend is
@@ -2631,6 +2649,32 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// depending on history nobody can see.
     public func openMediaPage(_ page: Int, for id: PostID) {
         pendingMediaPage = (id, page)
+        // ⚠️ AND APPLIED NOW IF THERE IS ANYTHING TO APPLY IT TO.
+        //
+        // The pending value is consumed by the data source's cell provider,
+        // which only runs when a cell is CONFIGURED. That covers the first
+        // open and nothing else: this screen is reused, so opening the same
+        // post again reaches a cell that is already built and still sitting on
+        // the page the viewer left it on. The instruction was then recorded and
+        // never read.
+        //
+        // What that looked like, measured with the page traced at activation:
+        // `card asked page=9` immediately followed by `cell activate page=4
+        // url=trailer.mp4`. The page displayed page 9 while warming page FOUR's
+        // clip — so it arrived showing page 9's poster, and the dismissal
+        // donated the surface it had warmed, sending the card home carrying the
+        // PREVIOUS clip. Reported precisely: "B arrives on the thumbnail, and
+        // the dismiss shows A".
+        //
+        // Cleared on success so the configure path cannot apply it a second
+        // time, and left pending when the cell is not realized yet — which is
+        // the first-open case the provider already handles.
+        guard let index = orderedIDs.firstIndex(of: id),
+              let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+                  as? SnapFeedCell
+        else { return }
+        cell.showMediaPage(page)
+        pendingMediaPage = nil
     }
 
     /// Opens a post with its comments already engaged.
