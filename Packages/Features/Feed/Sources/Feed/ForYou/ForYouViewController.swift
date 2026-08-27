@@ -804,7 +804,11 @@ final class ForYouViewController: UIViewController {
     private func installTextReveal(
         feed: UIViewController, format: GalleryFilter.Format, postID: PostID
     ) -> Bool {
+        // Cleared together: a stale geometry from the previous post would be
+        // read by the next close, and a stale `revealPresents` would put a
+        // reveal over a flight's opening.
         textSlideDismissal.revealGeometry = nil
+        textSlideDismissal.revealPresents = false
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         // ⚠️ THE POST THE CLOSE FLIES TO IS NOT ALWAYS THE ONE THAT OPENED.
@@ -872,6 +876,10 @@ final class ForYouViewController: UIViewController {
         // hand-written copies of thirteen fields agree only on the day they
         // are written. What stays is what genuinely differs between the two
         // screens: which chrome comes back, and what has to settle first.
+        // The OPENING is the reveal's — see `revealPresents`. Set alongside
+        // the geometry rather than derived from it, because a media post will
+        // carry a geometry too and must still open with its flight.
+        textSlideDismissal.revealPresents = true
         textSlideDismissal.revealGeometry = TextRevealInstaller.geometry(
             feed: feed,
             origin: TextRevealOrigin(

@@ -100,6 +100,18 @@ public final class InteractiveSlideDismissal: NSObject {
     /// post's kind from opposite sides.
     public var arbitratesWithHeroGrab = false
 
+    /// Whether the PUSH onto this screen is the reveal's.
+    ///
+    /// ⚠️ SEPARATE FROM HAVING A GEOMETRY, and the two came apart the moment
+    /// both drivers began sharing a screen. The geometry is what a card-shaped
+    /// CLOSE needs, and a media post now carries one too — for the case where
+    /// the viewer pages onto a text post before closing. Deciding the push from
+    /// its presence would put a reveal over an opening that is a hero flight.
+    ///
+    /// So the opening says so explicitly, and only a post that was opened AS
+    /// text sets it.
+    public var revealPresents = false
+
     /// The recognizer, so an owner can order a competing one behind it —
     /// `require(toFail:)` needs the object, and a caller that cannot see it
     /// has to duplicate the pan to get one.
@@ -332,12 +344,28 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // PROTOTYPE: the reveal is the only thing here that customizes a PUSH.
         // The slide never did — a text post arrived on UIKit's own slide —
         // which is exactly the gap this is measuring.
-        if operation == .push, toVC === feedViewController, let revealGeometry {
+        if operation == .push, toVC === feedViewController, revealPresents,
+           let revealGeometry {
             return RevealPresentAnimator(
                 geometry: revealGeometry, departingChrome: revealReturningChrome
             )
         }
         guard operation == .pop, fromVC === feedViewController else { return nil }
+        // ⚠️ A POST THAT FLIES GOES BACK TO WHOEVER HELD THIS SLOT BEFORE US.
+        //
+        // This driver holds the delegate slot for the whole of the screen's
+        // life, and it is no longer the only thing that can animate the screen
+        // away: a pager's post may want a hero, whose driver is the delegate
+        // this one displaced. Forwarding is how one slot serves two, and it is
+        // asked of the POST rather than of who happens to be driving — a
+        // back-button pop has no driver at all, and it must still leave as the
+        // right kind.
+        if (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind == .hero,
+           let savedDelegate {
+            return savedDelegate.navigationController?(
+                navigationController, animationControllerFor: operation, from: fromVC, to: toVC
+            )
+        }
         // A live grab is the animation; anything with geometry in it would
         // stage a second flight over the same page. See `RevealGrabAnimator`.
         if revealGrab != nil { return RevealGrabAnimator() }
@@ -355,7 +383,14 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         _ navigationController: UINavigationController,
         interactionControllerFor animationController: any UIViewControllerAnimatedTransitioning
     ) -> (any UIViewControllerInteractiveTransitioning)? {
-        revealGrab ?? interaction
+        // Ours only when one of ours is driving. An animator that came from the
+        // saved delegate carries the saved delegate's interaction — pairing it
+        // with this driver's would scrub someone else's flight.
+        if let grab = revealGrab { return grab }
+        if let interaction { return interaction }
+        return savedDelegate?.navigationController?(
+            navigationController, interactionControllerFor: animationController
+        )
     }
 
     public func navigationController(

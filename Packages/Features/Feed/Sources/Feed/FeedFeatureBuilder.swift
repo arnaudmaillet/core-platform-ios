@@ -500,6 +500,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 nav?.tabBarController?.setTabBarHidden(false, animated: false)
                 nav?.tabBarController?.tabBar.alpha = 0
             }
+            // The OPENING is this reveal's, and it has to say so: a geometry
+            // alone no longer means the push is one, now that a media post
+            // carries one for the case where the viewer pages onto a text post
+            // before closing. See `InteractiveSlideDismissal.revealPresents`.
+            dismissal.revealPresents = true
             dismissal.revealGeometry = TextRevealInstaller.geometry(
                 feed: destination,
                 origin: Self.withDockChoreography(reveal, on: nav),
