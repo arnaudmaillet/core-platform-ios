@@ -1199,7 +1199,13 @@ final class ForYouViewController: UIViewController {
         if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
             // Which driver opened the screen, said once. Everything downstream
             // reads differently depending on this answer.
-            print("[text-reveal] open path=\(revealing ? "reveal" : "hero")"
+            //
+            // ⚠️ "not the reveal" is TWO outcomes, not one: a flight, and the
+            // plain push a row that is not realized falls back to. Printing
+            // them as one made a harness run where the row had not been
+            // realized look like a text post opening with a hero, which is a
+            // defect that does not exist.
+            print("[text-reveal] open reveal=\(revealing)"
                 + " post=\(tapped.id.rawValue) kind=\(tapped.kind)")
         }
         #endif
