@@ -1195,6 +1195,14 @@ final class ForYouViewController: UIViewController {
         // own show/hide animation on the bar, and a second one fighting it left
         // the bar sitting fully opaque OVER the landed page for ~0.25s.
         let revealing = installTextReveal(feed: feed, format: format, postID: tapped.id)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+            // Which driver opened the screen, said once. Everything downstream
+            // reads differently depending on this answer.
+            print("[text-reveal] open path=\(revealing ? "reveal" : "hero")"
+                + " post=\(tapped.id.rawValue) kind=\(tapped.kind)")
+        }
+        #endif
         if !revealing {
             tabBarController?.setTabBarHidden(true, animated: true)
         }
@@ -1245,6 +1253,18 @@ final class ForYouViewController: UIViewController {
                 // underneath should stay stopped.
                 self?.pager.endPlaybackHandoff()
             }
+            // ⚠️ AND THE FLIGHT RIDES ALONG, for the post this screen may end
+            // on — the mirror of `attachCardCloseAlongsideFlight`.
+            //
+            // A text post opened this feed as a window, and the feed is a
+            // PAGER: swipe to a photograph and the post being dismissed has a
+            // hero to fly after all. Attached BEFORE the slide installs, so the
+            // slide saves this controller as the delegate it displaced and can
+            // forward a hero pop straight back to it.
+            if let page = pager.page(for: format) {
+                attachFlightAlongsideCardClose(feed: feed, page: page, tappedID: tapped.id)
+            }
+            textSlideDismissal.arbitratesWithHeroGrab = true
             textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)
             #if DEBUG
@@ -1325,7 +1345,11 @@ final class ForYouViewController: UIViewController {
         // on a tap-back), so it is revealed by the hand instead of appearing
         // after the card has already landed.
         transition.returningSourceChrome = tabBarController?.tabBar
-        transition.onSourceReturned = { [weak self] in
+        transition.onSourceReturned = { [weak self, weak page] in
+            // A card-shaped close that was cancelled left a row hidden under
+            // the page; if the viewer then left by this flight instead, nothing
+            // else would put it back. See `clearRevealConcealment`.
+            page?.clearRevealConcealment()
             // Completed pop only — a cancelled grab reports through
             // `onDismissalCancelled`, so the transition (and future grabs)
             // survives it by construction.
@@ -1456,6 +1480,41 @@ final class ForYouViewController: UIViewController {
     /// interactive dismissal and a cancelled grab reaches none of the completion
     /// callbacks. It is idempotent and costs a layout pass, so running it when
     /// nothing was wrong is not worth guarding against.
+    /// Attaches the hero close to a screen that was opened as a WINDOW, for the
+    /// case where the viewer pages onto a post that has media.
+    ///
+    /// The mirror of `attachCardCloseAlongsideFlight`, and it needs no
+    /// equivalent of that one's `prepareForSwipe`: a flight resolves everything
+    /// it carries through its source, which already adopts the landed post at
+    /// staging and declines a landing it cannot fly to.
+    ///
+    /// Nothing here touches the opening. The controller is installed as the
+    /// navigation delegate and then immediately shadowed by the slide, which is
+    /// exactly what makes the window's own push survive — and what leaves this
+    /// controller reachable, as `savedDelegate`, when a hero pop is forwarded.
+    private func attachFlightAlongsideCardClose(
+        feed: UIViewController, page: ForYouGridPage, tappedID: PostID
+    ) {
+        guard let navigationController,
+              let destination = feed as? any ZoomTransitionDestination else { return }
+        let source = ForYouGridZoomSource(
+            page: page,
+            tappedID: tappedID,
+            activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
+            depthView: pager
+        )
+        let transition = ZoomTransitionController(source: source, destination: destination)
+        activeTransition = transition
+        transition.returningSourceChrome = tabBarController?.tabBar
+        navigationController.delegate = transition
+        transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
+            // The same bar choreography the flight path states at length: back
+            // at alpha 0 before the pop, so the drag fades it in.
+            self?.showTabBar(alpha: 0)
+            self?.navigationController?.popViewController(animated: true)
+        }
+    }
+
     /// Attaches the card-shaped close to a screen that was opened by a FLIGHT,
     /// for the case where the viewer pages onto a post that has no media.
     ///
@@ -1485,6 +1544,20 @@ final class ForYouViewController: UIViewController {
                 page.adoptPost(landed, intoSlotOf: departureID)
             }
             installTextReveal(feed: feed, format: format, postID: landed, presenting: false)
+            // ⚠️ AND HIDE THE ROW, which on this path nothing else has.
+            //
+            // A reveal normally conceals the row it departed from at the
+            // OPENING — "the row goes the moment the window takes its place" —
+            // and its close only puts it back. This screen was opened by a
+            // FLIGHT, so no opening ever hid anything: without this the card
+            // flies home over a grid already showing the same card, and the
+            // landing has nothing to reveal. Measured as a close whose trace
+            // carried a single `conceal=false` and no `conceal=true` at all.
+            //
+            // Last, because `adoptPost` deliberately un-hides both swapped
+            // cells — the hero's requirement, since a flight LANDS on one of
+            // them — and this is the opposite need.
+            page.setRevealConcealed(true, for: landed)
         }
         textSlideDismissal.install(on: navigationController)
     }

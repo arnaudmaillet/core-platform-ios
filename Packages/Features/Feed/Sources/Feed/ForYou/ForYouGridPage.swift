@@ -1717,9 +1717,33 @@ final class ForYouGridPage: UIView {
     /// Hides the row a reveal's window was taken from, for the flight's length.
     /// See `revealConcealedPostID` for why this does not go through
     /// `setHeroHidden`.
+    /// Reveals whatever row a reveal is currently hiding, whoever hid it.
+    ///
+    /// A belt for the one path that can strand a concealment: a card-shaped
+    /// close CANCELLED leaves the row hidden under the page it sprang back to —
+    /// correct, since the page is covering it — and the viewer may then leave
+    /// by another route entirely (paging to a post that flies, and tapping
+    /// back). Nothing in that second transition knows a row is waiting to be
+    /// put back.
+    func clearRevealConcealment() {
+        guard let postID = revealConcealedPostID else { return }
+        setRevealConcealed(false, for: postID)
+    }
+
     func setRevealConcealed(_ concealed: Bool, for postID: PostID) {
         revealConcealedPostID = concealed ? postID : nil
-        (cell(for: postID) as? PostGridListRowCell)?.setHeroConcealed(concealed)
+        let row = cell(for: postID) as? PostGridListRowCell
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+            // Whether the row it names is REALIZED, because a concealment
+            // applied to nothing looks exactly like one that was never asked
+            // for — and the row it must hide is the one a dismissal just
+            // adopted into the departure slot.
+            print("[text-reveal] conceal=\(concealed) post=\(postID.rawValue)"
+                + " row=\(row == nil ? "MISSING" : "found")")
+        }
+        #endif
+        row?.setHeroConcealed(concealed)
     }
 
     func setHeroHidden(_ hidden: Bool, for postID: PostID, conceals: Bool = true) {
