@@ -1566,6 +1566,18 @@ final class ForYouViewController: UIViewController {
                   let page = pager.page(for: format),
                   let landed = (feed as? SnapFeedViewController)?.activePostID
             else { return }
+            // ⚠️ ONLY FOR A CLOSE THAT CARRIES A CARD.
+            //
+            // This runs from the pop as well as from the grab, and a pop is
+            // every dismissal there is — including a hero's. Doing this work
+            // for one is not merely wasted: it CONCEALS the row below, and a
+            // flight that lands on a hidden row reads as no animation at all.
+            // Reported exactly that way, as the hero having stopped working.
+            //
+            // Asked of the same authority the two grabs gate on, so the three
+            // can never disagree about what the post is.
+            guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
+            else { return }
             hasPrepared = true
             if landed != departureID {
                 page.adoptPost(landed, intoSlotOf: departureID)
