@@ -215,6 +215,18 @@ public struct ZoomDismissState: Sendable {
     }
 }
 
+/// How the screen being dismissed should go home.
+///
+/// Named for what it CARRIES rather than for which driver runs it: the drivers
+/// are an implementation detail that has already been rearranged twice, and a
+/// destination should not have to know their names to answer.
+public enum ZoomDismissalKind: Sendable, Equatable {
+    /// A piece of media flies between two places that both have it.
+    case hero
+    /// A whole card travels — for a post whose page is not a picture.
+    case card
+}
+
 @MainActor
 public protocol ZoomTransitionDestination: AnyObject {
     /// Whether the destination has content to reveal yet.
@@ -351,6 +363,26 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// (e.g. a page-snap fling that hasn't settled).
     var isReadyForInteractiveDismissal: Bool { get }
 
+    /// ⚠️ WHAT THE POST ON SCREEN RIGHT NOW WANTS TO GO HOME AS.
+    ///
+    /// A hero flies a piece of MEDIA between two places that both have it. A
+    /// card-shaped close carries a whole row instead, which is what a text post
+    /// needs — it has no media, and the note on
+    /// `ForYouGridPage.heroAppearance` records what happened the five times a
+    /// card tried to impersonate a page of comments.
+    ///
+    /// The kind was decided when the post was OPENED, and that was right while
+    /// a screen showed one post. This screen is a pager: open a photograph,
+    /// swipe to a text post, and the driver installed at the tap is the wrong
+    /// one for the post being dismissed. So the question is asked of the
+    /// destination, per touch, the way `isReadyForInteractiveDismissal` and
+    /// `zoomVerticalDismissalPermitted` already are — the screen showing the
+    /// post is the only thing that knows which post that is.
+    ///
+    /// Defaults to `.hero`, which is what every destination that shows one
+    /// thing has always done.
+    var zoomDismissalKind: ZoomDismissalKind { get }
+
     /// Whether a VERTICAL grab may claim a touch at `location` (in `view`'s
     /// coordinates). The vertical axis shares the screen with subsurfaces
     /// that own their own vertical gestures — a scrolling rail, an open
@@ -378,6 +410,7 @@ public protocol ZoomTransitionDestination: AnyObject {
 }
 
 public extension ZoomTransitionDestination {
+    var zoomDismissalKind: ZoomDismissalKind { .hero }
     var zoomDestinationContentIsReady: Bool { true }
     var zoomOwnsInteractiveDismissal: Bool { true }
     var zoomDestinationMediaIsRendering: Bool { true }

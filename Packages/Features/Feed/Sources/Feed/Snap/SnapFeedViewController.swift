@@ -3331,6 +3331,26 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         !collectionView.isDecelerating
     }
 
+    /// ⚠️ THE POST ON SCREEN RIGHT NOW, not the one that opened this screen.
+    ///
+    /// A text page has no media to fly, so it goes home as a card; anything
+    /// with a picture flies that picture. The distinction used to be settled at
+    /// the tap, which is correct for a screen that shows one post and wrong for
+    /// a PAGER — swipe from a photograph to a text post and the driver chosen
+    /// at the tap is the wrong one for the post being dismissed.
+    ///
+    /// Read from the MODEL rather than from the realized cell: a grab can begin
+    /// on a page whose cell is mid-recycle, and the answer must not depend on
+    /// what happens to be dequeued. Falls back to `.hero`, the historical
+    /// answer, when there is no model to ask.
+    public var zoomDismissalKind: ZoomDismissalKind {
+        let index = lifecycle.activeIndex ?? 0
+        guard orderedIDs.indices.contains(index),
+              let model = modelsByID[orderedIDs[index]]
+        else { return .hero }
+        return model.mediaURL == nil ? .card : .hero
+    }
+
     /// The vertical grab's extra gate (the horizontal one needs none: the
     /// pager owns no horizontal gestures). Refused while a comments panel is
     /// OPEN — the engaged layer owns the whole vertical axis (page drive,

@@ -90,6 +90,16 @@ public final class InteractiveSlideDismissal: NSObject {
     /// Nil means no veto, which is the behaviour every existing caller had.
     public var canBeginDismissal: (() -> Bool)?
 
+    /// Whether a hero grab is attached to the same screen and the two must
+    /// divide the work between them.
+    ///
+    /// Off by default, and that default is the whole of its safety: every
+    /// surface that uses this driver alone — a profile, a detail, a timeline
+    /// pushed with no flight — keeps claiming drags exactly as it did. Only a
+    /// screen that installs BOTH turns it on, and there the two gate on the
+    /// post's kind from opposite sides.
+    public var arbitratesWithHeroGrab = false
+
     /// The recognizer, so an owner can order a competing one behind it —
     /// `require(toFail:)` needs the object, and a caller that cannot see it
     /// has to duplicate the pan to get one.
@@ -385,6 +395,19 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         else { return false }
         if let destination = feed as? any ZoomTransitionDestination,
            !destination.isReadyForInteractiveDismissal { return false }
+        // ⚠️ AND ONLY FOR A POST THAT TRAVELS AS A CARD — the mirror of the
+        // hero grab's gate, asked of the same authority.
+        //
+        // Both drivers can be attached to one screen now, because a pager's
+        // post may not be the kind the tap installed for. Each refuses the
+        // other's half, so exactly one claims any given grab. A destination
+        // with no opinion answers `.hero`, which is why this asks for `.card`
+        // rather than "not hero": this driver also serves screens that fly
+        // nothing at all, and they must keep claiming drags as they did.
+        if arbitratesWithHeroGrab,
+           (feed as? any ZoomTransitionDestination)?.zoomDismissalKind != .card {
+            return false
+        }
         if let canBeginDismissal, !canBeginDismissal() { return false }
         guard let axis = ZoomDismissAxis.match(velocity: pan.velocity(in: view), axes: axes)
         else { return false }

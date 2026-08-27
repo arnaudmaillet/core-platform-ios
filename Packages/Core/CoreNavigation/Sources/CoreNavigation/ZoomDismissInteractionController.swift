@@ -734,6 +734,15 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
               let view = pannedView else { return grabLog("no pan/view", false) }
         guard destination?.isReadyForInteractiveDismissal == true
         else { return grabLog("not ready", false) }
+        // ⚠️ ONLY FOR A POST THAT HAS SOMETHING TO FLY.
+        //
+        // This screen is a pager: the post being dismissed is not always the
+        // one that opened it, and a text page has no media for a hero to carry.
+        // Refusing here leaves the drag to the driver that carries a whole card
+        // instead — the two gate on the same question, from opposite sides, so
+        // exactly one of them claims any given grab.
+        guard destination?.zoomDismissalKind != .card
+        else { return grabLog("post wants a card, not a hero", false) }
         // `context == nil` only covers OUR transitions. A pop of a screen
         // pushed above the feed (profile, comments) can still be settling —
         // the feed is already `topViewController` then, and beginning a grab
