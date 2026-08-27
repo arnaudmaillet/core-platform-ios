@@ -1561,6 +1561,27 @@ final class ForYouGridPage: UIView {
               let current = posts.firstIndex(where: { $0.id == postID }),
               slot != current
         else { return false }
+        // ⚠️ NEVER ACROSS THE "New" BOUNDARY, and this one CRASHES rather than
+        // looking wrong.
+        //
+        // `split` is not a stored number: it is the length of the leading RUN
+        // of arrivals. Swapping an old post into that run cuts the run short,
+        // so the two sections' counts change — while `reloadItems` promises
+        // UIKit that they did not. Reported from a device as "the number of
+        // items in section 0 after the update (1) must be equal to the number
+        // before (6)".
+        //
+        // Reloading the whole thing instead would satisfy UIKit and cost more
+        // than it looks: the section header moves when the run shortens, so
+        // every row below it does too — including the departure slot, whose
+        // whole value is that it is still exactly where the viewer left it.
+        //
+        // So a cross-boundary landing is declined, and the dismissal goes home
+        // to the card it left from. That is the honest answer for a list that
+        // is GROUPED: the two posts do not live in one run, and there is no
+        // slot to lend.
+        guard indexPath(for: slot).section == indexPath(for: current).section
+        else { return false }
         // The pixels each cell is showing RIGHT NOW, carried across the reload.
         //
         // `configure` clears the image and re-asks the cache, so a cell whose

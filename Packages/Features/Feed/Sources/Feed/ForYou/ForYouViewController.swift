@@ -108,6 +108,17 @@ final class ForYouViewController: UIViewController {
     /// the stack holds its delegate weakly.
     private var activeTransition: ZoomTransitionController?
 
+    /// The flight attached to a screen that was opened as a WINDOW, held only
+    /// so it outlives this function.
+    ///
+    /// ⚠️ NOT `activeTransition`, and the distinction is a bug I shipped for
+    /// one commit. That property is the guard on `openFeed` — "one flight at a
+    /// time" — and is cleared by the flight's own completion hooks. A window
+    /// opening has no such completion, so storing this one there left it set
+    /// for ever: every later tile tap returned at the guard and did nothing.
+    /// Reported as the screen breaking after a few open/close cycles.
+    private var cardPathFlight: ZoomTransitionController?
+
     /// How many posts a tile tap hands the feed, counting from the tapped one.
     ///
     /// `FixedPostsFeedProvider` hydrates its whole set in ONE concurrent
@@ -1232,6 +1243,10 @@ final class ForYouViewController: UIViewController {
             (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
             textSlideDismissal.attach(to: feed, axes: [.horizontal, .vertical])
             textSlideDismissal.onFeedPopped = { [weak self] _ in
+                // The flight that rode along with this window is over with the
+                // screen — released here rather than in one of its own hooks,
+                // because it may never have flown anything at all.
+                self?.cardPathFlight = nil
                 // Completed pops only — a cancelled swipe reports nothing here,
                 // which is exactly why this is a safe place to reveal from.
                 // `viewWillAppear` normally gets there first via the
@@ -1510,7 +1525,7 @@ final class ForYouViewController: UIViewController {
             depthView: pager
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
-        activeTransition = transition
+        cardPathFlight = transition
         transition.returningSourceChrome = tabBarController?.tabBar
         navigationController.delegate = transition
         transition.attachInteractiveDismissal(to: feed.view) { [weak self] in

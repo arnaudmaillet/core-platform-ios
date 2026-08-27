@@ -80,6 +80,55 @@ struct ForYouSourceSlotTests {
         #expect(abs(originAfter.x - originBefore.x) < 0.5)
     }
 
+    /// ⚠️ AND NEVER ACROSS THE "New" BOUNDARY — this one crashes.
+    ///
+    /// `split` is the length of the leading RUN of arrivals, not a stored
+    /// number, so swapping an old post into that run cuts it short and the two
+    /// sections' counts change — while `reloadItems` promises UIKit they did
+    /// not. Reported from a device: "the number of items in section 0 after the
+    /// update (1) must be equal to the number before (6)".
+    ///
+    /// Asserted through the page's own sectioning rather than against a literal
+    /// index, and both directions, because the run can shorten from either end.
+    @Test func aSwapIsRefusedAcrossTheArrivalsBoundary() {
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let corpus = posts(30)
+        page.render(.content(corpus))
+        page.setNewPosts(Set(corpus.prefix(6).map(\.id)))
+        page.layoutIfNeeded()
+
+        let arrival = page.posts[2].id
+        let older = page.posts[17].id
+
+        #expect(!page.adoptPost(older, intoSlotOf: arrival))
+        #expect(!page.adoptPost(arrival, intoSlotOf: older))
+        // Nothing moved, so the counts UIKit was promised still hold.
+        #expect(page.posts[2].id == arrival)
+        #expect(page.posts[17].id == older)
+    }
+
+    /// And inside one run it still works: the boundary is the limit, not the
+    /// feature.
+    @Test func aSwapWithinTheArrivalsIsAllowed() {
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let corpus = posts(30)
+        page.render(.content(corpus))
+        page.setNewPosts(Set(corpus.prefix(6).map(\.id)))
+        page.layoutIfNeeded()
+
+        let departure = page.posts[1].id
+        let landed = page.posts[4].id
+
+        #expect(page.adoptPost(landed, intoSlotOf: departure))
+        #expect(page.posts[1].id == landed)
+    }
+
     @Test func theActivePostMovesIntoTheDepartureSlot() {
         let page = page()
         let departure = page.posts[3].id
