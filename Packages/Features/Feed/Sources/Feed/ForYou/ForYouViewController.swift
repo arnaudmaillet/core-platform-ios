@@ -1337,6 +1337,7 @@ final class ForYouViewController: UIViewController {
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
             // And the post itself, for a landing this page no longer holds.
             landedModel: { [weak self] id in self?.viewModel.post(for: id) },
+            activeMediaPage: { [weak feed] in (feed as? SnapFeedViewController)?.activeMediaPage },
             // The gallery recedes; the tray and the title stay grounded.
             depthView: pager,
             // NOT hoisted — the two dismissals share one surface flow.
@@ -1549,6 +1550,7 @@ final class ForYouViewController: UIViewController {
             tappedID: tappedID,
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
             landedModel: { [weak self] id in self?.viewModel.post(for: id) },
+            activeMediaPage: { [weak feed] in (feed as? SnapFeedViewController)?.activeMediaPage },
             depthView: pager
         )
         let transition = ZoomTransitionController(source: source, destination: destination)

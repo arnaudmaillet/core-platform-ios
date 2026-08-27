@@ -469,6 +469,68 @@ struct DismissalReturnMatrixTests {
         #expect(frame == row, "the close collapsed to the centre instead of onto its card")
     }
 
+    // MARK: - What the landing row is showing when the card arrives
+
+    /// ⚠️ THE ROW IS PUT ON THE PAGE THE CARD IS CARRYING.
+    ///
+    /// A close from page four of a collection flies page four, and the row it
+    /// lands on keeps whatever page it was left on — the first, for a row the
+    /// viewer never touched. The photograph therefore changed under the card at
+    /// the exact moment the card was removed. The opening has had this in both
+    /// directions since `openMediaPage`; the close only ever had it in one.
+    @Test func theLandingRowIsPutOnThePageTheCardIsCarrying() {
+        let page = page(style: .list)
+        let tapped = page.posts[0].id
+        let landed = page.posts[12].id
+        var asked = 0
+
+        let source = ForYouGridZoomSource(
+            page: page, tappedID: tapped, activePostID: { landed },
+            landedModel: { id in page.post(for: id) },
+            activeMediaPage: { asked += 1; return 3 },
+            depthView: nil
+        )
+        source.zoomSourceWillStageDismissal()
+
+        #expect(asked == 1, "the close never asked which page it was flying")
+        #expect(index(of: landed, in: page) == 0)
+    }
+
+    /// Nil means "not a collection", and a row with no pages must be left alone
+    /// rather than sent to page zero — the same distinction `openMediaPage`
+    /// draws in the other direction.
+    @Test func aRowWithNoPagesIsNotSentToPageZero() {
+        let page = page(style: .list)
+
+        let source = ForYouGridZoomSource(
+            page: page, tappedID: page.posts[0].id, activePostID: { page.posts[12].id },
+            landedModel: { id in page.post(for: id) },
+            activeMediaPage: { nil },
+            depthView: nil
+        )
+        source.zoomSourceWillStageDismissal()
+
+        #expect(index(of: page.posts[0].id, in: page) == 0)
+    }
+
+    /// ⚠️ THE CARD STAYS AND THE MEDIA GOES, on a timeline.
+    ///
+    /// The landing needs somewhere for the flying photograph to arrive INTO:
+    /// with the row's preview left showing, the same picture is on screen twice
+    /// for the whole return and the card lands on a copy of itself. Concealing
+    /// a ROW takes the preview and leaves the card — header, caption, counters
+    /// — so the viewer sees the card they are returning to with a gap in it.
+    ///
+    /// A tile is the opposite case and keeps the old behaviour: a tile IS its
+    /// media, so concealing it would leave a hole in the mosaic.
+    @Test func aTimelineLandingOpensAGapForTheMediaToArriveInto() {
+        let list = page(style: .list)
+        let grid = page(style: .grid)
+
+        #expect(list.landingConcealsMedia)
+        #expect(grid.landingConcealsMedia == false)
+    }
+
     // MARK: - The order the viewer gets back
 
     /// ⚠️ THE FEED IS PERMUTED, NOT REBUILT: A, B, C read from A to C comes back

@@ -38,6 +38,10 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// simply cannot land on a post the page has dropped, which is where this
     /// stood before.
     private let landedModel: ((PostID) -> GalleryPost?)?
+    /// Which page of the landed post's collection the destination is showing,
+    /// so the row can be put on it before the card arrives. Nil for a caller
+    /// with no collections to speak of.
+    private let activeMediaPage: (() -> Int?)?
     /// Falls back to a centred collapse at this size when the anchor has no
     /// realized cell — the same rule the pin uses when it is panned off-screen.
     private let fallbackSide: CGFloat = 96
@@ -60,6 +64,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         tappedID: PostID,
         activePostID: @escaping () -> PostID?,
         landedModel: ((PostID) -> GalleryPost?)? = nil,
+        activeMediaPage: (() -> Int?)? = nil,
         depthView: UIView?,
         hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)? = nil,
         poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)? = nil,
@@ -74,6 +79,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         departureID = tappedID
         self.activePostID = activePostID
         self.landedModel = landedModel
+        self.activeMediaPage = activeMediaPage
         self.depthView = depthView
         self.donateLive = donateLive
     }
@@ -303,12 +309,37 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             // departure tile itself rather than on a rect that no longer exists.
             anchorID = departureID
         }
+        // ⚠️ AND ONTO THE PAGE THE VIEWER IS ACTUALLY LOOKING AT.
+        //
+        // The card a close flies carries ONE page of a collection — the one on
+        // screen — and the row it lands on keeps whatever page it was left on,
+        // which for a row the viewer never touched is the first. So a close
+        // from page four landed a photograph of page four onto a row showing
+        // page one, and the swap was visible at the exact moment the card was
+        // removed. The opening has had this in both directions since
+        // `openMediaPage`; the close only ever had it in one.
+        //
+        // Nil means "not a collection", which is why the row is left alone
+        // rather than sent to page zero.
+        if let landed = activeMediaPage?() { page?.setMediaPage(landed, for: anchorID) }
         // The scope was opened for the TAPPED post; the landing is on this one.
         // Without this the reconcile that fires when the tile is unhidden stops
         // the surface it has just been handed.
         page?.retargetPlaybackHandoff(to: anchorID)
-        // Visible for the whole return: the card is landing ON this tile.
-        page?.setHeroHidden(true, for: anchorID, conceals: false)
+        // ⚠️ THE CARD STAYS, THE MEDIA GOES — on a timeline.
+        //
+        // `conceals: false` here meant the landing row was fully visible under
+        // the incoming card, and for a TILE that is right: concealing a tile
+        // hides the whole cell, so the grid would show a hole for the length of
+        // the flight.
+        //
+        // A row is not a tile. Concealing it takes the PREVIEW and leaves the
+        // card — its header, caption and counters — which is exactly what the
+        // landing wants: the viewer sees the card they are returning to, with a
+        // gap where the photograph belongs, and the flying media fills it. With
+        // the preview left showing, the same photograph was on screen twice for
+        // the whole return, and the card's arrival had nothing to arrive into.
+        page?.setHeroHidden(true, for: anchorID, conceals: page?.landingConcealsMedia == true)
     }
 
     /// A tile whose post is no longer in the grid still needs a card to fly —

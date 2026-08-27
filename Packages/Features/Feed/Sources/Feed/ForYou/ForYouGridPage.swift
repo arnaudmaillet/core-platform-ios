@@ -1500,6 +1500,13 @@ final class ForYouGridPage: UIView {
         (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }
 
+    /// Whether a landing conceals the row's MEDIA while the card flies to it.
+    ///
+    /// True on a timeline, where concealing takes the preview and leaves the
+    /// card standing; false on a grid, where a tile IS its media and concealing
+    /// it would leave a hole in the mosaic for the length of the flight.
+    var landingConcealsMedia: Bool { style == .list }
+
     /// The post's whole cell, whatever kind of cell it is.
     ///
     /// ⚠️ THE ANSWER OF LAST RESORT FOR A CLOSE, and it exists because the two

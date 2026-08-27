@@ -3303,6 +3303,18 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return orderedIDs.indices.contains(index) ? orderedIDs[index] : nil
     }
 
+    /// Which page of the active post's collection is on screen — what a close
+    /// has to put the row it lands on onto.
+    ///
+    /// Read off the SETTLED page's cell for the same reason `activePostID` is:
+    /// the screen is already reporting itself invisible by the time a close
+    /// asks, so anything gated on visibility answers about the wrong post.
+    var activeMediaPage: Int? {
+        let index = settledPageIndex
+        return (collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+            as? SnapFeedCell)?.currentMediaPage
+    }
+
     /// The page this screen is ON, which is NOT the same as the page it is
     /// actively playing.
     ///

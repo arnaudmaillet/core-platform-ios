@@ -2150,6 +2150,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the CARD rather than trusting the instruction that was sent to it.
     var debugCurrentMediaPage: Int { mediaCard.currentPage }
 
+    /// Which page a DISMISSAL is leaving from, or nil when this post is not a
+    /// collection at all.
+    ///
+    /// The mirror of `showMediaPage`, and it exists for the same reason that
+    /// one does: the card a close flies carries the page the viewer is looking
+    /// at, so the row it lands on has to be showing that page and not the first
+    /// one. Nil rather than zero — "this post has no pages" and "this post is
+    /// on its first page" are different answers, and only one of them means
+    /// "leave the row alone".
+    var currentMediaPage: Int? {
+        mediaCard.showsCollection ? mediaCard.currentPage : nil
+    }
+
     /// Which pages are holding a playback surface — the retention window's
     /// footprint, which is otherwise invisible from outside.
     var debugSurfacedPages: [Int] { mediaCard.surfacedPages }
