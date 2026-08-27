@@ -847,6 +847,22 @@ final class ForYouViewController: UIViewController {
         func sourceFrame(_ space: UICoordinateSpace) -> CGRect? {
             pager.page(for: format)?.textRowFrame(for: anchorID, in: space)
         }
+        /// The rect this window closes onto — the text row's, and the ROW's
+        /// when the anchor turns out not to be a text row at all.
+        ///
+        /// ⚠️ THE ANCHOR CAN CHANGE KIND UNDER THIS WINDOW. It is re-pointed at
+        /// whatever the viewer paged to, and `textRowFrame` refuses a row with
+        /// media on purpose (a row with a hero flies instead of opening as a
+        /// window). So a window that ends on a photograph asked for a rect,
+        /// was told nil, and closed into the middle of the screen.
+        ///
+        /// Deliberately only for the CLOSE: the opening is still gated on a
+        /// real text row, which is what decides that this window exists at all.
+        func closingFrame(_ space: UICoordinateSpace) -> CGRect? {
+            let page = pager.page(for: format)
+            return page?.textRowFrame(for: anchorID, in: space)
+                ?? page?.rowFrame(for: anchorID, in: space)
+        }
         guard TextRevealInstaller.isEnabled,
               let page = pager.page(for: format),
               sourceFrame(view) != nil
@@ -899,7 +915,7 @@ final class ForYouViewController: UIViewController {
         textSlideDismissal.revealGeometry = TextRevealInstaller.geometry(
             feed: feed,
             origin: TextRevealOrigin(
-                rowFrame: { space in sourceFrame(space) },
+                rowFrame: { space in closingFrame(space) },
                 // Read ONCE, at staging, and deliberately not re-asked at
                 // dismissal: `applyPendingReveal` may have scrolled the row,
                 // and a row that scrolled out is not realized to answer. The

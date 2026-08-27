@@ -95,10 +95,36 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     // MARK: - ZoomTransitionSource
 
     func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect {
-        guard let hero = page?.hero(for: anchorID, in: container), zoomSourceIsOnScreen else {
-            return ZoomTransitionGeometry.centeredFallback(in: container.bounds, side: fallbackSide)
+        if let hero = page?.hero(for: anchorID, in: container), zoomSourceIsOnScreen {
+            return hero.frame
         }
-        return hero.frame
+        // ⚠️ THE ROW ITSELF, BEFORE THE MIDDLE OF THE SCREEN.
+        //
+        // A close ends up anchored to a post with no hero more often than the
+        // opening ever could: the anchor is re-pointed at whatever the viewer
+        // paged to, and if that post cannot be landed on the anchor stays the
+        // DEPARTURE post — which, for a text post opened as a window, has no
+        // media either. Both specific rects then answer nil and the card
+        // collapsed into the centre of the screen, flying a blank placeholder.
+        // Reported exactly that way: "the transition window returns to the
+        // middle of the screen".
+        //
+        // The row is always an honest answer: it is where that post lives, and
+        // the card lands on the card the viewer is coming back to.
+        if zoomSourceIsOnScreen, let row = page?.rowFrame(for: anchorID, in: container) {
+            return row
+        }
+        #if DEBUG
+        // `-zoom-live-log`: the centre is the answer of no answer, and on its
+        // own it says nothing about WHY — no rect for this post, or no row on
+        // screen at all. Reaching here at all means both.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] NO RECT anchor=\(anchorID.rawValue)"
+                + " onScreen=\(zoomSourceIsOnScreen)"
+                + " inFeed=\(page?.post(for: anchorID) != nil)")
+        }
+        #endif
+        return ZoomTransitionGeometry.centeredFallback(in: container.bounds, side: fallbackSide)
     }
 
     var zoomSourceIsOnScreen: Bool {

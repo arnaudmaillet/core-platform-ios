@@ -1500,6 +1500,24 @@ final class ForYouGridPage: UIView {
         (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }
 
+    /// The post's whole cell, whatever kind of cell it is.
+    ///
+    /// ⚠️ THE ANSWER OF LAST RESORT FOR A CLOSE, and it exists because the two
+    /// specific ones REFUSE each other's rows on purpose: `hero(for:)` answers
+    /// nil for a text row (it has no media to fly) and `textRowFrame(for:)`
+    /// answers nil for a media row (it has a hero, so it flies instead). Each
+    /// refusal is right on its own, and between them a close whose anchor
+    /// turned out to be the other kind has NOTHING — so it collapsed into the
+    /// middle of the screen, which is what "the transition window returns to
+    /// the centre" looks like.
+    ///
+    /// Landing on the right card in the wrong shape is a small infelicity;
+    /// landing nowhere is a broken transition. This is the floor under both.
+    func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let cell = cell(for: postID) else { return nil }
+        return cell.convert(cell.bounds, to: space)
+    }
+
     /// Whether a realized cell for the post is currently within the viewport —
     /// the hero falls back to a centered collapse when it isn't.
     func isPostVisible(_ postID: PostID) -> Bool {

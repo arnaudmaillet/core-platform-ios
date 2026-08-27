@@ -375,6 +375,100 @@ struct DismissalReturnMatrixTests {
         #expect(page.posts.count == 30)
     }
 
+    /// ⚠️ A WINDOW CAN CLOSE AS A FLIGHT, and the row it opened from is
+    /// CONCEALED for the whole visit.
+    ///
+    /// The two openings are not symmetric. A media post opens with a flight,
+    /// which hides the row's MEDIA; a text post opens as a window, and the
+    /// reveal takes the whole ROW away — "the row goes the moment the window
+    /// takes its place". Page from that text post onto a photograph and the
+    /// close is the flight's, landing in the slot the window left behind: a
+    /// slot the reveal is still holding concealed.
+    ///
+    /// Reported as the transition window "returning to the middle of the
+    /// screen", which is exactly what a flight does when its source reports
+    /// nothing to land on — `ZoomTransitionGeometry.centeredFallback`.
+    @Test func aWindowThatEndsOnAPhotographHasSomewhereToLand() {
+        let page = page(style: .list)
+        let text = page.posts[2].id
+        #expect(page.posts[2].kind == .text)
+        let media = page.posts[12].id
+        // What the window's opening does to the row it came from.
+        page.setRevealConcealed(true, for: text)
+
+        stageDismissal(on: page, tapped: text, landed: media)
+
+        #expect(index(of: media, in: page) == 2, "the landing post never reached the slot")
+        #expect(page.hero(for: media, in: page) != nil, "the flight had no rect and collapsed")
+        #expect(page.isPostVisible(media), "the landing row is concealed under the card")
+    }
+
+    /// And the row the window departed from comes back when the flight lands —
+    /// it is the other end of the same swap, and nothing else revisits it.
+    @Test func theWindowsOwnRowComesBackAfterAFlightCloses() {
+        let page = page(style: .list)
+        let text = page.posts[2].id
+        let media = page.posts[12].id
+        page.setRevealConcealed(true, for: text)
+
+        stageDismissal(on: page, tapped: text, landed: media)
+        page.clearHeroConcealment()
+        page.clearRevealConcealment()
+
+        expectNothingConcealed(page, "the window's row stayed hidden after a flight close")
+    }
+
+    /// ⚠️ NO CLOSE COLLAPSES INTO THE MIDDLE OF THE SCREEN WHILE ITS POST HAS A
+    /// ROW.
+    ///
+    /// The two rect lookups refuse each other's rows on purpose: `hero(for:)`
+    /// answers nil for a text row, `textRowFrame(for:)` answers nil for a media
+    /// row. Each refusal is right on its own — and between them sits a close
+    /// whose anchor is the OTHER kind, which had no rect at all and flew a
+    /// blank card into the centre of the screen. Reported as "the transition
+    /// window returns to the middle".
+    ///
+    /// The anchor lands on the other kind by ordinary use: it is re-pointed at
+    /// whatever the viewer paged to, and when that post cannot be adopted the
+    /// anchor stays the DEPARTURE post — which for a window is a text post, and
+    /// for a flight is a media one.
+    @Test(arguments: [0, 1, 2])
+    func aCloseAlwaysHasARectWhateverKindItsAnchorTurnedOutToBe(kindOffset: Int) {
+        let page = page(style: .list)
+        let anchor = page.posts[kindOffset].id   // 0,1,2 → photo, video, text
+        let kind = page.posts[kindOffset].kind
+
+        let rect = page.hero(for: anchor, in: page)?.frame
+            ?? page.textRowFrame(for: anchor, in: page)
+            ?? page.rowFrame(for: anchor, in: page)
+
+        #expect(rect != nil, Comment(rawValue: "a \\(kind) anchor had nowhere to land"))
+        #expect(rect != .zero)
+    }
+
+    /// The flight's own answer, end to end: a source anchored to a post with no
+    /// media still reports the row rather than the middle of the screen.
+    @Test func aFlightAnchoredToATextRowLandsOnTheRow() {
+        let page = page(style: .list)
+        let text = page.posts[2].id
+        #expect(page.posts[2].kind == .text)
+        #expect(page.hero(for: text, in: page) == nil, "a text row has no hero — the premise")
+
+        // The case that produces it: a window opened from this text post, the
+        // viewer paged to a post the grid cannot land on, so the anchor stayed
+        // here.
+        let source = ForYouGridZoomSource(
+            page: page, tappedID: text, activePostID: { PostID("gone") },
+            landedModel: { _ in nil }, depthView: nil
+        )
+        source.zoomSourceWillStageDismissal()
+
+        let frame = source.zoomHeroFrame(in: page)
+        let row = page.rowFrame(for: text, in: page)
+        #expect(row != nil)
+        #expect(frame == row, "the close collapsed to the centre instead of onto its card")
+    }
+
     // MARK: - The order the viewer gets back
 
     /// ⚠️ THE FEED IS PERMUTED, NOT REBUILT: A, B, C read from A to C comes back
