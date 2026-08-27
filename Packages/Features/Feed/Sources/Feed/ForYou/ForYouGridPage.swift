@@ -344,7 +344,21 @@ final class ForYouGridPage: UIView {
     }
 
     /// How close to the end a scroll gets before the next page is requested.
-    private static let prefetchDistance: CGFloat = 800
+    ///
+    /// ⚠️ MEASURED IN SCREENS, not in points, because a row is not a tile.
+    ///
+    /// A fixed 800pt is roughly three rows of tiles and barely ONE card: on the
+    /// timeline the request went out with a single card of runway left, so a
+    /// flick outran it and the viewer hit the end of the list before the page
+    /// arrived. A screen and a half of lead is the same lead on both shapes,
+    /// which is what "start fetching before they get there" actually means.
+    ///
+    /// The floor keeps the rule honest before first layout, where the viewport
+    /// is zero and a relative distance would ask for the next page only once
+    /// the scroll had already ended.
+    private var prefetchDistance: CGFloat {
+        max(800, collectionView.bounds.height * 1.5)
+    }
 
     init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
         self.imagePipeline = imagePipeline
@@ -540,15 +554,24 @@ final class ForYouGridPage: UIView {
     /// Shows or hides the next-page spinner beneath the last tile.
     ///
     /// **Why this cannot jump the scroll.** Reserving the band happens when
-    /// pagination fires, which is `prefetchDistance` (800pt) before the end —
+    /// pagination fires, which is `prefetchDistance` (a screen and a half)
+    /// before the end —
     /// growing the bottom inset never moves `contentOffset`, so there is nothing
     /// to see. Releasing it happens once the page has landed and added a whole
     /// slice of content, by which point the viewer is far from the bottom and
     /// the offset cannot be clamped by 56pt. The animation covers the one case
     /// left: a page that lands empty, where the release can nudge a viewer
     /// sitting at the very end.
+    /// ⚠️ EVERY STYLE, and the `style == .grid` this replaces was a hole.
+    ///
+    /// The timeline is the surface where the wait is actually visible: its rows
+    /// are a screen tall, so the viewer reaches the end of a page in a few
+    /// flicks, and until the next one landed the list simply stopped with no
+    /// sign that anything was coming. A grid hid that behind three columns of
+    /// tiles. Same footer, same band, same rule — the spinner is the answer to
+    /// "is there more", and both shapes owe it.
     func setPaging(_ paging: Bool) {
-        guard style == .grid, isPaging != paging else { return }
+        guard isPaging != paging else { return }
         isPaging = paging
         if paging {
             pagingSpinner.startAnimating()
@@ -1275,6 +1298,28 @@ final class ForYouGridPage: UIView {
         return Hero(frame: cell.convert(rect, to: space), cover: appearance.cover, style: appearance.style)
     }
 
+    /// Whether a hero could land on `postID` once it is IN the departure slot.
+    ///
+    /// ⚠️ ASKED OF THE MODEL, AND THAT IS THE WHOLE POINT.
+    ///
+    /// The obvious spelling — `heroAppearance(for:) != nil` — reads a REALIZED
+    /// CELL, and the post being dismissed is by definition the one the viewer
+    /// paged to, which is exactly the post whose row is furthest from the
+    /// screen. Nine pages down there is no cell, so the question answered "it
+    /// cannot fly", the adoption was declined, and the flight went home to the
+    /// tile it left from: the viewer closed Priya's photograph and watched it
+    /// land on Tom's dog. Measured that way, then fixed here.
+    ///
+    /// What can actually fly is a property of the post and the shape this page
+    /// draws it in: a tile is a rect whatever the post is, and a timeline row
+    /// only has one where it has media — a text row's card is the reveal's
+    /// business, not a flight's.
+    /// Takes the POST rather than its id, because the caller may be holding one
+    /// this page does not have yet — the adoption can insert it.
+    func canLandHero(on post: GalleryPost) -> Bool {
+        style == .grid || post.kind != .text
+    }
+
     /// What the flight card should *look* like, without needing a coordinate
     /// space — the card is built before anyone knows the container, and asking
     /// for a frame there would mean inventing one.
@@ -1562,12 +1607,33 @@ final class ForYouGridPage: UIView {
     /// bottom of a screen the flight is covering — and it has to shift, because
     /// the alternative is a card of the wrong height standing in for the post.
     @discardableResult
-    func adoptPost(_ postID: PostID, intoSlotOf occupantID: PostID) -> Bool {
+    func adoptPost(
+        _ postID: PostID, intoSlotOf occupantID: PostID, orInsert model: GalleryPost? = nil
+    ) -> Bool {
         guard !showsSkeleton,
-              let slot = posts.firstIndex(where: { $0.id == occupantID }),
-              let current = posts.firstIndex(where: { $0.id == postID }),
-              slot != current
+              let slot = posts.firstIndex(where: { $0.id == occupantID })
         else { return false }
+        // ⚠️ MOVE IF IT IS HERE, INSERT IF IT IS NOT — never a second copy.
+        //
+        // The list this page holds is a page of a paginated feed, and the post
+        // being dismissed came from a stream seeded off it, so the two can
+        // disagree: a refresh that lands while a post is open re-derives the
+        // corpus, and the post the viewer is closing may no longer be in it.
+        // Declining there is what leaves the viewer landing on the card they
+        // left — the same wrong landing as an unrealized row, from a different
+        // cause. Inserting the model the caller carries puts it where it
+        // belongs instead.
+        //
+        // Either way the id ends up in exactly ONE index. Every lookup here
+        // resolves an id through `firstIndex`, so a duplicate does not render
+        // twice, it renders once and makes the OTHER copy unaddressable: the
+        // flight rect, the hero hide and the playback adoption would each be
+        // free to pick a different tile.
+        guard let current = posts.firstIndex(where: { $0.id == postID }) else {
+            guard let model, model.id == postID else { return false }
+            return insertPost(model, at: slot)
+        }
+        guard slot != current else { return false }
         // ⚠️ A SWAP CAN RE-FORM THE SECTIONS, and the update has to know.
         //
         // `split` is not a stored number: it is the length of the leading RUN
@@ -1646,16 +1712,57 @@ final class ForYouGridPage: UIView {
                 cell.alpha = 1
                 cell.layoutIfNeeded()
             }
-            // And commit them to the render server in this turn rather than the
-            // next. Everything downstream — the hero rect, the flight card built
-            // from this cell's cover, the landing gate — reads the cell
-            // immediately, and a cell whose layers are still pending answers as
-            // though it were empty.
-            CATransaction.flush()
+            // ⚠️ NO `CATransaction.flush()` HERE, however tempting.
+            //
+            // It was here to commit the rebuilt cells to the render server in
+            // this turn rather than the next, because everything downstream —
+            // the hero rect, the flight card's cover, the landing gate — reads
+            // them immediately. `layoutIfNeeded` above already delivers that:
+            // the cells exist and are laid out, which is what those readers
+            // actually need.
+            //
+            // What the flush additionally did was flush UIKIT'S OWN
+            // TRANSACTION, and this method runs inside one on the back-button
+            // path: the adoption is asked for from `animationControllerFor`,
+            // which UIKit calls while committing the pop. Flushing there
+            // aborted the pop — the animator was returned and then never
+            // started, no `animateTransition`, no `didShow`, no completion. On
+            // screen: the closed post's navigation bar still up over the grid,
+            // and the row the close had concealed hidden for good, because the
+            // completion that puts it back never ran.
+            //
+            // Measured by removing exactly this line: the same close then
+            // logged `reveal animate` → `conceal=false` → `ended completed=true`.
         }
         // The landing tile is about to be flown onto; give its cover a head
         // start in case the cache does not already hold it.
         if let url = posts[slot].thumbnailURL { imagePipeline.prefetch([url]) }
+        return true
+    }
+
+    /// Puts a post the list no longer holds INTO it, at the departure slot.
+    ///
+    /// Whole-table, unconditionally: an insert changes the count of whichever
+    /// section it lands in, and `split` — the leading run of arrivals — can
+    /// change with it, so there is no targeted update that can honestly
+    /// describe this. The cost is the same one the swap pays when the run
+    /// moves, and it is paid under a screen the post being dismissed is
+    /// covering.
+    private func insertPost(_ post: GalleryPost, at slot: Int) -> Bool {
+        posts.insert(post, at: slot)
+        UIView.performWithoutAnimation {
+            collectionView.reloadData()
+            // The caller reads the landing rect from a realized cell the moment
+            // this returns; `reloadData` alone leaves `cellForItem` answering
+            // nil and the flight collapses to the middle of the screen.
+            collectionView.layoutIfNeeded()
+            if let cell = collectionView.cellForItem(at: indexPath(for: slot)) {
+                cell.isHidden = false
+                cell.alpha = 1
+                cell.layoutIfNeeded()
+            }
+        }
+        if let url = post.thumbnailURL { imagePipeline.prefetch([url]) }
         return true
     }
 
@@ -2230,7 +2337,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         guard !showsSkeleton, !posts.isEmpty else { return }
         let remaining = scrollView.contentSize.height
             - (scrollView.contentOffset.y + scrollView.bounds.height)
-        guard remaining < Self.prefetchDistance else { return }
+        guard remaining < prefetchDistance else { return }
         onNearEnd?()
     }
 

@@ -938,7 +938,7 @@ final class ForYouViewController: UIViewController {
                 // animates the safe area and this collection view adds it to
                 // its own inset, so an unpinned grid keeps drifting under a
                 // close that has already measured where it is going.
-                willStageDismissal: { [weak page, weak feed] in
+                willStageDismissal: { [weak self, weak page, weak feed] in
                     log("freeze    pre")
                     page?.beginHeroFreeze()
                     // ⚠️ THE CARD THE VIEWER ENDED ON TAKES THE DEPARTURE SLOT,
@@ -956,7 +956,10 @@ final class ForYouViewController: UIViewController {
                     // them is read after this.
                     if let landed = (feed as? SnapFeedViewController)?.activePostID,
                        landed != anchorID,
-                       page?.adoptPost(landed, intoSlotOf: anchorID) == true {
+                       page?.adoptPost(
+                           landed, intoSlotOf: anchorID,
+                           orInsert: self?.viewModel.post(for: landed)
+                       ) == true {
                         anchorID = landed
                     }
                     log("freeze   post")
@@ -1311,6 +1314,8 @@ final class ForYouViewController: UIViewController {
             // Injected rather than imported: the source stays a grid concept
             // and never learns what a feed is.
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
+            // And the post itself, for a landing this page no longer holds.
+            landedModel: { [weak self] id in self?.viewModel.post(for: id) },
             // The gallery recedes; the tray and the title stay grounded.
             depthView: pager,
             // NOT hoisted — the two dismissals share one surface flow.
@@ -1522,6 +1527,7 @@ final class ForYouViewController: UIViewController {
             page: page,
             tappedID: tappedID,
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
+            landedModel: { [weak self] id in self?.viewModel.post(for: id) },
             depthView: pager
         )
         let transition = ZoomTransitionController(source: source, destination: destination)
@@ -1580,7 +1586,9 @@ final class ForYouViewController: UIViewController {
             else { return }
             hasPrepared = true
             if landed != departureID {
-                page.adoptPost(landed, intoSlotOf: departureID)
+                page.adoptPost(
+                    landed, intoSlotOf: departureID, orInsert: self.viewModel.post(for: landed)
+                )
             }
             installTextReveal(feed: feed, format: format, postID: landed, presenting: false)
             // ⚠️ AND HIDE THE ROW, which on this path nothing else has.
@@ -1597,6 +1605,27 @@ final class ForYouViewController: UIViewController {
             // cells — the hero's requirement, since a flight LANDS on one of
             // them — and this is the opposite need.
             page.setRevealConcealed(true, for: landed)
+        }
+        // ⚠️ AND WHATEVER ANIMATED THE CLOSE, NO ROW STAYS HIDDEN.
+        //
+        // The concealment above is paid back by the reveal's own completion —
+        // when the reveal is what runs. It is not the only thing that can: this
+        // screen is closed by two grabs and by a back button, the preparation
+        // above runs for all of them, and a pop that ends up animated by
+        // anything else leaves the row it hid with nobody to put it back.
+        //
+        // Measured on a back-button close from a deep text landing: the row was
+        // concealed, the close was animated by something that never ran the
+        // reveal's completion, and the feed came back with a HOLE where the
+        // post the viewer had just been reading should have been — permanently,
+        // since nothing else on this screen ever revisits that flag.
+        //
+        // This is the backstop, not the mechanism: it fires on completed pops
+        // only, by which point the grid is on screen and any row it still holds
+        // hidden is a bug by definition.
+        textSlideDismissal.onFeedPopped = { [weak self] _ in
+            self?.pager.page(for: format)?.clearRevealConcealment()
+            self?.cardPathFlight = nil
         }
         textSlideDismissal.install(on: navigationController)
     }

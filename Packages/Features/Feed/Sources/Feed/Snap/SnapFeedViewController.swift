@@ -3299,9 +3299,29 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// `configureFlightChrome`'s rule so the card's chrome and its landing
     /// target can never describe different posts.
     var activePostID: PostID? {
-        let index = lifecycle.activeIndex ?? 0
+        let index = settledPageIndex
         return orderedIDs.indices.contains(index) ? orderedIDs[index] : nil
     }
+
+    /// The page this screen is ON, which is NOT the same as the page it is
+    /// actively playing.
+    ///
+    /// ⚠️ `activeIndex` GOES NIL THE MOMENT THE SCREEN STOPS BEING VISIBLE, and
+    /// a dismissal is exactly that moment: `viewWillDisappear` reports the
+    /// surface down, and every question asked afterwards — which post is this,
+    /// what does it travel as, where does it land — fell back to page ZERO, the
+    /// post the viewer opened with.
+    ///
+    /// Measured on a back-button close from page 11 of a text post: the pop
+    /// asked and was told `.hero`, because post ZERO is a photograph. The card
+    /// close had already adopted and CONCEALED the landed row, the flight it
+    /// was handed to could not land on a text row, and the feed came back with
+    /// a hole where the post should have been.
+    ///
+    /// Visibility is the right gate for PLAYBACK — nothing off screen should
+    /// hold a player — and the wrong one for identity. The snapped page is a
+    /// fact about the scroll position, and it survives the screen going away.
+    private var settledPageIndex: Int { lifecycle.pageIndex ?? 0 }
 
     /// Configures the replica from the page the card flies to/from: the active
     /// page if one is settled, else the first post (a map tap's feed opens on
@@ -3344,7 +3364,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// what happens to be dequeued. Falls back to `.hero`, the historical
     /// answer, when there is no model to ask.
     public var zoomDismissalKind: ZoomDismissalKind {
-        let index = lifecycle.activeIndex ?? 0
+        // The SETTLED page, not the active one — see `settledPageIndex`. A pop
+        // takes the screen's visibility away before it asks this.
+        let index = settledPageIndex
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]]
         else { return .hero }

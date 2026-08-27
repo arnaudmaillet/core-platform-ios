@@ -33,6 +33,11 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// The post the destination is showing right now, injected so this type
     /// never has to know what a feed is.
     private let activePostID: () -> PostID?
+    /// The feed's own copy of a post, for the case where the page being landed
+    /// in no longer holds it. Optional: a caller with no corpus to consult
+    /// simply cannot land on a post the page has dropped, which is where this
+    /// stood before.
+    private let landedModel: ((PostID) -> GalleryPost?)?
     /// Falls back to a centred collapse at this size when the anchor has no
     /// realized cell — the same rule the pin uses when it is panned off-screen.
     private let fallbackSide: CGFloat = 96
@@ -54,6 +59,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         page: ForYouGridPage,
         tappedID: PostID,
         activePostID: @escaping () -> PostID?,
+        landedModel: ((PostID) -> GalleryPost?)? = nil,
         depthView: UIView?,
         hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)? = nil,
         poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)? = nil,
@@ -67,6 +73,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         anchorID = tappedID
         departureID = tappedID
         self.activePostID = activePostID
+        self.landedModel = landedModel
         self.depthView = depthView
         self.donateLive = donateLive
     }
@@ -247,9 +254,20 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // give. What that case actually wants is the REVEAL, chosen at the
         // grab rather than at the tap, which is a change to which driver is
         // installed rather than to where it lands.
-        let landedCanFly = activePostID().map { page?.heroAppearance(for: $0) != nil } ?? false
-        if landedCanFly, let landed = activePostID(),
-           page?.adoptPost(landed, intoSlotOf: departureID) == true {
+        // ⚠️ THE MODEL DECIDES, NOT A REALIZED CELL — see `canLandHero(on:)`.
+        //
+        // This asked `heroAppearance`, which reads the cell, and the post being
+        // dismissed is the one the viewer paged to: the further they went, the
+        // more certain the row was outside the realized window and the answer
+        // was "cannot fly" for a photograph that plainly could. Nine pages down
+        // it declined every time, and the flight landed on the departure tile —
+        // the viewer closed one post and watched another land.
+        let landed = activePostID()
+        // Resolved from the page when it has it, and from the feed's whole
+        // corpus when it does not — the adoption inserts in that case.
+        let model = landed.flatMap { page?.post(for: $0) ?? landedModel?($0) }
+        if let landed, let model, page?.canLandHero(on: model) == true,
+           page?.adoptPost(landed, intoSlotOf: departureID, orInsert: model) == true {
             // The active post now occupies the departure slot, so anchoring to
             // it lands on that tile without moving anything.
             anchorID = landed

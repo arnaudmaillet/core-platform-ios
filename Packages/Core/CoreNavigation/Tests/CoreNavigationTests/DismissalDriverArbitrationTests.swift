@@ -49,6 +49,15 @@ struct DismissalDriverArbitrationTests {
         let animator = UIViewControllerAnimatedTransitioningStub()
         private(set) var animatorAsks = 0
         private(set) var didShows = 0
+        private(set) var interactionAsks = 0
+
+        func navigationController(
+            _ navigationController: UINavigationController,
+            interactionControllerFor animationController: any UIViewControllerAnimatedTransitioning
+        ) -> (any UIViewControllerInteractiveTransitioning)? {
+            interactionAsks += 1
+            return nil
+        }
 
         func navigationController(
             _ navigationController: UINavigationController,
@@ -224,6 +233,28 @@ struct DismissalDriverArbitrationTests {
         // Nothing of ours is driving, so the answer is whatever the displaced
         // delegate says — here, nothing.
         #expect(interaction == nil)
+    }
+
+    /// ⚠️ AN ANIMATOR THIS DRIVER BUILT IS NEVER DRIVEN BY ANYONE ELSE.
+    ///
+    /// The forwarding above is for animators that came FROM the displaced
+    /// delegate. Asking it about one of ours invites it to answer about its own
+    /// flights: a flight controller can hand back an interaction controller,
+    /// which then stages a hero of its own and waits for a finger that does not
+    /// exist. The pop starts, nothing advances it, and it never completes —
+    /// measured as a closed post's navigation bar left standing over the grid.
+    @Test func nobodyElseGetsToDriveOurOwnAnimator() {
+        let rig = rig(kind: .card)
+        rig.driver.revealGeometry = RevealGeometry(sourceFrame: { _ in .zero }, sourceCornerRadius: 0)
+        let ours = popAnimator(rig)
+        #expect(ours is RevealPopAnimator)
+
+        let interaction = rig.driver.navigationController(
+            rig.nav, interactionControllerFor: ours!
+        )
+
+        #expect(interaction == nil)
+        #expect(rig.saved.interactionAsks == 0, "the displaced delegate was asked to drive our pop")
     }
 
     /// ⚠️ A GEOMETRY IS NOT AN OPENING.

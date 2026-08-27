@@ -396,6 +396,20 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
                 navigationController, animationControllerFor: operation, from: fromVC, to: toVC
             )
         }
+        #if DEBUG
+        // `-grab-log`: which animator a pop got, and why.
+        //
+        // A close that looks wrong on screen has three candidate causes that
+        // are indistinguishable from the outside — the wrong driver answered,
+        // the right one answered with no geometry, or the geometry was built
+        // for the wrong post — and this names which.
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            let kind = (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind
+            print("[pop] kind=\(kind.map(String.init(describing:)) ?? "none")"
+                + " grab=\(revealGrab != nil) geometry=\(revealGeometry != nil)"
+                + " interaction=\(interaction != nil) delegate=\(type(of: navigationController.delegate))")
+        }
+        #endif
         // A live grab is the animation; anything with geometry in it would
         // stage a second flight over the same page. See `RevealGrabAnimator`.
         if revealGrab != nil { return RevealGrabAnimator() }
@@ -418,6 +432,24 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // with this driver's would scrub someone else's flight.
         if let grab = revealGrab { return grab }
         if let interaction { return interaction }
+        // ⚠️ AND AN ANIMATOR THIS DRIVER BUILT IS NEVER DRIVEN BY ANYONE ELSE.
+        //
+        // Forwarding unconditionally asks the displaced delegate to drive OUR
+        // animation, and a flight controller answers that question about its
+        // own flights: it can hand back an interaction controller which then
+        // stages a hero of its own and waits for a finger that does not exist.
+        // The pop starts, nothing advances it, and it never completes — a dim
+        // left over the grid, the closed post's navigation bar still up, and
+        // the row this driver concealed for the close hidden for good.
+        //
+        // Measured on a back-button close of a text post reached by paging: the
+        // animator was ours, the interaction was not, and neither `animate` nor
+        // any completion ever ran.
+        if animationController is RevealPopAnimator
+            || animationController is RevealPresentAnimator
+            || animationController is TimelineSlidePopAnimator {
+            return nil
+        }
         return savedDelegate?.navigationController?(
             navigationController, interactionControllerFor: animationController
         )
@@ -439,6 +471,11 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         //
         // Before the teardown below, which hands the slot back and forgets who
         // to forward to.
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[pop] didShow \(type(of: viewController))")
+        }
+        #endif
         savedDelegate?.navigationController?(
             navigationController, didShow: viewController, animated: animated
         )

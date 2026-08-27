@@ -120,6 +120,31 @@ struct SnapDismissalKindTests {
         #expect(feed([]).zoomDismissalKind == .hero)
     }
 
+    /// ⚠️ AND IT SURVIVES THE SCREEN GOING AWAY, which is the only moment it
+    /// is ever asked.
+    ///
+    /// The page index used to come from the ACTIVE item, and "active" means
+    /// visible — a screen that is being popped reports its surface down before
+    /// the pop asks anything, so every question fell back to page ZERO: the
+    /// post the viewer opened with, not the one they are closing.
+    ///
+    /// Measured on a back-button close from page 11 of a text post: the pop was
+    /// told `.hero` because post zero is a photograph, and the close that had
+    /// already adopted and concealed the landed row was handed to a driver that
+    /// could not land on it. The feed came back with a hole in it.
+    @Test func theAnswerSurvivesTheScreenBeingDismissed() {
+        let feed = feed([media("m"), text("t")])
+        page(feed, to: 1)
+        #expect(feed.zoomDismissalKind == .card)
+
+        // What a pop does first.
+        feed.beginAppearanceTransition(false, animated: false)
+        feed.endAppearanceTransition()
+
+        #expect(feed.zoomDismissalKind == .card, "the closing screen forgot which post it was on")
+        #expect(feed.activePostID == PostID("t"))
+    }
+
     /// The answer is a pure question — asking it must not activate a page,
     /// start a player, or otherwise move the screen. Both grabs ask it on every
     /// touch that reaches them.
