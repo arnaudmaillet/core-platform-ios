@@ -989,7 +989,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     /// Whether a flight is currently standing in for this row's media.
-    private(set) var isHeroMediaConcealed = false
+    /// Readable so a caller can assert the END STATE of a transition rather
+    /// than the calls that were supposed to produce it. A row whose media is
+    /// still standing in for a flight that ended is the shipped defect this
+    /// answers — and it is invisible to every test that only counts hides.
+    public private(set) var isHeroMediaConcealed = false
 
     /// Brings the chips, the date and the badge back with a settle rather than
     /// a switch.

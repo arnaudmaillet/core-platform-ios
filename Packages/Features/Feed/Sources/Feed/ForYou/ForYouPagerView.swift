@@ -175,6 +175,18 @@ final class ForYouPagerView: UIView {
         pages.forEach { $0.endRefreshing() }
     }
 
+    /// Puts back everything a transition hid, on every page.
+    ///
+    /// Asked of all three rather than of the active one: a lens can be switched
+    /// while a post is open, so the page that was flown from is not necessarily
+    /// the page being read on the way back.
+    func clearFlightConcealments() {
+        pages.forEach {
+            $0.clearRevealConcealment()
+            $0.clearHeroConcealment()
+        }
+    }
+
     /// Only the page being read shows the footer spinner. The other two are
     /// laid out off-screen and would otherwise reserve a band nobody can see.
     func setPaging(_ paging: Bool) {

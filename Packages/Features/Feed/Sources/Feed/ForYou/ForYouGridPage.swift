@@ -1874,6 +1874,37 @@ final class ForYouGridPage: UIView {
         setRevealConcealed(false, for: postID)
     }
 
+    /// Puts back whatever a FLIGHT hid, whoever ended up finishing the close.
+    ///
+    /// ⚠️ THE HIDE AND THE UNHIDE CAN BELONG TO DIFFERENT DRIVERS, and that is
+    /// the whole reason this exists. The push hides the tapped row's media so
+    /// the card flies alone, and the flight's own return puts it back — but the
+    /// feed is a PAGER: page onto a text post and the close is the card
+    /// driver's, so the flight never runs a return leg and never unhides
+    /// anything. The row came back with its caption and a blank where its
+    /// photograph had been, for the rest of the session.
+    ///
+    /// Reported after several round trips, because it accumulates: one row per
+    /// visit that ended on another kind of post. The sweep inside
+    /// `setHeroHidden(false:)` is what collects the ones neither reference
+    /// still names.
+    func clearHeroConcealment() {
+        // ⚠️ NO GUARD ON THE FLAGS, and the first version of this had one.
+        //
+        // The flags are what a leak may well NOT have. The post→cell mapping is
+        // not stable across a flight — staging swaps the landed post into the
+        // departure slot — so an unhide by lookup can clear the wrong instance
+        // and nil the flags while the cell that was actually hidden stays at
+        // alpha 0. A guard would skip the sweep in exactly that case, and the
+        // sweep costs one pass over the visible cells.
+        //
+        // (What actually fixed the reported leak was WHERE this is called from
+        // — `viewDidAppear` rather than a driver's callback. The guard was
+        // dropped alongside it and the two were never measured apart; this is
+        // the cheaper of the two shapes to be wrong about.)
+        setHeroHidden(false, for: heroHiddenPostID ?? heroFlyingPostID ?? PostID(""))
+    }
+
     func setRevealConcealed(_ concealed: Bool, for postID: PostID) {
         revealConcealedPostID = concealed ? postID : nil
         let row = cell(for: postID) as? PostGridListRowCell

@@ -90,6 +90,25 @@ struct DismissalReturnMatrixTests {
         page.posts.firstIndex { $0.id == id }
     }
 
+    /// Closes the post the way the APP would, by asking the same question the
+    /// app asks: a post with something to fly goes home on the flight, and one
+    /// without goes home as a card — which on this page is a direct adoption,
+    /// because the card driver owns the animation and the page only owns the
+    /// slot.
+    ///
+    /// Written as one helper because the permutation below is a rule about the
+    /// FEED, not about a driver: which one carries the post is an implementation
+    /// detail the viewer cannot see, and a test that only exercised the flight
+    /// would leave every text landing unproven.
+    private func close(on page: ForYouGridPage, tapped: PostID, landed: PostID) {
+        guard let model = page.post(for: landed) else { return }
+        if page.canLandHero(on: model) {
+            stageDismissal(on: page, tapped: tapped, landed: landed)
+        } else {
+            page.adoptPost(landed, intoSlotOf: tapped, orInsert: model)
+        }
+    }
+
     /// The invariant every single case owes, asserted everywhere rather than
     /// once: an id in two slots does not render twice, it makes one of the two
     /// unaddressable — `firstIndex` answers with whichever comes first, so the
@@ -259,6 +278,141 @@ struct DismissalReturnMatrixTests {
         stageDismissal(on: page, tapped: PostID("p0"), landed: PostID("p1"))
 
         #expect(page.posts.isEmpty)
+    }
+
+    // MARK: - The display the viewer gets back
+
+    /// Nothing on the grid may be invisible once no flight is in the air.
+    ///
+    /// The end state, not the calls: a row hidden by a driver that never got to
+    /// put it back looks exactly like a row nobody ever hid, and only the
+    /// pixels tell them apart.
+    private func expectNothingConcealed(_ page: ForYouGridPage, _ comment: Comment) {
+        let collection = page.subviews.compactMap { $0 as? UICollectionView }.first
+        for cell in collection?.visibleCells ?? [] {
+            #expect(cell.isHidden == false, comment)
+            #expect(cell.alpha == 1, comment)
+            if let row = cell as? PostGridListRowCell {
+                #expect(row.isHeroMediaConcealed == false, comment)
+            }
+        }
+    }
+
+    /// A whole round trip, the way the app performs one: the push hides the
+    /// tapped row's media so the card flies alone, the close re-points at
+    /// whatever the viewer ended on, and then either the flight lands (and puts
+    /// its own hide back) or another driver finishes the close and the screen's
+    /// own return sweep does.
+    private func roundTrip(
+        on page: ForYouGridPage,
+        tapped: PostID,
+        landed: PostID,
+        flightLands: Bool
+    ) {
+        let source = ForYouGridZoomSource(
+            page: page, tappedID: tapped, activePostID: { landed },
+            landedModel: { id in page.post(for: id) }, depthView: nil
+        )
+        source.setZoomSourceHidden(true)
+        source.zoomSourceWillStageDismissal()
+        if flightLands {
+            source.setZoomSourceHidden(false)
+        } else {
+            // What `viewDidAppear` does when the grid is on screen again.
+            page.clearHeroConcealment()
+            page.clearRevealConcealment()
+        }
+    }
+
+    /// ⚠️ THE HIDE AND THE UNHIDE CAN BELONG TO DIFFERENT DRIVERS.
+    ///
+    /// This is the reported leak. The push hides the tapped row's media; the
+    /// flight's own return is what puts it back. But the feed is a pager — end
+    /// on a text post and the close belongs to the CARD driver, which knows
+    /// nothing about a hide it did not make. The row came back with its caption
+    /// and a blank where its photograph was, and stayed that way: one more row
+    /// per round trip, which is why it was reported "after several iterations".
+    @Test(arguments: [ForYouGridPage.Style.grid, .list])
+    func aCloseFinishedByAnotherDriverStillGivesTheRowBack(style: ForYouGridPage.Style) {
+        let page = page(style: style)
+        let tapped = page.posts[1].id
+
+        roundTrip(on: page, tapped: tapped, landed: page.posts[14].id, flightLands: false)
+
+        expectNothingConcealed(page, "a row stayed hidden after the close ended")
+    }
+
+    /// And the ordinary case, where the flight does land, is unchanged.
+    @Test(arguments: [ForYouGridPage.Style.grid, .list])
+    func aFlightThatLandsGivesTheRowBackItself(style: ForYouGridPage.Style) {
+        let page = page(style: style)
+
+        roundTrip(
+            on: page, tapped: page.posts[1].id, landed: page.posts[13].id, flightLands: true
+        )
+
+        expectNothingConcealed(page, "the flight's own return left something hidden")
+    }
+
+    /// ⚠️ AND IT DOES NOT ACCUMULATE.
+    ///
+    /// One leaked row is a bug; the report was about what six of them look
+    /// like. Each trip departs from a different row, so a leak that survives
+    /// one round trip is still on screen at the end of the next.
+    @Test func sixRoundTripsLeaveNothingHidden() {
+        let page = page(style: .list)
+
+        for trip in 0..<6 {
+            roundTrip(
+                on: page,
+                tapped: page.posts[trip].id,
+                landed: page.posts[trip + 13].id,
+                flightLands: trip.isMultiple(of: 2)
+            )
+            expectNothingConcealed(page, "a row was left hidden by trip \(trip)")
+            expectNoDuplicates(page, "trip \(trip) duplicated an id")
+        }
+        #expect(page.posts.count == 30)
+    }
+
+    // MARK: - The order the viewer gets back
+
+    /// ⚠️ THE FEED IS PERMUTED, NOT REBUILT: A, B, C read from A to C comes back
+    /// C, B, A.
+    ///
+    /// Stated as the product rule it is. The post the viewer ended on takes the
+    /// slot they left from — that is the whole point of the adoption — and the
+    /// post that was there goes where the other one came from. Everything
+    /// between them is untouched, which is what makes the grid hold still under
+    /// a card that is landing on it.
+    @Test(arguments: [ForYouGridPage.Style.grid, .list])
+    func readingFromTheFirstPostToTheLastReversesTheEnds(style: ForYouGridPage.Style) {
+        let page = page(style: style, count: 3)
+        let (a, b, c) = (page.posts[0].id, page.posts[1].id, page.posts[2].id)
+
+        close(on: page, tapped: a, landed: c)
+
+        #expect(page.posts.map(\.id) == [c, b, a])
+    }
+
+    /// The same rule with the ends further apart: only the two ends move.
+    /// The same rule with the ends further apart, for every combination of what
+    /// the two ends ARE: only the two ends move, whichever driver carries the
+    /// post home.
+    @Test(arguments: [0, 1, 2], [0, 1, 2])
+    func onlyTheTwoEndsOfTheReadingMove(departureKind: Int, landingKind: Int) {
+        let page = page(style: .list)
+        let before = page.posts.map(\.id)
+        let from = 3 + departureKind      // 3,4,5 → photo, video, text
+        let to = 12 + landingKind         // 12,13,14 → photo, video, text
+
+        close(on: page, tapped: before[from], landed: before[to])
+
+        var expected = before
+        expected.swapAt(from, to)
+        let story = "a \(page.post(for: before[from])!.kind) → "
+            + "\(page.post(for: before[to])!.kind) reading did not permute its ends"
+        #expect(page.posts.map(\.id) == expected, Comment(rawValue: story))
     }
 
     // MARK: - What the adoption owes its caller

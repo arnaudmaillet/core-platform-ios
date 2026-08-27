@@ -1257,6 +1257,11 @@ final class ForYouViewController: UIViewController {
                 // where its `topViewController` guard declined.
                 self?.revealTabBar(animated: true)
                 self?.restoreChromeAfterTransition()
+                // The mirror of the hero path's backstop: this window may have
+                // ended on a MEDIA post, whose close is the flight's, and a
+                // flight that was cancelled or superseded leaves its hide
+                // behind. Idempotent when nothing is hidden.
+                self?.pager.page(for: format)?.clearHeroConcealment()
                 // Close the playback handoff opened before the push.
                 //
                 // On the hero path the transition closes it (`onSourceReturned`
@@ -1624,7 +1629,13 @@ final class ForYouViewController: UIViewController {
         // only, by which point the grid is on screen and any row it still holds
         // hidden is a bug by definition.
         textSlideDismissal.onFeedPopped = { [weak self] _ in
+            // Both concealments, because a close can be finished by a driver
+            // that did not start it: the flight hides the tapped row's media at
+            // the push and only its OWN return puts it back, so a visit that
+            // ends on a text post — closed by the card driver — leaves that row
+            // blank for good. See `clearHeroConcealment`.
             self?.pager.page(for: format)?.clearRevealConcealment()
+            self?.pager.page(for: format)?.clearHeroConcealment()
             self?.cardPathFlight = nil
         }
         textSlideDismissal.install(on: navigationController)
@@ -1682,6 +1693,25 @@ final class ForYouViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         sweepAbandonedTransition()
+        // ⚠️ NOTHING ON THIS SCREEN MAY BE INVISIBLE ONCE IT IS BACK.
+        //
+        // The concealments a close uses belong to a transition, and every one
+        // of them is put back by the driver that applied it — when that driver
+        // is the one that finishes. It often is not: the feed is a PAGER, so a
+        // post opened by a FLIGHT (which hides the tapped row's media so the
+        // card flies alone) can be closed by the CARD driver, whose return leg
+        // knows nothing about a hide it did not make. The row came back with
+        // its caption and a blank rectangle where its photograph belonged, and
+        // it stayed that way — one more row per round trip that ended on
+        // another kind of post. Reported after several iterations, which is
+        // exactly how it accumulates.
+        //
+        // Tied to this moment rather than to a driver's callback because this
+        // is the one fact all the paths share: the grid is on screen again, so
+        // no flight is in the air, so nothing here is legitimately hidden.
+        // `viewDidAppear` lands after the transition coordinator has finished,
+        // so it cannot race a landing.
+        pager.clearFlightConcealments()
         pager.setAutoplayActive(true)
         #if DEBUG
         scheduleTabAwayIfNeeded()
