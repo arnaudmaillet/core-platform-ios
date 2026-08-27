@@ -1556,11 +1556,17 @@ final class ForYouViewController: UIViewController {
         // off the landed post's ROW, so that row has to be in the departure
         // slot before any of them is asked for — otherwise they describe a card
         // sitting somewhere off screen. `adoptPost` is what puts it there.
-        textSlideDismissal.prepareForSwipe = { [weak self, weak feed] in
+        // ⚠️ ONCE. A swipe asks twice — when the grab claims the screen, and
+        // again when the pop it triggers asks for an animator — and a second
+        // swap would put the two cards back where they started.
+        var hasPrepared = false
+        textSlideDismissal.prepareForDismissal = { [weak self, weak feed] in
+            guard !hasPrepared else { return }
             guard let self, let feed,
                   let page = pager.page(for: format),
                   let landed = (feed as? SnapFeedViewController)?.activePostID
             else { return }
+            hasPrepared = true
             if landed != departureID {
                 page.adoptPost(landed, intoSlotOf: departureID)
             }

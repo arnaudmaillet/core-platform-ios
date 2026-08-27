@@ -80,17 +80,23 @@ struct ForYouSourceSlotTests {
         #expect(abs(originAfter.x - originBefore.x) < 0.5)
     }
 
-    /// ⚠️ AND NEVER ACROSS THE "New" BOUNDARY — this one crashes.
+    /// ⚠️ ACROSS THE "New" BOUNDARY TOO — the case that crashed.
     ///
     /// `split` is the length of the leading RUN of arrivals, not a stored
-    /// number, so swapping an old post into that run cuts it short and the two
+    /// number, so swapping an old post into that run cuts it short and both
     /// sections' counts change — while `reloadItems` promises UIKit they did
     /// not. Reported from a device: "the number of items in section 0 after the
     /// update (1) must be equal to the number before (6)".
     ///
-    /// Asserted through the page's own sectioning rather than against a literal
-    /// index, and both directions, because the run can shorten from either end.
-    @Test func aSwapIsRefusedAcrossTheArrivalsBoundary() {
+    /// It must still SWAP: the arrivals sit at the top, so paging a few posts
+    /// down crosses the boundary almost immediately, and a dismissal that
+    /// declined there would land on the card the viewer left. The update takes
+    /// the honest verb for a changed shape instead.
+    ///
+    /// Both directions, because the run can be entered from either side, and
+    /// the run's own length is asserted rather than a literal index — that is
+    /// the number UIKit was crashing on.
+    @Test func aSwapAcrossTheArrivalsBoundaryReshapesTheSections() {
         let page = ForYouGridPage(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
         )
@@ -103,11 +109,18 @@ struct ForYouSourceSlotTests {
         let arrival = page.posts[2].id
         let older = page.posts[17].id
 
-        #expect(!page.adoptPost(older, intoSlotOf: arrival))
-        #expect(!page.adoptPost(arrival, intoSlotOf: older))
-        // Nothing moved, so the counts UIKit was promised still hold.
-        #expect(page.posts[2].id == arrival)
+        #expect(page.adoptPost(older, intoSlotOf: arrival))
+
+        #expect(page.posts[2].id == older)
+        #expect(page.posts[17].id == arrival)
+        // The run now stops where the old post landed, and the page survived
+        // saying so — an update that lied about this is what crashed.
+        #expect(page.debugArrivalsRunLength == 2)
+
+        // And back the other way, from the old side into the run.
+        #expect(page.adoptPost(arrival, intoSlotOf: older))
         #expect(page.posts[17].id == older)
+        #expect(page.debugArrivalsRunLength == 6)
     }
 
     /// And inside one run it still works: the boundary is the limit, not the

@@ -110,6 +110,13 @@ final class ForYouGridPage: UIView {
         return leading < posts.count ? leading : 0
     }
 
+    #if DEBUG
+    /// How many rows the "New" header currently covers — the number UIKit
+    /// checks an update against, so a test can assert the shape rather than
+    /// the contents.
+    var debugArrivalsRunLength: Int { split }
+    #endif
+
     /// Arrivals first, everything else after, each half keeping the order it
     /// arrived in.
     ///
@@ -1561,27 +1568,21 @@ final class ForYouGridPage: UIView {
               let current = posts.firstIndex(where: { $0.id == postID }),
               slot != current
         else { return false }
-        // ⚠️ NEVER ACROSS THE "New" BOUNDARY, and this one CRASHES rather than
-        // looking wrong.
+        // ⚠️ A SWAP CAN RE-FORM THE SECTIONS, and the update has to know.
         //
         // `split` is not a stored number: it is the length of the leading RUN
-        // of arrivals. Swapping an old post into that run cuts the run short,
-        // so the two sections' counts change — while `reloadItems` promises
-        // UIKit that they did not. Reported from a device as "the number of
-        // items in section 0 after the update (1) must be equal to the number
-        // before (6)".
+        // of arrivals. Move an old post into that run and the run stops there,
+        // so both sections' counts change — while `reloadItems` promises UIKit
+        // they did not. It crashes: "the number of items in section 0 after the
+        // update (1) must be equal to the number before (6)". Invisible while
+        // the adoption was gated to the mosaic, which has one section.
         //
-        // Reloading the whole thing instead would satisfy UIKit and cost more
-        // than it looks: the section header moves when the run shortens, so
-        // every row below it does too — including the departure slot, whose
-        // whole value is that it is still exactly where the viewer left it.
-        //
-        // So a cross-boundary landing is declined, and the dismissal goes home
-        // to the card it left from. That is the honest answer for a list that
-        // is GROUPED: the two posts do not live in one run, and there is no
-        // slot to lend.
-        guard indexPath(for: slot).section == indexPath(for: current).section
-        else { return false }
+        // Refusing the swap was tried and is the wrong trade: the arrivals sit
+        // at the top, so paging a few posts down crosses the boundary almost
+        // immediately, and declining there means the viewer lands on the card
+        // they left — the exact thing the adoption exists to prevent. So the
+        // swap stands and the UPDATE changes shape below.
+        let splitBefore = split
         // The pixels each cell is showing RIGHT NOW, carried across the reload.
         //
         // `configure` clears the image and re-asks the cache, so a cell whose
@@ -1599,10 +1600,25 @@ final class ForYouGridPage: UIView {
         // without `prepareForReuse`, so a tile would keep the previous post's
         // video surface and play one post's motion under another's cover.
         UIView.performWithoutAnimation {
-            collectionView.reloadItems(at: [
-                indexPath(for: slot),
-                indexPath(for: current)
-            ])
+            if split == splitBefore {
+                collectionView.reloadItems(at: [
+                    indexPath(for: slot),
+                    indexPath(for: current)
+                ])
+            } else {
+                // ⚠️ THE WHOLE TABLE, because the sections themselves moved.
+                //
+                // A targeted update carries a promise about the counts, and
+                // this swap has just broken it. `reloadData` makes no such
+                // promise — it is the honest verb for "the shape changed".
+                //
+                // What it costs is one header's worth of shift for the rows
+                // below the boundary, and that is affordable exactly here: the
+                // grid is covered by the post being dismissed, and the landing
+                // rect is read AFTER the layout pass below, so the flight aims
+                // at where the slot actually ended up rather than where it was.
+                collectionView.reloadData()
+            }
             // Force the pass NOW. `reloadItems` only marks the items dirty; the
             // cells are rebuilt on the next layout, and the caller reads the
             // landing rect from a realized cell immediately after this returns.

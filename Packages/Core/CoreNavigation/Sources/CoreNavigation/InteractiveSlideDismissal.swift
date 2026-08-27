@@ -112,9 +112,15 @@ public final class InteractiveSlideDismissal: NSObject {
     /// text sets it.
     public var revealPresents = false
 
-    /// Called at the instant a swipe claims the screen, before anything reads
-    /// `revealGeometry`. See `beginSwipe`.
-    public var prepareForSwipe: (() -> Void)?
+    /// Called at the instant a dismissal is decided, before anything reads
+    /// `revealGeometry` — from a swipe claiming the screen, and from a pop
+    /// with no gesture behind it at all.
+    ///
+    /// ⚠️ MUST BE IDEMPOTENT. A swipe reaches it twice: once when the grab
+    /// claims the screen, and again when the pop it triggers asks for an
+    /// animator. What it does — moving a card into the slot the dismissal
+    /// flies to — undoes itself if it runs a second time.
+    public var prepareForDismissal: (() -> Void)?
 
     /// The recognizer, so an owner can order a competing one behind it —
     /// `require(toFail:)` needs the object, and a caller that cannot see it
@@ -238,7 +244,7 @@ public final class InteractiveSlideDismissal: NSObject {
         // Before the geometry is read three lines down, and that ordering is
         // the whole point: `onWillBeginPop` fires after the grab exists, which
         // is too late to decide what the grab is carrying.
-        prepareForSwipe?()
+        prepareForDismissal?()
         // Freeze the pager so a diagonal drag can't page mid-pop.
         (feed as? any ZoomTransitionDestination)?.setContentScrollEnabled(false)
         if let revealGeometry {
@@ -367,6 +373,14 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
             )
         }
         guard operation == .pop, fromVC === feedViewController else { return nil }
+        // ⚠️ A POP WITH NO GESTURE BEHIND IT still has to be prepared.
+        //
+        // A swipe passes through `beginSwipe`, which asks for this first. The
+        // back button does not: it goes straight to the stack, and this is the
+        // earliest moment anything of ours hears about it — still early enough,
+        // since the animator below is built from the geometry it produces.
+        // Idempotent by contract, because a swipe arrives here as well.
+        prepareForDismissal?()
         // ⚠️ A POST THAT FLIES GOES BACK TO WHOEVER HELD THIS SLOT BEFORE US.
         //
         // This driver holds the delegate slot for the whole of the screen's
