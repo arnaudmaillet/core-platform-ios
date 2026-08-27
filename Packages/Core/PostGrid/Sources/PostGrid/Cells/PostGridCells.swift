@@ -824,51 +824,21 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         )
     }
 
-    /// Brings in the closing metric line, which the page never had, instead of
-    /// letting it appear in a single frame.
+    /// ⚠️ NOTHING IS FADED IN AT THE LANDING, and the deletion of the thing
+    /// that used to be here is worth recording.
     ///
-    /// It runs at the LANDING — once the page is gone and the card is alone —
-    /// and not during the flight, because the page is veiled over exactly that
-    /// band: anything faded underneath an opaque cover arrives at full opacity
-    /// anyway.
+    /// The closing metric line was brought in over 0.22s once the card was
+    /// alone, on the reasoning that the PAGE never had one — true of the
+    /// reveal's push, and irrelevant to the leg this actually ran on. A
+    /// dismissal's window carries `RevealDismissCardView`, which is a whole row
+    /// including that line, so by the time this fired the viewer had been
+    /// looking at the metric line for the length of the flight. Dropping it to
+    /// zero and bringing it back is a blink of something already on screen —
+    /// reported exactly that way.
     ///
-    /// ## Why the caption is NOT faded with it
-    ///
-    /// The card and the page differ on one more thing: the tail of the last
-    /// line, where the affordance displaced the words the page still shows —
-    /// "…a migration that… Show more" against "…a migration that had been".
-    /// Cross-fading that was tried twice, once by dissolving the whole page
-    /// against the card and once by dissolving this label against a copy of
-    /// the page's version. Both showed the same artifact, because it is not a
-    /// property of the mechanism: blending two DIFFERENT runs of text draws
-    /// both of them, and the result reads as "that.had beenmore" rather than
-    /// as a substitution.
-    ///
-    /// A fade only works against nothing, which is why the metric line takes
-    /// one and the caption does not. Removing that last pop needs the two
-    /// sides to stop differing — either the page truncating its own line four
-    /// for the flight, or the veil hiding it so the card's can arrive into
-    /// empty space — and both are structural rather than a fade.
-    public func fadeInRevealedFurniture(duration: TimeInterval = 0.22) {
-        // ONLY when the caption was truncated, and the symmetry with
-        // `revealCut` is the reason. A truncated card's metric line arrives
-        // into a band the page was filling with words, so it has to be brought
-        // in rather than switched on. A whole caption's does not: the page
-        // carries the same metric line at the same offset, unveiled, for the
-        // entire flight — fading it in here would blink something that was
-        // already on screen.
-        // The BAND is deliberately absent from this, and its absence replaced a
-        // fade that was here for one commit. The destination now BORROWS this
-        // row's band for the flight (see `installRevealAuthorBand`), so the
-        // window already shows a header identical to this one — the swap at the
-        // landing is the identity, and fading this one in from zero would blink
-        // something the viewer was already looking at.
-        guard showMoreRange != nil else { return }
-        metaRow.alpha = 0
-        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseOut]) {
-            self.metaRow.alpha = 1
-        }
-    }
+    /// It is the same argument the band already won: the window shows a header
+    /// identical to the row's, so the swap at the landing is the identity.
+    /// Every part of this row now arrives that way.
 
     #if DEBUG
     /// Presses "Show more". Returns false when there was nothing to reveal,
@@ -1366,6 +1336,42 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         authorBand.showMenuControlAsScenery()
     }
 
+    /// Draws the band's repost and save controls without wiring them, for the
+    /// same reason and with the same care as the "..." above: a stand-in must
+    /// show what the ROW shows, and both ways of being wrong end the transition
+    /// with a control appearing or disappearing in the last frame.
+    ///
+    /// The capability existed on the band and nothing in the app called it, so
+    /// every text dismissal flew a card whose header was missing its trailing
+    /// pill — the one visible difference between the window and the row it
+    /// lands on.
+    public func showBandActionsAsScenery(repost: Bool, bookmark: Bool, saved: Bool) {
+        authorBand.showActionControlsAsScenery(repost: repost, bookmark: bookmark, saved: saved)
+    }
+
+    /// What the row's date is CURRENTLY reading, so a stand-in can show the
+    /// same string rather than working one out for itself.
+    ///
+    /// ⚠️ THE ROW'S ANSWER, NOT THE TRUTH. A compact age is a function of the
+    /// clock, and the row computed its own when it was configured — minutes
+    /// ago, on a post the viewer has been reading. A stand-in that recomputed
+    /// it flew "2m" home onto a row that still says "now", which is a word
+    /// changing at the end of a transition whose whole purpose is that nothing
+    /// changes. Whichever is stale, they must agree.
+    public var renderedAgeText: String? { ageLabel.text }
+
+    /// What the row's header is actually drawing in its trailing pill, so a
+    /// test can compare a stand-in against a row rather than against a literal.
+    public var visibleBandActions: (repost: Bool, bookmark: Bool, saved: Bool) {
+        authorBand.visibleActionControls
+    }
+
+    /// Makes this cell show `text` as its age, on both placements.
+    public func overrideAgeText(_ text: String) {
+        ageLabel.text = text
+        overlayAge.text = text
+    }
+
     private let card = UIView()
     /// The author band — shown only where the row's post actually carries an
     /// identity.
@@ -1390,8 +1396,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// while truncated, so the label's own text is not a copy of this and
     /// cannot be used in its place.
     private var fullCaption = ""
-    /// The closing metric line, held so a landing can bring it in gently —
-    /// see `fadeInRevealedFurniture`.
+    /// The closing metric line.
     private var metaRow: UIStackView!
     /// Where "Show more" sits inside the label's current attributed text, or
     /// nil when the caption fits and there is no affordance at all.

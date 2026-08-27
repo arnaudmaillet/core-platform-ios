@@ -1378,21 +1378,6 @@ final class ForYouGridPage: UIView {
         return row?.currentMediaPage
     }
 
-    /// Brings the landed row's own furniture in gently — see
-    /// `PostGridListRowCell.fadeInRevealedFurniture`. A no-op for a row that
-    /// is not realized, which is the honest answer: nothing is on screen to
-    /// fade.
-    func fadeInRevealedFurniture(for postID: PostID) {
-        let row = cell(for: postID) as? PostGridListRowCell
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
-            print("[text-reveal] landing fade: row=\(row == nil ? "MISSING" : "found")"
-                  + " window=\(row?.window == nil ? "no" : "yes")")
-        }
-        #endif
-        row?.fadeInRevealedFurniture()
-    }
-
     /// Where the page stops matching the row, in the row's own space — the
     /// reveal's cut line. `nil` when the row is not realized.
     /// The card a dismissal carries home, drawn at the ROW's own width so its
@@ -1415,6 +1400,16 @@ final class ForYouGridPage: UIView {
             // is showing the whole thing.
             captionExpanded: captionExpansion.isExpanded(postID),
             showsAuthorMenu: showsAuthorMenu(for: post),
+            // ⚠️ Both controls, because every row on THIS surface wires both —
+            // see `configure`, where the repost and bookmark handlers are set
+            // unconditionally. The saved state is read from the same store the
+            // row reads, so a post saved a moment ago flies home filled in.
+            actions: .init(
+                repost: true, bookmark: true, saved: bookmarks.isSaved(postID.rawValue)
+            ),
+            // The row's own date when there is a row — see
+            // `PostGridListRowCell.renderedAgeText`.
+            ageText: (cell(for: postID) as? PostGridListRowCell)?.renderedAgeText,
             // The ROW's own height when it is realized — see the profile's
             // twin, and `RevealDismissCardView.init`.
             height: cell(for: postID)?.bounds.height

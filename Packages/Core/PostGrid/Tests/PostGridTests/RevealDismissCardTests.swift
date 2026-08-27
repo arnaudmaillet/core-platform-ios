@@ -38,6 +38,91 @@ struct RevealDismissCardTests {
         )
     }
 
+    /// ⚠️ THE HEADER'S TRAILING PILL TRAVELS TOO — and it did not, for as long
+    /// as the band had the capability and nothing called it.
+    ///
+    /// The stand-in is scenery: it takes no touches, so the controls are never
+    /// wired, and a control with no handler HIDES itself. That is the right
+    /// default for a row and the wrong one for a card standing in for one — the
+    /// pill was simply missing from every text dismissal, which is the one
+    /// visible difference between the window and the row it lands on.
+    ///
+    /// Asserted in both directions, because "match the ROW" is the rule and a
+    /// stand-in that drew all three unconditionally would end a profile's
+    /// dismissal with two controls vanishing.
+    @Test func theStandInWearsWhateverTheRowsHeaderShows() throws {
+        let wired = RevealDismissCardView(
+            post: post(), width: 343,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            actions: .init(repost: true, bookmark: true, saved: true)
+        )
+        let card = try #require(wired.subviews.first as? PostGridListRowCell)
+        #expect(card.visibleBandActions == (repost: true, bookmark: true, saved: true))
+
+        let bare = standIn(width: 343)
+        let bareCard = try #require(bare.subviews.first as? PostGridListRowCell)
+        #expect(bareCard.visibleBandActions == (repost: false, bookmark: false, saved: false))
+    }
+
+    /// ⚠️ THE ROW'S DATE, NOT THIS INSTANT'S.
+    ///
+    /// A compact age is a function of the clock: the row worked its own out
+    /// when it was configured, and a viewer who has been reading the post for a
+    /// minute comes back to a row still saying "now". A stand-in that recomputed
+    /// it flew "2m" home onto that row — a word changing in the last frame of a
+    /// transition whose whole purpose is that nothing changes. Reported as the
+    /// date sometimes not matching between the window and the card.
+    @Test func theStandInShowsTheRowsDateRatherThanItsOwn() throws {
+        let mirrored = RevealDismissCardView(
+            post: post(), width: 343,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            ageText: "7m"
+        )
+        let card = try #require(mirrored.subviews.first as? PostGridListRowCell)
+        #expect(card.renderedAgeText == "7m")
+
+        // And a stand-in with no row to ask still says something — the honest
+        // fallback, not an empty slot.
+        let alone = standIn(width: 343)
+        let aloneCard = try #require(alone.subviews.first as? PostGridListRowCell)
+        #expect(aloneCard.renderedAgeText?.isEmpty == false)
+        #expect(aloneCard.renderedAgeText != "7m")
+    }
+
+    /// ⚠️ AND THE CLOSING METRIC LINE IS ALREADY ON IT, which is why nothing is
+    /// faded in at the landing.
+    ///
+    /// The row's metric line used to be brought up over 0.22s once the card was
+    /// alone, on the reasoning that the page never had one. True of the reveal's
+    /// PUSH; irrelevant to the dismissal, where the window carries this whole
+    /// row — so the fade blinked something the viewer had been looking at for
+    /// the length of the flight. This is the premise that made the deletion
+    /// safe, so it is worth holding on to.
+    @Test func theStandInAlreadyCarriesTheClosingMetricLine() throws {
+        func metrics(_ view: UIView) -> [PostMetricLabel] {
+            if let label = view as? PostMetricLabel { return [label] }
+            return view.subviews.flatMap(metrics)
+        }
+        // Counted, because a chip with no number hides itself — the line the
+        // fade used to bring in is the DATE plus whatever the post carries.
+        let counted = GalleryPost(
+            id: PostID("post-1"), kind: .text, isRepost: false, thumbnailURL: nil,
+            caption: "a short note", publishedAtMS: 0,
+            authorID: ProfileID("prof-1"), authorName: "Ada Lovelace", authorHandle: "ada",
+            reactionCount: 12, commentCount: 3
+        )
+        let view = RevealDismissCardView(
+            post: counted, width: 343,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.frame = CGRect(x: 0, y: 0, width: 343, height: 400)
+        view.layoutIfNeeded()
+        let card = try #require(view.subviews.first as? PostGridListRowCell)
+
+        #expect(card.renderedAgeText?.isEmpty == false)
+        #expect(metrics(card).contains { !$0.isHidden })
+    }
+
     /// A caption long enough to truncate at the row's four-line limit.
     private var longCaption: String {
         String(repeating: "Shipping the new build tonight and the changelog is long. ", count: 8)

@@ -39,6 +39,28 @@ import UIKit
 /// the caption is the same words in the same place. The correction only shows
 /// itself when there was something to correct.
 public final class RevealDismissCardView: UIView, RevealStandInShaping {
+    /// What the row's header is showing in its trailing pill.
+    ///
+    /// A value rather than three parameters, because the three are one answer:
+    /// they are read together off one row and drawn together into one capsule,
+    /// and a caller that got two of them from the row and the third from a
+    /// habit is exactly the mismatch this exists to prevent.
+    public struct BandActions: Sendable, Equatable {
+        public var repost: Bool
+        public var bookmark: Bool
+        public var saved: Bool
+
+        public init(repost: Bool, bookmark: Bool, saved: Bool) {
+            self.repost = repost
+            self.bookmark = bookmark
+            self.saved = saved
+        }
+
+        /// A row whose host wired neither control — a profile gallery's, until
+        /// it does.
+        public static let none = BandActions(repost: false, bookmark: false, saved: false)
+    }
+
     private let card: PostGridListRowCell
 
     /// `width` is the card's own, so the caption wraps and truncates exactly as
@@ -80,6 +102,8 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         imagePipeline: ImagePipeline,
         captionExpanded: Bool = false,
         showsAuthorMenu: Bool = true,
+        actions: BandActions = .none,
+        ageText: String? = nil,
         height: CGFloat? = nil
     ) {
         card = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 200))
@@ -94,6 +118,15 @@ public final class RevealDismissCardView: UIView, RevealStandInShaping {
         if showsAuthorMenu {
             card.showAuthorMenuControlAsScenery()
         }
+        // The header's trailing pill, on the same terms: drawn, never wired,
+        // and only what the row itself is showing.
+        card.showBandActionsAsScenery(
+            repost: actions.repost, bookmark: actions.bookmark, saved: actions.saved
+        )
+        // ⚠️ THE ROW'S DATE, not this instant's. See
+        // `PostGridListRowCell.renderedAgeText`: a compact age is a function of
+        // the clock, and the row worked its own out when it was configured.
+        if let ageText { card.overrideAgeText(ageText) }
         let attributes = UICollectionViewLayoutAttributes(
             forCellWith: IndexPath(item: 0, section: 0)
         )

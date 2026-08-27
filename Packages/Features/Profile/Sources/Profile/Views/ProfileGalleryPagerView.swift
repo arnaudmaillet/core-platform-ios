@@ -215,11 +215,6 @@ final class ProfileGalleryPagerView: UIView {
         return pages[activeIndex].textRowAuthorBand(for: postID)
     }
 
-    func fadeInRevealedFurniture(for postID: PostID) {
-        guard pages.indices.contains(activeIndex) else { return }
-        pages[activeIndex].fadeInRevealedFurniture(for: postID)
-    }
-
 
     func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
         guard pages.indices.contains(activeIndex) else { return }
