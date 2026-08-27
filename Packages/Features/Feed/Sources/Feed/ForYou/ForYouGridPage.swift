@@ -1537,14 +1537,26 @@ final class ForYouGridPage: UIView {
     /// lets the rest of the machinery go on addressing cells by post with no
     /// idea this happened.
     ///
-    /// **Geometry cannot shift.** The chaotic layout maps *index* to frame, so
-    /// exchanging the contents of two indices moves nothing. What does change is
-    /// the shape each of the two posts is cropped to: `PostGridSliceArrangement`
-    /// paired them with slots chosen for their own aspects, and a swap trades
-    /// those pairings.
+    /// **Geometry cannot shift — in the MOSAIC.** The chaotic layout maps
+    /// *index* to frame, so exchanging the contents of two indices moves
+    /// nothing. What does change is the shape each of the two posts is cropped
+    /// to: `PostGridSliceArrangement` paired them with slots chosen for their
+    /// own aspects, and a swap trades those pairings.
+    ///
+    /// ⚠️ IN A LIST IT SHIFTS, AND THAT IS ALLOWED. This was gated to `.grid`
+    /// on the reasoning above, which left the list — where a viewer scrolls a
+    /// post open, pages to another and closes it — landing on the card they
+    /// LEFT rather than the one they ended on. Rows self-size, so the adopted
+    /// post's height is its own and everything below it moves.
+    ///
+    /// What matters is that nothing the return depends on moves: rows ABOVE the
+    /// slot are untouched, so the slot's origin is exactly where it was, and
+    /// the landing rect is read after this returns. What shifts is off the
+    /// bottom of a screen the flight is covering — and it has to shift, because
+    /// the alternative is a card of the wrong height standing in for the post.
     @discardableResult
     func adoptPost(_ postID: PostID, intoSlotOf occupantID: PostID) -> Bool {
-        guard style == .grid, !showsSkeleton,
+        guard !showsSkeleton,
               let slot = posts.firstIndex(where: { $0.id == occupantID }),
               let current = posts.firstIndex(where: { $0.id == postID }),
               slot != current

@@ -48,6 +48,38 @@ struct ForYouSourceSlotTests {
         }
     }
 
+    /// ⚠️ AND A LIST ADOPTS TOO, which it could not until now.
+    ///
+    /// This was gated to the mosaic on the reasoning that a chaotic layout maps
+    /// index to frame, so a swap moves nothing. A LIST's rows self-size, so the
+    /// adopted post's height is its own — and the gate meant that on the one
+    /// surface where a viewer reads a post, pages to the next and closes it,
+    /// the dismissal landed on the card they LEFT rather than the one they
+    /// ended on.
+    ///
+    /// What the return depends on is unmoved: rows ABOVE the slot are
+    /// untouched, so the slot's origin is exactly where it was.
+    @Test func aListAdoptsIntoTheDepartureSlotToo() {
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        page.render(.content(posts(30)))
+        page.layoutIfNeeded()
+        let departure = page.posts[3].id
+        let active = page.posts[17].id
+        let originBefore = frames(of: page)[3].origin
+
+        #expect(page.adoptPost(active, intoSlotOf: departure))
+
+        #expect(page.posts[3].id == active)
+        #expect(page.posts[17].id == departure)
+        // The slot did not move, which is what makes flying home to it honest.
+        let originAfter = frames(of: page)[3].origin
+        #expect(abs(originAfter.y - originBefore.y) < 0.5)
+        #expect(abs(originAfter.x - originBefore.x) < 0.5)
+    }
+
     @Test func theActivePostMovesIntoTheDepartureSlot() {
         let page = page()
         let departure = page.posts[3].id
