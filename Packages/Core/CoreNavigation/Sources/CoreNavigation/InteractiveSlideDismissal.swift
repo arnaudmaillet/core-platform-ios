@@ -407,7 +407,7 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
             let kind = (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind
             print("[pop] kind=\(kind.map(String.init(describing:)) ?? "none")"
                 + " grab=\(revealGrab != nil) geometry=\(revealGeometry != nil)"
-                + " interaction=\(interaction != nil) delegate=\(type(of: navigationController.delegate))")
+                + " interaction=\(interaction != nil)")
         }
         #endif
         // A live grab is the animation; anything with geometry in it would
