@@ -1242,6 +1242,12 @@ final class ForYouViewController: UIViewController {
         // Hiding it and putting it back was tried and is worse: UIKit runs its
         // own show/hide animation on the bar, and a second one fighting it left
         // the bar sitting fully opaque OVER the landed page for ~0.25s.
+        // ⚠️ BEFORE THE WINDOW IS BUILT, not after: this clears the geometry,
+        // and everything the LAST opening left on a driver that outlives them
+        // all — including the flight path's preparation hook, which a window's
+        // close would otherwise run and which rebuilds the geometry for another
+        // post. See `resetForNewPresentation`.
+        textSlideDismissal.resetForNewPresentation()
         let revealing = installTextReveal(feed: feed, format: format, postID: tapped.id)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
@@ -1328,8 +1334,7 @@ final class ForYouViewController: UIViewController {
                 attachFlightAlongsideCardClose(feed: feed, page: page, tappedID: tapped.id)
             }
             textSlideDismissal.arbitratesWithHeroGrab = true
-            // A new life for this screen: recapture whoever owns the stack.
-            textSlideDismissal.install(on: navigationController, startingPresentation: true)
+            textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)
             #if DEBUG
             // `-text-swipe-demo <peak>`: walks the exact begin/update/release
@@ -1596,6 +1601,9 @@ final class ForYouViewController: UIViewController {
         feed: UIViewController, format: GalleryFilter.Format, departureID: PostID
     ) {
         guard let navigationController else { return }
+        // Nothing from the last opening survives into this one — see
+        // `resetForNewPresentation`.
+        textSlideDismissal.resetForNewPresentation()
         textSlideDismissal.arbitratesWithHeroGrab = true
         textSlideDismissal.attach(to: feed, axes: [.horizontal, .vertical])
         // ⚠️ ADOPT FIRST, BUILD SECOND, and the order is not stylistic.
@@ -1675,7 +1683,7 @@ final class ForYouViewController: UIViewController {
             self?.pager.page(for: format)?.clearHeroConcealment()
             self?.cardPathFlight = nil
         }
-        textSlideDismissal.install(on: navigationController, startingPresentation: true)
+        textSlideDismissal.install(on: navigationController)
     }
 
     private func restoreChromeAfterTransition() {

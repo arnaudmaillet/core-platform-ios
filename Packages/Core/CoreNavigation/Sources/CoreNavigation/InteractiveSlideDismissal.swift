@@ -165,29 +165,39 @@ public final class InteractiveSlideDismissal: NSObject {
     /// Takes the stack's delegate slot for the feed's time on `nav`. The
     /// previous delegate is saved, not clobbered: `navigationController(_:didShow:)`
     /// hands the slot back the moment the feed is off the stack.
-    /// - Parameter startingPresentation: true when the caller is about to PUSH
-    ///   the screen — a new life for it, so whoever owns the stack now is who
-    ///   must own it again afterwards. False (the default) is a re-assert
-    ///   during the screen's life, where the capture below must not move.
-    public func install(on nav: UINavigationController, startingPresentation: Bool = false) {
-        // ⚠️ A NEW PRESENTATION RE-CAPTURES, and not doing so is a whole broken
-        // dismissal.
-        //
-        // The capture is handed back by `didShow` when the screen leaves the
-        // stack — and `didShow` does not always arrive. Measured in a live
-        // session: a card-shaped close completed (`release commit=true`, the
-        // row restored) with no `didShow` behind it, so the slot was never
-        // handed back and the flag stayed set. The next opening installed a
-        // fresh flight, this driver declined to capture it, and the pop that
-        // followed asked to be forwarded to a controller belonging to the
-        // PREVIOUS screen. With nothing to forward to it fell through to its
-        // own animator: the trace reads `kind=hero` and `reveal animate` on the
-        // same pop, which is the window closing a post that wanted to fly.
-        //
-        // Reported as the grab not working on the dismissal, and it is exactly
-        // that — the finger was driving the flight's grab while the reveal was
-        // animating the pop.
-        if startingPresentation { hasCapturedSavedDelegate = false }
+    /// Forgets everything the LAST presentation of this screen left behind.
+    ///
+    /// ⚠️ THIS DRIVER OUTLIVES THE SCREENS IT SERVES. It is one object, reused
+    /// for every opening, and three separate defects have now come from a
+    /// field surviving into the next one — each reported as a different broken
+    /// animation, each traced back here:
+    ///
+    /// * the delegate capture. It is handed back by `didShow` when the screen
+    ///   leaves the stack, and `didShow` does not always arrive: a live capture
+    ///   shows a card-shaped close completing (`release commit=true`, row
+    ///   restored) with none behind it. The next opening installed a fresh
+    ///   flight this driver declined to notice, so a hero's pop tried to
+    ///   forward to the PREVIOUS screen's controller, found nothing, and fell
+    ///   through to its own animator — `kind=hero` and `reveal animate` on one
+    ///   pop, the finger driving a grab while the window animated the close.
+    /// * the preparation hook, which only the flight path sets. Left in place,
+    ///   a WINDOW's close ran the flight path's preparation, which rebuilds the
+    ///   geometry for a different post and clears it when it cannot — the trace
+    ///   reads `kind=card geometry=false`, and a window closes as a flat slide.
+    /// * the geometry and `revealPresents` alongside it, for the same reason.
+    ///
+    /// Called by whoever is about to PUSH, which is the one moment that is
+    /// unambiguously a new life. A re-assert during the screen's life must NOT
+    /// come through here: the capture is what makes a three-level unwind land
+    /// on the right screen, and moving it there is its own bug.
+    public func resetForNewPresentation() {
+        hasCapturedSavedDelegate = false
+        prepareForDismissal = nil
+        revealGeometry = nil
+        revealPresents = false
+    }
+
+    public func install(on nav: UINavigationController) {
         guard nav.delegate !== self else { return }
         // CAPTURED ONCE, and that distinction is the whole of a three-level
         // unwind working.

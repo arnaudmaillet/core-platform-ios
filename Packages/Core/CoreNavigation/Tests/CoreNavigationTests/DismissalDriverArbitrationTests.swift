@@ -256,7 +256,8 @@ struct DismissalDriverArbitrationTests {
         let second = SavedDelegate()
         rig.nav.delegate = second
 
-        rig.driver.install(on: rig.nav, startingPresentation: true)
+        rig.driver.resetForNewPresentation()
+        rig.driver.install(on: rig.nav)
         let animator = popAnimator(rig)
 
         #expect(second.animatorAsks == 1, "the pop was not forwarded to the current owner")
@@ -276,6 +277,27 @@ struct DismissalDriverArbitrationTests {
 
         #expect(transient.animatorAsks == 0, "a transient delegate was captured as the owner")
         #expect(rig.saved.animatorAsks == 1)
+    }
+
+    /// ⚠️ AND A NEW PRESENTATION RUNS NONE OF THE LAST ONE'S PREPARATION.
+    ///
+    /// The hook is set by the flight path only. Left in place, a WINDOW's close
+    /// ran it — and what it does is rebuild the geometry for a different post,
+    /// clearing it when it cannot. The trace reads `kind=card geometry=false`
+    /// and the window closes as a flat slide, which is the third defect this
+    /// one object's memory has produced.
+    @Test func aNewPresentationRunsNoneOfTheLastOnesPreparation() {
+        let rig = rig(kind: .card)
+        var stale = 0
+        rig.driver.prepareForDismissal = { stale += 1 }
+        rig.driver.revealGeometry = RevealGeometry(sourceFrame: { _ in .zero }, sourceCornerRadius: 0)
+
+        rig.driver.resetForNewPresentation()
+        _ = popAnimator(rig)
+
+        #expect(stale == 0, "the previous presentation's preparation ran")
+        #expect(rig.driver.revealGeometry == nil, "the previous presentation's geometry survived")
+        #expect(rig.driver.revealPresents == false)
     }
 
     /// ⚠️ AN ANIMATOR THIS DRIVER BUILT IS NEVER DRIVEN BY ANYONE ELSE.
