@@ -1883,6 +1883,25 @@ final class SnapFeedViewController: UIViewController {
     /// And which one is showing a panel WITHOUT owning the engagement.
     var debugPreviewRestingID: PostID? { previewRestingID }
 
+    /// The moment a cell BEGINS displaying, through the delegate the app uses.
+    ///
+    /// ⚠️ Not `presentRestingComments` directly. The defect this exists for was
+    /// a GATE at this call site, so a test that called the method underneath it
+    /// proved the method right and the screen blank.
+    func debugWillDisplayCell(at item: Int) {
+        let path = IndexPath(item: item, section: 0)
+        // Half a page in, which is where a real drag realizes it — a cell that
+        // has not been built yet cannot be told it is about to display, and a
+        // test that skipped that would assert about nothing.
+        let page = collectionView.bounds.height
+        if collectionView.cellForItem(at: path) == nil, page > 0 {
+            collectionView.contentOffset.y = (CGFloat(item) - 0.5) * page
+            collectionView.layoutIfNeeded()
+        }
+        guard let cell = collectionView.cellForItem(at: path) else { return }
+        collectionView(collectionView, willDisplay: cell, forItemAt: path)
+    }
+
     /// The ceiling the pager actually clamps to — prepares, then answers.
     func debugReachableCeiling() -> Int { reachableCeiling() }
 
@@ -2351,6 +2370,18 @@ final class SnapFeedViewController: UIViewController {
         if changesPage && !targetReEngages {
             setEngagedChrome(false, hasMedia: true, animated: true)
         }
+        #if DEBUG
+        // `-grab-log`: what the drive resolved to, and what the scroll view
+        // will actually accept. A committed step that never moves the page is
+        // either a target nobody applied or an offset something else is
+        // holding, and the two look identical from outside.
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[drive] commit start=\(Int(start)) step=\(step) target=\(target)"
+                + " targetY=\(Int(targetOffset)) offsetY=\(Int(collectionView.contentOffset.y))"
+                + " contentH=\(Int(collectionView.contentSize.height))"
+                + " pageH=\(Int(page)) scrollEnabled=\(collectionView.isScrollEnabled)")
+        }
+        #endif
         let distance = abs(collectionView.contentOffset.y - targetOffset)
         let springVelocity = distance > 0 ? min(3, abs(vy) / distance) : 0
         UIView.animate(
@@ -2360,6 +2391,12 @@ final class SnapFeedViewController: UIViewController {
         ) {
             self.collectionView.contentOffset.y = targetOffset
         } completion: { [weak self] finished in
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-grab-log"), let self {
+                print("[drive] settled finished=\(finished)"
+                    + " offsetY=\(Int(collectionView.contentOffset.y))")
+            }
+            #endif
             guard finished else { return }
             // Now the target page is settled: recompute the active item,
             // which fires the resign→teardown / activate legs (the landed
@@ -2892,7 +2929,22 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // (a missing model reads as "unknown", never "text-only").
         if let snapCell = cell as? SnapFeedCell, orderedIDs.indices.contains(indexPath.item) {
             let id = orderedIDs[indexPath.item]
-            if let model = modelsByID[id], model.mediaURL == nil, commentsEngagedID == nil {
+            // ⚠️ NOT GATED ON THE SLOT BEING FREE, and that gate is what made
+            // the arriving page blank.
+            //
+            // It reads as a guard against mounting twice, and it was — until
+            // the page being left began keeping its interface until its last
+            // pixel has gone. From then on the slot is ALWAYS held while the
+            // next page scrolls in, so this declined every time and the one
+            // path that mounts a preview was unreachable from the only place
+            // that calls it.
+            //
+            // What arrives is a text page with no panel: on a text post the
+            // caption lives INSIDE the panel, so the page is not merely
+            // undecorated, it is empty — white, no caption, no comments, just
+            // chrome. `presentRestingComments` makes this decision properly:
+            // engagement if the slot is free, preview if it is not.
+            if let model = modelsByID[id], model.mediaURL == nil {
                 presentRestingComments(for: id, host: snapCell)
             }
             // PHASE 2, when this cell is ALREADY the active page.

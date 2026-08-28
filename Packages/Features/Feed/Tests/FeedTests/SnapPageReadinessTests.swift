@@ -145,6 +145,29 @@ struct SnapPageReadinessTests {
         #expect(panels.count("b") == 1, "the panel was built once, not once per question")
     }
 
+    /// ⚠️ THROUGH `willDisplay`, WHICH IS WHERE THE GATE WAS.
+    ///
+    /// The arriving page mounts its panel from the delegate's begin-displaying
+    /// callback, and that call site carried its own "only if the slot is free"
+    /// condition. Once the page being left began keeping its interface until it
+    /// had gone, the slot was ALWAYS held there — so the one path that mounts a
+    /// preview became unreachable from the only place that calls it.
+    ///
+    /// What arrived was a text page with no panel, and on a text post the
+    /// caption lives inside the panel: not an undecorated page, an EMPTY one.
+    /// Reported as paging that "does not work", with a trace showing the drive
+    /// completing perfectly and the scroll landing exactly where it should.
+    @Test func theArrivingPageMountsThroughTheDelegateEvenWhenTheSlotIsHeld() {
+        let panels = Panels()
+        let feed = feed([text("a"), text("b")], panels: panels)
+        #expect(feed.debugRestingCommentsID == PostID("a"), "the premise: a holds the slot")
+
+        feed.debugWillDisplayCell(at: 1)
+
+        #expect(feed.debugPreviewRestingID == PostID("b"),
+                "the arriving page mounted nothing and would render empty")
+    }
+
     // MARK: - The display, page by page
 
     /// A text page owns its interface the moment it is the settled page.
