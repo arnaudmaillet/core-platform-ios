@@ -1811,10 +1811,21 @@ final class SnapFeedViewController: UIViewController {
     ///
     /// Never during a flight, for the reason `prewarmComments` gives: this is
     /// layout, and a hero's frame budget is not where it should be paid.
+    /// ⚠️ AND IT DOES NOT WAIT FOR THE ENGAGEMENT SLOT TO BE FREE, which the
+    /// first version of this did and which made it never run.
+    ///
+    /// Guarding on `commentsEngagedID`/`commentsContentVC` was copied from the
+    /// MOUNT, where those fields mean "something is already installed in a
+    /// cell". Building means nothing of the sort: this constructs into its own
+    /// field and touches neither. Their two most common values are exactly the
+    /// cases that matter — the current page is a text page and is holding the
+    /// slot with its own resting panel, or the current media page has had its
+    /// tap-to-comments panel warmed into it — so the guard declined precisely
+    /// when the next page needed building, and the black rectangle came back
+    /// unchanged.
     private func prewarmRestingComments(for id: PostID) {
         guard !isAwaitingZoomPresentation,
               prewarmedRestingID != id,
-              commentsEngagedID == nil, commentsContentVC == nil,
               modelsByID[id]?.mediaURL == nil,
               let makeCommentsPanelContent else { return }
         discardPrewarmedResting()
@@ -2223,10 +2234,82 @@ final class SnapFeedViewController: UIViewController {
     /// resists beyond the ends so you cannot fling off the feed — and, with
     /// the feed forward-only, `floor` is the drive's own origin page rather
     /// than offset zero.
+    /// The spinner shown under the last reachable page, exactly as the timeline
+    /// shows one at the end of a loaded batch — because to the viewer it is the
+    /// same situation: there IS more, and it is not here yet.
+    private lazy var pagingFooter: UIActivityIndicatorView = {
+        let spinner = UIActivityIndicatorView(style: .medium)
+        spinner.color = .white
+        spinner.hidesWhenStopped = true
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            spinner.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24)
+        ])
+        return spinner
+    }()
+
+    /// Shows the spinner while the viewer is pulling against the readiness
+    /// ceiling, and only then.
+    ///
+    /// Driven from the scroll rather than from the settle: the whole point is
+    /// to answer the gesture that is happening now — a viewer who drags past
+    /// the last ready page sees why they cannot go further while they are still
+    /// pulling, and a settled feed shows nothing.
+    private func updatePagingFooter(for scrollView: UIScrollView) {
+        let page = scrollView.bounds.height
+        guard page > 0, !orderedIDs.isEmpty else { return }
+        let ceiling = CGFloat(lastReachablePage) * page
+        let atCorpusEnd = lastReachablePage >= orderedIDs.count - 1
+        let pulling = scrollView.contentOffset.y > ceiling + 1
+        if pulling, !atCorpusEnd {
+            pagingFooter.startAnimating()
+        } else {
+            pagingFooter.stopAnimating()
+        }
+    }
+
+    /// Whether a page can be shown without the viewer watching it assemble.
+    ///
+    /// A MEDIA page is ready as soon as its model is: the cover arrives into a
+    /// laid-out card and the page is legible without it. A TEXT page is not —
+    /// what a text page IS is its comments panel, so until that panel is built
+    /// the page is a black rectangle, and showing it is the defect this answers.
+    ///
+    /// ⚠️ A HOST WITH NO PANEL FACTORY HAS READY TEXT PAGES BY DEFINITION.
+    /// Without that line every text post would be permanently unreachable on
+    /// any surface that does not supply one — a far worse failure than the
+    /// pop-in, and silent.
+    func isPageReady(_ index: Int) -> Bool {
+        guard orderedIDs.indices.contains(index),
+              let model = modelsByID[orderedIDs[index]] else { return false }
+        guard model.mediaURL == nil, makeCommentsPanelContent != nil else { return true }
+        return prewarmedRestingID == model.id || commentsEngagedID == model.id
+    }
+
+    /// The furthest page the viewer may reach right now.
+    ///
+    /// Scans forward from where they are and stops at the first page that is
+    /// not ready — which for a run of text posts is one at a time, since only
+    /// the page immediately ahead is ever built. That is the intent: a page the
+    /// viewer cannot reach yet reads exactly like the end of the feed, which is
+    /// a state this app already has an answer for, rather than like a post that
+    /// renders itself while they look at it.
+    ///
+    /// Never behind the page they are on: a corpus that changes under a settled
+    /// viewer must not push them backwards.
+    var lastReachablePage: Int {
+        let last = max(0, orderedIDs.count - 1)
+        var index = min(settledPageIndex, last)
+        while index < last, isPageReady(index + 1) { index += 1 }
+        return index
+    }
+
     private func rubberBandedOffset(_ offset: CGFloat, floor: CGFloat) -> CGFloat {
         let page = collectionView.bounds.height
         guard page > 0 else { return offset }
-        let maxOffset = CGFloat(max(0, orderedIDs.count - 1)) * page
+        let maxOffset = CGFloat(lastReachablePage) * page
         if offset < floor { return floor - Self.rubberBand(floor - offset, dimension: page) }
         if offset > maxOffset { return maxOffset + Self.rubberBand(offset - maxOffset, dimension: page) }
         return offset
@@ -2687,12 +2770,41 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         }
     }
 
+    /// ⚠️ THE FLICK STOPS AT THE LAST PAGE THAT IS READY.
+    ///
+    /// The pager's own paging is what carries a media page, and it will happily
+    /// land on a post whose interface has not been built — which is the black
+    /// rectangle that fills itself in. Clamping the TARGET rather than the live
+    /// offset keeps the drag itself free: the viewer can pull the next page
+    /// into view and see the loader under it, and the release settles back.
+    ///
+    /// A page that is not ready reads as the end of the feed, because that is
+    /// what it is for the moment: more is coming and it is not here yet.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView,
+        withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        let page = scrollView.bounds.height
+        guard page > 0 else { return }
+        let ceiling = CGFloat(lastReachablePage) * page
+        if targetContentOffset.pointee.y > ceiling {
+            targetContentOffset.pointee.y = ceiling
+        }
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        updatePagingFooter(for: scrollView)
+    }
+
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateActiveItem()
+        updatePagingFooter(for: scrollView)
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { updateActiveItem() }
+        updatePagingFooter(for: scrollView)
     }
 }
 

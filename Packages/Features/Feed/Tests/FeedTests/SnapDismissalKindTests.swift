@@ -228,6 +228,82 @@ struct SnapDismissalKindTests {
         #expect(feed.debugPrewarmedRestingID == PostID("b"), "the warm was never claimed")
     }
 
+    /// ⚠️ FROM A TEXT PAGE TOO — the case the first version could not do.
+    ///
+    /// Building was guarded on the ENGAGEMENT slot being free, a condition
+    /// copied from the mount, where it means "something is already installed in
+    /// a cell". The two commonest states are exactly the ones that matter: the
+    /// current page is a text page holding the slot with its own resting panel,
+    /// or a media page has had its tap-to-comments panel warmed into it. So the
+    /// warm declined precisely when the next page needed it, and the reported
+    /// black rectangle came back unchanged.
+    @Test func theWarmRunsFromATextPageAsWell() {
+        let panels = PanelBuilds()
+        let feed = feed([text("a"), text("b")], panels: panels)
+
+        // Page 0 is a text page: mounting it takes the engagement slot.
+        page(feed, to: 0)
+
+        #expect(feed.debugPrewarmedRestingID == PostID("b"),
+                "the page ahead was not built because the current page held the slot")
+        #expect(panels.count("b") == 1)
+    }
+
+    // MARK: - The readiness ceiling
+
+    /// ⚠️ A PAGE THAT IS NOT READY READS AS THE END OF THE FEED.
+    ///
+    /// Rather than landing on a post that assembles itself while the viewer
+    /// watches, the pager stops at the last page that is ready and shows the
+    /// same loader the end of a loaded batch shows — because to the viewer it
+    /// is the same situation: there is more, and it is not here yet.
+    @Test func theCeilingStopsAtTheFirstUnreadyPage() {
+        let panels = PanelBuilds()
+        // Two text pages ahead: only the first can be built.
+        let feed = feed([media("a"), text("b"), text("c")], panels: panels)
+
+        page(feed, to: 0)
+
+        #expect(feed.isPageReady(1), "the page ahead was built and is reachable")
+        #expect(feed.isPageReady(2) == false, "two text pages ahead is a guess, not a warm")
+        #expect(feed.lastReachablePage == 1)
+    }
+
+    /// Media pages are ready as soon as their model is: the cover arrives into
+    /// a laid-out card, and the page is legible without it. Gating them would
+    /// turn an ordinary feed into a one-page-at-a-time crawl.
+    @Test func mediaPagesDoNotWaitForAnything() {
+        let feed = feed([media("a"), media("b"), media("c"), media("d")])
+
+        page(feed, to: 0)
+
+        #expect(feed.lastReachablePage == 3)
+    }
+
+    /// ⚠️ A HOST WITH NO PANEL FACTORY HAS READY TEXT PAGES BY DEFINITION.
+    ///
+    /// Without this, every text post is permanently unreachable on any surface
+    /// that does not supply one — a far worse failure than the pop-in, and a
+    /// silent one.
+    @Test func textPagesAreReachableWhereNoPanelCanBeBuilt() {
+        let feed = feed([media("a"), text("b"), text("c")])
+
+        page(feed, to: 0)
+
+        #expect(feed.lastReachablePage == 2)
+    }
+
+    /// The ceiling never falls behind the page the viewer is on — a corpus that
+    /// changes under a settled viewer must not push them backwards.
+    @Test func theCeilingNeverPushesTheViewerBackwards() {
+        let panels = PanelBuilds()
+        let feed = feed([text("a"), text("b"), text("c")], panels: panels)
+
+        page(feed, to: 2)
+
+        #expect(feed.lastReachablePage == 2)
+    }
+
     /// A media page ahead is warmed by its cover, not by a panel — building one
     /// for it would be a view controller nobody mounts.
     @Test func aMediaPageAheadGetsNoPanel() {
