@@ -435,6 +435,8 @@ final class SnapFeedViewController: UIViewController {
     /// `-snap-start-index N`: snaps to page N shortly after appearing (mock:
     /// every index%3==2 is text-only) — deterministic access to a given page
     /// kind without scroll injection.
+    private var didDebugPageSwipe = false
+
     private func runDebugAppearanceHooks() {
         if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
@@ -442,6 +444,16 @@ final class SnapFeedViewController: UIViewController {
             }
         }
         let arguments = ProcessInfo.processInfo.arguments
+        // `-snap-page-demo [delay]`: drive the page swipe once the feed has
+        // settled, so the animated page change can be filmed.
+        if !didDebugPageSwipe, let position = arguments.firstIndex(of: "-snap-page-demo") {
+            didDebugPageSwipe = true
+            let delay = arguments.indices.contains(position + 1)
+                ? (Double(arguments[position + 1]) ?? 3.0) : 3.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.debugDrivePageSwipe()
+            }
+        }
         if !didDebugScroll,
            let flagIndex = arguments.firstIndex(of: "-snap-start-index"),
            arguments.indices.contains(flagIndex + 1),
@@ -1902,6 +1914,55 @@ final class SnapFeedViewController: UIViewController {
         collectionView(collectionView, willDisplay: cell, forItemAt: path)
     }
 
+    /// Walks the page swipe a finger drives on a text page, animated settle
+    /// included.
+    ///
+    /// The only gesture that moves a text page belongs to the composer bar, and
+    /// a synthetic drag cannot produce it — so the window that matters most
+    /// here, the half-second while the settle animates and the model has
+    /// already arrived at the destination, had no scripted route at all. Every
+    /// defect reported inside it had to be found by watching a recording.
+    func debugDrivePageSwipe(steps: Int = 12, distance: CGFloat = 520) {
+        drivePageSwipe(.began, translation: 0, velocity: 0)
+        for step in 1...max(1, steps) {
+            let dy = -distance * CGFloat(step) / CGFloat(max(1, steps))
+            drivePageSwipe(.changed, translation: dy, velocity: -900)
+        }
+        drivePageSwipe(.ended, translation: -distance, velocity: -900)
+    }
+
+    /// Tells the screen about every cell the layout has just realized, the way
+    /// a real scroll does.
+    ///
+    /// A test moves `contentOffset` directly, and UIKit builds the cells but
+    /// does not run the delegate's begin-displaying callback for them — which
+    /// is where a page decides what to show. Without this a suite can only
+    /// observe settled states, and four of the six defects in this area lived
+    /// strictly between them.
+    func debugRealizeVisibleCells() {
+        for path in collectionView.indexPathsForVisibleItems.sorted() {
+            guard let cell = collectionView.cellForItem(at: path) else { continue }
+            collectionView(collectionView, willDisplay: cell, forItemAt: path)
+        }
+    }
+
+    /// Which posts have a comments panel ON SCREEN right now, asked of the
+    /// cells rather than of any bookkeeping.
+    ///
+    /// A specification for this screen has to be written against what the
+    /// viewer sees: every defect here has been a disagreement between a field
+    /// and the pixels, so a test that reads the field agrees with the bug.
+    var debugPostsShowingComments: Set<PostID> {
+        var showing: Set<PostID> = []
+        for cell in collectionView.visibleCells {
+            guard let path = collectionView.indexPath(for: cell),
+                  orderedIDs.indices.contains(path.item),
+                  let snap = cell as? SnapFeedCell, snap.isShowingComments else { continue }
+            showing.insert(orderedIDs[path.item])
+        }
+        return showing
+    }
+
     /// Whether the pager can be scrolled at all — the state a leaked
     /// engagement used to be able to hold down for the rest of a session.
     var debugPagerIsLocked: Bool { !collectionView.isScrollEnabled }
@@ -2267,6 +2328,17 @@ final class SnapFeedViewController: UIViewController {
     private func reconcileRestingInterface(activeIndex: Int) {
         let activeID = orderedIDs.indices.contains(activeIndex) ? orderedIDs[activeIndex] : nil
         let activeIsText = activeID.flatMap { modelsByID[$0]?.mediaURL == nil } ?? false
+        #if DEBUG
+        // `-grab-log`: what the reconcile saw. An interface that survives its
+        // page is invisible in every other line — the screen looks settled and
+        // the pager is simply dead.
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[reconcile] active=\(activeID?.rawValue ?? "nil") text=\(activeIsText)"
+                + " engaged=\(commentsEngagedID?.rawValue ?? "nil")"
+                + " resting=\(commentsEngagementIsResting)"
+                + " engagedOnScreen=\(commentsEngagedID.map(isPostOnScreen) ?? false)")
+        }
+        #endif
 
         // An engagement belonging to a page that has LEFT is over, whatever
         // failed to say so. Still-visible pages keep theirs: that is what stops
@@ -2306,11 +2378,28 @@ final class SnapFeedViewController: UIViewController {
         guard let index = orderedIDs.firstIndex(of: id) else { return false }
         let page = collectionView.bounds.height
         guard page > 0 else { return false }
-        let offset = collectionView.layer.presentation()?.bounds.origin.y
-            ?? collectionView.contentOffset.y
         let top = CGFloat(index) * page
-        return top < offset + page && top + page > offset
+        // ⚠️ THE MODEL, WIDENED BY A SETTLE THAT IS STILL RUNNING.
+        //
+        // The presentation layer was tried and is not an answer: it reports a
+        // stale offset when nothing is animating, so a page two positions back
+        // read as on-screen for the rest of the session — measured as
+        // `active=post-new-06 engaged=post-new-07 engagedOnScreen=true`, with
+        // the pager locked for a post nobody could see.
+        //
+        // Our own settle is the ONE case where the model has arrived and the
+        // pixels have not, and we start that animation ourselves, so its span
+        // is known rather than inferred. Everywhere else — a finger, UIKit's
+        // deceleration — the model IS where the pixels are.
+        let live = collectionView.contentOffset.y
+        let lower = min(live, settleFromOffset ?? live)
+        let upper = max(live, settleFromOffset ?? live)
+        return top < upper + page && top + page > lower
     }
+
+    /// Where a page-change animation started, for as long as it is running.
+    /// Nil at rest — see `isPostOnScreen`.
+    private var settleFromOffset: CGFloat?
 
     private func lockRestingEngagement() {
         guard commentsEngagementIsResting, !restingLockApplied,
@@ -2453,6 +2542,9 @@ final class SnapFeedViewController: UIViewController {
                 + " pageH=\(Int(page)) scrollEnabled=\(collectionView.isScrollEnabled)")
         }
         #endif
+        // The page being left is on screen for the whole of this animation,
+        // whatever the model says — see `isPostOnScreen`.
+        settleFromOffset = collectionView.contentOffset.y
         let distance = abs(collectionView.contentOffset.y - targetOffset)
         let springVelocity = distance > 0 ? min(3, abs(vy) / distance) : 0
         UIView.animate(
@@ -2468,6 +2560,7 @@ final class SnapFeedViewController: UIViewController {
                     + " offsetY=\(Int(collectionView.contentOffset.y))")
             }
             #endif
+            self?.settleFromOffset = nil
             guard finished else { return }
             // Now the target page is settled: recompute the active item,
             // which fires the resign→teardown / activate legs (the landed
@@ -2694,6 +2787,19 @@ final class SnapFeedViewController: UIViewController {
             itemCount: orderedIDs.count
         )
         apply(lifecycle.setPageIndex(index))
+        // ⚠️ AT EVERY SETTLE, not only when the page CHANGED.
+        //
+        // The reconcile used to live inside the activation branch, so it ran
+        // only when the dispatcher reported a new page — and a settle that
+        // reports nothing is exactly the case where something was missed. A
+        // programmatic jump settles before the cell exists, the activation is
+        // dropped, and the screen keeps describing the page before it:
+        // measured as `settled=1 engaged=post-new-07`, an interface belonging
+        // to a page two positions back, with the pager locked for it.
+        //
+        // Cleaning up only when something changed means never cleaning up
+        // after the change that went missing.
+        if let index { reconcileRestingInterface(activeIndex: index) }
     }
 
     private func apply(_ transition: SnapLifecycleDispatcher.Transition) {
@@ -3153,18 +3259,15 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        // ⚠️ THE PAGE CHANGES AT THE HALFWAY MARK, not when the scroll stops.
+        // ⚠️ NO ACTIVATION HERE. Activating at the halfway mark was tried, to
+        // start a video as soon as its page owned most of the screen, and it
+        // moved the SCROLL: activation runs the settle's whole choreography —
+        // which includes bringing the active page clear of the chrome — so the
+        // feed jumped to the next page in the middle of the gesture. Reported
+        // as worse than the delay it was meant to fix, and it was.
         //
-        // `SnapActiveItemTracker` already rounds — the active page is the one
-        // whose top is nearest, which flips at exactly half a page — but this
-        // was only ever ASKED at the settle. So a video began at the end of the
-        // gesture rather than when its post owned most of the screen, and the
-        // viewer watched a still frame for the length of a scroll.
-        //
-        // Cheap enough to run at the display's rate: the tracker returns the
-        // same index for every frame but one, and the dispatcher answers "no
-        // change" without touching anything.
-        updateActiveItem()
+        // Starting playback early has to be a playback-only path, not a second
+        // caller of the seam that owns everything else.
         updatePagingFooter(for: scrollView)
     }
 

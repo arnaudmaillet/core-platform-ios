@@ -1333,6 +1333,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Reclaims the region after disengagement settles (the VC removes the
     /// child's view; this clears the cell-side scaffolding).
+    /// Whether this cell is currently showing a comments panel.
+    ///
+    /// The one question a caller can ask about the DISPLAY without knowing how
+    /// the panel got here — which is what a specification has to be written
+    /// against, since every defect in this area has been a difference between
+    /// the bookkeeping and the pixels.
+    var isShowingComments: Bool {
+        // ⚠️ AND VISIBLE. A panel is installed at alpha 0 and revealed by the
+        // engagement, so a media page's parked tap-to-comments WARM is hosted
+        // here too — present, and showing nothing. Counting it would make the
+        // specification claim a media page displays a thread it does not.
+        !commentsContainer.isHidden
+            && commentsContainer.alpha > 0
+            && !commentsContainer.subviews.isEmpty
+    }
+
     func clearComments() {
         commentsContainer.subviews.forEach { $0.removeFromSuperview() }
         commentsContainer.isHidden = true
