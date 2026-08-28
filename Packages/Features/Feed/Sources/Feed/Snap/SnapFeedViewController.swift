@@ -2049,10 +2049,6 @@ final class SnapFeedViewController: UIViewController {
         previewRestingVC = content
         previewRestingCell = cell
         installRestingPanel(content, for: id, host: cell)
-        // A page nobody is reading yet cannot be typed on, and the composer's
-        // keyboard ceiling is anchored to the SCREEN — see
-        // `setComposerTracksKeyboard`. Granted at the promotion.
-        (content as? PostDetailViewController)?.setComposerTracksKeyboard(false)
     }
 
     /// Hands the engagement to a panel that is already on screen. False when
@@ -2068,9 +2064,6 @@ final class SnapFeedViewController: UIViewController {
         commentsContentVC = content
         commentsEngagementIsResting = true
         restingLockApplied = false
-        // This is the page being read now, so its composer may follow the
-        // keyboard again.
-        (content as? PostDetailViewController)?.setComposerTracksKeyboard(true)
         return true
     }
 
@@ -2138,6 +2131,13 @@ final class SnapFeedViewController: UIViewController {
         // no spring, no offstage→onstage slide. The interface simply IS,
         // frame one, so scrolling it into view reveals it already formed.
         detail?.setComposerEntranceState(offstage: false)
+        // ⚠️ AT THE MOUNT TOO, not only at the next settle.
+        //
+        // The reconcile derives this, but it runs when a page SETTLES — and the
+        // composer is on screen, and wrong, for the whole scroll before that.
+        // The rule is the same in both places: the ceiling belongs to the page
+        // being read, and a page mounting while another is settled is not it.
+        detail?.setComposerTracksKeyboard(id == activePostID)
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
     }
@@ -2363,6 +2363,22 @@ final class SnapFeedViewController: UIViewController {
            ) as? SnapFeedCell {
             presentRestingComments(for: activeID, host: cell)
         }
+        // ⚠️ AND SO DOES THE COMPOSER'S KEYBOARD CEILING.
+        //
+        // That ceiling is anchored in WINDOW space, so a panel whose cell still
+        // hangs below the screen has its composer clamped to the screen's edge
+        // instead of travelling with its page — two composers at once, one
+        // moving and one stuck.
+        //
+        // Granting it at the MOUNT was the first attempt and it only covered
+        // the page that arrives while another holds the slot. A page arriving
+        // from a media post takes the slot outright, mounts as the engagement,
+        // and kept the ceiling — which is why it went wrong "sometimes".
+        // Derived from the settled page, like everything else here, it cannot
+        // depend on which route the panel took.
+        (commentsContentVC as? PostDetailViewController)?
+            .setComposerTracksKeyboard(commentsEngagedID == activeID)
+        (previewRestingVC as? PostDetailViewController)?.setComposerTracksKeyboard(false)
         // ⚠️ AND SO DOES THE GROUND BEHIND THE PAGES.
         //
         // The pager's own background is what shows through any strip a page has
