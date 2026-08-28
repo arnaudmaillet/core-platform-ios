@@ -271,6 +271,43 @@ struct SnapDismissalKindTests {
                 "the text page could not mount because a warm was parked in the slot")
     }
 
+    /// ⚠️ TEXT ONTO TEXT: the incoming page shows its panel while the page
+    /// being left still owns the engagement.
+    ///
+    /// The engagement is one slot on purpose — pager lock, composer ownership,
+    /// toolbar context — and two at once is a contradiction. The PICTURE is not
+    /// single, and a text page IS its panel, so the page scrolling in gets a
+    /// preview: same panel, same place, no claim on the slot.
+    @Test func aTextPageScrollingInShowsItsPanelWhileAnotherHoldsTheSlot() {
+        let panels = PanelBuilds()
+        let feed = feed([text("a"), text("b")], panels: panels)
+        page(feed, to: 0)
+        #expect(feed.debugRestingCommentsID == PostID("a"), "the premise: page a holds the slot")
+
+        feed.debugMountRestingComments(for: PostID("b"))
+
+        #expect(feed.debugPreviewRestingID == PostID("b"),
+                "the incoming page had nothing to show while the slot was held")
+        #expect(feed.debugRestingCommentsID == PostID("a"), "the slot changed hands too early")
+    }
+
+    /// And the settle PROMOTES it rather than building a second one — without
+    /// which the preview is pure cost, paid twice.
+    @Test func theSettlePromotesThePreviewRatherThanBuildingAgain() {
+        let panels = PanelBuilds()
+        let feed = feed([text("a"), text("b")], panels: panels)
+        page(feed, to: 0)
+        feed.debugMountRestingComments(for: PostID("b"))
+        let built = panels.count("b")
+        #expect(built >= 1)
+
+        page(feed, to: 1)
+
+        #expect(feed.debugRestingCommentsID == PostID("b"), "the promotion never happened")
+        #expect(feed.debugPreviewRestingID == nil)
+        #expect(panels.count("b") == built, "the settle built a second panel over the preview")
+    }
+
     // MARK: - The readiness ceiling
 
     /// ⚠️ A PAGE THAT IS NOT READY READS AS THE END OF THE FEED.

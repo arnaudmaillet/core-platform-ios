@@ -211,6 +211,11 @@ final class SnapFeedViewController: UIViewController {
     /// `prewarmRestingComments`. Deliberately not the engagement slot.
     private var prewarmedRestingID: PostID?
     private var prewarmedRestingVC: UIViewController?
+    /// The panel of a page that is scrolling IN while another still owns the
+    /// engagement — see `previewRestingComments`.
+    private var previewRestingID: PostID?
+    private var previewRestingVC: UIViewController?
+    private weak var previewRestingCell: SnapFeedCell?
     /// The cell hosting a warm panel, so it can be cleared when the warm is
     /// discarded without the page still being active.
     private weak var engagedCellForPrewarm: SnapFeedCell?
@@ -1831,7 +1836,14 @@ final class SnapFeedViewController: UIViewController {
         discardPrewarmedResting()
         let content = makeCommentsPanelContent(id)
         content.view.backgroundColor = .clear
-        content.overrideUserInterfaceStyle = .unspecified
+        // ⚠️ IN THE DEVICE'S THEME, not `.unspecified`.
+        //
+        // This view controller has no parent yet, so `.unspecified` resolves
+        // against nothing and it is laid out and rendered in whatever UIKit
+        // defaults to — then it is mounted into a cell and changes theme in
+        // front of the viewer. The whole point of building ahead is that
+        // nothing about the page changes when it arrives.
+        content.overrideUserInterfaceStyle = deviceInterfaceStyle
         // Laid out at the size it will be mounted at, so the mount is a
         // re-parent rather than a first layout. A view built and never measured
         // saves nothing.
@@ -1868,6 +1880,9 @@ final class SnapFeedViewController: UIViewController {
     /// Which post the resting panel is standing in for right now.
     var debugRestingCommentsID: PostID? { commentsEngagedID }
 
+    /// And which one is showing a panel WITHOUT owning the engagement.
+    var debugPreviewRestingID: PostID? { previewRestingID }
+
     /// Which text page has had its interface built ahead. Kept separately from
     /// the live field so a test can see a warm that was CONSUMED — which is the
     /// half that proves the mount paid nothing.
@@ -1899,24 +1914,96 @@ final class SnapFeedViewController: UIViewController {
         if commentsEngagedID == nil, prewarmedCommentsID != nil {
             discardPrewarmedComments()
         }
-        guard commentsEngagedID == nil, commentsContentVC == nil,
-              let makeCommentsPanelContent else { return }
-
-        let content: UIViewController
-        if prewarmedRestingID == id, let warmed = prewarmedRestingVC {
-            content = warmed
-            discardPrewarmedResting()
-        } else {
-            content = makeCommentsPanelContent(id)
+        guard commentsEngagedID == nil, commentsContentVC == nil else {
+            // ⚠️ THE SLOT IS HELD BY ANOTHER PAGE'S ENGAGEMENT — text onto
+            // text, where the page being left is still on screen and still
+            // needs its panel. The incoming page gets a PREVIEW instead: the
+            // same panel in the same place, without the engagement's
+            // bookkeeping. The settle promotes it once the slot frees.
+            previewRestingComments(for: id, host: cell)
+            return
         }
-        content.view.backgroundColor = .clear
-        // Inherited, exactly like the media panel — the cell decides.
-        content.overrideUserInterfaceStyle = .unspecified
+        guard let content = restingPanel(for: id) else { return }
         commentsEngagedID = id
         commentsContentVC = content
         commentsEngagementIsResting = true
         restingLockApplied = false
+        installRestingPanel(content, for: id, host: cell)
+    }
 
+    /// The incoming page's panel, mounted while another page still owns the
+    /// engagement.
+    ///
+    /// ⚠️ EVERYTHING THE VIEWER SEES, NONE OF WHAT THE VIEWER DRIVES.
+    ///
+    /// The engagement is one slot on purpose: it carries the pager lock, the
+    /// composer's ownership and the toolbar's context, and two of those at once
+    /// is a contradiction. What is NOT single is the picture — a text page IS
+    /// its panel, so a page scrolling in has to show one or it is a black
+    /// rectangle until the scroll stops. That is the reported defect for text
+    /// onto text, where the page being left still needs its own.
+    ///
+    /// So the panel is mounted into the incoming cell with no claim on the
+    /// slot, and the settle promotes it the moment the page being left
+    /// resigns. The promotion is a field assignment: nothing is built twice.
+    private func previewRestingComments(for id: PostID, host cell: SnapFeedCell) {
+        guard previewRestingID != id, commentsEngagedID != id,
+              let content = restingPanel(for: id) else { return }
+        discardRestingPreview()
+        previewRestingID = id
+        previewRestingVC = content
+        previewRestingCell = cell
+        installRestingPanel(content, for: id, host: cell)
+    }
+
+    /// Hands the engagement to a panel that is already on screen. False when
+    /// there is nothing to promote, so the caller mounts for real.
+    @discardableResult
+    private func promoteRestingPreview(for id: PostID) -> Bool {
+        guard previewRestingID == id, let content = previewRestingVC,
+              commentsEngagedID == nil, commentsContentVC == nil else { return false }
+        previewRestingID = nil
+        previewRestingVC = nil
+        previewRestingCell = nil
+        commentsEngagedID = id
+        commentsContentVC = content
+        commentsEngagementIsResting = true
+        restingLockApplied = false
+        return true
+    }
+
+    private func discardRestingPreview() {
+        if let content = previewRestingVC {
+            content.willMove(toParent: nil)
+            content.view.removeFromSuperview()
+            content.removeFromParent()
+            previewRestingCell?.setCommentsEngaged(false)
+            previewRestingCell?.clearComments()
+        }
+        previewRestingVC = nil
+        previewRestingID = nil
+        previewRestingCell = nil
+    }
+
+    /// The panel for a post: the one built ahead when it matches, a fresh one
+    /// otherwise.
+    private func restingPanel(for id: PostID) -> UIViewController? {
+        if prewarmedRestingID == id, let warmed = prewarmedRestingVC {
+            discardPrewarmedResting()
+            return warmed
+        }
+        return makeCommentsPanelContent?(id)
+    }
+
+    /// Everything a resting panel needs once it has a cell — identical whether
+    /// it is the engagement or a preview, because what the VIEWER gets must not
+    /// depend on which of the two it is.
+    private func installRestingPanel(
+        _ content: UIViewController, for id: PostID, host cell: SnapFeedCell
+    ) {
+        content.view.backgroundColor = .clear
+        // Inherited, exactly like the media panel — the cell decides.
+        content.overrideUserInterfaceStyle = .unspecified
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
@@ -1929,10 +2016,10 @@ final class SnapFeedViewController: UIViewController {
         // is in the air rather than arriving with the post fetch.
         if let model = modelsByID[id], let caption = model.caption, !caption.isEmpty {
             // `.flat` unconditionally, and it is not an assumption: this whole
-            // method is the TEXT page's resting engagement — a media page
-            // never reaches it (`presentComments` is its path). The face is
-            // still stated rather than defaulted, so the one caller that means
-            // "no glass" says so.
+            // path is the TEXT page's resting interface — a media page never
+            // reaches it (`presentComments` is its path). The face is still
+            // stated rather than defaulted, so the one caller that means "no
+            // glass" says so.
             detail?.seedCaption(
                 caption,
                 timestamp: model.timestampText,
@@ -2310,6 +2397,14 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
+    /// The theme the DEVICE is in, which is not always the theme this screen is
+    /// in: the feed pins itself dark while a photograph is settled, so anything
+    /// asking `traitCollection` from inside it gets the pin rather than the
+    /// device. Read off the window, which no view controller's override reaches.
+    private var deviceInterfaceStyle: UIUserInterfaceStyle {
+        view.window?.traitCollection.userInterfaceStyle ?? .unspecified
+    }
+
     /// Whether a page can be shown without the viewer watching it assemble.
     ///
     /// A MEDIA page is ready as soon as its model is: the cover arrives into a
@@ -2483,7 +2578,12 @@ final class SnapFeedViewController: UIViewController {
                 // presence REQUIRED — a not-yet-hydrated page reads as
                 // "unknown", never "text-only".
                 if let model = modelsByID[id], model.mediaURL == nil {
-                    if commentsEngagedID == nil,
+                    // The panel may already be on screen, mounted as a preview
+                    // while the page being left still held the slot. Promoting
+                    // it is a field assignment; mounting would build a second.
+                    if promoteRestingPreview(for: id) {
+                        // Nothing more to install — it is already in its cell.
+                    } else if commentsEngagedID == nil,
                        let cell = collectionView.cellForItem(at: IndexPath(item: activate, section: 0)) as? SnapFeedCell {
                         presentRestingComments(for: id, host: cell)
                     }

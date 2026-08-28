@@ -1439,7 +1439,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // themselves, which is what keeps them from disagreeing (see
         // `SnapChromeTheme`). The screen's bars live outside this tree and
         // are set from the same rule in `SnapFeedViewController`.
-        contentView.overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: hasMedia)
+        pageHasMedia = hasMedia
+        applyPageTheme()
         // Composition is POSITIONAL now (the info card's frame is set at
         // install per `hasMedia`), so the info card itself is format-
         // agnostic — its caption always starts at its own inner padding.
@@ -2249,6 +2250,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // applies the full wash unconditionally, which put a text page's
         // wash back every time the screen re-appeared.
         UIView.performWithoutAnimation { mediaBackdrop.setDim(backdropDim(at: 0)) }
+    }
+
+    /// Which theme this page draws in, resolved against the DEVICE rather than
+    /// against the screen — see `SnapChromeTheme.style(hasMedia:device:)`.
+    ///
+    /// Re-applied when the cell joins a window because that is the first moment
+    /// the device's style is knowable: a cell dequeued in `cellForItemAt` has no
+    /// window yet, and a text page that resolved its theme before then took the
+    /// screen's pin instead.
+    private var pageHasMedia = false
+
+    private func applyPageTheme() {
+        contentView.overrideUserInterfaceStyle = SnapChromeTheme.style(
+            hasMedia: pageHasMedia,
+            device: window?.traitCollection.userInterfaceStyle ?? .unspecified
+        )
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        applyPageTheme()
     }
 
     override func prepareForReuse() {
