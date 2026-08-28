@@ -632,6 +632,37 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         pageStage.frame = contentView.bounds
         contentView.addSubview(pageStage)
 
+        // ⚠️ A HAIRLINE AT EACH END, and it is not decoration.
+        //
+        // Every page here fills the screen edge to edge, so two of them in a
+        // row have no boundary at all: a light text page followed by a light
+        // text page reads as one surface that changed its mind, and a paging
+        // gesture that lands halfway shows no seam to say so. One pixel of
+        // black at the top and bottom is the whole of the answer — the pages
+        // are separated by the same line the platform uses between anything
+        // else, and it costs nothing to draw.
+        //
+        // On `contentView` rather than `pageStage`: the stage is transformed
+        // by the engagement, and a separator that scaled with it would stop
+        // being one pixel.
+        for edge in [pageSeparatorTop, pageSeparatorBottom] {
+            edge.backgroundColor = .black
+            edge.isUserInteractionEnabled = false
+            edge.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(edge)
+        }
+        let hairline = 1 / (window?.screen.scale ?? UIScreen.main.scale)
+        NSLayoutConstraint.activate([
+            pageSeparatorTop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            pageSeparatorTop.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            pageSeparatorTop.topAnchor.constraint(equalTo: contentView.topAnchor),
+            pageSeparatorTop.heightAnchor.constraint(equalToConstant: hairline),
+            pageSeparatorBottom.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            pageSeparatorBottom.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            pageSeparatorBottom.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            pageSeparatorBottom.heightAnchor.constraint(equalToConstant: hairline)
+        ])
+
         // Text-only posts' gradient page background lives inside the chrome
         // (shared with the hero flight's replica, so the landing swap can't
         // mismatch), not here. The media card hosts both render surfaces
@@ -2260,6 +2291,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// window yet, and a text page that resolved its theme before then took the
     /// screen's pin instead.
     private var pageHasMedia = false
+    /// The one-pixel seam between one full-screen page and the next — see the
+    /// note where they are added.
+    private let pageSeparatorTop = UIView()
+    private let pageSeparatorBottom = UIView()
 
     private func applyPageTheme() {
         contentView.overrideUserInterfaceStyle = SnapChromeTheme.style(

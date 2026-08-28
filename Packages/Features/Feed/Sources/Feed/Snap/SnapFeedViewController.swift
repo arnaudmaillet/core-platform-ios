@@ -1902,6 +1902,10 @@ final class SnapFeedViewController: UIViewController {
         collectionView(collectionView, willDisplay: cell, forItemAt: path)
     }
 
+    /// Whether the pager can be scrolled at all — the state a leaked
+    /// engagement used to be able to hold down for the rest of a session.
+    var debugPagerIsLocked: Bool { !collectionView.isScrollEnabled }
+
     /// The ceiling the pager actually clamps to — prepares, then answers.
     func debugReachableCeiling() -> Int { reachableCeiling() }
 
@@ -2241,6 +2245,61 @@ final class SnapFeedViewController: UIViewController {
     /// — over-scroll never chains to a page change) and swap in the
     /// engaged toolbar context. Deferred out of the pre-render so neither
     /// touches the still-in-flight scroll. Runs once per engagement.
+    /// Makes the screen match the page it is actually on.
+    ///
+    /// ⚠️ DERIVED, NOT MAINTAINED — and every leak in this file came from the
+    /// difference.
+    ///
+    /// The resting interface and the pager's lock used to be moved by
+    /// TRANSITIONS: mounted here, torn down there, unlocked in a teardown. Each
+    /// of those runs only if its callback does, and the callbacks are not
+    /// guaranteed — a cell recycled without an end-display, a resign leg that
+    /// defers to one, a promotion waiting for a slot nobody freed. Any single
+    /// miss leaves the screen describing a page the viewer left: measured as
+    /// `settled=1 engaged=post-new-07 scrollEnabled=false`, two pages later,
+    /// with the pager locked for a post no longer on screen. Nothing could
+    /// scroll and nothing in the trace said why.
+    ///
+    /// A reconcile cannot leak. It asks what is true NOW — which page is
+    /// settled, whether the old one is still visible — and makes the screen
+    /// agree. A missed callback costs one settle's delay instead of the rest of
+    /// the session.
+    private func reconcileRestingInterface(activeIndex: Int) {
+        let activeID = orderedIDs.indices.contains(activeIndex) ? orderedIDs[activeIndex] : nil
+        let activeIsText = activeID.flatMap { modelsByID[$0]?.mediaURL == nil } ?? false
+
+        // An engagement belonging to a page that has LEFT is over, whatever
+        // failed to say so. Still-visible pages keep theirs: that is what stops
+        // the page being left from emptying while the settle animates.
+        if let engaged = commentsEngagedID, commentsEngagementIsResting,
+           engaged != activeID, !isPostOnScreen(engaged) {
+            finishCommentsDisengagement()
+        }
+        // The settled text page owns the interface: promote what is already
+        // mounted, or mount it.
+        if activeIsText, let activeID, !promoteRestingPreview(for: activeID),
+           commentsEngagedID == nil,
+           let cell = collectionView.cellForItem(
+               at: IndexPath(item: activeIndex, section: 0)
+           ) as? SnapFeedCell {
+            presentRestingComments(for: activeID, host: cell)
+        }
+        // ⚠️ AND THE LOCK FOLLOWS THE SETTLED PAGE, not the engagement.
+        //
+        // A text page disables the pager because its own scroll view would
+        // chain with it. That is a fact about the page on screen, so it is read
+        // off the page on screen — an engagement that outlived its page cannot
+        // take the pager down with it.
+        collectionView.isScrollEnabled = !activeIsText
+    }
+
+    /// Whether the post's cell is currently among the visible ones.
+    private func isPostOnScreen(_ id: PostID) -> Bool {
+        collectionView.indexPathsForVisibleItems.contains {
+            orderedIDs.indices.contains($0.item) && orderedIDs[$0.item] == id
+        }
+    }
+
     private func lockRestingEngagement() {
         guard commentsEngagementIsResting, !restingLockApplied,
               commentsEngagedID != nil else { return }
@@ -2701,22 +2760,23 @@ final class SnapFeedViewController: UIViewController {
                 // presence REQUIRED — a not-yet-hydrated page reads as
                 // "unknown", never "text-only".
                 if let model = modelsByID[id], model.mediaURL == nil {
-                    // The panel may already be on screen, mounted as a preview
-                    // while the page being left still held the slot. Promoting
-                    // it is a field assignment; mounting would build a second.
-                    if promoteRestingPreview(for: id) {
-                        // Nothing more to install — it is already in its cell.
-                    } else if commentsEngagedID == nil,
-                       let cell = collectionView.cellForItem(at: IndexPath(item: activate, section: 0)) as? SnapFeedCell {
-                        presentRestingComments(for: id, host: cell)
-                    }
+                    // Mounting, promoting, releasing a page that has gone and
+                    // the pager's own lock are ONE decision now — see
+                    // `reconcileRestingInterface`.
+                    reconcileRestingInterface(activeIndex: activate)
                     if commentsEngagedID == id, commentsEngagementIsResting {
                         lockRestingEngagement()
                     }
-                } else if let cell = collectionView.cellForItem(
+                } else {
+                    // A MEDIA page settles too, and the same reconcile is what
+                    // releases an interface the page before it left behind and
+                    // gives the pager back — the case that locked the feed on a
+                    // photograph for a text post two pages ago.
+                    reconcileRestingInterface(activeIndex: activate)
+                }
+                if modelsByID[id]?.mediaURL != nil, let cell = collectionView.cellForItem(
                     at: IndexPath(item: activate, section: 0)
                 ) as? SnapFeedCell {
-
                     // MEDIA pages warm their comments panel here instead of
                     // at tap time — see `prewarmComments`. The settle seam
                     // is where the page has stopped moving and nothing is

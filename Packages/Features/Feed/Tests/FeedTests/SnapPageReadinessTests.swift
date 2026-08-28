@@ -168,6 +168,62 @@ struct SnapPageReadinessTests {
                 "the arriving page mounted nothing and would render empty")
     }
 
+    // MARK: - The screen matches the page it is on
+
+    /// ⚠️ AN INTERFACE THAT OUTLIVES ITS PAGE MUST NOT TAKE THE PAGER WITH IT.
+    ///
+    /// A text page disables the pager, because its own scroll view would chain
+    /// with it. That lock used to be released by a teardown — so a teardown
+    /// that did not run left the feed locked on a PHOTOGRAPH for a text post
+    /// two pages back. Measured exactly that way:
+    /// `settled=1 engaged=post-new-07 scrollEnabled=false`, with nothing able
+    /// to scroll and nothing in the trace to say why.
+    ///
+    /// The lock is a fact about the page on screen, so it is read off the page
+    /// on screen.
+    @Test func thePagerIsUnlockedByTheSettledPageNotByATeardown() {
+        let panels = Panels()
+        let feed = feed([text("a"), media("b")], panels: panels)
+        #expect(feed.debugPagerIsLocked, "a text page locks the pager")
+
+        advance(feed, from: 0)
+
+        #expect(feed.debugPagerIsLocked == false,
+                "the pager stayed locked on a media page for a text post that had gone")
+    }
+
+    /// And it locks again on the next text page, without anybody remembering to.
+    @Test func theLockFollowsEveryPage() {
+        let panels = Panels()
+        let feed = feed([media("a"), text("b"), media("c")], panels: panels)
+        #expect(feed.debugPagerIsLocked == false)
+
+        advance(feed, from: 0)
+        #expect(feed.debugPagerIsLocked, "a text page did not take the pager")
+
+        advance(feed, from: 1)
+        #expect(feed.debugPagerIsLocked == false)
+    }
+
+    /// A page that is still on screen keeps its interface — the reconcile
+    /// releases what has GONE, not merely what is no longer active. This is
+    /// what stops the page being left from emptying while the settle animates.
+    @Test func aVisiblePageKeepsItsInterfaceThroughTheSettle() {
+        let panels = Panels()
+        let feed = feed([text("a"), text("b")], panels: panels)
+
+        // Settle on b without telling the screen that a has finished leaving.
+        guard let collection = feed.view.subviews
+            .compactMap({ $0 as? UICollectionView }).first else { return }
+        collection.setContentOffset(
+            CGPoint(x: 0, y: collection.bounds.height), animated: false
+        )
+        feed.scrollViewDidEndDecelerating(collection)
+
+        #expect(feed.debugRestingCommentsID == PostID("a"),
+                "the page being left was emptied while it was still on screen")
+    }
+
     // MARK: - The display, page by page
 
     /// A text page owns its interface the moment it is the settled page.
