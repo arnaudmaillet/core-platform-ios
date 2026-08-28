@@ -1845,6 +1845,29 @@ final class SnapFeedViewController: UIViewController {
     }
 
     #if DEBUG
+    /// The mount and the media warm, reachable without a scroll — the defect
+    /// they produce together is an ORDER between two seams, and a test that
+    /// could not put them in that order could not see it.
+    func debugPrewarmComments(for id: PostID) {
+        guard let cell = collectionView.visibleCells.compactMap({ $0 as? SnapFeedCell }).first
+        else { return }
+        prewarmComments(for: id, host: cell)
+    }
+
+    func debugMountRestingComments(for id: PostID) {
+        guard let cell = collectionView.visibleCells.compactMap({ $0 as? SnapFeedCell }).first
+        else { return }
+        presentRestingComments(for: id, host: cell)
+    }
+
+    /// A warm with no engagement behind it — the state that blocked the mount.
+    var debugHasParkedCommentsWarm: Bool {
+        commentsEngagedID == nil && commentsContentVC != nil
+    }
+
+    /// Which post the resting panel is standing in for right now.
+    var debugRestingCommentsID: PostID? { commentsEngagedID }
+
     /// Which text page has had its interface built ahead. Kept separately from
     /// the live field so a test can see a warm that was CONSUMED — which is the
     /// half that proves the mount paid nothing.
@@ -1859,6 +1882,23 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func presentRestingComments(for id: PostID, host cell: SnapFeedCell) {
+        // ⚠️ A PARKED WARM IS NOT AN ENGAGEMENT, and treating it as one is the
+        // black page.
+        //
+        // The guard below reads `commentsContentVC` as "a panel is installed in
+        // a cell". A media page's tap-to-comments WARM sits in that same field
+        // with no engagement behind it — so scrolling from a warmed media page
+        // onto a text page found the slot taken, declined the mount, and the
+        // text page scrolled in as a black rectangle. It then appeared all at
+        // once at the settle, where the resign leg discards the warm and the
+        // activate leg mounts for real. Measured exactly that way on a
+        // recording: black for the whole scroll, complete the instant it
+        // stopped.
+        //
+        // The warm belongs to the page being LEFT and is worth nothing now.
+        if commentsEngagedID == nil, prewarmedCommentsID != nil {
+            discardPrewarmedComments()
+        }
         guard commentsEngagedID == nil, commentsContentVC == nil,
               let makeCommentsPanelContent else { return }
 
