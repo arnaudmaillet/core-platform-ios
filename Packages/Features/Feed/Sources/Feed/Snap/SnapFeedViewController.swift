@@ -1449,8 +1449,27 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
+    /// Whether a keyboard is currently on screen — see
+    /// `zoomVerticalDismissalPermitted`.
+    ///
+    /// Tracked from the notifications rather than read off
+    /// `keyboardLayoutGuide`, because the question is asked at the moment a
+    /// GESTURE begins: the guide's frame is animating then, and a guide
+    /// halfway down answers neither yes nor no.
+    private var isKeyboardOnScreen = false
+
     private func observeAppLifecycle() {
         let center = NotificationCenter.default
+        appObservers.add(center.addObserver(
+            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.isKeyboardOnScreen = true }
+        })
+        appObservers.add(center.addObserver(
+            forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.isKeyboardOnScreen = false }
+        })
         appObservers.add(center.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -1945,6 +1964,11 @@ final class SnapFeedViewController: UIViewController {
             collectionView(collectionView, willDisplay: cell, forItemAt: path)
         }
     }
+
+    /// Pretends a keyboard came up, so the veto below it can be tested without
+    /// one — a simulator will not raise a real keyboard for a unit test, and
+    /// the rule is about what the veto ANSWERS while one is up.
+    func debugSetKeyboardOnScreen(_ onScreen: Bool) { isKeyboardOnScreen = onScreen }
 
     /// Which posts have a comments panel ON SCREEN right now, asked of the
     /// cells rather than of any bookkeeping.
@@ -4156,6 +4180,18 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// territory that owns its own vertical gestures (the shortcut rail's
     /// column, the composer).
     public func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
+        // ⚠️ AN OPEN KEYBOARD OWNS THE DOWNWARD DRAG.
+        //
+        // The comments list dismisses the keyboard interactively — drag down
+        // over it and the keyboard follows the finger. That gesture and this
+        // one are the same drag in the same direction, and the keyboard's is
+        // the one the viewer means: they are looking at a keyboard they want
+        // gone, not at a post they want closed. Claiming it here closed the
+        // post out from under a half-typed comment.
+        //
+        // Only while the keyboard is actually up, so nothing changes for the
+        // rest of the page's life.
+        guard !isKeyboardOnScreen else { return false }
         guard commentsEngagedID == nil || commentsEngagementIsResting else { return false }
         let point = collectionView.convert(location, from: view)
         guard let hit = collectionView.hitTest(point, with: nil) else { return true }

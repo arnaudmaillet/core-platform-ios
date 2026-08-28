@@ -182,6 +182,46 @@ struct SnapPageDisplaySpecTests {
         #expect(panels.count("b") == 1)
     }
 
+    // MARK: - Who owns a downward drag
+
+    /// ⚠️ AN OPEN KEYBOARD OWNS THE DOWNWARD DRAG.
+    ///
+    /// The comments list dismisses the keyboard interactively — drag down over
+    /// it and the keyboard follows the finger. That gesture and the post's
+    /// close are the same drag in the same direction, and the keyboard's is the
+    /// one the viewer means: they are looking at a keyboard they want gone, not
+    /// at a post they want closed. Claiming it closed the post out from under a
+    /// half-typed comment.
+    ///
+    /// Asserted on MEDIA pages, where the drag is the dismissal's to begin
+    /// with. A resting text page already yields it to its own stream by another
+    /// rule, so it cannot show this one.
+    @Test func anOpenKeyboardTakesTheDownwardDragFromTheDismissal() {
+        let panels = Panels()
+        let feed = feed([media("a"), media("b")], panels: panels)
+        let middle = CGPoint(x: 195, y: 400)
+        #expect(feed.zoomVerticalDismissalPermitted(at: middle, in: feed.view),
+                "the premise: without a keyboard this drag is the dismissal's")
+
+        feed.debugSetKeyboardOnScreen(true)
+
+        #expect(feed.zoomVerticalDismissalPermitted(at: middle, in: feed.view) == false,
+                "the dismissal claimed a drag the keyboard owns")
+    }
+
+    /// And gives it back — the rule is about the keyboard being up, not about
+    /// having ever been up.
+    @Test func theDragComesBackWhenTheKeyboardGoes() {
+        let panels = Panels()
+        let feed = feed([media("a"), media("b")], panels: panels)
+        let middle = CGPoint(x: 195, y: 400)
+
+        feed.debugSetKeyboardOnScreen(true)
+        feed.debugSetKeyboardOnScreen(false)
+
+        #expect(feed.zoomVerticalDismissalPermitted(at: middle, in: feed.view))
+    }
+
     // MARK: - What the pager allows
 
     /// A text page owns the vertical axis — its thread scrolls — so the pager
