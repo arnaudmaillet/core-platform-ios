@@ -291,9 +291,15 @@ struct SnapDismissalKindTests {
         #expect(feed.debugRestingCommentsID == PostID("a"), "the slot changed hands too early")
     }
 
-    /// And the settle PROMOTES it rather than building a second one — without
-    /// which the preview is pure cost, paid twice.
-    @Test func theSettlePromotesThePreviewRatherThanBuildingAgain() {
+    /// And the preview is PROMOTED rather than rebuilt — without which it is
+    /// pure cost, paid twice.
+    ///
+    /// The promotion waits for the page being left to actually leave, because
+    /// that page keeps its own interface until then (see
+    /// `aTextPageKeepsItsInterfaceUntilItHasLeft`). Two pages showing a panel
+    /// at once is exactly the window this covers; two pages OWNING the
+    /// engagement is what it must never become.
+    @Test func thePreviewIsPromotedWhenTheLastPageFinallyLeaves() {
         let panels = PanelBuilds()
         let feed = feed([text("a"), text("b")], panels: panels)
         page(feed, to: 0)
@@ -302,10 +308,34 @@ struct SnapDismissalKindTests {
         #expect(built >= 1)
 
         page(feed, to: 1)
+        #expect(feed.debugRestingCommentsID == PostID("a"),
+                "the page being left gave up its interface before it had gone")
+
+        feed.debugLeaveCell(at: 0)
 
         #expect(feed.debugRestingCommentsID == PostID("b"), "the promotion never happened")
         #expect(feed.debugPreviewRestingID == nil)
-        #expect(panels.count("b") == built, "the settle built a second panel over the preview")
+        #expect(panels.count("b") == built, "a second panel was built over the preview")
+    }
+
+    /// ⚠️ THE PAGE BEING LEFT KEEPS ITS INTERFACE THROUGH THE SETTLE.
+    ///
+    /// The settle is not the moment a page stops being seen: the scroll
+    /// releases, the page snaps home, and the page being left is still partly
+    /// on screen for the length of that animation. Tearing its panel down at
+    /// the settle emptied it while the viewer could still see it — a text page
+    /// dropping to its bare floor on the way out, the mirror of the black
+    /// arrival.
+    @Test func aTextPageKeepsItsInterfaceUntilItHasLeft() {
+        let panels = PanelBuilds()
+        let feed = feed([text("a"), media("b")], panels: panels)
+        page(feed, to: 0)
+        #expect(feed.debugRestingCommentsID == PostID("a"))
+
+        page(feed, to: 1)
+
+        #expect(feed.debugRestingCommentsID == PostID("a"),
+                "the page being left was emptied while it was still on screen")
     }
 
     // MARK: - The readiness ceiling

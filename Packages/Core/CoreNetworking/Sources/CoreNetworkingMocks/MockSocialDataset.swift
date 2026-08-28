@@ -186,7 +186,22 @@ public struct MockSocialDataset: Sendable {
             """,
             "Quiet morning, notes and a long walk before anything else.",
             "Golden hour over the harbour.",
-            "Every clip from the trip, back to back."
+            "Every clip from the trip, back to back.",
+            // ⚠️ TWO TEXT ARRIVALS IN A ROW, AND THAT IS THE WHOLE POINT.
+            //
+            // The corpus makes every third post text-only, so two text posts
+            // are NEVER adjacent in it — which meant the case that produced
+            // three separate defects (a text page arriving while another text
+            // page still owns the resting interface) could not be reached from
+            // the seed at all. Every recording of it had to be made by opening
+            // one post and paging until the order happened to cooperate.
+            //
+            // These two sit at the head, so a cold launch opens on a text page
+            // and the very first page down is another. Vocabulary kept clear of
+            // every context lexicon — see the note above the captions — so the
+            // lens counts below do not move.
+            "Third coffee. Still deciding whether the rewrite was a good idea.",
+            "Wrote four paragraphs, kept one. That is a normal ratio."
         ]
         // ⚠️ THE LEAD SCALES WITH THE COUNT, because the stamps step BACK a
         // minute each: the newest is `epochMS` and the oldest is that minus one
@@ -247,7 +262,9 @@ public struct MockSocialDataset: Sendable {
             // in reverse (see arrival 4's note), so the highest index is the
             // card a cold launch opens on.
             let isOverCapacityGallery = index == 5
-            let hasMedia = isOverCapacityGallery || index % 3 != 2
+            // ⚠️ 6 AND 7 ARE TEXT, back to back — see the captions' own note.
+            let isAdjacentTextPair = index >= 6
+            let hasMedia = !isAdjacentTextPair && (isOverCapacityGallery || index % 3 != 2)
             let shape = isOverCapacityGallery ? (1600, 900) : shapes[index % shapes.count]
             let isVideo = !isOverCapacityGallery && index % 2 == 1
             let host = isVideo ? "video" : "media"

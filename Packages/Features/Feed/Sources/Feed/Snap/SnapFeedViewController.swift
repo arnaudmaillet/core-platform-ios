@@ -1883,6 +1883,14 @@ final class SnapFeedViewController: UIViewController {
     /// And which one is showing a panel WITHOUT owning the engagement.
     var debugPreviewRestingID: PostID? { previewRestingID }
 
+    /// The moment a page's last pixel leaves — which a unit test's scroll does
+    /// not produce, and which is now when a resting page is torn down.
+    func debugLeaveCell(at item: Int) {
+        let path = IndexPath(item: item, section: 0)
+        guard let cell = collectionView.cellForItem(at: path) else { return }
+        collectionView(collectionView, didEndDisplaying: cell, forItemAt: path)
+    }
+
     /// Which text page has had its interface built ahead. Kept separately from
     /// the live field so a test can see a warm that was CONSUMED — which is the
     /// half that proves the mount paid nothing.
@@ -2534,7 +2542,22 @@ final class SnapFeedViewController: UIViewController {
             // since the pager is locked for the engagement's lifetime).
             if let engaged = commentsEngagedID, orderedIDs.indices.contains(resign),
                engaged == orderedIDs[resign] {
-                finishCommentsDisengagement()
+                // ⚠️ A RESTING PAGE KEEPS ITS INTERFACE UNTIL ITS LAST PIXEL
+                // HAS LEFT.
+                //
+                // The settle is not the moment the page stops being seen: the
+                // scroll releases, the page snaps home, and the page being left
+                // is still partly on screen for the length of that animation.
+                // Tearing its panel down here emptied it while the viewer could
+                // still see it — a text page went to its bare floor for an
+                // instant on the way out, which is the same defect as the black
+                // arrival, mirrored.
+                //
+                // `didEndDisplaying` is the honest moment, and it already tears
+                // down the case where a page is scrolled past without ever
+                // settling. A page that never leaves the viewport keeps its
+                // interface, which is what a resting engagement is for.
+                if !commentsEngagementIsResting { finishCommentsDisengagement() }
             }
             // A warm panel belongs to the page that was active. Once that
             // page is not, the warm is stale — and holding it would block
@@ -2891,6 +2914,12 @@ extension SnapFeedViewController: UICollectionViewDelegate {
            orderedIDs[indexPath.item] == engagedID,
            lifecycle.activeIndex != indexPath.item {
             finishCommentsDisengagement()
+            // The slot is free at last — and the page that is now active may
+            // have been showing a PREVIEW since it scrolled in, waiting for
+            // exactly this. Promoting is a field assignment; without it the
+            // preview would stay one for ever and its page would never own its
+            // own pager lock.
+            if let active = activePostID { promoteRestingPreview(for: active) }
         }
     }
 
