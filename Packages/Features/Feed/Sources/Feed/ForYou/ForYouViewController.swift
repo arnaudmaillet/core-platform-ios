@@ -972,10 +972,28 @@ final class ForYouViewController: UIViewController {
                     // them is read after this.
                     if let landed = (feed as? SnapFeedViewController)?.activePostID,
                        landed != anchorID,
-                       page?.adoptPost(
+                       page?.adoptForClose(
                            landed, intoSlotOf: anchorID,
-                           orInsert: self?.viewModel.post(for: landed)
+                           orInsert: self?.viewModel.post(for: landed),
+                           // This close CARRIES the row, so the row stands aside.
+                           standingIn: true
                        ) == true {
+                        // ⚠️ AND THE CONCEALMENT MOVES WITH THE SWAP.
+                        //
+                        // The window has been standing in for the row it opened
+                        // from since the opening — that row is hidden, which is
+                        // what stops the same post being on screen twice. The
+                        // swap has just put a DIFFERENT post in that slot, and
+                        // the flag still names the old one: the card the viewer
+                        // is returning to was visible under the window they
+                        // were dragging, while the card they had left sat
+                        // hidden somewhere further down.
+                        //
+                        // Reported from the first case tried — open text A,
+                        // page to text B, drag — and visible for the whole
+                        // gesture, so no end-of-close sweep can answer it. The
+                        // handover is `adoptForClose`'s, so both drivers get it
+                        // from one place.
                         anchorID = landed
                     }
                     log("freeze   post")

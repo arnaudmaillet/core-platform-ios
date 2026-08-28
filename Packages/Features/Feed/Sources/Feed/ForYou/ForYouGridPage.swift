@@ -1500,6 +1500,60 @@ final class ForYouGridPage: UIView {
         (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }
 
+    /// The swap a CLOSE performs: the landed post takes the departure slot, and
+    /// the concealment goes with it.
+    ///
+    /// ⚠️ ONE METHOD BECAUSE IT IS ONE RULE, and it was two call sites getting
+    /// it differently right. What the viewer must never see is the card they
+    /// are returning to sitting visible under the transition standing in for
+    /// it, while the card they left is the hidden one. That is not a detail of
+    /// either driver — it is what "the feed is up to date" means during the
+    /// drag, and it is on screen for the whole gesture, so no sweep afterwards
+    /// can answer it.
+    ///
+    /// `standingIn` is what differs: a card-shaped close CARRIES the row, so
+    /// that row must stand aside for it. A flight carries only the media and
+    /// conceals its landing on its own channel — but it still needs the window
+    /// released, because the screen it is closing may have been opened as one.
+    @discardableResult
+    func adoptForClose(
+        _ postID: PostID,
+        intoSlotOf occupantID: PostID,
+        orInsert model: GalleryPost? = nil,
+        standingIn: Bool
+    ) -> Bool {
+        guard adoptPost(postID, intoSlotOf: occupantID, orInsert: model) else { return false }
+        // Released first: the two are one handover, and the order is what stops
+        // a frame with both rows hidden.
+        setRevealConcealed(false, for: occupantID)
+        if standingIn { setRevealConcealed(true, for: postID) }
+        return true
+    }
+
+    /// Which posts the viewer currently cannot see, whatever is hiding them.
+    ///
+    /// Answered from the CELLS rather than from the concealment flags, because
+    /// the two came apart — a flag naming one post while another row was the
+    /// invisible one is the whole of two separate defects. A caller asking
+    /// "what is on screen" must not be told what the bookkeeping believes.
+    ///
+    /// The index mapping lives here because the sections do: a caller walking
+    /// the collection view itself would have to re-derive the arrivals split.
+    func concealedPosts() -> Set<PostID> {
+        var hidden: Set<PostID> = []
+        for cell in collectionView.visibleCells {
+            guard let path = collectionView.indexPath(for: cell) else { continue }
+            let index = flatIndex(for: path)
+            guard posts.indices.contains(index) else { continue }
+            let card = cell.contentView.subviews.first
+            if cell.isHidden || cell.alpha == 0 || card?.alpha == 0
+                || (cell as? PostGridListRowCell)?.isHeroMediaConcealed == true {
+                hidden.insert(posts[index].id)
+            }
+        }
+        return hidden
+    }
+
     /// Whether a landing conceals the row's MEDIA while the card flies to it.
     ///
     /// True on a timeline, where concealing takes the preview and leaves the

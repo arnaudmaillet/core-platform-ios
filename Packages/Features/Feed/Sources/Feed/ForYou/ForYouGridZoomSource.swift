@@ -299,7 +299,12 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // corpus when it does not — the adoption inserts in that case.
         let model = landed.flatMap { page?.post(for: $0) ?? landedModel?($0) }
         if let landed, let model, page?.canLandHero(on: model) == true,
-           page?.adoptPost(landed, intoSlotOf: departureID, orInsert: model) == true {
+           page?.adoptForClose(
+               landed, intoSlotOf: departureID, orInsert: model,
+               // A flight carries the MEDIA, not the row: it conceals its own
+               // landing below, on the hero channel.
+               standingIn: false
+           ) == true {
             // The active post now occupies the departure slot, so anchoring to
             // it lands on that tile without moving anything.
             anchorID = landed

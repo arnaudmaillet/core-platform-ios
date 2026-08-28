@@ -469,6 +469,105 @@ struct DismissalReturnMatrixTests {
         #expect(frame == row, "the close collapsed to the centre instead of onto its card")
     }
 
+    // MARK: - Which card is hidden WHILE the close is being dragged
+
+    /// The posts whose row is currently standing aside for a transition —
+    /// concealed on either channel.
+    ///
+    /// Read off the cells rather than off a flag, because "which flag is set"
+    /// and "which card the viewer cannot see" came apart, and only the second
+    /// one is the bug.
+    private func concealedPosts(in page: ForYouGridPage) -> Set<PostID> {
+        page.concealedPosts()
+    }
+
+    /// ⚠️ THE HIDDEN CARD IS THE ONE THE TRANSITION IS STANDING IN FOR — at
+    /// every moment of the gesture, not merely once it ends.
+    ///
+    /// A window hides the row it opened from, which is what stops the same post
+    /// being on screen twice while it is dragged. Page to another post and the
+    /// swap puts a DIFFERENT post in that slot — and the flag still named the
+    /// old one, so the card the viewer was returning to sat visible under the
+    /// window they were holding, while the card they had left was hidden
+    /// somewhere further down. The report is exactly that, and it is visible
+    /// for the whole drag: no end-of-close sweep can answer it.
+    ///
+    /// Both directions asserted, because "B is hidden" alone would pass while A
+    /// was hidden too.
+    /// ⚠️ TALL ON PURPOSE. `concealedPosts` can only report rows the collection
+    /// view has REALIZED, so on a phone-sized page a post three rows down is
+    /// invisible to it either way and every assertion about that post passes
+    /// vacuously — which is exactly what the first version of these tests did,
+    /// including under falsification. A page tall enough to realize its whole
+    /// corpus is what makes "who is hidden" answerable at all.
+    private func tallPage(_ kinds: [GalleryPost.Kind]) -> ForYouGridPage {
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
+        page.render(.content(kinds.enumerated().map { index, kind in
+            GalleryPost(
+                id: PostID("p\(index)"),
+                kind: kind,
+                isRepost: false,
+                thumbnailURL: kind == .text ? nil : URL(string: "https://example.test/\(index).jpg"),
+                aspectRatio: 1,
+                caption: "caption \(index)",
+                publishedAtMS: 0
+            )
+        }))
+        page.layoutIfNeeded()
+        return page
+    }
+
+    @Test func theHiddenCardFollowsTheSwap() {
+        let page = tallPage([.text, .photo, .text])
+        let a = page.posts[0].id      // text, opened as a window
+        let b = page.posts[2].id      // text, paged to
+        page.setRevealConcealed(true, for: a)
+        #expect(concealedPosts(in: page) == [a], "the premise: the window hid its own row")
+
+        page.adoptForClose(b, intoSlotOf: a, orInsert: page.post(for: b), standingIn: true)
+
+        #expect(concealedPosts(in: page).contains(b), "the card being returned to was visible")
+        #expect(concealedPosts(in: page).contains(a) == false, "the card left behind stayed hidden")
+        #expect(concealedPosts(in: page) == [b], "exactly one card stands aside for the close")
+    }
+
+    /// A FLIGHT's close does not take the row aside — it carries the media and
+    /// conceals its landing on the other channel — but it still releases what a
+    /// window was holding. Same handover, the other half of it.
+    @Test func aFlightsCloseReleasesTheWindowWithoutTakingTheRow() {
+        let page = tallPage([.text, .photo, .photo])
+        let a = page.posts[0].id
+        let b = page.posts[2].id
+        page.setRevealConcealed(true, for: a)
+
+        page.adoptForClose(b, intoSlotOf: a, orInsert: page.post(for: b), standingIn: false)
+
+        #expect(concealedPosts(in: page).isEmpty,
+                "a flight's close should leave the row it lands on visible until it conceals it")
+    }
+
+    /// The same rule through the seam the app actually calls, rather than by
+    /// hand: staging a close releases what the window was holding.
+    @Test func stagingACloseMovesTheConcealment() {
+        let page = tallPage([.text, .video, .photo])
+        let a = page.posts[0].id
+        let b = page.posts[2].id      // a photograph — the close is a flight
+        page.setRevealConcealed(true, for: a)
+        #expect(concealedPosts(in: page) == [a])
+
+        let source = ForYouGridZoomSource(
+            page: page, tappedID: a, activePostID: { b },
+            landedModel: { id in page.post(for: id) }, depthView: nil
+        )
+        source.zoomSourceWillStageDismissal()
+
+        #expect(concealedPosts(in: page).contains(a) == false,
+                "the window's row stayed hidden after the swap moved past it")
+    }
+
     // MARK: - What the landing row is showing when the card arrives
 
     /// ⚠️ THE ROW IS PUT ON THE PAGE THE CARD IS CARRYING.
