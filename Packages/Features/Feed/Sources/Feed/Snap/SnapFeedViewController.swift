@@ -2428,7 +2428,20 @@ final class SnapFeedViewController: UIViewController {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return false }
         guard model.mediaURL == nil, makeCommentsPanelContent != nil else { return true }
-        return prewarmedRestingID == model.id || commentsEngagedID == model.id
+        // ⚠️ ALL THREE PLACES A PANEL CAN BE, and leaving one out strands the
+        // viewer.
+        //
+        // A panel is built ahead (`prewarmedRestingID`), then MOUNTED into the
+        // incoming cell as a preview — which consumes the warm — and only later
+        // promoted to the engagement. Counting the first and the last but not
+        // the middle meant a page that was already on screen, fully drawn, read
+        // as "not ready": the ceiling stopped short of it and the pager refused
+        // to advance. Two text posts in a row could not be paged through at
+        // all, and the console showed only the hero grab correctly declining an
+        // upward drag — nothing about the page that was quietly unreachable.
+        return prewarmedRestingID == model.id
+            || previewRestingID == model.id
+            || commentsEngagedID == model.id
     }
 
     /// The furthest page the viewer may reach right now.
