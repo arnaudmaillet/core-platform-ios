@@ -145,6 +145,33 @@ struct SnapDismissalKindTests {
         #expect(feed.activePostID == PostID("t"))
     }
 
+    /// The settle is what arms the warm, not UIKit's scroll heuristic.
+    ///
+    /// `UICollectionViewDataSourcePrefetching` warms nothing while the pager is
+    /// at rest, and during a fling only what its velocity heuristic reached. A
+    /// feed whose promise is that the next page is instant cannot be built on
+    /// that: after every settle the window is stated outright, so the pages
+    /// either side are ready whether the viewer arrived by flick, by tap, or by
+    /// sitting still for a minute first.
+    @Test func settlingOnAPageWarmsTheWindowAroundIt() {
+        let feed = feed([media("a"), media("b"), media("c"), media("d"), media("e")])
+
+        page(feed, to: 2)
+
+        // Two ahead, one behind, nearest first — see `SnapWarmWindow`.
+        #expect(feed.debugLastWarmedWindow == [3, 1, 4])
+    }
+
+    /// And it clamps at the end of the feed rather than asking for pages that
+    /// are not there.
+    @Test func theWarmStopsAtTheEndOfTheFeed() {
+        let feed = feed([media("a"), media("b"), media("c")])
+
+        page(feed, to: 2)
+
+        #expect(feed.debugLastWarmedWindow == [1])
+    }
+
     /// The answer is a pure question — asking it must not activate a page,
     /// start a player, or otherwise move the screen. Both grabs ask it on every
     /// touch that reaches them.

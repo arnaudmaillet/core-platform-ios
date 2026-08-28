@@ -2274,6 +2274,10 @@ final class SnapFeedViewController: UIViewController {
                 snapCell.defersPlaybackForFlight = isAwaitingZoomPresentation
             }
             lifecycleCell(at: activate)?.willBecomeActive()
+            // The pages either side get ready NOW, at the settle, rather than
+            // when UIKit's scroll heuristic happens to ask — see
+            // `warmSettledWindow`.
+            warmSettledWindow(around: activate)
             // Same settle-quantized seam that drives playback: both bar
             // surfaces (identity pill above, media attribution below) follow
             // the active page.
@@ -2406,6 +2410,69 @@ final class SnapFeedViewController: UIViewController {
         guard orderedIDs.indices.contains(index) else { return nil }
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapCellLifecycle
     }
+
+    /// Everything a page needs that is NOT its player: the cover to decode and
+    /// the comment stream to fetch.
+    ///
+    /// Both are cheap and both are what a viewer notices missing — a page that
+    /// snaps in and then fills itself in reads as a stutter even when no frame
+    /// was dropped.
+    func warmContent(at items: [Int]) {
+        let ids = items.compactMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
+        let urls = ids.compactMap { modelsByID[$0] }.flatMap { [$0.avatarURL, $0.mediaURL] }
+            .compactMap(\.self)
+        let pipeline = imagePipeline
+        Task { await pipeline.prefetch(urls) }
+        // Loaded before the page scrolls in, so its band enters the viewport
+        // already streaming (subtitles still wait for settle — their gate is
+        // activation, not content).
+        for id in ids where modelsByID[id] != nil {
+            viewModel.ensureCommentStreams(for: id)
+        }
+    }
+
+    /// The players, kept to the immediate neighbours — see `SnapWarmWindow`.
+    ///
+    /// Deliberately a narrower window than the content's: a player holds a
+    /// decoder and the platform caps how many can render at once, so this is
+    /// the one warm that has to stay stingy.
+    func warmPlayers(at items: [Int]) {
+        for item in items where orderedIDs.indices.contains(item) {
+            guard let model = modelsByID[orderedIDs[item]],
+                  model.mediaKind == .video, let url = model.mediaURL else { continue }
+            videoPlayback?.preroll(url)
+        }
+    }
+
+    /// ⚠️ A DEFINED WINDOW AROUND THE PAGE THE VIEWER SETTLED ON.
+    ///
+    /// `UICollectionViewDataSourcePrefetching` is UIKit's guess, made from
+    /// scroll velocity: it warms nothing at all while the pager is at rest, and
+    /// what it warms during a fling is whatever its heuristic reached. A feed
+    /// whose whole promise is that the next page is INSTANT cannot be built on
+    /// a guess — after every settle the window is stated outright, so the pages
+    /// either side are ready whether the viewer arrived by flick, by tap, or by
+    /// sitting still for a minute first.
+    ///
+    /// Kept alongside the prefetch callback rather than replacing it: UIKit's
+    /// guess is genuinely good DURING a fast scroll, where it runs ahead of the
+    /// settles. The two overlap, and both are idempotent.
+    private func warmSettledWindow(around active: Int) {
+        let count = orderedIDs.count
+        let content = SnapWarmWindow.content(around: active, count: count)
+        warmContent(at: content)
+        warmPlayers(at: SnapWarmWindow.players(around: active, count: count))
+        #if DEBUG
+        // What the settle actually warmed. The window itself is pure and tested
+        // on its own; this is how a test reaches the WIRING — that the settle
+        // asks at all, and asks about the page it settled on.
+        debugLastWarmedWindow = content
+        #endif
+    }
+
+    #if DEBUG
+    private(set) var debugLastWarmedWindow: [Int] = []
+    #endif
 
     private func prefetchURLs(for indexPaths: [IndexPath]) -> [URL] {
         indexPaths.compactMap { orderedIDs.indices.contains($0.item) ? modelsByID[orderedIDs[$0.item]] : nil }
@@ -3505,23 +3572,8 @@ private final class NotificationObserverBag: @unchecked Sendable {
 
 extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
     func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-        let urls = prefetchURLs(for: indexPaths)
-        let pipeline = imagePipeline
-        Task { await pipeline.prefetch(urls) }
-        // Warm the synthesizer/asset for upcoming video pages so their play is
-        // instant when they snap into view.
-        for indexPath in indexPaths where orderedIDs.indices.contains(indexPath.item) {
-            let model = modelsByID[orderedIDs[indexPath.item]]
-            if let model, model.mediaKind == .video, let url = model.mediaURL {
-                videoPlayback?.preroll(url)
-            }
-            // Comment streams too: loaded before the page scrolls in, so its
-            // band enters the viewport already streaming (subtitles wait for
-            // settle regardless — their gate is activation, not content).
-            if let model {
-                viewModel.ensureCommentStreams(for: model.id)
-            }
-        }
+        warmContent(at: indexPaths.map(\.item))
+        warmPlayers(at: indexPaths.map(\.item))
     }
 
     func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
