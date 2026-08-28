@@ -212,11 +212,14 @@ struct SnapPageReadinessTests {
         let panels = Panels()
         let feed = feed([text("a"), text("b")], panels: panels)
 
-        // Settle on b without telling the screen that a has finished leaving.
+        // Halfway: both pages have pixels on screen, which is the whole of the
+        // condition. Expressed as GEOMETRY rather than as "a callback has not
+        // run yet" — the callback ordering was what the first version of this
+        // test actually pinned, and it went green while the page went black.
         guard let collection = feed.view.subviews
             .compactMap({ $0 as? UICollectionView }).first else { return }
         collection.setContentOffset(
-            CGPoint(x: 0, y: collection.bounds.height), animated: false
+            CGPoint(x: 0, y: collection.bounds.height / 2), animated: false
         )
         feed.scrollViewDidEndDecelerating(collection)
 

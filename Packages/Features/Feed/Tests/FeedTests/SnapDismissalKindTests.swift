@@ -307,11 +307,9 @@ struct SnapDismissalKindTests {
         let built = panels.count("b")
         #expect(built >= 1)
 
+        // A full page of travel: the last one's pixels are gone, so its
+        // interface is finished and the arriving page takes it.
         page(feed, to: 1)
-        #expect(feed.debugRestingCommentsID == PostID("a"),
-                "the page being left gave up its interface before it had gone")
-
-        feed.debugLeaveCell(at: 0)
 
         #expect(feed.debugRestingCommentsID == PostID("b"), "the promotion never happened")
         #expect(feed.debugPreviewRestingID == nil)
@@ -332,7 +330,15 @@ struct SnapDismissalKindTests {
         page(feed, to: 0)
         #expect(feed.debugRestingCommentsID == PostID("a"))
 
-        page(feed, to: 1)
+        // Halfway out: still on screen, so still itself. The condition is
+        // PIXELS, not "the settle has not happened" — a page whose last pixel
+        // has gone is finished whatever the scroll is doing.
+        guard let collection = feed.view.subviews
+            .compactMap({ $0 as? UICollectionView }).first else { return }
+        collection.setContentOffset(
+            CGPoint(x: 0, y: collection.bounds.height / 2), animated: false
+        )
+        feed.scrollViewDidEndDecelerating(collection)
 
         #expect(feed.debugRestingCommentsID == PostID("a"),
                 "the page being left was emptied while it was still on screen")

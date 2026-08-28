@@ -646,7 +646,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // by the engagement, and a separator that scaled with it would stop
         // being one pixel.
         for edge in [pageSeparatorTop, pageSeparatorBottom] {
-            edge.backgroundColor = .black
+            // ⚠️ NOT BLACK. A hard black line between two light pages is louder
+            // than the boundary it marks — it reads as a border drawn around
+            // the content rather than as the seam between two of them. The
+            // platform's own separator is the right weight and follows the
+            // theme, which matters here because the pages either side of it can
+            // be light or dark independently.
+            edge.backgroundColor = .separator
             edge.isUserInteractionEnabled = false
             edge.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(edge)

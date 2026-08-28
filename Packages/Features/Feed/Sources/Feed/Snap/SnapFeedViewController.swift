@@ -2293,11 +2293,23 @@ final class SnapFeedViewController: UIViewController {
         collectionView.isScrollEnabled = !activeIsText
     }
 
-    /// Whether the post's cell is currently among the visible ones.
+    /// Whether the post still has PIXELS on screen.
+    ///
+    /// ⚠️ GEOMETRY, AND FROM THE PRESENTATION LAYER — asking UIKit which cells
+    /// are visible answers about the MODEL, and during a settle the model is
+    /// already at the destination while the pixels are still travelling. A page
+    /// half on screen therefore reported itself gone, its interface was torn
+    /// down under the viewer, and what was left was the bare cell: a white
+    /// strip with an orphaned composer bar, then the black media floor as it
+    /// slid away. Reported twice, and both halves are this one line.
     private func isPostOnScreen(_ id: PostID) -> Bool {
-        collectionView.indexPathsForVisibleItems.contains {
-            orderedIDs.indices.contains($0.item) && orderedIDs[$0.item] == id
-        }
+        guard let index = orderedIDs.firstIndex(of: id) else { return false }
+        let page = collectionView.bounds.height
+        guard page > 0 else { return false }
+        let offset = collectionView.layer.presentation()?.bounds.origin.y
+            ?? collectionView.contentOffset.y
+        let top = CGFloat(index) * page
+        return top < offset + page && top + page > offset
     }
 
     private func lockRestingEngagement() {
@@ -3087,7 +3099,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if let engagedID = commentsEngagedID, commentsEngagementIsResting,
            orderedIDs.indices.contains(indexPath.item),
            orderedIDs[indexPath.item] == engagedID,
-           lifecycle.activeIndex != indexPath.item {
+           lifecycle.activeIndex != indexPath.item,
+           // UIKit calls this when the cell leaves the MODEL's viewport, which
+           // during a settle is a moment too early — see `isPostOnScreen`.
+           !isPostOnScreen(engagedID) {
             finishCommentsDisengagement()
             // The slot is free at last — and the page that is now active may
             // have been showing a PREVIEW since it scrolled in, waiting for
@@ -3138,6 +3153,18 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // ⚠️ THE PAGE CHANGES AT THE HALFWAY MARK, not when the scroll stops.
+        //
+        // `SnapActiveItemTracker` already rounds — the active page is the one
+        // whose top is nearest, which flips at exactly half a page — but this
+        // was only ever ASKED at the settle. So a video began at the end of the
+        // gesture rather than when its post owned most of the screen, and the
+        // viewer watched a still frame for the length of a scroll.
+        //
+        // Cheap enough to run at the display's rate: the tracker returns the
+        // same index for every frame but one, and the dispatcher answers "no
+        // change" without touching anything.
+        updateActiveItem()
         updatePagingFooter(for: scrollView)
     }
 
