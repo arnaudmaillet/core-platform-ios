@@ -299,6 +299,10 @@ final class ForYouGridPage: UIView {
     /// flag. Weak: the collection view owns cells and may recycle this one,
     /// and a recycled cell is corrected by `cellForItemAt` anyway.
     private weak var heroHiddenCell: UICollectionViewCell?
+    /// The reveal channel's equivalent, and it exists for the same reason —
+    /// see `setRevealConcealed`. Weak for the same reason too: the collection
+    /// view owns cells, and a recycled one is corrected at `cellForItemAt`.
+    private weak var revealConcealedCell: PostGridListRowCell?
     /// The post whose twin is in the air, concealed or not.
     ///
     /// Split from `heroHiddenPostID` because the two questions came apart: a
@@ -1998,6 +2002,29 @@ final class ForYouGridPage: UIView {
         }
         #endif
         row?.setHeroConcealed(concealed)
+        // ⚠️ THE INSTANCE, NOT JUST THE ID — the hero channel has kept one of
+        // these since the day a lookup cleared the wrong cell, and this channel
+        // never got the same treatment.
+        //
+        // The post→cell mapping is not stable across a close: it ADOPTS, which
+        // moves posts between slots, so by the time the concealment is lifted
+        // `cell(for:)` can resolve the id to a different instance, or to none at
+        // all. A live capture of a reported session shows the precondition
+        // happening five times in one minute — `row=MISSING`, once of them on a
+        // `conceal=true`.
+        //
+        // ⚠️ DEFENSIVE BY ANALOGY, NOT MEASURED. Every route to it reachable
+        // from a test recycles the cell on the way, and reuse now clears both
+        // channels, so nothing here fails without this guard. It is kept
+        // because the sibling channel earned the same one the hard way and the
+        // cost is a weak reference — but it has not been shown to fix anything,
+        // and this note is what stops the next reader assuming it did.
+        if concealed {
+            revealConcealedCell = row
+        } else {
+            revealConcealedCell?.setHeroConcealed(false)
+            revealConcealedCell = nil
+        }
     }
 
     func setHeroHidden(_ hidden: Bool, for postID: PostID, conceals: Bool = true) {
