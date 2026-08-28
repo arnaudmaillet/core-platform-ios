@@ -1883,6 +1883,9 @@ final class SnapFeedViewController: UIViewController {
     /// And which one is showing a panel WITHOUT owning the engagement.
     var debugPreviewRestingID: PostID? { previewRestingID }
 
+    /// The ceiling the pager actually clamps to — prepares, then answers.
+    func debugReachableCeiling() -> Int { reachableCeiling() }
+
     /// The moment a page's last pixel leaves — which a unit test's scroll does
     /// not produce, and which is now when a resting page is torn down.
     func debugLeaveCell(at item: Int) {
@@ -2284,6 +2287,18 @@ final class SnapFeedViewController: UIViewController {
     private func drivePageSwipe(
         _ phase: CommentsInputBar.PageSwipePhase, translation dy: CGFloat, velocity vy: CGFloat
     ) {
+        #if DEBUG
+        // `-grab-log`: the ONLY gesture that pages a text post, and its ceiling.
+        //
+        // A text page disables the pager outright, so nothing else on that
+        // screen can move it. When it does not move, the question is whether
+        // this ran at all and what it was allowed to reach — two answers no
+        // other trace carries.
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[drive] \(phase) dy=\(Int(dy)) ceiling=\(reachableCeiling())"
+                + " settled=\(settledPageIndex) engaged=\(commentsEngagedID?.rawValue ?? "nil")")
+        }
+        #endif
         switch phase {
         case .began: beginPageDrive()
         case .changed: updatePageDrive(translation: dy)
@@ -2395,8 +2410,8 @@ final class SnapFeedViewController: UIViewController {
     private func updatePagingFooter(for scrollView: UIScrollView) {
         let page = scrollView.bounds.height
         guard page > 0, !orderedIDs.isEmpty else { return }
-        let ceiling = CGFloat(lastReachablePage) * page
-        let atCorpusEnd = lastReachablePage >= orderedIDs.count - 1
+        let ceiling = CGFloat(reachableCeiling()) * page
+        let atCorpusEnd = reachableCeiling() >= orderedIDs.count - 1
         let pulling = scrollView.contentOffset.y > ceiling + 1
         if pulling, !atCorpusEnd {
             pagingFooter.startAnimating()
@@ -2462,10 +2477,45 @@ final class SnapFeedViewController: UIViewController {
         return index
     }
 
+    /// The ceiling the pager actually uses: PREPARE, then allow.
+    ///
+    /// ⚠️ A GATE THAT CAN STRAND IS WORSE THAN THE POP-IN IT PREVENTS, and this
+    /// one stranded twice — each time on a state nobody had thought to count as
+    /// "ready", each time reported as the scroll simply not working, with
+    /// nothing in the trace to say why. That is the failure mode of asking a
+    /// question that can be wrong in a direction with no recovery.
+    ///
+    /// So the answer is not "is it ready" but "make it ready": the panel is
+    /// built synchronously, here, at the moment the viewer asks to move. A page
+    /// that can be prepared is reachable BECAUSE it was just prepared, and a
+    /// page that cannot be — no factory, no model yet — is reachable anyway,
+    /// because being stuck is not an outcome any viewer can act on.
+    ///
+    /// What remains gated is the only thing a viewer can understand: a page
+    /// whose data has not arrived. That is the end of the list, and the loader
+    /// says so.
+    private func reachableCeiling() -> Int {
+        let last = max(0, orderedIDs.count - 1)
+        let settled = min(settledPageIndex, last)
+        guard settled < last, modelsByID[orderedIDs[settled + 1]] != nil else { return settled }
+        // ⚠️ THE NEXT PAGE ONLY, because the warm holds ONE panel.
+        //
+        // Preparing the whole run forward looked thorough and was
+        // self-defeating: each call discards the last one's panel, so walking
+        // three pages ahead threw away the warm for the page actually being
+        // moved onto and it was built twice. One page is also all a gesture can
+        // reach, which is the only page the question is about.
+        if !isPageReady(settled + 1) { prewarmRestingComments(for: orderedIDs[settled + 1]) }
+        // Past it, the only question left is whether the data has arrived.
+        var ceiling = settled + 1
+        while ceiling < last, modelsByID[orderedIDs[ceiling + 1]] != nil { ceiling += 1 }
+        return ceiling
+    }
+
     private func rubberBandedOffset(_ offset: CGFloat, floor: CGFloat) -> CGFloat {
         let page = collectionView.bounds.height
         guard page > 0 else { return offset }
-        let maxOffset = CGFloat(lastReachablePage) * page
+        let maxOffset = CGFloat(reachableCeiling()) * page
         if offset < floor { return floor - Self.rubberBand(floor - offset, dimension: page) }
         if offset > maxOffset { return maxOffset + Self.rubberBand(offset - maxOffset, dimension: page) }
         return offset
@@ -2969,7 +3019,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     ) {
         let page = scrollView.bounds.height
         guard page > 0 else { return }
-        let ceiling = CGFloat(lastReachablePage) * page
+        let ceiling = CGFloat(reachableCeiling()) * page
         if targetContentOffset.pointee.y > ceiling {
             targetContentOffset.pointee.y = ceiling
         }

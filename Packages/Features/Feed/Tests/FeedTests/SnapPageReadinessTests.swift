@@ -106,6 +106,10 @@ struct SnapPageReadinessTests {
         let feed = feed(models, panels: panels)
 
         for index in 0..<(shape.count - 1) {
+            // The ceiling the PAGER uses prepares before it answers, so this
+            // asks the same question the gesture does.
+            #expect(feed.debugReachableCeiling() > index,
+                    Comment(rawValue: "the pager refused to leave page \(index) of \(shape)"))
             // ⚠️ WHAT `willDisplay` DOES AS THE NEXT PAGE SCROLLS IN, and
             // without it this loop proves nothing about the state that
             // actually stranded a viewer.
