@@ -235,6 +235,49 @@ struct DismissalDriverArbitrationTests {
         #expect(interaction == nil)
     }
 
+    /// ⚠️ A SECOND PRESENTATION FORWARDS TO THE SECOND OWNER.
+    ///
+    /// The saved delegate is handed back by `didShow` when the screen leaves
+    /// the stack, and `didShow` does not always arrive — measured in a live
+    /// session, on a card-shaped close that completed perfectly otherwise. The
+    /// slot then stays taken and the capture stays set, so the NEXT opening
+    /// installs a fresh flight that this driver refuses to notice: the pop asks
+    /// to be forwarded to a controller belonging to the previous screen, and
+    /// with nothing to forward to it falls through to its own animator. The
+    /// trace reads `kind=hero` and `reveal animate` on the same pop — the
+    /// window closing a post that wanted to fly, reported as the grab not
+    /// working.
+    ///
+    /// The opening says so, because only the opening knows: a re-assert during
+    /// the screen's life must NOT move the capture (see `install`).
+    @Test func aSecondPresentationForwardsToWhoeverOwnsTheStackNow() {
+        let rig = rig(kind: .hero)
+        // A close that never reported itself: the slot is still ours.
+        let second = SavedDelegate()
+        rig.nav.delegate = second
+
+        rig.driver.install(on: rig.nav, startingPresentation: true)
+        let animator = popAnimator(rig)
+
+        #expect(second.animatorAsks == 1, "the pop was not forwarded to the current owner")
+        #expect(animator === second.animator)
+        #expect(rig.saved.animatorAsks == 0, "the previous screen's controller was asked instead")
+    }
+
+    /// And a re-assert during the screen's life leaves the capture alone —
+    /// which is what keeps a three-level unwind landing on the right screen.
+    @Test func aReassertDoesNotMoveTheCapture() {
+        let rig = rig(kind: .hero)
+        let transient = SavedDelegate()
+        rig.nav.delegate = transient
+
+        rig.driver.install(on: rig.nav)
+        _ = popAnimator(rig)
+
+        #expect(transient.animatorAsks == 0, "a transient delegate was captured as the owner")
+        #expect(rig.saved.animatorAsks == 1)
+    }
+
     /// ⚠️ AN ANIMATOR THIS DRIVER BUILT IS NEVER DRIVEN BY ANYONE ELSE.
     ///
     /// The forwarding above is for animators that came FROM the displaced

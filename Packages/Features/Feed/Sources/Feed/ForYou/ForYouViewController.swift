@@ -1328,7 +1328,8 @@ final class ForYouViewController: UIViewController {
                 attachFlightAlongsideCardClose(feed: feed, page: page, tappedID: tapped.id)
             }
             textSlideDismissal.arbitratesWithHeroGrab = true
-            textSlideDismissal.install(on: navigationController)
+            // A new life for this screen: recapture whoever owns the stack.
+            textSlideDismissal.install(on: navigationController, startingPresentation: true)
             navigationController.pushViewController(feed, animated: true)
             #if DEBUG
             // `-text-swipe-demo <peak>`: walks the exact begin/update/release
@@ -1674,7 +1675,7 @@ final class ForYouViewController: UIViewController {
             self?.pager.page(for: format)?.clearHeroConcealment()
             self?.cardPathFlight = nil
         }
-        textSlideDismissal.install(on: navigationController)
+        textSlideDismissal.install(on: navigationController, startingPresentation: true)
     }
 
     private func restoreChromeAfterTransition() {

@@ -165,7 +165,29 @@ public final class InteractiveSlideDismissal: NSObject {
     /// Takes the stack's delegate slot for the feed's time on `nav`. The
     /// previous delegate is saved, not clobbered: `navigationController(_:didShow:)`
     /// hands the slot back the moment the feed is off the stack.
-    public func install(on nav: UINavigationController) {
+    /// - Parameter startingPresentation: true when the caller is about to PUSH
+    ///   the screen — a new life for it, so whoever owns the stack now is who
+    ///   must own it again afterwards. False (the default) is a re-assert
+    ///   during the screen's life, where the capture below must not move.
+    public func install(on nav: UINavigationController, startingPresentation: Bool = false) {
+        // ⚠️ A NEW PRESENTATION RE-CAPTURES, and not doing so is a whole broken
+        // dismissal.
+        //
+        // The capture is handed back by `didShow` when the screen leaves the
+        // stack — and `didShow` does not always arrive. Measured in a live
+        // session: a card-shaped close completed (`release commit=true`, the
+        // row restored) with no `didShow` behind it, so the slot was never
+        // handed back and the flag stayed set. The next opening installed a
+        // fresh flight, this driver declined to capture it, and the pop that
+        // followed asked to be forwarded to a controller belonging to the
+        // PREVIOUS screen. With nothing to forward to it fell through to its
+        // own animator: the trace reads `kind=hero` and `reveal animate` on the
+        // same pop, which is the window closing a post that wanted to fly.
+        //
+        // Reported as the grab not working on the dismissal, and it is exactly
+        // that — the finger was driving the flight's grab while the reveal was
+        // animating the pop.
+        if startingPresentation { hasCapturedSavedDelegate = false }
         guard nav.delegate !== self else { return }
         // CAPTURED ONCE, and that distinction is the whole of a three-level
         // unwind working.
