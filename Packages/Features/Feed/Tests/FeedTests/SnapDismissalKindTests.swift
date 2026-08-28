@@ -42,10 +42,33 @@ struct SnapDismissalKindTests {
         model(id, media: nil)
     }
 
-    private func feed(_ models: [FeedItemDisplayModel]) -> SnapFeedViewController {
+    /// Counts how many panels the feed actually BUILT.
+    ///
+    /// The point of warming a text page's interface is that the mount pays
+    /// nothing, and "was it warmed" cannot show that on its own — a mount that
+    /// ignored the warm and built a second one looks identical from the
+    /// outside. The count is the half that tells them apart.
+    ///
+    /// Counted PER POST, because this screen warms panels on another path too
+    /// (a media page's tap-to-comments): a total would move for reasons that
+    /// have nothing to do with the page under test.
+    @MainActor
+    private final class PanelBuilds {
+        private(set) var byPost: [PostID: Int] = [:]
+        func make(_ id: PostID) -> UIViewController {
+            byPost[id, default: 0] += 1
+            return UIViewController()
+        }
+        func count(_ id: String) -> Int { byPost[PostID(id)] ?? 0 }
+    }
+
+    private func feed(
+        _ models: [FeedItemDisplayModel], panels: PanelBuilds? = nil
+    ) -> SnapFeedViewController {
         let controller = SnapFeedViewController(
             viewModel: FeedViewModel(repository: MuteFeedProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            makeCommentsPanelContent: panels.map { builds in { id in builds.make(id) } }
         )
         controller.loadViewIfNeeded()
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
@@ -170,6 +193,51 @@ struct SnapDismissalKindTests {
         page(feed, to: 2)
 
         #expect(feed.debugLastWarmedWindow == [1])
+    }
+
+    /// ⚠️ A TEXT PAGE'S INTERFACE IS BUILT BEFORE ITS CELL EXISTS.
+    ///
+    /// A text page IS its comments panel — a whole view controller, roughly
+    /// 100ms of layout — and it was constructed at `willDisplay`, which is the
+    /// same moment the empty page is on screen. Reported from a recording: the
+    /// next page arrives as a black rectangle and fills itself in a beat later.
+    /// Warming the data was not enough, because the cost was never the data.
+    @Test func theNextTextPagesInterfaceIsBuiltAhead() {
+        let panels = PanelBuilds()
+        let feed = feed([media("a"), text("b"), media("c")], panels: panels)
+
+        page(feed, to: 0)
+
+        #expect(feed.debugPrewarmedRestingID == PostID("b"))
+        #expect(panels.count("b") == 1, "the page ahead was not built")
+    }
+
+    /// ⚠️ AND THE MOUNT SPENDS IT RATHER THAN BUILDING A SECOND ONE.
+    ///
+    /// Without this half the warm is pure cost: a panel built ahead, ignored,
+    /// and built again at exactly the moment it was meant to save.
+    @Test func theMountSpendsTheWarmRatherThanBuildingAgain() {
+        let panels = PanelBuilds()
+        let feed = feed([media("a"), text("b"), media("c")], panels: panels)
+        page(feed, to: 0)
+        #expect(panels.count("b") == 1)
+
+        page(feed, to: 1)
+
+        #expect(panels.count("b") == 1, "the mount built a second panel over the warm one")
+        #expect(feed.debugPrewarmedRestingID == PostID("b"), "the warm was never claimed")
+    }
+
+    /// A media page ahead is warmed by its cover, not by a panel — building one
+    /// for it would be a view controller nobody mounts.
+    @Test func aMediaPageAheadGetsNoPanel() {
+        let panels = PanelBuilds()
+        let feed = feed([media("a"), media("b"), media("c")], panels: panels)
+
+        page(feed, to: 0)
+
+        #expect(panels.count("b") == 0, "a media page ahead was given a panel")
+        #expect(feed.debugPrewarmedRestingID == nil)
     }
 
     /// The answer is a pure question — asking it must not activate a page,

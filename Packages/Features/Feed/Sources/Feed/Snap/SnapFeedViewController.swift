@@ -207,6 +207,10 @@ final class SnapFeedViewController: UIViewController {
     /// seam's warm). Distinct from `commentsEngagedID`, which means on
     /// screen and interactive.
     private var prewarmedCommentsID: PostID?
+    /// The RESTING panel built ahead for a text page — see
+    /// `prewarmRestingComments`. Deliberately not the engagement slot.
+    private var prewarmedRestingID: PostID?
+    private var prewarmedRestingVC: UIViewController?
     /// The cell hosting a warm panel, so it can be cleared when the warm is
     /// discarded without the page still being active.
     private weak var engagedCellForPrewarm: SnapFeedCell?
@@ -1790,11 +1794,70 @@ final class SnapFeedViewController: UIViewController {
     /// abort the very scroll bringing the cell in) and the engaged toolbar
     /// swap (nav chrome follows the SETTLED page, not a half-scrolled one).
     /// Idempotent by the slot guard; media pages never take this path.
+    /// A text page's interface, built BEFORE its cell exists.
+    ///
+    /// ⚠️ THE COST IS THE BUILD, NOT THE DATA. The stream is already warm by
+    /// the time a page scrolls in (see `warmContent`), and the page still
+    /// arrived as a black rectangle that filled itself in a beat later —
+    /// because what a text page IS is this panel, and it was constructed at
+    /// `willDisplay`, which is the same moment the black is on screen. Roughly
+    /// 100ms of layout, spent exactly when nothing can absorb it.
+    ///
+    /// ⚠️ HELD IN ITS OWN FIELD, and that is not tidiness. The engagement slot
+    /// (`commentsContentVC`) is what `presentRestingComments` guards on: a warm
+    /// parked there makes the mount decline, and the page then arrives blank
+    /// for good rather than late. That exact mistake is on the record; this
+    /// holds the built panel to one side and hands it over at the mount.
+    ///
+    /// Never during a flight, for the reason `prewarmComments` gives: this is
+    /// layout, and a hero's frame budget is not where it should be paid.
+    private func prewarmRestingComments(for id: PostID) {
+        guard !isAwaitingZoomPresentation,
+              prewarmedRestingID != id,
+              commentsEngagedID == nil, commentsContentVC == nil,
+              modelsByID[id]?.mediaURL == nil,
+              let makeCommentsPanelContent else { return }
+        discardPrewarmedResting()
+        let content = makeCommentsPanelContent(id)
+        content.view.backgroundColor = .clear
+        content.overrideUserInterfaceStyle = .unspecified
+        // Laid out at the size it will be mounted at, so the mount is a
+        // re-parent rather than a first layout. A view built and never measured
+        // saves nothing.
+        content.view.frame = view.bounds
+        content.view.layoutIfNeeded()
+        prewarmedRestingID = id
+        prewarmedRestingVC = content
+        #if DEBUG
+        debugPrewarmedRestingID = id
+        #endif
+    }
+
+    #if DEBUG
+    /// Which text page has had its interface built ahead. Kept separately from
+    /// the live field so a test can see a warm that was CONSUMED — which is the
+    /// half that proves the mount paid nothing.
+    private(set) var debugPrewarmedRestingID: PostID?
+    #endif
+
+    /// One at a time: the pager moves on and the page two ahead is not worth a
+    /// second view controller's memory.
+    private func discardPrewarmedResting() {
+        prewarmedRestingVC = nil
+        prewarmedRestingID = nil
+    }
+
     private func presentRestingComments(for id: PostID, host cell: SnapFeedCell) {
         guard commentsEngagedID == nil, commentsContentVC == nil,
               let makeCommentsPanelContent else { return }
 
-        let content = makeCommentsPanelContent(id)
+        let content: UIViewController
+        if prewarmedRestingID == id, let warmed = prewarmedRestingVC {
+            content = warmed
+            discardPrewarmedResting()
+        } else {
+            content = makeCommentsPanelContent(id)
+        }
         content.view.backgroundColor = .clear
         // Inherited, exactly like the media panel — the cell decides.
         content.overrideUserInterfaceStyle = .unspecified
@@ -2462,6 +2525,13 @@ final class SnapFeedViewController: UIViewController {
         let content = SnapWarmWindow.content(around: active, count: count)
         warmContent(at: content)
         warmPlayers(at: SnapWarmWindow.players(around: active, count: count))
+        // ⚠️ AND THE NEXT TEXT PAGE'S INTERFACE, which is the one page whose
+        // content is a whole view controller rather than an image. Only the
+        // page immediately ahead: it is one view controller's memory, and the
+        // page after that is a guess.
+        if orderedIDs.indices.contains(active + 1) {
+            prewarmRestingComments(for: orderedIDs[active + 1])
+        }
         #if DEBUG
         // What the settle actually warmed. The window itself is pure and tested
         // on its own; this is how a test reaches the WIRING — that the settle
