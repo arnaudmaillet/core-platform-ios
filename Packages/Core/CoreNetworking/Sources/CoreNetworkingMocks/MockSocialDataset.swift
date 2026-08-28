@@ -148,6 +148,12 @@ public struct MockSocialDataset: Sendable {
         }
     }
 
+    /// The id namespace of the posts that arrived after the viewer last looked.
+    /// Read by the geo fixture, which keeps them out of its venues — see
+    /// `MockGeoDiscoveryService.venueAssignments` for why a map fixture cares
+    /// what the timeline's head is made of.
+    static let arrivalIDPrefix = "post-new-"
+
     static func justArrivedRecords(
         authors: [Author],
         mediaCatalog: MediaCatalog
@@ -464,7 +470,7 @@ public struct MockSocialDataset: Sendable {
                 }
                 : []
             return PostRecord(
-                postID: String(format: "post-new-%02d", index),
+                postID: String(format: "\(arrivalIDPrefix)%02d", index),
                 authorProfileID: authors[index % authors.count].profileID,
                 caption: caption,
                 media: media,
