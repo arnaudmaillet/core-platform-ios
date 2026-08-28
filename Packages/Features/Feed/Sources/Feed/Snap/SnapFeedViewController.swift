@@ -2049,6 +2049,10 @@ final class SnapFeedViewController: UIViewController {
         previewRestingVC = content
         previewRestingCell = cell
         installRestingPanel(content, for: id, host: cell)
+        // A page nobody is reading yet cannot be typed on, and the composer's
+        // keyboard ceiling is anchored to the SCREEN — see
+        // `setComposerTracksKeyboard`. Granted at the promotion.
+        (content as? PostDetailViewController)?.setComposerTracksKeyboard(false)
     }
 
     /// Hands the engagement to a panel that is already on screen. False when
@@ -2064,6 +2068,9 @@ final class SnapFeedViewController: UIViewController {
         commentsContentVC = content
         commentsEngagementIsResting = true
         restingLockApplied = false
+        // This is the page being read now, so its composer may follow the
+        // keyboard again.
+        (content as? PostDetailViewController)?.setComposerTracksKeyboard(true)
         return true
     }
 

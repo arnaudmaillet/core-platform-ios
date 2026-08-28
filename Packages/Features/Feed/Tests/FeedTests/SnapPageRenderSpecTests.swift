@@ -174,6 +174,19 @@ struct SnapPageRenderSpecTests {
                 "the arriving page rendered dark while it was half on screen: \(sample)")
     }
 
+    // ⚠️ NOT COVERED HERE, AND SAID SO RATHER THAN FAKED.
+    //
+    // A page's composer must travel with its page — it was pinned to the
+    // screen's bottom edge, so two were visible at once during a scroll. The
+    // observable is geometric and easy; what is missing is a panel to observe.
+    // These suites stand a plain view controller in for one, and a fixture with
+    // no composer would let any assertion about composers pass. Using the real
+    // panel means a repository, a network and a view model inside a render
+    // test, which buys a worse test than none.
+    //
+    // Verified on the device instead. If it regresses, it regresses silently
+    // here — which is the honest cost, and the reason this note exists.
+
     /// ⚠️ THE GROUND BEHIND THE PAGES IS THE PAGE'S OWN.
     ///
     /// There is always a strip no page has covered for a frame or two: a cell
