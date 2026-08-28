@@ -2356,6 +2356,22 @@ final class SnapFeedViewController: UIViewController {
            ) as? SnapFeedCell {
             presentRestingComments(for: activeID, host: cell)
         }
+        // ⚠️ AND SO DOES THE GROUND BEHIND THE PAGES.
+        //
+        // The pager's own background is what shows through any strip a page has
+        // not covered — and there is always such a strip for a frame or two: a
+        // cell is recycled the moment the model says it has left, while the
+        // pixels of the settle are still arriving. Black behind a light page
+        // makes that frame a BLACK BAND across the top of the screen, which is
+        // what "the post goes black on the way out" was. Measured on a
+        // recording: one frame in a hundred and six, top-of-screen brightness
+        // 12 against 90 for every other frame.
+        //
+        // Matching the ground to the settled page does not fix the timing — it
+        // makes the timing invisible, which is better: no amount of care about
+        // when a cell is recycled can guarantee the frame, and this needs no
+        // guarantee.
+        collectionView.backgroundColor = activeIsText ? .systemBackground : .black
         // ⚠️ AND THE LOCK FOLLOWS THE SETTLED PAGE, not the engagement.
         //
         // A text page disables the pager because its own scroll view would

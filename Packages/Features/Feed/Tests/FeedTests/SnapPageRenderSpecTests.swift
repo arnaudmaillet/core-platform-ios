@@ -174,6 +174,48 @@ struct SnapPageRenderSpecTests {
                 "the arriving page rendered dark while it was half on screen: \(sample)")
     }
 
+    /// ⚠️ THE GROUND BEHIND THE PAGES IS THE PAGE'S OWN.
+    ///
+    /// There is always a strip no page has covered for a frame or two: a cell
+    /// is recycled the moment the model says it has left, while the pixels of
+    /// the settle are still arriving. Black behind a light page turns that
+    /// frame into a black band across the screen — one frame in a hundred and
+    /// six on the recording, top-of-screen brightness 12 against 90 elsewhere,
+    /// and the whole of "the post goes black on the way out".
+    ///
+    /// Sampled by scrolling PAST the last page, which is the one way a test can
+    /// hold the gap open: what shows there is exactly what shows for that frame.
+    @Test func theGroundBehindThePagesIsLightUnderALightPage() {
+        let (feed, window) = feed([text("a"), text("b")])
+        guard let collection = feed.view.subviews
+            .compactMap({ $0 as? UICollectionView }).first else { return }
+
+        // Settle on the last page, then open a gap below it.
+        scroll(feed, toPageFraction: 1)
+        feed.scrollViewDidEndDecelerating(collection)
+        collection.contentOffset.y += 300
+        collection.layoutIfNeeded()
+
+        let sample = colour(of: window, at: CGPoint(x: 195, y: 700))
+        #expect(isLight(sample), "the ground behind a light page is dark: \(sample)")
+    }
+
+    /// And dark under a dark one — the same rule, which is what makes it a rule
+    /// rather than a preference for white.
+    @Test func theGroundBehindThePagesIsDarkUnderAMediaPage() {
+        let (feed, window) = feed([media("a"), media("b")])
+        guard let collection = feed.view.subviews
+            .compactMap({ $0 as? UICollectionView }).first else { return }
+
+        scroll(feed, toPageFraction: 1)
+        feed.scrollViewDidEndDecelerating(collection)
+        collection.contentOffset.y += 300
+        collection.layoutIfNeeded()
+
+        let sample = colour(of: window, at: CGPoint(x: 195, y: 700))
+        #expect(isLight(sample) == false, "the ground behind a media page is light: \(sample)")
+    }
+
     /// The same, one page further on: the defect was reported after several
     /// changes, and a rule that only holds for the first is not the rule.
     @Test func theSecondPageChangeLooksLikeTheFirst() {
