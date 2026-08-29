@@ -40,12 +40,29 @@ struct MockForYouArrivalTests {
     /// arrivals rather than just the top of the corpus.
     ///
     /// ⚠️ THE ONE PLACE THE COUNT IS A LITERAL. The tests below derive it, so
-    /// a seventh arrival breaks exactly this one — deliberately, because
+    /// a further arrival breaks exactly this one — deliberately, because
     /// "someone added a fixture" is worth being told about once and not five
-    /// times. The sixth is the over-capacity gallery (`post-new-05`), staged
-    /// first in the feed so the pool's limits are reachable without scrolling.
-    @Test func sixPostsAreStagedAheadOfTheClock() {
-        #expect(arrivals().count == 6)
+    /// times. Six was the over-capacity gallery (`post-new-05`), staged first
+    /// so the pool's limits are reachable without scrolling; seven and eight
+    /// are the ADJACENT TEXT PAIR, staged ahead of it so a cold launch opens on
+    /// a text page and the first page down is another one.
+    @Test func eightPostsAreStagedAheadOfTheClock() {
+        #expect(arrivals().count == 8)
+    }
+
+    /// ⚠️ AND TWO OF THEM ARE TEXT, NEXT TO EACH OTHER.
+    ///
+    /// The corpus makes every third post text-only, so two text posts are never
+    /// adjacent in it — and "a text page arrives while another text page still
+    /// owns the resting interface" is where three separate defects lived. It
+    /// could not be reached from the seed at all; every recording of it was
+    /// made by opening a post and paging until the order happened to oblige.
+    @Test func theHeadOfTheFeedHasTwoTextPostsInARow() {
+        let head = arrivals().suffix(2)
+
+        #expect(head.count == 2)
+        #expect(head.allSatisfy { $0.kind == .text },
+                "the pair a cold launch opens on must both be text-only")
     }
 
     /// The unfiltered lens counts every one of them: the badge For You opens

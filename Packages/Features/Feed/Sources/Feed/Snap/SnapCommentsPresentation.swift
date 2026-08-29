@@ -344,6 +344,21 @@ enum SnapChromeTheme {
     static func style(hasMedia: Bool) -> UIUserInterfaceStyle {
         hasMedia ? .dark : .unspecified
     }
+
+    /// The same rule for something INSIDE a screen that may itself be pinned.
+    ///
+    /// ⚠️ `.unspecified` MEANS "ASK MY PARENT", and a page's parent is a screen
+    /// that pins itself dark while a photograph is settled. So a text page
+    /// scrolling in under a media page inherited DARK, then turned light at the
+    /// settle when the screen's own pin was released — a whole page changing
+    /// theme under the viewer, visible on any recording of the scroll.
+    ///
+    /// A text page follows the DEVICE, which is what it looks like it should
+    /// do, and saying so explicitly is the only way to mean it from inside a
+    /// subtree someone else has pinned.
+    static func style(hasMedia: Bool, device: UIUserInterfaceStyle) -> UIUserInterfaceStyle {
+        hasMedia ? .dark : device
+    }
 }
 
 final class SnapMediaBackdropView: UIView {

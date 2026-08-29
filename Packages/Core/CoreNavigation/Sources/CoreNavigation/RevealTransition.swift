@@ -1027,10 +1027,20 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     }
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[pop] reveal animate")
+        }
+        #endif
         interruptibleAnimator(using: context).startAnimation()
     }
 
     func animationEnded(_ transitionCompleted: Bool) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[pop] reveal ended completed=\(transitionCompleted)")
+        }
+        #endif
         staged = nil
     }
 

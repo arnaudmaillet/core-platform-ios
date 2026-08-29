@@ -407,6 +407,17 @@ public final class ForYouViewModel {
     /// already comes through this method, so applying it once here is what
     /// makes "the context filters both tabs" true by construction rather than
     /// by remembering to filter in four places.
+    /// One post out of the whole loaded corpus, BEFORE any lens.
+    ///
+    /// The dismissal's adoption is the caller: a post the viewer is closing has
+    /// to be able to land in the list even when the page it is landing in no
+    /// longer holds it — a refresh re-derived the corpus, or the context lens
+    /// moved while the post was open. Deliberately unfiltered, because the
+    /// question is "does this post exist" and not "does this page show it".
+    public func post(for id: PostID) -> GalleryPost? {
+        corpus?.first { $0.id == id }
+    }
+
     public func posts(for format: GalleryFilter.Format) -> [GalleryPost] {
         // `corpus` is already in display order — see its note. Reading is a
         // pure filter, so nothing can reorder behind the viewer's back.

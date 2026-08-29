@@ -207,6 +207,15 @@ final class SnapFeedViewController: UIViewController {
     /// seam's warm). Distinct from `commentsEngagedID`, which means on
     /// screen and interactive.
     private var prewarmedCommentsID: PostID?
+    /// The RESTING panel built ahead for a text page — see
+    /// `prewarmRestingComments`. Deliberately not the engagement slot.
+    private var prewarmedRestingID: PostID?
+    private var prewarmedRestingVC: UIViewController?
+    /// The panel of a page that is scrolling IN while another still owns the
+    /// engagement — see `previewRestingComments`.
+    private var previewRestingID: PostID?
+    private var previewRestingVC: UIViewController?
+    private weak var previewRestingCell: SnapFeedCell?
     /// The cell hosting a warm panel, so it can be cleared when the warm is
     /// discarded without the page still being active.
     private weak var engagedCellForPrewarm: SnapFeedCell?
@@ -426,6 +435,8 @@ final class SnapFeedViewController: UIViewController {
     /// `-snap-start-index N`: snaps to page N shortly after appearing (mock:
     /// every index%3==2 is text-only) — deterministic access to a given page
     /// kind without scroll injection.
+    private var didDebugPageSwipe = false
+
     private func runDebugAppearanceHooks() {
         if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
@@ -433,6 +444,16 @@ final class SnapFeedViewController: UIViewController {
             }
         }
         let arguments = ProcessInfo.processInfo.arguments
+        // `-snap-page-demo [delay]`: drive the page swipe once the feed has
+        // settled, so the animated page change can be filmed.
+        if !didDebugPageSwipe, let position = arguments.firstIndex(of: "-snap-page-demo") {
+            didDebugPageSwipe = true
+            let delay = arguments.indices.contains(position + 1)
+                ? (Double(arguments[position + 1]) ?? 3.0) : 3.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.debugDrivePageSwipe()
+            }
+        }
         if !didDebugScroll,
            let flagIndex = arguments.firstIndex(of: "-snap-start-index"),
            arguments.indices.contains(flagIndex + 1),
@@ -1428,8 +1449,27 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
+    /// Whether a keyboard is currently on screen — see
+    /// `zoomVerticalDismissalPermitted`.
+    ///
+    /// Tracked from the notifications rather than read off
+    /// `keyboardLayoutGuide`, because the question is asked at the moment a
+    /// GESTURE begins: the guide's frame is animating then, and a guide
+    /// halfway down answers neither yes nor no.
+    private var isKeyboardOnScreen = false
+
     private func observeAppLifecycle() {
         let center = NotificationCenter.default
+        appObservers.add(center.addObserver(
+            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.isKeyboardOnScreen = true }
+        })
+        appObservers.add(center.addObserver(
+            forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.isKeyboardOnScreen = false }
+        })
         appObservers.add(center.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -1790,19 +1830,299 @@ final class SnapFeedViewController: UIViewController {
     /// abort the very scroll bringing the cell in) and the engaged toolbar
     /// swap (nav chrome follows the SETTLED page, not a half-scrolled one).
     /// Idempotent by the slot guard; media pages never take this path.
-    private func presentRestingComments(for id: PostID, host cell: SnapFeedCell) {
-        guard commentsEngagedID == nil, commentsContentVC == nil,
+    /// A text page's interface, built BEFORE its cell exists.
+    ///
+    /// ⚠️ THE COST IS THE BUILD, NOT THE DATA. The stream is already warm by
+    /// the time a page scrolls in (see `warmContent`), and the page still
+    /// arrived as a black rectangle that filled itself in a beat later —
+    /// because what a text page IS is this panel, and it was constructed at
+    /// `willDisplay`, which is the same moment the black is on screen. Roughly
+    /// 100ms of layout, spent exactly when nothing can absorb it.
+    ///
+    /// ⚠️ HELD IN ITS OWN FIELD, and that is not tidiness. The engagement slot
+    /// (`commentsContentVC`) is what `presentRestingComments` guards on: a warm
+    /// parked there makes the mount decline, and the page then arrives blank
+    /// for good rather than late. That exact mistake is on the record; this
+    /// holds the built panel to one side and hands it over at the mount.
+    ///
+    /// Never during a flight, for the reason `prewarmComments` gives: this is
+    /// layout, and a hero's frame budget is not where it should be paid.
+    /// ⚠️ AND IT DOES NOT WAIT FOR THE ENGAGEMENT SLOT TO BE FREE, which the
+    /// first version of this did and which made it never run.
+    ///
+    /// Guarding on `commentsEngagedID`/`commentsContentVC` was copied from the
+    /// MOUNT, where those fields mean "something is already installed in a
+    /// cell". Building means nothing of the sort: this constructs into its own
+    /// field and touches neither. Their two most common values are exactly the
+    /// cases that matter — the current page is a text page and is holding the
+    /// slot with its own resting panel, or the current media page has had its
+    /// tap-to-comments panel warmed into it — so the guard declined precisely
+    /// when the next page needed building, and the black rectangle came back
+    /// unchanged.
+    private func prewarmRestingComments(for id: PostID) {
+        guard !isAwaitingZoomPresentation,
+              prewarmedRestingID != id,
+              modelsByID[id]?.mediaURL == nil,
               let makeCommentsPanelContent else { return }
-
+        discardPrewarmedResting()
         let content = makeCommentsPanelContent(id)
         content.view.backgroundColor = .clear
-        // Inherited, exactly like the media panel — the cell decides.
-        content.overrideUserInterfaceStyle = .unspecified
+        // ⚠️ IN THE DEVICE'S THEME, not `.unspecified`.
+        //
+        // This view controller has no parent yet, so `.unspecified` resolves
+        // against nothing and it is laid out and rendered in whatever UIKit
+        // defaults to — then it is mounted into a cell and changes theme in
+        // front of the viewer. The whole point of building ahead is that
+        // nothing about the page changes when it arrives.
+        content.overrideUserInterfaceStyle = deviceInterfaceStyle
+        // Laid out at the size it will be mounted at, so the mount is a
+        // re-parent rather than a first layout. A view built and never measured
+        // saves nothing.
+        content.view.frame = view.bounds
+        content.view.layoutIfNeeded()
+        prewarmedRestingID = id
+        prewarmedRestingVC = content
+        #if DEBUG
+        debugPrewarmedRestingID = id
+        #endif
+    }
+
+    #if DEBUG
+    /// The mount and the media warm, reachable without a scroll — the defect
+    /// they produce together is an ORDER between two seams, and a test that
+    /// could not put them in that order could not see it.
+    func debugPrewarmComments(for id: PostID) {
+        guard let cell = collectionView.visibleCells.compactMap({ $0 as? SnapFeedCell }).first
+        else { return }
+        prewarmComments(for: id, host: cell)
+    }
+
+    func debugMountRestingComments(for id: PostID) {
+        guard let cell = collectionView.visibleCells.compactMap({ $0 as? SnapFeedCell }).first
+        else { return }
+        presentRestingComments(for: id, host: cell)
+    }
+
+    /// A warm with no engagement behind it — the state that blocked the mount.
+    var debugHasParkedCommentsWarm: Bool {
+        commentsEngagedID == nil && commentsContentVC != nil
+    }
+
+    /// Which post the resting panel is standing in for right now.
+    var debugRestingCommentsID: PostID? { commentsEngagedID }
+
+    /// And which one is showing a panel WITHOUT owning the engagement.
+    var debugPreviewRestingID: PostID? { previewRestingID }
+
+    /// The moment a cell BEGINS displaying, through the delegate the app uses.
+    ///
+    /// ⚠️ Not `presentRestingComments` directly. The defect this exists for was
+    /// a GATE at this call site, so a test that called the method underneath it
+    /// proved the method right and the screen blank.
+    func debugWillDisplayCell(at item: Int) {
+        let path = IndexPath(item: item, section: 0)
+        // Half a page in, which is where a real drag realizes it — a cell that
+        // has not been built yet cannot be told it is about to display, and a
+        // test that skipped that would assert about nothing.
+        let page = collectionView.bounds.height
+        if collectionView.cellForItem(at: path) == nil, page > 0 {
+            collectionView.contentOffset.y = (CGFloat(item) - 0.5) * page
+            collectionView.layoutIfNeeded()
+        }
+        guard let cell = collectionView.cellForItem(at: path) else { return }
+        collectionView(collectionView, willDisplay: cell, forItemAt: path)
+    }
+
+    /// Walks the page swipe a finger drives on a text page, animated settle
+    /// included.
+    ///
+    /// The only gesture that moves a text page belongs to the composer bar, and
+    /// a synthetic drag cannot produce it — so the window that matters most
+    /// here, the half-second while the settle animates and the model has
+    /// already arrived at the destination, had no scripted route at all. Every
+    /// defect reported inside it had to be found by watching a recording.
+    func debugDrivePageSwipe(steps: Int = 12, distance: CGFloat = 520) {
+        drivePageSwipe(.began, translation: 0, velocity: 0)
+        for step in 1...max(1, steps) {
+            let dy = -distance * CGFloat(step) / CGFloat(max(1, steps))
+            drivePageSwipe(.changed, translation: dy, velocity: -900)
+        }
+        drivePageSwipe(.ended, translation: -distance, velocity: -900)
+    }
+
+    /// Tells the screen about every cell the layout has just realized, the way
+    /// a real scroll does.
+    ///
+    /// A test moves `contentOffset` directly, and UIKit builds the cells but
+    /// does not run the delegate's begin-displaying callback for them — which
+    /// is where a page decides what to show. Without this a suite can only
+    /// observe settled states, and four of the six defects in this area lived
+    /// strictly between them.
+    func debugRealizeVisibleCells() {
+        for path in collectionView.indexPathsForVisibleItems.sorted() {
+            guard let cell = collectionView.cellForItem(at: path) else { continue }
+            collectionView(collectionView, willDisplay: cell, forItemAt: path)
+        }
+    }
+
+    /// Pretends a keyboard came up, so the veto below it can be tested without
+    /// one — a simulator will not raise a real keyboard for a unit test, and
+    /// the rule is about what the veto ANSWERS while one is up.
+    func debugSetKeyboardOnScreen(_ onScreen: Bool) { isKeyboardOnScreen = onScreen }
+
+    /// Which posts have a comments panel ON SCREEN right now, asked of the
+    /// cells rather than of any bookkeeping.
+    ///
+    /// A specification for this screen has to be written against what the
+    /// viewer sees: every defect here has been a disagreement between a field
+    /// and the pixels, so a test that reads the field agrees with the bug.
+    var debugPostsShowingComments: Set<PostID> {
+        var showing: Set<PostID> = []
+        for cell in collectionView.visibleCells {
+            guard let path = collectionView.indexPath(for: cell),
+                  orderedIDs.indices.contains(path.item),
+                  let snap = cell as? SnapFeedCell, snap.isShowingComments else { continue }
+            showing.insert(orderedIDs[path.item])
+        }
+        return showing
+    }
+
+    /// Whether the pager can be scrolled at all — the state a leaked
+    /// engagement used to be able to hold down for the rest of a session.
+    var debugPagerIsLocked: Bool { !collectionView.isScrollEnabled }
+
+    /// The ceiling the pager actually clamps to — prepares, then answers.
+    func debugReachableCeiling() -> Int { reachableCeiling() }
+
+    /// The moment a page's last pixel leaves — which a unit test's scroll does
+    /// not produce, and which is now when a resting page is torn down.
+    func debugLeaveCell(at item: Int) {
+        let path = IndexPath(item: item, section: 0)
+        guard let cell = collectionView.cellForItem(at: path) else { return }
+        collectionView(collectionView, didEndDisplaying: cell, forItemAt: path)
+    }
+
+    /// Which text page has had its interface built ahead. Kept separately from
+    /// the live field so a test can see a warm that was CONSUMED — which is the
+    /// half that proves the mount paid nothing.
+    private(set) var debugPrewarmedRestingID: PostID?
+    #endif
+
+    /// One at a time: the pager moves on and the page two ahead is not worth a
+    /// second view controller's memory.
+    private func discardPrewarmedResting() {
+        prewarmedRestingVC = nil
+        prewarmedRestingID = nil
+    }
+
+    private func presentRestingComments(for id: PostID, host cell: SnapFeedCell) {
+        // ⚠️ A PARKED WARM IS NOT AN ENGAGEMENT, and treating it as one is the
+        // black page.
+        //
+        // The guard below reads `commentsContentVC` as "a panel is installed in
+        // a cell". A media page's tap-to-comments WARM sits in that same field
+        // with no engagement behind it — so scrolling from a warmed media page
+        // onto a text page found the slot taken, declined the mount, and the
+        // text page scrolled in as a black rectangle. It then appeared all at
+        // once at the settle, where the resign leg discards the warm and the
+        // activate leg mounts for real. Measured exactly that way on a
+        // recording: black for the whole scroll, complete the instant it
+        // stopped.
+        //
+        // The warm belongs to the page being LEFT and is worth nothing now.
+        if commentsEngagedID == nil, prewarmedCommentsID != nil {
+            discardPrewarmedComments()
+        }
+        guard commentsEngagedID == nil, commentsContentVC == nil else {
+            // ⚠️ THE SLOT IS HELD BY ANOTHER PAGE'S ENGAGEMENT — text onto
+            // text, where the page being left is still on screen and still
+            // needs its panel. The incoming page gets a PREVIEW instead: the
+            // same panel in the same place, without the engagement's
+            // bookkeeping. The settle promotes it once the slot frees.
+            previewRestingComments(for: id, host: cell)
+            return
+        }
+        guard let content = restingPanel(for: id) else { return }
         commentsEngagedID = id
         commentsContentVC = content
         commentsEngagementIsResting = true
         restingLockApplied = false
+        installRestingPanel(content, for: id, host: cell)
+    }
 
+    /// The incoming page's panel, mounted while another page still owns the
+    /// engagement.
+    ///
+    /// ⚠️ EVERYTHING THE VIEWER SEES, NONE OF WHAT THE VIEWER DRIVES.
+    ///
+    /// The engagement is one slot on purpose: it carries the pager lock, the
+    /// composer's ownership and the toolbar's context, and two of those at once
+    /// is a contradiction. What is NOT single is the picture — a text page IS
+    /// its panel, so a page scrolling in has to show one or it is a black
+    /// rectangle until the scroll stops. That is the reported defect for text
+    /// onto text, where the page being left still needs its own.
+    ///
+    /// So the panel is mounted into the incoming cell with no claim on the
+    /// slot, and the settle promotes it the moment the page being left
+    /// resigns. The promotion is a field assignment: nothing is built twice.
+    private func previewRestingComments(for id: PostID, host cell: SnapFeedCell) {
+        guard previewRestingID != id, commentsEngagedID != id,
+              let content = restingPanel(for: id) else { return }
+        discardRestingPreview()
+        previewRestingID = id
+        previewRestingVC = content
+        previewRestingCell = cell
+        installRestingPanel(content, for: id, host: cell)
+    }
+
+    /// Hands the engagement to a panel that is already on screen. False when
+    /// there is nothing to promote, so the caller mounts for real.
+    @discardableResult
+    private func promoteRestingPreview(for id: PostID) -> Bool {
+        guard previewRestingID == id, let content = previewRestingVC,
+              commentsEngagedID == nil, commentsContentVC == nil else { return false }
+        previewRestingID = nil
+        previewRestingVC = nil
+        previewRestingCell = nil
+        commentsEngagedID = id
+        commentsContentVC = content
+        commentsEngagementIsResting = true
+        restingLockApplied = false
+        return true
+    }
+
+    private func discardRestingPreview() {
+        if let content = previewRestingVC {
+            content.willMove(toParent: nil)
+            content.view.removeFromSuperview()
+            content.removeFromParent()
+            previewRestingCell?.setCommentsEngaged(false)
+            previewRestingCell?.clearComments()
+        }
+        previewRestingVC = nil
+        previewRestingID = nil
+        previewRestingCell = nil
+    }
+
+    /// The panel for a post: the one built ahead when it matches, a fresh one
+    /// otherwise.
+    private func restingPanel(for id: PostID) -> UIViewController? {
+        if prewarmedRestingID == id, let warmed = prewarmedRestingVC {
+            discardPrewarmedResting()
+            return warmed
+        }
+        return makeCommentsPanelContent?(id)
+    }
+
+    /// Everything a resting panel needs once it has a cell — identical whether
+    /// it is the engagement or a preview, because what the VIEWER gets must not
+    /// depend on which of the two it is.
+    private func installRestingPanel(
+        _ content: UIViewController, for id: PostID, host cell: SnapFeedCell
+    ) {
+        content.view.backgroundColor = .clear
+        // Inherited, exactly like the media panel — the cell decides.
+        content.overrideUserInterfaceStyle = .unspecified
         addChild(content)
         cell.installComments(content.view)
         content.didMove(toParent: self)
@@ -1815,10 +2135,10 @@ final class SnapFeedViewController: UIViewController {
         // is in the air rather than arriving with the post fetch.
         if let model = modelsByID[id], let caption = model.caption, !caption.isEmpty {
             // `.flat` unconditionally, and it is not an assumption: this whole
-            // method is the TEXT page's resting engagement — a media page
-            // never reaches it (`presentComments` is its path). The face is
-            // still stated rather than defaulted, so the one caller that means
-            // "no glass" says so.
+            // path is the TEXT page's resting interface — a media page never
+            // reaches it (`presentComments` is its path). The face is still
+            // stated rather than defaulted, so the one caller that means "no
+            // glass" says so.
             detail?.seedCaption(
                 caption,
                 timestamp: model.timestampText,
@@ -1835,6 +2155,13 @@ final class SnapFeedViewController: UIViewController {
         // no spring, no offstage→onstage slide. The interface simply IS,
         // frame one, so scrolling it into view reveals it already formed.
         detail?.setComposerEntranceState(offstage: false)
+        // ⚠️ AT THE MOUNT TOO, not only at the next settle.
+        //
+        // The reconcile derives this, but it runs when a page SETTLES — and the
+        // composer is on screen, and wrong, for the whole scroll before that.
+        // The rule is the same in both places: the ceiling belongs to the page
+        // being read, and a page mounting while another is settled is not it.
+        detail?.setComposerTracksKeyboard(id == activePostID)
         cell.setCommentsEngaged(true)
         cell.contentView.layoutIfNeeded()
     }
@@ -2010,6 +2337,133 @@ final class SnapFeedViewController: UIViewController {
     /// — over-scroll never chains to a page change) and swap in the
     /// engaged toolbar context. Deferred out of the pre-render so neither
     /// touches the still-in-flight scroll. Runs once per engagement.
+    /// Makes the screen match the page it is actually on.
+    ///
+    /// ⚠️ DERIVED, NOT MAINTAINED — and every leak in this file came from the
+    /// difference.
+    ///
+    /// The resting interface and the pager's lock used to be moved by
+    /// TRANSITIONS: mounted here, torn down there, unlocked in a teardown. Each
+    /// of those runs only if its callback does, and the callbacks are not
+    /// guaranteed — a cell recycled without an end-display, a resign leg that
+    /// defers to one, a promotion waiting for a slot nobody freed. Any single
+    /// miss leaves the screen describing a page the viewer left: measured as
+    /// `settled=1 engaged=post-new-07 scrollEnabled=false`, two pages later,
+    /// with the pager locked for a post no longer on screen. Nothing could
+    /// scroll and nothing in the trace said why.
+    ///
+    /// A reconcile cannot leak. It asks what is true NOW — which page is
+    /// settled, whether the old one is still visible — and makes the screen
+    /// agree. A missed callback costs one settle's delay instead of the rest of
+    /// the session.
+    private func reconcileRestingInterface(activeIndex: Int) {
+        let activeID = orderedIDs.indices.contains(activeIndex) ? orderedIDs[activeIndex] : nil
+        let activeIsText = activeID.flatMap { modelsByID[$0]?.mediaURL == nil } ?? false
+        #if DEBUG
+        // `-grab-log`: what the reconcile saw. An interface that survives its
+        // page is invisible in every other line — the screen looks settled and
+        // the pager is simply dead.
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[reconcile] active=\(activeID?.rawValue ?? "nil") text=\(activeIsText)"
+                + " engaged=\(commentsEngagedID?.rawValue ?? "nil")"
+                + " resting=\(commentsEngagementIsResting)"
+                + " engagedOnScreen=\(commentsEngagedID.map(isPostOnScreen) ?? false)")
+        }
+        #endif
+
+        // An engagement belonging to a page that has LEFT is over, whatever
+        // failed to say so. Still-visible pages keep theirs: that is what stops
+        // the page being left from emptying while the settle animates.
+        if let engaged = commentsEngagedID, commentsEngagementIsResting,
+           engaged != activeID, !isPostOnScreen(engaged) {
+            finishCommentsDisengagement()
+        }
+        // The settled text page owns the interface: promote what is already
+        // mounted, or mount it.
+        if activeIsText, let activeID, !promoteRestingPreview(for: activeID),
+           commentsEngagedID == nil,
+           let cell = collectionView.cellForItem(
+               at: IndexPath(item: activeIndex, section: 0)
+           ) as? SnapFeedCell {
+            presentRestingComments(for: activeID, host: cell)
+        }
+        // ⚠️ AND SO DOES THE COMPOSER'S KEYBOARD CEILING.
+        //
+        // That ceiling is anchored in WINDOW space, so a panel whose cell still
+        // hangs below the screen has its composer clamped to the screen's edge
+        // instead of travelling with its page — two composers at once, one
+        // moving and one stuck.
+        //
+        // Granting it at the MOUNT was the first attempt and it only covered
+        // the page that arrives while another holds the slot. A page arriving
+        // from a media post takes the slot outright, mounts as the engagement,
+        // and kept the ceiling — which is why it went wrong "sometimes".
+        // Derived from the settled page, like everything else here, it cannot
+        // depend on which route the panel took.
+        (commentsContentVC as? PostDetailViewController)?
+            .setComposerTracksKeyboard(commentsEngagedID == activeID)
+        (previewRestingVC as? PostDetailViewController)?.setComposerTracksKeyboard(false)
+        // ⚠️ AND SO DOES THE GROUND BEHIND THE PAGES.
+        //
+        // The pager's own background is what shows through any strip a page has
+        // not covered — and there is always such a strip for a frame or two: a
+        // cell is recycled the moment the model says it has left, while the
+        // pixels of the settle are still arriving. Black behind a light page
+        // makes that frame a BLACK BAND across the top of the screen, which is
+        // what "the post goes black on the way out" was. Measured on a
+        // recording: one frame in a hundred and six, top-of-screen brightness
+        // 12 against 90 for every other frame.
+        //
+        // Matching the ground to the settled page does not fix the timing — it
+        // makes the timing invisible, which is better: no amount of care about
+        // when a cell is recycled can guarantee the frame, and this needs no
+        // guarantee.
+        collectionView.backgroundColor = activeIsText ? .systemBackground : .black
+        // ⚠️ AND THE LOCK FOLLOWS THE SETTLED PAGE, not the engagement.
+        //
+        // A text page disables the pager because its own scroll view would
+        // chain with it. That is a fact about the page on screen, so it is read
+        // off the page on screen — an engagement that outlived its page cannot
+        // take the pager down with it.
+        collectionView.isScrollEnabled = !activeIsText
+    }
+
+    /// Whether the post still has PIXELS on screen.
+    ///
+    /// ⚠️ GEOMETRY, AND FROM THE PRESENTATION LAYER — asking UIKit which cells
+    /// are visible answers about the MODEL, and during a settle the model is
+    /// already at the destination while the pixels are still travelling. A page
+    /// half on screen therefore reported itself gone, its interface was torn
+    /// down under the viewer, and what was left was the bare cell: a white
+    /// strip with an orphaned composer bar, then the black media floor as it
+    /// slid away. Reported twice, and both halves are this one line.
+    private func isPostOnScreen(_ id: PostID) -> Bool {
+        guard let index = orderedIDs.firstIndex(of: id) else { return false }
+        let page = collectionView.bounds.height
+        guard page > 0 else { return false }
+        let top = CGFloat(index) * page
+        // ⚠️ THE MODEL, WIDENED BY A SETTLE THAT IS STILL RUNNING.
+        //
+        // The presentation layer was tried and is not an answer: it reports a
+        // stale offset when nothing is animating, so a page two positions back
+        // read as on-screen for the rest of the session — measured as
+        // `active=post-new-06 engaged=post-new-07 engagedOnScreen=true`, with
+        // the pager locked for a post nobody could see.
+        //
+        // Our own settle is the ONE case where the model has arrived and the
+        // pixels have not, and we start that animation ourselves, so its span
+        // is known rather than inferred. Everywhere else — a finger, UIKit's
+        // deceleration — the model IS where the pixels are.
+        let live = collectionView.contentOffset.y
+        let lower = min(live, settleFromOffset ?? live)
+        let upper = max(live, settleFromOffset ?? live)
+        return top < upper + page && top + page > lower
+    }
+
+    /// Where a page-change animation started, for as long as it is running.
+    /// Nil at rest — see `isPostOnScreen`.
+    private var settleFromOffset: CGFloat?
+
     private func lockRestingEngagement() {
         guard commentsEngagementIsResting, !restingLockApplied,
               commentsEngagedID != nil else { return }
@@ -2075,6 +2529,18 @@ final class SnapFeedViewController: UIViewController {
     private func drivePageSwipe(
         _ phase: CommentsInputBar.PageSwipePhase, translation dy: CGFloat, velocity vy: CGFloat
     ) {
+        #if DEBUG
+        // `-grab-log`: the ONLY gesture that pages a text post, and its ceiling.
+        //
+        // A text page disables the pager outright, so nothing else on that
+        // screen can move it. When it does not move, the question is whether
+        // this ran at all and what it was allowed to reach — two answers no
+        // other trace carries.
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[drive] \(phase) dy=\(Int(dy)) ceiling=\(reachableCeiling())"
+                + " settled=\(settledPageIndex) engaged=\(commentsEngagedID?.rawValue ?? "nil")")
+        }
+        #endif
         switch phase {
         case .began: beginPageDrive()
         case .changed: updatePageDrive(translation: dy)
@@ -2127,6 +2593,21 @@ final class SnapFeedViewController: UIViewController {
         if changesPage && !targetReEngages {
             setEngagedChrome(false, hasMedia: true, animated: true)
         }
+        #if DEBUG
+        // `-grab-log`: what the drive resolved to, and what the scroll view
+        // will actually accept. A committed step that never moves the page is
+        // either a target nobody applied or an offset something else is
+        // holding, and the two look identical from outside.
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[drive] commit start=\(Int(start)) step=\(step) target=\(target)"
+                + " targetY=\(Int(targetOffset)) offsetY=\(Int(collectionView.contentOffset.y))"
+                + " contentH=\(Int(collectionView.contentSize.height))"
+                + " pageH=\(Int(page)) scrollEnabled=\(collectionView.isScrollEnabled)")
+        }
+        #endif
+        // The page being left is on screen for the whole of this animation,
+        // whatever the model says — see `isPostOnScreen`.
+        settleFromOffset = collectionView.contentOffset.y
         let distance = abs(collectionView.contentOffset.y - targetOffset)
         let springVelocity = distance > 0 ? min(3, abs(vy) / distance) : 0
         UIView.animate(
@@ -2136,6 +2617,13 @@ final class SnapFeedViewController: UIViewController {
         ) {
             self.collectionView.contentOffset.y = targetOffset
         } completion: { [weak self] finished in
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-grab-log"), let self {
+                print("[drive] settled finished=\(finished)"
+                    + " offsetY=\(Int(collectionView.contentOffset.y))")
+            }
+            #endif
+            self?.settleFromOffset = nil
             guard finished else { return }
             // Now the target page is settled: recompute the active item,
             // which fires the resign→teardown / activate legs (the landed
@@ -2160,10 +2648,138 @@ final class SnapFeedViewController: UIViewController {
     /// resists beyond the ends so you cannot fling off the feed — and, with
     /// the feed forward-only, `floor` is the drive's own origin page rather
     /// than offset zero.
+    /// The spinner shown under the last reachable page, exactly as the timeline
+    /// shows one at the end of a loaded batch — because to the viewer it is the
+    /// same situation: there IS more, and it is not here yet.
+    private lazy var pagingFooter: UIActivityIndicatorView = {
+        let spinner = UIActivityIndicatorView(style: .medium)
+        spinner.color = .white
+        spinner.hidesWhenStopped = true
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            spinner.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24)
+        ])
+        return spinner
+    }()
+
+    /// Shows the spinner while the viewer is pulling against the readiness
+    /// ceiling, and only then.
+    ///
+    /// Driven from the scroll rather than from the settle: the whole point is
+    /// to answer the gesture that is happening now — a viewer who drags past
+    /// the last ready page sees why they cannot go further while they are still
+    /// pulling, and a settled feed shows nothing.
+    private func updatePagingFooter(for scrollView: UIScrollView) {
+        let page = scrollView.bounds.height
+        guard page > 0, !orderedIDs.isEmpty else { return }
+        let ceiling = CGFloat(reachableCeiling()) * page
+        let atCorpusEnd = reachableCeiling() >= orderedIDs.count - 1
+        let pulling = scrollView.contentOffset.y > ceiling + 1
+        if pulling, !atCorpusEnd {
+            pagingFooter.startAnimating()
+        } else {
+            pagingFooter.stopAnimating()
+        }
+    }
+
+    /// The theme the DEVICE is in, which is not always the theme this screen is
+    /// in: the feed pins itself dark while a photograph is settled, so anything
+    /// asking `traitCollection` from inside it gets the pin rather than the
+    /// device. Read off the window, which no view controller's override reaches.
+    private var deviceInterfaceStyle: UIUserInterfaceStyle {
+        view.window?.traitCollection.userInterfaceStyle ?? .unspecified
+    }
+
+    /// Whether a page can be shown without the viewer watching it assemble.
+    ///
+    /// A MEDIA page is ready as soon as its model is: the cover arrives into a
+    /// laid-out card and the page is legible without it. A TEXT page is not —
+    /// what a text page IS is its comments panel, so until that panel is built
+    /// the page is a black rectangle, and showing it is the defect this answers.
+    ///
+    /// ⚠️ A HOST WITH NO PANEL FACTORY HAS READY TEXT PAGES BY DEFINITION.
+    /// Without that line every text post would be permanently unreachable on
+    /// any surface that does not supply one — a far worse failure than the
+    /// pop-in, and silent.
+    func isPageReady(_ index: Int) -> Bool {
+        guard orderedIDs.indices.contains(index),
+              let model = modelsByID[orderedIDs[index]] else { return false }
+        guard model.mediaURL == nil, makeCommentsPanelContent != nil else { return true }
+        // ⚠️ ALL THREE PLACES A PANEL CAN BE, and leaving one out strands the
+        // viewer.
+        //
+        // A panel is built ahead (`prewarmedRestingID`), then MOUNTED into the
+        // incoming cell as a preview — which consumes the warm — and only later
+        // promoted to the engagement. Counting the first and the last but not
+        // the middle meant a page that was already on screen, fully drawn, read
+        // as "not ready": the ceiling stopped short of it and the pager refused
+        // to advance. Two text posts in a row could not be paged through at
+        // all, and the console showed only the hero grab correctly declining an
+        // upward drag — nothing about the page that was quietly unreachable.
+        return prewarmedRestingID == model.id
+            || previewRestingID == model.id
+            || commentsEngagedID == model.id
+    }
+
+    /// The furthest page the viewer may reach right now.
+    ///
+    /// Scans forward from where they are and stops at the first page that is
+    /// not ready — which for a run of text posts is one at a time, since only
+    /// the page immediately ahead is ever built. That is the intent: a page the
+    /// viewer cannot reach yet reads exactly like the end of the feed, which is
+    /// a state this app already has an answer for, rather than like a post that
+    /// renders itself while they look at it.
+    ///
+    /// Never behind the page they are on: a corpus that changes under a settled
+    /// viewer must not push them backwards.
+    var lastReachablePage: Int {
+        let last = max(0, orderedIDs.count - 1)
+        var index = min(settledPageIndex, last)
+        while index < last, isPageReady(index + 1) { index += 1 }
+        return index
+    }
+
+    /// The ceiling the pager actually uses: PREPARE, then allow.
+    ///
+    /// ⚠️ A GATE THAT CAN STRAND IS WORSE THAN THE POP-IN IT PREVENTS, and this
+    /// one stranded twice — each time on a state nobody had thought to count as
+    /// "ready", each time reported as the scroll simply not working, with
+    /// nothing in the trace to say why. That is the failure mode of asking a
+    /// question that can be wrong in a direction with no recovery.
+    ///
+    /// So the answer is not "is it ready" but "make it ready": the panel is
+    /// built synchronously, here, at the moment the viewer asks to move. A page
+    /// that can be prepared is reachable BECAUSE it was just prepared, and a
+    /// page that cannot be — no factory, no model yet — is reachable anyway,
+    /// because being stuck is not an outcome any viewer can act on.
+    ///
+    /// What remains gated is the only thing a viewer can understand: a page
+    /// whose data has not arrived. That is the end of the list, and the loader
+    /// says so.
+    private func reachableCeiling() -> Int {
+        let last = max(0, orderedIDs.count - 1)
+        let settled = min(settledPageIndex, last)
+        guard settled < last, modelsByID[orderedIDs[settled + 1]] != nil else { return settled }
+        // ⚠️ THE NEXT PAGE ONLY, because the warm holds ONE panel.
+        //
+        // Preparing the whole run forward looked thorough and was
+        // self-defeating: each call discards the last one's panel, so walking
+        // three pages ahead threw away the warm for the page actually being
+        // moved onto and it was built twice. One page is also all a gesture can
+        // reach, which is the only page the question is about.
+        if !isPageReady(settled + 1) { prewarmRestingComments(for: orderedIDs[settled + 1]) }
+        // Past it, the only question left is whether the data has arrived.
+        var ceiling = settled + 1
+        while ceiling < last, modelsByID[orderedIDs[ceiling + 1]] != nil { ceiling += 1 }
+        return ceiling
+    }
+
     private func rubberBandedOffset(_ offset: CGFloat, floor: CGFloat) -> CGFloat {
         let page = collectionView.bounds.height
         guard page > 0 else { return offset }
-        let maxOffset = CGFloat(max(0, orderedIDs.count - 1)) * page
+        let maxOffset = CGFloat(reachableCeiling()) * page
         if offset < floor { return floor - Self.rubberBand(floor - offset, dimension: page) }
         if offset > maxOffset { return maxOffset + Self.rubberBand(offset - maxOffset, dimension: page) }
         return offset
@@ -2234,6 +2850,19 @@ final class SnapFeedViewController: UIViewController {
             itemCount: orderedIDs.count
         )
         apply(lifecycle.setPageIndex(index))
+        // ⚠️ AT EVERY SETTLE, not only when the page CHANGED.
+        //
+        // The reconcile used to live inside the activation branch, so it ran
+        // only when the dispatcher reported a new page — and a settle that
+        // reports nothing is exactly the case where something was missed. A
+        // programmatic jump settles before the cell exists, the activation is
+        // dropped, and the screen keeps describing the page before it:
+        // measured as `settled=1 engaged=post-new-07`, an interface belonging
+        // to a page two positions back, with the pager locked for it.
+        //
+        // Cleaning up only when something changed means never cleaning up
+        // after the change that went missing.
+        if let index { reconcileRestingInterface(activeIndex: index) }
     }
 
     private func apply(_ transition: SnapLifecycleDispatcher.Transition) {
@@ -2253,7 +2882,22 @@ final class SnapFeedViewController: UIViewController {
             // since the pager is locked for the engagement's lifetime).
             if let engaged = commentsEngagedID, orderedIDs.indices.contains(resign),
                engaged == orderedIDs[resign] {
-                finishCommentsDisengagement()
+                // ⚠️ A RESTING PAGE KEEPS ITS INTERFACE UNTIL ITS LAST PIXEL
+                // HAS LEFT.
+                //
+                // The settle is not the moment the page stops being seen: the
+                // scroll releases, the page snaps home, and the page being left
+                // is still partly on screen for the length of that animation.
+                // Tearing its panel down here emptied it while the viewer could
+                // still see it — a text page went to its bare floor for an
+                // instant on the way out, which is the same defect as the black
+                // arrival, mirrored.
+                //
+                // `didEndDisplaying` is the honest moment, and it already tears
+                // down the case where a page is scrolled past without ever
+                // settling. A page that never leaves the viewport keeps its
+                // interface, which is what a resting engagement is for.
+                if !commentsEngagementIsResting { finishCommentsDisengagement() }
             }
             // A warm panel belongs to the page that was active. Once that
             // page is not, the warm is stale — and holding it would block
@@ -2274,6 +2918,10 @@ final class SnapFeedViewController: UIViewController {
                 snapCell.defersPlaybackForFlight = isAwaitingZoomPresentation
             }
             lifecycleCell(at: activate)?.willBecomeActive()
+            // The pages either side get ready NOW, at the settle, rather than
+            // when UIKit's scroll heuristic happens to ask — see
+            // `warmSettledWindow`.
+            warmSettledWindow(around: activate)
             // Same settle-quantized seam that drives playback: both bar
             // surfaces (identity pill above, media attribution below) follow
             // the active page.
@@ -2293,17 +2941,23 @@ final class SnapFeedViewController: UIViewController {
                 // presence REQUIRED — a not-yet-hydrated page reads as
                 // "unknown", never "text-only".
                 if let model = modelsByID[id], model.mediaURL == nil {
-                    if commentsEngagedID == nil,
-                       let cell = collectionView.cellForItem(at: IndexPath(item: activate, section: 0)) as? SnapFeedCell {
-                        presentRestingComments(for: id, host: cell)
-                    }
+                    // Mounting, promoting, releasing a page that has gone and
+                    // the pager's own lock are ONE decision now — see
+                    // `reconcileRestingInterface`.
+                    reconcileRestingInterface(activeIndex: activate)
                     if commentsEngagedID == id, commentsEngagementIsResting {
                         lockRestingEngagement()
                     }
-                } else if let cell = collectionView.cellForItem(
+                } else {
+                    // A MEDIA page settles too, and the same reconcile is what
+                    // releases an interface the page before it left behind and
+                    // gives the pager back — the case that locked the feed on a
+                    // photograph for a text post two pages ago.
+                    reconcileRestingInterface(activeIndex: activate)
+                }
+                if modelsByID[id]?.mediaURL != nil, let cell = collectionView.cellForItem(
                     at: IndexPath(item: activate, section: 0)
                 ) as? SnapFeedCell {
-
                     // MEDIA pages warm their comments panel here instead of
                     // at tap time — see `prewarmComments`. The settle seam
                     // is where the page has stopped moving and nothing is
@@ -2407,6 +3061,76 @@ final class SnapFeedViewController: UIViewController {
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapCellLifecycle
     }
 
+    /// Everything a page needs that is NOT its player: the cover to decode and
+    /// the comment stream to fetch.
+    ///
+    /// Both are cheap and both are what a viewer notices missing — a page that
+    /// snaps in and then fills itself in reads as a stutter even when no frame
+    /// was dropped.
+    func warmContent(at items: [Int]) {
+        let ids = items.compactMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
+        let urls = ids.compactMap { modelsByID[$0] }.flatMap { [$0.avatarURL, $0.mediaURL] }
+            .compactMap(\.self)
+        let pipeline = imagePipeline
+        Task { await pipeline.prefetch(urls) }
+        // Loaded before the page scrolls in, so its band enters the viewport
+        // already streaming (subtitles still wait for settle — their gate is
+        // activation, not content).
+        for id in ids where modelsByID[id] != nil {
+            viewModel.ensureCommentStreams(for: id)
+        }
+    }
+
+    /// The players, kept to the immediate neighbours — see `SnapWarmWindow`.
+    ///
+    /// Deliberately a narrower window than the content's: a player holds a
+    /// decoder and the platform caps how many can render at once, so this is
+    /// the one warm that has to stay stingy.
+    func warmPlayers(at items: [Int]) {
+        for item in items where orderedIDs.indices.contains(item) {
+            guard let model = modelsByID[orderedIDs[item]],
+                  model.mediaKind == .video, let url = model.mediaURL else { continue }
+            videoPlayback?.preroll(url)
+        }
+    }
+
+    /// ⚠️ A DEFINED WINDOW AROUND THE PAGE THE VIEWER SETTLED ON.
+    ///
+    /// `UICollectionViewDataSourcePrefetching` is UIKit's guess, made from
+    /// scroll velocity: it warms nothing at all while the pager is at rest, and
+    /// what it warms during a fling is whatever its heuristic reached. A feed
+    /// whose whole promise is that the next page is INSTANT cannot be built on
+    /// a guess — after every settle the window is stated outright, so the pages
+    /// either side are ready whether the viewer arrived by flick, by tap, or by
+    /// sitting still for a minute first.
+    ///
+    /// Kept alongside the prefetch callback rather than replacing it: UIKit's
+    /// guess is genuinely good DURING a fast scroll, where it runs ahead of the
+    /// settles. The two overlap, and both are idempotent.
+    private func warmSettledWindow(around active: Int) {
+        let count = orderedIDs.count
+        let content = SnapWarmWindow.content(around: active, count: count)
+        warmContent(at: content)
+        warmPlayers(at: SnapWarmWindow.players(around: active, count: count))
+        // ⚠️ AND THE NEXT TEXT PAGE'S INTERFACE, which is the one page whose
+        // content is a whole view controller rather than an image. Only the
+        // page immediately ahead: it is one view controller's memory, and the
+        // page after that is a guess.
+        if orderedIDs.indices.contains(active + 1) {
+            prewarmRestingComments(for: orderedIDs[active + 1])
+        }
+        #if DEBUG
+        // What the settle actually warmed. The window itself is pure and tested
+        // on its own; this is how a test reaches the WIRING — that the settle
+        // asks at all, and asks about the page it settled on.
+        debugLastWarmedWindow = content
+        #endif
+    }
+
+    #if DEBUG
+    private(set) var debugLastWarmedWindow: [Int] = []
+    #endif
+
     private func prefetchURLs(for indexPaths: [IndexPath]) -> [URL] {
         indexPaths.compactMap { orderedIDs.indices.contains($0.item) ? modelsByID[orderedIDs[$0.item]] : nil }
             .flatMap { [$0.avatarURL, $0.mediaURL] }
@@ -2446,7 +3170,22 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // (a missing model reads as "unknown", never "text-only").
         if let snapCell = cell as? SnapFeedCell, orderedIDs.indices.contains(indexPath.item) {
             let id = orderedIDs[indexPath.item]
-            if let model = modelsByID[id], model.mediaURL == nil, commentsEngagedID == nil {
+            // ⚠️ NOT GATED ON THE SLOT BEING FREE, and that gate is what made
+            // the arriving page blank.
+            //
+            // It reads as a guard against mounting twice, and it was — until
+            // the page being left began keeping its interface until its last
+            // pixel has gone. From then on the slot is ALWAYS held while the
+            // next page scrolls in, so this declined every time and the one
+            // path that mounts a preview was unreachable from the only place
+            // that calls it.
+            //
+            // What arrives is a text page with no panel: on a text post the
+            // caption lives INSIDE the panel, so the page is not merely
+            // undecorated, it is empty — white, no caption, no comments, just
+            // chrome. `presentRestingComments` makes this decision properly:
+            // engagement if the slot is free, preview if it is not.
+            if let model = modelsByID[id], model.mediaURL == nil {
                 presentRestingComments(for: id, host: snapCell)
             }
             // PHASE 2, when this cell is ALREADY the active page.
@@ -2529,8 +3268,17 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if let engagedID = commentsEngagedID, commentsEngagementIsResting,
            orderedIDs.indices.contains(indexPath.item),
            orderedIDs[indexPath.item] == engagedID,
-           lifecycle.activeIndex != indexPath.item {
+           lifecycle.activeIndex != indexPath.item,
+           // UIKit calls this when the cell leaves the MODEL's viewport, which
+           // during a settle is a moment too early — see `isPostOnScreen`.
+           !isPostOnScreen(engagedID) {
             finishCommentsDisengagement()
+            // The slot is free at last — and the page that is now active may
+            // have been showing a PREVIEW since it scrolled in, waiting for
+            // exactly this. Promoting is a field assignment; without it the
+            // preview would stay one for ever and its page would never own its
+            // own pager lock.
+            if let active = activePostID { promoteRestingPreview(for: active) }
         }
     }
 
@@ -2550,12 +3298,50 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         }
     }
 
+    /// ⚠️ THE FLICK STOPS AT THE LAST PAGE THAT IS READY.
+    ///
+    /// The pager's own paging is what carries a media page, and it will happily
+    /// land on a post whose interface has not been built — which is the black
+    /// rectangle that fills itself in. Clamping the TARGET rather than the live
+    /// offset keeps the drag itself free: the viewer can pull the next page
+    /// into view and see the loader under it, and the release settles back.
+    ///
+    /// A page that is not ready reads as the end of the feed, because that is
+    /// what it is for the moment: more is coming and it is not here yet.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView,
+        withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        let page = scrollView.bounds.height
+        guard page > 0 else { return }
+        let ceiling = CGFloat(reachableCeiling()) * page
+        if targetContentOffset.pointee.y > ceiling {
+            targetContentOffset.pointee.y = ceiling
+        }
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // ⚠️ NO ACTIVATION HERE. Activating at the halfway mark was tried, to
+        // start a video as soon as its page owned most of the screen, and it
+        // moved the SCROLL: activation runs the settle's whole choreography —
+        // which includes bringing the active page clear of the chrome — so the
+        // feed jumped to the next page in the middle of the gesture. Reported
+        // as worse than the delay it was meant to fix, and it was.
+        //
+        // Starting playback early has to be a playback-only path, not a second
+        // caller of the seam that owns everything else.
+        updatePagingFooter(for: scrollView)
+    }
+
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateActiveItem()
+        updatePagingFooter(for: scrollView)
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { updateActiveItem() }
+        updatePagingFooter(for: scrollView)
     }
 }
 
@@ -3299,9 +4085,41 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// `configureFlightChrome`'s rule so the card's chrome and its landing
     /// target can never describe different posts.
     var activePostID: PostID? {
-        let index = lifecycle.activeIndex ?? 0
+        let index = settledPageIndex
         return orderedIDs.indices.contains(index) ? orderedIDs[index] : nil
     }
+
+    /// Which page of the active post's collection is on screen — what a close
+    /// has to put the row it lands on onto.
+    ///
+    /// Read off the SETTLED page's cell for the same reason `activePostID` is:
+    /// the screen is already reporting itself invisible by the time a close
+    /// asks, so anything gated on visibility answers about the wrong post.
+    var activeMediaPage: Int? {
+        let index = settledPageIndex
+        return (collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+            as? SnapFeedCell)?.currentMediaPage
+    }
+
+    /// The page this screen is ON, which is NOT the same as the page it is
+    /// actively playing.
+    ///
+    /// ⚠️ `activeIndex` GOES NIL THE MOMENT THE SCREEN STOPS BEING VISIBLE, and
+    /// a dismissal is exactly that moment: `viewWillDisappear` reports the
+    /// surface down, and every question asked afterwards — which post is this,
+    /// what does it travel as, where does it land — fell back to page ZERO, the
+    /// post the viewer opened with.
+    ///
+    /// Measured on a back-button close from page 11 of a text post: the pop
+    /// asked and was told `.hero`, because post ZERO is a photograph. The card
+    /// close had already adopted and CONCEALED the landed row, the flight it
+    /// was handed to could not land on a text row, and the feed came back with
+    /// a hole where the post should have been.
+    ///
+    /// Visibility is the right gate for PLAYBACK — nothing off screen should
+    /// hold a player — and the wrong one for identity. The snapped page is a
+    /// fact about the scroll position, and it survives the screen going away.
+    private var settledPageIndex: Int { lifecycle.pageIndex ?? 0 }
 
     /// Configures the replica from the page the card flies to/from: the active
     /// page if one is settled, else the first post (a map tap's feed opens on
@@ -3331,6 +4149,28 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         !collectionView.isDecelerating
     }
 
+    /// ⚠️ THE POST ON SCREEN RIGHT NOW, not the one that opened this screen.
+    ///
+    /// A text page has no media to fly, so it goes home as a card; anything
+    /// with a picture flies that picture. The distinction used to be settled at
+    /// the tap, which is correct for a screen that shows one post and wrong for
+    /// a PAGER — swipe from a photograph to a text post and the driver chosen
+    /// at the tap is the wrong one for the post being dismissed.
+    ///
+    /// Read from the MODEL rather than from the realized cell: a grab can begin
+    /// on a page whose cell is mid-recycle, and the answer must not depend on
+    /// what happens to be dequeued. Falls back to `.hero`, the historical
+    /// answer, when there is no model to ask.
+    public var zoomDismissalKind: ZoomDismissalKind {
+        // The SETTLED page, not the active one — see `settledPageIndex`. A pop
+        // takes the screen's visibility away before it asks this.
+        let index = settledPageIndex
+        guard orderedIDs.indices.contains(index),
+              let model = modelsByID[orderedIDs[index]]
+        else { return .hero }
+        return model.mediaURL == nil ? .card : .hero
+    }
+
     /// The vertical grab's extra gate (the horizontal one needs none: the
     /// pager owns no horizontal gestures). Refused while a comments panel is
     /// OPEN — the engaged layer owns the whole vertical axis (page drive,
@@ -3340,6 +4180,18 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// territory that owns its own vertical gestures (the shortcut rail's
     /// column, the composer).
     public func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
+        // ⚠️ AN OPEN KEYBOARD OWNS THE DOWNWARD DRAG.
+        //
+        // The comments list dismisses the keyboard interactively — drag down
+        // over it and the keyboard follows the finger. That gesture and this
+        // one are the same drag in the same direction, and the keyboard's is
+        // the one the viewer means: they are looking at a keyboard they want
+        // gone, not at a post they want closed. Claiming it here closed the
+        // post out from under a half-typed comment.
+        //
+        // Only while the keyboard is actually up, so nothing changes for the
+        // rest of the page's life.
+        guard !isKeyboardOnScreen else { return false }
         guard commentsEngagedID == nil || commentsEngagementIsResting else { return false }
         let point = collectionView.convert(location, from: view)
         guard let hit = collectionView.hitTest(point, with: nil) else { return true }
@@ -3451,23 +4303,8 @@ private final class NotificationObserverBag: @unchecked Sendable {
 
 extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
     func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-        let urls = prefetchURLs(for: indexPaths)
-        let pipeline = imagePipeline
-        Task { await pipeline.prefetch(urls) }
-        // Warm the synthesizer/asset for upcoming video pages so their play is
-        // instant when they snap into view.
-        for indexPath in indexPaths where orderedIDs.indices.contains(indexPath.item) {
-            let model = modelsByID[orderedIDs[indexPath.item]]
-            if let model, model.mediaKind == .video, let url = model.mediaURL {
-                videoPlayback?.preroll(url)
-            }
-            // Comment streams too: loaded before the page scrolls in, so its
-            // band enters the viewport already streaming (subtitles wait for
-            // settle regardless — their gate is activation, not content).
-            if let model {
-                viewModel.ensureCommentStreams(for: model.id)
-            }
-        }
+        warmContent(at: indexPaths.map(\.item))
+        warmPlayers(at: indexPaths.map(\.item))
     }
 
     func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {

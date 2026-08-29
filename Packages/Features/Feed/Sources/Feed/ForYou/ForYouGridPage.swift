@@ -110,6 +110,13 @@ final class ForYouGridPage: UIView {
         return leading < posts.count ? leading : 0
     }
 
+    #if DEBUG
+    /// How many rows the "New" header currently covers — the number UIKit
+    /// checks an update against, so a test can assert the shape rather than
+    /// the contents.
+    var debugArrivalsRunLength: Int { split }
+    #endif
+
     /// Arrivals first, everything else after, each half keeping the order it
     /// arrived in.
     ///
@@ -292,6 +299,10 @@ final class ForYouGridPage: UIView {
     /// flag. Weak: the collection view owns cells and may recycle this one,
     /// and a recycled cell is corrected by `cellForItemAt` anyway.
     private weak var heroHiddenCell: UICollectionViewCell?
+    /// The reveal channel's equivalent, and it exists for the same reason —
+    /// see `setRevealConcealed`. Weak for the same reason too: the collection
+    /// view owns cells, and a recycled one is corrected at `cellForItemAt`.
+    private weak var revealConcealedCell: PostGridListRowCell?
     /// The post whose twin is in the air, concealed or not.
     ///
     /// Split from `heroHiddenPostID` because the two questions came apart: a
@@ -337,7 +348,21 @@ final class ForYouGridPage: UIView {
     }
 
     /// How close to the end a scroll gets before the next page is requested.
-    private static let prefetchDistance: CGFloat = 800
+    ///
+    /// ⚠️ MEASURED IN SCREENS, not in points, because a row is not a tile.
+    ///
+    /// A fixed 800pt is roughly three rows of tiles and barely ONE card: on the
+    /// timeline the request went out with a single card of runway left, so a
+    /// flick outran it and the viewer hit the end of the list before the page
+    /// arrived. A screen and a half of lead is the same lead on both shapes,
+    /// which is what "start fetching before they get there" actually means.
+    ///
+    /// The floor keeps the rule honest before first layout, where the viewport
+    /// is zero and a relative distance would ask for the next page only once
+    /// the scroll had already ended.
+    private var prefetchDistance: CGFloat {
+        max(800, collectionView.bounds.height * 1.5)
+    }
 
     init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
         self.imagePipeline = imagePipeline
@@ -533,15 +558,24 @@ final class ForYouGridPage: UIView {
     /// Shows or hides the next-page spinner beneath the last tile.
     ///
     /// **Why this cannot jump the scroll.** Reserving the band happens when
-    /// pagination fires, which is `prefetchDistance` (800pt) before the end —
+    /// pagination fires, which is `prefetchDistance` (a screen and a half)
+    /// before the end —
     /// growing the bottom inset never moves `contentOffset`, so there is nothing
     /// to see. Releasing it happens once the page has landed and added a whole
     /// slice of content, by which point the viewer is far from the bottom and
     /// the offset cannot be clamped by 56pt. The animation covers the one case
     /// left: a page that lands empty, where the release can nudge a viewer
     /// sitting at the very end.
+    /// ⚠️ EVERY STYLE, and the `style == .grid` this replaces was a hole.
+    ///
+    /// The timeline is the surface where the wait is actually visible: its rows
+    /// are a screen tall, so the viewer reaches the end of a page in a few
+    /// flicks, and until the next one landed the list simply stopped with no
+    /// sign that anything was coming. A grid hid that behind three columns of
+    /// tiles. Same footer, same band, same rule — the spinner is the answer to
+    /// "is there more", and both shapes owe it.
     func setPaging(_ paging: Bool) {
-        guard style == .grid, isPaging != paging else { return }
+        guard isPaging != paging else { return }
         isPaging = paging
         if paging {
             pagingSpinner.startAnimating()
@@ -1268,6 +1302,28 @@ final class ForYouGridPage: UIView {
         return Hero(frame: cell.convert(rect, to: space), cover: appearance.cover, style: appearance.style)
     }
 
+    /// Whether a hero could land on `postID` once it is IN the departure slot.
+    ///
+    /// ⚠️ ASKED OF THE MODEL, AND THAT IS THE WHOLE POINT.
+    ///
+    /// The obvious spelling — `heroAppearance(for:) != nil` — reads a REALIZED
+    /// CELL, and the post being dismissed is by definition the one the viewer
+    /// paged to, which is exactly the post whose row is furthest from the
+    /// screen. Nine pages down there is no cell, so the question answered "it
+    /// cannot fly", the adoption was declined, and the flight went home to the
+    /// tile it left from: the viewer closed Priya's photograph and watched it
+    /// land on Tom's dog. Measured that way, then fixed here.
+    ///
+    /// What can actually fly is a property of the post and the shape this page
+    /// draws it in: a tile is a rect whatever the post is, and a timeline row
+    /// only has one where it has media — a text row's card is the reveal's
+    /// business, not a flight's.
+    /// Takes the POST rather than its id, because the caller may be holding one
+    /// this page does not have yet — the adoption can insert it.
+    func canLandHero(on post: GalleryPost) -> Bool {
+        style == .grid || post.kind != .text
+    }
+
     /// What the flight card should *look* like, without needing a coordinate
     /// space — the card is built before anyone knows the container, and asking
     /// for a frame there would mean inventing one.
@@ -1448,6 +1504,85 @@ final class ForYouGridPage: UIView {
         (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }
 
+    /// The swap a CLOSE performs: the landed post takes the departure slot, and
+    /// the concealment goes with it.
+    ///
+    /// ⚠️ ONE METHOD BECAUSE IT IS ONE RULE, and it was two call sites getting
+    /// it differently right. What the viewer must never see is the card they
+    /// are returning to sitting visible under the transition standing in for
+    /// it, while the card they left is the hidden one. That is not a detail of
+    /// either driver — it is what "the feed is up to date" means during the
+    /// drag, and it is on screen for the whole gesture, so no sweep afterwards
+    /// can answer it.
+    ///
+    /// `standingIn` is what differs: a card-shaped close CARRIES the row, so
+    /// that row must stand aside for it. A flight carries only the media and
+    /// conceals its landing on its own channel — but it still needs the window
+    /// released, because the screen it is closing may have been opened as one.
+    @discardableResult
+    func adoptForClose(
+        _ postID: PostID,
+        intoSlotOf occupantID: PostID,
+        orInsert model: GalleryPost? = nil,
+        standingIn: Bool
+    ) -> Bool {
+        guard adoptPost(postID, intoSlotOf: occupantID, orInsert: model) else { return false }
+        // Released first: the two are one handover, and the order is what stops
+        // a frame with both rows hidden.
+        setRevealConcealed(false, for: occupantID)
+        if standingIn { setRevealConcealed(true, for: postID) }
+        return true
+    }
+
+    /// Which posts the viewer currently cannot see, whatever is hiding them.
+    ///
+    /// Answered from the CELLS rather than from the concealment flags, because
+    /// the two came apart — a flag naming one post while another row was the
+    /// invisible one is the whole of two separate defects. A caller asking
+    /// "what is on screen" must not be told what the bookkeeping believes.
+    ///
+    /// The index mapping lives here because the sections do: a caller walking
+    /// the collection view itself would have to re-derive the arrivals split.
+    func concealedPosts() -> Set<PostID> {
+        var hidden: Set<PostID> = []
+        for cell in collectionView.visibleCells {
+            guard let path = collectionView.indexPath(for: cell) else { continue }
+            let index = flatIndex(for: path)
+            guard posts.indices.contains(index) else { continue }
+            let card = cell.contentView.subviews.first
+            if cell.isHidden || cell.alpha == 0 || card?.alpha == 0
+                || (cell as? PostGridListRowCell)?.isHeroMediaConcealed == true {
+                hidden.insert(posts[index].id)
+            }
+        }
+        return hidden
+    }
+
+    /// Whether a landing conceals the row's MEDIA while the card flies to it.
+    ///
+    /// True on a timeline, where concealing takes the preview and leaves the
+    /// card standing; false on a grid, where a tile IS its media and concealing
+    /// it would leave a hole in the mosaic for the length of the flight.
+    var landingConcealsMedia: Bool { style == .list }
+
+    /// The post's whole cell, whatever kind of cell it is.
+    ///
+    /// ⚠️ THE ANSWER OF LAST RESORT FOR A CLOSE, and it exists because the two
+    /// specific ones REFUSE each other's rows on purpose: `hero(for:)` answers
+    /// nil for a text row (it has no media to fly) and `textRowFrame(for:)`
+    /// answers nil for a media row (it has a hero, so it flies instead). Each
+    /// refusal is right on its own, and between them a close whose anchor
+    /// turned out to be the other kind has NOTHING — so it collapsed into the
+    /// middle of the screen, which is what "the transition window returns to
+    /// the centre" looks like.
+    ///
+    /// Landing on the right card in the wrong shape is a small infelicity;
+    /// landing nowhere is a broken transition. This is the floor under both.
+    func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let cell = cell(for: postID) else { return nil }
+        return cell.convert(cell.bounds, to: space)
+    }
+
     /// Whether a realized cell for the post is currently within the viewport —
     /// the hero falls back to a centered collapse when it isn't.
     func isPostVisible(_ postID: PostID) -> Bool {
@@ -1555,12 +1690,48 @@ final class ForYouGridPage: UIView {
     /// bottom of a screen the flight is covering — and it has to shift, because
     /// the alternative is a card of the wrong height standing in for the post.
     @discardableResult
-    func adoptPost(_ postID: PostID, intoSlotOf occupantID: PostID) -> Bool {
+    func adoptPost(
+        _ postID: PostID, intoSlotOf occupantID: PostID, orInsert model: GalleryPost? = nil
+    ) -> Bool {
         guard !showsSkeleton,
-              let slot = posts.firstIndex(where: { $0.id == occupantID }),
-              let current = posts.firstIndex(where: { $0.id == postID }),
-              slot != current
+              let slot = posts.firstIndex(where: { $0.id == occupantID })
         else { return false }
+        // ⚠️ MOVE IF IT IS HERE, INSERT IF IT IS NOT — never a second copy.
+        //
+        // The list this page holds is a page of a paginated feed, and the post
+        // being dismissed came from a stream seeded off it, so the two can
+        // disagree: a refresh that lands while a post is open re-derives the
+        // corpus, and the post the viewer is closing may no longer be in it.
+        // Declining there is what leaves the viewer landing on the card they
+        // left — the same wrong landing as an unrealized row, from a different
+        // cause. Inserting the model the caller carries puts it where it
+        // belongs instead.
+        //
+        // Either way the id ends up in exactly ONE index. Every lookup here
+        // resolves an id through `firstIndex`, so a duplicate does not render
+        // twice, it renders once and makes the OTHER copy unaddressable: the
+        // flight rect, the hero hide and the playback adoption would each be
+        // free to pick a different tile.
+        guard let current = posts.firstIndex(where: { $0.id == postID }) else {
+            guard let model, model.id == postID else { return false }
+            return insertPost(model, at: slot)
+        }
+        guard slot != current else { return false }
+        // ⚠️ A SWAP CAN RE-FORM THE SECTIONS, and the update has to know.
+        //
+        // `split` is not a stored number: it is the length of the leading RUN
+        // of arrivals. Move an old post into that run and the run stops there,
+        // so both sections' counts change — while `reloadItems` promises UIKit
+        // they did not. It crashes: "the number of items in section 0 after the
+        // update (1) must be equal to the number before (6)". Invisible while
+        // the adoption was gated to the mosaic, which has one section.
+        //
+        // Refusing the swap was tried and is the wrong trade: the arrivals sit
+        // at the top, so paging a few posts down crosses the boundary almost
+        // immediately, and declining there means the viewer lands on the card
+        // they left — the exact thing the adoption exists to prevent. So the
+        // swap stands and the UPDATE changes shape below.
+        let splitBefore = split
         // The pixels each cell is showing RIGHT NOW, carried across the reload.
         //
         // `configure` clears the image and re-asks the cache, so a cell whose
@@ -1578,10 +1749,25 @@ final class ForYouGridPage: UIView {
         // without `prepareForReuse`, so a tile would keep the previous post's
         // video surface and play one post's motion under another's cover.
         UIView.performWithoutAnimation {
-            collectionView.reloadItems(at: [
-                indexPath(for: slot),
-                indexPath(for: current)
-            ])
+            if split == splitBefore {
+                collectionView.reloadItems(at: [
+                    indexPath(for: slot),
+                    indexPath(for: current)
+                ])
+            } else {
+                // ⚠️ THE WHOLE TABLE, because the sections themselves moved.
+                //
+                // A targeted update carries a promise about the counts, and
+                // this swap has just broken it. `reloadData` makes no such
+                // promise — it is the honest verb for "the shape changed".
+                //
+                // What it costs is one header's worth of shift for the rows
+                // below the boundary, and that is affordable exactly here: the
+                // grid is covered by the post being dismissed, and the landing
+                // rect is read AFTER the layout pass below, so the flight aims
+                // at where the slot actually ended up rather than where it was.
+                collectionView.reloadData()
+            }
             // Force the pass NOW. `reloadItems` only marks the items dirty; the
             // cells are rebuilt on the next layout, and the caller reads the
             // landing rect from a realized cell immediately after this returns.
@@ -1609,16 +1795,57 @@ final class ForYouGridPage: UIView {
                 cell.alpha = 1
                 cell.layoutIfNeeded()
             }
-            // And commit them to the render server in this turn rather than the
-            // next. Everything downstream — the hero rect, the flight card built
-            // from this cell's cover, the landing gate — reads the cell
-            // immediately, and a cell whose layers are still pending answers as
-            // though it were empty.
-            CATransaction.flush()
+            // ⚠️ NO `CATransaction.flush()` HERE, however tempting.
+            //
+            // It was here to commit the rebuilt cells to the render server in
+            // this turn rather than the next, because everything downstream —
+            // the hero rect, the flight card's cover, the landing gate — reads
+            // them immediately. `layoutIfNeeded` above already delivers that:
+            // the cells exist and are laid out, which is what those readers
+            // actually need.
+            //
+            // What the flush additionally did was flush UIKIT'S OWN
+            // TRANSACTION, and this method runs inside one on the back-button
+            // path: the adoption is asked for from `animationControllerFor`,
+            // which UIKit calls while committing the pop. Flushing there
+            // aborted the pop — the animator was returned and then never
+            // started, no `animateTransition`, no `didShow`, no completion. On
+            // screen: the closed post's navigation bar still up over the grid,
+            // and the row the close had concealed hidden for good, because the
+            // completion that puts it back never ran.
+            //
+            // Measured by removing exactly this line: the same close then
+            // logged `reveal animate` → `conceal=false` → `ended completed=true`.
         }
         // The landing tile is about to be flown onto; give its cover a head
         // start in case the cache does not already hold it.
         if let url = posts[slot].thumbnailURL { imagePipeline.prefetch([url]) }
+        return true
+    }
+
+    /// Puts a post the list no longer holds INTO it, at the departure slot.
+    ///
+    /// Whole-table, unconditionally: an insert changes the count of whichever
+    /// section it lands in, and `split` — the leading run of arrivals — can
+    /// change with it, so there is no targeted update that can honestly
+    /// describe this. The cost is the same one the swap pays when the run
+    /// moves, and it is paid under a screen the post being dismissed is
+    /// covering.
+    private func insertPost(_ post: GalleryPost, at slot: Int) -> Bool {
+        posts.insert(post, at: slot)
+        UIView.performWithoutAnimation {
+            collectionView.reloadData()
+            // The caller reads the landing rect from a realized cell the moment
+            // this returns; `reloadData` alone leaves `cellForItem` answering
+            // nil and the flight collapses to the middle of the screen.
+            collectionView.layoutIfNeeded()
+            if let cell = collectionView.cellForItem(at: indexPath(for: slot)) {
+                cell.isHidden = false
+                cell.alpha = 1
+                cell.layoutIfNeeded()
+            }
+        }
+        if let url = post.thumbnailURL { imagePipeline.prefetch([url]) }
         return true
     }
 
@@ -1717,9 +1944,87 @@ final class ForYouGridPage: UIView {
     /// Hides the row a reveal's window was taken from, for the flight's length.
     /// See `revealConcealedPostID` for why this does not go through
     /// `setHeroHidden`.
+    /// Reveals whatever row a reveal is currently hiding, whoever hid it.
+    ///
+    /// A belt for the one path that can strand a concealment: a card-shaped
+    /// close CANCELLED leaves the row hidden under the page it sprang back to —
+    /// correct, since the page is covering it — and the viewer may then leave
+    /// by another route entirely (paging to a post that flies, and tapping
+    /// back). Nothing in that second transition knows a row is waiting to be
+    /// put back.
+    func clearRevealConcealment() {
+        guard let postID = revealConcealedPostID else { return }
+        setRevealConcealed(false, for: postID)
+    }
+
+    /// Puts back whatever a FLIGHT hid, whoever ended up finishing the close.
+    ///
+    /// ⚠️ THE HIDE AND THE UNHIDE CAN BELONG TO DIFFERENT DRIVERS, and that is
+    /// the whole reason this exists. The push hides the tapped row's media so
+    /// the card flies alone, and the flight's own return puts it back — but the
+    /// feed is a PAGER: page onto a text post and the close is the card
+    /// driver's, so the flight never runs a return leg and never unhides
+    /// anything. The row came back with its caption and a blank where its
+    /// photograph had been, for the rest of the session.
+    ///
+    /// Reported after several round trips, because it accumulates: one row per
+    /// visit that ended on another kind of post. The sweep inside
+    /// `setHeroHidden(false:)` is what collects the ones neither reference
+    /// still names.
+    func clearHeroConcealment() {
+        // ⚠️ NO GUARD ON THE FLAGS, and the first version of this had one.
+        //
+        // The flags are what a leak may well NOT have. The post→cell mapping is
+        // not stable across a flight — staging swaps the landed post into the
+        // departure slot — so an unhide by lookup can clear the wrong instance
+        // and nil the flags while the cell that was actually hidden stays at
+        // alpha 0. A guard would skip the sweep in exactly that case, and the
+        // sweep costs one pass over the visible cells.
+        //
+        // (What actually fixed the reported leak was WHERE this is called from
+        // — `viewDidAppear` rather than a driver's callback. The guard was
+        // dropped alongside it and the two were never measured apart; this is
+        // the cheaper of the two shapes to be wrong about.)
+        setHeroHidden(false, for: heroHiddenPostID ?? heroFlyingPostID ?? PostID(""))
+    }
+
     func setRevealConcealed(_ concealed: Bool, for postID: PostID) {
         revealConcealedPostID = concealed ? postID : nil
-        (cell(for: postID) as? PostGridListRowCell)?.setHeroConcealed(concealed)
+        let row = cell(for: postID) as? PostGridListRowCell
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+            // Whether the row it names is REALIZED, because a concealment
+            // applied to nothing looks exactly like one that was never asked
+            // for — and the row it must hide is the one a dismissal just
+            // adopted into the departure slot.
+            print("[text-reveal] conceal=\(concealed) post=\(postID.rawValue)"
+                + " row=\(row == nil ? "MISSING" : "found")")
+        }
+        #endif
+        row?.setHeroConcealed(concealed)
+        // ⚠️ THE INSTANCE, NOT JUST THE ID — the hero channel has kept one of
+        // these since the day a lookup cleared the wrong cell, and this channel
+        // never got the same treatment.
+        //
+        // The post→cell mapping is not stable across a close: it ADOPTS, which
+        // moves posts between slots, so by the time the concealment is lifted
+        // `cell(for:)` can resolve the id to a different instance, or to none at
+        // all. A live capture of a reported session shows the precondition
+        // happening five times in one minute — `row=MISSING`, once of them on a
+        // `conceal=true`.
+        //
+        // ⚠️ DEFENSIVE BY ANALOGY, NOT MEASURED. Every route to it reachable
+        // from a test recycles the cell on the way, and reuse now clears both
+        // channels, so nothing here fails without this guard. It is kept
+        // because the sibling channel earned the same one the hard way and the
+        // cost is a weak reference — but it has not been shown to fix anything,
+        // and this note is what stops the next reader assuming it did.
+        if concealed {
+            revealConcealedCell = row
+        } else {
+            revealConcealedCell?.setHeroConcealed(false)
+            revealConcealedCell = nil
+        }
     }
 
     func setHeroHidden(_ hidden: Bool, for postID: PostID, conceals: Bool = true) {
@@ -2169,7 +2474,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         guard !showsSkeleton, !posts.isEmpty else { return }
         let remaining = scrollView.contentSize.height
             - (scrollView.contentOffset.y + scrollView.bounds.height)
-        guard remaining < Self.prefetchDistance else { return }
+        guard remaining < prefetchDistance else { return }
         onNearEnd?()
     }
 

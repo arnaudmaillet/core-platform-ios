@@ -632,6 +632,43 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         pageStage.frame = contentView.bounds
         contentView.addSubview(pageStage)
 
+        // ⚠️ A HAIRLINE AT EACH END, and it is not decoration.
+        //
+        // Every page here fills the screen edge to edge, so two of them in a
+        // row have no boundary at all: a light text page followed by a light
+        // text page reads as one surface that changed its mind, and a paging
+        // gesture that lands halfway shows no seam to say so. One pixel of
+        // black at the top and bottom is the whole of the answer — the pages
+        // are separated by the same line the platform uses between anything
+        // else, and it costs nothing to draw.
+        //
+        // On `contentView` rather than `pageStage`: the stage is transformed
+        // by the engagement, and a separator that scaled with it would stop
+        // being one pixel.
+        for edge in [pageSeparatorTop, pageSeparatorBottom] {
+            // ⚠️ NOT BLACK. A hard black line between two light pages is louder
+            // than the boundary it marks — it reads as a border drawn around
+            // the content rather than as the seam between two of them. The
+            // platform's own separator is the right weight and follows the
+            // theme, which matters here because the pages either side of it can
+            // be light or dark independently.
+            edge.backgroundColor = .separator
+            edge.isUserInteractionEnabled = false
+            edge.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(edge)
+        }
+        let hairline = 1 / (window?.screen.scale ?? UIScreen.main.scale)
+        NSLayoutConstraint.activate([
+            pageSeparatorTop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            pageSeparatorTop.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            pageSeparatorTop.topAnchor.constraint(equalTo: contentView.topAnchor),
+            pageSeparatorTop.heightAnchor.constraint(equalToConstant: hairline),
+            pageSeparatorBottom.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            pageSeparatorBottom.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            pageSeparatorBottom.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            pageSeparatorBottom.heightAnchor.constraint(equalToConstant: hairline)
+        ])
+
         // Text-only posts' gradient page background lives inside the chrome
         // (shared with the hero flight's replica, so the landing swap can't
         // mismatch), not here. The media card hosts both render surfaces
@@ -1296,6 +1333,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Reclaims the region after disengagement settles (the VC removes the
     /// child's view; this clears the cell-side scaffolding).
+    /// Whether this cell is currently showing a comments panel.
+    ///
+    /// The one question a caller can ask about the DISPLAY without knowing how
+    /// the panel got here — which is what a specification has to be written
+    /// against, since every defect in this area has been a difference between
+    /// the bookkeeping and the pixels.
+    var isShowingComments: Bool {
+        // ⚠️ AND VISIBLE. A panel is installed at alpha 0 and revealed by the
+        // engagement, so a media page's parked tap-to-comments WARM is hosted
+        // here too — present, and showing nothing. Counting it would make the
+        // specification claim a media page displays a thread it does not.
+        !commentsContainer.isHidden
+            && commentsContainer.alpha > 0
+            && !commentsContainer.subviews.isEmpty
+    }
+
     func clearComments() {
         commentsContainer.subviews.forEach { $0.removeFromSuperview() }
         commentsContainer.isHidden = true
@@ -1439,7 +1492,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // themselves, which is what keeps them from disagreeing (see
         // `SnapChromeTheme`). The screen's bars live outside this tree and
         // are set from the same rule in `SnapFeedViewController`.
-        contentView.overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: hasMedia)
+        pageHasMedia = hasMedia
+        applyPageTheme()
         // Composition is POSITIONAL now (the info card's frame is set at
         // install per `hasMedia`), so the info card itself is format-
         // agnostic — its caption always starts at its own inner padding.
@@ -2150,6 +2204,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the CARD rather than trusting the instruction that was sent to it.
     var debugCurrentMediaPage: Int { mediaCard.currentPage }
 
+    /// Which page a DISMISSAL is leaving from, or nil when this post is not a
+    /// collection at all.
+    ///
+    /// The mirror of `showMediaPage`, and it exists for the same reason that
+    /// one does: the card a close flies carries the page the viewer is looking
+    /// at, so the row it lands on has to be showing that page and not the first
+    /// one. Nil rather than zero — "this post has no pages" and "this post is
+    /// on its first page" are different answers, and only one of them means
+    /// "leave the row alone".
+    var currentMediaPage: Int? {
+        mediaCard.showsCollection ? mediaCard.currentPage : nil
+    }
+
     /// Which pages are holding a playback surface — the retention window's
     /// footprint, which is otherwise invisible from outside.
     var debugSurfacedPages: [Int] { mediaCard.surfacedPages }
@@ -2236,6 +2303,31 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // applies the full wash unconditionally, which put a text page's
         // wash back every time the screen re-appeared.
         UIView.performWithoutAnimation { mediaBackdrop.setDim(backdropDim(at: 0)) }
+    }
+
+    /// Which theme this page draws in, resolved against the DEVICE rather than
+    /// against the screen — see `SnapChromeTheme.style(hasMedia:device:)`.
+    ///
+    /// Re-applied when the cell joins a window because that is the first moment
+    /// the device's style is knowable: a cell dequeued in `cellForItemAt` has no
+    /// window yet, and a text page that resolved its theme before then took the
+    /// screen's pin instead.
+    private var pageHasMedia = false
+    /// The one-pixel seam between one full-screen page and the next — see the
+    /// note where they are added.
+    private let pageSeparatorTop = UIView()
+    private let pageSeparatorBottom = UIView()
+
+    private func applyPageTheme() {
+        contentView.overrideUserInterfaceStyle = SnapChromeTheme.style(
+            hasMedia: pageHasMedia,
+            device: window?.traitCollection.userInterfaceStyle ?? .unspecified
+        )
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        applyPageTheme()
     }
 
     override func prepareForReuse() {

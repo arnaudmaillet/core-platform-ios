@@ -81,17 +81,37 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// engine — asks what a post is in order to group it.
     private static func venueAssignments(for posts: [MockSocialDataset.PostRecord]) -> [String: Venue] {
         var assignments: [String: Venue] = [:]
-        var text = posts.lazy.filter { $0.media == nil }.map(\.postID).makeIterator()
+        // ⚠️ TEXT MEMBERS COME FROM THE CORPUS BODY, NEVER FROM THE ARRIVALS —
+        // and that is what keeps the mixed venue wearing a text face.
+        //
+        // A marker's face is its most-liked member, but the Radar path hydrates
+        // counters only when the caller passes a counter client: without one
+        // every pin arrives at likeCount 0 and the choice falls through to the
+        // members' id order (`MapClusterEngine.representative` keeps the first
+        // on ties). `post-00xx` sorts before `post-new-xx`, so the mixed venue's
+        // face was a text post for exactly one reason — one text post from the
+        // corpus body sat in it while all its media came from the arrivals.
+        //
+        // The arrivals are a FEED fixture. It gained a second text post (an
+        // adjacent text pair the snap pager needs), the venue walk took both,
+        // no `post-00xx` text member was left, and the mixed marker turned
+        // media-faced — failing `aTextFacedMixedClusterOpensBothKinds`, in a
+        // package that had not been touched. Drawing text from the body pins
+        // the property to something the Feed cannot move.
+        var text = posts.lazy
+            .filter { $0.media == nil && !$0.postID.hasPrefix(MockSocialDataset.arrivalIDPrefix) }
+            .map(\.postID).makeIterator()
         var media = posts.lazy.filter { $0.media != nil }.map(\.postID).makeIterator()
         func assign(_ venue: Venue, text textCount: Int, media mediaCount: Int) {
             for _ in 0..<textCount { if let id = text.next() { assignments[id] = venue } }
             for _ in 0..<mediaCount { if let id = media.next() { assignments[id] = venue } }
         }
         // ⚠️ These counts are load-bearing beyond clustering: which posts land
-        // here decides each venue's MOST-LIKED member, and that is the face
-        // under popularity representatives — the text-faced-mixed fixture
-        // (`aTextFacedMixedClusterOpensBothKinds`) rests on the current
-        // arithmetic. The PLACE PROFILE's three tabs don't need more members
+        // here decides each venue's MOST-LIKED member, and that is the face the
+        // app draws. `aTextFacedMixedClusterOpensBothKinds` rests on the
+        // arithmetic too, but on the OTHER half of it: that suite builds its
+        // repository without a counter client, so its pins are all at likeCount
+        // 0 and the id order decides instead — see the note on the text walk. The PLACE PROFILE's three tabs don't need more members
         // at venue scale: the mixed venue already spans all three kinds, and
         // the city/region markers roll up the whole zone's corpus.
         assign(mixedVenue, text: 2, media: 3)

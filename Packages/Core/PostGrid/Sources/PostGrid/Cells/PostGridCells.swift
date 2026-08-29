@@ -989,7 +989,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     /// Whether a flight is currently standing in for this row's media.
-    private(set) var isHeroMediaConcealed = false
+    /// Readable so a caller can assert the END STATE of a transition rather
+    /// than the calls that were supposed to produce it. A row whose media is
+    /// still standing in for a flight that ended is the shipped defect this
+    /// answers — and it is invisible to every test that only counts hides.
+    public private(set) var isHeroMediaConcealed = false
 
     /// Brings the chips, the date and the badge back with a settle rather than
     /// a switch.
@@ -1060,11 +1064,30 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// post twice, side by side, which is not a hero picking a card up; it is a
     /// copy being made. The grid keeps the row's SLOT either way, so nothing
     /// reflows underneath while the viewer is holding it.
+    /// ⚠️ CONCEALING CHOOSES A CHANNEL; RESTORING PUTS BACK BOTH.
+    ///
+    /// The routing reads `mediaView.isHidden` — which post this row is bound to
+    /// RIGHT NOW — and a flight outlives that answer. Conceal a text row (the
+    /// whole card goes to alpha 0), let the row be reconfigured with a post
+    /// that HAS media, and the restore took the other branch: it cleared a
+    /// media concealment that was never set and left the card at alpha 0. An
+    /// invisible card that still holds its slot is a hole in the feed, one card
+    /// tall, and it survives every later pass because nothing else looks at
+    /// that channel.
+    ///
+    /// Asymmetric on purpose: hiding the wrong thing shows the post twice mid
+    /// flight, so the conceal has to be exact. Putting back something that was
+    /// never taken costs nothing.
     public func setHeroConcealed(_ concealed: Bool) {
+        guard concealed else {
+            card.alpha = 1
+            setHeroMediaConcealed(false)
+            return
+        }
         if mediaView.isHidden {
-            card.alpha = concealed ? 0 : 1
+            card.alpha = 0
         } else {
-            setHeroMediaConcealed(concealed)
+            setHeroMediaConcealed(true)
         }
     }
 
@@ -1929,6 +1952,16 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // longer has, and keep the preview it now uses at alpha 0.
         setHeroMediaConcealed(false)
         mediaView.alpha = 1
+        // ⚠️ AND THE CARD, which is the channel a TEXT row is concealed on.
+        //
+        // This listed two channels and had three. A text row is concealed by
+        // taking the whole card to alpha 0 — it has no preview to hide — and
+        // that was the one nothing here put back. A recycled row therefore
+        // arrived bound to a new post with `card.alpha` still 0: invisible, but
+        // holding its slot, which is a HOLE in the feed exactly the height of a
+        // card. Reported after several round trips, because each one can leave
+        // another.
+        card.alpha = 1
         loadTask?.cancel()
         loadTask = nil
         mediaView.image = nil

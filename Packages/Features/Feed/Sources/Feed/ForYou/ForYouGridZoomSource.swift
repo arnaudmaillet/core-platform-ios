@@ -33,6 +33,15 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// The post the destination is showing right now, injected so this type
     /// never has to know what a feed is.
     private let activePostID: () -> PostID?
+    /// The feed's own copy of a post, for the case where the page being landed
+    /// in no longer holds it. Optional: a caller with no corpus to consult
+    /// simply cannot land on a post the page has dropped, which is where this
+    /// stood before.
+    private let landedModel: ((PostID) -> GalleryPost?)?
+    /// Which page of the landed post's collection the destination is showing,
+    /// so the row can be put on it before the card arrives. Nil for a caller
+    /// with no collections to speak of.
+    private let activeMediaPage: (() -> Int?)?
     /// Falls back to a centred collapse at this size when the anchor has no
     /// realized cell — the same rule the pin uses when it is panned off-screen.
     private let fallbackSide: CGFloat = 96
@@ -54,6 +63,8 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         page: ForYouGridPage,
         tappedID: PostID,
         activePostID: @escaping () -> PostID?,
+        landedModel: ((PostID) -> GalleryPost?)? = nil,
+        activeMediaPage: (() -> Int?)? = nil,
         depthView: UIView?,
         hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)? = nil,
         poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)? = nil,
@@ -67,6 +78,8 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         anchorID = tappedID
         departureID = tappedID
         self.activePostID = activePostID
+        self.landedModel = landedModel
+        self.activeMediaPage = activeMediaPage
         self.depthView = depthView
         self.donateLive = donateLive
     }
@@ -88,10 +101,36 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     // MARK: - ZoomTransitionSource
 
     func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect {
-        guard let hero = page?.hero(for: anchorID, in: container), zoomSourceIsOnScreen else {
-            return ZoomTransitionGeometry.centeredFallback(in: container.bounds, side: fallbackSide)
+        if let hero = page?.hero(for: anchorID, in: container), zoomSourceIsOnScreen {
+            return hero.frame
         }
-        return hero.frame
+        // ⚠️ THE ROW ITSELF, BEFORE THE MIDDLE OF THE SCREEN.
+        //
+        // A close ends up anchored to a post with no hero more often than the
+        // opening ever could: the anchor is re-pointed at whatever the viewer
+        // paged to, and if that post cannot be landed on the anchor stays the
+        // DEPARTURE post — which, for a text post opened as a window, has no
+        // media either. Both specific rects then answer nil and the card
+        // collapsed into the centre of the screen, flying a blank placeholder.
+        // Reported exactly that way: "the transition window returns to the
+        // middle of the screen".
+        //
+        // The row is always an honest answer: it is where that post lives, and
+        // the card lands on the card the viewer is coming back to.
+        if zoomSourceIsOnScreen, let row = page?.rowFrame(for: anchorID, in: container) {
+            return row
+        }
+        #if DEBUG
+        // `-zoom-live-log`: the centre is the answer of no answer, and on its
+        // own it says nothing about WHY — no rect for this post, or no row on
+        // screen at all. Reaching here at all means both.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] NO RECT anchor=\(anchorID.rawValue)"
+                + " onScreen=\(zoomSourceIsOnScreen)"
+                + " inFeed=\(page?.post(for: anchorID) != nil)")
+        }
+        #endif
+        return ZoomTransitionGeometry.centeredFallback(in: container.bounds, side: fallbackSide)
     }
 
     var zoomSourceIsOnScreen: Bool {
@@ -247,9 +286,25 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // give. What that case actually wants is the REVEAL, chosen at the
         // grab rather than at the tap, which is a change to which driver is
         // installed rather than to where it lands.
-        let landedCanFly = activePostID().map { page?.heroAppearance(for: $0) != nil } ?? false
-        if landedCanFly, let landed = activePostID(),
-           page?.adoptPost(landed, intoSlotOf: departureID) == true {
+        // ⚠️ THE MODEL DECIDES, NOT A REALIZED CELL — see `canLandHero(on:)`.
+        //
+        // This asked `heroAppearance`, which reads the cell, and the post being
+        // dismissed is the one the viewer paged to: the further they went, the
+        // more certain the row was outside the realized window and the answer
+        // was "cannot fly" for a photograph that plainly could. Nine pages down
+        // it declined every time, and the flight landed on the departure tile —
+        // the viewer closed one post and watched another land.
+        let landed = activePostID()
+        // Resolved from the page when it has it, and from the feed's whole
+        // corpus when it does not — the adoption inserts in that case.
+        let model = landed.flatMap { page?.post(for: $0) ?? landedModel?($0) }
+        if let landed, let model, page?.canLandHero(on: model) == true,
+           page?.adoptForClose(
+               landed, intoSlotOf: departureID, orInsert: model,
+               // A flight carries the MEDIA, not the row: it conceals its own
+               // landing below, on the hero channel.
+               standingIn: false
+           ) == true {
             // The active post now occupies the departure slot, so anchoring to
             // it lands on that tile without moving anything.
             anchorID = landed
@@ -259,12 +314,37 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             // departure tile itself rather than on a rect that no longer exists.
             anchorID = departureID
         }
+        // ⚠️ AND ONTO THE PAGE THE VIEWER IS ACTUALLY LOOKING AT.
+        //
+        // The card a close flies carries ONE page of a collection — the one on
+        // screen — and the row it lands on keeps whatever page it was left on,
+        // which for a row the viewer never touched is the first. So a close
+        // from page four landed a photograph of page four onto a row showing
+        // page one, and the swap was visible at the exact moment the card was
+        // removed. The opening has had this in both directions since
+        // `openMediaPage`; the close only ever had it in one.
+        //
+        // Nil means "not a collection", which is why the row is left alone
+        // rather than sent to page zero.
+        if let landed = activeMediaPage?() { page?.setMediaPage(landed, for: anchorID) }
         // The scope was opened for the TAPPED post; the landing is on this one.
         // Without this the reconcile that fires when the tile is unhidden stops
         // the surface it has just been handed.
         page?.retargetPlaybackHandoff(to: anchorID)
-        // Visible for the whole return: the card is landing ON this tile.
-        page?.setHeroHidden(true, for: anchorID, conceals: false)
+        // ⚠️ THE CARD STAYS, THE MEDIA GOES — on a timeline.
+        //
+        // `conceals: false` here meant the landing row was fully visible under
+        // the incoming card, and for a TILE that is right: concealing a tile
+        // hides the whole cell, so the grid would show a hole for the length of
+        // the flight.
+        //
+        // A row is not a tile. Concealing it takes the PREVIEW and leaves the
+        // card — its header, caption and counters — which is exactly what the
+        // landing wants: the viewer sees the card they are returning to, with a
+        // gap where the photograph belongs, and the flying media fills it. With
+        // the preview left showing, the same photograph was on screen twice for
+        // the whole return, and the card's arrival had nothing to arrive into.
+        page?.setHeroHidden(true, for: anchorID, conceals: page?.landingConcealsMedia == true)
     }
 
     /// A tile whose post is no longer in the grid still needs a card to fly —

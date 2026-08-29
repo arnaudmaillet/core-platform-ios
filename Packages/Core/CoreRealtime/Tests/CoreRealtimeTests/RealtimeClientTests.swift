@@ -11,12 +11,18 @@ private func makeClient(server: MockRealtimeServer, token: String = "edge-token"
 }
 
 /// Waits for `condition` to become true, polling; fails the test on timeout.
+///
+/// ⚠️ BOUNDED BY TRIES, NOT BY A CLOCK. Two seconds of wall time is a claim
+/// about the machine, not about the work: CI runs every package's tests at
+/// once, and the same budget that is a thousandfold margin on a quiet laptop
+/// expires mid-test there — reported as the assertion failing, which reads
+/// like a broken subscription and is nothing of the kind. The sibling helper in
+/// `FeedEngagementTests` turned CI red exactly that way.
 private func eventually(
-    timeout: TimeInterval = 2,
+    tries: Int = 1500,
     _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    for _ in 0..<tries {
         if await condition() { return true }
         try? await Task.sleep(nanoseconds: 10_000_000)
     }

@@ -102,9 +102,15 @@ struct ForYouPagingFooterTests {
         #expect(page.additionalBottomInset == 88)
     }
 
-    /// A list page has no footer: it is a timeline, and pagination there is not
-    /// this surface's concern.
-    @Test func listPagesIgnorePaging() {
+    /// ⚠️ A TIMELINE OWES THE FOOTER MORE THAN A GRID DOES, and this test used
+    /// to assert the opposite: that a list page ignores paging entirely.
+    ///
+    /// That was the rule until someone read the timeline. Its rows are a screen
+    /// tall, so the end of a page is a few flicks away, and until the next
+    /// batch landed the list simply stopped — no spinner, no sign anything was
+    /// coming, indistinguishable from the end of the feed. A grid hid the same
+    /// wait behind three columns of tiles.
+    @Test func aTimelineReservesTheFooterBandToo() {
         let list = ForYouGridPage(imagePipeline: pipeline(), style: .list)
         list.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         list.additionalBottomInset = 88
@@ -112,6 +118,10 @@ struct ForYouPagingFooterTests {
         let scroll = list.subviews.compactMap { $0 as? UIScrollView }.first!
 
         list.setPaging(true)
-        #expect(scroll.contentInset.bottom == 88, "a list page reserved a footer band")
+        #expect(scroll.contentInset.bottom > 88, "a timeline showed no sign the next page was coming")
+
+        list.setPaging(false)
+        scroll.layoutIfNeeded()
+        #expect(list.additionalBottomInset == 88, "the band outlived the fetch")
     }
 }

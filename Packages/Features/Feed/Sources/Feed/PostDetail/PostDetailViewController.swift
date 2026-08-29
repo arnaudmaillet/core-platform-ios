@@ -802,8 +802,32 @@ final class PostDetailViewController: UIViewController {
         )
         rest.priority = .defaultHigh
         composeBottomEngaged = [keyboard, rest]
-        NSLayoutConstraint.activate(composeBottomEngaged)
+        composerKeyboardCeiling = keyboard
+        keyboard.isActive = composerTracksKeyboard
+        rest.isActive = true
     }
+
+    /// Whether the composer is allowed to be lifted by the KEYBOARD.
+    ///
+    /// ⚠️ THE CEILING IS ANCHORED TO THE SCREEN, and a page that is only
+    /// partly on it hangs below. `keyboardLayoutGuide` is a window-space guide:
+    /// with no keyboard up its top sits at the bottom of the SCREEN, and the
+    /// constraint is required — so a panel whose own view extends past the
+    /// bottom (a page scrolling in, whose cell is still half below) has its
+    /// composer pinned to the screen's edge instead of travelling with the
+    /// page. Two composers are then visible at once: the page's, moving, and
+    /// this one, stuck. Reported exactly that way.
+    ///
+    /// Only the page a viewer can actually type on needs it, so it is granted
+    /// rather than assumed — off while a panel is standing in for a page that
+    /// is arriving, on when that page becomes the one being read.
+    func setComposerTracksKeyboard(_ tracks: Bool) {
+        composerTracksKeyboard = tracks
+        composerKeyboardCeiling?.isActive = tracks
+    }
+
+    private var composerTracksKeyboard = true
+    private weak var composerKeyboardCeiling: NSLayoutConstraint?
 
     // MARK: - Render
 
