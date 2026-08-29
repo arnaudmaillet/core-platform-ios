@@ -1161,30 +1161,41 @@ struct SnapCommentsPresentationTests {
         #expect(feed.toolbarItems ?? [] == resting)
     }
 
-    /// ⚠️ AND THE BACK ARROW STAYS PUT, in every state.
+    /// ⚠️ AND THE BACK ARROW KEEPS THE EDGE, in every state.
     ///
     /// The exit used to take this slot on a media post, which cost the screen
     /// its way OUT while the layout was open: leaving the post meant closing
     /// the comments first and then going back — two gestures for one
     /// intention. The two answer different questions (leave the screen vs.
     /// leave the layout) and now have different places to say so.
-    @Test func theBackArrowKeepsItsSlotThroughTheEngagement() {
+    ///
+    /// The group GROWS around it — the sort joins inboard while the thread is
+    /// open — so the assertion is that the arrow is still the item at the
+    /// screen's edge, not that the group is untouched.
+    @Test func theBackArrowKeepsTheEdgeThroughTheEngagement() throws {
         let (_, feed) = Self.chromeHost()
-        let restingItems = feed.navigationItem.leftBarButtonItems ?? []
-        #expect(restingItems.count == 1)
+        let arrow = try #require(feed.navigationItem.leftBarButtonItems?.first)
 
-        feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(feed.navigationItem.leftBarButtonItems ?? [] == restingItems)
-        #expect(!Self.leadingLabels(feed).contains("Close comments"))
+        for hasMedia in [true, false] {
+            feed.setEngagedChrome(true, hasMedia: hasMedia, animated: false)
+            #expect(feed.navigationItem.leftBarButtonItems?.first === arrow,
+                    Comment(rawValue: "the arrow lost the edge (hasMedia: \(hasMedia))"))
+            #expect(!Self.leadingLabels(feed).contains("Close comments"))
+        }
 
-        feed.setEngagedChrome(true, hasMedia: false, animated: false)
-        #expect(feed.navigationItem.leftBarButtonItems ?? [] == restingItems)
+        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == [arrow])
     }
 
     /// A TAB-ROOT feed has no back arrow — and still gains the ✕, in the
     /// corner. The two answer different questions, and only the second is
     /// always available.
-    @Test func aTabRootFeedWithNoBackArrowStillGetsTheExit() {
+    ///
+    /// ⚠️ AND THE SORT STANDS ALONE THERE, with no spacer: the leading group's
+    /// fixed space exists to keep the arrow and the sort two pills, and with no
+    /// arrow there is nothing to keep apart. A leading run that opened with a
+    /// spacer would indent the sort off the screen's edge for no reason.
+    @Test func aTabRootFeedWithNoBackArrowStillGetsTheExit() throws {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: EmptyFeedProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
@@ -1199,36 +1210,49 @@ struct SnapCommentsPresentationTests {
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         #expect((feed.toolbarItems?.last?.customView as? UIButton)?.accessibilityLabel
                 == "Close comments")
+        let leading = feed.navigationItem.leftBarButtonItems ?? []
+        #expect(leading.count == 1)
+        #expect(leading.first?.customView is SnapCommentSortButton)
+
+        feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
     }
 
-    /// The trailing pair reads [⇅ sort] [author] — `rightBarButtonItems` is
-    /// indexed right-to-left, so the author is index 0 and the sort lands to
-    /// its left, separated by the fixed space that keeps them two pills
-    /// instead of one shared iOS 26 platter.
-    @Test func commentModeAddsTheSortPillLeftOfTheAuthor() throws {
+    /// ⚠️ THE SORT SITS BESIDE THE BACK ARROW: [‹ back] [⇅ sort], and
+    /// `leftBarButtonItems` is indexed LEFT to right, so the arrow is index 0
+    /// and the sort lands inboard of it — separated by the fixed space that
+    /// keeps them two pills instead of one shared iOS 26 platter.
+    ///
+    /// It rode the TRAILING run twice, inboard of the author and then outboard
+    /// of the balance, and neither read: the sort is a control over the thread
+    /// below, and the trailing end of this bar is where the post's own identity
+    /// lives. This end is the one that says what the screen is doing.
+    @Test func commentModeAddsTheSortPillBesideTheBackArrow() throws {
         let (_, feed) = Self.chromeHost()
-        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
+        let resting = feed.navigationItem.leftBarButtonItems ?? []
+        #expect(resting.count == 1) // the back arrow alone
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        let engaged = feed.navigationItem.rightBarButtonItems ?? []
+        let engaged = feed.navigationItem.leftBarButtonItems ?? []
         #expect(engaged.count == 3)
-        #expect(engaged[0].customView is SnapAuthorIdentityView)
-        #expect(engaged[1].customView == nil) // the fixed space
+        #expect(engaged[0] === resting.first)   // the arrow keeps the edge
+        #expect(engaged[1].customView == nil)   // the fixed space
         #expect(engaged[2].customView is SnapCommentSortButton)
+        // …and the trailing run is untouched by the engagement.
+        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
-        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting)
     }
 
-    /// ⚠️ WITH A BALANCE, THE RUN READS [⇅ sort] [◎ balance] [author].
+    /// ⚠️ THE WHOLE BAR, ENGAGED: [‹ back] [⇅ sort] ——— [◎ balance] [author].
     ///
-    /// `rightBarButtonItems` is indexed right-to-left, so the array is the bar
-    /// reversed: author first, then the balance, then the sort furthest from
-    /// the screen edge. The two were the other way round — balance beside the
-    /// author — which put the one item that has nothing to do with this post
-    /// between the post's own pill and the control that orders its thread.
-    @Test func theBalanceSitsBetweenTheSortAndTheAuthor() throws {
+    /// Stated end to end in one place, because the arrangement is the product
+    /// decision and it has moved three times: the two groups say different
+    /// kinds of thing — what the screen is DOING on the left, what the post IS
+    /// on the right — and a rule that only pins one half cannot catch an item
+    /// crossing between them.
+    @Test func theEngagedBarReadsBackSortThenBalanceAuthor() throws {
         let suite = "snap.chrome.order.test"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.removePersistentDomain(forName: suite)
@@ -1245,13 +1269,20 @@ struct SnapCommentsPresentationTests {
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
 
-        let items = feed.navigationItem.rightBarButtonItems ?? []
-        #expect(items.count == 5, "the run is [author][space][balance][space][sort]: \(items.count)")
-        #expect(items[0].customView is SnapAuthorIdentityView)
-        #expect(items[1].customView == nil) // the fixed space that keeps them two pills
-        #expect(items[2].customView is WalletBadgeButton)
-        #expect(items[3].customView == nil)
-        #expect(items[4].customView is SnapCommentSortButton)
+        // LEADING, left to right: the arrow then the sort.
+        let leading = feed.navigationItem.leftBarButtonItems ?? []
+        #expect(leading.count == 3, "the leading group is [back][space][sort]: \(leading.count)")
+        #expect(leading[1].customView == nil) // the fixed space that keeps them two pills
+        #expect(leading[2].customView is SnapCommentSortButton)
+
+        // TRAILING, right to left: the author at the edge, the balance inboard.
+        let trailing = feed.navigationItem.rightBarButtonItems ?? []
+        #expect(trailing.count == 3, "the trailing run is [author][space][balance]: \(trailing.count)")
+        #expect(trailing[0].customView is SnapAuthorIdentityView)
+        #expect(trailing[1].customView == nil)
+        #expect(trailing[2].customView is WalletBadgeButton)
+        // Nothing crossed between the groups.
+        #expect(trailing.contains { $0.customView is SnapCommentSortButton } == false)
     }
 
     /// The author pill goes COMPACT so both pills fit the trailing run.

@@ -935,22 +935,21 @@ final class SnapFeedViewController: UIViewController {
         }
 
         // ⚠️ READ RIGHT TO LEFT: `rightBarButtonItems[0]` is the one nearest the
-        // screen edge, so this array is the bar reversed. Left to right the run
-        // is [⇅ sort] [◎ balance] [author] — the sort OUTBOARD of the balance.
+        // screen edge, so this array is the bar reversed — left to right the
+        // run is [◎ balance] [author], in both states.
         //
-        // They were the other way round, balance then sort, on no stronger
-        // reason than the order they arrived in. The author pill and the sort
-        // are one thought — this post, and how its thread is ordered — so
-        // nothing belongs between them, and the balance is the item that has
-        // nothing to do with the post at all.
+        // The SORT is not here any more. It rode this run, first inboard of the
+        // author and then outboard of the balance, and neither reads: it is a
+        // control over the thread below it, not a fact about the post, and the
+        // trailing end of this bar is where the post's own identity lives. It
+        // sits beside the back arrow now (`applyLeadingNavItem`), which is the
+        // end that says what this screen is DOING rather than what it is about.
+        //
+        // The fixed space is what keeps the two separate pills: iOS 26 groups
+        // ADJACENT bar items into one shared glass platter.
         var navItems: [UIBarButtonItem] = [authorItem]
         if let walletBadgeItem {
             navItems += [.fixedSpace(Spacing.sm), walletBadgeItem]
-        }
-        // The fixed spaces are what keep these separate pills: iOS 26 groups
-        // ADJACENT bar items into one shared glass platter.
-        if engaged {
-            navItems += [.fixedSpace(Spacing.sm), sortItem]
         }
         applyTrailingNavItems(navItems, animated: animated)
 
@@ -989,6 +988,10 @@ final class SnapFeedViewController: UIViewController {
         let bar = navigationController?.navigationBar.bounds.width ?? view.bounds.width
         guard bar > 0 else { return }
 
+        // ⚠️ THE SORT IS STILL IN THIS ARITHMETIC, and it has to be: it moved to
+        // the LEADING group, which takes its width from the same bar. What the
+        // author can have is what the bar has left after everything else on it,
+        // whichever end that everything sits at.
         func authorBudget(sortWidth: CGFloat) -> CGFloat {
             let pad = Self.itemPlatterPadding
             return bar
@@ -1079,7 +1082,18 @@ final class SnapFeedViewController: UIViewController {
     /// footer's trailing corner instead (see `applyToolbarExit`), where it
     /// stands in the ⋯'s own bubble.
     private func applyLeadingNavItem(engaged: Bool, hasMedia: Bool, animated: Bool) {
-        let items = [backItem].compactMap { $0 }
+        // ⚠️ LEFT TO RIGHT here, unlike the trailing run: `leftBarButtonItems[0]`
+        // is the one nearest the screen edge. So this reads [‹ back] [⇅ sort],
+        // the sort just inboard of the arrow, with the fixed space that keeps
+        // them two pills rather than one shared platter.
+        //
+        // The sort belongs at this end: it is a control over the thread, and
+        // this is the end that carries what the screen is DOING. The trailing
+        // end carries who the post is by.
+        var items = [backItem].compactMap { $0 }
+        if engaged {
+            items += items.isEmpty ? [sortItem] : [.fixedSpace(Spacing.sm), sortItem]
+        }
         guard navigationItem.leftBarButtonItems ?? [] != items else { return }
         navigationItem.setLeftBarButtonItems(items, animated: animated)
     }
