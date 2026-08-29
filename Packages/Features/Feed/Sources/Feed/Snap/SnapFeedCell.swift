@@ -599,6 +599,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self else { return }
             self.chrome.setMediaPage(page)
             self.reconcilePagePlayback()
+            // A gallery's pages arrive one at a time, so turning to one is
+            // exactly the moment the answer to "is there a picture here" can
+            // change — in either direction.
+            self.refreshMediaLoader()
             self.onMediaPageChanged?(page)
         }
         chrome.onMediaPageRequested = { [weak self] page in
@@ -1501,6 +1505,23 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The media card selects its surface for the kind and clears any
         // prior frame; a text post's surface simply never receives content.
         mediaCard.configure(kind: hasMedia ? model.mediaKind : .image)
+        // ⚠️ ARMED HERE, ABOVE THE COLLECTION'S EARLY RETURN.
+        //
+        // It was armed after the single-media loads at the bottom, and a
+        // collection never reaches them: `showCollection` returns, so a gallery
+        // — the format most likely to be waiting on a download, since it has
+        // several — was the one format that never said it was waiting. Caught
+        // in the simulator, not by the suite: the specs build single-media
+        // pages, and every one of them passed.
+        //
+        // A CLIP'S POSTER IS NOT ITS MEDIA, which is the other half: the
+        // photograph waits with nothing on screen, the clip waits behind a
+        // still standing in for a video that has not started. The first decoded
+        // frame retires it either way.
+        mediaCard.renderView.onPictureAvailabilityChange = { [weak self] _ in
+            self?.refreshMediaLoader()
+        }
+        refreshMediaLoader()
 
         let isVideo = hasMedia && model.mediaKind == .video
         let isImage = hasMedia && model.mediaKind == .image
@@ -1560,6 +1581,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         if isVideo, let thumbnailURL = model.thumbnailURL {
             loadPoster(thumbnailURL, expecting: model.id, pipeline: pipeline)
         }
+        refreshMediaLoader()
     }
 
     /// Loads the video poster into the render view; shown under the player until
@@ -1669,6 +1691,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let image else { return }
             guard let self, self.representedID == id else { return }
             self.mediaCard.setImage(image)
+            self.refreshMediaLoader()
         })
     }
 
@@ -1755,6 +1778,118 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             prewarmNeighbouringClips()
         }
     }
+
+    // MARK: - The wait
+
+    /// How long a page may be missing its media before it says so.
+    ///
+    /// ⚠️ NOT ZERO, and the number is the whole design. A cached picture lands
+    /// within a frame or two of `configure`, so a spinner shown the instant a
+    /// page has nothing would flash on almost every page change — motion that
+    /// means "waiting" appearing where there was no wait is worse than the
+    /// silence it replaces. A quarter of a second is long enough that anything
+    /// still missing is a real fetch, and short enough that a real fetch is
+    /// announced before the viewer wonders.
+    private static let mediaLoaderGrace: TimeInterval = {
+        #if DEBUG
+        // `-media-wait-grace <ms>`: shortens (or removes) the delay, so the
+        // state can be filmed. It is otherwise close to unreachable in the
+        // simulator — the transition hands a page the picture it flew in with,
+        // and the warm window has the neighbours ready — which is the system
+        // working, and also why "I could not see it" is not evidence that it
+        // does not work.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-media-wait-grace"),
+           position + 1 < arguments.count, let milliseconds = Double(arguments[position + 1]) {
+            return milliseconds / 1000
+        }
+        #endif
+        return 0.25
+    }()
+    private var mediaLoaderTimer: Timer?
+
+    /// Whether the media area has the post's OWN picture on it.
+    ///
+    /// Deliberately not `isMediaContentRendering`, which answers a different
+    /// question for the hero landing: a postered clip is *presentable* there —
+    /// there is something to hand over to — and it is exactly the case this
+    /// must call a wait, because the poster is not the post's media.
+    private var hasItsOwnMedia: Bool {
+        guard mediaURL != nil else { return true }
+        if mediaCard.showsCollection {
+            return mediaCard.currentPageVideoURL == nil
+                ? mediaCard.isImageReady
+                : mediaCard.renderView.hasFrame
+        }
+        switch mediaKind {
+        case .video: return mediaCard.renderView.hasFrame
+        case .image: return mediaCard.isImageReady
+        }
+    }
+
+    /// Re-decides whether the page is announcing a wait.
+    ///
+    /// Called from every place the answer can change — the bind, the image
+    /// landing, the first decoded frame, a carousel page turn — rather than
+    /// polled: this is a fact the media surfaces already know, and asking them
+    /// on a timer would be inventing a signal that exists.
+    private func refreshMediaLoader() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media-wait] %.3f decide own=%@ armed=%@ showing=%@ url=%@",
+                         CACurrentMediaTime(), hasItsOwnMedia ? "Y" : "n",
+                         mediaLoaderTimer == nil ? "n" : "Y",
+                         mediaCard.isShowingLoader ? "Y" : "n",
+                         mediaURL?.lastPathComponent ?? "nil"))
+        }
+        #endif
+        guard !hasItsOwnMedia else {
+            mediaLoaderTimer?.invalidate()
+            mediaLoaderTimer = nil
+            mediaCard.setLoading(false)
+            return
+        }
+        guard mediaLoaderTimer == nil, !mediaCard.isShowingLoader else { return }
+        let timer = Timer.scheduledTimer(
+            withTimeInterval: Self.mediaLoaderGrace, repeats: false
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.mediaLoaderTimer = nil
+                // Asked AGAIN at the end of the grace, never assumed: the whole
+                // point of waiting is that the answer may have changed.
+                self.mediaCard.setLoading(!self.hasItsOwnMedia)
+            }
+        }
+        mediaLoaderTimer = timer
+    }
+
+    /// Drops the wait entirely — the recycle path.
+    private func cancelMediaLoader() {
+        mediaLoaderTimer?.invalidate()
+        mediaLoaderTimer = nil
+        mediaCard.setLoading(false)
+    }
+
+    #if DEBUG
+    /// Whether the page is announcing a wait, asked of the media area rather
+    /// than of any bookkeeping.
+    var debugIsShowingMediaLoader: Bool { mediaCard.isShowingLoader }
+
+    /// Runs the grace out now, so a spec does not have to sleep for it.
+    func debugElapseMediaLoaderGrace() {
+        mediaLoaderTimer?.invalidate()
+        mediaLoaderTimer = nil
+        mediaCard.setLoading(!hasItsOwnMedia)
+    }
+
+    /// Delivers a picture the way the pipeline would, so a spec can watch the
+    /// spinner go without a network.
+    func debugDeliverMedia() {
+        mediaCard.setImage(UIImage(systemName: "photo") ?? UIImage())
+        refreshMediaLoader()
+    }
+    #endif
 
     // MARK: - Viewport playback
 
@@ -2426,6 +2561,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // whether it has the screen, and a stale `true` would make that
         // message a no-op — the page would never start.
         ownsViewport = false
+        cancelMediaLoader()
         // Instant (unanimated) disengage: a recycled cell must come back
         // full-bleed. Ordered before the media/chrome resets it restores.
         setCommentsEngaged(false)
