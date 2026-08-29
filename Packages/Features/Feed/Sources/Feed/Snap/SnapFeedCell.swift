@@ -595,6 +595,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.onScrollPosition = { [weak self] position in
             self?.chrome.setMediaScrollPosition(position)
         }
+        mediaCard.onScrollSettled = { [weak self] page in
+            self?.chrome.setMediaScrollSettled(page)
+        }
         mediaCard.onPageChanged = { [weak self] page in
             guard let self else { return }
             self.chrome.setMediaPage(page)

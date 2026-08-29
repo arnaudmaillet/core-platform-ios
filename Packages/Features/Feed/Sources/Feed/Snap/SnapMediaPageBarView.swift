@@ -119,25 +119,50 @@ final class SnapMediaPageBarView: UIView {
             }
         }
         position = CGFloat(min(max(current, 0), count - 1))
+        settledPage = Int(position)
         setNeedsLayout()
         layoutIfNeeded()
     }
 
     /// The carousel moved, in fractional pages.
     ///
-    /// Applied IMMEDIATELY: this is the transposition, and a strip that eased
-    /// its way toward the finger would lag the pictures it describes. The
-    /// spring is somewhere else — see `pop(_:)`.
+    /// Applied IMMEDIATELY and with NOTHING ELSE: this is the transposition,
+    /// and a strip that eased its way toward the finger would lag the pictures
+    /// it describes.
+    ///
+    /// ⚠️ AND NO ACCENT HERE. The bounce used to fire at the crossing, with the
+    /// finger still down and the widths still reflowing — a stretch on top of a
+    /// reflow, twice per page on a long drag, which reads as the strip stumbling
+    /// rather than as motion. Reported as "pas très fluide", and the diagnosis
+    /// was right: two motions on one object, only one of which the viewer was
+    /// asking for. The accent belongs to the SETTLE — see `settle(at:)`.
     func setPosition(_ newPosition: CGFloat) {
         guard pageCount >= 2 else { return }
-        let clamped = min(max(newPosition, 0), CGFloat(pageCount - 1))
-        let crossed = Int(clamped.rounded()) != Int(position.rounded())
-        position = clamped
+        position = min(max(newPosition, 0), CGFloat(pageCount - 1))
         layoutSegments()
-        // The bounce lands on the CROSSING, which is the only moment in a drag
-        // that is a discrete event: the mark has just changed hands.
-        if crossed { pop(Int(clamped.rounded())) }
     }
+
+    /// The scroll came to rest on `page` — the snap at the end of a drag.
+    ///
+    /// This is the strip's one accent, and the only place it is allowed to
+    /// happen: at rest there is nothing else moving, so a bounce here is
+    /// punctuation rather than interference.
+    ///
+    /// ⚠️ ONLY WHEN THE PAGE ACTUALLY CHANGED. A drag that snaps back to where
+    /// it started is a settle too, and bouncing there would accent the absence
+    /// of an event.
+    func settle(at page: Int) {
+        guard pageCount >= 2 else { return }
+        let landed = min(max(page, 0), pageCount - 1)
+        position = CGFloat(landed)
+        layoutSegments()
+        defer { settledPage = landed }
+        guard landed != settledPage else { return }
+        pop(landed)
+    }
+
+    /// The page the last settle landed on, so a snap-back is not an arrival.
+    private var settledPage = 0
 
     /// A page arrived as a NUMBER rather than as a position — a post reopened
     /// on page three, a page set from outside. There is a real distance to
@@ -155,6 +180,7 @@ final class SnapMediaPageBarView: UIView {
         let target = CGFloat(min(max(page, 0), pageCount - 1))
         guard Int(position.rounded()) != Int(target) else { return }
         position = target
+        settledPage = Int(target)
         UIView.animate(
             withDuration: Self.springDuration, delay: 0,
             usingSpringWithDamping: Self.springDamping, initialSpringVelocity: 0.6,
@@ -162,7 +188,6 @@ final class SnapMediaPageBarView: UIView {
         ) {
             self.layoutSegments()
         }
-        pop(page)
     }
 
     /// ⚠️ A spring the eye reads as WEIGHT, not as a wobble: under-damped
@@ -220,8 +245,11 @@ final class SnapMediaPageBarView: UIView {
         1 + (Self.activeWidthFactor - 1) * proximity(toPage: index)
     }
 
-    /// The handover's bounce: the segment taking the mark stretches along the
-    /// strip and springs back.
+    /// The arrival's bounce: the segment that has just taken the mark stretches
+    /// along the strip and springs back.
+    ///
+    /// One caller, `settle(at:)`, and that is the whole of the rule — the strip
+    /// moves with the scroll and accents only where the scroll stops.
     ///
     /// ⚠️ A TRANSFORM, not a width. The widths are already being driven by the
     /// scroll — animating them here would be two things writing one number, and

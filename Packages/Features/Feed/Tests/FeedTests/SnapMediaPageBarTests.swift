@@ -118,18 +118,36 @@ struct SnapMediaPageBarTests {
                 > #require(view.debugSegmentFrame(0)).width)
     }
 
-    /// ⚠️ THE BOUNCE LANDS ON THE CROSSING, and it is a TRANSFORM. The widths
-    /// are already being driven by the scroll, so an accent that animated them
-    /// would be two things writing one number; a scale rides on top of whatever
-    /// the layout is doing.
-    @Test func crossingSpringsTheSegmentTakingTheMark() {
+    /// ⚠️ THE ACCENT BELONGS TO THE SNAP, NOT TO THE CROSSING — and it is a
+    /// TRANSFORM either way, because the widths are already being driven by the
+    /// scroll and an accent that animated them would be two things writing one
+    /// number.
+    ///
+    /// It fired at the crossing first: with the finger still down and the
+    /// widths still reflowing, a stretch on top of a reflow, twice per page on
+    /// a long drag. Reported as "not very fluid", and the diagnosis was right —
+    /// two motions on one object, only one of which anyone asked for. At rest
+    /// there is nothing else moving, so a bounce there is punctuation.
+    @Test func onlyTheSnapAccentsAnything() {
         let view = bar(pages: 4, current: 0)
 
-        view.setPosition(0.4)                    // still page one
+        view.setPosition(0.6)   // crossed, mid-drag: the mark has changed hands
         #expect(view.debugSegmentIsPopping(1) == false)
 
-        view.setPosition(0.6)                    // the mark changes hands
+        view.settle(at: 1)      // …and the scroll comes to rest
         #expect(view.debugSegmentIsPopping(1))
+    }
+
+    /// ⚠️ AND A SNAP-BACK IS NOT AN ARRIVAL. A drag that returns to the page it
+    /// started on ends in a settle too, and an accent there would punctuate the
+    /// absence of an event.
+    @Test func aSnapBackToTheSamePageDoesNotBounce() {
+        let view = bar(pages: 4, current: 1)
+
+        view.setPosition(1.4)   // dragged, not far enough
+        view.settle(at: 1)
+
+        #expect(view.debugSegmentIsPopping(1) == false)
     }
 
     /// ⚠️ AND THAT IS WHY THEY ARE PILLS RATHER THAN DOTS. Few pictures means

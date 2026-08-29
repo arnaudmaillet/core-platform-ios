@@ -101,6 +101,17 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// crossing would leave it still until the page had already changed.
     public var onScrollPosition: ((CGFloat) -> Void)?
 
+    /// The scroll came to REST on a page — the snap at the end of a drag, or
+    /// the end of an animated move.
+    ///
+    /// ⚠️ The third signal, and it is not the same event as either of the
+    /// others. `onPageChanged` fires mid-gesture, the moment the nearest page
+    /// becomes another one, with the finger still down and the pictures still
+    /// moving; this one fires when everything has stopped. Anything that reads
+    /// as PUNCTUATION — an accent, a bounce, a haptic — belongs here, because
+    /// at the crossing there is nothing to punctuate yet.
+    public var onScrollSettled: ((Int) -> Void)?
+
     /// Fired whenever the page under the box changes, so the host can move an
     /// indicator that lives OUTSIDE this view — see `PostGridListRowCell`, where
     /// the chips and the indicator belong to the preview rather than to its
@@ -654,6 +665,20 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         scrollViewDidScroll(scrollView)
     }
     #endif
+
+    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        // A drag released with no speed left never decelerates, so this is the
+        // only place that case comes to rest.
+        if !decelerate { onScrollSettled?(currentPage) }
+    }
+
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        onScrollSettled?(currentPage)
+    }
+
+    public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        onScrollSettled?(currentPage)
+    }
 
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         // Before the page-change guard below: a mark's page can leave the box
