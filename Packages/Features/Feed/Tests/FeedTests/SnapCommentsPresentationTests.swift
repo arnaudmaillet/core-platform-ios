@@ -53,41 +53,11 @@ struct SnapCommentsPresentationTests {
         #expect(SnapCommentsLayout.footerFrostLead > 0)
     }
 
-    /// The caption card is a LIQUID GLASS bubble, and each clause here is a
-    /// rule the material imposes that a plain blur did not:
-    ///
-    /// - the shape lives in `cornerConfiguration`, so `layer.cornerRadius`
-    ///   must stay 0 and the view must not clip — a layer radius clips a
-    ///   material that doesn't know it has been clipped, and the specular
-    ///   edge is drawn on the unclipped shape;
-    /// - no border of our own, because the glass draws its own edge (a
-    ///   hairline on top reads as an outline sitting ON the material);
-    /// - the appearance is INHERITED, not pinned, so a standard dynamic
-    ///   `.regular` glass resolves its translucency and contrast for the
-    ///   ambient theme — dark on a media panel (its host pins that), the
-    ///   device's own on a text one;
-    /// - and the radius is the app's message-bubble radius, not a local pick.
-    @Test func theCaptionCardIsALiquidGlassBubble() throws {
-        let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: 374, height: 96))
-        let glass = try #require(card.subviews.compactMap { $0 as? SnapGlassCardView }.first)
-        card.layoutIfNeeded()
-
-        #expect(glass.layer.cornerRadius == 0)
-        #expect(glass.clipsToBounds == false)
-        #expect(glass.layer.borderWidth == 0)
-        #expect(glass.overrideUserInterfaceStyle == .unspecified)
-        #expect(glass.effectiveRadius(corner: .allCorners) == SnapCommentsLayout.stripCardCornerRadius)
-        // The bubble radius is the chat transcript's, not a number picked here.
-        #expect(SnapCommentsLayout.stripCardCornerRadius == 18)
-        // Bubble padding clears the corner on every side.
-        #expect(SnapPostInfoCardView.contentInset == Spacing.lg)
-
-        // Unwindowed, the glass stays nil — building a real effect off-screen
-        // stalls the render server on headless CI, the rule every glass
-        // surface in the app follows.
-        glass.setGlassActive(true)
-        #expect(glass.effect == nil)
-    }
+    // ⚠️ THE CAPTION'S GLASS BUBBLE IS GONE, and with it the test that pinned
+    // its radius, its inset and its inherited appearance. The caption is drawn
+    // with `CommentRowView` now — the same row the comments use, with no
+    // material of its own — so there is no second surface to keep in step with
+    // the stream's. See `PostCaptionFaceSpecTests`.
 
     /// The INTERACTIVE pull-down's progress model: the list's OVERSHOOT
     /// past its top maps to a clamped 0…1, and release commits on distance
@@ -465,10 +435,10 @@ struct SnapCommentsPresentationTests {
         #expect(alpha(footer[1]) == 1)
         #expect(alpha(footer[2]) == 1)
 
-        // NO caption card in the cell at all any more — the caption is the
-        // hosted stream's first row, so the feed cell must not carry a
-        // second copy of it floating above.
-        #expect(subviews.compactMap { $0 as? SnapPostInfoCardView }.isEmpty)
+        // NO caption in the cell at all any more — it is the hosted stream's
+        // FIRST ROW, so the feed cell must not carry a second copy floating
+        // above. Asserted against the row the caption is drawn with now.
+        #expect(subviews.compactMap { $0 as? CommentRowView }.isEmpty)
 
         // …with the media at the BACK of the stack, under the readability
         // layer — never z-lifted over the stream (the lift is what let the
@@ -968,8 +938,9 @@ struct SnapCommentsPresentationTests {
         let (media, mediaHosted) = try engagedShell(media: true)
 
         for (cell, hosted) in [(text, textHosted), (media, mediaHosted)] {
-            // No caption card in the cell on EITHER format.
-            #expect(cell.contentView.subviews.compactMap { $0 as? SnapPostInfoCardView }.isEmpty)
+            // No caption in the cell on EITHER format — it belongs to the
+            // hosted stream, which is where its row is.
+            #expect(cell.contentView.subviews.compactMap { $0 as? CommentRowView }.isEmpty)
             // The stream fills the cell and starts below the chrome zone.
             #expect(hosted.superview?.frame == cell.contentView.bounds)
             #expect(cell.engagedCommentsTopInset(safeAreaTop: Self.topInset)
@@ -1016,59 +987,6 @@ struct SnapCommentsPresentationTests {
         #expect(card.hitTest(CGPoint(x: 195, y: 400), with: nil) == nil)
     }
 
-    @Test func theCaptionBubblePadsEvenlyAndSizesItself() throws {
-        let inset = SnapPostInfoCardView.contentInset
-        let side: CGFloat = 300
-        let card = SnapPostInfoCardView()
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.widthAnchor.constraint(equalToConstant: side).isActive = true
-        card.configure(caption: "A caption that comfortably fills a line or two.", timestamp: "10 weeks", likeCount: 40)
-        card.setNeedsLayout()
-        card.layoutIfNeeded()
-        // SELF-SIZED: nothing set a height, so the fitting size is the
-        // bubble's own answer, and it must actually hold its content.
-        let height = card.systemLayoutSizeFitting(
-            CGSize(width: side, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        ).height
-        #expect(height > 2 * inset)
-        card.frame = CGRect(x: 0, y: 0, width: side, height: height)
-        card.layoutIfNeeded()
-
-        func frame(_ v: UIView) -> CGRect { v.superview?.convert(v.frame, to: card) ?? v.frame }
-        var labels: [UILabel] = []
-        var stack: [UIView] = [card]
-        while let view = stack.popLast() {
-            if let l = view as? UILabel, l.text?.isEmpty == false { labels.append(l) }
-            stack.append(contentsOf: view.subviews)
-        }
-        let caption = try #require(labels.first { $0.text?.hasPrefix("A caption") == true })
-        let timestamp = try #require(labels.first { $0.text == "10 weeks" })
-        let captionFrame = frame(caption), timeFrame = frame(timestamp)
-
-        // All four margins are the same inset.
-        #expect(abs(captionFrame.minX - inset) < 0.5)
-        #expect(abs(side - captionFrame.maxX - inset) < 0.5)
-        #expect(abs(captionFrame.minY - inset) < 0.5)
-        #expect(abs(height - timeFrame.maxY - inset) < 0.5)
-        // The date is LEADING now, under the caption it dates — the trailing
-        // corner belongs to the like counter (`PostCaptionFaceSpecTests` owns
-        // that rule; this one is about the bubble's margins).
-        #expect(abs(timeFrame.minX - inset) < 0.5)
-        #expect(timeFrame.minY >= captionFrame.maxY + SnapPostInfoCardView.captionActionsGap - 0.5)
-        // A longer caption yields a TALLER bubble — it grows to its text.
-        card.configure(
-            caption: String(repeating: "wrapping caption text ", count: 12),
-            timestamp: "10 weeks", likeCount: 40
-        )
-        let tall = card.systemLayoutSizeFitting(
-            CGSize(width: side, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        ).height
-        #expect(tall > height)
-    }
 
     @Test func commentSortButtonKeepsHonestSelectionState() throws {
         let button = SnapCommentSortButton()
@@ -1746,11 +1664,15 @@ struct SnapCommentsPresentationTests {
         cell.configure(with: post, imagePipeline: nil)
         cell.layoutIfNeeded()
 
-        // The avatar column matches the comment rows' exactly.
+        // The avatar column matches the comment rows' exactly — trivially now
+        // that the caption IS a comment row, which is the point of the change.
         let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
         #expect(avatar.bounds.width == CommentRowView.avatarSize)
-        let bubble = try #require(Self.firstView(SnapPostInfoCardView.self, in: cell))
-        #expect(abs(bubble.frame.minX - (avatar.frame.maxX + CommentRowView.avatarGap)) < 0.5)
+        let caption = try #require(
+            Self.firstView(UILabel.self, in: cell, matching: { $0.text == "Weekend build log." })
+        )
+        #expect(abs(caption.convert(caption.bounds, to: cell).minX
+                    - (avatar.frame.maxX + CommentRowView.avatarGap)) < 0.5)
 
         // Initials render immediately; no picture without a pipeline.
         #expect(Self.monogramText(in: cell) == post.avatarMonogram)
@@ -1779,51 +1701,38 @@ struct SnapCommentsPresentationTests {
         #expect(Self.avatarImage(in: cell) == nil)
     }
 
-    /// ⚠️ A TEXT POST WEARS THE BUBBLE TOO — the row has ONE face now.
+    /// ⚠️ EVERY POST WEARS THE COMMENT ROW — text and media alike.
     ///
-    /// It used to wear the gallery card's flat content instead, and the reason
-    /// was the reveal's handshake: the page is opened by a mask that grows the
-    /// gallery row into the screen, so the caption the row was showing and the
-    /// caption the page shows first were deliberately the same object at the
-    /// same inset (32pt from the screen edge, where a bubble's sits at 71).
-    ///
-    /// That was traded away on purpose — a reader should meet one object, the
-    /// post as the first message in its own thread, whatever it is made of.
-    /// `PostCaptionFaceSpecTests` states the rule from the reader's side; this
-    /// keeps the check where the old one was, so the change is legible in the
-    /// history of this file.
-    @Test func aTextPostsCaptionWearsTheSameBubble() throws {
-        let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: 402, height: 120))
-        cell.configure(
-            with: Self.post(caption: "Shipping the new build tonight.", avatar: nil, hasMedia: false),
-            imagePipeline: nil,
-            likeCount: 40
-        )
-        cell.layoutIfNeeded()
+    /// This has changed twice. It was two faces (a glass bubble for media, the
+    /// gallery card's flat content for text), then one bubble for both, and now
+    /// no bubble at all: the caption is the thread's first message, so it is
+    /// drawn with the thread's own row. `PostCaptionFaceSpecTests` states the
+    /// shape from the reader's side; this keeps the check where the old ones
+    /// were, so the change is legible in the history of this file.
+    @Test func everyPostsCaptionIsTheCommentRow() throws {
+        for hasMedia in [true, false] {
+            let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: 402, height: 120))
+            cell.configure(
+                with: Self.post(
+                    caption: "Shipping the new build tonight.", avatar: nil, hasMedia: hasMedia
+                ),
+                imagePipeline: nil,
+                likeCount: 40
+            )
+            cell.layoutIfNeeded()
 
-        let bubble = try #require(Self.firstView(SnapPostInfoCardView.self, in: cell))
-        #expect(!Self.isEffectivelyHidden(bubble))
-        let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
-        #expect(!Self.isEffectivelyHidden(avatar))
+            let row = try #require(Self.firstView(CommentRowView.self, in: cell))
+            #expect(!Self.isEffectivelyHidden(row))
+            let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
+            #expect(!Self.isEffectivelyHidden(avatar))
+            // And no material anywhere: a bubble is what this stopped being.
+            #expect(Self.allViews(UIVisualEffectView.self, in: cell).isEmpty)
+        }
     }
 
-    /// And a MEDIA post is the same row, which is the other half of the claim.
-    @Test func aMediaPostsCaptionKeepsTheGlassBubble() throws {
-        let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: 402, height: 120))
-        cell.configure(
-            with: Self.post(caption: "Golden hour over the harbour.", avatar: nil),
-            imagePipeline: nil
-        )
-        cell.layoutIfNeeded()
 
-        let bubble = try #require(Self.firstView(SnapPostInfoCardView.self, in: cell))
-        #expect(!Self.isEffectivelyHidden(bubble))
-        let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
-        #expect(!Self.isEffectivelyHidden(avatar))
-    }
-
-    /// Absent is not zero. `PostMetricLabel` hides a `nil` and renders a `0`,
-    /// so a page whose opener knew no count shows the date alone.
+    /// Absent is not zero: a page whose opener knew no count shows the header
+    /// alone, exactly as a comment with no likes does.
     @Test func aCaptionRowWithNoKnownCountShowsNoCounter() throws {
         let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: 402, height: 120))
         cell.configure(
@@ -1832,44 +1741,39 @@ struct SnapCommentsPresentationTests {
             likeCount: nil
         )
         cell.layoutIfNeeded()
-        let bubble = try #require(Self.firstView(SnapPostInfoCardView.self, in: cell))
-        #expect(bubble.debugLikeCounter.isHidden)
+
+        let counter = try #require(Self.firstView(UIButton.self, in: cell))
+        #expect(counter.configuration?.attributedTitle == nil)
     }
 
-    /// The caption bubble is NON-INTERACTIVE — a standard row in the list,
-    /// like every comment beside it. It carried a close tap for one round;
-    /// a row that silently dismisses the screen under a stray tap is not
-    /// what a message in a thread should do, and the toolbar's ✕ is the
-    /// single exit. The AVATAR keeps its own tap.
-    @Test func theCaptionBubbleIsAPlainRowAndOnlyTheAvatarTaps() throws {
+    /// The caption row takes NO comment interactions — no reply tap, no
+    /// context menu, no like control — while the avatar keeps its own tap. It
+    /// wears the comment's shape; it does not inherit its affordances.
+    @Test func theCaptionRowIsInertExceptForItsAvatar() throws {
         let cell = CaptionBubbleCell(frame: CGRect(x: 0, y: 0, width: 374, height: 120))
         cell.configure(with: Self.post(caption: "Weekend build log.", avatar: nil), imagePipeline: nil)
         cell.layoutIfNeeded()
 
-        let bubble = try #require(Self.firstView(SnapPostInfoCardView.self, in: cell))
+        let row = try #require(Self.firstView(CommentRowView.self, in: cell))
+        #expect(row.gestureRecognizers?.allSatisfy { !$0.isEnabled } ?? true)
+        #expect(row.interactions.contains { $0 is UIContextMenuInteraction } == false)
+        let counter = try #require(Self.firstView(UIButton.self, in: cell))
+        #expect(counter.isUserInteractionEnabled == false)
+
+        // …while the avatar keeps exactly its own. (The cell's contentView is
+        // not asserted: UIKit puts its own recognizers there.)
         let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
-        // No recognizer anywhere on the bubble or its content…
-        var stack: [UIView] = [bubble]
-        while let view = stack.popLast() {
-            #expect(view.gestureRecognizers?.isEmpty ?? true)
-            stack.append(contentsOf: view.subviews)
-        }
-        // …while the avatar keeps exactly its own. (The cell's contentView
-        // is not asserted: UIKit puts its own recognizers there.)
         #expect(avatar.gestureRecognizers?.count == 1)
 
         var profiles = 0
         cell.onAvatarTap = { profiles += 1 }
         cell.onAvatarTap?()
         #expect(profiles == 1)
-        cell.prepareForReuse()
-        #expect(cell.onAvatarTap == nil)
     }
 
-    /// MEDIA by default, and that is now load-bearing: `CaptionBubbleCell`
-    /// picks its face from the post's format, so a post with no attachment
-    /// wears the flat gallery-card content and has neither bubble nor avatar
-    /// to assert on. Pass `hasMedia: false` to exercise that face instead.
+    /// MEDIA by default. The format no longer changes the caption's FACE —
+    /// every post is drawn with the comment row — but it still changes the page
+    /// around it, so both are exercised.
     private static func post(
         caption: String, avatar: URL?, id: String = "post-0001", hasMedia: Bool = true
     ) -> PostDetailDisplayModel {
@@ -2362,41 +2266,6 @@ struct SnapCommentsPresentationTests {
             hasAppliedStream: true, introducesCaption: false) == true)
     }
 
-    /// The caption bubble's TEXT is dynamic too — pinning the glass and
-    /// hardcoding white were one decision, so unpinning the glass without
-    /// unpinning the text would leave white glyphs under a material free to
-    /// render bright: the one combination that reliably disappears.
-    @Test func captionBubbleTextResolvesPerAppearance() throws {
-        let card = SnapPostInfoCardView(frame: CGRect(x: 0, y: 0, width: 374, height: 96))
-        card.configure(caption: "A caption.", timestamp: "28 May 2026", likeCount: nil)
-        card.layoutIfNeeded()
-
-        var labels: [UILabel] = []
-        var stack: [UIView] = [card]
-        while let view = stack.popLast() {
-            if let label = view as? UILabel { labels.append(label) }
-            stack.append(contentsOf: view.subviews)
-        }
-        #expect(labels.count >= 2)
-
-        let light = UITraitCollection(userInterfaceStyle: .light)
-        let dark = UITraitCollection(userInterfaceStyle: .dark)
-        for label in labels {
-            let colour = try #require(label.textColor)
-            // Genuinely dynamic: a hardcoded white resolves identically in
-            // both, which is exactly what this replaced.
-            #expect(colour.resolvedColor(with: light) != colour.resolvedColor(with: dark))
-        }
-        // …and the hierarchy survives: the timestamp stays subordinate.
-        //
-        // Found by its TEXT, not by its alignment: the date moved to the
-        // leading edge of the closing line and is `.natural` now, like the
-        // caption above it (see `PostCaptionFaceSpecTests`), so alignment no
-        // longer tells the two apart.
-        let caption = try #require(labels.first { $0.numberOfLines == 0 }).textColor!
-        let timestamp = try #require(labels.first { $0.text == "28 May 2026" }).textColor!
-        #expect(caption != timestamp)
-    }
 
     /// The cell is the theme's authority for everything it OWNS — the frost
     /// band and the hosted comment panel both inherit from its content view

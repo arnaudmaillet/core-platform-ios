@@ -2191,6 +2191,7 @@ final class SnapFeedViewController: UIViewController {
             detail?.seedCaption(
                 caption,
                 timestamp: model.timestampText,
+                authorName: model.authorName,
                 monogram: CommentsInputBar.monogram(model.authorName),
                 avatarURL: model.avatarURL,
                 metrics: model.cardMetrics

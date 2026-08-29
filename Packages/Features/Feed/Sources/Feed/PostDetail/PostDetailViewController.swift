@@ -151,9 +151,11 @@ final class PostDetailViewController: UIViewController {
     /// the view or comment counts, so the seed stays the source for the line
     /// (see `CaptionBubbleCell.configure`).
     private var seededCardMetrics: PostCardMetrics?
-    /// The author the opener handed over, so a seeded row wears its avatar
-    /// from frame one rather than an empty disc until the fetch lands.
-    private var seededAuthor: (monogram: String, avatarURL: URL?)?
+    /// The author the opener handed over, so a seeded row wears its NAME and
+    /// its avatar from frame one rather than an empty disc and a blank header
+    /// until the fetch lands. The row names its author now (it is shaped like a
+    /// comment), so the name is as load-bearing as the picture.
+    private var seededAuthor: (name: String, monogram: String, avatarURL: URL?)?
     /// Parents whose full reply pool is shown (the "view more" seam's
     /// state). Per-screen, like scroll position.
     private var expandedReplyParents: Set<String> = []
@@ -967,13 +969,14 @@ final class PostDetailViewController: UIViewController {
     func seedCaption(
         _ text: String,
         timestamp: String,
+        authorName: String = "",
         monogram: String = "",
         avatarURL: URL? = nil,
         metrics: PostCardMetrics? = nil
     ) {
         guard mode == .commentsOnly, !text.isEmpty, latestPost == nil else { return }
         seededCaption = (text, timestamp)
-        seededAuthor = (monogram, avatarURL)
+        seededAuthor = (authorName, monogram, avatarURL)
         seededCardMetrics = metrics
         loadViewIfNeeded()
         applyStream(animated: false)
@@ -1122,6 +1125,7 @@ final class PostDetailViewController: UIViewController {
                 cell.configureSeed(
                     caption: seed.text,
                     timestamp: seed.timestamp,
+                    authorName: self.seededAuthor?.name ?? "",
                     monogram: self.seededAuthor?.monogram ?? "",
                     avatarURL: self.seededAuthor?.avatarURL,
                     likeCount: self.captionLikeCount,
