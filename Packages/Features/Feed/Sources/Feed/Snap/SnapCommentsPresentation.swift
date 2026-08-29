@@ -51,10 +51,15 @@ enum SnapCommentsLayout {
     /// card's own `captionTopInset` with it. So 20pt here was a third helping
     /// of top padding on one edge, under the 16pt the row already has.
     ///
-    /// What is left is what the name says: enough that a row gliding past the
-    /// blur band does not touch it, and nothing more. The row's own inset is
-    /// the breath the reader sees.
-    static let streamTopBreath: CGFloat = Spacing.xs
+    /// ⚠️ AND THEN THE ROW'S OWN INSET WENT TOO, so this carries it now.
+    ///
+    /// 4pt was right while the caption was the gallery card's content, which
+    /// brought a 16pt `captionTopInset` of its own. The caption is a comment
+    /// row now (see `CaptionBubbleCell`), and comment rows sit flush — nothing
+    /// below this number holds the first row off the blur band any more, so the
+    /// caption arrived tight against the chrome. Reported as wanting air above
+    /// it, which is exactly what was subtracted.
+    static let streamTopBreath: CGFloat = Spacing.lg
 
     // MARK: The caption bubble's interior
     //

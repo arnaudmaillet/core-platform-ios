@@ -234,13 +234,18 @@ final class SnapFeedViewController: UIViewController {
     /// cell) rides for free.
     private var pageDriveStartOffset: CGFloat?
 
+    /// Files a post's Report. Nil withholds the row entirely: an action that
+    /// cannot act is not offered — the grid's card menu follows the same rule.
+    private let reporting: (any ContentReporting)?
+
     init(
         viewModel: FeedViewModel,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
         makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
         wallet: WalletStore? = nil,
-        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        reporting: (any ContentReporting)? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
@@ -248,6 +253,7 @@ final class SnapFeedViewController: UIViewController {
         self.makeCommentsPanelContent = makeCommentsPanelContent
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        self.reporting = reporting
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -1180,18 +1186,28 @@ final class SnapFeedViewController: UIViewController {
     /// as the identity pill). Every action resolves the active post at
     /// action time, so none can act on a page the user has scrolled past.
     private func configureToolbarItems() {
+        bookmarkButton.accessibilityLabel = "Save"
         bookmarkButton.addAction(UIAction { [weak self] _ in
             guard let self, let model = self.activeModel else { return }
             self.toggleBookmark(for: model.id)
         }, for: .primaryActionTriggered)
 
-        let share = SnapNavControls.makeToolbarActionButton(systemName: "square.and.arrow.up")
-        share.addAction(UIAction { [weak self] _ in
-            guard let self, let model = self.activeModel else { return }
-            self.presentShareSheet(for: model.id)
-        }, for: .primaryActionTriggered)
+        // ⚠️ REPOST HAS NO ACTION YET, and it is drawn anyway — the same
+        // posture the gallery card's band takes for the same glyph, and for the
+        // same reason: `CreatePost` carries `parent_id` on the wire and
+        // `GalleryPost.isRepost` already reads it (the profile's
+        // Posts/Reposts split), but `PostComposer` takes no parent, so there is
+        // no client path that publishes one. What it needs is a mutation, not a
+        // handler. Pressing it does nothing today, here as there.
+        let repost = SnapNavControls.makeToolbarActionButton(systemName: "arrow.2.squarepath")
+        repost.accessibilityLabel = "Repost"
 
-        // One glass capsule for the WHOLE trailing run — bookmark, share and
+        // SHARE LEFT THE BAR. It is in the ⋯ menu now, beside the other things
+        // you can do TO a post rather than the two you can do WITH it: save it,
+        // and pass it on. Three glyphs of equal weight said the three were
+        // equally common, and share is not.
+
+        // One glass capsule for the WHOLE trailing run — bookmark, repost and
         // ⋯ in three 36pt slots inside a single bubble.
         //
         // It used to be two bubbles, [🔖 ⬆︎] and [⋯], held apart by a fixed
@@ -1207,10 +1223,14 @@ final class SnapFeedViewController: UIViewController {
         // it, just a folded-up one. The separation it lost was never carrying
         // a distinction, which is why this is a cheap trade rather than a
         // sacrifice.
-        let shareCluster = UIStackView(arrangedSubviews: [bookmarkButton, share])
+        let shareCluster = UIStackView(arrangedSubviews: [bookmarkButton, repost])
         shareCluster.axis = .horizontal
 
         let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
+        // ⚠️ NAMED, all three. Two of these glyphs carried no label at all, so
+        // VoiceOver read them as "button" — the composition test needs a handle
+        // on them and a reader needs one more.
+        more.accessibilityLabel = "More actions"
         more.showsMenuAsPrimaryAction = true
         more.menu = UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
@@ -1221,7 +1241,7 @@ final class SnapFeedViewController: UIViewController {
 
         // ONE item set, for every state:
         //
-        //   [♫ attribution] … [🔖 ⬆︎] [⋯]
+        //   [♫ attribution] … [🔖 ⇄] [⋯]
         //
         // The toolbar is now STATE-INVARIANT. It used to carry three sets
         // whose only difference was the trailing slot — a red ✕ while a
@@ -1342,6 +1362,9 @@ final class SnapFeedViewController: UIViewController {
     /// the active page changes.
     private func refreshBookmarkGlyph(for id: PostID) {
         let saved = bookmarks.isSaved(id.rawValue)
+        // The label follows the state, like the glyph: "Save" and "Saved" are
+        // different offers, and a reader who cannot see the fill has only this.
+        bookmarkButton.accessibilityLabel = saved ? "Saved" : "Save"
         var config = bookmarkButton.configuration
         config?.image = UIImage(systemName: saved ? "bookmark.fill" : "bookmark")?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
@@ -1515,7 +1538,12 @@ final class SnapFeedViewController: UIViewController {
 
     private func render(_ state: FeedViewModel.RenderState) {
         let previousModels = modelsByID
-        orderedIDs = state.items.map(\.id)
+        // The viewer's "not interested" applies HERE, one render late by
+        // design: the post they were on when they asked stays until they leave
+        // it, and never comes back.
+        orderedIDs = state.items.map(\.id).filter {
+            !notInterestedIDs.contains($0) || $0 == activePostID
+        }
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
 
         // ⚠️ **A stable id is not an unchanged page** — see
@@ -3146,17 +3174,94 @@ final class SnapFeedViewController: UIViewController {
 
     /// The "more" menu routes to existing view-model seams; grow it as
     /// social affordances (save, report) gain real backends.
+    /// What ⋯ folds up.
+    ///
+    /// ⚠️ NOT NAVIGATION. It carried "View comments" and "View profile", and
+    /// both were second doors to places the screen already opens with one tap —
+    /// the comment count opens the thread, the author pill opens the profile. A
+    /// menu of things you can reach anyway is a menu nobody reads, and it
+    /// crowded out the things that have nowhere else to live.
+    ///
+    /// So it is the three that do: pass the post on, ask for less like it, and
+    /// report it. Report is destructive and last, which is the ordering the
+    /// gallery card's own menu uses.
     private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
-        [
-            UIAction(title: "View comments", image: UIImage(systemName: "bubble.right")) { [weak self] _ in
-                self?.viewModel.didTapComments(id)
+        var actions: [UIMenuElement] = [
+            UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+                self?.presentShareSheet(for: id)
             },
-            UIAction(title: "View profile", image: UIImage(systemName: "person.circle")) { [weak self] _ in
-                guard let model = self?.modelsByID[id] else { return }
-                self?.viewModel.didTapAuthor(model.authorID)
+            UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in
+                self?.markNotInterested(id)
             },
         ]
+        // Withheld rather than disabled when there is nobody to file with — an
+        // action that cannot act is not offered.
+        if reporting != nil {
+            actions.append(UIAction(
+                title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive
+            ) { [weak self] _ in
+                self?.presentReportReasons(for: id)
+            })
+        }
+        return actions
     }
+
+    /// The posts the viewer has asked not to see again, for as long as this
+    /// screen lives.
+    ///
+    /// ⚠️ THE SESSION, AND NOTHING MORE — and the toast says exactly that.
+    /// There is no "not interested" signal anywhere in the contracts: no
+    /// ranking feedback in `timeline.v1`, no hide in `post.v1`. What this can
+    /// honestly do is stop the post coming back on THIS surface, so that is
+    /// what it does and what the confirmation claims. A toast promising a
+    /// better feed tomorrow would be the lie.
+    private var notInterestedIDs: Set<PostID> = []
+
+    private func markNotInterested(_ id: PostID) {
+        notInterestedIDs.insert(id)
+        // ⚠️ NOT REMOVED FROM UNDER THE VIEWER. The post is on screen, and
+        // pulling the page they are reading out from under their thumb to
+        // acknowledge a menu tap is a worse answer than the one they asked for.
+        // The next render drops it — see `render(_:)` — so it goes when they
+        // move on, which is when "not interested" means anything.
+        ToastView.present("Hidden from this feed", symbol: "hand.thumbsdown", in: view)
+    }
+
+    private func presentReportReasons(for id: PostID) {
+        ReportReasonSheet.present(from: self, subject: "this post", sourceView: view) { [weak self] reason in
+            self?.report(id, reason: reason)
+        }
+    }
+
+    /// Files the report and says which way it went — a report the viewer
+    /// believes was filed but wasn't is the worst outcome here.
+    private func report(_ id: PostID, reason: ReportReason) {
+        guard let reporting else { return }
+        Task { [weak self] in
+            do {
+                // The surface is a triage signal in its own right: the same post
+                // reported from the feed and from a profile are different
+                // reports.
+                try await reporting.report(.post(id), reason: reason, surface: "ios.feed")
+                guard let self else { return }
+                ToastView.present("Report sent", symbol: "flag.fill", in: view)
+            } catch {
+                guard let self else { return }
+                ToastView.present("Couldn't send this report", symbol: "exclamationmark.triangle", in: view)
+            }
+        }
+    }
+
+    #if DEBUG
+    /// The ⋯ menu's rows, as built for `id`. The menu itself is a deferred
+    /// element UIKit resolves when it opens, so there is nothing to read off
+    /// the button — the composition has to be asked for.
+    func debugMoreMenuActions(for id: PostID) -> [UIMenuElement] { moreMenuActions(for: id) }
+
+    func debugMoreMenuTitles(for id: PostID) -> [String] {
+        debugMoreMenuActions(for: id).compactMap { ($0 as? UIAction)?.title }
+    }
+    #endif
 
     private func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
         guard orderedIDs.indices.contains(index) else { return nil }

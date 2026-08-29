@@ -710,7 +710,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 )
             },
             wallet: wallet,
-            makeWalletSheet: makeWalletSheet
+            makeWalletSheet: makeWalletSheet,
+            // For the ⋯ menu's Report row, which withholds itself when there is
+            // nobody to file with — the same rule the grid's card menu follows.
+            reporting: reporting
         )
     }
 
