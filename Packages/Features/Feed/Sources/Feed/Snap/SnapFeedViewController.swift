@@ -64,10 +64,10 @@ final class SnapFeedViewController: UIViewController {
     /// first appearance, when the stack relationship is finally knowable.
     private var backItem: UIBarButtonItem?
     /// The nav bar's LEADING item while a MEDIA post's comments are open: a
-    /// ✕ that collapses back to the media layout. It stands in the back
-    /// arrow's slot because it means the same kind of thing one level in —
-    /// leave what is open — and it exists independently of `isClosable`,
-    /// since it closes the LAYOUT, not the screen.
+    /// ✕ that collapses back to the media layout. It stands in the FOOTER's
+    /// trailing corner, taking the ⋯'s bubble while the layout is open, and it
+    /// exists independently of `isClosable`: it closes the LAYOUT, not the
+    /// screen — which is exactly why the back arrow keeps its own slot.
     private var closeCommentsItem = UIBarButtonItem()
     /// The viewer's saved pile.
     ///
@@ -234,13 +234,18 @@ final class SnapFeedViewController: UIViewController {
     /// cell) rides for free.
     private var pageDriveStartOffset: CGFloat?
 
+    /// Files a post's Report. Nil withholds the row entirely: an action that
+    /// cannot act is not offered — the grid's card menu follows the same rule.
+    private let reporting: (any ContentReporting)?
+
     init(
         viewModel: FeedViewModel,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
         makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
         wallet: WalletStore? = nil,
-        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        reporting: (any ContentReporting)? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
@@ -248,6 +253,7 @@ final class SnapFeedViewController: UIViewController {
         self.makeCommentsPanelContent = makeCommentsPanelContent
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        self.reporting = reporting
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -436,6 +442,7 @@ final class SnapFeedViewController: UIViewController {
     /// every index%3==2 is text-only) — deterministic access to a given page
     /// kind without scroll injection.
     private var didDebugPageSwipe = false
+    private var didDebugFling = false
 
     private func runDebugAppearanceHooks() {
         if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
@@ -452,6 +459,25 @@ final class SnapFeedViewController: UIViewController {
                 ? (Double(arguments[position + 1]) ?? 3.0) : 3.0
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.debugDrivePageSwipe()
+            }
+        }
+        // `-snap-fling [pages]`: scrolls the pager one page at a time the way a
+        // FLICK does — a stream of small offset changes, each with its own
+        // delegate callback, then a settle.
+        //
+        // Nothing before this could exercise a scroll at all. `-snap-page-demo`
+        // drives the text page's own swipe gesture, and `-snap-start-index`
+        // teleports; both reach the settle without ever passing through the
+        // middle of the screen, which is exactly where the picture now changes
+        // hands (`updateViewportPlayback`). Read the run with `-media-log`: a
+        // `[page-play]` between `[fling] begin` and `[fling] settle` is the
+        // clip starting mid-scroll, which is the whole claim.
+        if !didDebugFling, let position = arguments.firstIndex(of: "-snap-fling") {
+            didDebugFling = true
+            let pages = arguments.indices.contains(position + 1)
+                ? (Int(arguments[position + 1]) ?? 1) : 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                self?.debugFlingPages(pages)
             }
         }
         if !didDebugScroll,
@@ -908,17 +934,27 @@ final class SnapFeedViewController: UIViewController {
             commentSortButton.setTitleHidden(false)
         }
 
-        var navItems: [UIBarButtonItem] = engaged
-            ? [authorItem, .fixedSpace(Spacing.sm), sortItem]
-            : [authorItem]
-        // The wallet badge closes the run's left in BOTH states — the same
-        // fixed-space idiom that keeps the sort and author two pills.
+        // ⚠️ READ RIGHT TO LEFT: `rightBarButtonItems[0]` is the one nearest the
+        // screen edge, so this array is the bar reversed — left to right the
+        // run is [◎ balance] [author], in both states.
+        //
+        // The SORT is not here any more. It rode this run, first inboard of the
+        // author and then outboard of the balance, and neither reads: it is a
+        // control over the thread below it, not a fact about the post, and the
+        // trailing end of this bar is where the post's own identity lives. It
+        // sits beside the back arrow now (`applyLeadingNavItem`), which is the
+        // end that says what this screen is DOING rather than what it is about.
+        //
+        // The fixed space is what keeps the two separate pills: iOS 26 groups
+        // ADJACENT bar items into one shared glass platter.
+        var navItems: [UIBarButtonItem] = [authorItem]
         if let walletBadgeItem {
             navItems += [.fixedSpace(Spacing.sm), walletBadgeItem]
         }
         applyTrailingNavItems(navItems, animated: animated)
 
         applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
+        applyToolbarExit(engaged: engaged, hasMedia: hasMedia, animated: animated)
         // The toolbar is state-invariant now; nothing to swap.
     }
 
@@ -952,6 +988,10 @@ final class SnapFeedViewController: UIViewController {
         let bar = navigationController?.navigationBar.bounds.width ?? view.bounds.width
         guard bar > 0 else { return }
 
+        // ⚠️ THE SORT IS STILL IN THIS ARITHMETIC, and it has to be: it moved to
+        // the LEADING group, which takes its width from the same bar. What the
+        // author can have is what the bar has left after everything else on it,
+        // whichever end that everything sits at.
         func authorBudget(sortWidth: CGFloat) -> CGFloat {
             let pad = Self.itemPlatterPadding
             return bar
@@ -1032,10 +1072,53 @@ final class SnapFeedViewController: UIViewController {
     /// SET, don't ASSIGN — same reason as the trailing items: the animated
     /// form hands the change to the bar's own item animator, so the ✕ morphs
     /// into the arrow's place instead of popping over it.
+    /// ⚠️ THE ARROW STAYS, in every state.
+    ///
+    /// The comments exit used to take this slot on a media post, on the reading
+    /// that it means the same kind of thing one level in — leave what is open.
+    /// It cost the screen its way OUT while the layout was open: the arrow was
+    /// gone, so leaving the post meant closing the comments first and then
+    /// going back, two gestures for one intention. The exit moved to the
+    /// footer's trailing corner instead (see `applyToolbarExit`), where it
+    /// stands in the ⋯'s own bubble.
     private func applyLeadingNavItem(engaged: Bool, hasMedia: Bool, animated: Bool) {
-        let items = [engaged && hasMedia ? closeCommentsItem : backItem].compactMap { $0 }
+        // ⚠️ LEFT TO RIGHT here, unlike the trailing run: `leftBarButtonItems[0]`
+        // is the one nearest the screen edge. So this reads [‹ back] [⇅ sort],
+        // the sort just inboard of the arrow, with the fixed space that keeps
+        // them two pills rather than one shared platter.
+        //
+        // The sort belongs at this end: it is a control over the thread, and
+        // this is the end that carries what the screen is DOING. The trailing
+        // end carries who the post is by.
+        var items = [backItem].compactMap { $0 }
+        if engaged {
+            items += items.isEmpty ? [sortItem] : [.fixedSpace(Spacing.sm), sortItem]
+        }
         guard navigationItem.leftBarButtonItems ?? [] != items else { return }
         navigationItem.setLeftBarButtonItems(items, animated: animated)
+    }
+
+    /// The footer's trailing corner: ⋯ at rest, ✕ while a media post's comments
+    /// are open.
+    ///
+    /// ⚠️ THE CORNER IS NOT STATE-INVARIANT ANY MORE, and that was a deliberate
+    /// property once: the toolbar carried three item sets whose only difference
+    /// was this slot, and collapsing them to one was what stopped a text
+    /// engagement and a media engagement disagreeing about what the corner
+    /// meant. Two things have changed since. The ⋯ has its own platter now, so
+    /// the swap is one bubble changing its glyph rather than a run
+    /// re-composing; and a TEXT page never swaps at all — its comments are the
+    /// page, so there is nothing to close and its corner stays ⋯. The corner
+    /// therefore reads the same way everywhere it can be read: it closes what
+    /// is open, or folds away what else there is.
+    private func applyToolbarExit(engaged: Bool, hasMedia: Bool, animated: Bool) {
+        guard !defaultToolbarItems.isEmpty else { return }
+        let exit = engaged && hasMedia
+        let items = exit
+            ? defaultToolbarItems.dropLast() + [closeCommentsItem]
+            : defaultToolbarItems
+        guard toolbarItems ?? [] != Array(items) else { return }
+        setToolbarItems(Array(items), animated: animated)
     }
 
     private func applyTrailingNavItems(_ items: [UIBarButtonItem], animated: Bool) {
@@ -1116,23 +1199,23 @@ final class SnapFeedViewController: UIViewController {
         }
         navigationItem.rightBarButtonItems = restingTrailingItems()
 
-        // The comments exit, built once and held: it takes the leading slot
-        // whenever a media post's comments are open.
+        // The comments exit, built once and held: it takes the FOOTER's
+        // trailing bubble whenever a media post's comments are open.
         //
-        // UNTINTED, deliberately — it wears whatever the bar gives it, like
-        // the back chevron whose slot it takes. It carried `.systemRed` in
-        // the toolbar, where the exit had to be told apart from three
-        // controls that act ON the post; in the leading slot its POSITION
-        // already says what it is.
+        // UNTINTED, and now for a better reason than before. It carried
+        // `.systemRed` when it sat in a capsule beside three controls that act
+        // ON the post, where the exit had to be told apart from them; that
+        // capsule holds two controls now and the ⋯ has a bubble of its own, so
+        // the exit arrives ALONE in it. Being the only thing in its own bubble
+        // is what says what it is.
         //
-        // Note for anyone re-reaching for a colour here: the nav bar's
-        // Liquid Glass platter renders its own adaptive glyph colour and
-        // ignores `baseForegroundColor` outright (measured — the ✕ came out
-        // #06123D against a request for red, exactly as the back chevron
-        // comes out dark against a request for white). Baking the colour
-        // into the image with `.alwaysOriginal` does defeat it, at the cost
-        // of resolving the dynamic colour once at build time.
-        let close = SnapNavControls.makeNavActionButton(systemName: "xmark")
+        // Note for anyone re-reaching for a colour: a Liquid Glass platter
+        // renders its own adaptive glyph colour and ignores
+        // `baseForegroundColor` outright (measured in the nav bar — the ✕ came
+        // out #06123D against a request for red). Baking the colour into the
+        // image with `.alwaysOriginal` does defeat it, at the cost of resolving
+        // the dynamic colour once at build time.
+        let close = SnapNavControls.makeToolbarActionButton(systemName: "xmark")
         close.accessibilityLabel = "Close comments"
         close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
         closeCommentsItem = UIBarButtonItem(customView: close)
@@ -1160,37 +1243,52 @@ final class SnapFeedViewController: UIViewController {
     /// as the identity pill). Every action resolves the active post at
     /// action time, so none can act on a page the user has scrolled past.
     private func configureToolbarItems() {
+        bookmarkButton.accessibilityLabel = "Save"
         bookmarkButton.addAction(UIAction { [weak self] _ in
             guard let self, let model = self.activeModel else { return }
             self.toggleBookmark(for: model.id)
         }, for: .primaryActionTriggered)
 
-        let share = SnapNavControls.makeToolbarActionButton(systemName: "square.and.arrow.up")
-        share.addAction(UIAction { [weak self] _ in
-            guard let self, let model = self.activeModel else { return }
-            self.presentShareSheet(for: model.id)
-        }, for: .primaryActionTriggered)
+        // ⚠️ REPOST HAS NO ACTION YET, and it is drawn anyway — the same
+        // posture the gallery card's band takes for the same glyph, and for the
+        // same reason: `CreatePost` carries `parent_id` on the wire and
+        // `GalleryPost.isRepost` already reads it (the profile's
+        // Posts/Reposts split), but `PostComposer` takes no parent, so there is
+        // no client path that publishes one. What it needs is a mutation, not a
+        // handler. Pressing it does nothing today, here as there.
+        let repost = SnapNavControls.makeToolbarActionButton(systemName: "arrow.2.squarepath")
+        repost.accessibilityLabel = "Repost"
 
-        // One glass capsule for the WHOLE trailing run — bookmark, share and
-        // ⋯ in three 36pt slots inside a single bubble.
+        // SHARE LEFT THE BAR. It is in the ⋯ menu now, beside the other things
+        // you can do TO a post rather than the two you can do WITH it: save it,
+        // and pass it on. Three glyphs of equal weight said the three were
+        // equally common, and share is not.
+
+        // TWO bubbles: [🔖 ⇄] and [⋯], held apart by a fixed space — iOS 26
+        // groups ADJACENT bar items into one shared platter, so a spacer is
+        // the only way to make two.
         //
-        // It used to be two bubbles, [🔖 ⬆︎] and [⋯], held apart by a fixed
-        // space: iOS 26 groups ADJACENT bar items into one shared platter, so
-        // a spacer is the only way to make two. That spacer is now gone, and
-        // the reason is cost rather than taste. Every platter is its own glass
-        // host, and UIKit materialises each one through SwiftUI inside
-        // `pushViewController` — which is the hero flight's stall (see
-        // `ZoomFlightProfiler`). The bar wore five; it wears four.
+        // ⚠️ THE COST ARGUMENT DOES NOT DECIDE THIS, and the measurements are
+        // the reason. They were merged into one capsule to save a platter,
+        // each being its own glass host that UIKit materialises through
+        // SwiftUI inside `pushViewController` — the hero flight's stall. Then
+        // the arms were measured (the table under `-no-toolbar` below): one
+        // platter fewer bought ~2 ms, inside the noise, while the floating bar
+        // itself costs ~45 ms cold whatever is in it.
         //
-        // The grouping still reads: everything in this capsule acts on THIS
-        // post, and ⋯ is the same kind of thing as share — one more action on
-        // it, just a folded-up one. The separation it lost was never carrying
-        // a distinction, which is why this is a cheap trade rather than a
-        // sacrifice.
-        let shareCluster = UIStackView(arrangedSubviews: [bookmarkButton, share])
+        // So the grouping is a design question again, and the two are not the
+        // same kind of thing: the capsule holds what you DO to this post —
+        // save it, pass it on — and ⋯ holds what is folded away. A separator
+        // between them says which is which; sharing a platter said they were
+        // three of a kind.
+        let shareCluster = UIStackView(arrangedSubviews: [bookmarkButton, repost])
         shareCluster.axis = .horizontal
 
         let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
+        // ⚠️ NAMED, all three. Two of these glyphs carried no label at all, so
+        // VoiceOver read them as "button" — the composition test needs a handle
+        // on them and a reader needs one more.
+        more.accessibilityLabel = "More actions"
         more.showsMenuAsPrimaryAction = true
         more.menu = UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
@@ -1201,7 +1299,7 @@ final class SnapFeedViewController: UIViewController {
 
         // ONE item set, for every state:
         //
-        //   [♫ attribution] … [🔖 ⬆︎] [⋯]
+        //   [♫ attribution] … [🔖 ⇄] [⋯]
         //
         // The toolbar is now STATE-INVARIANT. It used to carry three sets
         // whose only difference was the trailing slot — a red ✕ while a
@@ -1219,31 +1317,31 @@ final class SnapFeedViewController: UIViewController {
             UIBarButtonItem(customView: mediaAttributionView),
             .flexibleSpace(),
         ]
-        shareCluster.addArrangedSubview(more)
         #if DEBUG
-        // `-split-toolbar-platters`: the A/B side, restoring the two-bubble
-        // trailing run so both arms come from one binary.
-        if ProcessInfo.processInfo.arguments.contains("-split-toolbar-platters") {
-            shareCluster.removeArrangedSubview(more)
-            more.removeFromSuperview()
-            defaultToolbarItems = leading + [
-                UIBarButtonItem(customView: shareCluster),
-                .fixedSpace(Spacing.sm),
-                UIBarButtonItem(customView: more),
-            ]
+        // `-merge-toolbar-platters`: the A/B's other arm, folding ⋯ back into
+        // the actions' capsule so both come from one binary. It was the
+        // shipped side once — see the note above for why the numbers no longer
+        // argue for it.
+        if ProcessInfo.processInfo.arguments.contains("-merge-toolbar-platters") {
+            shareCluster.addArrangedSubview(more)
+            defaultToolbarItems = leading + [UIBarButtonItem(customView: shareCluster)]
             toolbarItems = defaultToolbarItems
             return
         }
         #endif
-        defaultToolbarItems = leading + [UIBarButtonItem(customView: shareCluster)]
+        defaultToolbarItems = leading + [
+            UIBarButtonItem(customView: shareCluster),
+            .fixedSpace(Spacing.sm),
+            UIBarButtonItem(customView: more),
+        ]
         #if DEBUG
         // `-no-toolbar`: the UPPER BOUND on what trimming the footer can buy,
         // and the probe that settled where the flight's cost actually lives.
         // Not shippable — it is the whole footer — but the numbers redirect
         // the whole question. Push work, 3 runs each:
         //
-        //   5 platters (two-bubble trailing run)   cold 95.4  warm 43.2 / 47.0
-        //   4 platters (merged, shipped)           cold 98.5  warm 40.4 / 45.4
+        //   5 platters (two-bubble run, shipped)  cold 95.4  warm 43.2 / 47.0
+        //   4 platters (merged)                    cold 98.5  warm 40.4 / 45.4
         //   4 platters, STANDARD items not custom  cold 103.9 warm 45.9 / 44.8
         //   NO TOOLBAR AT ALL (2 platters)         cold 53.1  warm 32.6 / 31.0
         //
@@ -1322,6 +1420,9 @@ final class SnapFeedViewController: UIViewController {
     /// the active page changes.
     private func refreshBookmarkGlyph(for id: PostID) {
         let saved = bookmarks.isSaved(id.rawValue)
+        // The label follows the state, like the glyph: "Save" and "Saved" are
+        // different offers, and a reader who cannot see the fill has only this.
+        bookmarkButton.accessibilityLabel = saved ? "Saved" : "Save"
         var config = bookmarkButton.configuration
         config?.image = UIImage(systemName: saved ? "bookmark.fill" : "bookmark")?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
@@ -1495,7 +1596,12 @@ final class SnapFeedViewController: UIViewController {
 
     private func render(_ state: FeedViewModel.RenderState) {
         let previousModels = modelsByID
-        orderedIDs = state.items.map(\.id)
+        // The viewer's "not interested" applies HERE, one render late by
+        // design: the post they were on when they asked stays until they leave
+        // it, and never comes back.
+        orderedIDs = state.items.map(\.id).filter {
+            !notInterestedIDs.contains($0) || $0 == activePostID
+        }
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
 
         // ⚠️ **A stable id is not an unchanged page** — see
@@ -1958,6 +2064,36 @@ final class SnapFeedViewController: UIViewController {
     /// is where a page decides what to show. Without this a suite can only
     /// observe settled states, and four of the six defects in this area lived
     /// strictly between them.
+    /// One page of scroll, in sixtieths of a second — a flick, not a jump.
+    ///
+    /// Each step is an ordinary offset change followed by the delegate callback
+    /// UIKit would have sent, so everything that reacts to scrolling reacts
+    /// here: the paging footer, and the page that owns the picture.
+    func debugFlingPages(_ remaining: Int) {
+        guard remaining > 0 else { return }
+        let page = collectionView.bounds.height
+        guard page > 0 else { return }
+        let start = collectionView.contentOffset.y
+        let target = min(start + page, CGFloat(reachableCeiling()) * page)
+        let steps = 24
+        print("[fling] begin from=\(Int(start)) to=\(Int(target))")
+        func step(_ index: Int) {
+            guard index <= steps else {
+                self.scrollViewDidEndDecelerating(self.collectionView)
+                print("[fling] settle offsetY=\(Int(self.collectionView.contentOffset.y))")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    self?.debugFlingPages(remaining - 1)
+                }
+                return
+            }
+            let progress = CGFloat(index) / CGFloat(steps)
+            collectionView.contentOffset.y = start + (target - start) * progress
+            scrollViewDidScroll(collectionView)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { step(index + 1) }
+        }
+        step(1)
+    }
+
     func debugRealizeVisibleCells() {
         for path in collectionView.indexPathsForVisibleItems.sorted() {
             guard let cell = collectionView.cellForItem(at: path) else { continue }
@@ -2134,16 +2270,18 @@ final class SnapFeedViewController: UIViewController {
         // The caption the FEED already has, so the row exists while the hero
         // is in the air rather than arriving with the post fetch.
         if let model = modelsByID[id], let caption = model.caption, !caption.isEmpty {
-            // `.flat` unconditionally, and it is not an assumption: this whole
-            // path is the TEXT page's resting interface — a media page never
-            // reaches it (`presentComments` is its path). The face is still
-            // stated rather than defaulted, so the one caller that means "no
-            // glass" says so.
+            // The AUTHOR travels with the caption: the row is an avatar beside
+            // a bubble for every post now, and this path — the text page's
+            // resting interface — is the one that mounts before any fetch, so
+            // without it the disc would sit empty for the whole reveal.
             detail?.seedCaption(
                 caption,
                 timestamp: model.timestampText,
-                style: .flat,
+                authorName: model.authorName,
+                monogram: CommentsInputBar.monogram(model.authorName),
+                avatarURL: model.avatarURL,
                 metrics: model.cardMetrics
+                    ?? PostCardMetrics(views: nil, reactions: model.likeCount, comments: nil)
             )
         }
         // No close handler — a resting page is undismissable; the swipe
@@ -2418,7 +2556,24 @@ final class SnapFeedViewController: UIViewController {
         // makes the timing invisible, which is better: no amount of care about
         // when a cell is recycled can guarantee the frame, and this needs no
         // guarantee.
-        collectionView.backgroundColor = activeIsText ? .systemBackground : .black
+        // ⚠️ UNLESS A FLIGHT IS BEING COMPOSITED THROUGH THIS SCREEN.
+        //
+        // A masked-hero opening (a post opened from its COMMENT COUNT) and an
+        // engaged dismissal both clear this screen's floors on purpose: the
+        // thread is drawn over the card carrying the photograph, and an opaque
+        // ground between them shuts the card out. This rule runs at EVERY
+        // settle — which includes the settles a flight triggers — so without
+        // the guard it painted the ground black one frame into the opening and
+        // the media only reappeared when the card was removed. Reported as the
+        // media not transitioning at all; filmed as one frame of photograph
+        // followed by black.
+        //
+        // The floors are restored where the flight ends (`zoomTransitionDidEnd`,
+        // `endEngagedDismissalIfNeeded`), which is also the moment this rule
+        // becomes true again.
+        if !isMaskedRevealActive, !isEngagedDismissalActive {
+            collectionView.backgroundColor = activeIsText ? .systemBackground : .black
+        }
         // ⚠️ AND THE LOCK FOLLOWS THE SETTLED PAGE, not the engagement.
         //
         // A text page disables the pager because its own scroll view would
@@ -2843,6 +2998,51 @@ final class SnapFeedViewController: UIViewController {
         apply(lifecycle.setVisible(isOnScreen && isForeground))
     }
 
+    /// The page playback follows: the one covering most of the screen.
+    ///
+    /// Deliberately NOT the lifecycle's active index, though the arithmetic is
+    /// the same one (`SnapActiveItemTracker.activeIndex` is the page owning the
+    /// viewport's midpoint). The difference is WHEN each is consulted: the
+    /// lifecycle's is settle-quantized, because everything it drives — chrome,
+    /// warm window, resting interface, the pager's lock — must not move under a
+    /// finger. Playback is the one thing that should.
+    private var playbackOwner: Int?
+
+    /// Hands the picture to whichever page owns the screen, and takes it back
+    /// from the one that lost it. Runs on EVERY scroll callback, so it must
+    /// stay this cheap: an index, a comparison, and nothing at all when the
+    /// answer has not changed.
+    private func updateViewportPlayback() {
+        let owner = SnapActiveItemTracker.activeIndex(
+            contentOffsetY: collectionView.contentOffset.y,
+            pageHeight: collectionView.bounds.height,
+            itemCount: orderedIDs.count
+        )
+        guard owner != playbackOwner else { return }
+        if let previous = playbackOwner {
+            (lifecycleCell(at: previous) as? SnapFeedCell)?.setOwnsViewport(false)
+        }
+        playbackOwner = owner
+        if let owner {
+            (lifecycleCell(at: owner) as? SnapFeedCell)?.setOwnsViewport(true)
+        }
+    }
+
+    #if DEBUG
+    /// The post whose clip is running, read off the CELLS rather than from the
+    /// index above: a dispatch that never reaches a cell starts nothing, and
+    /// asking the bookkeeping would not know the difference.
+    var debugPlayingPostID: PostID? {
+        for (index, id) in orderedIDs.enumerated() {
+            guard let cell = collectionView.cellForItem(
+                at: IndexPath(item: index, section: 0)
+            ) as? SnapFeedCell else { continue }
+            if cell.debugOwnsPlayback { return id }
+        }
+        return nil
+    }
+    #endif
+
     private func updateActiveItem() {
         let index = SnapActiveItemTracker.activeIndex(
             contentOffsetY: collectionView.contentOffset.y,
@@ -2850,6 +3050,11 @@ final class SnapFeedViewController: UIViewController {
             itemCount: orderedIDs.count
         )
         apply(lifecycle.setPageIndex(index))
+        // The settled page owns the screen by definition, so the two agree
+        // here — and a settle that arrives without any scroll callback (a
+        // programmatic jump, a landing) is the only way the picture would
+        // otherwise be missed.
+        updateViewportPlayback()
         // ⚠️ AT EVERY SETTLE, not only when the page CHANGED.
         //
         // The reconcile used to live inside the activation branch, so it ran
@@ -3044,17 +3249,101 @@ final class SnapFeedViewController: UIViewController {
 
     /// The "more" menu routes to existing view-model seams; grow it as
     /// social affordances (save, report) gain real backends.
+    /// What ⋯ folds up.
+    ///
+    /// ⚠️ NOT NAVIGATION. It carried "View comments" and "View profile", and
+    /// both were second doors to places the screen already opens with one tap —
+    /// the comment count opens the thread, the author pill opens the profile. A
+    /// menu of things you can reach anyway is a menu nobody reads, and it
+    /// crowded out the things that have nowhere else to live.
+    ///
+    /// So it is the three that do: pass the post on, ask for less like it, and
+    /// report it. Report is destructive and last, which is the ordering the
+    /// gallery card's own menu uses.
     private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
-        [
-            UIAction(title: "View comments", image: UIImage(systemName: "bubble.right")) { [weak self] _ in
-                self?.viewModel.didTapComments(id)
+        var actions: [UIMenuElement] = [
+            UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+                self?.presentShareSheet(for: id)
             },
-            UIAction(title: "View profile", image: UIImage(systemName: "person.circle")) { [weak self] _ in
-                guard let model = self?.modelsByID[id] else { return }
-                self?.viewModel.didTapAuthor(model.authorID)
+            UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in
+                self?.markNotInterested(id)
             },
         ]
+        // Withheld rather than disabled when there is nobody to file with — an
+        // action that cannot act is not offered.
+        if reporting != nil {
+            actions.append(UIAction(
+                title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive
+            ) { [weak self] _ in
+                self?.presentReportReasons(for: id)
+            })
+        }
+        return actions
     }
+
+    /// The posts the viewer has asked not to see again, for as long as this
+    /// screen lives.
+    ///
+    /// ⚠️ THE SESSION, AND NOTHING MORE — and the toast says exactly that.
+    /// There is no "not interested" signal anywhere in the contracts: no
+    /// ranking feedback in `timeline.v1`, no hide in `post.v1`. What this can
+    /// honestly do is stop the post coming back on THIS surface, so that is
+    /// what it does and what the confirmation claims. A toast promising a
+    /// better feed tomorrow would be the lie.
+    private var notInterestedIDs: Set<PostID> = []
+
+    private func markNotInterested(_ id: PostID) {
+        notInterestedIDs.insert(id)
+        // ⚠️ NOT REMOVED FROM UNDER THE VIEWER. The post is on screen, and
+        // pulling the page they are reading out from under their thumb to
+        // acknowledge a menu tap is a worse answer than the one they asked for.
+        // The next render drops it — see `render(_:)` — so it goes when they
+        // move on, which is when "not interested" means anything.
+        ToastView.present("Hidden from this feed", symbol: "hand.thumbsdown", in: view)
+    }
+
+    private func presentReportReasons(for id: PostID) {
+        ReportReasonSheet.present(from: self, subject: "this post", sourceView: view) { [weak self] reason in
+            self?.report(id, reason: reason)
+        }
+    }
+
+    /// Files the report and says which way it went — a report the viewer
+    /// believes was filed but wasn't is the worst outcome here.
+    private func report(_ id: PostID, reason: ReportReason) {
+        guard let reporting else { return }
+        Task { [weak self] in
+            do {
+                // The surface is a triage signal in its own right: the same post
+                // reported from the feed and from a profile are different
+                // reports.
+                try await reporting.report(.post(id), reason: reason, surface: "ios.feed")
+                guard let self else { return }
+                ToastView.present("Report sent", symbol: "flag.fill", in: view)
+            } catch {
+                guard let self else { return }
+                ToastView.present("Couldn't send this report", symbol: "exclamationmark.triangle", in: view)
+            }
+        }
+    }
+
+    #if DEBUG
+    /// Opens the masked window the comment-count path opens, without a
+    /// transition to drive it — the state a settle must not paint over.
+    func debugBeginMaskedReveal(for id: PostID) {
+        openComments(for: id, revealingFrom: CGRect(x: 28, y: 601, width: 312, height: 195))
+        setZoomContentHidden(true)
+    }
+
+    /// The ⋯ menu's rows, as built for `id`. The menu itself is a deferred
+    /// element UIKit resolves when it opens, so there is nothing to read off
+    /// the button — the composition has to be asked for.
+    func debugMoreMenuActions(for id: PostID) -> [UIMenuElement] { moreMenuActions(for: id) }
+
+    func debugMoreMenuTitles(for id: PostID) -> [String] {
+        debugMoreMenuActions(for: id).compactMap { ($0 as? UIAction)?.title }
+    }
+    #endif
 
     private func lifecycleCell(at index: Int) -> SnapCellLifecycle? {
         guard orderedIDs.indices.contains(index) else { return nil }
@@ -3156,6 +3445,11 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // layout pass the presentation triggers. Stamping only in `apply` left
         // the flag false exactly when it mattered.
         (cell as? SnapFeedCell)?.defersPlaybackForFlight = isAwaitingZoomPresentation
+        // The same net, for the picture: a page can be handed the screen while
+        // it is still being realized, and the hand-over reaches nothing. The
+        // page that owns the viewport is a fact about the SCROLL, so it is
+        // re-stated to every cell as it appears.
+        (cell as? SnapFeedCell)?.setOwnsViewport(playbackOwner == indexPath.item)
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
@@ -3330,7 +3624,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // as worse than the delay it was meant to fix, and it was.
         //
         // Starting playback early has to be a playback-only path, not a second
-        // caller of the seam that owns everything else.
+        // caller of the seam that owns everything else — which is exactly what
+        // `updateViewportPlayback` is: it moves the picture and touches
+        // nothing else on the screen.
+        updateViewportPlayback()
         updatePagingFooter(for: scrollView)
     }
 

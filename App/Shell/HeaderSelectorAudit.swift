@@ -193,7 +193,14 @@ final class HeaderSelectorAudit {
         if !overflow.isEmpty {
             finding.problems.append("COLLAPSED items — \(overflow.joined(separator: ", "))")
         }
-        let trailingCount = (item?.rightBarButtonItems ?? []).count(where: { !$0.isHidden })
+        // ⚠️ ONLY THE ITEMS THAT SHARE A PLATTER. `sharesBackground = false` is
+        // UIKit's opt-out from the fused pill — the wallet badge takes it, so it
+        // draws in a capsule of its OWN and the group's platter legitimately
+        // holds one item fewer. Counting it here reported For You's header as a
+        // collapsed group while a screenshot showed two capsules side by side:
+        // the check was measuring a platter that had never been asked to hold it.
+        let trailingCount = (item?.rightBarButtonItems ?? [])
+            .count(where: { !$0.isHidden && $0.sharesBackground })
         if let narrow = undersizedTrailingPlatter(in: bar, holding: trailingCount) {
             finding.problems.append(narrow)
         }

@@ -59,6 +59,10 @@ final class CommentRowView: UIView {
     /// The reply indent, restated per configure — a reused row can switch
     /// depth between a top-level comment and a reply.
     private var rowLeading: NSLayoutConstraint?
+    /// The row's own two comment-only interactions, held so a caption can take
+    /// them off and a recycled row can put them back.
+    private var rowTapRecognizer: UITapGestureRecognizer?
+    private var contextMenu: UIContextMenuInteraction?
     private let headerLabel = UILabel()
     private let bodyLabel = UILabel()
     /// The header line's trailing control: ♥ + counter, pushed to the far
@@ -101,7 +105,12 @@ final class CommentRowView: UIView {
         let rowTap = UITapGestureRecognizer(target: self, action: #selector(rowTapped))
         rowTap.delegate = self
         addGestureRecognizer(rowTap)
-        addInteraction(UIContextMenuInteraction(delegate: self))
+        rowTapRecognizer = rowTap
+        // Held, because a caption row takes them away and a recycled row puts
+        // them back — see `configureAsPostCaption`.
+        let menu = UIContextMenuInteraction(delegate: self)
+        contextMenu = menu
+        addInteraction(menu)
     }
 
     /// Test/preview convenience: build and configure in one step.
@@ -122,6 +131,69 @@ final class CommentRowView: UIView {
         loadAvatar(model.avatarURL, for: model.id, using: imagePipeline)
     }
 
+    /// Points the row at the POST — the thread's first message.
+    ///
+    /// ⚠️ THE SAME VIEW, not a twin. The caption used to be its own component
+    /// (a Liquid Glass bubble, then a flat card) and its own geometry, and the
+    /// whole job of that geometry was to line up with this row: same avatar
+    /// column, same header line, same body inset. Two objects kept in step by
+    /// hand drift the first time either is touched, so there is one now.
+    ///
+    /// What it does NOT inherit is a comment's affordances. A caption is not
+    /// something to reply to, block or report, and its counter is not a control
+    /// — the post's like lives on the toolbar, and two places to like one post
+    /// is one too many. Everything a comment can do is switched off here rather
+    /// than left wired to a nil handler, so a stray tap cannot find it.
+    func configureAsPostCaption(
+        authorName: String,
+        timestamp: String,
+        caption: String,
+        monogram: String,
+        avatarURL: URL?,
+        likeCount: Int64?,
+        imagePipeline: ImagePipeline?
+    ) {
+        representedID = nil
+        headerLabel.text = timestamp.isEmpty ? authorName : "\(authorName) · \(timestamp)"
+        bodyLabel.text = caption
+        avatarView.setMonogram(monogram)
+        rowLeading?.constant = 0
+        setCaptionLikeCount(likeCount)
+        becomeCaption()
+        loadAvatar(avatarURL, for: nil, using: imagePipeline)
+    }
+
+    /// The counter as a READING: the heart is quiet, the number is the post's,
+    /// and an unknown count draws nothing at all rather than a nought.
+    private func setCaptionLikeCount(_ count: Int64?) {
+        var config = likeButton.configuration
+        config?.image = UIImage(
+            systemName: "heart",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        )
+        config?.baseForegroundColor = .secondaryLabel
+        if let count {
+            var title = AttributedString(SnapSubtitleView.countText(Int(count)))
+            title.font = UIFont.preferredFont(forTextStyle: .caption1)
+            config?.attributedTitle = title
+        } else {
+            config?.attributedTitle = nil
+        }
+        likeButton.configuration = config
+    }
+
+    /// Switches off everything that belongs to a comment and not to a post.
+    /// Idempotent: a recycled row re-runs it, and `prepareForReuse` undoes it.
+    private func becomeCaption() {
+        isCaption = true
+        likeButton.isUserInteractionEnabled = false
+        rowTapRecognizer?.isEnabled = false
+        if let menu = contextMenu { removeInteraction(menu) }
+    }
+
+    /// Whether this row is standing in for the post rather than a comment.
+    private var isCaption = false
+
     /// Cell recycling: drop the in-flight fetch, the picture, and the
     /// identity it belonged to. Called from `CommentCell.prepareForReuse`.
     func prepareForReuse() {
@@ -129,6 +201,18 @@ final class CommentRowView: UIView {
         avatarTask = nil
         representedID = nil
         avatarImageView.image = nil
+        // ⚠️ BACK TO A COMMENT. A row that stood in for a caption has its reply
+        // tap, its menu and its like control switched off, and a recycled cell
+        // that inherited that would be a comment nobody could interact with —
+        // the tile-cell lesson applied to a row.
+        if isCaption {
+            isCaption = false
+            likeButton.isUserInteractionEnabled = true
+            rowTapRecognizer?.isEnabled = true
+            if let contextMenu, !interactions.contains(where: { $0 === contextMenu }) {
+                addInteraction(contextMenu)
+            }
+        }
         onAvatarTap = nil
         onLikeTap = nil
         onReplyTap = nil
@@ -141,7 +225,11 @@ final class CommentRowView: UIView {
     /// thread, and only if the row is still showing the comment it started
     /// for. Every failure path (no URL, cancelled, decode error, recycled
     /// row) simply leaves the monogram, which is already on screen.
-    private func loadAvatar(_ url: URL?, for id: String, using pipeline: ImagePipeline?) {
+    /// - Parameter id: the comment the fetch belongs to, or `nil` for the
+    ///   caption, which is not one. The guard is the same either way: what a
+    ///   recycled row must never do is paint a picture fetched for the row it
+    ///   used to be.
+    private func loadAvatar(_ url: URL?, for id: String?, using pipeline: ImagePipeline?) {
         avatarTask?.cancel()
         avatarTask = nil
         avatarImageView.image = nil
@@ -247,79 +335,39 @@ final class CommentRowView: UIView {
     }
 }
 
-/// The comment list's FIRST ROW: the post's own caption, as a message
-/// bubble with the author's avatar beside it.
+/// The comment list's FIRST ROW: the post itself, drawn as the thread's first
+/// message.
 ///
-///   ( ) ┌──────────────────────────┐
-///       │ Weekend build log: …     │
-///       │                10 weeks  │
-///       └──────────────────────────┘
-///   ( ) Kenji Tanaka · 20m
+/// ```
+///  ( )  Ava Moreau · 10 weeks                    ♥ 271
+///       Weekend build log: rebuilt the pipeline…
+///  ( )  Kenji Tanaka · 20m                       ♥ 3
 ///       Love this shot 🔥
+/// ```
 ///
-/// The avatar column is `CommentRowView`'s, to the point: same diameter,
-/// same gap, same monogram-under-picture contract, same id-guarded fetch.
-/// That alignment is the whole reason the caption reads as the first
-/// message in the thread rather than as a header pasted above it — the
-/// bubble's glass is the only thing that sets it apart.
+/// ⚠️ IT IS A `CommentRowView`, not something shaped like one. The caption has
+/// been three things now — a Liquid Glass bubble beside an avatar, the gallery
+/// card's flat content for text posts, and a bubble again with its own closing
+/// line — and each of them existed to line up with the rows beneath it: same
+/// avatar column, same header, same body inset, kept in step by hand. Sharing
+/// the row deletes that whole class of drift, and it is also the design: the
+/// post is the first message in its own thread, so it looks like one.
 ///
-/// It scrolls like any other row (it IS any other row), which is what the
-/// move out of the feed cell bought: no reserved region, no measured
-/// caption height, and no floating card to keep in sync with the list.
+/// What it does not share is a comment's affordances — see
+/// `CommentRowView.configureAsPostCaption`.
 final class CaptionBubbleCell: UICollectionViewCell {
-    /// Which face the caption wears — and the choice is a property of the
-    /// POST, not of this screen.
-    ///
-    /// A media page's caption floats over an arbitrary photograph, so it needs
-    /// the glass and reads as a message in the thread. A TEXT page has no
-    /// photograph to fight, and is arrived at by a reveal that opens the
-    /// gallery row into the page — so its caption must be the row's caption,
-    /// at the row's size and inset, or the transition hands the eye from one
-    /// object to a different one.
-    enum Style {
-        /// Avatar + Liquid Glass bubble. The media page's face.
-        case bubble
-        /// The gallery card's own content, flat on the page's ground.
-        case flat
-    }
-
-    private let avatarView = MonogramAvatarView(diameter: CommentRowView.avatarSize)
-    private let avatarImageView = AvatarImageView()
-    private let bubble = SnapPostInfoCardView()
-    private let flat = PostCaptionRowView()
-    /// The avatar+bubble pair, hidden as a unit when the flat face is worn.
-    private var bubbleRow: UIStackView!
-    private var avatarTask: Task<Void, Never>?
-    /// The reuse guard, the comment rows' rule applied to the post: a
-    /// recycled cell can outlive its own fetch.
-    private var representedID: PostID?
-    /// Defaults to the bubble, so every caller that says nothing keeps the
-    /// face it has always had.
-    private var style: Style = .bubble
+    private let row = CommentRowView()
 
     /// The avatar was tapped — the host pushes the author's profile.
-    var onAvatarTap: (() -> Void)?
+    var onAvatarTap: (() -> Void)? {
+        get { row.onAvatarTap }
+        set { row.onAvatarTap = newValue }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        avatarImageView.pin(to: avatarView)
-        avatarView.isUserInteractionEnabled = true
-        avatarView.addGestureRecognizer(
-            UITapGestureRecognizer(target: self, action: #selector(avatarTapped))
-        )
-        // The bubble is NON-INTERACTIVE: a standard row in the list, like
-        // every comment beside it. It carried a tap that closed the layout
-        // for one round; the toolbar's ✕ is the single exit now, and a row
-        // that silently dismisses the screen under a stray tap is not what
-        // a message in a thread should do.
-
-        let row = UIStackView(arrangedSubviews: [avatarView, bubble])
-        row.axis = .horizontal
-        row.alignment = .top
-        row.spacing = CommentRowView.avatarGap
         row.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(row)
-        bubbleRow = row
         NSLayoutConstraint.activate([
             row.topAnchor.constraint(equalTo: contentView.topAnchor),
             row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -327,22 +375,6 @@ final class CaptionBubbleCell: UICollectionViewCell {
             // The inter-row breathing every other stream row uses.
             row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.lg),
         ])
-        // The flat face fills the cell EDGE TO EDGE and carries the card's
-        // insets internally, which is what puts its caption at the same x as
-        // the gallery row's: the cell already sits at the card's leading edge,
-        // so 16pt inside it is the card's own 16pt inside its card.
-        flat.translatesAutoresizingMaskIntoConstraints = false
-        flat.isHidden = true
-        contentView.addSubview(flat)
-        NSLayoutConstraint.activate([
-            flat.topAnchor.constraint(equalTo: contentView.topAnchor),
-            flat.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            flat.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            flat.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
-        // The bubble is onstage by default: it is list content, and the
-        // engagement's fade belongs to the container it rides in.
-        bubble.setContentEntrance(offstage: false)
     }
 
     @available(*, unavailable)
@@ -350,46 +382,25 @@ final class CaptionBubbleCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        avatarTask?.cancel()
-        avatarTask = nil
-        representedID = nil
-        avatarImageView.image = nil
-        bubble.reset()
-        flat.reset()
-        // Back to the default face: a recycled cell must not inherit the
-        // previous post's format, which is the tile-cell lesson (`setFace`)
-        // applied to a row.
-        apply(style: .bubble)
-        onAvatarTap = nil
+        row.prepareForReuse()
     }
 
-    /// Swaps the face. Both are built once and toggled, rather than rebuilt:
-    /// the glass must only ever materialize in a window, so tearing it down
-    /// and back up per configure would contact the render server on a
-    /// scrolling row.
-    private func apply(style: Style) {
-        self.style = style
-        bubbleRow.isHidden = style != .bubble
-        flat.isHidden = style != .flat
-    }
-
-    /// Measures this row at the width the layout is actually going to give
-    /// it, rather than at whatever width the cell happens to be carrying.
+    /// Measures this row at the width the layout is actually going to give it,
+    /// rather than at whatever width the cell happens to be carrying.
     ///
-    /// THE RACE THIS CLOSES. A self-sizing cell is asked its height once,
-    /// and on the feed's resting engagement it is asked early — the
-    /// comments are installed into a feed cell from `willDisplay`, while
-    /// the page is still arriving, so the container's width is not final.
-    /// Measured against a too-wide box the caption is one line, and one
-    /// line is the height the layout keeps: the row never grows back, and
-    /// the label — which HAS the full string — renders as much of it as
-    /// fits and clips the rest. That is the "clipped to one line, end of
-    /// the text missing" report, and it reproduced about one launch in
-    /// three.
+    /// THE RACE THIS CLOSES. A self-sizing cell is asked its height once, and
+    /// on the feed's resting engagement it is asked early — the comments are
+    /// installed into a feed cell from `willDisplay`, while the page is still
+    /// arriving, so the container's width is not final. Measured against a
+    /// too-wide box the caption is one line, and one line is the height the
+    /// layout keeps: the row never grows back, and the label — which HAS the
+    /// full string — renders as much of it as fits and clips the rest. That is
+    /// the "clipped to one line, end of the text missing" report, and it
+    /// reproduced about one launch in three.
     ///
-    /// So the width comes from the ATTRIBUTES, which are authoritative, and
-    /// the layout is forced through synchronously before measuring, so
-    /// nothing downstream can hand back a cached one-line height.
+    /// So the width comes from the ATTRIBUTES, which are authoritative, and the
+    /// layout is forced through synchronously before measuring, so nothing
+    /// downstream can hand back a cached one-line height.
     override func preferredLayoutAttributesFitting(
         _ layoutAttributes: UICollectionViewLayoutAttributes
     ) -> UICollectionViewLayoutAttributes {
@@ -397,10 +408,6 @@ final class CaptionBubbleCell: UICollectionViewCell {
         guard targetWidth > 0 else {
             return super.preferredLayoutAttributesFitting(layoutAttributes)
         }
-        // Adopt the target width FIRST: `preferredMaxLayoutWidth` is derived
-        // from the bubble's resolved bounds (see `SnapPostInfoCardView`), so
-        // the label only learns its real wrapping width once the cell is
-        // actually that wide.
         if abs(bounds.width - targetWidth) > 0.5 {
             bounds.size.width = targetWidth
         }
@@ -417,73 +424,44 @@ final class CaptionBubbleCell: UICollectionViewCell {
         return layoutAttributes
     }
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        // The glass materializes only in a window (the render-server rule
-        // every glass surface here follows) — and this row can be dequeued
-        // long before it is attached, so the seed lives here rather than in
-        // `configure`. A flat row has no glass to materialize, and asking for
-        // it anyway would contact the render server for a surface nobody is
-        // going to see.
-        bubble.setGlassActive(style == .bubble && window != nil)
-    }
-
     /// Renders from what the FEED already knows, before this screen's own post
-    /// fetch returns. Caption and timestamp only — enough for the row to exist,
-    /// occupy its real height, and be somewhere a flight can aim at.
+    /// fetch returns — enough for the row to exist, occupy its real height, and
+    /// be somewhere a flight can aim at.
+    ///
+    /// The author travels too, and it has to: the row names its author, and a
+    /// seeded row that showed an empty disc and no name until the fetch
+    /// returned would be a hole in the object the reveal is carrying the eye
+    /// to. The feed knows the name and the picture already.
     func configureSeed(
-        caption: String, timestamp: String, style: Style, metrics: PostCardMetrics?
+        caption: String, timestamp: String, authorName: String, monogram: String,
+        avatarURL: URL?, likeCount: Int64?, imagePipeline: ImagePipeline?
     ) {
-        representedID = nil
-        apply(style: style)
-        switch style {
-        case .bubble: bubble.configure(caption: caption, timestamp: timestamp)
-        case .flat: flat.configure(caption: caption, timestamp: timestamp, metrics: metrics)
-        }
+        row.configureAsPostCaption(
+            authorName: authorName, timestamp: timestamp, caption: caption,
+            monogram: monogram, avatarURL: avatarURL, likeCount: likeCount,
+            imagePipeline: imagePipeline
+        )
     }
 
-    /// `metrics` is the SEED's, deliberately, and it is not re-derived here.
+    /// `likeCount` comes from the HOST, deliberately, and is not derived here.
     ///
-    /// A `FeedEntry` carries a like count and nothing else — no views, no
-    /// comment count — so the real post landing knows strictly less about the
-    /// metric line than the grid that opened it did. Recomputing from the
-    /// model would therefore blank two of the three numbers a moment after
-    /// they appeared, which is the "seeded page can only get worse" failure
-    /// this screen has already been bitten by once.
+    /// A `PostDetailDisplayModel` carries no engagement at all — the screen
+    /// tracks it separately, because it moves: the viewer can like the post
+    /// from the toolbar while this row is on screen. The host passes whichever
+    /// number is currently true (the live one once the post has landed, the
+    /// opener's until then), and `nil` when nobody has said.
     func configure(
         with model: PostDetailDisplayModel,
         imagePipeline: ImagePipeline?,
-        metrics: PostCardMetrics? = nil
+        likeCount: Int64? = nil
     ) {
-        representedID = model.postID
-        // The POST decides the face: no media, no reason for glass.
-        apply(style: model.hasMedia ? .bubble : .flat)
-        switch style {
-        case .bubble:
-            bubble.configure(caption: model.caption, timestamp: model.timestampText)
-            avatarView.setMonogram(model.avatarMonogram)
-            bubble.setGlassActive(window != nil)
-            loadAvatar(model.avatarURL, for: model.postID, using: imagePipeline)
-        case .flat:
-            flat.configure(
-                caption: model.caption, timestamp: model.timestampText, metrics: metrics
-            )
-        }
+        row.configureAsPostCaption(
+            authorName: model.authorName, timestamp: model.timestampText,
+            caption: model.caption, monogram: model.avatarMonogram,
+            avatarURL: model.avatarURL, likeCount: likeCount,
+            imagePipeline: imagePipeline
+        )
     }
-
-    private func loadAvatar(_ url: URL?, for id: PostID, using pipeline: ImagePipeline?) {
-        avatarTask?.cancel()
-        avatarTask = nil
-        avatarImageView.image = nil
-        guard let url, let pipeline else { return }
-        avatarTask = Task { [weak self] in
-            let image = try? await pipeline.image(for: url)
-            guard let self, let image, !Task.isCancelled, self.representedID == id else { return }
-            self.avatarImageView.image = image
-        }
-    }
-
-    @objc private func avatarTapped() { onAvatarTap?() }
 }
 
 

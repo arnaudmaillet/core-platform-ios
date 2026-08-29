@@ -111,6 +111,19 @@ public final class VideoRenderView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// The poster shown until the video is ready to display. Pass `nil` to clear.
+    /// Fired whenever this surface's answer to "is there a real picture here"
+    /// changes — the first decoded frame, and the loss of it on a detach.
+    ///
+    /// The surface is the only thing that knows: the two backings learn it two
+    /// different ways (a KVO on the player layer, the first enqueue on the
+    /// sample-buffer one) and both already funnel through
+    /// `updatePosterVisibility`. Everything above had to poll or guess, which
+    /// is why the feed's "still loading" spinner could not be driven at all.
+    public var onPictureAvailabilityChange: ((Bool) -> Void)?
+    /// The last thing said, so nothing is said twice — the readiness KVO fires
+    /// on every re-assert, not only on the edge.
+    private var hasAnnouncedPicture = false
+
     public func setPoster(_ image: UIImage?) {
         posterView.image = image
         updatePosterVisibility(ready: isReadyForDisplay)
@@ -163,6 +176,16 @@ public final class VideoRenderView: UIView {
     }
 
     private func updatePosterVisibility(ready: Bool) {
+        // ⚠️ ANNOUNCED HERE, because this is where both backings agree.
+        //
+        // A player layer learns it by KVO and a sample-buffer layer by its first
+        // enqueue, and the two arrive by different routes at different times —
+        // but both call this, so this is the one place that can say "there is a
+        // picture now" without knowing which kind of surface it is.
+        if ready != hasAnnouncedPicture {
+            hasAnnouncedPicture = ready
+            onPictureAvailabilityChange?(ready)
+        }
         let wasVisible = !posterView.isHidden
         let shouldHide = (posterView.image == nil) || ready
         #if DEBUG

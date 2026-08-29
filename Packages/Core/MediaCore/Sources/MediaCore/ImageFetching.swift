@@ -61,8 +61,31 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
     public func fetchImageData(for url: URL) async throws -> Data {
         let scheme = url.scheme?.lowercased()
         let fetcher = scheme == "http" || scheme == "https" ? remote : placeholder
+        #if DEBUG
+        // `-slow-media <ms>`: holds every image back, so the states that only
+        // exist WHILE a picture is missing can be seen at all.
+        //
+        // Mock mode's placeholder fetcher answers in microseconds and the real
+        // catalog is cached after one launch, so the feed's "still loading"
+        // spinner — which waits a quarter-second before appearing — could not
+        // be reached from a script: it is correct for it never to show when
+        // nothing is ever slow. This is the only way to film it, and it delays
+        // the FETCH rather than faking the state, so everything downstream (the
+        // grace, the cell, the surface) is the real path.
+        if let delay = Self.debugMediaDelay { try? await Task.sleep(nanoseconds: delay) }
+        #endif
         return try await fetcher.fetchImageData(for: url)
     }
+
+    #if DEBUG
+    private static let debugMediaDelay: UInt64? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let position = arguments.firstIndex(of: "-slow-media"),
+              position + 1 < arguments.count,
+              let milliseconds = UInt64(arguments[position + 1]) else { return nil }
+        return milliseconds * NSEC_PER_MSEC
+    }()
+    #endif
 }
 
 /// Deterministic offline fetcher for mock mode: renders a solid-color image

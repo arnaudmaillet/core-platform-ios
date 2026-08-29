@@ -119,15 +119,15 @@ final class PostDetailViewController: UIViewController {
     /// The engaged footer's frost: rows gliding behind the composer stay
     /// visible but dissolve into a LIGHT blur, so the bar reads over them
     /// without the band reading as an overlay on the post. Clear at the
-    /// band's top edge, full material by the composer's top, solid to the
-    /// screen's bottom; the mask re-frames itself when the keyboard grows
-    /// the band. HIT-INERT: it must never eat the bar's taps or the swipe
-    /// pan. Effect nil until the engaged entrance IN A WINDOW; it rides the
-    /// master spring via `setComposerEntranceState`.
+    /// band's top edge, full material at the screen's bottom — the header
+    /// band's ramp, mirrored, and no `topRampLength`: that parameter exists to
+    /// finish a ramp EARLY and hold it, which is exactly the plateau this
+    /// stopped having. HIT-INERT: it must never eat the bar's taps or the
+    /// swipe pan. Effect nil until the engaged entrance IN A WINDOW; it rides
+    /// the master spring via `setComposerEntranceState`.
     private let composerBackdrop = ProgressiveFrostView(
         maskColors: SnapCommentsLayout.footerFrostMaskColors,
-        maskLocations: [0, 0.5, 1],
-        topRampLength: SnapCommentsLayout.footerFrostLead
+        maskLocations: SnapCommentsLayout.footerFrostMaskLocations
     )
     private var imageTasks: [Task<Void, Never>] = []
     /// The threaded stream as last loaded — kept so expansion re-renders
@@ -151,7 +151,11 @@ final class PostDetailViewController: UIViewController {
     /// the view or comment counts, so the seed stays the source for the line
     /// (see `CaptionBubbleCell.configure`).
     private var seededCardMetrics: PostCardMetrics?
-    private var seededCaptionStyle: CaptionBubbleCell.Style = .bubble
+    /// The author the opener handed over, so a seeded row wears its NAME and
+    /// its avatar from frame one rather than an empty disc and a blank header
+    /// until the fetch lands. The row names its author now (it is shaped like a
+    /// comment), so the name is as load-bearing as the picture.
+    private var seededAuthor: (name: String, monogram: String, avatarURL: URL?)?
     /// Parents whose full reply pool is shown (the "view more" seam's
     /// state). Per-screen, like scroll position.
     private var expandedReplyParents: Set<String> = []
@@ -919,6 +923,35 @@ final class PostDetailViewController: UIViewController {
         config?.image = UIImage(systemName: state.isLiked ? "heart.fill" : "heart")
         config?.baseForegroundColor = state.isLiked ? .systemRed : .secondaryLabel
         likeButton.configuration = config
+        // The caption row carries the same number in its closing line, and it
+        // is a LIVE one: the viewer can like the post from the toolbar with
+        // that row on screen.
+        // ⚠️ ONLY ONCE THE POST HAS LANDED. The state starts at zero for every
+        // screen, and a zero before the fetch is not a count — it is the
+        // absence of one, and the row would assert "nobody liked this" over
+        // the number the opener actually handed it.
+        setCaptionLikeCount(latestPost == nil ? nil : state.likeCount)
+    }
+
+    /// The count the caption row's closing line shows: the live one once the
+    /// post has landed, the opener's until then, `nil` when nobody has said.
+    private var liveLikeCount: Int64?
+    private var captionLikeCount: Int64? { liveLikeCount ?? seededCardMetrics?.reactions }
+
+    /// Re-renders the caption row when — and only when — its number changed.
+    ///
+    /// Reconfigure, never reload: the row is a `UIVisualEffectView`, and a
+    /// diffable reload fades a cell in, which renders a glass material as flat
+    /// opaque grey for the fade's duration (the "bubble loads dark then flashes
+    /// light" report).
+    private func setCaptionLikeCount(_ count: Int64?) {
+        let before = captionLikeCount
+        liveLikeCount = count
+        guard captionLikeCount != before, streamDataSource != nil else { return }
+        var snapshot = streamDataSource.snapshot()
+        guard snapshot.itemIdentifiers.contains(.caption) else { return }
+        snapshot.reconfigureItems([.caption])
+        streamDataSource.apply(snapshot, animatingDifferences: false)
     }
 
     /// Renders the caption row NOW, from what the opener already knows.
@@ -929,22 +962,21 @@ final class PostDetailViewController: UIViewController {
     /// caption dropped in afterwards. The feed already holds the caption and
     /// the timestamp, so it hands them over at mount and the real post replaces
     /// the row later with the same text, moving nothing.
-    /// `style` and `metrics` come from the OPENER, because only it knows both.
-    ///
-    /// The face is a property of the post's format — a text page's caption
-    /// wears the gallery card's flat content, a media page's wears the glass
-    /// bubble — and the metric line exists nowhere else in the pipeline: a
-    /// `FeedEntry` carries a like count and neither a view nor a comment
-    /// count, so a hydrated model knows less than the grid that opened this.
+    /// The AUTHOR and the counts come from the opener, because only it has
+    /// them: the row is an avatar beside a bubble whatever the post is made of,
+    /// and a `FeedEntry` carries a like count and neither a view nor a comment
+    /// count — so a hydrated model knows less than the grid that opened this.
     func seedCaption(
         _ text: String,
         timestamp: String,
-        style: CaptionBubbleCell.Style = .bubble,
+        authorName: String = "",
+        monogram: String = "",
+        avatarURL: URL? = nil,
         metrics: PostCardMetrics? = nil
     ) {
         guard mode == .commentsOnly, !text.isEmpty, latestPost == nil else { return }
         seededCaption = (text, timestamp)
-        seededCaptionStyle = style
+        seededAuthor = (authorName, monogram, avatarURL)
         seededCardMetrics = metrics
         loadViewIfNeeded()
         applyStream(animated: false)
@@ -1087,14 +1119,17 @@ final class PostDetailViewController: UIViewController {
                 cell.configure(
                     with: post,
                     imagePipeline: self.imagePipeline,
-                    metrics: self.seededCardMetrics
+                    likeCount: self.captionLikeCount
                 )
             } else if let seed = self.seededCaption {
                 cell.configureSeed(
                     caption: seed.text,
                     timestamp: seed.timestamp,
-                    style: self.seededCaptionStyle,
-                    metrics: self.seededCardMetrics
+                    authorName: self.seededAuthor?.name ?? "",
+                    monogram: self.seededAuthor?.monogram ?? "",
+                    avatarURL: self.seededAuthor?.avatarURL,
+                    likeCount: self.captionLikeCount,
+                    imagePipeline: self.imagePipeline
                 )
             } else {
                 return
@@ -1268,11 +1303,10 @@ final class PostDetailViewController: UIViewController {
         guard width > 0, mode == .commentsOnly,
               let post = latestPost, post.hasCaption else { return 0 }
         let sizingCell = captionSizingCell
-        // The SAME metrics the real row gets: this cell exists to answer how
-        // tall the caption row will be, and a metric line it was not given is
-        // a line of height it does not reserve. (The face itself follows
-        // `post.hasMedia` inside `configure`, so both cells wear it.)
-        sizingCell.configure(with: post, imagePipeline: nil, metrics: seededCardMetrics)
+        // The SAME count the real row gets: this cell exists to answer how tall
+        // the caption row will be, and a closing line it was not given is a
+        // line of height it does not reserve.
+        sizingCell.configure(with: post, imagePipeline: nil, likeCount: captionLikeCount)
         sizingCell.bounds.size.width = width
         sizingCell.contentView.setNeedsLayout()
         sizingCell.contentView.layoutIfNeeded()

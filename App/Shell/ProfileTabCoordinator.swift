@@ -49,14 +49,26 @@ final class ProfileTabCoordinator: TabCoordinator {
         // positions against the window's bottom safe area, reports a zeroed safe
         // area of its own, and ignores both `additionalSafeAreaInsets` on the
         // navigation controller and its own layout margins.
-        navigationController.viewControllers = [
-            container.profileFeature.makeCurrentUserProfileViewController(
-                onLogout: onLogout,
-                identityStub: nil,
-                trayPlacement: .aboveBottomSafeArea
-            )
-        ]
+        let profile = container.profileFeature.makeCurrentUserProfileViewController(
+            onLogout: onLogout,
+            identityStub: nil,
+            trayPlacement: .aboveBottomSafeArea
+        )
+        navigationController.viewControllers = [profile]
+        // The balance, inboard of the gear — the same installer the Maps and
+        // For You headers use. ⚠️ THE TAB ROOT ONLY: a pushed profile is
+        // someone else's, and a viewer's balance has no business on it.
+        walletBadge = WalletBadgeInstaller(
+            wallet: container.walletStore,
+            presenter: navigationController
+        ) { [weak profile] item in
+            (profile as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
+        }
     }
+
+    /// The header's balance badge. Held for the coordinator's life, which is
+    /// the process's.
+    private var walletBadge: WalletBadgeInstaller?
 
     /// Shows the viewer's own avatar as the tab's icon, falling back to the
     /// glyph when there isn't one.

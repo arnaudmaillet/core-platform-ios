@@ -138,6 +138,56 @@ final class SnapMediaCardView: UIView {
         logMediaState(image == nil ? "setImage(nil)" : "setImage(image)")
     }
 
+    // MARK: - The wait
+
+    /// Says the page is waiting for its media.
+    ///
+    /// A thumbnail that is still loading and a thumbnail that IS the post look
+    /// exactly alike, and a clip's poster looks like a photograph — so a page
+    /// mid-fetch was indistinguishable from a page that had arrived. This is
+    /// the difference, and it sits over the media area rather than over the
+    /// chrome: it belongs to the picture that is missing.
+    private lazy var spinner: UIActivityIndicatorView = {
+        let view = UIActivityIndicatorView(style: .medium)
+        // ⚠️ WHITE, not `.label`. The ground here is the post's photograph or
+        // black — never the page's theme — so a semantic colour would resolve
+        // against a background this view does not have. White is what every
+        // other overlay on this surface uses, for the same reason.
+        view.color = .white
+        view.hidesWhenStopped = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(view)
+        NSLayoutConstraint.activate([
+            view.centerXAnchor.constraint(equalTo: centerXAnchor),
+            view.centerYAnchor.constraint(equalTo: centerYAnchor),
+            view.widthAnchor.constraint(equalToConstant: 24),
+            view.heightAnchor.constraint(equalToConstant: 24)
+        ])
+        return view
+    }()
+
+    /// Whether the spinner is up. Built lazily, so asking before anything ever
+    /// waited must not create it.
+    private var isSpinning = false
+
+    func setLoading(_ loading: Bool) {
+        guard loading != isSpinning else { return }
+        isSpinning = loading
+        if loading {
+            // ⚠️ ABOVE EVERYTHING, and re-stated on every show: the carousel is
+            // inserted over `imageView` after this view is built, so a spinner
+            // added once would sit UNDER a collection's pages.
+            bringSubviewToFront(spinner)
+            spinner.startAnimating()
+        } else {
+            spinner.stopAnimating()
+        }
+        logMediaState(loading ? "setLoading(true)" : "setLoading(false)")
+    }
+
+    /// Read by `SnapMediaLoaderSpecTests`.
+    var isShowingLoader: Bool { isSpinning }
+
     // MARK: - Collections
 
     /// Fired as the viewer pages a collection, so the chrome can move its

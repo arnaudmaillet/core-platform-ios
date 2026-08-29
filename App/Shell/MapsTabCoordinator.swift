@@ -39,29 +39,12 @@ final class MapsTabCoordinator: TabCoordinator {
         return item
     }()
 
-    /// The wallet's toolbar face: coin + balance, pulsing while a claim
-    /// waits. A custom view (an image item can't carry the count), hosted on
-    /// an item that KEEPS ITS OWN CAPSULE — iOS 26 draws one shared glass
-    /// background behind adjacent bar items, and without the opt-out the
-    /// badge and the bell fuse into a single pill (`LeadingSelectorItem`'s
-    /// doctrine, applied trailing-side).
-    private lazy var walletBadge = WalletBadgeButton()
-    private lazy var walletBadgeItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(customView: walletBadge)
-        item.sharesBackground = false
-        return item
-    }()
-    /// Wakes the badge when the hourly claim unlocks — the one state change
-    /// that arrives by CLOCK, not by store mutation, so no notification will
-    /// ever announce it. One-shot, re-armed from every refresh.
-    private var claimUnlockTimer: Timer?
-    /// The store-change half of the badge's freshness (spends and claims,
-    /// wherever they happen). Held for the coordinator's lifetime — the tab
-    /// coordinators live exactly as long as the process.
-    private var walletObserver: NSObjectProtocol?
-    /// The screen wearing the bar items, for the width-change reinstall
-    /// (a bar measures a custom view once, at install — see
-    /// `WalletBadgeButton.onFittedWidthChange`).
+    /// The wallet's toolbar face: coin + balance, pulsing while a claim waits.
+    /// Everything around it — the store observation, the claim wake-up, the
+    /// width-change reinstall, the sheet — lives in `WalletBadgeInstaller`,
+    /// which the For You and Profile headers wear too.
+    private var walletBadge: WalletBadgeInstaller?
+    /// The screen wearing the bar items, for the reinstall.
     private weak var mapViewController: UIViewController?
 
     init(container: AppContainer, notificationsButtonItem: UIBarButtonItem) {
@@ -84,35 +67,20 @@ final class MapsTabCoordinator: TabCoordinator {
         // of the bell ([coin] [bell]) — in its own glass bubble via
         // `sharesBackground = false` rather than the fixedSpace the avatar
         // era used.
-        mapViewController.navigationItem.rightBarButtonItems = [notificationsButtonItem, walletBadgeItem]
         // The post-creation "+" sits opposite the pair, top-left.
         mapViewController.navigationItem.leftBarButtonItem = createPostButtonItem
         navigationController.viewControllers = [mapViewController]
 
-        walletBadge.addAction(
-            UIAction { [weak self] _ in self?.presentWalletSheet() },
-            for: .primaryActionTriggered
-        )
-        // A grown count needs a re-measured wrapper, and the wrapper
-        // belongs to the ITEM: re-assigning the same item hands the bar the
-        // same wrapper with the same frozen size (measured in-sim — "120"
-        // still wrapped). A FRESH item is the only thing the bar measures
-        // anew.
-        walletBadge.onFittedWidthChange = { [weak self] in
-            guard let self, let nav = self.mapViewController?.navigationItem else { return }
-            let fresh = UIBarButtonItem(customView: self.walletBadge)
-            fresh.sharesBackground = false
-            self.walletBadgeItem = fresh
-            nav.rightBarButtonItems = [self.notificationsButtonItem, fresh]
+        // The badge stands where the avatar used to — trailing group, inboard
+        // of the bell ([coin] [bell]).
+        walletBadge = WalletBadgeInstaller(
+            wallet: container.walletStore,
+            presenter: navigationController
+        ) { [weak self] item in
+            guard let self else { return }
+            self.mapViewController?.navigationItem.rightBarButtonItems =
+                [self.notificationsButtonItem, item]
         }
-        walletObserver = NotificationCenter.default.addObserver(
-            forName: WalletStore.didChangeNotification,
-            object: container.walletStore,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshWalletBadge() }
-        }
-        refreshWalletBadge()
 
         #if DEBUG
         // `-open-wallet`: presents the wallet sheet ~1s after launch — the
@@ -127,35 +95,7 @@ final class MapsTabCoordinator: TabCoordinator {
         #endif
     }
 
-    /// Renders one wallet snapshot onto the badge, and arms the wake-up for
-    /// the moment the countdown ends.
-    private func refreshWalletBadge() {
-        let snapshot = container.walletStore.snapshot()
-        walletBadge.update(
-            balance: snapshot.balance,
-            claimAvailable: snapshot.claimAvailable,
-            claimProgress: snapshot.claimCountdown.map {
-                WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
-            }
-        )
-
-        claimUnlockTimer?.invalidate()
-        claimUnlockTimer = nil
-        guard let unlockAt = snapshot.nextClaimAt else { return }
-        // +1s so the re-read lands strictly past the gate, never on it.
-        let timer = Timer(
-            fire: unlockAt.addingTimeInterval(1), interval: 0, repeats: false
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshWalletBadge() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        claimUnlockTimer = timer
-    }
-
     private func presentWalletSheet() {
-        navigationController.present(
-            WalletClaimViewController(wallet: container.walletStore),
-            animated: true
-        )
+        walletBadge?.presentSheet()
     }
 }

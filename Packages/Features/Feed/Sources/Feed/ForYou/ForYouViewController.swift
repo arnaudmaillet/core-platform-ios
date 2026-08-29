@@ -33,7 +33,7 @@ import UIKit
 /// resting state.
 ///
 /// This is a **tab root**, so the tab bar stays — it is how the viewer leaves.
-final class ForYouViewController: UIViewController {
+final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private let viewModel: ForYouViewModel
     private let pager: ForYouPagerView
     private let makeSnapFeed: ([PostID]) -> UIViewController
@@ -433,6 +433,35 @@ final class ForYouViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// An item the SHELL owns, standing inboard of this screen's own —
+    /// the viewer's point balance today, the same badge the Maps header and
+    /// the post screen wear.
+    ///
+    /// Injected rather than built here, and that is the whole design: three
+    /// screens show one number, so one object owns the wallet, the claim
+    /// countdown and the sheet, and the screens promise only to keep the item
+    /// in their trailing run. This one has to survive `viewDidLoad`'s own
+    /// write, which is why it is stored and re-applied rather than assigned.
+    private var trailingAccessoryItem: UIBarButtonItem?
+
+    /// Installs (or clears) that item. Safe before the view loads — the write
+    /// at `viewDidLoad` composes from the same two places.
+    ///
+    /// `HeaderAccessoryHosting`, so the shell can hand it over without knowing
+    /// this type.
+    func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {
+        trailingAccessoryItem = item
+        guard isViewLoaded else { return }
+        applyTrailingItems()
+    }
+
+    /// ⚠️ `[0]` IS THE SCREEN EDGE. The lens menu keeps the corner and the
+    /// accessory sits to its left, which is the arrangement the Maps header
+    /// already wears ([coin] [bell]).
+    private func applyTrailingItems() {
+        navigationItem.rightBarButtonItems = [contextItem, trailingAccessoryItem].compactMap { $0 }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
@@ -449,7 +478,7 @@ final class ForYouViewController: UIViewController {
         // Native bar items on both sides; the selector joins the LEADING group
         // behind the compose glyph, so the centre stays empty and flexible.
         navigationItem.leftBarButtonItem = composeItem
-        navigationItem.rightBarButtonItem = contextItem
+        applyTrailingItems()
         navigationItem.installLeadingSelector(tabBar)
         contextItem.menu = makeContextMenu()
 

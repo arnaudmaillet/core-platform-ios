@@ -32,11 +32,25 @@ final class ForYouTabCoordinator: TabCoordinator {
         self.container = container
     }
 
+    /// The header's balance badge — the same object the Maps header wears, so
+    /// the number, the claim countdown and the sheet cannot drift between the
+    /// two. Held for the coordinator's life, which is the process's.
+    private var walletBadge: WalletBadgeInstaller?
+
     func start() {
         let forYou = container.feedFeature.makeForYouViewController { [weak self] presentation in
             self?.apply(presentation)
         }
         navigationController.viewControllers = [forYou]
+        // ⚠️ Installed through the SCREEN, not onto its `navigationItem`: For
+        // You composes its own trailing run at `viewDidLoad`, so an item
+        // written from out here would be erased by it.
+        walletBadge = WalletBadgeInstaller(
+            wallet: container.walletStore,
+            presenter: navigationController
+        ) { [weak forYou] item in
+            (forYou as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
+        }
     }
 
     /// The lens menu this tab's root offers, for the shell to hang off a
