@@ -1120,55 +1120,70 @@ struct SnapCommentsPresentationTests {
         #expect(items.last?.customView is UIButton)
     }
 
-    @Test func toolbarIsIdenticalInEveryState() {
+    /// ⚠️ THE FOOTER'S CORNER CARRIES THE EXIT: ⋯ at rest, ✕ while a MEDIA
+    /// post's comments are open, ⋯ again when they close.
+    ///
+    /// The toolbar was state-invariant for a while, and that was a real
+    /// property: three item sets whose only difference was this slot became
+    /// one, so a text engagement and a media engagement could not disagree
+    /// about what the corner meant. Two things changed. The ⋯ has a platter of
+    /// its own now, so the swap is one bubble changing glyph rather than a run
+    /// re-composing; and a TEXT page still never swaps — its comments ARE the
+    /// page, so there is nothing to close.
+    @Test func theFooterCornerCarriesTheCommentsExit() throws {
         let (_, feed) = Self.chromeHost()
         let resting = feed.toolbarItems ?? []
         #expect(!resting.isEmpty)
+        func cornerLabel() -> String? {
+            (feed.toolbarItems?.last?.customView as? UIButton)?.accessibilityLabel
+        }
+        #expect(cornerLabel() == "More actions")
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(feed.toolbarItems ?? [] == resting)
-
-        feed.setEngagedChrome(true, hasMedia: false, animated: false)
-        #expect(feed.toolbarItems ?? [] == resting)
+        #expect(cornerLabel() == "Close comments")
+        // ONLY the corner: everything to its left is untouched, which is what
+        // makes this a swap rather than a rebuild.
+        #expect(feed.toolbarItems?.dropLast() ?? [] == resting.dropLast())
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(feed.toolbarItems ?? [] == resting)
     }
 
-    /// The LEADING slot carries the exit now: a media post's comments put a
-    /// ✕ where the back arrow sits, and closing restores the arrow.
-    @Test func mediaCommentsPutTheCloseButtonInTheBackArrowsSlot() {
+    /// A TEXT page's corner never changes: its comments are its resting state,
+    /// so a ✕ would promise a media layout that does not exist.
+    @Test func aTextPagesCornerKeepsTheMenu() {
         let (_, feed) = Self.chromeHost()
-        // At rest, a pushed feed shows its back arrow (a bare chevron — it
-        // carries no accessibility label of its own).
+        let resting = feed.toolbarItems ?? []
+
+        feed.setEngagedChrome(true, hasMedia: false, animated: false)
+
+        #expect(feed.toolbarItems ?? [] == resting)
+    }
+
+    /// ⚠️ AND THE BACK ARROW STAYS PUT, in every state.
+    ///
+    /// The exit used to take this slot on a media post, which cost the screen
+    /// its way OUT while the layout was open: leaving the post meant closing
+    /// the comments first and then going back — two gestures for one
+    /// intention. The two answer different questions (leave the screen vs.
+    /// leave the layout) and now have different places to say so.
+    @Test func theBackArrowKeepsItsSlotThroughTheEngagement() {
+        let (_, feed) = Self.chromeHost()
         let restingItems = feed.navigationItem.leftBarButtonItems ?? []
         #expect(restingItems.count == 1)
-        #expect(!Self.leadingLabels(feed).contains("Close comments"))
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(Self.leadingLabels(feed) == ["Close comments"])
-
-        feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == restingItems)
-    }
-
-    /// TEXT POSTS KEEP THE BACK ARROW. Their engagement is the page's
-    /// permanent resting state, so a ✕ would promise a media layout that
-    /// does not exist — the asymmetry that used to live in the toolbar,
-    /// moved to the slot where it reads as a navigation choice.
-    @Test func textCommentsKeepTheBackArrow() {
-        let (_, feed) = Self.chromeHost()
-        let restingItems = feed.navigationItem.leftBarButtonItems ?? []
+        #expect(!Self.leadingLabels(feed).contains("Close comments"))
 
         feed.setEngagedChrome(true, hasMedia: false, animated: false)
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == restingItems)
-        #expect(!Self.leadingLabels(feed).contains("Close comments"))
     }
 
-    /// A TAB-ROOT feed has no back arrow — and still gains the ✕. The two
-    /// answer different questions (leave the screen vs. leave the layout),
-    /// and only the second is always available.
-    @Test func tabRootFeedHasNoBackArrowButStillGetsTheCloseButton() {
+    /// A TAB-ROOT feed has no back arrow — and still gains the ✕, in the
+    /// corner. The two answer different questions, and only the second is
+    /// always available.
+    @Test func aTabRootFeedWithNoBackArrowStillGetsTheExit() {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: EmptyFeedProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
@@ -1181,9 +1196,8 @@ struct SnapCommentsPresentationTests {
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(Self.leadingLabels(feed) == ["Close comments"])
-
-        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect((feed.toolbarItems?.last?.customView as? UIButton)?.accessibilityLabel
+                == "Close comments")
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
     }
 

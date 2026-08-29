@@ -64,10 +64,10 @@ final class SnapFeedViewController: UIViewController {
     /// first appearance, when the stack relationship is finally knowable.
     private var backItem: UIBarButtonItem?
     /// The nav bar's LEADING item while a MEDIA post's comments are open: a
-    /// ✕ that collapses back to the media layout. It stands in the back
-    /// arrow's slot because it means the same kind of thing one level in —
-    /// leave what is open — and it exists independently of `isClosable`,
-    /// since it closes the LAYOUT, not the screen.
+    /// ✕ that collapses back to the media layout. It stands in the FOOTER's
+    /// trailing corner, taking the ⋯'s bubble while the layout is open, and it
+    /// exists independently of `isClosable`: it closes the LAYOUT, not the
+    /// screen — which is exactly why the back arrow keeps its own slot.
     private var closeCommentsItem = UIBarButtonItem()
     /// The viewer's saved pile.
     ///
@@ -945,6 +945,7 @@ final class SnapFeedViewController: UIViewController {
         applyTrailingNavItems(navItems, animated: animated)
 
         applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
+        applyToolbarExit(engaged: engaged, hasMedia: hasMedia, animated: animated)
         // The toolbar is state-invariant now; nothing to swap.
     }
 
@@ -1058,10 +1059,42 @@ final class SnapFeedViewController: UIViewController {
     /// SET, don't ASSIGN — same reason as the trailing items: the animated
     /// form hands the change to the bar's own item animator, so the ✕ morphs
     /// into the arrow's place instead of popping over it.
+    /// ⚠️ THE ARROW STAYS, in every state.
+    ///
+    /// The comments exit used to take this slot on a media post, on the reading
+    /// that it means the same kind of thing one level in — leave what is open.
+    /// It cost the screen its way OUT while the layout was open: the arrow was
+    /// gone, so leaving the post meant closing the comments first and then
+    /// going back, two gestures for one intention. The exit moved to the
+    /// footer's trailing corner instead (see `applyToolbarExit`), where it
+    /// stands in the ⋯'s own bubble.
     private func applyLeadingNavItem(engaged: Bool, hasMedia: Bool, animated: Bool) {
-        let items = [engaged && hasMedia ? closeCommentsItem : backItem].compactMap { $0 }
+        let items = [backItem].compactMap { $0 }
         guard navigationItem.leftBarButtonItems ?? [] != items else { return }
         navigationItem.setLeftBarButtonItems(items, animated: animated)
+    }
+
+    /// The footer's trailing corner: ⋯ at rest, ✕ while a media post's comments
+    /// are open.
+    ///
+    /// ⚠️ THE CORNER IS NOT STATE-INVARIANT ANY MORE, and that was a deliberate
+    /// property once: the toolbar carried three item sets whose only difference
+    /// was this slot, and collapsing them to one was what stopped a text
+    /// engagement and a media engagement disagreeing about what the corner
+    /// meant. Two things have changed since. The ⋯ has its own platter now, so
+    /// the swap is one bubble changing its glyph rather than a run
+    /// re-composing; and a TEXT page never swaps at all — its comments are the
+    /// page, so there is nothing to close and its corner stays ⋯. The corner
+    /// therefore reads the same way everywhere it can be read: it closes what
+    /// is open, or folds away what else there is.
+    private func applyToolbarExit(engaged: Bool, hasMedia: Bool, animated: Bool) {
+        guard !defaultToolbarItems.isEmpty else { return }
+        let exit = engaged && hasMedia
+        let items = exit
+            ? defaultToolbarItems.dropLast() + [closeCommentsItem]
+            : defaultToolbarItems
+        guard toolbarItems ?? [] != Array(items) else { return }
+        setToolbarItems(Array(items), animated: animated)
     }
 
     private func applyTrailingNavItems(_ items: [UIBarButtonItem], animated: Bool) {
@@ -1142,23 +1175,23 @@ final class SnapFeedViewController: UIViewController {
         }
         navigationItem.rightBarButtonItems = restingTrailingItems()
 
-        // The comments exit, built once and held: it takes the leading slot
-        // whenever a media post's comments are open.
+        // The comments exit, built once and held: it takes the FOOTER's
+        // trailing bubble whenever a media post's comments are open.
         //
-        // UNTINTED, deliberately — it wears whatever the bar gives it, like
-        // the back chevron whose slot it takes. It carried `.systemRed` in
-        // the toolbar, where the exit had to be told apart from three
-        // controls that act ON the post; in the leading slot its POSITION
-        // already says what it is.
+        // UNTINTED, and now for a better reason than before. It carried
+        // `.systemRed` when it sat in a capsule beside three controls that act
+        // ON the post, where the exit had to be told apart from them; that
+        // capsule holds two controls now and the ⋯ has a bubble of its own, so
+        // the exit arrives ALONE in it. Being the only thing in its own bubble
+        // is what says what it is.
         //
-        // Note for anyone re-reaching for a colour here: the nav bar's
-        // Liquid Glass platter renders its own adaptive glyph colour and
-        // ignores `baseForegroundColor` outright (measured — the ✕ came out
-        // #06123D against a request for red, exactly as the back chevron
-        // comes out dark against a request for white). Baking the colour
-        // into the image with `.alwaysOriginal` does defeat it, at the cost
-        // of resolving the dynamic colour once at build time.
-        let close = SnapNavControls.makeNavActionButton(systemName: "xmark")
+        // Note for anyone re-reaching for a colour: a Liquid Glass platter
+        // renders its own adaptive glyph colour and ignores
+        // `baseForegroundColor` outright (measured in the nav bar — the ✕ came
+        // out #06123D against a request for red). Baking the colour into the
+        // image with `.alwaysOriginal` does defeat it, at the cost of resolving
+        // the dynamic colour once at build time.
+        let close = SnapNavControls.makeToolbarActionButton(systemName: "xmark")
         close.accessibilityLabel = "Close comments"
         close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
         closeCommentsItem = UIBarButtonItem(customView: close)
