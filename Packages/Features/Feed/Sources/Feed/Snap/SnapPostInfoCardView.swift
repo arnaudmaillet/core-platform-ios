@@ -1,15 +1,26 @@
 import CoreModels
 import DesignSystem
+import PostGrid
 import UIKit
 
 /// The post's caption as a MESSAGE BUBBLE — one Liquid Glass surface
-/// (`SnapGlassCardView`) holding the caption over a right-aligned timestamp:
+/// (`SnapGlassCardView`) holding the caption over a closing line that reads
+/// from both ends:
 ///
 ///   ┌─────────────────────────────┐
 ///   │ Weekend build log: rebuilt  │
 ///   │ the pipeline end to end…    │
-///   │                   10 weeks  │  ← timestamp, TRAILING
+///   │ 10 weeks              ♥ 40  │  ← date LEADING, likes TRAILING
 ///   └─────────────────────────────┘
+///
+/// The date used to sit trailing, alone, on the message-bubble convention
+/// where a timestamp settles into the bottom-right corner. It reads better at
+/// the reading edge, under the caption it dates — and that frees the corner
+/// for the one number the row is missing, the post's likes.
+///
+/// ⚠️ ABSENT IS NOT ZERO. The counter is a `PostMetricLabel`, which hides
+/// itself for a `nil` and renders a `0`: an opener that never knew the count
+/// leaves the corner empty rather than claiming nobody liked the post.
 ///
 /// It is the comment list's FIRST ROW (see `CaptionBubbleCell`), not a
 /// floating card the feed cell reserves a region for. That move is why the
@@ -25,10 +36,18 @@ import UIKit
 /// the audio credit is the toolbar's attribution item. Nothing duplicated.
 final class SnapPostInfoCardView: UIView {
     private let captionLabel = UILabel()
-    /// The post's age ("10 weeks"), trailing-aligned under the caption —
-    /// the message-bubble convention, where the timestamp settles into the
-    /// bubble's bottom-right corner.
+    /// The post's age ("10 weeks"), at the LEADING edge of the closing line.
     private let timestampLabel = UILabel()
+    /// The post's likes, at the trailing end of that same line. The grid's
+    /// own counter component, so the glyph, the spacing and the absent/zero
+    /// rule are the ones every other surface uses.
+    private let likeCounter = PostMetricLabel(
+        symbol: "heart", font: .preferredFont(forTextStyle: .footnote),
+        color: .secondaryLabel
+    )
+    /// The closing line: date at one end, likes at the other, a spacer between
+    /// them so each stays pinned to its own edge however long the other is.
+    private let footer = UIStackView()
     /// This component's floating glass bubble, filling it.
     private let glass = SnapGlassCardView()
     /// The caption + timestamp, hosted inside the glass and faded as one for
@@ -96,29 +115,42 @@ final class SnapPostInfoCardView: UIView {
         // caption, and legible on a refracting material in either theme
         // (a fixed white alpha could only ever be tuned for one).
         timestampLabel.textColor = .secondaryLabel
-        timestampLabel.textAlignment = .right
+        // NATURAL, not right: the date now sits at the reading edge, which is
+        // the trailing one in RTL.
+        timestampLabel.textAlignment = .natural
         timestampLabel.numberOfLines = 1
         timestampLabel.setContentHuggingPriority(.required, for: .vertical)
-        timestampLabel.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(timestampLabel)
+        // ⚠️ A DATE MAY NOT BE SQUEEZED by the counter beside it. Both ends of
+        // the line are short, and the spacer between them is what gives way.
+        timestampLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        footer.addArrangedSubview(timestampLabel)
+        footer.addArrangedSubview(spacer)
+        footer.addArrangedSubview(likeCounter)
+        footer.axis = .horizontal
+        footer.alignment = .center
+        footer.spacing = SnapCommentsLayout.cardContentInset / 2
+        footer.setContentHuggingPriority(.required, for: .vertical)
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(footer)
 
         // A clean top→bottom chain, all four margins the same inset: caption
-        // from the top, timestamp trailing-pinned beneath it, and the
-        // content's own bottom closing the bubble — so the whole thing sizes
-        // to its text with no fixed heights anywhere.
+        // from the top, the closing line spanning the full width beneath it,
+        // and the content's own bottom closing the bubble — so the whole thing
+        // sizes to its text with no fixed heights anywhere.
         NSLayoutConstraint.activate([
             captionLabel.topAnchor.constraint(equalTo: content.topAnchor, constant: inset),
             captionLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: inset),
             captionLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
 
-            timestampLabel.topAnchor.constraint(
+            footer.topAnchor.constraint(
                 equalTo: captionLabel.bottomAnchor, constant: Self.captionActionsGap
             ),
-            timestampLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: content.leadingAnchor, constant: inset
-            ),
-            timestampLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
-            timestampLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -inset),
+            footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: inset),
+            footer.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -inset),
+            footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -inset),
         ])
     }
 
@@ -165,18 +197,30 @@ final class SnapPostInfoCardView: UIView {
 
     // MARK: - Content
 
-    /// Fills the bubble. Both fields land synchronously; the bubble sizes
+    /// Fills the bubble. Every field lands synchronously; the bubble sizes
     /// itself to them.
-    func configure(caption: String?, timestamp: String?) {
+    ///
+    /// - Parameter likeCount: `nil` when the opener does not know it — see the
+    ///   absent-is-not-zero note above.
+    func configure(caption: String?, timestamp: String?, likeCount: Int64?) {
         captionLabel.text = caption
         timestampLabel.text = timestamp
+        likeCounter.set(likeCount)
     }
 
     /// Cell reuse: drop content.
     func reset() {
         captionLabel.text = nil
         timestampLabel.text = nil
+        likeCounter.set(nil)
     }
+
+    // MARK: - Read by the layout spec
+
+    /// The closing line's two ends, so a spec can assert which EDGE each sits
+    /// at without knowing how the row is built.
+    var debugDateLabel: UILabel { timestampLabel }
+    var debugLikeCounter: PostMetricLabel { likeCounter }
 
     // MARK: - Geometry
 

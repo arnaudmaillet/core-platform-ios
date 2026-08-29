@@ -1690,7 +1690,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // start — because the surface it all works on is the same object.
         switch playsVideo {
         case true:
-            guard let url = activeVideoURL, let videoPlayback else { return }
+            // `videoPlayback` is not bound here any more: the start below owns
+            // that, and the only use left on this path is the flight's warm.
+            guard let url = activeVideoURL, videoPlayback != nil else { return }
             // A hero card may be flying this post's player right now. Starting
             // here would attach a NEWER layer to the same player and blank the
             // card mid-flight, so the start waits for the flight to land — see
@@ -1737,18 +1739,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 warmAttachForFlight(url: url)
                 return
             }
-            mediaCard.hostRenderViewOnCurrentPage()
-            let view = mediaCard.renderView
-            let scope = playbackScope
-            Task { [weak self] in
-                await videoPlayback.play(url, in: view, scope: scope)
-                // ⚠️ ACTIVATION IS ITS OWN DOOR, and it bypasses the page
-                // reconcile entirely — which is why warming hung off that
-                // reconcile alone did nothing at all for the case that matters
-                // most: opening a post. The test read "page one was never
-                // prepared", and it was right.
-                self?.prewarmNeighbouringClips()
-            }
+            // The same start the viewport door uses, so a page that began
+            // playing at the halfway mark is RESUMED here rather than started
+            // a second time.
+            startWatchedClip()
         case false:
             // Nothing to start: a photo page's media is STATIC. The slow
             // zoom that used to prove activation here is gone (see
@@ -1759,6 +1753,101 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // in, and they are exactly the ones a viewer meets cold. Nothing to
             // play here does not mean nothing to prepare.
             prewarmNeighbouringClips()
+        }
+    }
+
+    // MARK: - Viewport playback
+
+    /// Whether this page covers most of the screen right now.
+    private var ownsViewport = false
+
+    /// ⚠️ THE PLAYBACK-ONLY DOOR, and the only thing that may open mid-drag.
+    ///
+    /// A clip starts when its page passes half the screen, not when the scroll
+    /// stops — waiting for the settle means a spring's worth of still frame on
+    /// a page the viewer is already reading. But the page is NOT active yet:
+    /// activation re-points the chrome, warms a window, reconciles the resting
+    /// interface and brings the settled page clear of the toolbar, and running
+    /// that from a scroll callback moved the scroll under the finger. That is
+    /// why this exists as its own entrance and touches nothing but the picture.
+    ///
+    /// Idempotent by construction, because both callers are: the settle
+    /// activates the same page a drag already handed the screen to, and the
+    /// start below resumes a hosted player rather than opening a second one.
+    func setOwnsViewport(_ owns: Bool) {
+        guard ownsViewport != owns else { return }
+        ownsViewport = owns
+        guard playsVideo, videoPlayback != nil else { return }
+        if owns {
+            startWatchedClip()
+        } else if !isActive {
+            // ⚠️ PAUSED, never stopped: stopping releases the player and takes
+            // the surface off its page, which puts the poster back on a page
+            // that is still half on screen. The release belongs to the page
+            // going away entirely — `didEndDisplaying`.
+            pausePlaybackInPlace()
+        }
+    }
+
+    #if DEBUG
+    /// The page's own account of the picture: it owns the screen and it has a
+    /// clip to run. Read by `SnapViewportPlaybackSpecTests`, which has no
+    /// decoder and so cannot ask whether frames actually advanced.
+    var debugOwnsPlayback: Bool { ownsViewport && playsVideo }
+    #endif
+
+    /// Pauses the watched surface where it stands, keeping the player, the
+    /// loan and the last frame.
+    private func pausePlaybackInPlace() {
+        guard let videoPlayback else { return }
+        videoPlayback.setPaused(true, in: mediaCard.renderView)
+    }
+
+    /// Brings the watched page's clip to the screen: adopt-and-resume if a
+    /// player is already hosted, otherwise start one.
+    ///
+    /// Shared by activation and by the viewport door above, so the two cannot
+    /// drift into two different ideas of what "playing" means.
+    private func startWatchedClip() {
+        guard let url = activeVideoURL, let videoPlayback else { return }
+        // A hero card may be flying this post's player right now. Starting here
+        // would attach a NEWER layer to the same player and blank the card
+        // mid-flight, so the start waits for the flight to land.
+        guard !defersPlaybackForFlight else {
+            hasDeferredPlayback = true
+            mediaCard.hostRenderViewOnCurrentPage()
+            warmAttachForFlight(url: url)
+            return
+        }
+        mediaCard.hostRenderViewOnCurrentPage()
+        let view = mediaCard.renderView
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            // WHICH DOOR, and whether anything was there already. The whole
+            // claim of the half-screen start is a matter of ORDER — read
+            // against `[fling] begin`/`[fling] settle`, a line with `owns=Y
+            // active=N` is the clip starting mid-scroll.
+            print(String(format: "[page-play] %.3f start owns=%@ active=%@ hosted=%@ url=%@",
+                         CACurrentMediaTime(), ownsViewport ? "Y" : "N",
+                         isActive ? "Y" : "N",
+                         videoPlayback.hasPlayer(in: view) ? "Y" : "N",
+                         url.lastPathComponent))
+        }
+        #endif
+        // ⚠️ ASKED OF THE POOL, not of the hosting: a surface can hang on its
+        // page with no player behind it. A hosted player is resumed in place —
+        // which is what makes the settle after a half-screen start free.
+        if videoPlayback.hasPlayer(in: view), videoPlayback.setPaused(false, in: view) {
+            prewarmNeighbouringClips()
+            return
+        }
+        let scope = playbackScope
+        Task { [weak self] in
+            await videoPlayback.play(url, in: view, scope: scope)
+            // ⚠️ ACTIVATION IS ITS OWN DOOR, and it bypasses the page reconcile
+            // entirely — which is why warming hung off that reconcile alone did
+            // nothing at all for the case that matters most: opening a post.
+            self?.prewarmNeighbouringClips()
         }
     }
 
@@ -2333,6 +2422,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     override func prepareForReuse() {
         super.prepareForReuse()
         isActive = false
+        // A recycled cell owns nothing: the next post to land here is told
+        // whether it has the screen, and a stale `true` would make that
+        // message a no-op — the page would never start.
+        ownsViewport = false
         // Instant (unanimated) disengage: a recycled cell must come back
         // full-bleed. Ordered before the media/chrome resets it restores.
         setCommentsEngaged(false)

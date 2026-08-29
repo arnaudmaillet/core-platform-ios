@@ -267,35 +267,30 @@ final class CommentRowView: UIView {
 /// move out of the feed cell bought: no reserved region, no measured
 /// caption height, and no floating card to keep in sync with the list.
 final class CaptionBubbleCell: UICollectionViewCell {
-    /// Which face the caption wears — and the choice is a property of the
-    /// POST, not of this screen.
-    ///
-    /// A media page's caption floats over an arbitrary photograph, so it needs
-    /// the glass and reads as a message in the thread. A TEXT page has no
-    /// photograph to fight, and is arrived at by a reveal that opens the
-    /// gallery row into the page — so its caption must be the row's caption,
-    /// at the row's size and inset, or the transition hands the eye from one
-    /// object to a different one.
-    enum Style {
-        /// Avatar + Liquid Glass bubble. The media page's face.
-        case bubble
-        /// The gallery card's own content, flat on the page's ground.
-        case flat
-    }
+    // ⚠️ ONE FACE, WHATEVER THE POST IS MADE OF.
+    //
+    // This row used to wear two. A media page's caption floats over an
+    // arbitrary photograph, so it took the glass and the avatar and read as a
+    // message in the thread; a TEXT page took the gallery card's flat content
+    // instead — no bubble, no avatar, a rule underneath — because a text page
+    // is arrived at by a reveal that opens the gallery ROW into the page, and
+    // the row's caption sits 32pt from the screen edge where a bubble's sits
+    // at 71.
+    //
+    // The product decision is that a reader meets ONE object — the post, as
+    // the first message in its own thread — and that a post's format is not a
+    // reason to redraw it. The reveal's job is now to carry the eye to that
+    // object rather than to pretend nothing moved. See
+    // `PostCaptionFaceSpecTests`, which states the rule from the reader's
+    // side and names no branch at all.
 
     private let avatarView = MonogramAvatarView(diameter: CommentRowView.avatarSize)
     private let avatarImageView = AvatarImageView()
     private let bubble = SnapPostInfoCardView()
-    private let flat = PostCaptionRowView()
-    /// The avatar+bubble pair, hidden as a unit when the flat face is worn.
-    private var bubbleRow: UIStackView!
     private var avatarTask: Task<Void, Never>?
     /// The reuse guard, the comment rows' rule applied to the post: a
     /// recycled cell can outlive its own fetch.
     private var representedID: PostID?
-    /// Defaults to the bubble, so every caller that says nothing keeps the
-    /// face it has always had.
-    private var style: Style = .bubble
 
     /// The avatar was tapped — the host pushes the author's profile.
     var onAvatarTap: (() -> Void)?
@@ -319,26 +314,12 @@ final class CaptionBubbleCell: UICollectionViewCell {
         row.spacing = CommentRowView.avatarGap
         row.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(row)
-        bubbleRow = row
         NSLayoutConstraint.activate([
             row.topAnchor.constraint(equalTo: contentView.topAnchor),
             row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             // The inter-row breathing every other stream row uses.
             row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.lg),
-        ])
-        // The flat face fills the cell EDGE TO EDGE and carries the card's
-        // insets internally, which is what puts its caption at the same x as
-        // the gallery row's: the cell already sits at the card's leading edge,
-        // so 16pt inside it is the card's own 16pt inside its card.
-        flat.translatesAutoresizingMaskIntoConstraints = false
-        flat.isHidden = true
-        contentView.addSubview(flat)
-        NSLayoutConstraint.activate([
-            flat.topAnchor.constraint(equalTo: contentView.topAnchor),
-            flat.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            flat.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            flat.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
         // The bubble is onstage by default: it is list content, and the
         // engagement's fade belongs to the container it rides in.
@@ -354,23 +335,9 @@ final class CaptionBubbleCell: UICollectionViewCell {
         avatarTask = nil
         representedID = nil
         avatarImageView.image = nil
+        avatarView.setMonogram("")
         bubble.reset()
-        flat.reset()
-        // Back to the default face: a recycled cell must not inherit the
-        // previous post's format, which is the tile-cell lesson (`setFace`)
-        // applied to a row.
-        apply(style: .bubble)
         onAvatarTap = nil
-    }
-
-    /// Swaps the face. Both are built once and toggled, rather than rebuilt:
-    /// the glass must only ever materialize in a window, so tearing it down
-    /// and back up per configure would contact the render server on a
-    /// scrolling row.
-    private func apply(style: Style) {
-        self.style = style
-        bubbleRow.isHidden = style != .bubble
-        flat.isHidden = style != .flat
     }
 
     /// Measures this row at the width the layout is actually going to give
@@ -422,56 +389,55 @@ final class CaptionBubbleCell: UICollectionViewCell {
         // The glass materializes only in a window (the render-server rule
         // every glass surface here follows) — and this row can be dequeued
         // long before it is attached, so the seed lives here rather than in
-        // `configure`. A flat row has no glass to materialize, and asking for
-        // it anyway would contact the render server for a surface nobody is
-        // going to see.
-        bubble.setGlassActive(style == .bubble && window != nil)
+        // `configure`.
+        bubble.setGlassActive(window != nil)
     }
 
     /// Renders from what the FEED already knows, before this screen's own post
-    /// fetch returns. Caption and timestamp only — enough for the row to exist,
-    /// occupy its real height, and be somewhere a flight can aim at.
+    /// fetch returns — enough for the row to exist, occupy its real height, and
+    /// be somewhere a flight can aim at.
+    ///
+    /// The author travels too, and it has to: the row is an avatar beside a
+    /// bubble for every post now, and a seeded row that showed an empty disc
+    /// until the fetch returned would be a hole in the object the reveal is
+    /// carrying the eye to. The feed knows the name and the picture already.
     func configureSeed(
-        caption: String, timestamp: String, style: Style, metrics: PostCardMetrics?
+        caption: String, timestamp: String, monogram: String, avatarURL: URL?,
+        likeCount: Int64?, imagePipeline: ImagePipeline?
     ) {
         representedID = nil
-        apply(style: style)
-        switch style {
-        case .bubble: bubble.configure(caption: caption, timestamp: timestamp)
-        case .flat: flat.configure(caption: caption, timestamp: timestamp, metrics: metrics)
-        }
+        bubble.configure(caption: caption, timestamp: timestamp, likeCount: likeCount)
+        avatarView.setMonogram(monogram)
+        bubble.setGlassActive(window != nil)
+        loadAvatar(avatarURL, for: nil, using: imagePipeline)
     }
 
-    /// `metrics` is the SEED's, deliberately, and it is not re-derived here.
+    /// `likeCount` comes from the HOST, deliberately, and is not derived here.
     ///
-    /// A `FeedEntry` carries a like count and nothing else — no views, no
-    /// comment count — so the real post landing knows strictly less about the
-    /// metric line than the grid that opened it did. Recomputing from the
-    /// model would therefore blank two of the three numbers a moment after
-    /// they appeared, which is the "seeded page can only get worse" failure
-    /// this screen has already been bitten by once.
+    /// A `PostDetailDisplayModel` carries no engagement at all — the screen
+    /// tracks it separately, because it moves: the viewer can like the post
+    /// from the toolbar while this row is on screen. The host passes whichever
+    /// number is currently true (the live one once the post has landed, the
+    /// opener's until then), and `nil` when nobody has said.
     func configure(
         with model: PostDetailDisplayModel,
         imagePipeline: ImagePipeline?,
-        metrics: PostCardMetrics? = nil
+        likeCount: Int64? = nil
     ) {
         representedID = model.postID
-        // The POST decides the face: no media, no reason for glass.
-        apply(style: model.hasMedia ? .bubble : .flat)
-        switch style {
-        case .bubble:
-            bubble.configure(caption: model.caption, timestamp: model.timestampText)
-            avatarView.setMonogram(model.avatarMonogram)
-            bubble.setGlassActive(window != nil)
-            loadAvatar(model.avatarURL, for: model.postID, using: imagePipeline)
-        case .flat:
-            flat.configure(
-                caption: model.caption, timestamp: model.timestampText, metrics: metrics
-            )
-        }
+        bubble.configure(
+            caption: model.caption, timestamp: model.timestampText, likeCount: likeCount
+        )
+        avatarView.setMonogram(model.avatarMonogram)
+        bubble.setGlassActive(window != nil)
+        loadAvatar(model.avatarURL, for: model.postID, using: imagePipeline)
     }
 
-    private func loadAvatar(_ url: URL?, for id: PostID, using pipeline: ImagePipeline?) {
+    /// - Parameter id: the post the fetch belongs to, or `nil` for a SEEDED
+    ///   row, which has no post yet. The guard is the same either way: what a
+    ///   recycled cell must never do is paint a picture fetched for the post it
+    ///   used to be showing.
+    private func loadAvatar(_ url: URL?, for id: PostID?, using pipeline: ImagePipeline?) {
         avatarTask?.cancel()
         avatarTask = nil
         avatarImageView.image = nil

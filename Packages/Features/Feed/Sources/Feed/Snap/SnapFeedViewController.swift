@@ -436,6 +436,7 @@ final class SnapFeedViewController: UIViewController {
     /// every index%3==2 is text-only) — deterministic access to a given page
     /// kind without scroll injection.
     private var didDebugPageSwipe = false
+    private var didDebugFling = false
 
     private func runDebugAppearanceHooks() {
         if ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
@@ -452,6 +453,25 @@ final class SnapFeedViewController: UIViewController {
                 ? (Double(arguments[position + 1]) ?? 3.0) : 3.0
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.debugDrivePageSwipe()
+            }
+        }
+        // `-snap-fling [pages]`: scrolls the pager one page at a time the way a
+        // FLICK does — a stream of small offset changes, each with its own
+        // delegate callback, then a settle.
+        //
+        // Nothing before this could exercise a scroll at all. `-snap-page-demo`
+        // drives the text page's own swipe gesture, and `-snap-start-index`
+        // teleports; both reach the settle without ever passing through the
+        // middle of the screen, which is exactly where the picture now changes
+        // hands (`updateViewportPlayback`). Read the run with `-media-log`: a
+        // `[page-play]` between `[fling] begin` and `[fling] settle` is the
+        // clip starting mid-scroll, which is the whole claim.
+        if !didDebugFling, let position = arguments.firstIndex(of: "-snap-fling") {
+            didDebugFling = true
+            let pages = arguments.indices.contains(position + 1)
+                ? (Int(arguments[position + 1]) ?? 1) : 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                self?.debugFlingPages(pages)
             }
         }
         if !didDebugScroll,
@@ -1958,6 +1978,36 @@ final class SnapFeedViewController: UIViewController {
     /// is where a page decides what to show. Without this a suite can only
     /// observe settled states, and four of the six defects in this area lived
     /// strictly between them.
+    /// One page of scroll, in sixtieths of a second — a flick, not a jump.
+    ///
+    /// Each step is an ordinary offset change followed by the delegate callback
+    /// UIKit would have sent, so everything that reacts to scrolling reacts
+    /// here: the paging footer, and the page that owns the picture.
+    func debugFlingPages(_ remaining: Int) {
+        guard remaining > 0 else { return }
+        let page = collectionView.bounds.height
+        guard page > 0 else { return }
+        let start = collectionView.contentOffset.y
+        let target = min(start + page, CGFloat(reachableCeiling()) * page)
+        let steps = 24
+        print("[fling] begin from=\(Int(start)) to=\(Int(target))")
+        func step(_ index: Int) {
+            guard index <= steps else {
+                self.scrollViewDidEndDecelerating(self.collectionView)
+                print("[fling] settle offsetY=\(Int(self.collectionView.contentOffset.y))")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    self?.debugFlingPages(remaining - 1)
+                }
+                return
+            }
+            let progress = CGFloat(index) / CGFloat(steps)
+            collectionView.contentOffset.y = start + (target - start) * progress
+            scrollViewDidScroll(collectionView)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { step(index + 1) }
+        }
+        step(1)
+    }
+
     func debugRealizeVisibleCells() {
         for path in collectionView.indexPathsForVisibleItems.sorted() {
             guard let cell = collectionView.cellForItem(at: path) else { continue }
@@ -2134,16 +2184,17 @@ final class SnapFeedViewController: UIViewController {
         // The caption the FEED already has, so the row exists while the hero
         // is in the air rather than arriving with the post fetch.
         if let model = modelsByID[id], let caption = model.caption, !caption.isEmpty {
-            // `.flat` unconditionally, and it is not an assumption: this whole
-            // path is the TEXT page's resting interface — a media page never
-            // reaches it (`presentComments` is its path). The face is still
-            // stated rather than defaulted, so the one caller that means "no
-            // glass" says so.
+            // The AUTHOR travels with the caption: the row is an avatar beside
+            // a bubble for every post now, and this path — the text page's
+            // resting interface — is the one that mounts before any fetch, so
+            // without it the disc would sit empty for the whole reveal.
             detail?.seedCaption(
                 caption,
                 timestamp: model.timestampText,
-                style: .flat,
+                monogram: CommentsInputBar.monogram(model.authorName),
+                avatarURL: model.avatarURL,
                 metrics: model.cardMetrics
+                    ?? PostCardMetrics(views: nil, reactions: model.likeCount, comments: nil)
             )
         }
         // No close handler — a resting page is undismissable; the swipe
@@ -2843,6 +2894,51 @@ final class SnapFeedViewController: UIViewController {
         apply(lifecycle.setVisible(isOnScreen && isForeground))
     }
 
+    /// The page playback follows: the one covering most of the screen.
+    ///
+    /// Deliberately NOT the lifecycle's active index, though the arithmetic is
+    /// the same one (`SnapActiveItemTracker.activeIndex` is the page owning the
+    /// viewport's midpoint). The difference is WHEN each is consulted: the
+    /// lifecycle's is settle-quantized, because everything it drives — chrome,
+    /// warm window, resting interface, the pager's lock — must not move under a
+    /// finger. Playback is the one thing that should.
+    private var playbackOwner: Int?
+
+    /// Hands the picture to whichever page owns the screen, and takes it back
+    /// from the one that lost it. Runs on EVERY scroll callback, so it must
+    /// stay this cheap: an index, a comparison, and nothing at all when the
+    /// answer has not changed.
+    private func updateViewportPlayback() {
+        let owner = SnapActiveItemTracker.activeIndex(
+            contentOffsetY: collectionView.contentOffset.y,
+            pageHeight: collectionView.bounds.height,
+            itemCount: orderedIDs.count
+        )
+        guard owner != playbackOwner else { return }
+        if let previous = playbackOwner {
+            (lifecycleCell(at: previous) as? SnapFeedCell)?.setOwnsViewport(false)
+        }
+        playbackOwner = owner
+        if let owner {
+            (lifecycleCell(at: owner) as? SnapFeedCell)?.setOwnsViewport(true)
+        }
+    }
+
+    #if DEBUG
+    /// The post whose clip is running, read off the CELLS rather than from the
+    /// index above: a dispatch that never reaches a cell starts nothing, and
+    /// asking the bookkeeping would not know the difference.
+    var debugPlayingPostID: PostID? {
+        for (index, id) in orderedIDs.enumerated() {
+            guard let cell = collectionView.cellForItem(
+                at: IndexPath(item: index, section: 0)
+            ) as? SnapFeedCell else { continue }
+            if cell.debugOwnsPlayback { return id }
+        }
+        return nil
+    }
+    #endif
+
     private func updateActiveItem() {
         let index = SnapActiveItemTracker.activeIndex(
             contentOffsetY: collectionView.contentOffset.y,
@@ -2850,6 +2946,11 @@ final class SnapFeedViewController: UIViewController {
             itemCount: orderedIDs.count
         )
         apply(lifecycle.setPageIndex(index))
+        // The settled page owns the screen by definition, so the two agree
+        // here — and a settle that arrives without any scroll callback (a
+        // programmatic jump, a landing) is the only way the picture would
+        // otherwise be missed.
+        updateViewportPlayback()
         // ⚠️ AT EVERY SETTLE, not only when the page CHANGED.
         //
         // The reconcile used to live inside the activation branch, so it ran
@@ -3156,6 +3257,11 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // layout pass the presentation triggers. Stamping only in `apply` left
         // the flag false exactly when it mattered.
         (cell as? SnapFeedCell)?.defersPlaybackForFlight = isAwaitingZoomPresentation
+        // The same net, for the picture: a page can be handed the screen while
+        // it is still being realized, and the hand-over reaches nothing. The
+        // page that owns the viewport is a fact about the SCROLL, so it is
+        // re-stated to every cell as it appears.
+        (cell as? SnapFeedCell)?.setOwnsViewport(playbackOwner == indexPath.item)
         if lifecycle.activeIndex == indexPath.item {
             (cell as? SnapCellLifecycle)?.willBecomeActive()
         }
@@ -3330,7 +3436,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // as worse than the delay it was meant to fix, and it was.
         //
         // Starting playback early has to be a playback-only path, not a second
-        // caller of the seam that owns everything else.
+        // caller of the seam that owns everything else — which is exactly what
+        // `updateViewportPlayback` is: it moves the picture and touches
+        // nothing else on the screen.
+        updateViewportPlayback()
         updatePagingFooter(for: scrollView)
     }
 
