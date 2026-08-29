@@ -91,6 +91,16 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// apart from the scroll view's own.
     private weak var tapRecognizer: UITapGestureRecognizer?
 
+    /// Where the box is BETWEEN pages, as a fraction: 2.37 is "a third of the
+    /// way from page two to page three".
+    ///
+    /// ⚠️ The continuous twin of `onPageChanged`, and both are needed. A page
+    /// number is what a host acts on — load these, play that one — and a
+    /// fraction is what a host DRAWS from: the strip under the post's caption
+    /// reflows across the whole gesture, so a signal that only speaks at the
+    /// crossing would leave it still until the page had already changed.
+    public var onScrollPosition: ((CGFloat) -> Void)?
+
     /// Fired whenever the page under the box changes, so the host can move an
     /// indicator that lives OUTSIDE this view — see `PostGridListRowCell`, where
     /// the chips and the indicator belong to the preview rather than to its
@@ -520,6 +530,15 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         return min(CGFloat(index) * stride, maximum)
     }
 
+    /// The box's position in pages, fractionally — clamped to the run, because
+    /// a rubber-banded overscroll is not a page and a strip drawn from it would
+    /// stretch off its own end.
+    public var scrollPosition: CGFloat {
+        guard stride > 0, pageViews.count > 1 else { return 0 }
+        let raw = scrollView.contentOffset.x / stride
+        return min(max(raw, 0), CGFloat(pageViews.count - 1))
+    }
+
     private func page(nearest offset: CGFloat) -> Int {
         guard stride > 0 else { return 0 }
         let raw = Int((offset / stride).rounded())
@@ -641,6 +660,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         // without the RESOLVED page changing again (the drag that carries it
         // out is the same one that already changed it).
         retirePausedMarksOffScreen()
+        onScrollPosition?(scrollPosition)
         let resolved = page(nearest: scrollView.contentOffset.x)
         guard resolved != currentPage else { return }
         currentPage = resolved

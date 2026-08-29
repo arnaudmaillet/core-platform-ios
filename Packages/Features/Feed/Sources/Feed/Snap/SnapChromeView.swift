@@ -787,6 +787,13 @@ final class SnapChromeView: UIView {
         mediaPageBar.setCurrent(page)
     }
 
+    /// The carousel's position in fractional pages, straight through to the
+    /// strip: width and ink are read off it, so the strip reflows for the whole
+    /// gesture rather than at the crossing. See `SnapMediaPageBarView`.
+    func setMediaScrollPosition(_ position: CGFloat) {
+        mediaPageBar.setPosition(position)
+    }
+
     /// The viewer asked for a page by touching the indicator. The CELL owns the
     /// carousel, so the request travels out rather than the chrome reaching in.
     var onMediaPageRequested: ((Int) -> Void)? {

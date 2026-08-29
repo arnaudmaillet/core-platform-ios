@@ -589,6 +589,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The two halves of the collection readout meet here and nowhere else:
         // the card owns the pages, the chrome owns the indicator, and neither
         // reaches for the other.
+        // The strip under the caption is drawn from the scroll itself, so it
+        // gets the continuous signal; everything else here acts on a PAGE and
+        // gets the discrete one below.
+        mediaCard.onScrollPosition = { [weak self] position in
+            self?.chrome.setMediaScrollPosition(position)
+        }
         mediaCard.onPageChanged = { [weak self] page in
             guard let self else { return }
             self.chrome.setMediaPage(page)

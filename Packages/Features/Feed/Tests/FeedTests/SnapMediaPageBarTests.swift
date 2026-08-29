@@ -31,11 +31,12 @@ struct SnapMediaPageBarTests {
 
     // MARK: - The strip
 
-    /// The claim, as geometry: the segments SHARE the width — they start at one
-    /// edge, end at the other, and are all the same length.
+    /// The claim, as geometry: the segments SHARE the width — the run starts at
+    /// one edge and ends at the other, with a gap between neighbours and
+    /// nothing else.
     @Test func theSegmentsShareTheWholeWidth() throws {
         let width: CGFloat = 370
-        let view = bar(pages: 3, width: width)
+        let view = bar(pages: 3, current: 0, width: width)
 
         let first = try #require(view.debugSegmentFrame(0))
         let middle = try #require(view.debugSegmentFrame(1))
@@ -43,18 +44,100 @@ struct SnapMediaPageBarTests {
 
         #expect(first.minX == 0)
         #expect(abs(last.maxX - width) < 0.5)
-        #expect(abs(first.width - middle.width) < 0.5)
-        #expect(abs(middle.width - last.width) < 0.5)
-        // …with the gap between them, and nothing else.
         #expect(abs(middle.minX - first.maxX - SnapMediaPageBarView.gap) < 0.5)
+        // The pages you are not on are drawn alike; the one you are on is the
+        // subject of the next case.
+        #expect(abs(middle.width - last.width) < 0.5)
+    }
+
+    /// ⚠️ THE PAGE YOU ARE ON IS THE WIDE ONE — at least twice the rest, at any
+    /// count, so the mark survives a glance at twelve pages where an even run
+    /// of segments would just read as "uneven".
+    @Test func thePageYouAreOnIsTheWideOne() throws {
+        for pages in [2, 5, 13] {
+            let view = bar(pages: pages, current: 1)
+            let active = try #require(view.debugSegmentFrame(1))
+            let resting = try #require(view.debugSegmentFrame(0))
+            #expect(active.width >= resting.width * 2,
+                    Comment(rawValue: "\(pages) pages: \(active.width) vs \(resting.width)"))
+        }
+    }
+
+    /// ⚠️ AND THE WIDTHS TRANSPOSE THE SCROLL. Halfway between two pictures,
+    /// both segments are half grown — the strip reflows across the whole
+    /// gesture rather than snapping when the page number changes.
+    @Test func theWidthsTransposeTheScroll() throws {
+        let width: CGFloat = 370
+        let view = bar(pages: 4, current: 1, width: width)
+        let resting = try #require(view.debugSegmentFrame(3)).width
+        let grown = try #require(view.debugSegmentFrame(1)).width
+
+        view.setPosition(1.5)
+
+        let half = try #require(view.debugSegmentFrame(1))
+        let other = try #require(view.debugSegmentFrame(2))
+        #expect(abs(half.width - other.width) < 0.5)   // shared exactly
+        #expect(half.width > resting)
+        #expect(half.width < grown)
+        // ⚠️ AND THE RUN STILL SPANS THE COLUMN. The weights sum to the same
+        // total at every position, so the strip never breathes at its ends —
+        // which would read as a layout fault rather than as motion.
+        #expect(try #require(view.debugSegmentFrame(0)).minX == 0)
+        #expect(abs(try #require(view.debugSegmentFrame(3)).maxX - width) < 0.5)
+    }
+
+    /// The ink rides the same curve as the width: half grown is half lit.
+    @Test func theInkTransposesTheScrollToo() throws {
+        let view = bar(pages: 4, current: 1)
+        view.setPosition(1.5)
+
+        let one = try #require(view.debugSegmentAlpha(1))
+        let two = try #require(view.debugSegmentAlpha(2))
+        #expect(abs(one - two) < 0.01)
+        #expect(one > SnapMediaPageBarView.restingAlpha)
+        #expect(one < 1)
+        #expect(try #require(view.debugSegmentAlpha(3)) < one)
+    }
+
+    /// ⚠️ AND A PAGE NUMBER MUST NOT FIGHT THE FINGER. The carousel reports
+    /// both signals — a fraction on every scroll callback, a page number at the
+    /// crossing — and halfway through a drag they are 0.52 and 1, both true. A
+    /// strip that sprang to 1.0 on the second would jump ahead of the finger and
+    /// be dragged back by the next fraction, once per crossing, for ever.
+    @Test func aPageNumberTheStripAlreadyAgreesWithChangesNothing() throws {
+        let view = bar(pages: 4, current: 0)
+        view.setPosition(0.52)
+        let midDrag = try #require(view.debugSegmentFrame(0)).width
+
+        view.setCurrent(1) // the crossing's page number, arriving mid-drag
+
+        #expect(try #require(view.debugSegmentFrame(0)).width == midDrag)
+        // …and a page it does NOT agree with still moves it.
+        view.setCurrent(3)
+        #expect(try #require(view.debugSegmentFrame(3)).width
+                > #require(view.debugSegmentFrame(0)).width)
+    }
+
+    /// ⚠️ THE BOUNCE LANDS ON THE CROSSING, and it is a TRANSFORM. The widths
+    /// are already being driven by the scroll, so an accent that animated them
+    /// would be two things writing one number; a scale rides on top of whatever
+    /// the layout is doing.
+    @Test func crossingSpringsTheSegmentTakingTheMark() {
+        let view = bar(pages: 4, current: 0)
+
+        view.setPosition(0.4)                    // still page one
+        #expect(view.debugSegmentIsPopping(1) == false)
+
+        view.setPosition(0.6)                    // the mark changes hands
+        #expect(view.debugSegmentIsPopping(1))
     }
 
     /// ⚠️ AND THAT IS WHY THEY ARE PILLS RATHER THAN DOTS. Few pictures means
     /// long segments — the shape carries the count, which a row of identical
     /// dots cannot do without being counted.
     @Test func fewerPicturesMakeLongerPills() throws {
-        let two = try #require(bar(pages: 2).debugSegmentFrame(0))
-        let six = try #require(bar(pages: 6).debugSegmentFrame(0))
+        let two = try #require(bar(pages: 2).debugSegmentFrame(1))   // a resting one
+        let six = try #require(bar(pages: 6).debugSegmentFrame(1))
 
         #expect(two.width > six.width * 2)
         // A pill, not a dot: far longer than it is tall.

@@ -3,7 +3,8 @@ import PostGrid
 import UIKit
 
 /// Which picture of a collection the post screen is showing: **one segment per
-/// page, laid across the whole width of the column**.
+/// page, laid across the whole width of the column**, and the one you are on is
+/// the wide one.
 ///
 /// ## Why a bar and not the card's dots
 ///
@@ -14,17 +15,31 @@ import UIKit
 /// share of the width. Two pictures make two long pills; twelve make twelve
 /// short ones, and the difference is legible before it is counted.
 ///
-/// It also stops the indicator being a small target floating over the
-/// photograph. Down here it is a full-width control between the caption and the
-/// bar — the place a viewer already looks for a position.
+/// ## The strip is a function of the scroll
 ///
-/// ## Frames, not a stack
+/// ⚠️ Its whole state is ONE number: where the carousel is, in fractional
+/// pages. Width and ink are read off that number, so the strip reflows under
+/// the finger for the entire gesture instead of waiting to be told a page has
+/// changed — the crossing is a consequence of the drag, not the moment the
+/// drawing may begin. Halfway between two pictures, both segments are half
+/// grown and half lit.
+///
+/// The total width is invariant under that interpolation (the weights always
+/// sum to the same number), so the run stays edge to edge while its insides
+/// move. Anything else would be a strip that breathes at its ends, which reads
+/// as a layout bug rather than as motion.
+///
+/// ## Frames, not a stack — and bounds/centre, not frames
 ///
 /// How wide a segment is depends on the width and the count, both of which
-/// change under this view (a rotation, a re-configure). `UIStackView` would
-/// have to add and remove arranged subviews inside a layout pass to answer
-/// that, which is the fight `PageDotsView` and `MediaCarouselView` both avoid
-/// the same way.
+/// change under this view; `UIStackView` would have to add and remove arranged
+/// subviews inside a layout pass to answer that, which is the fight
+/// `PageDotsView` and `MediaCarouselView` both avoid the same way.
+///
+/// ⚠️ And the geometry is assigned as `bounds` + `center`, never `frame`,
+/// because the handover pop is a TRANSFORM: assigning a frame to a transformed
+/// view re-derives its bounds from it and cancels the transform silently. The
+/// same trap `SnapFeedCell.pageStage` documents, one view down.
 final class SnapMediaPageBarView: UIView {
     /// The strip's thickness — the card's dot diameter, so this reads as the
     /// same ink stretched rather than as a different control.
@@ -33,6 +48,16 @@ final class SnapMediaPageBarView: UIView {
     /// The gap between two segments. Small enough that the run reads as one
     /// strip, wide enough that the divisions are not a moiré at twelve pages.
     static let gap: CGFloat = Spacing.xs
+
+    /// How much wider the page you are on is than the rest.
+    ///
+    /// ⚠️ Wide enough that the answer survives a glance at twelve pages: at
+    /// 2.6 the active pill is unmistakably the long one whatever the count,
+    /// where 1.5 read as "the segments are uneven" rather than as a mark.
+    static let activeWidthFactor: CGFloat = 2.6
+
+    /// The ink the pages you are not on are drawn in — the card's own ratio.
+    static let restingAlpha: CGFloat = 0.35
 
     /// The viewer asked for a page by dragging along the strip. The HOST moves
     /// the carousel — an indicator that scrolled something for itself would be
@@ -56,7 +81,8 @@ final class SnapMediaPageBarView: UIView {
 
     private var segments: [UIView] = []
     private var pageCount = 0
-    private var currentPage = 0
+    /// Where the carousel is, in fractional pages — the strip's entire state.
+    private var position: CGFloat = 0
     /// The shared arithmetic; its scale is set from the layout, below.
     private var scrubber = PageScrubber(pointsPerPage: 1)
 
@@ -91,40 +117,133 @@ final class SnapMediaPageBarView: UIView {
                 addSubview(view)
                 return view
             }
-            setNeedsLayout()
         }
-        setCurrent(current)
+        position = CGFloat(min(max(current, 0), count - 1))
+        setNeedsLayout()
+        layoutIfNeeded()
     }
 
-    /// Moves the mark without rebuilding — this runs on every scroll callback
-    /// of a carousel under a finger.
+    /// The carousel moved, in fractional pages.
+    ///
+    /// Applied IMMEDIATELY: this is the transposition, and a strip that eased
+    /// its way toward the finger would lag the pictures it describes. The
+    /// spring is somewhere else — see `pop(_:)`.
+    func setPosition(_ newPosition: CGFloat) {
+        guard pageCount >= 2 else { return }
+        let clamped = min(max(newPosition, 0), CGFloat(pageCount - 1))
+        let crossed = Int(clamped.rounded()) != Int(position.rounded())
+        position = clamped
+        layoutSegments()
+        // The bounce lands on the CROSSING, which is the only moment in a drag
+        // that is a discrete event: the mark has just changed hands.
+        if crossed { pop(Int(clamped.rounded())) }
+    }
+
+    /// A page arrived as a NUMBER rather than as a position — a post reopened
+    /// on page three, a page set from outside. There is a real distance to
+    /// travel here, so this one springs.
+    ///
+    /// ⚠️ IT MUST NOT ACT ON A PAGE THE STRIP IS ALREADY ON, and "already on"
+    /// means the rounded position, not an exact match. The carousel reports
+    /// both signals: a fraction on every scroll callback and a page number at
+    /// the crossing. Halfway through a drag the fraction is 0.52 and the page
+    /// number is 1 — both true, and a strip that sprang to 1.0 on the second
+    /// would jump ahead of the finger and be dragged back by the next fraction.
+    /// A page it already agrees with is nothing to do.
     func setCurrent(_ page: Int) {
         guard pageCount >= 2 else { return }
-        currentPage = min(max(page, 0), pageCount - 1)
-        for (index, segment) in segments.enumerated() {
-            // The card's own ratio: the page you are on is the ink, the rest is
-            // the same ink held back.
-            segment.alpha = index == currentPage ? 1 : 0.35
+        let target = CGFloat(min(max(page, 0), pageCount - 1))
+        guard Int(position.rounded()) != Int(target) else { return }
+        position = target
+        UIView.animate(
+            withDuration: Self.springDuration, delay: 0,
+            usingSpringWithDamping: Self.springDamping, initialSpringVelocity: 0.6,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.layoutSegments()
         }
+        pop(page)
     }
+
+    /// ⚠️ A spring the eye reads as WEIGHT, not as a wobble: under-damped
+    /// enough to overshoot once and settle, over a duration short enough that
+    /// the strip is never still behind a finger that has moved on.
+    private static let springDamping: CGFloat = 0.62
+    private static let springDuration: TimeInterval = 0.42
+
+    // MARK: - Layout
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        layoutSegments()
+    }
+
+    /// Every segment's geometry and ink, from `position` alone.
+    ///
+    /// The weight curve is a tent: a segment is fully grown at its own page,
+    /// resting a page away, and linear in between — so two neighbours share the
+    /// growth exactly while the viewer is between them, and the weights sum to
+    /// the same total at every position. That invariance is what keeps the run
+    /// edge to edge mid-drag.
+    private func layoutSegments() {
         guard !segments.isEmpty, bounds.width > 0 else { return }
         let count = CGFloat(segments.count)
-        let width = max((bounds.width - Self.gap * (count - 1)) / count, 1)
-        let stride = width + Self.gap
+        let available = max(bounds.width - Self.gap * (count - 1), 1)
+        let weights = segments.indices.map { weight(forPage: $0) }
+        let total = weights.reduce(0, +)
+        var x: CGFloat = 0
         for (index, segment) in segments.enumerated() {
-            segment.frame = CGRect(
-                x: CGFloat(index) * stride, y: 0, width: width, height: bounds.height
-            )
+            let width = max(available * weights[index] / total, 1)
+            // ⚠️ bounds + centre, never frame: the pop is a transform, and a
+            // frame assignment would cancel it (see the type's note).
+            segment.bounds = CGRect(x: 0, y: 0, width: width, height: bounds.height)
+            segment.center = CGPoint(x: x + width / 2, y: bounds.height / 2)
+            segment.layer.cornerRadius = min(bounds.height, width) / 2
+            segment.alpha = Self.restingAlpha
+                + (1 - Self.restingAlpha) * proximity(toPage: index)
+            x += width + Self.gap
         }
-        // ⚠️ THE SCRUB TRACKS THE STRIP IT IS DRAWN ON. A segment's stride is
-        // how far the finger travels for one page here, so the mark keeps pace
-        // with the thumb instead of running ahead of it — the same rule as the
-        // chip's, at this strip's own scale.
-        scrubber.pointsPerPage = stride
+        // ⚠️ THE SCRUB TRACKS THE STRIP IT IS DRAWN ON. One page per average
+        // segment stride, so the mark keeps pace with the thumb — the same rule
+        // as the card's chip, at this strip's own scale. The AVERAGE, not the
+        // active segment's own width, or the gesture's scale would change as it
+        // travelled.
+        scrubber.pointsPerPage = (bounds.width + Self.gap) / count
     }
+
+    /// 1 on the page itself, 0 a page away, linear between — the tent above.
+    private func proximity(toPage index: Int) -> CGFloat {
+        max(0, 1 - abs(CGFloat(index) - position))
+    }
+
+    private func weight(forPage index: Int) -> CGFloat {
+        1 + (Self.activeWidthFactor - 1) * proximity(toPage: index)
+    }
+
+    /// The handover's bounce: the segment taking the mark stretches along the
+    /// strip and springs back.
+    ///
+    /// ⚠️ A TRANSFORM, not a width. The widths are already being driven by the
+    /// scroll — animating them here would be two things writing one number, and
+    /// the loser is whichever ran second. A transform is a separate channel: it
+    /// rides on top of whatever the layout is doing, which is exactly what an
+    /// accent should do.
+    private func pop(_ index: Int) {
+        guard segments.indices.contains(index) else { return }
+        let segment = segments[index]
+        segment.transform = CGAffineTransform(scaleX: Self.popScale, y: 1)
+        UIView.animate(
+            withDuration: Self.springDuration, delay: 0,
+            usingSpringWithDamping: Self.springDamping, initialSpringVelocity: 0.9,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            segment.transform = .identity
+        }
+    }
+
+    /// Along the strip only — a pill that grew in both directions would leave
+    /// its own line, and the line is the thing being read.
+    private static let popScale: CGFloat = 1.16
 
     // MARK: - Scrubbing
 
@@ -140,7 +259,7 @@ final class SnapMediaPageBarView: UIView {
         guard pageCount >= 2 else { return }
         switch state {
         case .began:
-            scrubber.begin(atX: x, page: currentPage)
+            scrubber.begin(atX: x, page: Int(position.rounded()))
         case .changed:
             if let page = scrubber.page(draggedTo: x, pageCount: pageCount) {
                 onPageRequested?(page)
@@ -163,15 +282,32 @@ final class SnapMediaPageBarView: UIView {
     private static let minimumTouchHeight: CGFloat = 44
 
     #if DEBUG
-    /// Where a segment is drawn, so a spec can state the claim that makes this
-    /// view different from the dots: the segments SHARE the width.
+    /// Where a segment is drawn, so a spec can state the claims that make this
+    /// view different from the dots: the segments SHARE the width, and the one
+    /// you are on takes the larger share.
+    ///
+    /// Read from bounds + centre rather than `frame`, so a pop in flight does
+    /// not report as a wider segment.
     func debugSegmentFrame(_ index: Int) -> CGRect? {
-        segments.indices.contains(index) ? segments[index].frame : nil
+        guard segments.indices.contains(index) else { return nil }
+        let segment = segments[index]
+        return CGRect(
+            x: segment.center.x - segment.bounds.width / 2,
+            y: segment.center.y - segment.bounds.height / 2,
+            width: segment.bounds.width, height: segment.bounds.height
+        )
     }
 
     /// How strongly a segment is drawn — the mark, read without a screenshot.
     func debugSegmentAlpha(_ index: Int) -> CGFloat? {
         segments.indices.contains(index) ? segments[index].alpha : nil
+    }
+
+    /// Whether a segment is mid-pop — the bounce, which is a transform and so
+    /// invisible to every geometry above.
+    func debugSegmentIsPopping(_ index: Int) -> Bool {
+        guard segments.indices.contains(index) else { return false }
+        return segments[index].layer.animation(forKey: "transform") != nil
     }
 
     /// Drives the scrub without a finger; the simulator injects none.
