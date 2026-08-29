@@ -934,13 +934,23 @@ final class SnapFeedViewController: UIViewController {
             commentSortButton.setTitleHidden(false)
         }
 
-        var navItems: [UIBarButtonItem] = engaged
-            ? [authorItem, .fixedSpace(Spacing.sm), sortItem]
-            : [authorItem]
-        // The wallet badge closes the run's left in BOTH states — the same
-        // fixed-space idiom that keeps the sort and author two pills.
+        // ⚠️ READ RIGHT TO LEFT: `rightBarButtonItems[0]` is the one nearest the
+        // screen edge, so this array is the bar reversed. Left to right the run
+        // is [⇅ sort] [◎ balance] [author] — the sort OUTBOARD of the balance.
+        //
+        // They were the other way round, balance then sort, on no stronger
+        // reason than the order they arrived in. The author pill and the sort
+        // are one thought — this post, and how its thread is ordered — so
+        // nothing belongs between them, and the balance is the item that has
+        // nothing to do with the post at all.
+        var navItems: [UIBarButtonItem] = [authorItem]
         if let walletBadgeItem {
             navItems += [.fixedSpace(Spacing.sm), walletBadgeItem]
+        }
+        // The fixed spaces are what keep these separate pills: iOS 26 groups
+        // ADJACENT bar items into one shared glass platter.
+        if engaged {
+            navItems += [.fixedSpace(Spacing.sm), sortItem]
         }
         applyTrailingNavItems(navItems, animated: animated)
 
@@ -2532,7 +2542,24 @@ final class SnapFeedViewController: UIViewController {
         // makes the timing invisible, which is better: no amount of care about
         // when a cell is recycled can guarantee the frame, and this needs no
         // guarantee.
-        collectionView.backgroundColor = activeIsText ? .systemBackground : .black
+        // ⚠️ UNLESS A FLIGHT IS BEING COMPOSITED THROUGH THIS SCREEN.
+        //
+        // A masked-hero opening (a post opened from its COMMENT COUNT) and an
+        // engaged dismissal both clear this screen's floors on purpose: the
+        // thread is drawn over the card carrying the photograph, and an opaque
+        // ground between them shuts the card out. This rule runs at EVERY
+        // settle — which includes the settles a flight triggers — so without
+        // the guard it painted the ground black one frame into the opening and
+        // the media only reappeared when the card was removed. Reported as the
+        // media not transitioning at all; filmed as one frame of photograph
+        // followed by black.
+        //
+        // The floors are restored where the flight ends (`zoomTransitionDidEnd`,
+        // `endEngagedDismissalIfNeeded`), which is also the moment this rule
+        // becomes true again.
+        if !isMaskedRevealActive, !isEngagedDismissalActive {
+            collectionView.backgroundColor = activeIsText ? .systemBackground : .black
+        }
         // ⚠️ AND THE LOCK FOLLOWS THE SETTLED PAGE, not the engagement.
         //
         // A text page disables the pager because its own scroll view would
@@ -3287,6 +3314,13 @@ final class SnapFeedViewController: UIViewController {
     }
 
     #if DEBUG
+    /// Opens the masked window the comment-count path opens, without a
+    /// transition to drive it — the state a settle must not paint over.
+    func debugBeginMaskedReveal(for id: PostID) {
+        openComments(for: id, revealingFrom: CGRect(x: 28, y: 601, width: 312, height: 195))
+        setZoomContentHidden(true)
+    }
+
     /// The ⋯ menu's rows, as built for `id`. The menu itself is a deferred
     /// element UIKit resolves when it opens, so there is nothing to read off
     /// the button — the composition has to be asked for.

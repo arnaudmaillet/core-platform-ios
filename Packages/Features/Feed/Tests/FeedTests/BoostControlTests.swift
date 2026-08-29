@@ -233,12 +233,16 @@ struct BoostControlTests {
         #expect(resting[1].customView == nil) // the fixed space
         #expect(resting[2].customView is WalletBadgeButton)
 
+        // ⚠️ ENGAGED, THE SORT GOES OUTBOARD OF THE BADGE: left to right the run
+        // reads [⇅ sort] [🪙 balance] [author]. The two were the other way
+        // round, which put the one item that has nothing to do with this post
+        // between the post's own pill and the control that orders its thread.
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         let engaged = feed.navigationItem.rightBarButtonItems ?? []
         #expect(engaged.count == 5)
         #expect(engaged[0].customView is SnapAuthorIdentityView)
-        #expect(engaged[2].customView is SnapCommentSortButton)
-        #expect(engaged[4].customView is WalletBadgeButton)
+        #expect(engaged[2].customView is WalletBadgeButton)
+        #expect(engaged[4].customView is SnapCommentSortButton)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 3)

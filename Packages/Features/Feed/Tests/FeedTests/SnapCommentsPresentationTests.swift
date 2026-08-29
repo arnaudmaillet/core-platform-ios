@@ -1,4 +1,5 @@
 import CoreContracts
+import CoreStorage
 import CoreModels
 import DesignSystem
 import MediaCore
@@ -1218,6 +1219,39 @@ struct SnapCommentsPresentationTests {
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
+    }
+
+    /// ⚠️ WITH A BALANCE, THE RUN READS [⇅ sort] [◎ balance] [author].
+    ///
+    /// `rightBarButtonItems` is indexed right-to-left, so the array is the bar
+    /// reversed: author first, then the balance, then the sort furthest from
+    /// the screen edge. The two were the other way round — balance beside the
+    /// author — which put the one item that has nothing to do with this post
+    /// between the post's own pill and the control that orders its thread.
+    @Test func theBalanceSitsBetweenTheSortAndTheAuthor() throws {
+        let suite = "snap.chrome.order.test"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let feed = SnapFeedViewController(
+            viewModel: FeedViewModel(repository: EmptyFeedProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            wallet: WalletStore(defaults: defaults)
+        )
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(feed, animated: false)
+        feed.loadViewIfNeeded()
+        feed.beginAppearanceTransition(true, animated: false)
+        feed.endAppearanceTransition()
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+
+        let items = feed.navigationItem.rightBarButtonItems ?? []
+        #expect(items.count == 5, "the run is [author][space][balance][space][sort]: \(items.count)")
+        #expect(items[0].customView is SnapAuthorIdentityView)
+        #expect(items[1].customView == nil) // the fixed space that keeps them two pills
+        #expect(items[2].customView is WalletBadgeButton)
+        #expect(items[3].customView == nil)
+        #expect(items[4].customView is SnapCommentSortButton)
     }
 
     /// The author pill goes COMPACT so both pills fit the trailing run.
