@@ -265,24 +265,23 @@ struct MediaTapPlaybackSpecTests {
         #expect(pool.isAdvancing(in: tile))
     }
 
-    /// A gallery hangs its page dots above the comment band, so the clip's
-    /// floor rises to meet them: the strip that carries the dots belongs to
-    /// the readout, and a tap that pauses a single-clip post has to stop
-    /// pausing there.
-    @Test func aGallerysPageDotsRaiseTheClipsFloor() async {
+    /// ⚠️ AND THE FLOOR IS THE SAME LINE ON EVERY FORMAT.
+    ///
+    /// It used to rise for a gallery, whose page dots hung above the comment
+    /// band. The strip that replaced them sits under the caption, so a
+    /// collection's picture is now as tall as any other's — and the strip,
+    /// being well below the floor, is not something a tap aimed at the clip can
+    /// press by accident.
+    @Test func theFloorIsTheSameLineOnEveryFormat() async {
         let (single, _, _) = await Self.landedPage()
-        let (gallery, _, _) = await Self.landedPage(pages: 4)
+        let (gallery, _) = await Self.landedGallery(pages: 4)
 
-        let singleFloor = single.debugPlaybackTapRegion.maxY
-        let galleryFloor = gallery.debugPlaybackTapRegion.maxY
-        #expect(galleryFloor < singleFloor,
-                Comment(rawValue: "dots did not lift the floor: \(galleryFloor) vs \(singleFloor)"))
+        #expect(gallery.debugPlaybackTapRegion.maxY == single.debugPlaybackTapRegion.maxY)
 
-        // The strip between the two floors: the clip's on a single-media post,
-        // the readout's on a gallery.
-        let betweenTheFloors = CGPoint(x: single.bounds.midX, y: (galleryFloor + singleFloor) / 2)
-        #expect(single.playbackTapRegionContains(betweenTheFloors))
-        #expect(gallery.playbackTapRegionContains(betweenTheFloors) == false)
+        // The strip's own band, just above the bar: the page talking, not the
+        // picture.
+        let onTheStrip = CGPoint(x: gallery.bounds.midX, y: gallery.bounds.height - 40)
+        #expect(gallery.playbackTapRegionContains(onTheStrip) == false)
     }
 
     /// Both ends of the region are the screen's own thresholds, not numbers of

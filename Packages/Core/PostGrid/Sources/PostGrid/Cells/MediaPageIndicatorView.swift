@@ -251,24 +251,6 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         }
     }
 
-    /// ⚠️ THE PAGE YOU ARE ON IS WHERE THE DRAG STARTS FROM, wherever the
-    /// finger lands.
-    ///
-    /// The touch used to be read ABSOLUTELY — the strip divided into as many
-    /// bands as there are pages, and wherever you pressed is the page you got.
-    /// Which meant putting a finger on the middle of the chip teleported a
-    /// twelve-page post to page six before the drag had moved at all. The chip
-    /// looked like a scrubber and behaved like a row of targets.
-    ///
-    /// So the touch-down point is an ORIGIN, not a coordinate: it pins the
-    /// current page, and only movement from there asks for anything. Nothing
-    /// jumps, and the dots track the finger.
-    private func anchor(at x: CGFloat) {
-        scrubAnchorX = x
-        scrubAnchorPage = currentPage
-        lastRequestedPage = currentPage
-    }
-
     /// One dot's slot per page, which is what makes the gesture legible: the
     /// mark advances by exactly the distance between two dots, so the finger
     /// and the strip move at the same rate.
@@ -280,29 +262,16 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// never what is reachable.
     static var pointsPerPage: CGFloat { dotDiameter + dotSpacing }
 
-    private var scrubAnchorX: CGFloat = 0
-    private var scrubAnchorPage = 0
-    private var lastRequestedPage: Int?
+    /// The arithmetic itself, shared with the post screen's full-width bar —
+    /// see `PageScrubber`, which carries the reasoning that used to live here.
+    private var scrubber = PageScrubber(pointsPerPage: MediaPageIndicatorView.pointsPerPage)
+
+    private func anchor(at x: CGFloat) {
+        scrubber.begin(atX: x, page: currentPage)
+    }
 
     private func requestPage(draggedTo x: CGFloat) {
-        let travelled = Int(((x - scrubAnchorX) / Self.pointsPerPage).rounded())
-        let raw = scrubAnchorPage + travelled
-        let page = min(max(raw, 0), pageCount - 1)
-        // ⚠️ RE-ANCHOR AT THE ENDS, or the gesture goes numb.
-        //
-        // Drag twenty pages past the last one and `raw` is twenty out of range.
-        // Without this the finger would have to travel all twenty back before
-        // the strip moved again — the control would feel stuck exactly when the
-        // viewer is trying to correct an overshoot. Pinning the anchor to the
-        // edge means the way back responds on the first slot.
-        if raw != page {
-            scrubAnchorPage = page
-            scrubAnchorX = x
-        }
-        // Only when it CHANGES: `.changed` fires on every touch move, and the
-        // host's answer to a page request is to scroll a carousel.
-        guard page != lastRequestedPage else { return }
-        lastRequestedPage = page
+        guard let page = scrubber.page(draggedTo: x, pageCount: pageCount) else { return }
         onPageRequested?(page)
     }
 

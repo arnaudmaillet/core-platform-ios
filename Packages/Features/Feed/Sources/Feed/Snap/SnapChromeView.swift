@@ -37,7 +37,16 @@ final class SnapChromeView: UIView {
     private let commentTicker = SnapCommentTickerView()
     /// Which page of a COLLECTION the media is showing. Hidden for every post
     /// that has one piece of media, which is most of them.
-    private let mediaPageIndicator = MediaPageIndicatorView()
+    /// The page strip, at the bottom of the column and the full width of it.
+    ///
+    /// ⚠️ It used to be the card's CHIP of dots, floating over the photograph
+    /// just above the comment band. Two things were wrong with it there: a
+    /// five-dot window is a compromise made for a row that has counters to fit
+    /// beside it, and this screen has none — and a small target over the media
+    /// is in the one place the page also wants a tap to mean play/pause. Down
+    /// here it is a strip the width of the caption, in the band between the
+    /// caption and the bar, where a position is read rather than aimed at.
+    private let mediaPageBar = SnapMediaPageBarView()
 
     /// The subtitle zone, directly above the band: a persistent pill of
     /// semantic comments, one at a time, with the count bubble leading it.
@@ -259,29 +268,25 @@ final class SnapChromeView: UIView {
             commentTicker.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md)
         }
 
-        // ⚠️ AFTER the ticker is in the hierarchy, not before. `constrain(in:)`
-        // is what adds a view, so a constraint minted against the ticker's
-        // anchors while it is still parentless throws "no common ancestor" at
-        // activation — which is a launch crash, not a layout warning.
-        // The media page indicator rides directly above the ticker: the two
-        // together are the page's bottom-left readout, and the band is the
-        // nearest thing with a settled vertical position — hanging the indicator
-        // off the caption instead would put a gap the ticker's presence changes.
+        // NOTE: nothing rides above the ticker any more. The page indicator
+        // used to — a chip of dots hung off the band's top edge — and it is the
+        // strip below the caption now (`mediaPageBar`), which is why this
+        // corner is one container shorter than it was.
         //
-        // Centred horizontally. It is the MEDIA's readout, and the column under
-        // it — ticker, caption — is text starting at the margin: a chip sharing
-        // that edge attaches itself to the first line of the caption rather than
-        // to the photograph it describes.
-        // ⚠️ AND NO GROUND UNDER IT, here as on the card. This chip used to
-        // wear the system's interactive glass — the one place on this screen a
-        // lens had a photograph to take its cue from — and it is now the dots
-        // alone on every surface. See `MediaPageIndicatorView.makeGround`.
-        mediaPageIndicator.isHidden = true
-        mediaPageIndicator.constrain(in: self) { parent in
-            mediaPageIndicator.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            mediaPageIndicator.bottomAnchor.constraint(
-                equalTo: commentTicker.topAnchor, constant: -Spacing.sm
-            )
+        // ⚠️ THE FULL WIDTH OF THE COLUMN, and the caption's own margins are
+        // what defines it: the strip is the pictures' index, the caption is
+        // what they are about, and two things stacked in one column read as
+        // one thing only if they share an edge.
+        //
+        // Pinned to the BOTTOM of the margins guide — the line the toolbar
+        // rests against — so it sits in the band between the caption and the
+        // bar without moving either. The caption keeps the position it has on
+        // every other format; a post with one picture simply has nothing here.
+        mediaPageBar.constrain(in: self) { parent in
+            mediaPageBar.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor)
+            mediaPageBar.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor)
+            mediaPageBar.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor)
+            mediaPageBar.heightAnchor.constraint(equalToConstant: SnapMediaPageBarView.thickness)
         }
 
 
@@ -747,43 +752,51 @@ final class SnapChromeView: UIView {
     /// below two hides the indicator — a readout for a single photograph is
     /// furniture answering a question nobody asked.
     func setMediaPageCount(_ count: Int, current: Int) {
-        mediaPageIndicator.configure(count: count, current: current)
+        mediaPageBar.configure(count: count, current: current)
     }
 
-    /// Where the page's BOTTOM READOUT begins — the comment band, or the page
-    /// dots when a gallery hangs them above it.
+    /// Where the page's BOTTOM READOUT begins — the top of the comment band.
     ///
     /// The media's floor, and the boundary a tap on the picture stops at: below
-    /// this line the page is talking ABOUT the post (dots, ticker, caption,
-    /// bar) and a touch belongs to whatever it lands on.
+    /// this line the page is talking ABOUT the post (ticker, caption, page
+    /// strip, bar) and a touch belongs to whatever it lands on.
     ///
     /// ⚠️ Read off the band whether or not it is showing anything. The ticker's
     /// box is reserved on every format — that is what makes this corner
     /// format-agnostic (see `captionFloorGuide`) — so taking its position
     /// rather than its visibility keeps the floor still on a post that has no
     /// comments yet, and keeps it in the same place when the first one lands.
-    var bottomReadoutTop: CGFloat {
-        mediaPageIndicator.isHidden
-            ? commentTicker.frame.minY
-            : min(commentTicker.frame.minY, mediaPageIndicator.frame.minY)
-    }
+    ///
+    /// ⚠️ AND IT IS THE SAME LINE ON EVERY FORMAT NOW. It used to rise for a
+    /// gallery, whose page dots hung above the band; the strip that replaced
+    /// them lives under the caption, well below this, so a collection's picture
+    /// is as tall as any other's.
+    var bottomReadoutTop: CGFloat { commentTicker.frame.minY }
+
+    #if DEBUG
+    /// The page strip and the caption, so a spec can state where the strip sits
+    /// in the column — and that its arrival moves nothing else.
+    var debugPageBarFrame: CGRect { mediaPageBar.frame }
+    var debugCaptionFrame: CGRect { captionLabel.frame }
+    var debugPageBar: SnapMediaPageBarView { mediaPageBar }
+    #endif
 
     /// Moves the mark as the viewer pages. Separate from the count because this
     /// runs on every scroll callback of a carousel under a finger.
     func setMediaPage(_ page: Int) {
-        mediaPageIndicator.setCurrent(page)
+        mediaPageBar.setCurrent(page)
     }
 
     /// The viewer asked for a page by touching the indicator. The CELL owns the
     /// carousel, so the request travels out rather than the chrome reaching in.
     var onMediaPageRequested: ((Int) -> Void)? {
-        get { mediaPageIndicator.onPageRequested }
-        set { mediaPageIndicator.onPageRequested = newValue }
+        get { mediaPageBar.onPageRequested }
+        set { mediaPageBar.onPageRequested = newValue }
     }
 
     /// The indicator's scrub, passed up so the screen's own pans can yield to
     /// it. See `MediaPageIndicatorView.scrubGesture`.
-    var mediaScrubGesture: UIGestureRecognizer { mediaPageIndicator.scrubGesture }
+    var mediaScrubGesture: UIGestureRecognizer { mediaPageBar.scrubGesture }
 
     func setTickerActive(_ active: Bool) {
         commentTicker.setActive(active)
