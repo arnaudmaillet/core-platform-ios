@@ -9,7 +9,7 @@ import DesignSystem
 import PostGrid
 import UIKit
 
-final class ProfileViewController: UIViewController {
+final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private let viewModel: ProfileViewModel
     /// Non-nil only for the signed-in viewer's own profile (the Profile tab);
     /// nil for a profile pushed via routing, which shows no account actions.
@@ -164,6 +164,16 @@ final class ProfileViewController: UIViewController {
     private var settingsItem: UIBarButtonItem?
     /// The own-profile switcher; taps present the profile-switcher menu.
     private var switcherItem: UIBarButtonItem?
+    /// An item the SHELL owns, standing inboard of this screen's own — the
+    /// viewer's point balance today, the same badge the Maps header and the
+    /// post screen wear.
+    ///
+    /// Injected rather than built here, and that is the design: three screens
+    /// show one number, so one object owns the wallet, the claim countdown and
+    /// the sheet, and each screen promises only to keep the item in its
+    /// trailing run. Kept as state because that run is REBUILT — see
+    /// `applyNavigationState`.
+    private var trailingAccessoryItem: UIBarButtonItem?
     /// The relationship capsule: Follow / Following.
     ///
     /// **A stock titled item — deliberately not `UIBarButtonItem(customView:)`,
@@ -1570,6 +1580,22 @@ final class ProfileViewController: UIViewController {
         }
     }
 
+    /// Installs (or clears) the shell's trailing accessory. Safe before the
+    /// view loads: the run is composed in `applyNavigationState`, which reads
+    /// this every time it runs.
+    func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {
+        trailingAccessoryItem = item
+        guard isViewLoaded else { return }
+        applyNavigationState()
+    }
+
+    #if DEBUG
+    /// Recomposes the trailing run, so a test can put the screen through the
+    /// rebuild an injected item has to survive without having to move the
+    /// follow state to get there.
+    func debugRebuildNavigationState() { applyNavigationState() }
+    #endif
+
     /// Pre-fetches the switcher snapshot and installs a synchronous menu on the
     /// switcher item. Re-run after a switch so the active marker updates.
     ///
@@ -1762,6 +1788,10 @@ final class ProfileViewController: UIViewController {
         // The switcher, on the own profile only — see the note above for why it
         // is not in the leading group.
         if let switcherItem { items.append(switcherItem) }
+        // The shell's accessory LAST, which puts it furthest from the screen
+        // edge: `[0]` is the corner, so the gear keeps it and the balance sits
+        // inboard — the Maps header's arrangement ([coin] [bell]).
+        if let trailingAccessoryItem { items.append(trailingAccessoryItem) }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is
         // what used to tear the capsule down and rebuild it mid-transition.
@@ -1775,10 +1805,16 @@ final class ProfileViewController: UIViewController {
         // is the regression test a recording can't be.
         if ProcessInfo.processInfo.arguments.contains("-profile-navbar-audit") {
             let phase = transitionCoordinator != nil ? "DURING-TRANSITION" : "idle"
-            // `custom=` is the audit's other job: it names any item in this
-            // slot that is a hosted view rather than one UIKit draws itself —
-            // the shape that cannot interpolate across a bar transition. It
-            // must stay 0.
+            // `custom=` is the audit's other job: it counts items in this slot
+            // that are HOSTED VIEWS rather than ones UIKit draws itself — the
+            // shape that cannot interpolate across a bar transition.
+            //
+            // ⚠️ The floor is no longer zero. The shell's accessory (the wallet
+            // badge) is a hosted view by necessity: a bar item cannot carry a
+            // count beside a glyph. What the audit is still for is this
+            // screen's OWN items — the follow capsule above all, which was
+            // converted off a custom view for exactly this reason — so read it
+            // as "one, and only the injected one".
             let custom = items.count(where: { $0.customView != nil })
             print("PROFILE-NAVBAR-AUDIT rebuild items=\(items.count) custom=\(custom) "
                 + "state=\(followButtonState) \(phase)")
