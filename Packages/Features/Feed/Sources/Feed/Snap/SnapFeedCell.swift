@@ -547,8 +547,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         pauseGlyph.layer.shadowRadius = 6
         pauseGlyph.layer.shadowOffset = .zero
 
-        // Background tap toggles play/pause; the delegate rejects taps that
-        // land on an interactive control (the chrome's shortcut rail).
+        // A tap on the picture toggles play/pause; the delegate rejects taps
+        // that land on an interactive control (the chrome's shortcut rail), and
+        // `playbackTapRegionContains` rejects the ones outside the media band.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleBackgroundTap))
         tap.delegate = self
         contentView.addGestureRecognizer(tap)
@@ -1945,6 +1946,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// drift into two different ideas of what "playing" means.
     private func startWatchedClip() {
         guard let url = activeVideoURL, let videoPlayback else { return }
+        // ⚠️ THE GLYPH IS NOT A STICKER. It says "you stopped this", and this
+        // door is the page starting the clip for a reason of its own — the
+        // viewer came back to a page they had paused, and it is playing again.
+        // Left up, the mark would sit over moving pictures and the next tap
+        // would read inverted: it pauses a clip that already looks paused.
+        setPauseGlyphVisible(false)
         // A hero card may be flying this post's player right now. Starting here
         // would attach a NEWER layer to the same player and blank the card
         // mid-flight, so the start waits for the flight to land.
@@ -2283,7 +2290,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
-    @objc private func handleBackgroundTap() {
+    @objc private func handleBackgroundTap(_ recognizer: UITapGestureRecognizer) {
+        tapMedia(at: recognizer.location(in: contentView))
+    }
+
+    /// A tap that reached the page's own background. Internal (not private) so
+    /// the arbitration is unit-testable — the simulator injects no touches, and
+    /// this decision is the whole of what a tap means here.
+    func tapMedia(at point: CGPoint) {
         // While engaged, the strip is the only cell territory the panel
         // doesn't cover — a tap there means "expand back", not play/pause.
         // Unless the post is TEXT-ONLY: its engagement is the permanent
@@ -2292,7 +2306,35 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             if mediaURL != nil { onRequestCommentsClose?() }
             return
         }
+        guard playbackTapRegionContains(point) else { return }
         togglePlayback()
+    }
+
+    /// THE CLIP'S TERRITORY: the media band, between the header and the page's
+    /// bottom readout.
+    ///
+    /// The gesture used to take the whole cell, which put play/pause on the
+    /// caption, on the dead space under it, and in the band the nav bar's
+    /// platters float in — a tap aimed at the gap between two bar buttons
+    /// stopped the video. What the viewer means by "the picture" is bounded at
+    /// the top by the header and at the bottom by the first thing that is
+    /// clearly the page talking about the post: the comment band, or a
+    /// gallery's page dots where they sit above it.
+    ///
+    /// The trailing rail is NOT excluded here: it is interactive chrome, and
+    /// `isInteractiveTouch` already keeps every control's touches for the
+    /// control. This boundary is about territory, not about targets.
+    func playbackTapRegionContains(_ point: CGPoint) -> Bool {
+        playbackTapRegion.contains(point)
+    }
+
+    /// The region above, as a rectangle. The floor can only be as low as the
+    /// chrome's readout and never above the header — a cell that has not been
+    /// laid out yet answers with an empty rect rather than a negative one.
+    private var playbackTapRegion: CGRect {
+        let top = frozenInsets.top
+        let floor = max(top, chrome.bottomReadoutTop)
+        return CGRect(x: 0, y: top, width: bounds.width, height: floor - top)
     }
 
     /// How long a press must last before it counts as a hold rather than a tap.
@@ -2310,20 +2352,36 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private var isHeldPaused = false
 
     @objc private func handleMediaHold(_ recognizer: UILongPressGestureRecognizer) {
-        guard playsVideo, let videoPlayback else { return }
         switch recognizer.state {
         case .began:
-            // Only a clip that is actually running can be held. Holding a
-            // paused one and letting go would otherwise start it.
-            guard videoPlayback.isAdvancing(in: mediaCard.renderView) else { return }
-            isHeldPaused = videoPlayback.setPaused(true, in: mediaCard.renderView)
+            beginMediaHold(at: recognizer.location(in: contentView))
         case .ended, .cancelled, .failed:
-            guard isHeldPaused else { return }
-            isHeldPaused = false
-            videoPlayback.setPaused(false, in: mediaCard.renderView)
+            endMediaHold()
         default:
             break
         }
+    }
+
+    /// ⚠️ THE SAME TERRITORY AS THE TAP, and it has to be: two gestures that
+    /// disagree about where the picture is are two different pictures as far as
+    /// the hand is concerned. So the hold is off duty exactly where the tap is
+    /// — outside the media band, and while the thread is open (where the strip
+    /// means "bring the media back").
+    func beginMediaHold(at point: CGPoint) {
+        guard !isCommentsEngaged, playbackTapRegionContains(point) else { return }
+        guard playsVideo, let videoPlayback else { return }
+        // Only a clip that is actually running can be held. Holding a paused
+        // one and letting go would otherwise start it.
+        guard videoPlayback.isAdvancing(in: mediaCard.renderView) else { return }
+        isHeldPaused = videoPlayback.setPaused(true, in: mediaCard.renderView)
+        traceViewerPlayback("hold", paused: isHeldPaused)
+    }
+
+    func endMediaHold() {
+        guard isHeldPaused, let videoPlayback else { return }
+        isHeldPaused = false
+        videoPlayback.setPaused(false, in: mediaCard.renderView)
+        traceViewerPlayback("release", paused: false)
     }
 
     /// Toggles the active video's playback and reflects it in the pause glyph.
@@ -2331,7 +2389,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func togglePlayback() {
         guard playsVideo, let videoPlayback else { return }
         let paused = videoPlayback.togglePlayback(in: mediaCard.renderView)
+        traceViewerPlayback("tap", paused: paused)
         setPauseGlyphVisible(paused)
+    }
+
+    /// What the finger did to the clip, for the leg no unit test can reach: a
+    /// suite has no decoder, so "the player was told to stop" is all it can
+    /// assert. `-media-log` says whether a player ANSWERED — the silent no-op
+    /// this gesture spent a release doing is `answered=N`, and it looks
+    /// identical from every other angle.
+    private func traceViewerPlayback(_ action: String, paused: Bool) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-media-log") else { return }
+        // A player that took the instruction now reads the OPPOSITE of the
+        // state it was moved out of; one that never heard it reads unchanged.
+        let advancing = videoPlayback?.isAdvancing(in: mediaCard.renderView) ?? false
+        print(String(format: "[page-play] %.3f %@ paused=%@ answered=%@ page=%d",
+                     CACurrentMediaTime(), action, paused ? "Y" : "N",
+                     advancing == paused ? "N" : "Y", mediaCard.currentPage))
+        #endif
     }
 
     private func setPauseGlyphVisible(_ visible: Bool) {
@@ -2403,6 +2479,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     var mediaScrubGesture: UIGestureRecognizer { chrome.mediaScrubGesture }
 
     var debugRenderSurface: VideoRenderView { mediaCard.renderView }
+
+    /// Whether the centred glyph is up — the page's own account of "the viewer
+    /// stopped this", which is the half of the gesture a screenshot can see.
+    var debugIsShowingPauseGlyph: Bool { !pauseGlyph.isHidden }
+
+    /// The clip's territory as a rectangle, so a spec can state its edges
+    /// against the screen's thresholds rather than against numbers of its own.
+    var debugPlaybackTapRegion: CGRect { playbackTapRegion }
 
     /// Moves the collection to a page as a viewer's swipe would.
     ///

@@ -312,6 +312,16 @@ public final class VideoRenderView: UIView {
         playerLayer.player = player
     }
 
+    /// The player this surface is drawing, however it came to be attached.
+    ///
+    /// ⚠️ NOT "the player this surface owns". A surface that joined an existing
+    /// playback holds no pool loan, so the controller's loan table cannot
+    /// answer for it — and the viewer's questions (is this moving, stop it,
+    /// start it) are about the picture in front of them, not about the
+    /// bookkeeping behind it. `attachAlongside` already resolves the binding
+    /// this way; this names it so the controller can ask the same question.
+    var boundPlayer: AVPlayer? { renderer?.player ?? playerLayer?.player }
+
     /// Joins `sibling`'s playback directly — the same renderer in
     /// sample-buffer mode, the same player in layer mode — for callers that
     /// know WHICH surface they must mirror rather than which URL. The seam

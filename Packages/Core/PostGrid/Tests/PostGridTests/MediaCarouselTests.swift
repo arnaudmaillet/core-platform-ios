@@ -895,3 +895,66 @@ struct CarouselChipsAreFixedTests {
         #expect(chips[1].minX - chips[0].maxX > gap + 1)
     }
 }
+
+
+/// **A TAP NOBODY IS LISTENING TO MUST NOT RECOGNIZE.**
+///
+/// ⚠️ Not tidiness — recognition is exclusive. A recognizer that wins PREVENTS
+/// the ones it does not recognize simultaneously with, ancestors included, and
+/// this one sits nearer the touch than anything its host can install. So on a
+/// screen that never set `onTapped` it was winning every tap in order to run an
+/// empty closure, and the host's own gesture never fired.
+///
+/// That is the whole of a defect that looked like two: the post screen's
+/// tap-to-pause worked on a single clip and did nothing on a gallery. Same
+/// cell, same recognizer, same handler — the only difference was a carousel in
+/// the touch path with no listener behind its tap.
+///
+/// `cancelsTouchesInView = false` does not cover this. It governs delivery to
+/// VIEWS; prevention is the other channel, and it is the one that bit.
+@MainActor
+struct CarouselTapArbitrationTests {
+    private func carousel(style: MediaCarouselView.Style) -> MediaCarouselView {
+        let view = MediaCarouselView(style: style)
+        view.frame = CGRect(x: 0, y: 0, width: 340, height: 200)
+        view.configure(
+            with: [
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://a"), aspectRatio: 1.78),
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://b"), aspectRatio: 1.78)
+            ],
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// The post screen's carousel: full-bleed pages under a page that owns its
+    /// own tap. Nothing is listening here, so the tap stands down.
+    @Test func aPageCarouselWithNoListenerYieldsTheTap() {
+        #expect(carousel(style: .page).tapHasAListener() == false)
+    }
+
+    /// And the card's, where the tap is the only way the post opens — that one
+    /// keeps every touch it can get.
+    @Test func aCardCarouselWithAListenerKeepsTheTap() {
+        let view = carousel(style: .card)
+        view.onTapped = {}
+        #expect(view.tapHasAListener())
+    }
+
+    /// ⚠️ THE ANSWER TRACKS THE LISTENER, not the style. A `.page` carousel
+    /// whose host does want the tap gets it, and a `.card` one whose host let
+    /// go stops taking it — the rule is about who is listening, and a rule
+    /// written against the style would be right by coincidence today and wrong
+    /// the first time a screen changed its mind.
+    @Test func theRuleFollowsTheListenerAndNotTheStyle() {
+        let page = carousel(style: .page)
+        page.onTapped = {}
+        #expect(page.tapHasAListener())
+
+        let card = carousel(style: .card)
+        card.onTapped = {}
+        card.onTapped = nil
+        #expect(card.tapHasAListener() == false)
+    }
+}

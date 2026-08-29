@@ -479,7 +479,7 @@ public final class VideoPlaybackController {
     }
 
     public func isAdvancing(in view: VideoRenderView) -> Bool {
-        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        guard let player = watchedPlayer(in: view) else { return false }
         return player.timeControlStatus != .paused
     }
 
@@ -526,7 +526,7 @@ public final class VideoPlaybackController {
     /// Returns whether there was a player to move.
     @discardableResult
     public func setPaused(_ paused: Bool, in view: VideoRenderView) -> Bool {
-        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        guard let player = watchedPlayer(in: view) else { return false }
         if paused {
             // ⚠️ WHERE THE PICTURE WAS, remembered — because an adaptive stream
             // does not necessarily come back to it.
@@ -582,7 +582,7 @@ public final class VideoPlaybackController {
     /// when no player is active for the view (e.g. an image/text cell).
     @discardableResult
     public func togglePlayback(in view: VideoRenderView) -> Bool {
-        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        guard let player = watchedPlayer(in: view) else { return false }
         if player.timeControlStatus == .paused {
             player.play()
             return false
@@ -784,6 +784,26 @@ public final class VideoPlaybackController {
         }?.key
         guard let key else { return nil }
         return activePlayers[key]
+    }
+
+    /// The player `view` is DRAWING — its own loan first, and failing that the
+    /// playback it joined.
+    ///
+    /// ⚠️ The pool answers two different questions about a surface, and this is
+    /// the viewer's one. `hasPlayer(in:)` is the other: who holds the loan,
+    /// whose `stop` retires the player, who the pool will bill. Ownership is
+    /// the right basis for lifetime decisions and the wrong one for "pause what
+    /// I am looking at" — a page that joined a grid tile's clip (every hero
+    /// landing) owns nothing, and asking the loan table about it answered
+    /// "nothing is playing here" while the viewer watched it move. The controls
+    /// returned false and did nothing, which is a defect with no error in it:
+    /// reported as the post screen's tap-to-pause being dead.
+    ///
+    /// Reads the binding off the SURFACE (`boundPlayer`) rather than looking a
+    /// URL up in the pool, because two surfaces can carry the same asset and
+    /// only the one in front of the viewer may be stopped.
+    private func watchedPlayer(in view: VideoRenderView) -> AVPlayer? {
+        activePlayers[ObjectIdentifier(view)] ?? view.boundPlayer
     }
 
     private func activePlayer(playing mediaURL: URL) -> AVPlayer? {

@@ -750,6 +750,24 @@ final class SnapChromeView: UIView {
         mediaPageIndicator.configure(count: count, current: current)
     }
 
+    /// Where the page's BOTTOM READOUT begins — the comment band, or the page
+    /// dots when a gallery hangs them above it.
+    ///
+    /// The media's floor, and the boundary a tap on the picture stops at: below
+    /// this line the page is talking ABOUT the post (dots, ticker, caption,
+    /// bar) and a touch belongs to whatever it lands on.
+    ///
+    /// ⚠️ Read off the band whether or not it is showing anything. The ticker's
+    /// box is reserved on every format — that is what makes this corner
+    /// format-agnostic (see `captionFloorGuide`) — so taking its position
+    /// rather than its visibility keeps the floor still on a post that has no
+    /// comments yet, and keeps it in the same place when the first one lands.
+    var bottomReadoutTop: CGFloat {
+        mediaPageIndicator.isHidden
+            ? commentTicker.frame.minY
+            : min(commentTicker.frame.minY, mediaPageIndicator.frame.minY)
+    }
+
     /// Moves the mark as the viewer pages. Separate from the count because this
     /// runs on every scroll callback of a carousel under a finger.
     func setMediaPage(_ page: Int) {

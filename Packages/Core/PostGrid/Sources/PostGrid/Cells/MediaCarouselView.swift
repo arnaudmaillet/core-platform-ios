@@ -31,7 +31,7 @@ import UIKit
 /// every width change; the package's layout note asks hot cells to place their
 /// subviews in `layoutSubviews` from precomputed sizes, and a carousel of image
 /// views is exactly that case.
-public final class MediaCarouselView: UIView, UIScrollViewDelegate {
+public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     /// Where this carousel is: inside a card, or filling a page.
     ///
     /// ONE carousel with two styles rather than two carousels. The snapping, the
@@ -86,6 +86,10 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// A tap recognizer here, forwarded by the cell to whatever opens the post,
     /// rather than a hole in `hitTest`: the pages still have to receive the pan.
     public var onTapped: (() -> Void)?
+
+    /// The recognizer behind `onTapped`, kept so the delegate below can tell it
+    /// apart from the scroll view's own.
+    private weak var tapRecognizer: UITapGestureRecognizer?
 
     /// Fired whenever the page under the box changes, so the host can move an
     /// indicator that lives OUTSIDE this view — see `PostGridListRowCell`, where
@@ -257,8 +261,20 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         // A tap only fires when no drag happened, so it never competes with the
         // pan — and it does not consume the touch, so anything else listening
         // still hears it.
+        //
+        // ⚠️ `cancelsTouchesInView = false` IS NOT THE WHOLE OF "does not
+        // consume". It governs touch delivery to VIEWS; recognition is the
+        // other channel, and there a recognizer that wins PREVENTS the ones it
+        // does not recognize simultaneously with — including an ancestor's.
+        // This tap is nearer the touch than anything the host has, so it wins
+        // every time, and on a screen where nobody set `onTapped` it won in
+        // order to do nothing at all. That is how the post screen's
+        // tap-to-pause came to work on a single clip and never on a gallery:
+        // same cell, same recognizer, silently prevented by this one.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         tap.cancelsTouchesInView = false
+        tap.delegate = self
+        tapRecognizer = tap
         // On THIS view, not on the scroll view. `UIScrollView` overrides
         // `gestureRecognizerShouldBegin` for recognizers it does not own, and a
         // tap added there never fired — the card's photograph was untappable
@@ -373,6 +389,26 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
 
     @objc private func handleTap() {
         onTapped?()
+    }
+
+    /// Whether the tap has anybody to report to — the whole of its right to
+    /// recognize. A discrete recognizer is asked this before it recognizes, so
+    /// a `false` here fails it outright and leaves the touch to whoever else
+    /// wants it, which on the post screen is the page's own play/pause.
+    ///
+    /// Internal so the rule is unit-testable: recognition itself cannot be
+    /// driven from a test, and this is the decision that stands behind it.
+    func tapHasAListener() -> Bool { onTapped != nil }
+
+    /// ⚠️ In the class body, not an extension: this is an OVERRIDE of `UIView`'s
+    /// own hook as well as the delegate callback, and Swift takes overrides
+    /// only here. One implementation serves both, which is the point — the two
+    /// routes must not be able to answer differently.
+    public override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === tapRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        return tapHasAListener()
     }
 
     /// How long a press must last before it is a hold rather than a tap.
