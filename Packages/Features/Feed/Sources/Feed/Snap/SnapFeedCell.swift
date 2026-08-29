@@ -2547,6 +2547,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func didResignActive(releasingPlayback: Bool) {
         guard isActive else { return }
         isActive = false
+        // The same rule the carousel applies to a page that leaves the box, at
+        // the scale of the whole post: this page is not the one being watched
+        // any more, so the receipt for a stop the viewer made on it has nothing
+        // left to annotate. Coming back starts the clip regardless.
+        mediaCard.clearPausedMarks()
         // Covers the paths visibility can't see: backgrounding and the
         // feed's own disappearance, where no `didEndDisplaying` fires.
         chrome.setTickerActive(false)

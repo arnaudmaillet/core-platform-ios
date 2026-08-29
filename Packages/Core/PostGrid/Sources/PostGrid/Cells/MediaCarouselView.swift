@@ -173,6 +173,23 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         pageViews[index].setPausedMarkVisible(visible)
     }
 
+    /// Takes down the mark on every page that has left the box.
+    ///
+    /// ⚠️ A mark is a receipt for a picture the viewer is LOOKING AT. Riding
+    /// its page out of the screen is right — that is what makes it belong to
+    /// the picture — but staying on a page nobody can see is bookkeeping, and
+    /// bookkeeping that outlives its subject comes back wrong: the page is
+    /// paused now because the carousel pauses what it leaves, not because
+    /// anyone chose it, and arriving there again starts it anyway.
+    ///
+    /// Unanimated on purpose: there is nothing on screen to crossfade.
+    private func retirePausedMarksOffScreen() {
+        let visible = CGRect(origin: scrollView.contentOffset, size: scrollView.bounds.size)
+        for page in pageViews where page.visiblePausedMark != nil && !page.frame.intersects(visible) {
+            page.setPausedMarkVisible(false, animated: false)
+        }
+    }
+
     /// The mark on `index` while it is showing — the view itself, so a caller
     /// can ask where it is drawn rather than trust that it moved.
     public func visiblePausedMark(onPage index: Int) -> UIView? {
@@ -609,9 +626,21 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     public func debugScroll(toPage index: Int, animated: Bool = true) -> Bool {
         setPage(index, animated: animated)
     }
+
+    /// Scrolls to an arbitrary offset — the fractional positions a real drag
+    /// passes through and `setPage` cannot express, which is where "has this
+    /// page left the box yet" is actually decided.
+    func debugScroll(toOffsetX x: CGFloat) {
+        scrollView.contentOffset.x = x
+        scrollViewDidScroll(scrollView)
+    }
     #endif
 
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // Before the page-change guard below: a mark's page can leave the box
+        // without the RESOLVED page changing again (the drag that carries it
+        // out is the same one that already changed it).
+        retirePausedMarksOffScreen()
         let resolved = page(nearest: scrollView.contentOffset.x)
         guard resolved != currentPage else { return }
         currentPage = resolved
@@ -724,7 +753,7 @@ final class CarouselPageView: UIView {
     }
 
     /// Shows or hides this page's stopped mark.
-    func setPausedMarkVisible(_ visible: Bool) {
+    func setPausedMarkVisible(_ visible: Bool, animated: Bool = true) {
         guard visible || pausedMark != nil else { return }
         let mark = pausedMark ?? {
             let view = PausedClipMarkView()
@@ -736,7 +765,7 @@ final class CarouselPageView: UIView {
         // Above the picture, whichever picture this page is showing — a
         // surface hosted after the mark would otherwise cover it.
         bringSubviewToFront(mark)
-        mark.setVisible(visible)
+        mark.setVisible(visible, animated: animated)
     }
 
     /// The mark itself when it is showing, so a caller can ask WHERE it is

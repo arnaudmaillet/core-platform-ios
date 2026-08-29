@@ -203,38 +203,31 @@ struct MediaTapPlaybackSpecTests {
         return (cell, pool)
     }
 
-    /// ⚠️ THE CLAIM, AS THE VIEWER SEES IT: stop page one, swipe, and the mark
-    /// goes with the picture it belongs to.
+    /// ⚠️ THE CLAIM, AS THE VIEWER SEES IT: the mark is ON the stopped page —
+    /// and when that page leaves, it leaves with it.
     ///
-    /// Centred on the screen it belonged to nothing — it hung over page two,
-    /// which was playing, and said the opposite of the truth.
-    @Test func theMarkLeavesWithThePageTheViewerStopped() async throws {
+    /// Centred on the SCREEN it belonged to nothing: it hung over the page
+    /// arriving, which was playing, and said the opposite of the truth. The
+    /// geometry of the ride itself — half out of the box, half of the mark
+    /// still showing — is pinned one level down, in `CarouselPausedMarkTests`,
+    /// where a drag can be expressed as an offset rather than a page.
+    @Test func theMarkSitsOnTheStoppedPageAndLeavesWithIt() async throws {
         let (cell, _) = await Self.landedGallery(pages: 3)
         cell.tapMedia(at: Self.mediaPoint(cell))
-        let atRest = try #require(cell.debugPausedMarkFrame(onPage: 0))
-        #expect(abs(atRest.midX - cell.bounds.midX) < 1)
+
+        let onThePicture = try #require(cell.debugPausedMarkFrame(onPage: 0))
+        #expect(abs(onThePicture.midX - cell.bounds.midX) < 1)
 
         cell.debugShowPage(1)
         cell.layoutIfNeeded()
 
-        let afterTheSwipe = try #require(cell.debugPausedMarkFrame(onPage: 0))
-        #expect(afterTheSwipe.midX < atRest.midX - cell.bounds.width / 2,
-                Comment(rawValue: "the mark stayed on screen: \(afterTheSwipe.midX)"))
-        // …and the page arriving wears none of its own: it is playing.
+        // Gone with its page, and the page arriving wears none of its own.
+        #expect(cell.debugPausedMarkFrame(onPage: 0) == nil)
         #expect(cell.debugPausedMarkFrame(onPage: 1) == nil)
         #expect(cell.debugIsShowingPauseGlyph == false)
-    }
 
-    /// Coming back to a page the viewer stopped takes its mark down, because
-    /// arriving is what starts the clip again. The receipt is spent with it.
-    @Test func returningToAStoppedPageTakesItsMarkDown() async {
-        let (cell, _) = await Self.landedGallery(pages: 3)
-        cell.tapMedia(at: Self.mediaPoint(cell))
-        #expect(cell.debugPausedMarkFrame(onPage: 0) != nil)
-
-        cell.debugShowPage(1)
+        // …and coming back finds nothing to clear: arriving starts the clip.
         cell.debugShowPage(0)
-
         #expect(cell.debugPausedMarkFrame(onPage: 0) == nil)
     }
 

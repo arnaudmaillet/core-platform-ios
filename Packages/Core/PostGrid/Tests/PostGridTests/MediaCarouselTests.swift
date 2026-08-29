@@ -1029,6 +1029,25 @@ struct CarouselPausedMarkTests {
         #expect(marks > hosted)
     }
 
+    /// ⚠️ AND IT GOES WHEN ITS PAGE LEAVES THE BOX. Riding out with the page is
+    /// what makes the mark belong to the picture; STAYING on a page nobody can
+    /// see is bookkeeping, and this particular bookkeeping comes back wrong —
+    /// by then the page is paused because the carousel pauses what it leaves,
+    /// not because anyone chose it.
+    @Test func aMarkRidesOutWithItsPageAndThenGoes() {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 0)
+
+        // Half way through the drag: page one is still half on screen, and so
+        // is its mark.
+        view.debugScroll(toOffsetX: view.bounds.width / 2)
+        #expect(view.visiblePausedMark(onPage: 0) != nil)
+
+        // Fully off, and it is gone.
+        view.debugScroll(toOffsetX: view.bounds.width)
+        #expect(view.visiblePausedMark(onPage: 0) == nil)
+    }
+
     /// Taking it down leaves nothing to answer with — and asking a page that
     /// never wore one mints no view at all.
     @Test func aPageWithoutAMarkHasNothingToShow() {
