@@ -119,15 +119,15 @@ final class PostDetailViewController: UIViewController {
     /// The engaged footer's frost: rows gliding behind the composer stay
     /// visible but dissolve into a LIGHT blur, so the bar reads over them
     /// without the band reading as an overlay on the post. Clear at the
-    /// band's top edge, full material by the composer's top, solid to the
-    /// screen's bottom; the mask re-frames itself when the keyboard grows
-    /// the band. HIT-INERT: it must never eat the bar's taps or the swipe
-    /// pan. Effect nil until the engaged entrance IN A WINDOW; it rides the
-    /// master spring via `setComposerEntranceState`.
+    /// band's top edge, full material at the screen's bottom — the header
+    /// band's ramp, mirrored, and no `topRampLength`: that parameter exists to
+    /// finish a ramp EARLY and hold it, which is exactly the plateau this
+    /// stopped having. HIT-INERT: it must never eat the bar's taps or the
+    /// swipe pan. Effect nil until the engaged entrance IN A WINDOW; it rides
+    /// the master spring via `setComposerEntranceState`.
     private let composerBackdrop = ProgressiveFrostView(
         maskColors: SnapCommentsLayout.footerFrostMaskColors,
-        maskLocations: [0, 0.5, 1],
-        topRampLength: SnapCommentsLayout.footerFrostLead
+        maskLocations: SnapCommentsLayout.footerFrostMaskLocations
     )
     private var imageTasks: [Task<Void, Never>] = []
     /// The threaded stream as last loaded — kept so expansion re-renders

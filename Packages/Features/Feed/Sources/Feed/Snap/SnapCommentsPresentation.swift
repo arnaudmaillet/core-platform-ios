@@ -244,15 +244,30 @@ enum SnapCommentsLayout {
     static var headerFrostMaskColors: [UIColor] { [.black, .clear] }
     static var headerFrostMaskLocations: [NSNumber] { [0, 1] }
 
-    /// The FOOTER band's ramp, deliberately ASYMMETRIC: clear at the band's
-    /// top, full material by the composer's top edge, and solid from there
-    /// to the screen's bottom. The composer must sit on the SOLID part of
-    /// its own band, not on the clear end of it.
-    static var footerFrostMaskColors: [UIColor] { [.clear, .black, .black] }
+    /// The FOOTER band's ramp — THE HEADER'S, MIRRORED. Clear at the band's
+    /// top, full material at the screen's bottom edge, one gradient across
+    /// the whole band with no knee in it.
+    ///
+    /// ⚠️ It used to hold: clear → full by the composer's top edge → SOLID
+    /// from there down, on the rule that the composer must sit on the solid
+    /// part of its own band. That rule was right about legibility and wrong
+    /// about proportion — the hold made two thirds of the band a flat slab,
+    /// which over a text page (where a veil stands in for a blur that has
+    /// nothing to refract) reads as a lid rather than a fade. Reported as far
+    /// too pronounced, and against the header band, which does exactly this
+    /// and was not.
+    ///
+    /// The composer now sits where the nav bar sits in the header's ramp:
+    /// past the middle, on strong material, but not on a plateau.
+    static var footerFrostMaskColors: [UIColor] { [.clear, .black] }
+    static var footerFrostMaskLocations: [NSNumber] { [0, 1] }
 
-    /// How far ABOVE the composer the footer band starts, so its ramp is
-    /// finished — full material by the composer's top edge — which is
-    /// exactly where the composer needs its background to be solid.
+    /// How far ABOVE the composer the footer band starts.
+    ///
+    /// It was the RUNWAY the ramp had to finish over, back when the ramp
+    /// finished early and held. With a single gradient it is simply how much
+    /// of the page the fade is spread across — and spreading it further is
+    /// what makes it gentle, so the number stays.
     static let footerFrostLead: CGFloat = 96
 
     // MARK: The interactive pull-down dismissal

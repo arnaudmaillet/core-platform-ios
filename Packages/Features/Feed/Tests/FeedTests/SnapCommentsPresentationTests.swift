@@ -427,13 +427,21 @@ struct SnapCommentsPresentationTests {
         }
         #expect(alpha(header[0]) == 1)
         #expect(alpha(header[1]) == 0)
-        // The FOOTER is NOT symmetric, and deliberately so: it fades in over
-        // the lead and then HOLDS full material.
+        // ⚠️ AND THE FOOTER IS THE SAME RAMP, MIRRORED. It used to fade in
+        // over the lead and then HOLD full material to the screen's bottom —
+        // right about the composer's legibility, wrong about proportion: the
+        // hold made two thirds of the band a flat slab, and over a text page
+        // (where a veil stands in for a blur with nothing to refract) it read
+        // as a lid. Two stops now, ends reversed, no knee.
         let footer = SnapCommentsLayout.footerFrostMaskColors
-        #expect(footer.count == 3)
+        #expect(footer.count == 2)
+        #expect(SnapCommentsLayout.footerFrostMaskLocations == [0, 1])
         #expect(alpha(footer[0]) == 0)
         #expect(alpha(footer[1]) == 1)
-        #expect(alpha(footer[2]) == 1)
+        // Stated as the mirror it is, so the pair cannot drift apart: whatever
+        // the header does at its outer edge, the footer does at its own.
+        #expect(alpha(footer.last!) == alpha(header.first!))
+        #expect(alpha(footer.first!) == alpha(header.last!))
 
         // NO caption in the cell at all any more — it is the hosted stream's
         // FIRST ROW, so the feed cell must not carry a second copy floating
@@ -1097,13 +1105,19 @@ struct SnapCommentsPresentationTests {
     /// bubble back. (Worth knowing before trying: platter COUNT is not what
     /// the hero push is paying for — see `configureToolbarItems` — so do not
     /// split this on the theory that merging it was the performance fix.)
-    @Test func theToolbarsTrailingRunIsASingleItem() {
+    @Test func theToolbarsTrailingRunIsTwoPlatters() {
         let (_, feed) = Self.chromeHost()
         let items = feed.toolbarItems ?? []
-        // [attribution][flexible space][bookmark ⬆︎ ⋯]
-        #expect(items.count == 3)
-        #expect(items.last?.customView is UIStackView)
-        #expect((items.last?.customView as? UIStackView)?.arrangedSubviews.count == 3)
+        // [attribution][flexible space][🔖 ⇄][fixed space][⋯]
+        //
+        // It was one platter holding all three for a while, to save a glass
+        // host on the hero flight's push. The arms were then measured and the
+        // saving was ~2 ms — inside the noise — so the grouping went back to
+        // being a design question. `SnapToolbarCompositionTests` owns the
+        // reason; this pins the shape.
+        #expect(items.count == 5)
+        #expect((items.dropFirst(2).first?.customView as? UIStackView)?.arrangedSubviews.count == 2)
+        #expect(items.last?.customView is UIButton)
     }
 
     @Test func toolbarIsIdenticalInEveryState() {

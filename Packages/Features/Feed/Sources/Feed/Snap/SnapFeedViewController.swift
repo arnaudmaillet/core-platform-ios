@@ -1207,22 +1207,23 @@ final class SnapFeedViewController: UIViewController {
         // and pass it on. Three glyphs of equal weight said the three were
         // equally common, and share is not.
 
-        // One glass capsule for the WHOLE trailing run — bookmark, repost and
-        // ⋯ in three 36pt slots inside a single bubble.
+        // TWO bubbles: [🔖 ⇄] and [⋯], held apart by a fixed space — iOS 26
+        // groups ADJACENT bar items into one shared platter, so a spacer is
+        // the only way to make two.
         //
-        // It used to be two bubbles, [🔖 ⬆︎] and [⋯], held apart by a fixed
-        // space: iOS 26 groups ADJACENT bar items into one shared platter, so
-        // a spacer is the only way to make two. That spacer is now gone, and
-        // the reason is cost rather than taste. Every platter is its own glass
-        // host, and UIKit materialises each one through SwiftUI inside
-        // `pushViewController` — which is the hero flight's stall (see
-        // `ZoomFlightProfiler`). The bar wore five; it wears four.
+        // ⚠️ THE COST ARGUMENT DOES NOT DECIDE THIS, and the measurements are
+        // the reason. They were merged into one capsule to save a platter,
+        // each being its own glass host that UIKit materialises through
+        // SwiftUI inside `pushViewController` — the hero flight's stall. Then
+        // the arms were measured (the table under `-no-toolbar` below): one
+        // platter fewer bought ~2 ms, inside the noise, while the floating bar
+        // itself costs ~45 ms cold whatever is in it.
         //
-        // The grouping still reads: everything in this capsule acts on THIS
-        // post, and ⋯ is the same kind of thing as share — one more action on
-        // it, just a folded-up one. The separation it lost was never carrying
-        // a distinction, which is why this is a cheap trade rather than a
-        // sacrifice.
+        // So the grouping is a design question again, and the two are not the
+        // same kind of thing: the capsule holds what you DO to this post —
+        // save it, pass it on — and ⋯ holds what is folded away. A separator
+        // between them says which is which; sharing a platter said they were
+        // three of a kind.
         let shareCluster = UIStackView(arrangedSubviews: [bookmarkButton, repost])
         shareCluster.axis = .horizontal
 
@@ -1259,31 +1260,31 @@ final class SnapFeedViewController: UIViewController {
             UIBarButtonItem(customView: mediaAttributionView),
             .flexibleSpace(),
         ]
-        shareCluster.addArrangedSubview(more)
         #if DEBUG
-        // `-split-toolbar-platters`: the A/B side, restoring the two-bubble
-        // trailing run so both arms come from one binary.
-        if ProcessInfo.processInfo.arguments.contains("-split-toolbar-platters") {
-            shareCluster.removeArrangedSubview(more)
-            more.removeFromSuperview()
-            defaultToolbarItems = leading + [
-                UIBarButtonItem(customView: shareCluster),
-                .fixedSpace(Spacing.sm),
-                UIBarButtonItem(customView: more),
-            ]
+        // `-merge-toolbar-platters`: the A/B's other arm, folding ⋯ back into
+        // the actions' capsule so both come from one binary. It was the
+        // shipped side once — see the note above for why the numbers no longer
+        // argue for it.
+        if ProcessInfo.processInfo.arguments.contains("-merge-toolbar-platters") {
+            shareCluster.addArrangedSubview(more)
+            defaultToolbarItems = leading + [UIBarButtonItem(customView: shareCluster)]
             toolbarItems = defaultToolbarItems
             return
         }
         #endif
-        defaultToolbarItems = leading + [UIBarButtonItem(customView: shareCluster)]
+        defaultToolbarItems = leading + [
+            UIBarButtonItem(customView: shareCluster),
+            .fixedSpace(Spacing.sm),
+            UIBarButtonItem(customView: more),
+        ]
         #if DEBUG
         // `-no-toolbar`: the UPPER BOUND on what trimming the footer can buy,
         // and the probe that settled where the flight's cost actually lives.
         // Not shippable — it is the whole footer — but the numbers redirect
         // the whole question. Push work, 3 runs each:
         //
-        //   5 platters (two-bubble trailing run)   cold 95.4  warm 43.2 / 47.0
-        //   4 platters (merged, shipped)           cold 98.5  warm 40.4 / 45.4
+        //   5 platters (two-bubble run, shipped)  cold 95.4  warm 43.2 / 47.0
+        //   4 platters (merged)                    cold 98.5  warm 40.4 / 45.4
         //   4 platters, STANDARD items not custom  cold 103.9 warm 45.9 / 44.8
         //   NO TOOLBAR AT ALL (2 platters)         cold 53.1  warm 32.6 / 31.0
         //

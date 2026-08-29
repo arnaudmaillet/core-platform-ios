@@ -89,11 +89,32 @@ struct SnapToolbarCompositionTests {
         let items = try #require(feed().toolbarItems)
 
         #expect(items.first?.customView is SnapMediaAttributionView)
-        // The space between is a system item with no custom view of its own —
-        // which is exactly how a flexible space reads from out here.
+        // The spaces are system items with no custom view of their own — which
+        // is exactly how a space reads from out here.
         let space = try #require(items.dropFirst().first)
         #expect(space.customView == nil, "no dynamic space after the credit")
-        #expect(items.count == 3, "the bar is [credit][space][actions]: \(items.count) items")
+        // ⚠️ FIVE, because ⋯ HAS ITS OWN BUBBLE: [credit][flex][actions]
+        // [fixed][⋯]. iOS 26 fuses adjacent bar items into one platter, so the
+        // fixed space between the last two IS the separation — see
+        // `theMenuStandsInItsOwnPlatter`.
+        #expect(items.count == 5, "the bar is [credit][flex][actions][fixed][⋯]: \(items.count)")
+    }
+
+    /// ⚠️ THE ⋯ STANDS APART, in a platter of its own.
+    ///
+    /// The capsule holds what you DO to this post — save it, pass it on — and
+    /// ⋯ holds what is folded away; a shared platter said the three were three
+    /// of a kind. The separation is a fixed space, because iOS 26 groups
+    /// ADJACENT items into one platter and a spacer is the only way to make
+    /// two.
+    @Test func theMenuStandsInItsOwnPlatter() throws {
+        let items = try #require(feed().toolbarItems)
+
+        let actions = try #require(items.dropFirst(2).first?.customView as? UIStackView)
+        #expect(actions.arrangedSubviews.count == 2, "the capsule is not [save, repost]")
+        #expect(items.dropFirst(3).first?.customView == nil, "no separator before the ⋯")
+        let more = try #require(items.last?.customView as? UIButton)
+        #expect(more.accessibilityLabel == "More actions")
     }
 
     // MARK: - The menu
