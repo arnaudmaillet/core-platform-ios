@@ -50,6 +50,9 @@ final class SnapMediaCardView: UIView {
         imageView.clipsToBounds = true
         imageView.pin(to: self)
         renderView.pin(to: self)
+        // Last, so it starts above both pictures — and hidden, so it costs a
+        // laid-out view and nothing else until a viewer stops something.
+        singleMark.pin(to: self)
     }
 
     /// Re-installs the video surface after a hero flight borrowed it.
@@ -238,6 +241,52 @@ final class SnapMediaCardView: UIView {
         if renderView.superview !== self {
             renderView.removeFromSuperview()
             renderView.pin(to: self)
+        }
+    }
+
+    /// The stopped mark for a SINGLE attachment — one picture, one mark.
+    ///
+    /// A collection's marks live on its pages (`MediaCarouselView`), because
+    /// there the mark has to travel with the picture it belongs to. Here the
+    /// picture is the card, so the card holds it.
+    /// ⚠️ Built with the card, not on first use. A mark minted at the moment
+    /// of the tap has no frame until the next layout pass, so it crossfades in
+    /// at zero size and jumps — a first-appearance-only defect, which is the
+    /// kind a spec catches once and a viewer meets every time.
+    private let singleMark = PausedClipMarkView()
+
+    /// Shows or hides the mark on the picture the viewer is looking at.
+    func setPausedMark(_ visible: Bool) {
+        if showsCollection {
+            carousel?.setPausedMark(visible, onPage: currentPage)
+        } else {
+            if visible { bringSubviewToFront(singleMark) }
+            singleMark.setVisible(visible)
+        }
+    }
+
+    /// Whether the picture in front of the viewer wears the mark.
+    var showsPausedMark: Bool { visiblePausedMark != nil }
+
+    /// The mark being drawn on the current picture, if any.
+    var visiblePausedMark: UIView? {
+        showsCollection
+            ? carousel?.visiblePausedMark(onPage: currentPage)
+            : (singleMark.isShowing ? singleMark : nil)
+    }
+
+    /// The mark a given PAGE is wearing, whether or not the viewer is on it —
+    /// the question a spec asks to prove the mark stayed with its page.
+    func visiblePausedMark(onPage page: Int) -> UIView? {
+        showsCollection ? carousel?.visiblePausedMark(onPage: page) : visiblePausedMark
+    }
+
+    /// Takes every mark down — the post's pictures are all playing, or the card
+    /// is being handed a different post entirely.
+    func clearPausedMarks() {
+        singleMark.setVisible(false, animated: false)
+        for page in 0..<max(0, pageCount) {
+            carousel?.setPausedMark(false, onPage: page)
         }
     }
 

@@ -162,6 +162,23 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         pageViews.firstIndex { $0.hosts(view) }
     }
 
+    /// Shows or hides the stopped mark on ONE page.
+    ///
+    /// Addressed by page rather than "the current one" because the two are not
+    /// the same question the moment a swipe is in flight: the viewer stops the
+    /// page they are looking at, and by the time anything is reconciled the
+    /// page under the finger may already be the next one.
+    public func setPausedMark(_ visible: Bool, onPage index: Int) {
+        guard pageViews.indices.contains(index) else { return }
+        pageViews[index].setPausedMarkVisible(visible)
+    }
+
+    /// The mark on `index` while it is showing — the view itself, so a caller
+    /// can ask where it is drawn rather than trust that it moved.
+    public func visiblePausedMark(onPage index: Int) -> UIView? {
+        pageViews.indices.contains(index) ? pageViews[index].visiblePausedMark : nil
+    }
+
     /// How many pages the carousel is showing.
     public var pageCount: Int { pages.count }
 
@@ -663,6 +680,17 @@ final class CarouselPageView: UIView {
     /// The host's playback surface while this page is holding it.
     private weak var surface: UIView?
 
+    /// The mark this page wears while the viewer has its clip stopped.
+    ///
+    /// ⚠️ ON THE PAGE, so it travels with it. The mark used to be centred on
+    /// the SCREEN, one per post — which is a lie the moment a post has more
+    /// than one picture: swiping left carried a stopped page's mark onto the
+    /// page arriving, over a clip that was playing. A page is what scrolls, so
+    /// a page is what carries the answer.
+    ///
+    /// Minted on first use: most pages never wear one.
+    private var pausedMark: PausedClipMarkView?
+
     /// The surface this page is REALLY holding — both halves again, for the
     /// same reason `hosts(_:)` asks both: a weak reference outlives the view
     /// being taken away by a flight, and a page that answered from the
@@ -692,7 +720,28 @@ final class CarouselPageView: UIView {
         super.layoutSubviews()
         cover.frame = bounds
         surface?.frame = bounds
+        pausedMark?.frame = bounds
     }
+
+    /// Shows or hides this page's stopped mark.
+    func setPausedMarkVisible(_ visible: Bool) {
+        guard visible || pausedMark != nil else { return }
+        let mark = pausedMark ?? {
+            let view = PausedClipMarkView()
+            view.frame = bounds
+            addSubview(view)
+            pausedMark = view
+            return view
+        }()
+        // Above the picture, whichever picture this page is showing — a
+        // surface hosted after the mark would otherwise cover it.
+        bringSubviewToFront(mark)
+        mark.setVisible(visible)
+    }
+
+    /// The mark itself when it is showing, so a caller can ask WHERE it is
+    /// drawn — the whole claim being that it rides this page.
+    var visiblePausedMark: UIView? { pausedMark?.isShowing == true ? pausedMark : nil }
 
     func host(_ surface: UIView) {
         // ⚠️ IDENTITY IS NOT ENOUGH — ask whether it is actually here.
@@ -709,8 +758,10 @@ final class CarouselPageView: UIView {
         guard surface !== self.surface || surface.superview !== self else { return }
         self.surface = surface
         // Over the cover: the picture replaces the poster the moment it has a
-        // frame of its own, and nothing sits above it.
+        // frame of its own, and nothing sits above it — except the stopped
+        // mark, which is about the picture and has to stay on top of it.
         addSubview(surface)
+        if let pausedMark { bringSubviewToFront(pausedMark) }
         setNeedsLayout()
     }
 

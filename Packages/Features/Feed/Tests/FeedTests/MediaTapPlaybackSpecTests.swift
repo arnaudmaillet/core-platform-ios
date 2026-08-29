@@ -47,7 +47,7 @@ struct MediaTapPlaybackSpecTests {
 
     private static let clip = URL(string: "mock://video/trailer")!
 
-    private static func model(pages: Int = 0) -> FeedItemDisplayModel {
+    private static func model(pages: Int = 0, videoPages: Bool = false) -> FeedItemDisplayModel {
         FeedItemDisplayModel(
             id: PostID("post-video"),
             authorID: ProfileID("profile-1"),
@@ -62,7 +62,10 @@ struct MediaTapPlaybackSpecTests {
             likeCount: 0,
             timestampText: "now",
             extraMedia: (0..<pages).map {
-                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://media/\($0 + 1)"), videoURL: nil)
+                GalleryPost.MediaPage(
+                    thumbnailURL: URL(string: "mock://media/\($0 + 1)"),
+                    videoURL: videoPages ? URL(string: "mock://video/page-\($0 + 1)") : nil
+                )
             }
         )
     }
@@ -164,6 +167,86 @@ struct MediaTapPlaybackSpecTests {
         cell.setOwnsViewport(true)  // and back: the page starts it again
 
         #expect(cell.debugIsShowingPauseGlyph == false)
+    }
+
+    // MARK: - The mark rides the picture
+
+    /// A gallery resting on a page that is playing — the state a viewer is in
+    /// when they stop one page of several.
+    ///
+    /// ⚠️ NOT `willBecomeActive`, and the reason is a flake this suite already
+    /// produced. Activation starts the clip in a Task of its own, so a fixture
+    /// that waits for "a player is advancing" and then taps is racing work that
+    /// is still running: the same two cases disagreed about whether the mark
+    /// was up at all, from one run to the next. Here the page is handed a
+    /// surface and a clip that is already running — which is exactly what a
+    /// hero landing leaves behind — and nothing is in flight to interfere.
+    private static func landedGallery(pages: Int)
+        async -> (cell: SnapFeedCell, pool: VideoPlaybackController) {
+        let pool = VideoPlaybackController(source: StubSource(), poolSize: 6, capacity: 6)
+        let cell = SnapFeedCell(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        cell.configure(
+            with: model(pages: pages - 1, videoPages: true),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: pool
+        )
+        cell.applyChromeInsets(UIEdgeInsets(top: 103, left: 0, bottom: 34, right: 0))
+        cell.layoutIfNeeded()
+        cell.debugHostRenderViewOnCurrentPage()
+
+        let tile = VideoRenderView()
+        tile.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        await pool.play(clip, in: tile, scope: "post-video")   // page one's clip
+        _ = pool.attachSurface(cell.debugRenderSurface, to: clip)
+        #expect(pool.isAdvancing(in: cell.debugRenderSurface),
+                Comment(rawValue: "the fixture never started playing"))
+        return (cell, pool)
+    }
+
+    /// ⚠️ THE CLAIM, AS THE VIEWER SEES IT: stop page one, swipe, and the mark
+    /// goes with the picture it belongs to.
+    ///
+    /// Centred on the screen it belonged to nothing — it hung over page two,
+    /// which was playing, and said the opposite of the truth.
+    @Test func theMarkLeavesWithThePageTheViewerStopped() async throws {
+        let (cell, _) = await Self.landedGallery(pages: 3)
+        cell.tapMedia(at: Self.mediaPoint(cell))
+        let atRest = try #require(cell.debugPausedMarkFrame(onPage: 0))
+        #expect(abs(atRest.midX - cell.bounds.midX) < 1)
+
+        cell.debugShowPage(1)
+        cell.layoutIfNeeded()
+
+        let afterTheSwipe = try #require(cell.debugPausedMarkFrame(onPage: 0))
+        #expect(afterTheSwipe.midX < atRest.midX - cell.bounds.width / 2,
+                Comment(rawValue: "the mark stayed on screen: \(afterTheSwipe.midX)"))
+        // …and the page arriving wears none of its own: it is playing.
+        #expect(cell.debugPausedMarkFrame(onPage: 1) == nil)
+        #expect(cell.debugIsShowingPauseGlyph == false)
+    }
+
+    /// Coming back to a page the viewer stopped takes its mark down, because
+    /// arriving is what starts the clip again. The receipt is spent with it.
+    @Test func returningToAStoppedPageTakesItsMarkDown() async {
+        let (cell, _) = await Self.landedGallery(pages: 3)
+        cell.tapMedia(at: Self.mediaPoint(cell))
+        #expect(cell.debugPausedMarkFrame(onPage: 0) != nil)
+
+        cell.debugShowPage(1)
+        cell.debugShowPage(0)
+
+        #expect(cell.debugPausedMarkFrame(onPage: 0) == nil)
+    }
+
+    /// And a single-attachment post still wears its mark over its own picture —
+    /// the card is the picture there, so the two coincide.
+    @Test func aSinglePicturesMarkSitsOnThatPicture() async throws {
+        let (cell, _, _) = await Self.landedPage()
+        cell.tapMedia(at: Self.mediaPoint(cell))
+
+        let mark = try #require(cell.debugPausedMarkFrame(onPage: 0))
+        #expect(abs(mark.midX - cell.bounds.midX) < 1)
+        #expect(abs(mark.midY - cell.bounds.midY) < 1)
     }
 
     // MARK: - Where the clip's territory ends

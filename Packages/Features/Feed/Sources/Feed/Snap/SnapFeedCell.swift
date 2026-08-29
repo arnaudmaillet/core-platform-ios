@@ -39,7 +39,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private let chrome = SnapChromeView()
 
     /// A large centred play glyph shown while the active video is user-paused.
-    private let pauseGlyph = UIImageView()
 
     private var representedID: PostID?
 
@@ -83,6 +82,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private func reconcilePagePlayback() {
         guard mediaCard.showsCollection, let videoPlayback else { return }
         reconcileRetainedClips()
+        // ⚠️ THE ARRIVING PAGE'S MARK, and only its own. This page is about to
+        // be started (or is already running), so the receipt for a stop the
+        // viewer made on it is spent. The page being LEFT keeps its mark and
+        // carries it off the screen — that is the whole of "the mark belongs
+        // to the picture".
         setPauseGlyphVisible(false)
         // ⚠️ PAUSED IN PLACE, never stopped and evicted.
         //
@@ -536,17 +540,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         contentView.backgroundColor = .black
         contentView.clipsToBounds = true
 
-        pauseGlyph.image = UIImage(systemName: "play.fill")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 56, weight: .semibold))
-        pauseGlyph.tintColor = UIColor.white.withAlphaComponent(0.85)
-        pauseGlyph.contentMode = .center
-        pauseGlyph.isUserInteractionEnabled = false
-        pauseGlyph.isHidden = true
-        pauseGlyph.layer.shadowColor = UIColor.black.cgColor
-        pauseGlyph.layer.shadowOpacity = 0.4
-        pauseGlyph.layer.shadowRadius = 6
-        pauseGlyph.layer.shadowOffset = .zero
-
         // A tap on the picture toggles play/pause; the delegate rejects taps
         // that land on an interactive control (the chrome's shortcut rail), and
         // `playbackTapRegionContains` rejects the ones outside the media band.
@@ -714,11 +707,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
         chrome.pin(to: contentView)
 
-        // Centred pause glyph (added last so it sits above the media/chrome).
-        pauseGlyph.constrain(in: contentView) { parent in
-            pauseGlyph.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            pauseGlyph.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
+        // NOTE: no pause glyph is installed here. The mark that says a clip is
+        // stopped belongs to the PICTURE — `SnapMediaCardView` holds it for a
+        // single attachment and each carousel page holds its own — so it rides
+        // a swipe instead of hanging in the middle of the screen while the
+        // pages move underneath it.
     }
 
     // MARK: - Comments engagement
@@ -1390,9 +1383,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         cardSwipeRecognizer.isEnabled = engaged
 
         if engaged {
-            if !pauseGlyph.isHidden {
+            if mediaCard.showsPausedMark {
                 pauseGlyphSuppressedByEngagement = true
-                pauseGlyph.isHidden = true
+                mediaCard.setPausedMark(false)
             }
             // THE BACKGROUND, not a tile: the media holds its full-bleed
             // frame, its identity transform, and its playback — the
@@ -1413,7 +1406,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             headerFrost.effect = nil
             if pauseGlyphSuppressedByEngagement {
                 pauseGlyphSuppressedByEngagement = false
-                pauseGlyph.isHidden = false
+                mediaCard.setPausedMark(true)
             }
         }
     }
@@ -2410,11 +2403,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         #endif
     }
 
+    /// Puts the stopped mark on the picture in front of the viewer, or takes it
+    /// away. The card decides WHERE that is — its own bounds for a single
+    /// attachment, the current page for a collection.
     private func setPauseGlyphVisible(_ visible: Bool) {
-        guard pauseGlyph.isHidden == visible else { return }
-        UIView.transition(with: pauseGlyph, duration: 0.15, options: .transitionCrossDissolve) {
-            self.pauseGlyph.isHidden = !visible
-        }
+        mediaCard.setPausedMark(visible)
     }
 
     // MARK: - Hero-flight live media
@@ -2482,11 +2475,26 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Whether the centred glyph is up — the page's own account of "the viewer
     /// stopped this", which is the half of the gesture a screenshot can see.
-    var debugIsShowingPauseGlyph: Bool { !pauseGlyph.isHidden }
+    var debugIsShowingPauseGlyph: Bool { mediaCard.showsPausedMark }
+
+    /// Where a given page's stopped mark is drawn, in the CELL's coordinates —
+    /// nil when that page wears none. The claim it exists to check is that the
+    /// mark moved WITH the page rather than staying centred on the screen.
+    /// (A single-attachment post has one picture, and answers for any page.)
+    func debugPausedMarkFrame(onPage page: Int) -> CGRect? {
+        mediaCard.visiblePausedMark(onPage: page).map { $0.convert($0.bounds, to: self) }
+    }
 
     /// The clip's territory as a rectangle, so a spec can state its edges
     /// against the screen's thresholds rather than against numbers of its own.
     var debugPlaybackTapRegion: CGRect { playbackTapRegion }
+
+    /// Puts the watched surface on the page the card is showing — the piece of
+    /// activation a spec needs without activation's asynchronous start (which
+    /// a fixture cannot race without becoming time-dependent).
+    func debugHostRenderViewOnCurrentPage() {
+        mediaCard.hostRenderViewOnCurrentPage()
+    }
 
     /// Moves the collection to a page as a viewer's swipe would.
     ///
@@ -2655,7 +2663,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onRequestBoostUndo = nil
         onRequestCommentsClose = nil
         onRequestCommentsPageDrive = nil
-        setPauseGlyphVisible(false)
+        // EVERY page's mark, not just the one showing: a recycled cell that
+        // kept one on page three would put a stopped clip's receipt on a
+        // picture belonging to a different post.
+        mediaCard.clearPausedMarks()
+        pauseGlyphSuppressedByEngagement = false
         // ⚠️ A held chrome must never ride a recycled cell. A flight that is
         // cancelled, or a dismissal that ends the page instead of landing it,
         // leaves the hold un-released — and the next post to use this cell would

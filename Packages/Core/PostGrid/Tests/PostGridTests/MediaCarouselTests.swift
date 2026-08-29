@@ -958,3 +958,86 @@ struct CarouselTapArbitrationTests {
         #expect(card.tapHasAListener() == false)
     }
 }
+
+
+/// **THE STOPPED MARK BELONGS TO THE PICTURE, NOT TO THE SCREEN.**
+///
+/// A carousel's pages each carry their own clip and their own playhead, so each
+/// carries its own answer to "is this one stopped". Centred on the screen the
+/// mark belonged to nothing: stopping page one and swiping left left a play
+/// triangle hanging over page two, which was playing.
+///
+/// A page is what scrolls, so a page is what holds it — no offset to follow, no
+/// second thing to keep in step.
+@MainActor
+struct CarouselPausedMarkTests {
+    private func carousel(pages: Int = 3) -> MediaCarouselView {
+        let view = MediaCarouselView(style: .page)
+        view.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+        view.configure(
+            with: (0..<pages).map {
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://\($0)"), aspectRatio: 1)
+            },
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// The claim, stated as geometry: the mark moves with its page when the
+    /// carousel does. A screen-anchored one would sit still.
+    @Test func aPagesMarkTravelsWithThePage() throws {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 0)
+        let mark = try #require(view.visiblePausedMark(onPage: 0))
+        let atRest = mark.convert(mark.bounds, to: view)
+        #expect(abs(atRest.midX - view.bounds.midX) < 1)
+
+        view.setPage(1, animated: false)
+        view.layoutIfNeeded()
+
+        let afterTheSwipe = mark.convert(mark.bounds, to: view)
+        #expect(afterTheSwipe.midX < atRest.midX - view.bounds.width / 2,
+                Comment(rawValue: "the mark stayed on screen: \(afterTheSwipe.midX) vs \(atRest.midX)"))
+    }
+
+    /// And a page answers only for itself — the mark is not a property of the
+    /// carousel that the pages happen to share.
+    @Test func eachPageAnswersForItsOwnMark() {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 0)
+
+        #expect(view.visiblePausedMark(onPage: 0) != nil)
+        #expect(view.visiblePausedMark(onPage: 1) == nil)
+        #expect(view.visiblePausedMark(onPage: 2) == nil)
+    }
+
+    /// ⚠️ AND IT STAYS OVER THE PICTURE. A surface hosted after the mark was
+    /// put up would otherwise cover it — the page adds playback surfaces above
+    /// its cover, which is above where the mark first landed.
+    @Test func theMarkStaysAboveAPictureHostedAfterIt() throws {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 0)
+        let mark = try #require(view.visiblePausedMark(onPage: 0))
+        let page = try #require(mark.superview)
+
+        let surface = UIView()
+        view.host(surface, onPage: 0)
+
+        let marks = try #require(page.subviews.firstIndex(of: mark))
+        let hosted = try #require(page.subviews.firstIndex(of: surface))
+        #expect(marks > hosted)
+    }
+
+    /// Taking it down leaves nothing to answer with — and asking a page that
+    /// never wore one mints no view at all.
+    @Test func aPageWithoutAMarkHasNothingToShow() {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 1)
+        view.setPausedMark(false, onPage: 1)
+        #expect(view.visiblePausedMark(onPage: 1) == nil)
+
+        view.setPausedMark(false, onPage: 2)
+        #expect(view.visiblePausedMark(onPage: 2) == nil)
+    }
+}
