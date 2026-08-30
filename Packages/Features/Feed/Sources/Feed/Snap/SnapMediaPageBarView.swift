@@ -146,6 +146,14 @@ final class SnapMediaPageBarView: UIView {
     /// The HOST owns playback, for the reason it owns the carousel.
     var onSeekRequested: ((Double) -> Void)?
 
+    /// Where the thumb is pointing while it drags a clip's bar: the moment, and
+    /// the place along the strip to point at. Nil when the drag ends.
+    ///
+    /// Separate from `onSeekRequested` because they are answered by different
+    /// things — one moves the picture, the other describes where it is going —
+    /// and because a preview that arrives late must not re-seek.
+    var onScrubPreview: (((fraction: Double, x: CGFloat))?) -> Void = { _ in }
+
     private var segments: [UIView] = []
     /// The played part of each segment — minted only for the page that is a
     /// clip, because that is the only one that ever draws it.
@@ -573,9 +581,13 @@ final class SnapMediaPageBarView: UIView {
             } else if let page = scrubber.page(draggedTo: x, pageCount: pageCount) {
                 onPageRequested?(page)
             }
-        case .ended:
+        case .ended, .cancelled, .failed:
+            // The card belongs to the gesture: it goes when the thumb does,
+            // including on a cancel, which is the case a rule written only for
+            // `.ended` leaves a card hanging on screen.
+            onScrubPreview(nil)
             wake()
-            guard !travelled else { return }
+            guard state == .ended, !travelled else { return }
             let hit = page(under: x)
             // ⚠️ A TAP ON THE BAR IS A TAP ON A CLIP, and the only thing a tap
             // there can mean is "go to that moment" — the page it lands on is
@@ -634,7 +646,9 @@ final class SnapMediaPageBarView: UIView {
     private func seek(draggedTo x: CGFloat) {
         guard let seekAnchor, let bar = barWidth, bar > 0 else { return }
         let moved = Double((x - touchDownX) / bar)
-        onSeekRequested?(min(max(seekAnchor + moved, 0), 1))
+        let fraction = min(max(seekAnchor + moved, 0), 1)
+        onSeekRequested?(fraction)
+        onScrubPreview((fraction: fraction, x: x))
     }
 
     /// The drawn width of the segment carrying the clip's bar — the distance

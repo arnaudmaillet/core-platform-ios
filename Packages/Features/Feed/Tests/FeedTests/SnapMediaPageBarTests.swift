@@ -618,6 +618,69 @@ struct SnapMediaPageBarTests {
         #expect(abs((seeks.first ?? 0) - 0.75) < 0.02)
     }
 
+    // MARK: - Pointing with a card
+
+    /// ⚠️ THE CARD IS PART OF THE GESTURE, so the strip says where the thumb is
+    /// pointing separately from what it is asking for. A preview that arrived
+    /// late must be able to be ignored; a seek must not be re-issued because a
+    /// picture turned up.
+    @Test func draggingAClipsBarSaysWhereTheThumbIsPointing() {
+        let width: CGFloat = 370
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.2, width: width)
+        var pointed: [(fraction: Double, x: CGFloat)] = []
+        var ended = 0
+        view.onScrubPreview = { preview in
+            if let preview { pointed.append(preview) } else { ended += 1 }
+        }
+
+        view.debugScrub(.began, atX: 100)
+        view.debugScrub(.changed, atX: 100 + width * 0.3)
+        #expect(pointed.count == 1)
+        #expect(abs((pointed.first?.fraction ?? 0) - 0.5) < 0.02)   // 0.2 + 0.3
+        #expect(pointed.first?.x == 100 + width * 0.3)
+
+        view.debugScrub(.ended, atX: 100 + width * 0.3)
+        #expect(ended == 1)
+    }
+
+    /// ⚠️ AND A CANCELLED GESTURE TAKES IT AWAY TOO. A rule written only for
+    /// `.ended` leaves the card on screen when the system takes the touch back
+    /// — which happens on every interruption a phone can have.
+    @Test func aCancelledScrubAlsoTakesTheCardAway() {
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.2)
+        var ended = 0
+        view.onScrubPreview = { if $0 == nil { ended += 1 } }
+
+        view.debugScrub(.began, atX: 100)
+        view.debugScrub(.changed, atX: 160)
+        view.debugScrub(.cancelled, atX: 160)
+
+        #expect(ended == 1)
+    }
+
+    /// The readout is the half that always works, so it is stated exactly:
+    /// the moment under the thumb, and the length it is a part of.
+    @Test func theCardReadsTheMomentAndTheLength() {
+        let card = SnapScrubPreviewView()
+        card.show(fraction: 0.5, seconds: 184)   // 3:04 of 3:04… half of it
+        #expect(card.debugTimestamp == "1:32 / 3:04")
+
+        card.show(fraction: 0.25, seconds: 7325) // past an hour, so hours show
+        #expect(card.debugTimestamp == "30:31 / 2:02:05")
+    }
+
+    /// ⚠️ AND A CARD WITH NO FRAME IS STILL A CARD. Not every asset gives up a
+    /// still on demand, and the time is what the viewer is reading while they
+    /// drag — so nothing about the readout waits for a picture.
+    @Test func theCardShowsItsTimeWithNoPictureAtAll() {
+        let card = SnapScrubPreviewView()
+        card.show(fraction: 0.5, seconds: 60)
+
+        #expect(card.debugIsShowing)
+        #expect(card.debugHasPicture == false)
+        #expect(card.debugTimestamp == "0:30 / 1:00")
+    }
+
     // MARK: - Where it sits in the column
 
     private func chrome(pages: Int) -> SnapChromeView {
@@ -649,6 +712,41 @@ struct SnapMediaPageBarTests {
         #expect(abs(strip.minX - caption.minX) < 0.5)
         #expect(abs(strip.maxX - caption.maxX) < 0.5)
         #expect(strip.height == SnapMediaPageBarView.thickness)
+    }
+
+    /// ⚠️ THE CARD POINTS FROM ABOVE THE STRIP, AND STAYS INSIDE THE COLUMN.
+    /// It is a label on the strip: one that ran past the strip's own ends would
+    /// point at nothing, and one that pushed anything else around would make
+    /// the layout move because a finger touched it.
+    @Test func theScrubCardFollowsTheThumbWithinTheColumn() {
+        let view = chrome(pages: 1)
+        view.setMediaPageCount(1, current: 0, clipPages: [0])
+        view.setMediaPlayhead(0.2, seconds: 120)
+        view.layoutIfNeeded()
+        let strip = view.debugPageBarFrame
+        let caption = view.debugCaptionFrame
+
+        view.debugPageBar.debugScrub(.began, atX: strip.width / 2)
+        view.debugPageBar.debugScrub(.changed, atX: strip.width / 2 + 40)
+        let middle = view.debugScrubPreviewFrame()
+        // Directly above the strip, and OVER whatever is there — the caption is
+        // the page talking about the post, and a pointer that waited for empty room
+        // would have to sit somewhere that is not where the thumb is. It floats,
+        // it is transient, and it moves nothing (asserted at the end).
+        #expect(middle.maxY <= strip.minY)
+        #expect(middle.minY < caption.maxY)
+        #expect(middle.minX >= strip.minX - 0.5)
+        #expect(middle.maxX <= strip.maxX + 0.5)
+
+        // Dragged to the far end, it stops at the column's edge rather than
+        // running off it.
+        view.debugPageBar.debugScrub(.changed, atX: strip.width * 4)
+        let far = view.debugScrubPreviewFrame()
+        #expect(far.maxX <= strip.maxX + 0.5)
+        #expect(far.minX > middle.minX)
+
+        // …and the caption has not moved for any of it.
+        #expect(view.debugCaptionFrame == caption)
     }
 
     /// ⚠️ AND ITS ARRIVAL MOVES NOTHING. A strip that pushed the caption up

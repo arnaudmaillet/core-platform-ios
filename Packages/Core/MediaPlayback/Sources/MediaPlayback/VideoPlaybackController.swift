@@ -598,6 +598,66 @@ public final class VideoPlaybackController {
         return (min(max(time / duration, 0), 1), duration)
     }
 
+    /// A still from the clip `view` is drawing, at `fraction` of its length —
+    /// the picture a scrubber shows above the thumb.
+    ///
+    /// ⚠️ BEST EFFORT, AND NIL IS ORDINARY. Not every asset will give up a
+    /// frame on demand: a stream may refuse outright, and one that obliges may
+    /// take longer than the thumb waits. The caller draws nil as "no picture
+    /// yet", never as an error — the time beside it is the part that always
+    /// works.
+    ///
+    /// ⚠️ TOLERANT BY HALF A SECOND, for the reason the seek is: an exact frame
+    /// means decoding forward from the nearest keyframe, and a scrubber asks
+    /// again before that finishes. What the viewer is reading is roughly where
+    /// they are, and the roughness is invisible at the size this is drawn.
+    public func previewFrame(
+        atFraction fraction: Double, in view: VideoRenderView, maximumWidth: CGFloat
+    ) async -> CGImage? {
+        guard let player = watchedPlayer(in: view), let item = player.currentItem else { return nil }
+        let duration = item.duration.seconds
+        guard duration.isFinite, duration > 0 else { return nil }
+        let generator = frameGenerator(for: item.asset)
+        generator.maximumSize = CGSize(width: maximumWidth * 2, height: 0)
+        let seconds = duration * min(max(fraction, 0), 1)
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        // ⚠️ The callback form, not `image(at:)`. The async one would carry the
+        // generator across an isolation boundary — it is not `Sendable`, and
+        // the compiler is right to refuse. Here the generator is only touched
+        // where it lives and the frame comes back through the continuation,
+        // which is the shape `VideoExporter.posterImage` already uses.
+        return try? await withCheckedThrowingContinuation { continuation in
+            generator.generateCGImageAsynchronously(for: time) { image, _, error in
+                if let image {
+                    continuation.resume(returning: image)
+                } else {
+                    continuation.resume(throwing: error ?? CancellationError())
+                }
+            }
+        }
+    }
+
+    /// One generator per asset, kept for the length of a scrub rather than
+    /// built per frame: a generator carries the reader it has already opened,
+    /// and building one per request pays for that open thirty times a second.
+    private func frameGenerator(for asset: AVAsset) -> AVAssetImageGenerator {
+        let key = ObjectIdentifier(asset)
+        if let existing = frameGenerators[key] { return existing }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
+        // Bounded: a post's clips are few, and an entry costs a reader.
+        if frameGenerators.count >= 4 {
+            frameGenerators.removeAll()
+        }
+        frameGenerators[key] = generator
+        return generator
+    }
+
+    private var frameGenerators: [ObjectIdentifier: AVAssetImageGenerator] = [:]
+
     /// Moves the playhead of the clip `view` is drawing.
     ///
     /// ⚠️ TOLERANT, not exact. A finger on a scrubber asks for a new position

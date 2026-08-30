@@ -608,6 +608,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             self.refreshMediaLoader()
             self.onMediaPageChanged?(page)
         }
+        chrome.onScrubPreviewRequested = { [weak self] fraction in
+            self?.updateScrubPreview(fraction)
+        }
         chrome.onMediaSeekRequested = { [weak self] fraction in
             guard let self, let videoPlayback else { return }
             videoPlayback.seek(toFraction: fraction, in: mediaCard.renderView)
@@ -2461,8 +2464,50 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             }
         }
         #endif
-        chrome.setMediaPlayhead(head?.fraction)
+        chrome.setMediaPlayhead(head?.fraction, seconds: head?.seconds ?? 0)
     }
+
+    /// Fetches the frame the scrub card is pointing at, at a rate a decoder can
+    /// actually keep.
+    ///
+    /// ⚠️ ONE IN FLIGHT, PLUS THE LATEST ASKED FOR. A thumb asks sixty times a
+    /// second and a frame takes longer than that to decode, so requests issued
+    /// per event would queue behind each other and the card would show where
+    /// the thumb WAS, further behind with every point of travel. One request at
+    /// a time, and when it lands, the most recent position is fetched if it has
+    /// moved — which converges on the thumb instead of trailing it.
+    private func updateScrubPreview(_ fraction: Double?) {
+        guard let fraction else {
+            wantedPreviewFraction = nil
+            chrome.setScrubPreviewPicture(nil)
+            return
+        }
+        wantedPreviewFraction = fraction
+        guard !isFetchingPreview else { return }
+        fetchScrubPreview()
+    }
+
+    private func fetchScrubPreview() {
+        guard let fraction = wantedPreviewFraction, let videoPlayback else { return }
+        isFetchingPreview = true
+        let surface = mediaCard.renderView
+        Task { [weak self] in
+            let image = await videoPlayback.previewFrame(
+                atFraction: fraction, in: surface,
+                maximumWidth: SnapScrubPreviewView.frameSize.width
+            )
+            guard let self else { return }
+            isFetchingPreview = false
+            // The gesture may have ended while this was decoding; the card is
+            // already gone and its picture must not come back.
+            guard let wanted = wantedPreviewFraction else { return }
+            chrome.setScrubPreviewPicture(image)
+            if abs(wanted - fraction) > 0.001 { fetchScrubPreview() }
+        }
+    }
+
+    private var wantedPreviewFraction: Double?
+    private var isFetchingPreview = false
 
     #if DEBUG
     private var lastPlayheadTrace: CFTimeInterval = 0

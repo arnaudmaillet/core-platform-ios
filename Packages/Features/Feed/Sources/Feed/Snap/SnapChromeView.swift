@@ -48,6 +48,16 @@ final class SnapChromeView: UIView {
     /// caption and the bar, where a position is read rather than aimed at.
     private let mediaPageBar = SnapMediaPageBarView()
 
+    /// The card a thumb dragging a clip's bar points with — the frame it would
+    /// land on and the time it would land at. Frame-managed and out of the
+    /// layout entirely: it exists only during a gesture, it follows the thumb,
+    /// and nothing else on this screen may move because it appeared.
+    private let scrubPreview = SnapScrubPreviewView()
+
+    /// The clip's length, kept because the card's readout is a time and the
+    /// strip speaks in fractions.
+    private var clipSeconds: Double = 0
+
     /// The subtitle zone, directly above the band: a persistent pill of
     /// semantic comments, one at a time, with the count bubble leading it.
     /// Same content contract as the band (arrives only via
@@ -282,6 +292,12 @@ final class SnapChromeView: UIView {
         // rests against — so it sits in the band between the caption and the
         // bar without moving either. The caption keeps the position it has on
         // every other format; a post with one picture simply has nothing here.
+        scrubPreview.translatesAutoresizingMaskIntoConstraints = true
+        scrubPreview.frame = CGRect(origin: .zero, size: SnapScrubPreviewView.totalSize)
+        addSubview(scrubPreview)
+        mediaPageBar.onScrubPreview = { [weak self] preview in
+            self?.showScrubPreview(preview)
+        }
         mediaPageBar.constrain(in: self) { parent in
             mediaPageBar.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor)
             mediaPageBar.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor)
@@ -779,6 +795,8 @@ final class SnapChromeView: UIView {
     var debugPageBarFrame: CGRect { mediaPageBar.frame }
     var debugCaptionFrame: CGRect { captionLabel.frame }
     var debugPageBar: SnapMediaPageBarView { mediaPageBar }
+    var debugScrubPreview: SnapScrubPreviewView { scrubPreview }
+    func debugScrubPreviewFrame() -> CGRect { scrubPreview.frame }
     #endif
 
     /// Moves the mark as the viewer pages. Separate from the count because this
@@ -797,8 +815,42 @@ final class SnapChromeView: UIView {
     /// How far through the clip the page is showing, when there is one whose
     /// length is known — the strip draws it inside the segment it has grown
     /// into a bar.
-    func setMediaPlayhead(_ fraction: Double?) {
+    func setMediaPlayhead(_ fraction: Double?, seconds: Double = 0) {
+        clipSeconds = seconds
         mediaPageBar.setPlayhead(fraction)
+    }
+
+    /// The frame the scrub card is pointing at, when one could be made. Nil
+    /// leaves the card's readout alone — see `SnapScrubPreviewView`.
+    func setScrubPreviewPicture(_ image: CGImage?) {
+        scrubPreview.setPicture(image)
+    }
+
+    /// Asked for a frame at a moment in the clip, or told the gesture is over.
+    /// The CELL owns playback, so the request travels out.
+    var onScrubPreviewRequested: ((Double?) -> Void)?
+
+    /// Puts the card over the thumb and tells the host what to fetch.
+    ///
+    /// ⚠️ CLAMPED TO THE COLUMN, not to the screen: the card is a label on the
+    /// strip, and one that ran past the strip's own ends would point at nothing.
+    private func showScrubPreview(_ preview: (fraction: Double, x: CGFloat)?) {
+        guard let preview else {
+            scrubPreview.hide()
+            onScrubPreviewRequested?(nil)
+            return
+        }
+        let size = SnapScrubPreviewView.totalSize
+        let alongTheStrip = mediaPageBar.frame.minX + preview.x
+        let leftMost = mediaPageBar.frame.minX + size.width / 2
+        let rightMost = mediaPageBar.frame.maxX - size.width / 2
+        scrubPreview.frame = CGRect(
+            x: min(max(alongTheStrip, leftMost), rightMost) - size.width / 2,
+            y: mediaPageBar.frame.minY - size.height - Spacing.sm,
+            width: size.width, height: size.height
+        )
+        scrubPreview.show(fraction: preview.fraction, seconds: clipSeconds)
+        onScrubPreviewRequested?(preview.fraction)
     }
 
     /// The viewer dragged along a clip's bar. The CELL owns playback, so the
