@@ -507,6 +507,117 @@ struct SnapMediaPageBarTests {
         #expect(seeks.last == 0)
     }
 
+    // MARK: - Consecutive clips, and the rest of the strip
+
+    /// ⚠️ TWO CLIPS IN A ROW STAY A BAR ALL THE WAY ACROSS.
+    ///
+    /// Clipness was "how near is the nearest clip", and proximity is a tent
+    /// whose halves add to one — so half way between one clip and the NEXT it
+    /// read 0.5, and the strip dutifully blended half way back to its ordinary
+    /// shape. The other pages flashed into view and out again between two
+    /// videos, for no reason a viewer could name. Added rather than maximised,
+    /// two consecutive clips hold it at 1 the whole way.
+    @Test func aSwipeBetweenTwoClipsNeverBringsTheOtherPagesBack() throws {
+        let view = clipBar(pages: 6, current: 1, clips: [1, 2], playhead: 0.2)
+
+        for position in [CGFloat(1), 1.25, 1.5, 1.75, 2] {
+            view.setPosition(position)
+            // The pages beyond the pair and their slivers stay out of the way:
+            // nothing two slots from the viewer is drawn.
+            #expect(try #require(view.debugSegmentFrame(4)).width < 1,
+                    Comment(rawValue: "page four came back at \(position)"))
+            #expect(try #require(view.debugSegmentFrame(5)).width < 1,
+                    Comment(rawValue: "page five came back at \(position)"))
+        }
+    }
+
+    /// And a clip beside a PHOTOGRAPH still hands over — the strip is a bar at
+    /// one end of the swipe and an ordinary run at the other.
+    @Test func aSwipeFromAClipToAPhotographStillHandsOver() throws {
+        let view = clipBar(pages: 6, current: 1, clips: [1], playhead: 0.2)
+        let asBar = try #require(view.debugSegmentFrame(1)).width
+
+        view.setPosition(2)   // onto the photograph
+
+        #expect(try #require(view.debugSegmentFrame(2)).width < asBar / 2)
+        #expect(try #require(view.debugSegmentFrame(4)).width > 4)   // the run is back
+    }
+
+    // MARK: - Resting and waking
+
+    /// ⚠️ THE STRIP IS FURNITURE MOST OF THE TIME. It sits under the caption on
+    /// every collection and every clip, and at full strength it competes with
+    /// the words above it for a reading nobody is taking — you look at an index
+    /// while you are moving. So it rests dim, comes up for as long as something
+    /// is happening, and goes back down afterwards.
+    ///
+    /// ⚠️ Compared with a tolerance, because `alpha` is a `Float` behind a
+    /// `CGFloat` face — 0.45 goes in and 0.44999998 comes back. The same trap
+    /// this file already met on a segment's ink.
+    @Test func theStripRestsDimAndWakesWhenTouched() {
+        // ⚠️ THE CLAIM IS THE DIFFERENCE, not the constant. Written only against
+        // `restingOpacity` this passes with the strip never dimmed at all —
+        // both sides move together — so the first thing asserted is that
+        // resting is dimmer than woken.
+        #expect(SnapMediaPageBarView.restingOpacity < 1)
+
+        let view = bar(pages: 5, current: 0)
+        let rested = { abs(view.debugContainerOpacity - SnapMediaPageBarView.restingOpacity) < 0.001 }
+        #expect(rested())
+
+        view.debugTap(atX: 100)
+        #expect(view.debugContainerOpacity == 1)
+
+        view.debugElapseWake()
+        #expect(rested())
+    }
+
+    /// ⚠️ AND THE PICTURES MOVING COUNTS AS SOMETHING HAPPENING. Dimming the
+    /// index while the pages fly past it would hide it exactly when it is being
+    /// read.
+    @Test func theStripWakesWhenThePicturesMove() {
+        let view = bar(pages: 5, current: 0)
+        view.debugElapseWake()
+
+        view.setPosition(0.4)
+
+        #expect(view.debugContainerOpacity == 1)
+    }
+
+    // MARK: - A lone clip
+
+    /// ⚠️ A SINGLE PHOTOGRAPH HAS NO POSITION TO REPORT; A SINGLE CLIP DOES.
+    /// One full-width pill under a photograph would claim an index it does not
+    /// have — but where you are in a clip is a real answer, so the strip is
+    /// drawn for one page and becomes that clip's bar.
+    @Test func aLoneClipGetsABarAndALonePhotographGetsNothing() throws {
+        let photograph = clipBar(pages: 1, current: 0, clips: [], playhead: nil)
+        #expect(photograph.isHidden)
+
+        let width: CGFloat = 370
+        let clip = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.4, width: width)
+        #expect(clip.isHidden == false)
+        #expect(try #require(clip.debugSegmentFrame(0)).width > width - 1)
+        #expect(abs(try #require(clip.debugFillFrame(0)).width - width * 0.4) < 1)
+    }
+
+    /// ⚠️ A TAP ON A BAR IS A TAP ON A CLIP, so it means "go to that moment" —
+    /// the page it lands on is the page you are already on. On a lone clip it
+    /// is the only instruction the strip can carry at all.
+    @Test func aTapOnTheBarMovesThePlayhead() {
+        let width: CGFloat = 370
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.1, width: width)
+        var seeks: [Double] = []
+        var pages: [Int] = []
+        view.onSeekRequested = { seeks.append($0) }
+        view.onPageRequested = { pages.append($0) }
+
+        view.debugTap(atX: width * 0.75)
+
+        #expect(pages.isEmpty)
+        #expect(abs((seeks.first ?? 0) - 0.75) < 0.02)
+    }
+
     // MARK: - Where it sits in the column
 
     private func chrome(pages: Int) -> SnapChromeView {

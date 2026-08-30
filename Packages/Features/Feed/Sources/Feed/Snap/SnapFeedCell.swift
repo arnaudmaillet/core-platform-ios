@@ -1588,7 +1588,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             videoPlayback?.stop(view)
         }
         mediaCard.hideCollection()
-        chrome.setMediaPageCount(0, current: 0)
+        // A lone CLIP still has a position to report — where you are in it — so
+        // the strip is drawn for one page and becomes that clip's bar. A lone
+        // photograph reports nothing and keeps no strip.
+        chrome.setMediaPageCount(isVideo ? 1 : 0, current: 0, clipPages: isVideo ? [0] : [])
+        updatePlayheadFeed()
 
         if isImage {
             loadImage(model.mediaURL, expecting: model.id, pipeline: pipeline)
@@ -2410,7 +2414,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The pool answers for the WATCHED surface, so this works on a page that
     /// joined its clip from a grid tile, which is every post opened from a card.
     private func updatePlayheadFeed() {
-        let wanted = isActive && mediaCard.showsCollection && playsVideo
+        let wanted = isActive && playsVideo
         guard wanted else {
             stopPlayheadFeed()
             return
