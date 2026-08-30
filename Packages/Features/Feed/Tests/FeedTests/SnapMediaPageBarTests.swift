@@ -265,6 +265,44 @@ struct SnapMediaPageBarTests {
         #expect(penultimate > outermost)
     }
 
+    /// ⚠️ AND THE TAPER DISSOLVES AS THE RUN'S END COMES INTO VIEW, rather
+    /// than switching off when it arrives.
+    ///
+    /// It was gated on a boolean — are there pages beyond this end — so sliding
+    /// the window onto the last page flipped it, and the two tapered segments
+    /// went from a sliver to full width between one frame and the next.
+    /// Reported exactly that way: the last segment popping to normal size, with
+    /// no animation, as you reach the second-to-last page. The fix is not an
+    /// animation; it is measuring what was being asked as a yes-or-no.
+    @Test func theTaperDissolvesAsTheRunsEndComesIntoView() throws {
+        let view = bar(pages: 13, current: 0)
+        var widths: [CGFloat] = []
+        for position in [CGFloat(10), 10.5, 11] {
+            view.setPosition(position)
+            widths.append(try #require(view.debugSegmentFrame(12)).width)
+        }
+
+        #expect(widths[0] < widths[1], Comment(rawValue: "jumped: \(widths)"))
+        #expect(widths[1] < widths[2], Comment(rawValue: "jumped: \(widths)"))
+    }
+
+    /// ⚠️ AND THE SAME AT THE OTHER END, which is where the report said it
+    /// would be. The window is stateful — it only follows when it has to — so
+    /// the walk back is driven as a walk back rather than as a jump.
+    @Test func theTaperDissolvesTheSameWayComingBack() throws {
+        let view = bar(pages: 13, current: 0)
+        view.setPosition(11)   // out to the far end, so the window has travelled
+
+        var widths: [CGFloat] = []
+        for position in [CGFloat(2), 1.5, 1] {
+            view.setPosition(position)
+            widths.append(try #require(view.debugSegmentFrame(0)).width)
+        }
+
+        #expect(widths[0] < widths[1], Comment(rawValue: "jumped: \(widths)"))
+        #expect(widths[1] < widths[2], Comment(rawValue: "jumped: \(widths)"))
+    }
+
     /// ⚠️ AND THE MARK NEVER TAPERS, wherever the window parks it. The taper
     /// says "the run continues past here" and the mark says "you are here";
     /// the window puts the mark one slot in from the end it is heading for,

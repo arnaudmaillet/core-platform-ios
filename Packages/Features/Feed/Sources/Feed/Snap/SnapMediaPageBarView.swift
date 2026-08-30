@@ -269,18 +269,36 @@ final class SnapMediaPageBarView: UIView {
 
     /// 1 inside the window, tapering to 0 across `taperSlots` at an end the run
     /// continues past, 0 beyond it. Always 1 when the whole run fits.
+    ///
+    /// ⚠️ "CONTINUES PAST" IS A QUANTITY, NOT A YES OR NO — and reading it as a
+    /// yes or no is what put a jump in an otherwise continuous strip.
+    ///
+    /// The taper used to be gated on a boolean: are there pages beyond this
+    /// end. Sliding the window onto the last page flipped it, and the two
+    /// tapered segments went from a sliver to full width between one frame and
+    /// the next — reported, exactly, as the last segment popping to normal size
+    /// with no animation as you reach the second-to-last page, and the same
+    /// thing mirrored at the first.
+    ///
+    /// So it is measured instead: how MANY pages are still out there, clamped
+    /// to one. A window with a whole page beyond it tapers fully; one with a
+    /// third of a page left tapers a third as much; one sitting on the end does
+    /// not taper at all. The strip stays what it is everywhere else — a
+    /// function of the scroll, with no state of its own to animate.
     private func presence(ofPage index: Int, visible: Int) -> CGFloat {
         guard segments.count > visible else { return 1 }
         let slot = CGFloat(index) - windowOrigin
-        let continuesBefore = windowOrigin > 0.0001
-        let continuesAfter = windowOrigin + CGFloat(visible) < CGFloat(segments.count) - 0.0001
-        // A run that genuinely ends here does not taper: there is nothing more
-        // to promise. Half a slot of overhang either side so the outermost
-        // segment is fully out before it is gone.
-        let leading = continuesBefore
-            ? (slot + 0.5) / Self.taperSlots : .greatestFiniteMagnitude
-        let trailing = continuesAfter
-            ? (CGFloat(visible) - 0.5 - slot) / Self.taperSlots : .greatestFiniteMagnitude
+        let beyondBefore = min(max(windowOrigin, 0), 1)
+        let beyondAfter = min(
+            max(CGFloat(segments.count - visible) - windowOrigin, 0), 1
+        )
+        // Half a slot of overhang either side, so the outermost segment is
+        // fully out of the window before it is gone.
+        let leadingRamp = min(max((slot + 0.5) / Self.taperSlots, 0), 1)
+        let trailingRamp = min(max((CGFloat(visible) - 0.5 - slot) / Self.taperSlots, 0), 1)
+        // Each end's taper is worn only as far as that end continues.
+        let leading = 1 - beyondBefore * (1 - leadingRamp)
+        let trailing = 1 - beyondAfter * (1 - trailingRamp)
         return min(max(min(leading, trailing), 0), 1)
     }
 
