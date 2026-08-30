@@ -42,11 +42,22 @@ public final class VideoPlaybackController {
     }
     /// Bumped on every play/stop for a view so a slow `playableURL` resolution
     /// that lost the race is discarded instead of attaching to a recycled cell.
+    ///
+    /// Entries end with the binding (`detach` clears them) — the table used to
+    /// keep one Int per surface ever played, because the dead-surface sweep
+    /// only walks `surfaces` and a properly-stopped view was already gone from
+    /// there. Tokens come from `generationCounter`, never per-key arithmetic:
+    /// a cleared key restarts nothing, so a resolution from before the clear
+    /// can never collide with a token minted after it.
     private var generation: [ObjectIdentifier: Int] = [:]
+    private var generationCounter = 0
     private var loopObservers: [ObjectIdentifier: NSObjectProtocol] = [:]
-    /// Stall observers, kept only so they outlive this call. Diagnostic, armed
-    /// by `-carousel-audit` and empty otherwise.
-    private var stallObservers: [NSObjectProtocol] = []
+    /// Stall observers, keyed by PLAYER like the loop observers and removed
+    /// with them. Diagnostic, armed by `-carousel-audit` and empty otherwise —
+    /// which is exactly why the bookkeeping has to be tight: this used to be
+    /// an append-only array whose closures held every `AVPlayerItem` ever
+    /// played, so the diagnostic flag was itself the leak it was hunting.
+    private var stallObservers: [ObjectIdentifier: NSObjectProtocol] = [:]
     /// Where each paused player's picture was, so a resume can put it back.
     /// Keyed by PLAYER: two surfaces can share one, and they share its playhead.
     private var pausedAnchors: [ObjectIdentifier: CMTime] = [:]
@@ -141,7 +152,7 @@ public final class VideoPlaybackController {
         // bookkeeping below describes THIS view; swept later, it inherits.
         forgetDeadSurfaces()
         let key = ObjectIdentifier(view)
-        let token = (generation[key] ?? 0) + 1
+        let token = nextGenerationToken()
         generation[key] = token
 
         // A player parked for this exact asset is adopted whole — same item,
@@ -325,7 +336,7 @@ public final class VideoPlaybackController {
         discardParkedPlayback()
         // Cancel any in-flight resolution for this view so a late arrival can't
         // attach a fresh item over the surface we just cleared.
-        generation[key] = (generation[key] ?? 0) + 1
+        generation[key] = nextGenerationToken()
         activePlayers[key] = nil
         playingURL[key] = nil
         playingScope[key] = nil
@@ -362,17 +373,11 @@ public final class VideoPlaybackController {
     public func discardParkedPlayback() {
         guard let parked else { return }
         self.parked = nil
-        parked.player.pause()
-        removeLoop(for: parked.player)
-        parked.player.replaceCurrentItem(with: nil)
-        renderers[ObjectIdentifier(parked.player)]?.invalidate()
-        if idlePlayers.count < poolSize {
-            idlePlayers.append(parked.player)
-        } else {
-            // Same rule as `detach`: a dropped player takes its renderer entry
-            // with it, or the map retains both forever.
-            renderers.removeValue(forKey: ObjectIdentifier(parked.player))
-        }
+        // The same retirement `detach` runs — one implementation, so the two
+        // routes to "this playback is over" cannot drift apart in what they
+        // leave behind (they did: this copy of the wind-down predated the
+        // pause-anchor purge and would have kept the anchor).
+        retire(parked.player)
     }
 
     /// Re-caps the bit rate of the item already playing in `view`, in bits per
@@ -428,7 +433,8 @@ public final class VideoPlaybackController {
         forgetDeadSurfaces()
         let key = ObjectIdentifier(view)
         VideoPlaybackTrace.emit("stop \(playingURL[key]?.lastPathComponent ?? "-")")
-        generation[key] = (generation[key] ?? 0) + 1
+        // No token bump: `detach` clears the entry outright, and a cleared key
+        // fails the resolution guard just as hard as a newer token would.
         detach(key: key, view: view)
     }
 
@@ -844,7 +850,7 @@ public final class VideoPlaybackController {
         let key = ObjectIdentifier(view)
         // Supersede any in-flight resolution for this view, so a late `play`
         // cannot attach a second item over the one just adopted.
-        generation[key] = (generation[key] ?? 0) + 1
+        generation[key] = nextGenerationToken()
         activePlayers[key] = player
         surfaces[key] = WeakSurface(view: view)
         playingURL[key] = mediaURL
@@ -951,6 +957,11 @@ public final class VideoPlaybackController {
         surfaces[key] = nil
         playingURL[key] = nil
         playingScope[key] = nil
+        // The whole ledger ends here, generation included: a cleared key fails
+        // the resolution guard (nil matches no token), and tokens are globally
+        // unique so the next tenant of this address cannot collide with a
+        // resolution from before the clear.
+        generation[key] = nil
         guard let player = activePlayers.removeValue(forKey: key) else { return }
         // ⚠️ STILL IN USE? Then this is one surface leaving, not the end of a
         // playback.
@@ -971,6 +982,12 @@ public final class VideoPlaybackController {
     private func retire(_ player: AVPlayer) {
         player.pause()
         removeLoop(for: player)
+        // The anchor dies with the loan. It is keyed by the PLAYER, and the
+        // pool reuses players — one left behind here belongs to a clip that no
+        // longer exists, and the reused player's first resume would compare a
+        // fresh playhead against it and seek the NEW clip to wherever the OLD
+        // one was paused.
+        pausedAnchors.removeValue(forKey: ObjectIdentifier(player))
         player.replaceCurrentItem(with: nil)
         // The renderer stays in the map, keyed to this player, and is reused
         // when the player is loaned out again. Invalidating only drops its
@@ -1001,23 +1018,27 @@ public final class VideoPlaybackController {
     /// `fast` dispatch with no stall anywhere near it kills it, and the cause is
     /// ours after all. The instrument is what makes those two distinguishable
     /// instead of arguable.
-    private func observeStalls(for item: AVPlayerItem) {
+    private func observeStalls(for item: AVPlayerItem, player: AVPlayer) {
         guard VideoPlaybackTrace.isEnabled else { return }
-        stallObservers.append(NotificationCenter.default.addObserver(
+        // Keyed by player and removed with the loop observer: the diagnostic
+        // must not outlive what it diagnoses. `item` is weak for the same
+        // reason — the old strong capture kept every item ever played alive
+        // for as long as its entry did, which used to be forever.
+        stallObservers[ObjectIdentifier(player)] = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.playbackStalledNotification,
             object: item, queue: .main
-        ) { _ in
+        ) { [weak item] _ in
             MainActor.assumeIsolated {
                 VideoPlaybackTrace.emit(
-                    String(format: "STALLED at=%.3fs", item.currentTime().seconds)
+                    String(format: "STALLED at=%.3fs", item?.currentTime().seconds ?? -1)
                 )
             }
-        })
+        }
     }
 
     private func installLoop(for player: AVPlayer, item: AVPlayerItem) {
         removeLoop(for: player)
-        observeStalls(for: item)
+        observeStalls(for: item, player: player)
         loopObservers[ObjectIdentifier(player)] = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
@@ -1034,6 +1055,18 @@ public final class VideoPlaybackController {
         if let observer = loopObservers.removeValue(forKey: ObjectIdentifier(player)) {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let observer = stallObservers.removeValue(forKey: ObjectIdentifier(player)) {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    /// Globally unique play/stop tokens. Never per-key arithmetic: a key that
+    /// was cleared and re-populated would restart a per-key count at 1, and a
+    /// resolution still in flight from an earlier tenant of the same address
+    /// could then match it and bind stale content over a fresh request.
+    private func nextGenerationToken() -> Int {
+        generationCounter += 1
+        return generationCounter
     }
 
     // MARK: - Test hooks
@@ -1065,6 +1098,14 @@ public final class VideoPlaybackController {
     }
 
     var idlePlayerCount: Int { idlePlayers.count }
+
+    /// Census of the tables that must not outlive what they describe. Public
+    /// because the hero-transition audit reads them from the app target; each
+    /// is a leak the moment it exceeds the live state it mirrors.
+    public var debugPausedAnchorCount: Int { pausedAnchors.count }
+    public var debugStallObserverCount: Int { stallObservers.count }
+    public var debugGenerationEntryCount: Int { generation.count }
+
     func activePlayer(in view: VideoRenderView) -> AVPlayer? { activePlayers[ObjectIdentifier(view)] }
     func peakBitRate(in view: VideoRenderView) -> Double? {
         activePlayers[ObjectIdentifier(view)]?.currentItem?.preferredPeakBitRate
