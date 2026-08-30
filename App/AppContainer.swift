@@ -255,6 +255,15 @@ final class AppContainer {
 
     /// A Maps-dedicated player pool for live pin previews, separate from the
     /// feed's, so the two surfaces never contend for players.
+    #if DEBUG
+    /// Both playback pools, labelled, for the hero-transition audit — the one
+    /// reader that needs to see them side by side. `mapsVideoPlayback` stays
+    /// private; the audit reads census accessors only.
+    var debugPlaybackPools: [(label: String, pool: VideoPlaybackController)] {
+        [("feed", videoPlayback), ("maps", mapsVideoPlayback)]
+    }
+    #endif
+
     private lazy var mapsVideoPlayback: VideoPlaybackController = {
         let source: any VideoSource = switch environment {
         case .mock: PlaceholderVideoFetcher()

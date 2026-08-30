@@ -1,0 +1,4 @@
+# D07: catch the present flight mid-air and FINISH it.
+CASE_ARGS=(-select-tab 1 -foryou-open 0 -zoom-interrupt finish)
+CASE_DURATION=16
+CASE_CHECKS=(audit motion)

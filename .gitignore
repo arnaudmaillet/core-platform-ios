@@ -22,3 +22,6 @@ DerivedData/
 
 # Tooling
 .claude/settings.local.json
+
+# Hero QA output (evidence bundles, recordings)
+hero-qa-out/

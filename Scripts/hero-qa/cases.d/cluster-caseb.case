@@ -1,0 +1,5 @@
+# S09/D08 scripted: the Case-B cluster feed, grabbed vertically onto the
+# gallery beneath.
+CASE_ARGS=(-maps-mock-semantic-clusters -maps-open-first-media-cluster -maps-demo-grab -zoom-demo-grab-vertical)
+CASE_DURATION=24
+CASE_CHECKS=(audit motion)

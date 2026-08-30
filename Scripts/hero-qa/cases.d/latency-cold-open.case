@@ -1,0 +1,5 @@
+# S10: injected latency — poster flight, mid-air retry adoption, reveal gate.
+CASE_ARGS=(-select-tab 1 -mock-latency 700 -foryou-open 0 -foryou-demo-tapback)
+CASE_DURATION=24
+CASE_BASELINE_AT=6
+CASE_CHECKS=(audit motion no-black settle-baseline)

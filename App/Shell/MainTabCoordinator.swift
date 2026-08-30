@@ -202,6 +202,13 @@ final class MainTabCoordinator: NSObject, Coordinator {
         refreshUnreadBadge()
 
         #if DEBUG
+        // `-hero-audit`: the hero machinery's live census — pools, transition
+        // objects, stranded views — published to an accessibility probe, a
+        // file sink, and the console. The channel every Hero UI suite reads.
+        HeroTransitionAudit.installIfRequested(pools: container.debugPlaybackPools)
+        #endif
+
+        #if DEBUG
         // Dev convenience: `-select-tab N` opens directly on a tab for testing,
         // in bar order (0 = Maps … 4 = Search). Every index is a plain
         // selection now — 1 used to trigger the feed push instead, which it no
