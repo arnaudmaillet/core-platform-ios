@@ -669,6 +669,50 @@ struct SnapMediaPageBarTests {
         #expect(card.debugTimestamp == "30:31 / 2:02:05")
     }
 
+    /// ⚠️ THE CARD KEEPS THE LAST FRAME IT HAD. A decode that fails or arrives
+    /// late must change nothing on screen: the thumb has moved a little, not
+    /// somewhere else, and a card that blanked between frames would flicker its
+    /// way along a drag.
+    @Test func theCardHoldsItsLastFrameWhileTheNextIsDecoding() throws {
+        let card = SnapScrubPreviewView()
+        card.show(fraction: 0.2, seconds: 60)
+        card.setPicture(try Self.aFrame())
+        #expect(card.debugHasPicture)
+
+        // The next one is on its way…
+        card.setLoading(true)
+        card.debugElapseLoaderGrace()
+
+        #expect(card.debugHasPicture)          // …and the last one is still up
+        #expect(card.debugIsLoading == false)  // …with no spinner over it
+    }
+
+    /// ⚠️ AND IT SAYS IT IS WAITING ONLY WHEN IT HAS NOTHING. A spinner over a
+    /// frame would be an apology for a picture that is already there.
+    @Test func theCardSpinsOnlyWithNoFrameAtAll() {
+        let card = SnapScrubPreviewView()
+        card.show(fraction: 0.2, seconds: 60)
+
+        card.setLoading(true)
+        #expect(card.debugIsLoading == false)  // …after a fifth of a second, not before
+        card.debugElapseLoaderGrace()
+        #expect(card.debugIsLoading)
+
+        card.setLoading(false)
+        #expect(card.debugIsLoading == false)
+    }
+
+    /// A 1×1 frame — the spec is about what the card DOES with a picture, not
+    /// about the picture.
+    private static func aFrame() throws -> CGImage {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1))
+        let image = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        return try #require(image.cgImage)
+    }
+
     /// ⚠️ AND A CARD WITH NO FRAME IS STILL A CARD. Not every asset gives up a
     /// still on demand, and the time is what the viewer is reading while they
     /// drag — so nothing about the readout waits for a picture.
@@ -747,6 +791,13 @@ struct SnapMediaPageBarTests {
 
         // …and the caption has not moved for any of it.
         #expect(view.debugCaptionFrame == caption)
+
+        // ⚠️ AND THE CARD IS IN FRONT OF EVERYTHING. It is built with the strip,
+        // and the surfaces added after it are its own siblings — the shortcut
+        // wheel, the boost anchor, the subtitle zone, the comment empty state —
+        // so a card added once sits UNDER the comment surfaces it is meant to
+        // point over. Reported exactly that way.
+        #expect(view.subviews.last === view.debugScrubPreview)
     }
 
     /// ⚠️ AND ITS ARRIVAL MOVES NOTHING. A strip that pushed the caption up

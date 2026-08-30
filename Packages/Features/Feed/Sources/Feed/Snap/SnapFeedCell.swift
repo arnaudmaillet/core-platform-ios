@@ -2479,7 +2479,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private func updateScrubPreview(_ fraction: Double?) {
         guard let fraction else {
             wantedPreviewFraction = nil
-            chrome.setScrubPreviewPicture(nil)
+            chrome.setScrubPreviewLoading(false)
             return
         }
         wantedPreviewFraction = fraction
@@ -2490,6 +2490,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private func fetchScrubPreview() {
         guard let fraction = wantedPreviewFraction, let videoPlayback else { return }
         isFetchingPreview = true
+        chrome.setScrubPreviewLoading(true)
         let surface = mediaCard.renderView
         Task { [weak self] in
             let image = await videoPlayback.previewFrame(
@@ -2501,8 +2502,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // The gesture may have ended while this was decoding; the card is
             // already gone and its picture must not come back.
             guard let wanted = wantedPreviewFraction else { return }
-            chrome.setScrubPreviewPicture(image)
-            if abs(wanted - fraction) > 0.001 { fetchScrubPreview() }
+            // ⚠️ A FAILED DECODE CHANGES NOTHING ON SCREEN. The card keeps the
+            // last frame it had — the thumb has moved a little, not somewhere
+            // else — and only says it is waiting while there is genuinely
+            // nothing to show.
+            if let image { chrome.setScrubPreviewPicture(image) }
+            if abs(wanted - fraction) > 0.001 {
+                fetchScrubPreview()
+            } else {
+                chrome.setScrubPreviewLoading(false)
+            }
         }
     }
 

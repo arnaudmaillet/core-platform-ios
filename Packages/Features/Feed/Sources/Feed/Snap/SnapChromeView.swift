@@ -820,10 +820,17 @@ final class SnapChromeView: UIView {
         mediaPageBar.setPlayhead(fraction)
     }
 
-    /// The frame the scrub card is pointing at, when one could be made. Nil
-    /// leaves the card's readout alone — see `SnapScrubPreviewView`.
-    func setScrubPreviewPicture(_ image: CGImage?) {
+    /// A frame the scrub card is pointing at. There is no "nothing new" here:
+    /// a decode that failed leaves the last frame standing — see
+    /// `SnapScrubPreviewView.setPicture`.
+    func setScrubPreviewPicture(_ image: CGImage) {
         scrubPreview.setPicture(image)
+    }
+
+    /// Whether a frame is on its way, so the card can stand in for one it has
+    /// not got.
+    func setScrubPreviewLoading(_ loading: Bool) {
+        scrubPreview.setLoading(loading)
     }
 
     /// Asked for a frame at a moment in the clip, or told the gesture is over.
@@ -849,6 +856,12 @@ final class SnapChromeView: UIView {
             y: mediaPageBar.frame.minY - size.height - Spacing.sm,
             width: size.width, height: size.height
         )
+        // ⚠️ ABOVE EVERYTHING, and re-stated on every show. The card is built
+        // with the strip, and the surfaces added after it — the shortcut wheel,
+        // the boost anchor, the subtitle zone, the comment empty state — are
+        // its own siblings, so a card added once sits UNDER the comment
+        // surfaces it is meant to point over. Reported exactly that way.
+        bringSubviewToFront(scrubPreview)
         scrubPreview.show(fraction: preview.fraction, seconds: clipSeconds)
         onScrubPreviewRequested?(preview.fraction)
     }

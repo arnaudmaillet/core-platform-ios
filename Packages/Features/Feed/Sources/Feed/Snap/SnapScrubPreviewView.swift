@@ -25,6 +25,29 @@ final class SnapScrubPreviewView: UIView {
     private let time = UILabel()
     private let plate = UIView()
 
+    /// Shown while a frame is being decoded and there is nothing yet to show.
+    ///
+    /// ⚠️ White, not `.label`, for the reason every overlay on this surface is:
+    /// the ground is the post's photograph or black, never the page's theme, so
+    /// a semantic colour would resolve against a background this view does not
+    /// have.
+    private let spinner: UIActivityIndicatorView = {
+        let view = UIActivityIndicatorView(style: .medium)
+        view.color = .white
+        view.hidesWhenStopped = true
+        return view
+    }()
+
+    /// Whether a frame is on its way, and the delay before saying so.
+    private var isLoading = false
+    private var graceTimer: Timer?
+
+    /// ⚠️ A FIFTH OF A SECOND OF SILENCE FIRST. Most frames arrive faster than
+    /// that, and a spinner shown for every one of them would strobe under the
+    /// thumb — the same trap the media loader documents one file over, where an
+    /// indicator armed without a grace flashed on nearly every page change.
+    static let loaderGrace: TimeInterval = 0.2
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
@@ -51,6 +74,7 @@ final class SnapScrubPreviewView: UIView {
 
         addSubview(plate)
         plate.addSubview(picture)
+        plate.addSubview(spinner)
         addSubview(time)
         alpha = 0
     }
@@ -69,6 +93,7 @@ final class SnapScrubPreviewView: UIView {
         super.layoutSubviews()
         plate.frame = CGRect(origin: .zero, size: Self.frameSize)
         picture.frame = plate.bounds
+        spinner.center = CGPoint(x: plate.bounds.midX, y: plate.bounds.midY)
         time.frame = CGRect(
             x: 0, y: Self.frameSize.height + 2,
             width: bounds.width, height: 16
@@ -85,17 +110,54 @@ final class SnapScrubPreviewView: UIView {
         }
     }
 
-    /// The frame under the thumb, or nil while there is none to show.
-    func setPicture(_ image: CGImage?) {
-        picture.image = image.map { UIImage(cgImage: $0) }
+    /// A frame the thumb is pointing at.
+    ///
+    /// ⚠️ THERE IS NO WAY TO SAY "NOTHING NEW" HERE, deliberately: a decode
+    /// that fails or arrives late must leave the last frame standing. A card
+    /// that blanked between frames would flicker its way along a drag, and the
+    /// picture it blanked to is less true than the one it already had — the
+    /// thumb has moved a little, not somewhere else. Clearing belongs to the
+    /// end of the gesture, and `hide` owns it.
+    func setPicture(_ image: CGImage) {
+        picture.image = UIImage(cgImage: image)
+        setLoading(false)
+    }
+
+    /// Whether a frame is being decoded. The spinner only stands in for a
+    /// picture that is not there — once one is, a newer one arrives over it and
+    /// the card never goes blank.
+    func setLoading(_ loading: Bool) {
+        guard loading != isLoading else { return }
+        isLoading = loading
+        graceTimer?.invalidate()
+        graceTimer = nil
+        guard loading else {
+            spinner.stopAnimating()
+            return
+        }
+        guard picture.image == nil else { return }
+        graceTimer = Timer.scheduledTimer(withTimeInterval: Self.loaderGrace, repeats: false) {
+            [weak self] _ in
+            guard let self, isLoading, picture.image == nil else { return }
+            // ⚠️ Above the picture, and re-stated on every show for the reason
+            // the media card's is: this is the only thing here that has to be
+            // seen through whatever else the plate is holding.
+            plate.bringSubviewToFront(spinner)
+            spinner.startAnimating()
+        }
     }
 
     func hide() {
+        setLoading(false)
         UIView.animate(withDuration: 0.2, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = 0
         } completion: { _ in
             guard self.alpha == 0 else { return }
+            // ⚠️ Cleared only here. The next gesture may be on a different clip
+            // — or a different post — and a card that opened on the last one's
+            // frame would be claiming something untrue for as long as the first
+            // decode takes.
             self.picture.image = nil
         }
     }
@@ -115,5 +177,12 @@ final class SnapScrubPreviewView: UIView {
     var debugTimestamp: String? { time.text }
     var debugHasPicture: Bool { picture.image != nil }
     var debugIsShowing: Bool { alpha > 0.5 }
+    var debugIsLoading: Bool { spinner.isAnimating }
+
+    /// Runs the loader's grace out now, so a spec need not wait a fifth of a
+    /// second for a delay whose duration is not the claim under test.
+    func debugElapseLoaderGrace() {
+        graceTimer?.fire()
+    }
     #endif
 }
