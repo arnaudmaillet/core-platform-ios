@@ -173,7 +173,25 @@ final class SnapMediaCardView: UIView {
     /// waited must not create it.
     private var isSpinning = false
 
+    /// Which PAGE of a collection is announcing a wait, when one is.
+    ///
+    /// ⚠️ THE WAIT BELONGS TO A MEDIA, NOT TO THE POST — the same rule the
+    /// stopped mark already follows, and the play/pause glyph with it. Centred
+    /// on the card, the spinner stayed put while the pictures moved under it:
+    /// swiping off a page that was still loading left its announcement hanging
+    /// over the picture that had already arrived, which says the opposite of
+    /// the truth on both pages at once. On the page, it scrolls away with the
+    /// media it is about.
+    ///
+    /// A single photograph or clip has no pages to belong to, so that case
+    /// keeps the card's own spinner and `isSpinning` answers for it.
+    private var loadingPage: Int?
+
     func setLoading(_ loading: Bool) {
+        if showsCollection {
+            setCollectionLoading(loading)
+            return
+        }
         guard loading != isSpinning else { return }
         isSpinning = loading
         if loading {
@@ -188,8 +206,37 @@ final class SnapMediaCardView: UIView {
         logMediaState(loading ? "setLoading(true)" : "setLoading(false)")
     }
 
+    /// The wait on a collection, which is a wait on ONE of its pages.
+    ///
+    /// ⚠️ THE OLD PAGE'S SPINNER COMES DOWN when the wait moves. The host
+    /// decides this for the page in front of the viewer and for no other, so a
+    /// spinner left on a page nobody is deciding for is bookkeeping that
+    /// outlives its subject — the fault `retirePausedMarksOffScreen` is written
+    /// against, one file over. Riding out of the box is right; staying lit out
+    /// there is not.
+    private func setCollectionLoading(_ loading: Bool) {
+        let page = currentPage
+        guard loadingPage != (loading ? page : nil) else { return }
+        if let previous = loadingPage, previous != page || !loading {
+            carousel?.setLoading(false, onPage: previous)
+        }
+        loadingPage = loading ? page : nil
+        if loading { carousel?.setLoading(true, onPage: page) }
+        logMediaState(loading ? "setLoading(true, page: \(page))" : "setLoading(false)")
+    }
+
     /// Read by `SnapMediaLoaderSpecTests`.
-    var isShowingLoader: Bool { isSpinning }
+    var isShowingLoader: Bool { showsCollection ? loadingPage != nil : isSpinning }
+
+    #if DEBUG
+    /// WHERE the wait is drawn — the view itself, so a spec can prove it rides
+    /// its page rather than the card.
+    func visibleLoader(onPage page: Int) -> UIView? {
+        showsCollection
+            ? carousel?.visibleLoader(onPage: page)
+            : (isSpinning ? spinner : nil)
+    }
+    #endif
 
     // MARK: - Collections
 
@@ -217,6 +264,10 @@ final class SnapMediaCardView: UIView {
         let carousel = carousel ?? makeCarousel()
         carousel.isHidden = false
         carousel.configure(with: pages, imagePipeline: imagePipeline)
+        // A recycled carousel keeps whatever the last post left lit, and these
+        // are different pictures entirely.
+        carousel.clearLoaders()
+        loadingPage = nil
         imageView.isHidden = true
         renderView.isHidden = true
         #if DEBUG
@@ -231,6 +282,9 @@ final class SnapMediaCardView: UIView {
     func hideCollection() {
         carousel?.isHidden = true
         carousel?.cancelPendingWork()
+        // The wait belonged to a page, and there are no pages now.
+        carousel?.clearLoaders()
+        loadingPage = nil
         // Every page's claim on a surface ends with the collection. The players
         // behind them are the caller's to stop — see the call site, which
         // releases and stops before asking for this.
@@ -473,8 +527,24 @@ final class SnapMediaCardView: UIView {
     /// Moves to a page, when the indicator asks. A no-op for a post with no
     /// collection, which is the honest answer rather than a crash.
     func setPage(_ index: Int, animated: Bool = true) {
+        #if DEBUG
+        debugPageRequests.append((page: index, animated: animated))
+        #endif
         carousel?.setPage(index, animated: animated)
     }
+
+    #if DEBUG
+    /// The last page instruction and how it was to be MADE.
+    ///
+    /// ⚠️ The decision, not the motion, and the difference is not a shortcut: a
+    /// scroll view with no window applies an animated offset immediately, so a
+    /// spec that watched the pages would find a turn and a jump identical and
+    /// pass whichever rule it was given. What is worth pinning here is the
+    /// choice the cell makes; the easing is UIKit's.
+    private(set) var debugPageRequests: [(page: Int, animated: Bool)] = []
+
+    func debugClearPageRequests() { debugPageRequests = [] }
+    #endif
 
     private func makeCarousel() -> MediaCarouselView {
         let view = MediaCarouselView(style: .page)

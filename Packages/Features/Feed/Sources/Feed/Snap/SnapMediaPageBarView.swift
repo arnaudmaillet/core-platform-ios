@@ -406,7 +406,23 @@ final class SnapMediaPageBarView: UIView {
         let clipWeights = clipness > 0 ? clipShapeWeights(available: runWidth) : nil
         let shown = segments.indices.map { index -> CGFloat in
             guard let clipWeights else { return rooms[index] }
-            let inTheClipsShape: CGFloat = clipWeights[index] > 0 ? 1 : 0
+            // ⚠️ A DISTANCE, NOT A BOOLEAN — the same mistake this file made in
+            // the taper, made again here and costing the same thing.
+            //
+            // Written as `weight > 0 ? 1 : 0` this flips from one to nothing at
+            // exactly two slots from the clip, which is exactly where a swipe
+            // onto that clip ENDS. The flip is not visible on the page that
+            // flips — it is already down to a hair — but `shown` is what the
+            // GAPS are drawn from, and the gaps are what `available` has left
+            // for everyone: two seams closing in a single frame handed four
+            // points back to the run at the last moment of the swipe, and the
+            // bar surged into them after having been slowing down. Measured on
+            // a five-page post with a clip at index two: the run's widths summed
+            // to 307.59 at position 1.98 and 311.67 at 2.00.
+            //
+            // As a distance it fades over the same slot the sliver fades over,
+            // so the seam closes across the swipe instead of at the end of it.
+            let inTheClipsShape = min(clipWeights[index] / Self.clipNeighbourWidth, 1)
             return rooms[index] * (1 - clipness * (1 - inTheClipsShape))
         }
         // A gap belongs to a seam, and a seam is only as present as the thinner

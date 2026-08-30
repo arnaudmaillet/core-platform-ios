@@ -207,6 +207,32 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         pageViews.indices.contains(index) ? pageViews[index].visiblePausedMark : nil
     }
 
+    /// Shows or hides the wait on ONE page.
+    ///
+    /// Addressed by page for the reason the mark is: the picture that is
+    /// waiting and the picture in front of the viewer are the same question
+    /// only while nothing is moving.
+    public func setLoading(_ visible: Bool, onPage index: Int) {
+        guard pageViews.indices.contains(index) else { return }
+        pageViews[index].setLoadingVisible(visible)
+    }
+
+    /// Whether `index` is announcing a wait.
+    public func isLoading(onPage index: Int) -> Bool {
+        pageViews.indices.contains(index) && pageViews[index].visibleLoader != nil
+    }
+
+    /// The spinner on `index` while it is up — the view itself, so a spec can
+    /// ask where it is drawn rather than trust that it travelled.
+    public func visibleLoader(onPage index: Int) -> UIView? {
+        pageViews.indices.contains(index) ? pageViews[index].visibleLoader : nil
+    }
+
+    /// Takes every wait down — the post is being handed a different one.
+    public func clearLoaders() {
+        for page in pageViews { page.setLoadingVisible(false) }
+    }
+
     /// How many pages the carousel is showing.
     public var pageCount: Int { pages.count }
 
@@ -741,6 +767,17 @@ final class CarouselPageView: UIView {
     /// Minted on first use: most pages never wear one.
     private var pausedMark: PausedClipMarkView?
 
+    /// The wait, ON THE PAGE, for the reason the mark is on it.
+    ///
+    /// A spinner centred on the POST says "something here is loading" and then
+    /// points at the wrong picture the moment a swipe carries an arrived one in
+    /// front of it — the page that is actually waiting has scrolled away and
+    /// left its announcement behind. What is waiting is a MEDIA, so the media's
+    /// page is what carries the answer, exactly as it carries its stopped mark.
+    ///
+    /// Minted on first use: most pages never wait long enough to show one.
+    private var loader: UIActivityIndicatorView?
+
     /// The surface this page is REALLY holding — both halves again, for the
     /// same reason `hosts(_:)` asks both: a weak reference outlives the view
     /// being taken away by a flight, and a page that answered from the
@@ -771,6 +808,7 @@ final class CarouselPageView: UIView {
         cover.frame = bounds
         surface?.frame = bounds
         pausedMark?.frame = bounds
+        loader?.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
     /// Shows or hides this page's stopped mark.
@@ -792,6 +830,32 @@ final class CarouselPageView: UIView {
     /// The mark itself when it is showing, so a caller can ask WHERE it is
     /// drawn — the whole claim being that it rides this page.
     var visiblePausedMark: UIView? { pausedMark?.isShowing == true ? pausedMark : nil }
+
+    /// Shows or hides this page's wait.
+    func setLoadingVisible(_ visible: Bool) {
+        guard visible || loader != nil else { return }
+        let spinner = loader ?? {
+            let view = UIActivityIndicatorView(style: .medium)
+            // ⚠️ WHITE, not `.label`: the ground here is a photograph or black,
+            // never a theme, so a semantic colour would resolve against a
+            // background this view does not have. Same rule as the card's own.
+            view.color = .white
+            view.hidesWhenStopped = true
+            view.sizeToFit()
+            view.center = CGPoint(x: bounds.midX, y: bounds.midY)
+            addSubview(view)
+            loader = view
+            return view
+        }()
+        // Above the picture, whichever picture this page is showing — a surface
+        // hosted after the spinner would otherwise cover it.
+        bringSubviewToFront(spinner)
+        if visible { spinner.startAnimating() } else { spinner.stopAnimating() }
+    }
+
+    /// The spinner while it is up, so a caller can ask WHERE it is drawn rather
+    /// than trust that it moved.
+    var visibleLoader: UIView? { loader?.isAnimating == true ? loader : nil }
 
     func host(_ surface: UIView) {
         // ⚠️ IDENTITY IS NOT ENOUGH — ask whether it is actually here.

@@ -1,6 +1,7 @@
 import CoreModels
 import MediaCore
 import MediaPlayback
+import PostGrid
 import Testing
 import UIKit
 @testable import Feed
@@ -68,6 +69,65 @@ struct SnapMediaLoaderSpecTests {
 
     private func text(_ id: String = "post-text") -> FeedItemDisplayModel {
         model(id, kind: .image, media: nil)
+    }
+
+    /// A post of several pictures, none of which the pipeline will ever answer
+    /// for — so every page is genuinely outstanding.
+    private func collection(_ pages: Int, id: String = "post-gallery") -> SnapFeedCell {
+        let cell = SnapFeedCell(frame: Self.container)
+        let extra = (1..<pages).map { index in
+            GalleryPost.MediaPage(
+                thumbnailURL: URL(string: "https://example.test/\(id)-\(index).jpg"),
+                videoURL: nil
+            )
+        }
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID(id), authorID: ProfileID("p"), authorName: "Ava",
+                metaText: "@ava · 3m", avatarURL: nil, caption: "caption",
+                mediaURL: URL(string: "https://example.test/\(id)-0.jpg"),
+                mediaKind: .image, thumbnailURL: nil, audioText: nil,
+                likeCount: 0, timestampText: "now", extraMedia: extra
+            ),
+            pipeline: ImagePipeline(fetcher: SilentFetcher()),
+            videoPlayback: nil
+        )
+        cell.layoutIfNeeded()
+        return cell
+    }
+
+    // MARK: - Whose wait it is
+
+    /// ⚠️ THE WAIT BELONGS TO A MEDIA, NOT TO THE POST.
+    ///
+    /// Reported from the feed: the spinner behaved as though it were the page's
+    /// rather than the picture's. Centred on the card, it stayed put while the
+    /// pictures moved under it — so swiping off a page that was still loading
+    /// left its announcement hanging over the picture that had already arrived,
+    /// saying the opposite of the truth on both pages at once.
+    ///
+    /// The stopped mark and the play/pause glyph already ride their page. This
+    /// is the same rule, and the claim is the same shape: each page owns its
+    /// own, and turning to another takes the first one's down.
+    @Test func theWaitRidesItsOwnPage() {
+        let cell = collection(3)
+        cell.debugElapseMediaLoaderGrace()
+
+        let first = cell.debugLoaderView(onPage: 0)
+        #expect(first != nil, "the premise: page one is waiting")
+        #expect(cell.debugLoaderView(onPage: 1) == nil,
+                "and the page next door is not announcing anything")
+
+        cell.debugShowPage(1)
+        cell.debugElapseMediaLoaderGrace()
+
+        let second = cell.debugLoaderView(onPage: 1)
+        #expect(second != nil)
+        // ⚠️ NOT THE SAME VIEW. One spinner moved from page to page would be
+        // the card's again, wearing a different address.
+        #expect(second !== first)
+        #expect(cell.debugLoaderView(onPage: 0) == nil,
+                "the page left behind stopped announcing a wait nobody decides for")
     }
 
     // MARK: - When it shows

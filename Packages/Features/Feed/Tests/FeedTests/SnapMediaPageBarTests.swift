@@ -519,6 +519,44 @@ struct SnapMediaPageBarTests {
         #expect(seeks.last == 0)
     }
 
+    /// ⚠️ THE RUN HANDS NOTHING BACK AT THE END OF A SWIPE.
+    ///
+    /// Reported as "the segments resize fine, but there is a slight jump right
+    /// at the end" on a video, and it was one — not in the position, which is
+    /// continuous, but in the WIDTHS, which briefly were not.
+    ///
+    /// A page's membership of the clip's shape was a boolean: `weight > 0`,
+    /// which flips at exactly two slots away, which is exactly where a swipe
+    /// onto that clip ends. The page that flips is a hair wide by then and
+    /// invisible — but the GAPS are drawn from it, and two seams closing in one
+    /// frame handed four points back to the run at the last moment of the
+    /// gesture, which the bar spent in a surge after having been slowing down.
+    ///
+    /// So the claim is about the TOTAL: the run's widths sum to the same thing
+    /// from one step of a swipe to the next. Measured before the fix, this walk
+    /// stepped 4.08pt at the arrival; after it, 0.17pt.
+    @Test func theRunHandsNoWidthBackAtTheEndOfASwipe() {
+        let width: CGFloat = 370
+        let view = clipBar(pages: 5, current: 1, clips: [2], playhead: 0.3, width: width)
+        var previous: CGFloat?
+        var worst: (step: CGFloat, at: CGFloat) = (0, 0)
+        var position = CGFloat(1)
+        while position <= 2.0001 {
+            view.setPosition(position)
+            view.layoutIfNeeded()
+            let total = (0..<5)
+                .compactMap { view.debugSegmentFrame($0)?.width }
+                .reduce(0, +)
+            if let previous, abs(total - previous) > worst.step {
+                worst = (abs(total - previous), position)
+            }
+            previous = total
+            position += 0.02
+        }
+        #expect(worst.step < 1,
+                Comment(rawValue: "the run jumped \(worst.step)pt at \(worst.at)"))
+    }
+
     // MARK: - The count in the corner
 
     /// ⚠️ THE COUNT IS THE ANSWER THE SEGMENTS CANNOT GIVE. A run of pills says
@@ -791,6 +829,86 @@ struct SnapMediaPageBarTests {
         #expect(card.debugTimestamp == "0:30 / 1:00")
     }
 
+    // MARK: - What a tap on a segment asks the carousel for
+
+    /// A post of several pictures, in a cell, so the request a tap makes can be
+    /// followed all the way to the pages it moves.
+    private func collectionCell(pages: Int) -> SnapFeedCell {
+        let cell = SnapFeedCell(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let extra = (1..<pages).map { index in
+            GalleryPost.MediaPage(
+                thumbnailURL: URL(string: "https://example.test/thumb-\(index).jpg"),
+                videoURL: nil
+            )
+        }
+        cell.configure(
+            with: FeedItemDisplayModel(
+                id: PostID("post-gallery"), authorID: ProfileID("p"), authorName: "Ava",
+                metaText: "@ava · 3m", avatarURL: nil, caption: "caption",
+                mediaURL: URL(string: "https://example.test/thumb-0.jpg"),
+                mediaKind: .image, thumbnailURL: nil, audioText: nil,
+                likeCount: 0, timestampText: "now", extraMedia: extra
+            ),
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil
+        )
+        cell.layoutIfNeeded()
+        return cell
+    }
+
+    /// ⚠️ THE JOURNEY IS NOT SHOWN AND THE ARRIVAL IS.
+    ///
+    /// Reported twice, and the second report is what settled the shape. First:
+    /// aiming at a segment near the far end sent the carousel sprinting through
+    /// every picture in between — six pictures thrown past the viewer at a speed
+    /// that makes them noise, to arrive somewhere they could see from the start.
+    /// Cutting straight there fixed that and broke something else: the taps that
+    /// cut no longer played the strip's reflow at all, which reads as the
+    /// control being broken on exactly the taps that travel furthest.
+    ///
+    /// So neither. The carousel is put down NEXT DOOR to the target without a
+    /// word, and then turns the last page. Every tap ends in the same motion
+    /// whatever it was aimed at, and no picture the viewer did not ask for is
+    /// shown on the way.
+    ///
+    /// ⚠️ READ AS THE DECISIONS, NOT AS THE MOTION — and that is not a shortcut.
+    /// A scroll view with no window applies an animated offset immediately, so
+    /// a case that watched the pages would find a turn and a jump identical and
+    /// pass whichever rule it was handed. Measured: asking for the neighbour
+    /// with `animated: true` left the carousel on page one before the next line
+    /// ran. What is worth pinning is the sequence; the easing is UIKit's.
+    @Test func aFarTapArrivesNextDoorInSilenceAndThenTurnsThePage() {
+        let cell = collectionCell(pages: 6)
+        #expect(cell.debugCurrentMediaPage == 0, "the premise")
+
+        // The neighbour: one instruction, and it is the turn.
+        cell.debugClearPageRequests()
+        cell.debugRequestMediaPage(1)
+        #expect(cell.debugPageRequests.map(\.page) == [1])
+        #expect(cell.debugPageRequests.map(\.animated) == [true])
+
+        // Four away: put down at four in silence, then the page turns onto five.
+        cell.debugClearPageRequests()
+        cell.debugRequestMediaPage(5)
+        #expect(cell.debugPageRequests.map(\.page) == [4, 5])
+        #expect(cell.debugPageRequests.map(\.animated) == [false, true])
+        #expect(cell.debugCurrentMediaPage == 5, "and it arrived")
+
+        // ⚠️ AND IT APPROACHES FROM THE SIDE IT IS COMING FROM. Travelling back
+        // down the run, next door is the segment ABOVE the target, not below —
+        // approaching from the wrong side would turn the page backwards onto a
+        // picture the viewer had just been shown.
+        cell.debugClearPageRequests()
+        cell.debugRequestMediaPage(0)
+        #expect(cell.debugPageRequests.map(\.page) == [1, 0])
+        #expect(cell.debugPageRequests.map(\.animated) == [false, true])
+
+        // And a neighbour on the way back is still just a turn.
+        cell.debugClearPageRequests()
+        cell.debugRequestMediaPage(1)
+        #expect(cell.debugPageRequests.map(\.page) == [1])
+    }
+
     // MARK: - Where it sits in the column
 
     private func chrome(pages: Int) -> SnapChromeView {
@@ -870,6 +988,88 @@ struct SnapMediaPageBarTests {
     /// would give a collection a different resting geometry from every other
     /// format — which the hero flight's replica would then have to match, and
     /// the corner is deliberately format-agnostic (see `captionFloorGuide`).
+    /// ⚠️ AND IT STOPS SHORT OF THE TOOLBAR'S LINE. Flush against it the strip
+    /// and the bar's glass read as one stacked control, which is the one thing
+    /// they are not: the strip is the pictures' index, the bar is what you can
+    /// DO to the post.
+    @Test func theStripStopsShortOfTheToolbarsLine() {
+        let view = chrome(pages: 3)
+        let toolbarLine = view.bounds.height - 83
+
+        let gap = toolbarLine - view.debugPageBarFrame.maxY
+        #expect(abs(gap - SnapChromeView.pageBarToolbarGap) < 0.5,
+                Comment(rawValue: "the strip left \(gap)pt"))
+    }
+
+    // MARK: - What a scrub takes away
+
+    /// ⚠️ THE PAGE'S TALK RECEDES UNDER A SCRUB, AND COMES BACK.
+    ///
+    /// A viewer dragging along a clip's bar is looking for a MOMENT in the
+    /// picture, and the card showing it is a small thing over a page still
+    /// carrying its caption, its comments and its rail. So the page recedes for
+    /// the length of the gesture.
+    ///
+    /// ⚠️ RESTORED, not asserted. Several of these are faded by someone else
+    /// for their own reasons, so the fade back returns each to what it was
+    /// worth rather than to full — which is what this case actually checks by
+    /// comparing against the values it read before the gesture.
+    @Test func theScrubTakesThePagesTalkDownAndGivesItBack() {
+        let view = chrome(pages: 1)
+        view.setMediaPageCount(1, current: 0, clipPages: [0])
+        view.setMediaPlayhead(0.2, seconds: 120)
+        view.layoutIfNeeded()
+        let resting = view.debugScrubFadedAlphas
+
+        let bar = view.debugPageBar
+        bar.debugScrub(.began, atX: 100)
+        bar.debugScrub(.changed, atX: 140)
+        #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
+
+        bar.debugScrub(.ended, atX: 140)
+        #expect(view.debugScrubFadedAlphas == resting)
+    }
+
+    /// ⚠️ AND A CELL RECYCLED MID-SCRUB HANDS BACK WHAT IT BORROWED.
+    ///
+    /// A gesture does not have to END for the cell to be taken away — the post
+    /// can be swiped off under the thumb — and a chrome that only restored on
+    /// `.ended` would give the NEXT post a caption and a band that never come
+    /// back. The trap the reset already carries for the engagement's fade, one
+    /// gesture further in.
+    @Test func aRecycleMidScrubGivesThePagesTalkBack() {
+        let view = chrome(pages: 1)
+        view.setMediaPageCount(1, current: 0, clipPages: [0])
+        view.setMediaPlayhead(0.2, seconds: 120)
+        view.layoutIfNeeded()
+        let resting = view.debugScrubFadedAlphas
+
+        let bar = view.debugPageBar
+        bar.debugScrub(.began, atX: 100)
+        bar.debugScrub(.changed, atX: 140)
+        #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 }, "the premise")
+
+        // Taken away with the thumb still down.
+        view.reset()
+
+        #expect(view.debugScrubFadedAlphas == resting)
+    }
+
+    /// And the strip itself never fades: it is the instrument in the hand.
+    @Test func theScrubLeavesTheStripAndItsCardAlone() {
+        let view = chrome(pages: 1)
+        view.setMediaPageCount(1, current: 0, clipPages: [0])
+        view.setMediaPlayhead(0.2, seconds: 120)
+        view.layoutIfNeeded()
+
+        let bar = view.debugPageBar
+        bar.debugScrub(.began, atX: 100)
+        bar.debugScrub(.changed, atX: 140)
+
+        #expect(bar.alpha == 1)
+        #expect(view.debugScrubPreview.alpha == 1)
+    }
+
     @Test func theStripsArrivalMovesNothingElse() {
         let withStrip = chrome(pages: 4)
         let without = chrome(pages: 0)

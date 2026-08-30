@@ -619,10 +619,39 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // than being told twice.
         }
         chrome.onMediaPageRequested = { [weak self] page in
-            // Teleport, for the reason the card's own indicator does: the
-            // scrubbing finger is the clock, and a scroll animation would run a
-            // second one against it.
-            self?.mediaCard.setPage(page, animated: false)
+            guard let self else { return }
+            // ⚠️ A NEIGHBOUR IS A PAGE TURN; ANYTHING FURTHER IS A JUMP.
+            //
+            // This was a teleport for every distance while a FINGER asked for
+            // the page — the scrubbing thumb is the clock, and a scroll
+            // animation would have run a second one against it. The drag stopped
+            // paging, so a tap asks now, and a tap has no clock: the carousel's
+            // own motion is the only one left, and it is what makes the strip
+            // reflow rather than cut.
+            //
+            // But an animation is a page TURNING, and one aimed six segments
+            // away is not a turn — it is the six pictures in between thrown
+            // past the viewer at a speed that makes them noise, to arrive
+            // somewhere they could see from the start.
+            //
+            // ⚠️ SO THE JOURNEY IS NOT SHOWN AND THE ARRIVAL IS. The carousel
+            // is put down next door to the target without a word, and then
+            // turns the last page. Every tap ends in the same motion whatever
+            // it was aimed at, which is the point: a rule that animated some
+            // taps and cut others made the strip look broken on the ones it
+            // cut — reported exactly that way, as "sometimes the resize does
+            // not play".
+            //
+            // The silent step is a REAL page change and travels the normal
+            // path, playback and loader included. That is not a concession: it
+            // is the same run of events a fast swipe across those pages fires,
+            // and a page the viewer is about to be one turn away from is one
+            // the warm window wants anyway.
+            let current = self.mediaCard.currentPage
+            if abs(page - current) > 1 {
+                self.mediaCard.setPage(page > current ? page - 1 : page + 1, animated: false)
+            }
+            self.mediaCard.setPage(page, animated: true)
         }
     }
 
@@ -1899,6 +1928,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// than of any bookkeeping.
     var debugIsShowingMediaLoader: Bool { mediaCard.isShowingLoader }
 
+    /// WHERE the wait is drawn — the view itself, so a spec can prove it rides
+    /// its own picture rather than the post.
+    func debugLoaderView(onPage page: Int) -> UIView? {
+        mediaCard.visibleLoader(onPage: page)
+    }
+
     /// Runs the grace out now, so a spec does not have to sleep for it.
     func debugElapseMediaLoaderGrace() {
         mediaLoaderTimer?.invalidate()
@@ -2640,6 +2675,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func debugHostRenderViewOnCurrentPage() {
         mediaCard.hostRenderViewOnCurrentPage()
     }
+
+    /// Asks for a page exactly as the strip's tap does, so a spec drives the
+    /// cell's own answer to that request rather than a route nobody uses.
+    func debugRequestMediaPage(_ page: Int) {
+        chrome.onMediaPageRequested?(page)
+    }
+
+    /// Every page instruction this cell has sent its card, in order — see the
+    /// card's own note on why the decisions are what a spec can hold onto.
+    var debugPageRequests: [(page: Int, animated: Bool)] { mediaCard.debugPageRequests }
+
+    /// Forgets them, so a case can read one tap at a time.
+    func debugClearPageRequests() { mediaCard.debugClearPageRequests() }
 
     /// Moves the collection to a page as a viewer's swipe would.
     ///
