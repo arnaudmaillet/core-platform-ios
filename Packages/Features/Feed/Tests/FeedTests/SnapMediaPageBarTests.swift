@@ -29,11 +29,21 @@ struct SnapMediaPageBarTests {
         return view
     }
 
+    /// Where the run of segments ENDS — which is no longer the edge of the
+    /// column. The counter takes a corner at the trailing end and the run gets
+    /// what is left, so every case that used to read "the run spans the width"
+    /// reads "the run spans its own column" instead. Without a counter (a lone
+    /// clip) the two are the same number.
+    private func runEnd(of view: SnapMediaPageBarView, width: CGFloat) -> CGFloat {
+        guard let counter = view.debugCounterFrame else { return width }
+        return counter.minX - SnapMediaPageBarView.counterInset
+    }
+
     // MARK: - The strip
 
-    /// The claim, as geometry: the segments SHARE the width — the run starts at
-    /// one edge and ends at the other, with a gap between neighbours and
-    /// nothing else.
+    /// The claim, as geometry: the segments SHARE the run — it starts at the
+    /// leading edge and ends where the counter's corner begins, with a gap
+    /// between neighbours and nothing else.
     @Test func theSegmentsShareTheWholeWidth() throws {
         let width: CGFloat = 370
         let view = bar(pages: 3, current: 0, width: width)
@@ -43,7 +53,7 @@ struct SnapMediaPageBarTests {
         let last = try #require(view.debugSegmentFrame(2))
 
         #expect(first.minX == 0)
-        #expect(abs(last.maxX - width) < 0.5)
+        #expect(abs(last.maxX - runEnd(of: view, width: width)) < 0.5)
         #expect(abs(middle.minX - first.maxX - SnapMediaPageBarView.gap) < 0.5)
         // The pages you are not on are drawn alike; the one you are on is the
         // subject of the next case.
@@ -83,7 +93,8 @@ struct SnapMediaPageBarTests {
         // total at every position, so the strip never breathes at its ends —
         // which would read as a layout fault rather than as motion.
         #expect(try #require(view.debugSegmentFrame(0)).minX == 0)
-        #expect(abs(try #require(view.debugSegmentFrame(3)).maxX - width) < 0.5)
+        #expect(abs(try #require(view.debugSegmentFrame(3)).maxX
+                    - runEnd(of: view, width: width)) < 0.5)
     }
 
     /// The ink rides the same curve as the width: half grown is half lit.
@@ -172,12 +183,15 @@ struct SnapMediaPageBarTests {
         #expect(bar(pages: 2).isHidden == false)
     }
 
-    /// ⚠️ THE DRAG TRACKS THE STRIP IT IS DRAWN ON. A segment's stride is one
-    /// page here, so the mark keeps pace with the thumb — and touching it asks
-    /// for nothing, which matters more on a full-width control than it did on
-    /// the card's chip: an absolute read would send a twelve-page post to page
-    /// six the moment a thumb landed near the middle of the screen.
-    @Test func draggingAlongTheStripAsksForPagesAtItsOwnScale() {
+    /// ⚠️ A DRAG ON A PHOTOGRAPH'S STRIP ASKS FOR NOTHING AT ALL.
+    ///
+    /// It used to page the carousel, one slot per segment — a second way to do
+    /// what a swipe on the picture already does, on a control the width of the
+    /// column, where the pages it walked past were the pages the media was
+    /// flying through underneath. Selecting is what a strip of segments is for
+    /// and a tap says it exactly; dragging is left to the one thing with no
+    /// other control, which is where you are inside a clip.
+    @Test func draggingAPhotographsStripAsksForNothing() {
         let width: CGFloat = 370
         let view = bar(pages: 4, width: width)
         var asked: [Int] = []
@@ -185,15 +199,11 @@ struct SnapMediaPageBarTests {
 
         let stride = (width + SnapMediaPageBarView.gap) / 4
         view.debugScrub(.began, atX: 20)
-        #expect(asked.isEmpty) // the touch alone asks for nothing
-
         view.debugScrub(.changed, atX: 20 + stride)
         view.debugScrub(.changed, atX: 20 + stride * 2)
-        #expect(asked == [1, 2])
+        view.debugScrub(.ended, atX: 20 + stride * 2)
 
-        // Back past the start, and it clamps rather than going numb.
-        view.debugScrub(.changed, atX: 20 - stride * 5)
-        #expect(asked == [1, 2, 0])
+        #expect(asked.isEmpty)
     }
 
     // MARK: - The window, past ten pictures
@@ -333,7 +343,7 @@ struct SnapMediaPageBarTests {
             let leading = try #require(ink.map(\.minX).min())
             let trailing = try #require(ink.map(\.maxX).max())
             #expect(leading < 1, Comment(rawValue: "left a gap at \(position): \(leading)"))
-            #expect(trailing > width - 1,
+            #expect(trailing > runEnd(of: view, width: width) - 1,
                     Comment(rawValue: "left a gap at \(position): \(trailing)"))
         }
     }
@@ -360,7 +370,7 @@ struct SnapMediaPageBarTests {
         let view = clipBar(pages: 5, current: 2, clips: [2], playhead: 0.5, width: width)
 
         let bar = try #require(view.debugSegmentFrame(2))
-        #expect(bar.width > width * 0.8)
+        #expect(bar.width > runEnd(of: view, width: width) * 0.8)
 
         // The neighbours are still there — they are the only way back to the
         // other pages once the bar has taken the strip.
@@ -451,7 +461,7 @@ struct SnapMediaPageBarTests {
         let bar = try #require(view.debugSegmentFrame(3))
         let right = try #require(view.debugSegmentFrame(4))
         #expect(left.minX < 1)
-        #expect(right.maxX > width - 1)
+        #expect(right.maxX > runEnd(of: view, width: width) - 1)
         #expect(abs(bar.minX - left.maxX - SnapMediaPageBarView.gap) < 0.5)
         #expect(abs(right.minX - bar.maxX - SnapMediaPageBarView.gap) < 0.5)
     }
@@ -469,7 +479,9 @@ struct SnapMediaPageBarTests {
         view.debugScrub(.changed, atX: 20 + stride)
         view.debugScrub(.ended, atX: 20 + stride)
 
-        #expect(asked == [1])   // the drag's request, and no second one on lift
+        // Nothing: the drag asks for nothing on a photograph, and a thumb that
+        // travelled did not mean to select where it happened to lift.
+        #expect(asked.isEmpty)
     }
 
     /// ⚠️ ON A CLIP, THE DRAG IS THE PLAYHEAD — the finer of the two things the
@@ -505,6 +517,56 @@ struct SnapMediaPageBarTests {
 
         #expect(seeks.first == 1)
         #expect(seeks.last == 0)
+    }
+
+    // MARK: - The count in the corner
+
+    /// ⚠️ THE COUNT IS THE ANSWER THE SEGMENTS CANNOT GIVE. A run of pills says
+    /// where you are in a gallery and, once a window is sliding through a long
+    /// one, stops being able to say how big the gallery is — and on a clip the
+    /// run is a bar and says neither.
+    @Test func theCornerCountsTheMediaAndTheTotal() {
+        let view = bar(pages: 5, current: 0)
+        #expect(view.debugCounterText == "1/5")
+
+        view.setPosition(3)
+        #expect(view.debugCounterText == "4/5")
+
+        // ⚠️ It reads the page you are ON — the rounded position — so it
+        // changes once, where the swipe crosses, rather than flickering
+        // between two numbers for the length of a drag.
+        view.setPosition(3.4)
+        #expect(view.debugCounterText == "4/5")
+        view.setPosition(3.6)
+        #expect(view.debugCounterText == "5/5")
+    }
+
+    /// It counts past the window too: ten segments are drawn of twenty-four,
+    /// and the corner is where the other fourteen are accounted for.
+    @Test func theCountSurvivesTheWindow() {
+        let view = bar(pages: 24, current: 0)
+        view.setPosition(17)
+        #expect(view.debugCounterText == "18/24")
+    }
+
+    /// A lone clip has nothing to count — "1/1" is a fact nobody asked for.
+    @Test func aLoneClipCountsNothing() {
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.3)
+        #expect(view.debugCounterText == nil)
+    }
+
+    /// ⚠️ AND THE RUN GIVES UP THE ROOM. The counter's width comes from its
+    /// text rather than from the column, so the segments take what is left —
+    /// a run that ignored it would draw underneath it.
+    @Test func theRunEndsWhereTheCountBegins() throws {
+        let width: CGFloat = 370
+        let view = bar(pages: 5, current: 0, width: width)
+
+        let count = try #require(view.debugCounterFrame)
+        let last = try #require(view.debugSegmentFrame(4))
+        #expect(abs(count.maxX - width) < 0.5)
+        #expect(last.maxX <= count.minX + 0.5)
+        #expect(abs(count.minX - last.maxX - SnapMediaPageBarView.counterInset) < 0.5)
     }
 
     // MARK: - Consecutive clips, and the rest of the strip
@@ -572,16 +634,20 @@ struct SnapMediaPageBarTests {
         #expect(rested())
     }
 
-    /// ⚠️ AND THE PICTURES MOVING COUNTS AS SOMETHING HAPPENING. Dimming the
-    /// index while the pages fly past it would hide it exactly when it is being
-    /// read.
-    @Test func theStripWakesWhenThePicturesMove() {
+    /// ⚠️ AND THE PICTURES MOVING DOES *NOT* WAKE IT. It did, on the reading
+    /// that the strip is about the pages and the pages were moving — but a
+    /// viewer swiping through a gallery is looking at the gallery, and an index
+    /// that brightens under every swipe is a second thing moving in the corner
+    /// of the eye for the whole gesture. The strip comes up when it is TOUCHED:
+    /// when it is being used, rather than when it merely has news.
+    @Test func scrollingThePicturesDoesNotWakeTheStrip() {
         let view = bar(pages: 5, current: 0)
         view.debugElapseWake()
 
         view.setPosition(0.4)
+        view.setPosition(1)
 
-        #expect(view.debugContainerOpacity == 1)
+        #expect(abs(view.debugContainerOpacity - SnapMediaPageBarView.restingOpacity) < 0.001)
     }
 
     // MARK: - A lone clip
