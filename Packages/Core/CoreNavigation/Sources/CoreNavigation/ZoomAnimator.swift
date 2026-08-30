@@ -689,7 +689,19 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             self.liveMediaState = liveMediaState
             self.finalizeLanding = finalizeLanding
             self.deadline = deadline
+            #if DEBUG
+            // The hold spans a window where the ANIMATOR is already gone but
+            // the card is deliberately still on screen; counted so the audit
+            // reads that as "landing", not "stranded".
+            ZoomDebugCensus.increment(ZoomDebugCensus.Key.landingHold)
+            #endif
         }
+
+        #if DEBUG
+        deinit {
+            ZoomDebugCensus.decrement(ZoomDebugCensus.Key.landingHold)
+        }
+        #endif
 
         /// How long a "ready" answer is distrusted after the hold begins. The
         /// dip arrives via KVO roughly 8ms after the surface is installed, and

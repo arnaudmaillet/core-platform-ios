@@ -51,6 +51,10 @@ public enum ZoomDebugCensus {
         public static let interruptor = "zoom.interruptor"
         public static let grabDriver = "zoom.grabDriver"
         public static let liveMediaRetry = "zoom.liveMediaRetry"
+        /// A landing hold keeps the card parented up to 0.75s AFTER the
+        /// animator is gone — counted so an audit does not read that window
+        /// as a stranded card.
+        public static let landingHold = "zoom.landingHold"
         public static let flightCard = "zoom.flightCard"
         public static let pinCard = "zoom.pinCard"
     }

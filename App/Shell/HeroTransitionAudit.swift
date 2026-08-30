@@ -89,8 +89,11 @@ final class HeroTransitionAudit {
         let pins = census[ZoomDebugCensus.Key.pinCard] ?? 0
         // A grab-from-rest builds an animator too (superseded, but alive), so
         // "some transition object exists" is the honest activity signal for
-        // every open/dismiss path.
-        let isActive = animators > 0 || interruptors > 0 || retries > 0
+        // every open/dismiss path. Landing holds count as active: the hold
+        // keeps the card visible up to 0.75s AFTER the animator died, and the
+        // first field run read exactly that window as `STRANDED cards=1`.
+        let holds = census[ZoomDebugCensus.Key.landingHold] ?? 0
+        let isActive = animators > 0 || interruptors > 0 || retries > 0 || holds > 0
 
         var players = 0
         var idle = 0
