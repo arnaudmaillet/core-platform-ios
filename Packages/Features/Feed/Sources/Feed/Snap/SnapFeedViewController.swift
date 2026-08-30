@@ -63,11 +63,19 @@ final class SnapFeedViewController: UIViewController {
     /// opened onto a stack it can leave (never on the tab root). Built on
     /// first appearance, when the stack relationship is finally knowable.
     private var backItem: UIBarButtonItem?
-    /// The nav bar's LEADING item while a MEDIA post's comments are open: a
-    /// ✕ that collapses back to the media layout. It stands in the FOOTER's
-    /// trailing corner, taking the ⋯'s bubble while the layout is open, and it
-    /// exists independently of `isClosable`: it closes the LAYOUT, not the
-    /// screen — which is exactly why the back arrow keeps its own slot.
+    /// The ✕ that collapses a MEDIA post's comments back to the media.
+    ///
+    /// It takes the TRAILING nav slot while the layout is open — the author
+    /// pill's — and it exists independently of `isClosable`: it closes the
+    /// LAYOUT, not the screen, which is exactly why the back arrow keeps its
+    /// own slot at the other end.
+    ///
+    /// ⚠️ It stood in the footer's ⋯ bubble for a while, and the swap cost the
+    /// footer its ⋯ for as long as the thread was open — the menu that carries
+    /// Share, Report and Not interested, gone exactly when a reader is deepest
+    /// in the post. Up here it takes the one thing the open thread does not
+    /// need: while you are reading the comments, whose post it is has already
+    /// been read.
     private var closeCommentsItem = UIBarButtonItem()
     /// The viewer's saved pile.
     ///
@@ -947,15 +955,24 @@ final class SnapFeedViewController: UIViewController {
         //
         // The fixed space is what keeps the two separate pills: iOS 26 groups
         // ADJACENT bar items into one shared glass platter.
-        var navItems: [UIBarButtonItem] = [authorItem]
+        //
+        // ⚠️ AND THE EXIT TAKES THE AUTHOR'S SLOT while a media post's thread is
+        // open. The two are the same kind of thing — the outermost item at the
+        // end that says what this screen is about — and only one of them is
+        // worth the slot at a time: with the thread open, whose post it is has
+        // already been read, and the way back to the picture has not.
+        //
+        // A TEXT post keeps its author here, because its comments ARE the page:
+        // there is nothing to close, so nothing to put in the slot.
+        var navItems: [UIBarButtonItem] = [engaged && hasMedia ? closeCommentsItem : authorItem]
         if let walletBadgeItem {
             navItems += [.fixedSpace(Spacing.sm), walletBadgeItem]
         }
         applyTrailingNavItems(navItems, animated: animated)
 
         applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
-        applyToolbarExit(engaged: engaged, hasMedia: hasMedia, animated: animated)
-        // The toolbar is state-invariant now; nothing to swap.
+        // The toolbar is state-invariant: the ⋯ keeps its bubble in every
+        // state, because the menu it holds is not about the layout.
     }
 
     /// Fits the trailing run to the bar, giving way in a fixed order.
@@ -1078,9 +1095,10 @@ final class SnapFeedViewController: UIViewController {
     /// that it means the same kind of thing one level in — leave what is open.
     /// It cost the screen its way OUT while the layout was open: the arrow was
     /// gone, so leaving the post meant closing the comments first and then
-    /// going back, two gestures for one intention. The exit moved to the
-    /// footer's trailing corner instead (see `applyToolbarExit`), where it
-    /// stands in the ⋯'s own bubble.
+    /// going back, two gestures for one intention. The exit lives at the other
+    /// end now, in the TRAILING nav slot the author pill holds at rest — so the
+    /// two ways out of a post are one at each end of the same bar, and neither
+    /// costs the other.
     private func applyLeadingNavItem(engaged: Bool, hasMedia: Bool, animated: Bool) {
         // ⚠️ LEFT TO RIGHT here, unlike the trailing run: `leftBarButtonItems[0]`
         // is the one nearest the screen edge. So this reads [‹ back] [⇅ sort],
@@ -1096,29 +1114,6 @@ final class SnapFeedViewController: UIViewController {
         }
         guard navigationItem.leftBarButtonItems ?? [] != items else { return }
         navigationItem.setLeftBarButtonItems(items, animated: animated)
-    }
-
-    /// The footer's trailing corner: ⋯ at rest, ✕ while a media post's comments
-    /// are open.
-    ///
-    /// ⚠️ THE CORNER IS NOT STATE-INVARIANT ANY MORE, and that was a deliberate
-    /// property once: the toolbar carried three item sets whose only difference
-    /// was this slot, and collapsing them to one was what stopped a text
-    /// engagement and a media engagement disagreeing about what the corner
-    /// meant. Two things have changed since. The ⋯ has its own platter now, so
-    /// the swap is one bubble changing its glyph rather than a run
-    /// re-composing; and a TEXT page never swaps at all — its comments are the
-    /// page, so there is nothing to close and its corner stays ⋯. The corner
-    /// therefore reads the same way everywhere it can be read: it closes what
-    /// is open, or folds away what else there is.
-    private func applyToolbarExit(engaged: Bool, hasMedia: Bool, animated: Bool) {
-        guard !defaultToolbarItems.isEmpty else { return }
-        let exit = engaged && hasMedia
-        let items = exit
-            ? defaultToolbarItems.dropLast() + [closeCommentsItem]
-            : defaultToolbarItems
-        guard toolbarItems ?? [] != Array(items) else { return }
-        setToolbarItems(Array(items), animated: animated)
     }
 
     private func applyTrailingNavItems(_ items: [UIBarButtonItem], animated: Bool) {
@@ -1199,8 +1194,8 @@ final class SnapFeedViewController: UIViewController {
         }
         navigationItem.rightBarButtonItems = restingTrailingItems()
 
-        // The comments exit, built once and held: it takes the FOOTER's
-        // trailing bubble whenever a media post's comments are open.
+        // The comments exit, built once and held: it takes the TRAILING nav
+        // slot whenever a media post's comments are open.
         //
         // UNTINTED, and now for a better reason than before. It carried
         // `.systemRed` when it sat in a capsule beside three controls that act
@@ -1215,7 +1210,9 @@ final class SnapFeedViewController: UIViewController {
         // out #06123D against a request for red). Baking the colour into the
         // image with `.alwaysOriginal` does defeat it, at the cost of resolving
         // the dynamic colour once at build time.
-        let close = SnapNavControls.makeToolbarActionButton(systemName: "xmark")
+        // A NAV control, not a toolbar one: it lives in the bar at the top of
+        // the screen now, and the two sizes are different by design.
+        let close = SnapNavControls.makeNavActionButton(systemName: "xmark")
         close.accessibilityLabel = "Close comments"
         close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
         closeCommentsItem = UIBarButtonItem(customView: close)

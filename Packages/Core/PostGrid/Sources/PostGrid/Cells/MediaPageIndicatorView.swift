@@ -251,24 +251,6 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         }
     }
 
-    /// ⚠️ THE PAGE YOU ARE ON IS WHERE THE DRAG STARTS FROM, wherever the
-    /// finger lands.
-    ///
-    /// The touch used to be read ABSOLUTELY — the strip divided into as many
-    /// bands as there are pages, and wherever you pressed is the page you got.
-    /// Which meant putting a finger on the middle of the chip teleported a
-    /// twelve-page post to page six before the drag had moved at all. The chip
-    /// looked like a scrubber and behaved like a row of targets.
-    ///
-    /// So the touch-down point is an ORIGIN, not a coordinate: it pins the
-    /// current page, and only movement from there asks for anything. Nothing
-    /// jumps, and the dots track the finger.
-    private func anchor(at x: CGFloat) {
-        scrubAnchorX = x
-        scrubAnchorPage = currentPage
-        lastRequestedPage = currentPage
-    }
-
     /// One dot's slot per page, which is what makes the gesture legible: the
     /// mark advances by exactly the distance between two dots, so the finger
     /// and the strip move at the same rate.
@@ -280,29 +262,16 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// never what is reachable.
     static var pointsPerPage: CGFloat { dotDiameter + dotSpacing }
 
-    private var scrubAnchorX: CGFloat = 0
-    private var scrubAnchorPage = 0
-    private var lastRequestedPage: Int?
+    /// The arithmetic itself, shared with the post screen's full-width bar —
+    /// see `PageScrubber`, which carries the reasoning that used to live here.
+    private var scrubber = PageScrubber(pointsPerPage: MediaPageIndicatorView.pointsPerPage)
+
+    private func anchor(at x: CGFloat) {
+        scrubber.begin(atX: x, page: currentPage)
+    }
 
     private func requestPage(draggedTo x: CGFloat) {
-        let travelled = Int(((x - scrubAnchorX) / Self.pointsPerPage).rounded())
-        let raw = scrubAnchorPage + travelled
-        let page = min(max(raw, 0), pageCount - 1)
-        // ⚠️ RE-ANCHOR AT THE ENDS, or the gesture goes numb.
-        //
-        // Drag twenty pages past the last one and `raw` is twenty out of range.
-        // Without this the finger would have to travel all twenty back before
-        // the strip moved again — the control would feel stuck exactly when the
-        // viewer is trying to correct an overshoot. Pinning the anchor to the
-        // edge means the way back responds on the first slot.
-        if raw != page {
-            scrubAnchorPage = page
-            scrubAnchorX = x
-        }
-        // Only when it CHANGES: `.changed` fires on every touch move, and the
-        // host's answer to a page request is to scroll a carousel.
-        guard page != lastRequestedPage else { return }
-        lastRequestedPage = page
+        guard let page = scrubber.page(draggedTo: x, pageCount: pageCount) else { return }
         onPageRequested?(page)
     }
 
@@ -544,39 +513,16 @@ final class PageDotsView: UIView {
         return min(count, max(fitted, minimumVisibleDots))
     }
 
-    /// The slots the mark is allowed to occupy — one in from each end.
-    ///
-    /// ⚠️ THE MARK WALKS; THE WINDOW ONLY FOLLOWS WHEN IT HAS TO.
-    ///
-    /// Recomputing the window from the current page alone gives the mark a
-    /// FIXED slot, and then the whole row slides under it on every page change
-    /// — so the one thing actually happening, the viewer moving along the run,
-    /// is the one thing the indicator does not show. Worse when the direction
-    /// changes: the fixed slot moves from one side of the middle to the other,
-    /// so a single page back jumped the row by TWO. Reported exactly that way,
-    /// as the mark landing on the second dot where the third was expected.
-    ///
-    /// So the window is KEPT and only pushed. The mark moves one dot per page
-    /// until it reaches the slot one in from the end it is heading for, and
-    /// from then on the row scrolls under it — which is where "fourth of five
-    /// going forward, second going back" comes from: it is the STEADY STATE of
-    /// travelling in one direction, not a rule applied per page.
-    ///
-    /// Both bounds collapse gracefully on a narrow chip: with three dots the
-    /// mark holds the middle, with two the trailing one, with one there is
-    /// nowhere to walk.
+    /// The window's rule, which lives in `PageWindow` now — the post screen's
+    /// segment bar draws the same one, and it is stateful enough that two
+    /// copies would agree only until one was touched. These two names stay so
+    /// the dots' own tests and call sites keep reading as dots.
     static func slotBounds(visible: Int) -> (lowest: Int, highest: Int) {
-        let lowest = min(1, max(visible - 1, 0))
-        return (lowest, max(visible - 2, lowest))
+        PageWindow.slotBounds(visible: visible)
     }
 
-    /// The first dot of the window: the previous one, moved as little as the
-    /// mark's bounds allow, and never off either end of the run.
     static func windowStart(current: Int, visible: Int, count: Int, from previous: Int) -> Int {
-        guard count > visible else { return 0 }
-        let bounds = slotBounds(visible: visible)
-        let pushed = min(max(previous, current - bounds.highest), current - bounds.lowest)
-        return min(max(pushed, 0), count - visible)
+        PageWindow.start(current: current, visible: visible, count: count, from: previous)
     }
 
     /// How small an edge dot goes when the run continues past it.

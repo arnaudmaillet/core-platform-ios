@@ -267,15 +267,13 @@ struct SnapShortcutRailViewTests {
         // No bare effect view in the overlap zone — the frosted chip that used
         // to sit there is gone and must not come back.
         //
-        // The media page indicator is excluded by TYPE rather than by counting:
-        // it is a `UIVisualEffectView` subclass, it lives above the ticker
-        // rather than in the overlap, and it is hidden for every post that is
-        // not a collection. Widening the exclusion to "any effect view" would
-        // have retired the assertion instead of narrowing it.
-        #expect(chrome.subviews
-            .compactMap { $0 as? UIVisualEffectView }
-            .filter { !($0 is MediaPageIndicatorView) }
-            .isEmpty)
+        // ⚠️ The exclusion this used to carry is gone with its subject: the
+        // page indicator was a `UIVisualEffectView` subclass floating above the
+        // ticker, and it is a plain strip under the caption now
+        // (`SnapMediaPageBarView`). So the assertion is the flat one again —
+        // NO effect view in the chrome at all — which is stronger than the
+        // filtered version it replaces.
+        #expect(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.isEmpty)
         #expect(compose.frame.minY == ticker.frame.minY)
         #expect(abs(compose.frame.maxY - ticker.frame.maxY) < 0.01)
         #expect(abs(compose.frame.maxX - rail.frame.maxX) < 0.01)

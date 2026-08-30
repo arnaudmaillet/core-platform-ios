@@ -233,14 +233,19 @@ struct BoostControlTests {
         #expect(resting[1].customView == nil) // the fixed space
         #expect(resting[2].customView is WalletBadgeButton)
 
-        // ⚠️ AND THE ENGAGEMENT DOES NOT CHANGE THIS RUN AT ALL. The sort used
-        // to join it — first inboard of the author, then outboard of the
-        // badge — and neither read: it is a control over the thread, not a fact
-        // about the post. It sits beside the back arrow now, so the trailing
-        // end stays [🪙 balance] [author] whatever the screen is doing.
+        // ⚠️ THE BADGE HOLDS ITS PLACE THROUGH THE ENGAGEMENT; the OUTERMOST
+        // item is what changes. The sort used to join this run — first inboard
+        // of the author, then outboard of the badge — and neither read: it is a
+        // control over the thread, not a fact about the post, and it sits
+        // beside the back arrow now. What does belong here is the ✕, which
+        // takes the author's slot while a media post's thread is open: the
+        // balance is still one in from the edge, whatever is at the edge.
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         let engaged = feed.navigationItem.rightBarButtonItems ?? []
-        #expect(engaged == resting)
+        #expect(engaged.count == 3)
+        #expect((engaged[0].customView as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(engaged[1] == resting[1])   // the same fixed space
+        #expect(engaged[2] == resting[2])   // …and the same badge
         #expect(engaged.contains { $0.customView is SnapCommentSortButton } == false)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)

@@ -895,3 +895,168 @@ struct CarouselChipsAreFixedTests {
         #expect(chips[1].minX - chips[0].maxX > gap + 1)
     }
 }
+
+
+/// **A TAP NOBODY IS LISTENING TO MUST NOT RECOGNIZE.**
+///
+/// ⚠️ Not tidiness — recognition is exclusive. A recognizer that wins PREVENTS
+/// the ones it does not recognize simultaneously with, ancestors included, and
+/// this one sits nearer the touch than anything its host can install. So on a
+/// screen that never set `onTapped` it was winning every tap in order to run an
+/// empty closure, and the host's own gesture never fired.
+///
+/// That is the whole of a defect that looked like two: the post screen's
+/// tap-to-pause worked on a single clip and did nothing on a gallery. Same
+/// cell, same recognizer, same handler — the only difference was a carousel in
+/// the touch path with no listener behind its tap.
+///
+/// `cancelsTouchesInView = false` does not cover this. It governs delivery to
+/// VIEWS; prevention is the other channel, and it is the one that bit.
+@MainActor
+struct CarouselTapArbitrationTests {
+    private func carousel(style: MediaCarouselView.Style) -> MediaCarouselView {
+        let view = MediaCarouselView(style: style)
+        view.frame = CGRect(x: 0, y: 0, width: 340, height: 200)
+        view.configure(
+            with: [
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://a"), aspectRatio: 1.78),
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://b"), aspectRatio: 1.78)
+            ],
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// The post screen's carousel: full-bleed pages under a page that owns its
+    /// own tap. Nothing is listening here, so the tap stands down.
+    @Test func aPageCarouselWithNoListenerYieldsTheTap() {
+        #expect(carousel(style: .page).tapHasAListener() == false)
+    }
+
+    /// And the card's, where the tap is the only way the post opens — that one
+    /// keeps every touch it can get.
+    @Test func aCardCarouselWithAListenerKeepsTheTap() {
+        let view = carousel(style: .card)
+        view.onTapped = {}
+        #expect(view.tapHasAListener())
+    }
+
+    /// ⚠️ THE ANSWER TRACKS THE LISTENER, not the style. A `.page` carousel
+    /// whose host does want the tap gets it, and a `.card` one whose host let
+    /// go stops taking it — the rule is about who is listening, and a rule
+    /// written against the style would be right by coincidence today and wrong
+    /// the first time a screen changed its mind.
+    @Test func theRuleFollowsTheListenerAndNotTheStyle() {
+        let page = carousel(style: .page)
+        page.onTapped = {}
+        #expect(page.tapHasAListener())
+
+        let card = carousel(style: .card)
+        card.onTapped = {}
+        card.onTapped = nil
+        #expect(card.tapHasAListener() == false)
+    }
+}
+
+
+/// **THE STOPPED MARK BELONGS TO THE PICTURE, NOT TO THE SCREEN.**
+///
+/// A carousel's pages each carry their own clip and their own playhead, so each
+/// carries its own answer to "is this one stopped". Centred on the screen the
+/// mark belonged to nothing: stopping page one and swiping left left a play
+/// triangle hanging over page two, which was playing.
+///
+/// A page is what scrolls, so a page is what holds it — no offset to follow, no
+/// second thing to keep in step.
+@MainActor
+struct CarouselPausedMarkTests {
+    private func carousel(pages: Int = 3) -> MediaCarouselView {
+        let view = MediaCarouselView(style: .page)
+        view.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+        view.configure(
+            with: (0..<pages).map {
+                GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://\($0)"), aspectRatio: 1)
+            },
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// The claim, stated as geometry: the mark moves with its page when the
+    /// carousel does. A screen-anchored one would sit still.
+    @Test func aPagesMarkTravelsWithThePage() throws {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 0)
+        let mark = try #require(view.visiblePausedMark(onPage: 0))
+        let atRest = mark.convert(mark.bounds, to: view)
+        #expect(abs(atRest.midX - view.bounds.midX) < 1)
+
+        view.setPage(1, animated: false)
+        view.layoutIfNeeded()
+
+        let afterTheSwipe = mark.convert(mark.bounds, to: view)
+        #expect(afterTheSwipe.midX < atRest.midX - view.bounds.width / 2,
+                Comment(rawValue: "the mark stayed on screen: \(afterTheSwipe.midX) vs \(atRest.midX)"))
+    }
+
+    /// And a page answers only for itself — the mark is not a property of the
+    /// carousel that the pages happen to share.
+    @Test func eachPageAnswersForItsOwnMark() {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 0)
+
+        #expect(view.visiblePausedMark(onPage: 0) != nil)
+        #expect(view.visiblePausedMark(onPage: 1) == nil)
+        #expect(view.visiblePausedMark(onPage: 2) == nil)
+    }
+
+    /// ⚠️ AND IT STAYS OVER THE PICTURE. A surface hosted after the mark was
+    /// put up would otherwise cover it — the page adds playback surfaces above
+    /// its cover, which is above where the mark first landed.
+    @Test func theMarkStaysAboveAPictureHostedAfterIt() throws {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 0)
+        let mark = try #require(view.visiblePausedMark(onPage: 0))
+        let page = try #require(mark.superview)
+
+        let surface = UIView()
+        view.host(surface, onPage: 0)
+
+        let marks = try #require(page.subviews.firstIndex(of: mark))
+        let hosted = try #require(page.subviews.firstIndex(of: surface))
+        #expect(marks > hosted)
+    }
+
+    /// ⚠️ AND IT GOES WHEN ITS PAGE LEAVES THE BOX. Riding out with the page is
+    /// what makes the mark belong to the picture; STAYING on a page nobody can
+    /// see is bookkeeping, and this particular bookkeeping comes back wrong —
+    /// by then the page is paused because the carousel pauses what it leaves,
+    /// not because anyone chose it.
+    @Test func aMarkRidesOutWithItsPageAndThenGoes() {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 0)
+
+        // Half way through the drag: page one is still half on screen, and so
+        // is its mark.
+        view.debugScroll(toOffsetX: view.bounds.width / 2)
+        #expect(view.visiblePausedMark(onPage: 0) != nil)
+
+        // Fully off, and it is gone.
+        view.debugScroll(toOffsetX: view.bounds.width)
+        #expect(view.visiblePausedMark(onPage: 0) == nil)
+    }
+
+    /// Taking it down leaves nothing to answer with — and asking a page that
+    /// never wore one mints no view at all.
+    @Test func aPageWithoutAMarkHasNothingToShow() {
+        let view = carousel()
+        view.setPausedMark(true, onPage: 1)
+        view.setPausedMark(false, onPage: 1)
+        #expect(view.visiblePausedMark(onPage: 1) == nil)
+
+        view.setPausedMark(false, onPage: 2)
+        #expect(view.visiblePausedMark(onPage: 2) == nil)
+    }
+}

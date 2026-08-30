@@ -479,7 +479,7 @@ public final class VideoPlaybackController {
     }
 
     public func isAdvancing(in view: VideoRenderView) -> Bool {
-        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        guard let player = watchedPlayer(in: view) else { return false }
         return player.timeControlStatus != .paused
     }
 
@@ -526,7 +526,7 @@ public final class VideoPlaybackController {
     /// Returns whether there was a player to move.
     @discardableResult
     public func setPaused(_ paused: Bool, in view: VideoRenderView) -> Bool {
-        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        guard let player = watchedPlayer(in: view) else { return false }
         if paused {
             // ⚠️ WHERE THE PICTURE WAS, remembered — because an adaptive stream
             // does not necessarily come back to it.
@@ -577,12 +577,113 @@ public final class VideoPlaybackController {
         return true
     }
 
+    /// Where the clip `view` is drawing has got to, as a fraction of its
+    /// length, with the length in seconds beside it.
+    ///
+    /// ⚠️ NIL IS AN ANSWER, and the caller must draw it as one. There is no
+    /// playhead when there is no player, and none worth reporting while the
+    /// length is unknown — a stream still resolving, or a live one that has no
+    /// end at all. A bar that draws zero for those is a bar that says "at the
+    /// beginning" when the truth is "not yet known", which is the reading a
+    /// viewer will act on.
+    ///
+    /// Asked of the WATCHED player, so a page that joined a grid tile's clip
+    /// answers about the picture in front of the viewer — see `watchedPlayer`.
+    public func playhead(in view: VideoRenderView) -> (fraction: Double, seconds: Double)? {
+        guard let player = watchedPlayer(in: view), let item = player.currentItem else { return nil }
+        let duration = item.duration.seconds
+        guard duration.isFinite, duration > 0 else { return nil }
+        let time = item.currentTime().seconds
+        guard time.isFinite else { return nil }
+        return (min(max(time / duration, 0), 1), duration)
+    }
+
+    /// A still from the clip `view` is drawing, at `fraction` of its length —
+    /// the picture a scrubber shows above the thumb.
+    ///
+    /// ⚠️ BEST EFFORT, AND NIL IS ORDINARY. Not every asset will give up a
+    /// frame on demand: a stream may refuse outright, and one that obliges may
+    /// take longer than the thumb waits. The caller draws nil as "no picture
+    /// yet", never as an error — the time beside it is the part that always
+    /// works.
+    ///
+    /// ⚠️ TOLERANT BY HALF A SECOND, for the reason the seek is: an exact frame
+    /// means decoding forward from the nearest keyframe, and a scrubber asks
+    /// again before that finishes. What the viewer is reading is roughly where
+    /// they are, and the roughness is invisible at the size this is drawn.
+    public func previewFrame(
+        atFraction fraction: Double, in view: VideoRenderView, maximumWidth: CGFloat
+    ) async -> CGImage? {
+        guard let player = watchedPlayer(in: view), let item = player.currentItem else { return nil }
+        let duration = item.duration.seconds
+        guard duration.isFinite, duration > 0 else { return nil }
+        let generator = frameGenerator(for: item.asset)
+        generator.maximumSize = CGSize(width: maximumWidth * 2, height: 0)
+        let seconds = duration * min(max(fraction, 0), 1)
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        // ⚠️ The callback form, not `image(at:)`. The async one would carry the
+        // generator across an isolation boundary — it is not `Sendable`, and
+        // the compiler is right to refuse. Here the generator is only touched
+        // where it lives and the frame comes back through the continuation,
+        // which is the shape `VideoExporter.posterImage` already uses.
+        return try? await withCheckedThrowingContinuation { continuation in
+            generator.generateCGImageAsynchronously(for: time) { image, _, error in
+                if let image {
+                    continuation.resume(returning: image)
+                } else {
+                    continuation.resume(throwing: error ?? CancellationError())
+                }
+            }
+        }
+    }
+
+    /// One generator per asset, kept for the length of a scrub rather than
+    /// built per frame: a generator carries the reader it has already opened,
+    /// and building one per request pays for that open thirty times a second.
+    private func frameGenerator(for asset: AVAsset) -> AVAssetImageGenerator {
+        let key = ObjectIdentifier(asset)
+        if let existing = frameGenerators[key] { return existing }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
+        // Bounded: a post's clips are few, and an entry costs a reader.
+        if frameGenerators.count >= 4 {
+            frameGenerators.removeAll()
+        }
+        frameGenerators[key] = generator
+        return generator
+    }
+
+    private var frameGenerators: [ObjectIdentifier: AVAssetImageGenerator] = [:]
+
+    /// Moves the playhead of the clip `view` is drawing.
+    ///
+    /// ⚠️ TOLERANT, not exact. A finger on a scrubber asks for a new position
+    /// thirty times a second and every exact seek is a decode from the nearest
+    /// keyframe forward: asked exactly, the picture falls behind the thumb and
+    /// then catches up in lurches. A quarter-second either way is inside what
+    /// the eye reads as "there", and it lets the player answer from frames it
+    /// already has.
+    public func seek(toFraction fraction: Double, in view: VideoRenderView) {
+        guard let player = watchedPlayer(in: view), let item = player.currentItem else { return }
+        let duration = item.duration.seconds
+        guard duration.isFinite, duration > 0 else { return }
+        let seconds = duration * min(max(fraction, 0), 1)
+        let tolerance = CMTime(seconds: 0.25, preferredTimescale: 600)
+        player.seek(
+            to: CMTime(seconds: seconds, preferredTimescale: 600),
+            toleranceBefore: tolerance, toleranceAfter: tolerance
+        )
+    }
+
     /// Toggles play/pause for the player bound to `view` (a user tapping the
     /// full-screen cell). Returns the new paused state. No-op returning `false`
     /// when no player is active for the view (e.g. an image/text cell).
     @discardableResult
     public func togglePlayback(in view: VideoRenderView) -> Bool {
-        guard let player = activePlayers[ObjectIdentifier(view)] else { return false }
+        guard let player = watchedPlayer(in: view) else { return false }
         if player.timeControlStatus == .paused {
             player.play()
             return false
@@ -784,6 +885,26 @@ public final class VideoPlaybackController {
         }?.key
         guard let key else { return nil }
         return activePlayers[key]
+    }
+
+    /// The player `view` is DRAWING — its own loan first, and failing that the
+    /// playback it joined.
+    ///
+    /// ⚠️ The pool answers two different questions about a surface, and this is
+    /// the viewer's one. `hasPlayer(in:)` is the other: who holds the loan,
+    /// whose `stop` retires the player, who the pool will bill. Ownership is
+    /// the right basis for lifetime decisions and the wrong one for "pause what
+    /// I am looking at" — a page that joined a grid tile's clip (every hero
+    /// landing) owns nothing, and asking the loan table about it answered
+    /// "nothing is playing here" while the viewer watched it move. The controls
+    /// returned false and did nothing, which is a defect with no error in it:
+    /// reported as the post screen's tap-to-pause being dead.
+    ///
+    /// Reads the binding off the SURFACE (`boundPlayer`) rather than looking a
+    /// URL up in the pool, because two surfaces can carry the same asset and
+    /// only the one in front of the viewer may be stopped.
+    private func watchedPlayer(in view: VideoRenderView) -> AVPlayer? {
+        activePlayers[ObjectIdentifier(view)] ?? view.boundPlayer
     }
 
     private func activePlayer(playing mediaURL: URL) -> AVPlayer? {

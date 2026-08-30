@@ -50,6 +50,9 @@ final class SnapMediaCardView: UIView {
         imageView.clipsToBounds = true
         imageView.pin(to: self)
         renderView.pin(to: self)
+        // Last, so it starts above both pictures — and hidden, so it costs a
+        // laid-out view and nothing else until a viewer stops something.
+        singleMark.pin(to: self)
     }
 
     /// Re-installs the video surface after a hero flight borrowed it.
@@ -170,7 +173,25 @@ final class SnapMediaCardView: UIView {
     /// waited must not create it.
     private var isSpinning = false
 
+    /// Which PAGE of a collection is announcing a wait, when one is.
+    ///
+    /// ⚠️ THE WAIT BELONGS TO A MEDIA, NOT TO THE POST — the same rule the
+    /// stopped mark already follows, and the play/pause glyph with it. Centred
+    /// on the card, the spinner stayed put while the pictures moved under it:
+    /// swiping off a page that was still loading left its announcement hanging
+    /// over the picture that had already arrived, which says the opposite of
+    /// the truth on both pages at once. On the page, it scrolls away with the
+    /// media it is about.
+    ///
+    /// A single photograph or clip has no pages to belong to, so that case
+    /// keeps the card's own spinner and `isSpinning` answers for it.
+    private var loadingPage: Int?
+
     func setLoading(_ loading: Bool) {
+        if showsCollection {
+            setCollectionLoading(loading)
+            return
+        }
         guard loading != isSpinning else { return }
         isSpinning = loading
         if loading {
@@ -185,10 +206,43 @@ final class SnapMediaCardView: UIView {
         logMediaState(loading ? "setLoading(true)" : "setLoading(false)")
     }
 
+    /// The wait on a collection, which is a wait on ONE of its pages.
+    ///
+    /// ⚠️ THE OLD PAGE'S SPINNER COMES DOWN when the wait moves. The host
+    /// decides this for the page in front of the viewer and for no other, so a
+    /// spinner left on a page nobody is deciding for is bookkeeping that
+    /// outlives its subject — the fault `retirePausedMarksOffScreen` is written
+    /// against, one file over. Riding out of the box is right; staying lit out
+    /// there is not.
+    private func setCollectionLoading(_ loading: Bool) {
+        let page = currentPage
+        guard loadingPage != (loading ? page : nil) else { return }
+        if let previous = loadingPage, previous != page || !loading {
+            carousel?.setLoading(false, onPage: previous)
+        }
+        loadingPage = loading ? page : nil
+        if loading { carousel?.setLoading(true, onPage: page) }
+        logMediaState(loading ? "setLoading(true, page: \(page))" : "setLoading(false)")
+    }
+
     /// Read by `SnapMediaLoaderSpecTests`.
-    var isShowingLoader: Bool { isSpinning }
+    var isShowingLoader: Bool { showsCollection ? loadingPage != nil : isSpinning }
+
+    #if DEBUG
+    /// WHERE the wait is drawn — the view itself, so a spec can prove it rides
+    /// its page rather than the card.
+    func visibleLoader(onPage page: Int) -> UIView? {
+        showsCollection
+            ? carousel?.visibleLoader(onPage: page)
+            : (isSpinning ? spinner : nil)
+    }
+    #endif
 
     // MARK: - Collections
+
+    /// Fired continuously as a collection scrolls, in fractional pages — what
+    /// the page strip draws from. See `MediaCarouselView.onScrollPosition`.
+    var onScrollPosition: ((CGFloat) -> Void)?
 
     /// Fired as the viewer pages a collection, so the chrome can move its
     /// indicator. The card knows where the pages are; it does not know where the
@@ -210,6 +264,10 @@ final class SnapMediaCardView: UIView {
         let carousel = carousel ?? makeCarousel()
         carousel.isHidden = false
         carousel.configure(with: pages, imagePipeline: imagePipeline)
+        // A recycled carousel keeps whatever the last post left lit, and these
+        // are different pictures entirely.
+        carousel.clearLoaders()
+        loadingPage = nil
         imageView.isHidden = true
         renderView.isHidden = true
         #if DEBUG
@@ -224,6 +282,9 @@ final class SnapMediaCardView: UIView {
     func hideCollection() {
         carousel?.isHidden = true
         carousel?.cancelPendingWork()
+        // The wait belonged to a page, and there are no pages now.
+        carousel?.clearLoaders()
+        loadingPage = nil
         // Every page's claim on a surface ends with the collection. The players
         // behind them are the caller's to stop — see the call site, which
         // releases and stops before asking for this.
@@ -238,6 +299,52 @@ final class SnapMediaCardView: UIView {
         if renderView.superview !== self {
             renderView.removeFromSuperview()
             renderView.pin(to: self)
+        }
+    }
+
+    /// The stopped mark for a SINGLE attachment — one picture, one mark.
+    ///
+    /// A collection's marks live on its pages (`MediaCarouselView`), because
+    /// there the mark has to travel with the picture it belongs to. Here the
+    /// picture is the card, so the card holds it.
+    /// ⚠️ Built with the card, not on first use. A mark minted at the moment
+    /// of the tap has no frame until the next layout pass, so it crossfades in
+    /// at zero size and jumps — a first-appearance-only defect, which is the
+    /// kind a spec catches once and a viewer meets every time.
+    private let singleMark = PausedClipMarkView()
+
+    /// Shows or hides the mark on the picture the viewer is looking at.
+    func setPausedMark(_ visible: Bool) {
+        if showsCollection {
+            carousel?.setPausedMark(visible, onPage: currentPage)
+        } else {
+            if visible { bringSubviewToFront(singleMark) }
+            singleMark.setVisible(visible)
+        }
+    }
+
+    /// Whether the picture in front of the viewer wears the mark.
+    var showsPausedMark: Bool { visiblePausedMark != nil }
+
+    /// The mark being drawn on the current picture, if any.
+    var visiblePausedMark: UIView? {
+        showsCollection
+            ? carousel?.visiblePausedMark(onPage: currentPage)
+            : (singleMark.isShowing ? singleMark : nil)
+    }
+
+    /// The mark a given PAGE is wearing, whether or not the viewer is on it —
+    /// the question a spec asks to prove the mark stayed with its page.
+    func visiblePausedMark(onPage page: Int) -> UIView? {
+        showsCollection ? carousel?.visiblePausedMark(onPage: page) : visiblePausedMark
+    }
+
+    /// Takes every mark down — the post's pictures are all playing, or the card
+    /// is being handed a different post entirely.
+    func clearPausedMarks() {
+        singleMark.setVisible(false, animated: false)
+        for page in 0..<max(0, pageCount) {
+            carousel?.setPausedMark(false, onPage: page)
         }
     }
 
@@ -420,12 +527,29 @@ final class SnapMediaCardView: UIView {
     /// Moves to a page, when the indicator asks. A no-op for a post with no
     /// collection, which is the honest answer rather than a crash.
     func setPage(_ index: Int, animated: Bool = true) {
+        #if DEBUG
+        debugPageRequests.append((page: index, animated: animated))
+        #endif
         carousel?.setPage(index, animated: animated)
     }
+
+    #if DEBUG
+    /// The last page instruction and how it was to be MADE.
+    ///
+    /// ⚠️ The decision, not the motion, and the difference is not a shortcut: a
+    /// scroll view with no window applies an animated offset immediately, so a
+    /// spec that watched the pages would find a turn and a jump identical and
+    /// pass whichever rule it was given. What is worth pinning here is the
+    /// choice the cell makes; the easing is UIKit's.
+    private(set) var debugPageRequests: [(page: Int, animated: Bool)] = []
+
+    func debugClearPageRequests() { debugPageRequests = [] }
+    #endif
 
     private func makeCarousel() -> MediaCarouselView {
         let view = MediaCarouselView(style: .page)
         view.onPageChanged = { [weak self] page in self?.onPageChanged?(page) }
+        view.onScrollPosition = { [weak self] position in self?.onScrollPosition?(position) }
         // Below nothing — it is the media, and everything else on the page is
         // layered over the card by the cell.
         insertSubview(view, aboveSubview: imageView)

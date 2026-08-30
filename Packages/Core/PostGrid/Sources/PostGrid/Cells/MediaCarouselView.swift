@@ -31,7 +31,7 @@ import UIKit
 /// every width change; the package's layout note asks hot cells to place their
 /// subviews in `layoutSubviews` from precomputed sizes, and a carousel of image
 /// views is exactly that case.
-public final class MediaCarouselView: UIView, UIScrollViewDelegate {
+public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     /// Where this carousel is: inside a card, or filling a page.
     ///
     /// ONE carousel with two styles rather than two carousels. The snapping, the
@@ -86,6 +86,21 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// A tap recognizer here, forwarded by the cell to whatever opens the post,
     /// rather than a hole in `hitTest`: the pages still have to receive the pan.
     public var onTapped: (() -> Void)?
+
+    /// The recognizer behind `onTapped`, kept so the delegate below can tell it
+    /// apart from the scroll view's own.
+    private weak var tapRecognizer: UITapGestureRecognizer?
+
+    /// Where the box is BETWEEN pages, as a fraction: 2.37 is "a third of the
+    /// way from page two to page three".
+    ///
+    /// ⚠️ The continuous twin of `onPageChanged`, and both are needed. A page
+    /// number is what a host acts on — load these, play that one — and a
+    /// fraction is what a host DRAWS from: the strip under the post's caption
+    /// reflows across the whole gesture, so a signal that only speaks at the
+    /// crossing would leave it still until the page had already changed.
+    public var onScrollPosition: ((CGFloat) -> Void)?
+
 
     /// Fired whenever the page under the box changes, so the host can move an
     /// indicator that lives OUTSIDE this view — see `PostGridListRowCell`, where
@@ -156,6 +171,66 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     /// Which page is holding `view`, nil when none is.
     public func page(hosting view: UIView) -> Int? {
         pageViews.firstIndex { $0.hosts(view) }
+    }
+
+    /// Shows or hides the stopped mark on ONE page.
+    ///
+    /// Addressed by page rather than "the current one" because the two are not
+    /// the same question the moment a swipe is in flight: the viewer stops the
+    /// page they are looking at, and by the time anything is reconciled the
+    /// page under the finger may already be the next one.
+    public func setPausedMark(_ visible: Bool, onPage index: Int) {
+        guard pageViews.indices.contains(index) else { return }
+        pageViews[index].setPausedMarkVisible(visible)
+    }
+
+    /// Takes down the mark on every page that has left the box.
+    ///
+    /// ⚠️ A mark is a receipt for a picture the viewer is LOOKING AT. Riding
+    /// its page out of the screen is right — that is what makes it belong to
+    /// the picture — but staying on a page nobody can see is bookkeeping, and
+    /// bookkeeping that outlives its subject comes back wrong: the page is
+    /// paused now because the carousel pauses what it leaves, not because
+    /// anyone chose it, and arriving there again starts it anyway.
+    ///
+    /// Unanimated on purpose: there is nothing on screen to crossfade.
+    private func retirePausedMarksOffScreen() {
+        let visible = CGRect(origin: scrollView.contentOffset, size: scrollView.bounds.size)
+        for page in pageViews where page.visiblePausedMark != nil && !page.frame.intersects(visible) {
+            page.setPausedMarkVisible(false, animated: false)
+        }
+    }
+
+    /// The mark on `index` while it is showing — the view itself, so a caller
+    /// can ask where it is drawn rather than trust that it moved.
+    public func visiblePausedMark(onPage index: Int) -> UIView? {
+        pageViews.indices.contains(index) ? pageViews[index].visiblePausedMark : nil
+    }
+
+    /// Shows or hides the wait on ONE page.
+    ///
+    /// Addressed by page for the reason the mark is: the picture that is
+    /// waiting and the picture in front of the viewer are the same question
+    /// only while nothing is moving.
+    public func setLoading(_ visible: Bool, onPage index: Int) {
+        guard pageViews.indices.contains(index) else { return }
+        pageViews[index].setLoadingVisible(visible)
+    }
+
+    /// Whether `index` is announcing a wait.
+    public func isLoading(onPage index: Int) -> Bool {
+        pageViews.indices.contains(index) && pageViews[index].visibleLoader != nil
+    }
+
+    /// The spinner on `index` while it is up — the view itself, so a spec can
+    /// ask where it is drawn rather than trust that it travelled.
+    public func visibleLoader(onPage index: Int) -> UIView? {
+        pageViews.indices.contains(index) ? pageViews[index].visibleLoader : nil
+    }
+
+    /// Takes every wait down — the post is being handed a different one.
+    public func clearLoaders() {
+        for page in pageViews { page.setLoadingVisible(false) }
     }
 
     /// How many pages the carousel is showing.
@@ -257,8 +332,20 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         // A tap only fires when no drag happened, so it never competes with the
         // pan — and it does not consume the touch, so anything else listening
         // still hears it.
+        //
+        // ⚠️ `cancelsTouchesInView = false` IS NOT THE WHOLE OF "does not
+        // consume". It governs touch delivery to VIEWS; recognition is the
+        // other channel, and there a recognizer that wins PREVENTS the ones it
+        // does not recognize simultaneously with — including an ancestor's.
+        // This tap is nearer the touch than anything the host has, so it wins
+        // every time, and on a screen where nobody set `onTapped` it won in
+        // order to do nothing at all. That is how the post screen's
+        // tap-to-pause came to work on a single clip and never on a gallery:
+        // same cell, same recognizer, silently prevented by this one.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         tap.cancelsTouchesInView = false
+        tap.delegate = self
+        tapRecognizer = tap
         // On THIS view, not on the scroll view. `UIScrollView` overrides
         // `gestureRecognizerShouldBegin` for recognizers it does not own, and a
         // tap added there never fired — the card's photograph was untappable
@@ -375,6 +462,26 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
         onTapped?()
     }
 
+    /// Whether the tap has anybody to report to — the whole of its right to
+    /// recognize. A discrete recognizer is asked this before it recognizes, so
+    /// a `false` here fails it outright and leaves the touch to whoever else
+    /// wants it, which on the post screen is the page's own play/pause.
+    ///
+    /// Internal so the rule is unit-testable: recognition itself cannot be
+    /// driven from a test, and this is the decision that stands behind it.
+    func tapHasAListener() -> Bool { onTapped != nil }
+
+    /// ⚠️ In the class body, not an extension: this is an OVERRIDE of `UIView`'s
+    /// own hook as well as the delegate callback, and Swift takes overrides
+    /// only here. One implementation serves both, which is the point — the two
+    /// routes must not be able to answer differently.
+    public override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === tapRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        return tapHasAListener()
+    }
+
     /// How long a press must last before it is a hold rather than a tap.
     /// Matches the post screen's, so the gesture feels the same on both.
     public static let holdToPauseDuration: TimeInterval = 0.2
@@ -448,6 +555,15 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     private func offset(forPage index: Int) -> CGFloat {
         let maximum = max(scrollView.contentSize.width - bounds.width, 0)
         return min(CGFloat(index) * stride, maximum)
+    }
+
+    /// The box's position in pages, fractionally — clamped to the run, because
+    /// a rubber-banded overscroll is not a page and a strip drawn from it would
+    /// stretch off its own end.
+    public var scrollPosition: CGFloat {
+        guard stride > 0, pageViews.count > 1 else { return 0 }
+        let raw = scrollView.contentOffset.x / stride
+        return min(max(raw, 0), CGFloat(pageViews.count - 1))
     }
 
     private func page(nearest offset: CGFloat) -> Int {
@@ -556,9 +672,22 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate {
     public func debugScroll(toPage index: Int, animated: Bool = true) -> Bool {
         setPage(index, animated: animated)
     }
+
+    /// Scrolls to an arbitrary offset — the fractional positions a real drag
+    /// passes through and `setPage` cannot express, which is where "has this
+    /// page left the box yet" is actually decided.
+    func debugScroll(toOffsetX x: CGFloat) {
+        scrollView.contentOffset.x = x
+        scrollViewDidScroll(scrollView)
+    }
     #endif
 
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // Before the page-change guard below: a mark's page can leave the box
+        // without the RESOLVED page changing again (the drag that carries it
+        // out is the same one that already changed it).
+        retirePausedMarksOffScreen()
+        onScrollPosition?(scrollPosition)
         let resolved = page(nearest: scrollView.contentOffset.x)
         guard resolved != currentPage else { return }
         currentPage = resolved
@@ -627,6 +756,28 @@ final class CarouselPageView: UIView {
     /// The host's playback surface while this page is holding it.
     private weak var surface: UIView?
 
+    /// The mark this page wears while the viewer has its clip stopped.
+    ///
+    /// ⚠️ ON THE PAGE, so it travels with it. The mark used to be centred on
+    /// the SCREEN, one per post — which is a lie the moment a post has more
+    /// than one picture: swiping left carried a stopped page's mark onto the
+    /// page arriving, over a clip that was playing. A page is what scrolls, so
+    /// a page is what carries the answer.
+    ///
+    /// Minted on first use: most pages never wear one.
+    private var pausedMark: PausedClipMarkView?
+
+    /// The wait, ON THE PAGE, for the reason the mark is on it.
+    ///
+    /// A spinner centred on the POST says "something here is loading" and then
+    /// points at the wrong picture the moment a swipe carries an arrived one in
+    /// front of it — the page that is actually waiting has scrolled away and
+    /// left its announcement behind. What is waiting is a MEDIA, so the media's
+    /// page is what carries the answer, exactly as it carries its stopped mark.
+    ///
+    /// Minted on first use: most pages never wait long enough to show one.
+    private var loader: UIActivityIndicatorView?
+
     /// The surface this page is REALLY holding — both halves again, for the
     /// same reason `hosts(_:)` asks both: a weak reference outlives the view
     /// being taken away by a flight, and a page that answered from the
@@ -656,7 +807,55 @@ final class CarouselPageView: UIView {
         super.layoutSubviews()
         cover.frame = bounds
         surface?.frame = bounds
+        pausedMark?.frame = bounds
+        loader?.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
+
+    /// Shows or hides this page's stopped mark.
+    func setPausedMarkVisible(_ visible: Bool, animated: Bool = true) {
+        guard visible || pausedMark != nil else { return }
+        let mark = pausedMark ?? {
+            let view = PausedClipMarkView()
+            view.frame = bounds
+            addSubview(view)
+            pausedMark = view
+            return view
+        }()
+        // Above the picture, whichever picture this page is showing — a
+        // surface hosted after the mark would otherwise cover it.
+        bringSubviewToFront(mark)
+        mark.setVisible(visible, animated: animated)
+    }
+
+    /// The mark itself when it is showing, so a caller can ask WHERE it is
+    /// drawn — the whole claim being that it rides this page.
+    var visiblePausedMark: UIView? { pausedMark?.isShowing == true ? pausedMark : nil }
+
+    /// Shows or hides this page's wait.
+    func setLoadingVisible(_ visible: Bool) {
+        guard visible || loader != nil else { return }
+        let spinner = loader ?? {
+            let view = UIActivityIndicatorView(style: .medium)
+            // ⚠️ WHITE, not `.label`: the ground here is a photograph or black,
+            // never a theme, so a semantic colour would resolve against a
+            // background this view does not have. Same rule as the card's own.
+            view.color = .white
+            view.hidesWhenStopped = true
+            view.sizeToFit()
+            view.center = CGPoint(x: bounds.midX, y: bounds.midY)
+            addSubview(view)
+            loader = view
+            return view
+        }()
+        // Above the picture, whichever picture this page is showing — a surface
+        // hosted after the spinner would otherwise cover it.
+        bringSubviewToFront(spinner)
+        if visible { spinner.startAnimating() } else { spinner.stopAnimating() }
+    }
+
+    /// The spinner while it is up, so a caller can ask WHERE it is drawn rather
+    /// than trust that it moved.
+    var visibleLoader: UIView? { loader?.isAnimating == true ? loader : nil }
 
     func host(_ surface: UIView) {
         // ⚠️ IDENTITY IS NOT ENOUGH — ask whether it is actually here.
@@ -673,8 +872,10 @@ final class CarouselPageView: UIView {
         guard surface !== self.surface || surface.superview !== self else { return }
         self.surface = surface
         // Over the cover: the picture replaces the poster the moment it has a
-        // frame of its own, and nothing sits above it.
+        // frame of its own, and nothing sits above it — except the stopped
+        // mark, which is about the picture and has to stay on top of it.
         addSubview(surface)
+        if let pausedMark { bringSubviewToFront(pausedMark) }
         setNeedsLayout()
     }
 

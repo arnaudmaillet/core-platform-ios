@@ -37,7 +37,29 @@ final class SnapChromeView: UIView {
     private let commentTicker = SnapCommentTickerView()
     /// Which page of a COLLECTION the media is showing. Hidden for every post
     /// that has one piece of media, which is most of them.
-    private let mediaPageIndicator = MediaPageIndicatorView()
+    /// The page strip, at the bottom of the column and the full width of it.
+    ///
+    /// ⚠️ It used to be the card's CHIP of dots, floating over the photograph
+    /// just above the comment band. Two things were wrong with it there: a
+    /// five-dot window is a compromise made for a row that has counters to fit
+    /// beside it, and this screen has none — and a small target over the media
+    /// is in the one place the page also wants a tap to mean play/pause. Down
+    /// here it is a strip the width of the caption, in the band between the
+    /// caption and the bar, where a position is read rather than aimed at.
+    private let mediaPageBar = SnapMediaPageBarView()
+
+    /// The hair of space between the page strip and the toolbar under it.
+    static let pageBarToolbarGap: CGFloat = Spacing.xs
+
+    /// The card a thumb dragging a clip's bar points with — the frame it would
+    /// land on and the time it would land at. Frame-managed and out of the
+    /// layout entirely: it exists only during a gesture, it follows the thumb,
+    /// and nothing else on this screen may move because it appeared.
+    private let scrubPreview = SnapScrubPreviewView()
+
+    /// The clip's length, kept because the card's readout is a time and the
+    /// strip speaks in fractions.
+    private var clipSeconds: Double = 0
 
     /// The subtitle zone, directly above the band: a persistent pill of
     /// semantic comments, one at a time, with the count bubble leading it.
@@ -259,29 +281,40 @@ final class SnapChromeView: UIView {
             commentTicker.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md)
         }
 
-        // ⚠️ AFTER the ticker is in the hierarchy, not before. `constrain(in:)`
-        // is what adds a view, so a constraint minted against the ticker's
-        // anchors while it is still parentless throws "no common ancestor" at
-        // activation — which is a launch crash, not a layout warning.
-        // The media page indicator rides directly above the ticker: the two
-        // together are the page's bottom-left readout, and the band is the
-        // nearest thing with a settled vertical position — hanging the indicator
-        // off the caption instead would put a gap the ticker's presence changes.
+        // NOTE: nothing rides above the ticker any more. The page indicator
+        // used to — a chip of dots hung off the band's top edge — and it is the
+        // strip below the caption now (`mediaPageBar`), which is why this
+        // corner is one container shorter than it was.
         //
-        // Centred horizontally. It is the MEDIA's readout, and the column under
-        // it — ticker, caption — is text starting at the margin: a chip sharing
-        // that edge attaches itself to the first line of the caption rather than
-        // to the photograph it describes.
-        // ⚠️ AND NO GROUND UNDER IT, here as on the card. This chip used to
-        // wear the system's interactive glass — the one place on this screen a
-        // lens had a photograph to take its cue from — and it is now the dots
-        // alone on every surface. See `MediaPageIndicatorView.makeGround`.
-        mediaPageIndicator.isHidden = true
-        mediaPageIndicator.constrain(in: self) { parent in
-            mediaPageIndicator.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            mediaPageIndicator.bottomAnchor.constraint(
-                equalTo: commentTicker.topAnchor, constant: -Spacing.sm
+        // ⚠️ THE FULL WIDTH OF THE COLUMN, and the caption's own margins are
+        // what defines it: the strip is the pictures' index, the caption is
+        // what they are about, and two things stacked in one column read as
+        // one thing only if they share an edge.
+        //
+        // Pinned NEAR the bottom of the margins guide — the line the toolbar
+        // rests against — so it sits in the band between the caption and the
+        // bar without moving either. The caption keeps the position it has on
+        // every other format; a post with one picture simply has nothing here.
+        //
+        // ⚠️ AND IT STOPS SHORT OF THE LINE by a hair. Flush against the guide
+        // the strip and the toolbar's glass read as one stacked control, which
+        // is the one thing they are not: the strip is the pictures' index and
+        // the bar is what you can DO to the post. Four points is enough to say
+        // they are two things — less than the seam between two containers in
+        // the band above (md), because these two are closer kin than that.
+        scrubPreview.translatesAutoresizingMaskIntoConstraints = true
+        scrubPreview.frame = CGRect(origin: .zero, size: SnapScrubPreviewView.totalSize)
+        addSubview(scrubPreview)
+        mediaPageBar.onScrubPreview = { [weak self] preview in
+            self?.showScrubPreview(preview)
+        }
+        mediaPageBar.constrain(in: self) { parent in
+            mediaPageBar.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor)
+            mediaPageBar.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor)
+            mediaPageBar.bottomAnchor.constraint(
+                equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Self.pageBarToolbarGap
             )
+            mediaPageBar.heightAnchor.constraint(equalToConstant: SnapMediaPageBarView.thickness)
         }
 
 
@@ -746,26 +779,194 @@ final class SnapChromeView: UIView {
     /// How many media pages the post has, and which one is showing. A count
     /// below two hides the indicator — a readout for a single photograph is
     /// furniture answering a question nobody asked.
-    func setMediaPageCount(_ count: Int, current: Int) {
-        mediaPageIndicator.configure(count: count, current: current)
+    func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
+        mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
     }
+
+    /// Where the page's BOTTOM READOUT begins — the top of the comment band.
+    ///
+    /// The media's floor, and the boundary a tap on the picture stops at: below
+    /// this line the page is talking ABOUT the post (ticker, caption, page
+    /// strip, bar) and a touch belongs to whatever it lands on.
+    ///
+    /// ⚠️ Read off the band whether or not it is showing anything. The ticker's
+    /// box is reserved on every format — that is what makes this corner
+    /// format-agnostic (see `captionFloorGuide`) — so taking its position
+    /// rather than its visibility keeps the floor still on a post that has no
+    /// comments yet, and keeps it in the same place when the first one lands.
+    ///
+    /// ⚠️ AND IT IS THE SAME LINE ON EVERY FORMAT NOW. It used to rise for a
+    /// gallery, whose page dots hung above the band; the strip that replaced
+    /// them lives under the caption, well below this, so a collection's picture
+    /// is as tall as any other's.
+    var bottomReadoutTop: CGFloat { commentTicker.frame.minY }
+
+    #if DEBUG
+    /// The page strip and the caption, so a spec can state where the strip sits
+    /// in the column — and that its arrival moves nothing else.
+    var debugPageBarFrame: CGRect { mediaPageBar.frame }
+    var debugCaptionFrame: CGRect { captionLabel.frame }
+    var debugPageBar: SnapMediaPageBarView { mediaPageBar }
+    var debugScrubPreview: SnapScrubPreviewView { scrubPreview }
+    func debugScrubPreviewFrame() -> CGRect { scrubPreview.frame }
+    #endif
 
     /// Moves the mark as the viewer pages. Separate from the count because this
     /// runs on every scroll callback of a carousel under a finger.
     func setMediaPage(_ page: Int) {
-        mediaPageIndicator.setCurrent(page)
+        mediaPageBar.setCurrent(page)
     }
+
+    /// The carousel's position in fractional pages, straight through to the
+    /// strip: width and ink are read off it, so the strip reflows for the whole
+    /// gesture rather than at the crossing. See `SnapMediaPageBarView`.
+    func setMediaScrollPosition(_ position: CGFloat) {
+        mediaPageBar.setPosition(position)
+    }
+
+    /// How far through the clip the page is showing, when there is one whose
+    /// length is known — the strip draws it inside the segment it has grown
+    /// into a bar.
+    func setMediaPlayhead(_ fraction: Double?, seconds: Double = 0) {
+        clipSeconds = seconds
+        mediaPageBar.setPlayhead(fraction)
+    }
+
+    /// A frame the scrub card is pointing at. There is no "nothing new" here:
+    /// a decode that failed leaves the last frame standing — see
+    /// `SnapScrubPreviewView.setPicture`.
+    func setScrubPreviewPicture(_ image: CGImage) {
+        scrubPreview.setPicture(image)
+    }
+
+    /// Whether a frame is on its way, so the card can stand in for one it has
+    /// not got.
+    func setScrubPreviewLoading(_ loading: Bool) {
+        scrubPreview.setLoading(loading)
+    }
+
+    /// Asked for a frame at a moment in the clip, or told the gesture is over.
+    /// The CELL owns playback, so the request travels out.
+    var onScrubPreviewRequested: ((Double?) -> Void)?
+
+    /// Puts the card over the thumb and tells the host what to fetch.
+    ///
+    /// ⚠️ CLAMPED TO THE COLUMN, not to the screen: the card is a label on the
+    /// strip, and one that ran past the strip's own ends would point at nothing.
+    private func showScrubPreview(_ preview: (fraction: Double, x: CGFloat)?) {
+        guard let preview else {
+            scrubPreview.hide()
+            setScrubFocus(false)
+            onScrubPreviewRequested?(nil)
+            return
+        }
+        setScrubFocus(true)
+        let size = SnapScrubPreviewView.totalSize
+        let alongTheStrip = mediaPageBar.frame.minX + preview.x
+        let leftMost = mediaPageBar.frame.minX + size.width / 2
+        let rightMost = mediaPageBar.frame.maxX - size.width / 2
+        scrubPreview.frame = CGRect(
+            x: min(max(alongTheStrip, leftMost), rightMost) - size.width / 2,
+            y: mediaPageBar.frame.minY - size.height - Spacing.sm,
+            width: size.width, height: size.height
+        )
+        // ⚠️ ABOVE EVERYTHING, and re-stated on every show. The card is built
+        // with the strip, and the surfaces added after it — the shortcut wheel,
+        // the boost anchor, the subtitle zone, the comment empty state — are
+        // its own siblings, so a card added once sits UNDER the comment
+        // surfaces it is meant to point over. Reported exactly that way.
+        bringSubviewToFront(scrubPreview)
+        scrubPreview.show(fraction: preview.fraction, seconds: clipSeconds)
+        onScrubPreviewRequested?(preview.fraction)
+    }
+
+    // MARK: - The scrub's focus
+
+    /// Everything on the page that is ABOUT the post rather than part of the
+    /// instrument in the viewer's hand.
+    ///
+    /// ⚠️ THE STRIP AND ITS CARD ARE NOT IN HERE, and neither is the scrim.
+    /// The first two are what the thumb is holding; the third is not content
+    /// at all but the wash that keeps white legible over a photograph, and
+    /// taking it away would brighten the picture under the very thing the
+    /// viewer is reading.
+    ///
+    /// The two TOOLBARS are not here either, and cannot be: they belong to the
+    /// screen rather than to this view. That is the right answer as well as
+    /// the available one — the way out of a post should not blink away because
+    /// a thumb landed on a clip's bar.
+    private var scrubFadedViews: [UIView] {
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton]
+    }
+
+    /// What each faded view was worth before the scrub took it, so the fade
+    /// back RESTORES rather than asserts.
+    ///
+    /// ⚠️ Restoring to 1 would be a bug with a long tail: several of these are
+    /// faded by someone else for their own reasons — the rail rides the
+    /// pull-down's progress, the band and the caption fade through an
+    /// engagement — and a scrub that ended by setting them all to full would
+    /// hand back a page brighter than the one it borrowed.
+    private var scrubFadeRestore: [(view: UIView, alpha: CGFloat)] = []
+
+    /// Fades the page's talk out under a scrub, and back when it ends.
+    ///
+    /// A viewer dragging along a clip's bar is looking for a MOMENT in the
+    /// picture, and the card showing it is a small thing over a page still
+    /// crowded with everything else. So the page recedes for the length of the
+    /// gesture and comes back when the thumb lifts.
+    private func setScrubFocus(_ focused: Bool, animated: Bool = true) {
+        // Guarding on the ledger, not on a flag: entering twice would capture
+        // the faded values as the ones to restore, which is how a fade becomes
+        // permanent.
+        guard focused == scrubFadeRestore.isEmpty else { return }
+        let restoring = scrubFadeRestore
+        if focused {
+            scrubFadeRestore = scrubFadedViews.map { (view: $0, alpha: $0.alpha) }
+        } else {
+            scrubFadeRestore = []
+        }
+        let targets: [(view: UIView, alpha: CGFloat)] = focused
+            ? scrubFadeRestore.map { (view: $0.view, alpha: 0) }
+            : restoring
+        let apply = { for target in targets { target.view.alpha = target.alpha } }
+        guard animated else { return apply() }
+        UIView.animate(
+            withDuration: Self.scrubFocusDuration,
+            delay: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut],
+            animations: apply
+        )
+    }
+
+    /// Long enough to read as a fade, short enough that a quick tap-and-drag on
+    /// a bar does not spend its first moments in a dissolve.
+    static let scrubFocusDuration: TimeInterval = 0.2
+
+    #if DEBUG
+    /// What the page's talk is worth right now — the question a spec asks to
+    /// prove the scrub took it away and gave it back.
+    var debugScrubFadedAlphas: [CGFloat] { scrubFadedViews.map(\.alpha) }
+    #endif
+
+    /// The viewer dragged along a clip's bar. The CELL owns playback, so the
+    /// request travels out rather than the chrome reaching for a player.
+    var onMediaSeekRequested: ((Double) -> Void)? {
+        get { mediaPageBar.onSeekRequested }
+        set { mediaPageBar.onSeekRequested = newValue }
+    }
+
 
     /// The viewer asked for a page by touching the indicator. The CELL owns the
     /// carousel, so the request travels out rather than the chrome reaching in.
     var onMediaPageRequested: ((Int) -> Void)? {
-        get { mediaPageIndicator.onPageRequested }
-        set { mediaPageIndicator.onPageRequested = newValue }
+        get { mediaPageBar.onPageRequested }
+        set { mediaPageBar.onPageRequested = newValue }
     }
 
     /// The indicator's scrub, passed up so the screen's own pans can yield to
     /// it. See `MediaPageIndicatorView.scrubGesture`.
-    var mediaScrubGesture: UIGestureRecognizer { mediaPageIndicator.scrubGesture }
+    var mediaScrubGesture: UIGestureRecognizer { mediaPageBar.scrubGesture }
 
     func setTickerActive(_ active: Bool) {
         commentTicker.setActive(active)
@@ -848,6 +1049,13 @@ final class SnapChromeView: UIView {
     /// Clears post-specific content (cell reuse).
     func reset() {
         representedID = nil
+        // ⚠️ AND A SCRUB IN FLIGHT GIVES ITS ALPHAS BACK FIRST. A gesture does
+        // not have to end for a cell to be recycled — the post can be swiped
+        // away under the thumb — and the fade would otherwise be inherited by
+        // the next post as a caption and a band that never come back. The same
+        // trap as the line below, one gesture further in. Unanimated: there is
+        // nothing on screen to dissolve, and the next configure is immediate.
+        setScrubFocus(false, animated: false)
         // A scaffold handed the next post while still faded would keep that
         // post's chrome invisible.
         alpha = 1
