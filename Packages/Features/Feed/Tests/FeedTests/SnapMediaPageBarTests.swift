@@ -118,36 +118,25 @@ struct SnapMediaPageBarTests {
                 > #require(view.debugSegmentFrame(0)).width)
     }
 
-    /// ⚠️ THE ACCENT BELONGS TO THE SNAP, NOT TO THE CROSSING — and it is a
-    /// TRANSFORM either way, because the widths are already being driven by the
-    /// scroll and an accent that animated them would be two things writing one
-    /// number.
+    /// ⚠️ NOTHING ANIMATES, and that absence is deliberate enough to pin.
     ///
-    /// It fired at the crossing first: with the finger still down and the
-    /// widths still reflowing, a stretch on top of a reflow, twice per page on
-    /// a long drag. Reported as "not very fluid", and the diagnosis was right —
-    /// two motions on one object, only one of which anyone asked for. At rest
-    /// there is nothing else moving, so a bounce there is punctuation.
-    @Test func onlyTheSnapAccentsAnything() {
+    /// A bounce lived here twice — first at the crossing, where it stretched a
+    /// segment while the widths were still reflowing under the finger, then at
+    /// the settle, where it was at least alone. Both were removed: the strip
+    /// already MOVES, because its widths and its ink are a function of the
+    /// scroll, and an accent laid over a thing that is already moving is a
+    /// second motion on one object however well timed. What reads as alive here
+    /// is the reflow.
+    @Test func nothingAboutTheStripAnimates() {
         let view = bar(pages: 4, current: 0)
 
-        view.setPosition(0.6)   // crossed, mid-drag: the mark has changed hands
-        #expect(view.debugSegmentIsPopping(1) == false)
+        view.setPosition(0.6)   // across the crossing
+        view.setPosition(1)     // and onto the page
+        #expect(view.debugSegmentIsAnimating(0) == false)
+        #expect(view.debugSegmentIsAnimating(1) == false)
 
-        view.settle(at: 1)      // …and the scroll comes to rest
-        #expect(view.debugSegmentIsPopping(1))
-    }
-
-    /// ⚠️ AND A SNAP-BACK IS NOT AN ARRIVAL. A drag that returns to the page it
-    /// started on ends in a settle too, and an accent there would punctuate the
-    /// absence of an event.
-    @Test func aSnapBackToTheSamePageDoesNotBounce() {
-        let view = bar(pages: 4, current: 1)
-
-        view.setPosition(1.4)   // dragged, not far enough
-        view.settle(at: 1)
-
-        #expect(view.debugSegmentIsPopping(1) == false)
+        view.setCurrent(3)      // and a page arriving as a number
+        #expect(view.debugSegmentIsAnimating(3) == false)
     }
 
     /// ⚠️ AND THAT IS WHY THEY ARE PILLS RATHER THAN DOTS. Few pictures means
@@ -205,6 +194,110 @@ struct SnapMediaPageBarTests {
         // Back past the start, and it clamps rather than going numb.
         view.debugScrub(.changed, atX: 20 - stride * 5)
         #expect(asked == [1, 2, 0])
+    }
+
+    // MARK: - The window, past ten pictures
+
+    /// Which pages the strip is actually drawing — anything with ink.
+    private func drawn(_ view: SnapMediaPageBarView, pages: Int) -> [Int] {
+        (0..<pages).filter { (view.debugSegmentAlpha($0) ?? 0) > 0.02 }
+    }
+
+    /// ⚠️ TEN SEGMENTS, WHATEVER THE COUNT. Past that the strip stops being a
+    /// diagram and becomes a texture — at twenty a segment is thinner than the
+    /// gap beside it, and the mark's 2.6× is a few points of nothing.
+    @Test func aLongRunIsDrawnTenSegmentsAtATime() {
+        #expect(drawn(bar(pages: 10), pages: 10).count == 10)
+
+        let long = bar(pages: 24)
+        // Ten, plus whatever fraction of the eleventh is on its way in.
+        #expect(drawn(long, pages: 24).count <= 11)
+        #expect(drawn(long, pages: 24).count >= 10)
+    }
+
+    /// ⚠️ THE MARK WALKS; THE WINDOW ONLY FOLLOWS WHEN IT HAS TO — the card
+    /// indicator's rule, and the reason it exists is that recomputing the
+    /// window from the current page alone gives the mark a fixed slot and
+    /// slides the whole run under it on every page, which shows the one thing
+    /// that is happening as the one thing that does not move.
+    @Test func theWindowHoldsStillWhileTheMarkWalksIntoIt() throws {
+        let view = bar(pages: 24, current: 0)
+        #expect(drawn(view, pages: 24).first == 0)
+
+        view.setPosition(3)   // still well inside the window
+        // ⚠️ The claim is MEMBERSHIP, not geometry. The widths move whatever
+        // the window does — that is the mark growing — so a test that watched
+        // an x-coordinate would be pinning the tent, not the window.
+        #expect(drawn(view, pages: 24).first == 0)
+
+        // The bound itself — the mark sits one slot in from the end it is
+        // heading for, and the window still has not moved.
+        view.setPosition(8)
+        #expect(drawn(view, pages: 24).first == 0)
+
+        // One page further, and from here the run scrolls under the mark.
+        view.setPosition(9)
+        #expect(try #require(drawn(view, pages: 24).first) > 0)
+    }
+
+    /// ⚠️ THE RUN TAPERS WHERE IT CONTINUES, AND ONLY THERE. The outermost
+    /// segment narrowing says "there is more past here"; a window sitting on
+    /// the true first page has nothing to promise on that side and says
+    /// nothing.
+    @Test func theRunTapersOnlyAtAnEndThatContinues() throws {
+        let view = bar(pages: 24, current: 0)
+
+        // The window sits on the true first page, so the leading end promises
+        // nothing and is drawn flat: two interior segments, same width.
+        #expect(abs(try #require(view.debugSegmentFrame(1)).width
+                    - #require(view.debugSegmentFrame(2)).width) < 0.5)
+
+        // The trailing end continues, and says so — narrower, and dimmer.
+        let interior = try #require(view.debugSegmentFrame(5)).width
+        #expect(try #require(view.debugSegmentFrame(9)).width < interior / 2)
+        #expect(try #require(view.debugSegmentAlpha(9)) < #require(view.debugSegmentAlpha(5)))
+
+        // ⚠️ And the taper is a SLOPE, not a cliff: the segment one in from the
+        // end is part-way down, which is what says how the run is going.
+        let penultimate = try #require(view.debugSegmentFrame(8)).width
+        let outermost = try #require(view.debugSegmentFrame(9)).width
+        #expect(penultimate < interior)
+        #expect(penultimate > outermost)
+    }
+
+    /// ⚠️ AND THE MARK NEVER TAPERS, wherever the window parks it. The taper
+    /// says "the run continues past here" and the mark says "you are here";
+    /// the window puts the mark one slot in from the end it is heading for,
+    /// which is exactly the slot the taper reaches, so the two collide by
+    /// construction rather than by accident.
+    @Test func theMarkNeverTapers() throws {
+        let view = bar(pages: 24, current: 0)
+        view.setPosition(12)   // travelling forward: the mark rides the bound
+
+        let markWidth = try #require(view.debugSegmentFrame(12)).width
+        let widest = (0..<24).compactMap { view.debugSegmentFrame($0)?.width }.max()
+        #expect(markWidth == widest)
+        #expect(try #require(view.debugSegmentAlpha(12)) == 1)
+    }
+
+    /// The window changes nothing about the promise the strip makes at rest:
+    /// the run still spans the column exactly, at any position.
+    @Test func theWindowedRunStillSpansTheColumn() throws {
+        let width: CGFloat = 370
+        let view = bar(pages: 24, current: 0, width: width)
+
+        for position in [CGFloat(0), 3.5, 12, 17.25, 23] {
+            view.setPosition(position)
+            let ink = (0..<24).compactMap { index -> CGRect? in
+                guard (view.debugSegmentAlpha(index) ?? 0) > 0.02 else { return nil }
+                return view.debugSegmentFrame(index)
+            }
+            let leading = try #require(ink.map(\.minX).min())
+            let trailing = try #require(ink.map(\.maxX).max())
+            #expect(leading < 1, Comment(rawValue: "left a gap at \(position): \(leading)"))
+            #expect(trailing > width - 1,
+                    Comment(rawValue: "left a gap at \(position): \(trailing)"))
+        }
     }
 
     // MARK: - Where it sits in the column

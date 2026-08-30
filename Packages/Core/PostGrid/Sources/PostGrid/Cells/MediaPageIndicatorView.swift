@@ -513,39 +513,16 @@ final class PageDotsView: UIView {
         return min(count, max(fitted, minimumVisibleDots))
     }
 
-    /// The slots the mark is allowed to occupy — one in from each end.
-    ///
-    /// ⚠️ THE MARK WALKS; THE WINDOW ONLY FOLLOWS WHEN IT HAS TO.
-    ///
-    /// Recomputing the window from the current page alone gives the mark a
-    /// FIXED slot, and then the whole row slides under it on every page change
-    /// — so the one thing actually happening, the viewer moving along the run,
-    /// is the one thing the indicator does not show. Worse when the direction
-    /// changes: the fixed slot moves from one side of the middle to the other,
-    /// so a single page back jumped the row by TWO. Reported exactly that way,
-    /// as the mark landing on the second dot where the third was expected.
-    ///
-    /// So the window is KEPT and only pushed. The mark moves one dot per page
-    /// until it reaches the slot one in from the end it is heading for, and
-    /// from then on the row scrolls under it — which is where "fourth of five
-    /// going forward, second going back" comes from: it is the STEADY STATE of
-    /// travelling in one direction, not a rule applied per page.
-    ///
-    /// Both bounds collapse gracefully on a narrow chip: with three dots the
-    /// mark holds the middle, with two the trailing one, with one there is
-    /// nowhere to walk.
+    /// The window's rule, which lives in `PageWindow` now — the post screen's
+    /// segment bar draws the same one, and it is stateful enough that two
+    /// copies would agree only until one was touched. These two names stay so
+    /// the dots' own tests and call sites keep reading as dots.
     static func slotBounds(visible: Int) -> (lowest: Int, highest: Int) {
-        let lowest = min(1, max(visible - 1, 0))
-        return (lowest, max(visible - 2, lowest))
+        PageWindow.slotBounds(visible: visible)
     }
 
-    /// The first dot of the window: the previous one, moved as little as the
-    /// mark's bounds allow, and never off either end of the run.
     static func windowStart(current: Int, visible: Int, count: Int, from previous: Int) -> Int {
-        guard count > visible else { return 0 }
-        let bounds = slotBounds(visible: visible)
-        let pushed = min(max(previous, current - bounds.highest), current - bounds.lowest)
-        return min(max(pushed, 0), count - visible)
+        PageWindow.start(current: current, visible: visible, count: count, from: previous)
     }
 
     /// How small an edge dot goes when the run continues past it.

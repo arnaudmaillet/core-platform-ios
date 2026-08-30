@@ -29,17 +29,23 @@ import UIKit
 /// move. Anything else would be a strip that breathes at its ends, which reads
 /// as a layout bug rather than as motion.
 ///
-/// ## Frames, not a stack — and bounds/centre, not frames
+/// ## A window, past ten pictures
+///
+/// Ten segments is the most the strip draws. Beyond that it stops being a
+/// diagram and becomes a texture — at twenty, a segment is thinner than the gap
+/// beside it — so a window of ten slides through the run instead, with the mark
+/// walking inside it and the run tapering away at whichever end it continues
+/// past. That is the card indicator's own system (`PageWindow`), told
+/// continuously here because this strip has a continuous position to tell it
+/// with: a page leaving narrows and fades out while the one arriving grows in.
+///
+/// ## Frames, not a stack
 ///
 /// How wide a segment is depends on the width and the count, both of which
 /// change under this view; `UIStackView` would have to add and remove arranged
 /// subviews inside a layout pass to answer that, which is the fight
 /// `PageDotsView` and `MediaCarouselView` both avoid the same way.
 ///
-/// ⚠️ And the geometry is assigned as `bounds` + `center`, never `frame`,
-/// because the handover pop is a TRANSFORM: assigning a frame to a transformed
-/// view re-derives its bounds from it and cancels the transform silently. The
-/// same trap `SnapFeedCell.pageStage` documents, one view down.
 final class SnapMediaPageBarView: UIView {
     /// The strip's thickness — the card's dot diameter, so this reads as the
     /// same ink stretched rather than as a different control.
@@ -58,6 +64,24 @@ final class SnapMediaPageBarView: UIView {
 
     /// The ink the pages you are not on are drawn in — the card's own ratio.
     static let restingAlpha: CGFloat = 0.35
+
+    /// How many segments the strip draws at once, however many pictures there
+    /// are.
+    ///
+    /// ⚠️ Past this the strip stops being a diagram and becomes a texture: at
+    /// twenty, a segment is narrower than the gap beside it and the mark's
+    /// 2.6× is a few points of nothing. Ten is where a run still reads as
+    /// countable — and beyond it the WINDOW carries the rest, exactly as the
+    /// card's chip does with five dots.
+    static let maximumVisibleSegments = 10
+
+    /// How many slots the run tapers over at an end it continues past.
+    ///
+    /// ⚠️ TWO, not one, and the card's note says why: the outermost segment
+    /// shrinking says "there is more past here"; the one beside it, part-way
+    /// down, says how the row is GOING. A single step from full size to nothing
+    /// reads as a run that was cut; a slope reads as a run that continues.
+    static let taperSlots: CGFloat = 2
 
     /// The viewer asked for a page by dragging along the strip. The HOST moves
     /// the carousel — an indicator that scrolled something for itself would be
@@ -119,7 +143,6 @@ final class SnapMediaPageBarView: UIView {
             }
         }
         position = CGFloat(min(max(current, 0), count - 1))
-        settledPage = Int(position)
         setNeedsLayout()
         layoutIfNeeded()
     }
@@ -130,43 +153,24 @@ final class SnapMediaPageBarView: UIView {
     /// and a strip that eased its way toward the finger would lag the pictures
     /// it describes.
     ///
-    /// ⚠️ AND NO ACCENT HERE. The bounce used to fire at the crossing, with the
-    /// finger still down and the widths still reflowing — a stretch on top of a
-    /// reflow, twice per page on a long drag, which reads as the strip stumbling
-    /// rather than as motion. Reported as "pas très fluide", and the diagnosis
-    /// was right: two motions on one object, only one of which the viewer was
-    /// asking for. The accent belongs to the SETTLE — see `settle(at:)`.
+    /// ⚠️ AND NOTHING ELSE HAPPENS HERE — no accent, no easing, no second
+    /// motion of any kind.
+    ///
+    /// A bounce lived here for two versions: first at the crossing, where it
+    /// stretched a segment while the widths were still reflowing under the
+    /// finger, and then at the settle, where it was at least alone. Both were
+    /// removed. The strip already MOVES — its widths and its ink are a function
+    /// of the scroll — and an accent laid over a thing that is already moving
+    /// is a second motion on one object however well timed it is. What reads as
+    /// alive here is the reflow itself.
     func setPosition(_ newPosition: CGFloat) {
         guard pageCount >= 2 else { return }
         position = min(max(newPosition, 0), CGFloat(pageCount - 1))
         layoutSegments()
     }
 
-    /// The scroll came to rest on `page` — the snap at the end of a drag.
-    ///
-    /// This is the strip's one accent, and the only place it is allowed to
-    /// happen: at rest there is nothing else moving, so a bounce here is
-    /// punctuation rather than interference.
-    ///
-    /// ⚠️ ONLY WHEN THE PAGE ACTUALLY CHANGED. A drag that snaps back to where
-    /// it started is a settle too, and bouncing there would accent the absence
-    /// of an event.
-    func settle(at page: Int) {
-        guard pageCount >= 2 else { return }
-        let landed = min(max(page, 0), pageCount - 1)
-        position = CGFloat(landed)
-        layoutSegments()
-        defer { settledPage = landed }
-        guard landed != settledPage else { return }
-        pop(landed)
-    }
-
-    /// The page the last settle landed on, so a snap-back is not an arrival.
-    private var settledPage = 0
-
     /// A page arrived as a NUMBER rather than as a position — a post reopened
-    /// on page three, a page set from outside. There is a real distance to
-    /// travel here, so this one springs.
+    /// on page three, a page set from outside.
     ///
     /// ⚠️ IT MUST NOT ACT ON A PAGE THE STRIP IS ALREADY ON, and "already on"
     /// means the rounded position, not an exact match. The carousel reports
@@ -180,21 +184,8 @@ final class SnapMediaPageBarView: UIView {
         let target = CGFloat(min(max(page, 0), pageCount - 1))
         guard Int(position.rounded()) != Int(target) else { return }
         position = target
-        settledPage = Int(target)
-        UIView.animate(
-            withDuration: Self.springDuration, delay: 0,
-            usingSpringWithDamping: Self.springDamping, initialSpringVelocity: 0.6,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.layoutSegments()
-        }
+        layoutSegments()
     }
-
-    /// ⚠️ A spring the eye reads as WEIGHT, not as a wobble: under-damped
-    /// enough to overshoot once and settle, over a duration short enough that
-    /// the strip is never still behind a finger that has moved on.
-    private static let springDamping: CGFloat = 0.62
-    private static let springDuration: TimeInterval = 0.42
 
     // MARK: - Layout
 
@@ -203,37 +194,59 @@ final class SnapMediaPageBarView: UIView {
         layoutSegments()
     }
 
-    /// Every segment's geometry and ink, from `position` alone.
+    /// Every segment's geometry and ink, from `position` and the window alone.
     ///
-    /// The weight curve is a tent: a segment is fully grown at its own page,
-    /// resting a page away, and linear in between — so two neighbours share the
-    /// growth exactly while the viewer is between them, and the weights sum to
-    /// the same total at every position. That invariance is what keeps the run
-    /// edge to edge mid-drag.
+    /// Two curves, multiplied.
+    ///
+    /// The MARK is a tent: a segment is fully grown at its own page, resting a
+    /// page away, linear in between — so two neighbours share the growth
+    /// exactly while the viewer is between them.
+    ///
+    /// PRESENCE is how much of the strip a page is entitled to at all: 1 inside
+    /// the window, tapering to nothing across the last two slots of an end the
+    /// run continues past, 0 beyond. A page leaving therefore narrows and fades
+    /// out while the one arriving grows in — the same information the card's
+    /// dots give with a shrunken edge dot, told continuously because this strip
+    /// has a continuous position to tell it with.
+    ///
+    /// The widths are shares of what is left after the gaps, so the run spans
+    /// the column exactly at every position — including mid-slide, where the
+    /// gaps of a half-arrived segment are themselves half-width.
     private func layoutSegments() {
         guard !segments.isEmpty, bounds.width > 0 else { return }
-        let count = CGFloat(segments.count)
-        let available = max(bounds.width - Self.gap * (count - 1), 1)
-        let weights = segments.indices.map { weight(forPage: $0) }
-        let total = weights.reduce(0, +)
+        let visible = visibleSlots
+        updateWindowOrigin(visible: visible)
+        let rooms = segments.indices.map { room(forPage: $0, visible: visible) }
+        let weights = segments.indices.map {
+            rooms[$0] * (1 + (Self.activeWidthFactor - 1) * proximity(toPage: $0))
+        }
+        let total = max(weights.reduce(0, +), 0.0001)
+        // A gap belongs to a seam, and a seam is only as present as the thinner
+        // of the two segments it separates.
+        let gaps = segments.indices.dropLast().map { Self.gap * min(rooms[$0], rooms[$0 + 1]) }
+        let available = max(bounds.width - gaps.reduce(0, +), 1)
         var x: CGFloat = 0
         for (index, segment) in segments.enumerated() {
-            let width = max(available * weights[index] / total, 1)
-            // ⚠️ bounds + centre, never frame: the pop is a transform, and a
-            // frame assignment would cancel it (see the type's note).
-            segment.bounds = CGRect(x: 0, y: 0, width: width, height: bounds.height)
+            let width = available * weights[index] / total
+            // ⚠️ bounds + centre rather than frame. They are the same thing
+            // while nothing is transformed, and they stay right if anything
+            // ever is: assigning a frame to a transformed view re-derives its
+            // bounds and cancels the transform silently — the trap
+            // `SnapFeedCell.pageStage` documents one view up.
+            segment.bounds = CGRect(x: 0, y: 0, width: max(width, 0), height: bounds.height)
             segment.center = CGPoint(x: x + width / 2, y: bounds.height / 2)
-            segment.layer.cornerRadius = min(bounds.height, width) / 2
-            segment.alpha = Self.restingAlpha
-                + (1 - Self.restingAlpha) * proximity(toPage: index)
-            x += width + Self.gap
+            segment.layer.cornerRadius = min(bounds.height, max(width, 0)) / 2
+            segment.alpha = rooms[index]
+                * (Self.restingAlpha + (1 - Self.restingAlpha) * proximity(toPage: index))
+            x += width + (index < gaps.count ? gaps[index] : 0)
         }
         // ⚠️ THE SCRUB TRACKS THE STRIP IT IS DRAWN ON. One page per average
-        // segment stride, so the mark keeps pace with the thumb — the same rule
-        // as the card's chip, at this strip's own scale. The AVERAGE, not the
-        // active segment's own width, or the gesture's scale would change as it
-        // travelled.
-        scrubber.pointsPerPage = (bounds.width + Self.gap) / count
+        // slot, so the mark keeps pace with the thumb — the same rule as the
+        // card's chip, at this strip's own scale. The AVERAGE, not the active
+        // segment's own width, or the gesture's scale would change as it
+        // travelled. Off the WINDOW, not the count: with a long run the thumb
+        // still walks one slot per page, and the pages beyond simply arrive.
+        scrubber.pointsPerPage = (bounds.width + Self.gap) / CGFloat(visible)
     }
 
     /// 1 on the page itself, 0 a page away, linear between — the tent above.
@@ -241,37 +254,50 @@ final class SnapMediaPageBarView: UIView {
         max(0, 1 - abs(CGFloat(index) - position))
     }
 
-    private func weight(forPage index: Int) -> CGFloat {
-        1 + (Self.activeWidthFactor - 1) * proximity(toPage: index)
+    /// How much strip a page is entitled to: presence, except that the MARK is
+    /// never tapered.
+    ///
+    /// ⚠️ The card's rule, and it exists because the two signals collide by
+    /// construction: the taper says "the run continues past here" and the mark
+    /// says "you are here", and the window deliberately parks the mark one slot
+    /// in from the end it is heading for — which is exactly the slot the taper
+    /// reaches. Shrinking the mark to say what its neighbours already say costs
+    /// the one thing the strip is for.
+    private func room(forPage index: Int, visible: Int) -> CGFloat {
+        max(presence(ofPage: index, visible: visible), proximity(toPage: index))
     }
 
-    /// The arrival's bounce: the segment that has just taken the mark stretches
-    /// along the strip and springs back.
-    ///
-    /// One caller, `settle(at:)`, and that is the whole of the rule — the strip
-    /// moves with the scroll and accents only where the scroll stops.
-    ///
-    /// ⚠️ A TRANSFORM, not a width. The widths are already being driven by the
-    /// scroll — animating them here would be two things writing one number, and
-    /// the loser is whichever ran second. A transform is a separate channel: it
-    /// rides on top of whatever the layout is doing, which is exactly what an
-    /// accent should do.
-    private func pop(_ index: Int) {
-        guard segments.indices.contains(index) else { return }
-        let segment = segments[index]
-        segment.transform = CGAffineTransform(scaleX: Self.popScale, y: 1)
-        UIView.animate(
-            withDuration: Self.springDuration, delay: 0,
-            usingSpringWithDamping: Self.springDamping, initialSpringVelocity: 0.9,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            segment.transform = .identity
-        }
+    /// 1 inside the window, tapering to 0 across `taperSlots` at an end the run
+    /// continues past, 0 beyond it. Always 1 when the whole run fits.
+    private func presence(ofPage index: Int, visible: Int) -> CGFloat {
+        guard segments.count > visible else { return 1 }
+        let slot = CGFloat(index) - windowOrigin
+        let continuesBefore = windowOrigin > 0.0001
+        let continuesAfter = windowOrigin + CGFloat(visible) < CGFloat(segments.count) - 0.0001
+        // A run that genuinely ends here does not taper: there is nothing more
+        // to promise. Half a slot of overhang either side so the outermost
+        // segment is fully out before it is gone.
+        let leading = continuesBefore
+            ? (slot + 0.5) / Self.taperSlots : .greatestFiniteMagnitude
+        let trailing = continuesAfter
+            ? (CGFloat(visible) - 0.5 - slot) / Self.taperSlots : .greatestFiniteMagnitude
+        return min(max(min(leading, trailing), 0), 1)
     }
 
-    /// Along the strip only — a pill that grew in both directions would leave
-    /// its own line, and the line is the thing being read.
-    private static let popScale: CGFloat = 1.16
+    /// How many segments the strip draws at once.
+    private var visibleSlots: Int { min(segments.count, Self.maximumVisibleSegments) }
+
+    /// The window's leading slot, kept between passes: the mark walks inside
+    /// the window and the window follows only when it has to. Fractional, so a
+    /// window that has to follow slides with the finger instead of jumping a
+    /// whole slot at the crossing.
+    private var windowOrigin: CGFloat = 0
+
+    private func updateWindowOrigin(visible: Int) {
+        windowOrigin = PageWindow.start(
+            current: position, visible: visible, count: segments.count, from: windowOrigin
+        )
+    }
 
     // MARK: - Scrubbing
 
@@ -314,8 +340,8 @@ final class SnapMediaPageBarView: UIView {
     /// view different from the dots: the segments SHARE the width, and the one
     /// you are on takes the larger share.
     ///
-    /// Read from bounds + centre rather than `frame`, so a pop in flight does
-    /// not report as a wider segment.
+    /// Read from bounds + centre rather than `frame`, which is also how the
+    /// layout assigns them.
     func debugSegmentFrame(_ index: Int) -> CGRect? {
         guard segments.indices.contains(index) else { return nil }
         let segment = segments[index]
@@ -331,11 +357,15 @@ final class SnapMediaPageBarView: UIView {
         segments.indices.contains(index) ? segments[index].alpha : nil
     }
 
-    /// Whether a segment is mid-pop — the bounce, which is a transform and so
-    /// invisible to every geometry above.
-    func debugSegmentIsPopping(_ index: Int) -> Bool {
+    /// Whether anything about a segment is animating.
+    ///
+    /// ⚠️ Kept after the accent was removed, because the claim it checks is now
+    /// an ABSENCE — the strip is a function of the scroll and nothing about it
+    /// animates on its own. An absence with no test is an absence that comes
+    /// back.
+    func debugSegmentIsAnimating(_ index: Int) -> Bool {
         guard segments.indices.contains(index) else { return false }
-        return segments[index].layer.animation(forKey: "transform") != nil
+        return (segments[index].layer.animationKeys() ?? []).isEmpty == false
     }
 
     /// Drives the scrub without a finger; the simulator injects none.

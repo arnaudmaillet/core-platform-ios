@@ -794,10 +794,6 @@ final class SnapChromeView: UIView {
         mediaPageBar.setPosition(position)
     }
 
-    /// The carousel came to rest — where the strip's accent belongs.
-    func setMediaScrollSettled(_ page: Int) {
-        mediaPageBar.settle(at: page)
-    }
 
     /// The viewer asked for a page by touching the indicator. The CELL owns the
     /// carousel, so the request travels out rather than the chrome reaching in.

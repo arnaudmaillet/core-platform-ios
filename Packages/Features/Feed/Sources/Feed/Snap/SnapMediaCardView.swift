@@ -197,10 +197,6 @@ final class SnapMediaCardView: UIView {
     /// the page strip draws from. See `MediaCarouselView.onScrollPosition`.
     var onScrollPosition: ((CGFloat) -> Void)?
 
-    /// Fired when a collection's scroll comes to REST on a page — the snap.
-    /// See `MediaCarouselView.onScrollSettled`.
-    var onScrollSettled: ((Int) -> Void)?
-
     /// Fired as the viewer pages a collection, so the chrome can move its
     /// indicator. The card knows where the pages are; it does not know where the
     /// indicator lives.
@@ -484,7 +480,6 @@ final class SnapMediaCardView: UIView {
         let view = MediaCarouselView(style: .page)
         view.onPageChanged = { [weak self] page in self?.onPageChanged?(page) }
         view.onScrollPosition = { [weak self] position in self?.onScrollPosition?(position) }
-        view.onScrollSettled = { [weak self] page in self?.onScrollSettled?(page) }
         // Below nothing — it is the media, and everything else on the page is
         // layered over the card by the cell.
         insertSubview(view, aboveSubview: imageView)
