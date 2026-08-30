@@ -599,11 +599,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self else { return }
             self.chrome.setMediaPage(page)
             self.reconcilePagePlayback()
+            // A page that is a clip draws the strip as its bar; one that is not
+            // takes the bar away. Both are decided by what is under the viewer.
+            self.updatePlayheadFeed()
             // A gallery's pages arrive one at a time, so turning to one is
             // exactly the moment the answer to "is there a picture here" can
             // change — in either direction.
             self.refreshMediaLoader()
             self.onMediaPageChanged?(page)
+        }
+        chrome.onMediaSeekRequested = { [weak self] fraction in
+            guard let self, let videoPlayback else { return }
+            videoPlayback.seek(toFraction: fraction, in: mediaCard.renderView)
+            // The bar redraws from the playhead it is fed, and the feed is a
+            // frame away — so it follows the finger on the next tick rather
+            // than being told twice.
         }
         chrome.onMediaPageRequested = { [weak self] page in
             // Teleport, for the reason the card's own indicator does: the
@@ -1540,7 +1550,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // so a second configure carrying no instruction must not be read as
             // an instruction to go back to the first.
             if let initialMediaPage { mediaCard.setPage(initialMediaPage, animated: false) }
-            chrome.setMediaPageCount(model.mediaPages.count, current: mediaCard.currentPage)
+            chrome.setMediaPageCount(
+                model.mediaPages.count,
+                current: mediaCard.currentPage,
+                clipPages: Set(mediaCard.videoPageIndices)
+            )
+            updatePlayheadFeed()
             #if DEBUG
             // ⚠️ Published HERE as well as from the window, because the window
             // only runs once the page is active or the viewer has moved — so a
@@ -1700,6 +1715,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func willBecomeActive() {
         guard !isActive else { return }
         isActive = true
+        defer { updatePlayheadFeed() }
         // Activation always starts playing, so any user-paused glyph is stale.
         setPauseGlyphVisible(false)
         // Normally redundant with the visibility path (`setTickerStreaming`),
@@ -2383,6 +2399,71 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         traceViewerPlayback("release", paused: false)
     }
 
+    /// Keeps the page strip's clip bar fed while there is one to feed.
+    ///
+    /// ⚠️ A DISPLAY LINK, and only while it is earning its place: the page is
+    /// active, its collection's current page carries a clip, and the strip is
+    /// therefore drawn as that clip's bar. A playhead has no notification to
+    /// hang off — it advances because time passes — so something has to ask,
+    /// and asking on the screen's own beat is the cheapest honest answer.
+    ///
+    /// The pool answers for the WATCHED surface, so this works on a page that
+    /// joined its clip from a grid tile, which is every post opened from a card.
+    private func updatePlayheadFeed() {
+        let wanted = isActive && mediaCard.showsCollection && playsVideo
+        guard wanted else {
+            stopPlayheadFeed()
+            return
+        }
+        publishPlayhead()
+        guard playheadLink == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(publishPlayhead))
+        // Thirty is smooth for a bar this size and half the work of sixty; the
+        // range lets the system drop it further when the display does.
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 30, preferred: 30)
+        link.add(to: .main, forMode: .common)
+        playheadLink = link
+    }
+
+    /// ⚠️ `CADisplayLink` RETAINS ITS TARGET. A cell that stopped feeding the
+    /// strip without invalidating would go on ticking inside a reuse pool for
+    /// the life of the app, holding itself alive — so every exit from the
+    /// feeding state comes through here.
+    private func stopPlayheadFeed() {
+        playheadLink?.invalidate()
+        playheadLink = nil
+        chrome.setMediaPlayhead(nil)
+    }
+
+    private var playheadLink: CADisplayLink?
+
+    @objc private func publishPlayhead() {
+        let head = videoPlayback?.playhead(in: mediaCard.renderView)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            // ⚠️ ONCE A SECOND, not thirty times: a trace that costs more than
+            // the thing it watches changes what it is watching. The fraction
+            // and the length together, because a nil here has two causes — no
+            // player at all, and a length not known yet — and only the second
+            // is normal.
+            let now = CACurrentMediaTime()
+            if now - lastPlayheadTrace > 1 {
+                lastPlayheadTrace = now
+                print(String(format: "[page-play] %.3f playhead=%@ seconds=%@ page=%d",
+                             now,
+                             head.map { String(format: "%.3f", $0.fraction) } ?? "nil",
+                             head.map { String(format: "%.1f", $0.seconds) } ?? "nil",
+                             mediaCard.currentPage))
+            }
+        }
+        #endif
+        chrome.setMediaPlayhead(head?.fraction)
+    }
+
+    #if DEBUG
+    private var lastPlayheadTrace: CFTimeInterval = 0
+    #endif
+
     /// Toggles the active video's playback and reflects it in the pause glyph.
     /// No-op for image/text cells (no player).
     func togglePlayback() {
@@ -2553,6 +2634,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func didResignActive(releasingPlayback: Bool) {
         guard isActive else { return }
         isActive = false
+        updatePlayheadFeed()
         // The same rule the carousel applies to a page that leaves the box, at
         // the scale of the whole post: this page is not the one being watched
         // any more, so the receipt for a stop the viewer made on it has nothing
@@ -2679,6 +2761,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // picture belonging to a different post.
         mediaCard.clearPausedMarks()
         pauseGlyphSuppressedByEngagement = false
+        stopPlayheadFeed()
         // ⚠️ A held chrome must never ride a recycled cell. A flight that is
         // cancelled, or a dismissal that ends the page instead of landing it,
         // leaves the hold un-released — and the next post to use this cell would

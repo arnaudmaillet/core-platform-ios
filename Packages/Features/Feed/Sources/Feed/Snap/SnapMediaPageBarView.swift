@@ -29,6 +29,19 @@ import UIKit
 /// move. Anything else would be a strip that breathes at its ends, which reads
 /// as a layout bug rather than as motion.
 ///
+/// ## On a clip, the strip becomes the clip's own bar
+///
+/// A video page has two things to say and they are the same shape: where you
+/// are in the post, and where you are in the picture. So the active segment
+/// grows to nearly the whole width and carries the playhead inside it, with
+/// the neighbouring pages left as slivers at either edge — still there, still
+/// tappable, still saying "there is more this way".
+///
+/// The strip's controls follow the same split: a TAP always selects the segment
+/// under it (that is how you move between pages once the segments are slivers),
+/// and a DRAG means the finer of the two things on offer — the playhead on a
+/// clip, the pages on a photograph.
+///
 /// ## A window, past ten pictures
 ///
 /// Ten segments is the most the strip draws. Beyond that it stops being a
@@ -75,6 +88,14 @@ final class SnapMediaPageBarView: UIView {
     /// card's chip does with five dots.
     static let maximumVisibleSegments = 10
 
+    /// What is left for a neighbour when the active segment is a clip's bar.
+    ///
+    /// ⚠️ A SLIVER, NOT NOTHING. The pages either side are the only thing left
+    /// saying the post has more than this one picture, and they are the targets
+    /// a tap uses to get there — a strip that showed the bar alone would be a
+    /// carousel with no way out but the media itself.
+    static let clipNeighbourWidth: CGFloat = 14
+
     /// How many slots the run tapers over at an end it continues past.
     ///
     /// ⚠️ TWO, not one, and the card's note says why: the outermost segment
@@ -103,8 +124,22 @@ final class SnapMediaPageBarView: UIView {
         return scrub
     }()
 
+    /// The viewer asked to move the playhead of the clip the strip is drawing.
+    /// The HOST owns playback, for the reason it owns the carousel.
+    var onSeekRequested: ((Double) -> Void)?
+
     private var segments: [UIView] = []
+    /// The played part of each segment — minted only for the page that is a
+    /// clip, because that is the only one that ever draws it.
+    private var fills: [Int: UIView] = [:]
     private var pageCount = 0
+    /// Which pages carry a clip: the strip draws those differently and reads a
+    /// drag on them differently.
+    private var clipPages: Set<Int> = []
+    /// How far through the clip on the page the viewer is on, when there is one
+    /// and its length is known. Nil draws nothing rather than zero — see
+    /// `VideoPlaybackController.playhead`.
+    private var playhead: Double?
     /// Where the carousel is, in fractional pages — the strip's entire state.
     private var position: CGFloat = 0
     /// The shared arithmetic; its scale is set from the layout, below.
@@ -127,7 +162,14 @@ final class SnapMediaPageBarView: UIView {
 
     /// One segment per page. Hidden entirely below two — a single picture has
     /// no position to report, and one full-width pill would claim it did.
-    func configure(count: Int, current: Int) {
+    ///
+    /// ⚠️ A SINGLE CLIP IS STILL A SINGLE PICTURE. A one-page post keeps no
+    /// strip even when it is a video: the post screen's clip has no pages to
+    /// index, and a lone progress bar under the caption is a different feature
+    /// from this one — it would need its own answer about what a drag on it
+    /// means while the page can also be swiped away.
+    func configure(count: Int, current: Int, clipPages: Set<Int> = []) {
+        self.clipPages = clipPages
         pageCount = count
         isHidden = count < 2
         guard count >= 2 else { return }
@@ -145,6 +187,14 @@ final class SnapMediaPageBarView: UIView {
         position = CGFloat(min(max(current, 0), count - 1))
         setNeedsLayout()
         layoutIfNeeded()
+    }
+
+    /// How far through the clip on the page the viewer is on. Nil when there is
+    /// no clip, or none whose length is known yet.
+    func setPlayhead(_ fraction: Double?) {
+        guard playhead != fraction else { return }
+        playhead = fraction
+        layoutSegments()
     }
 
     /// The carousel moved, in fractional pages.
@@ -221,13 +271,39 @@ final class SnapMediaPageBarView: UIView {
             rooms[$0] * (1 + (Self.activeWidthFactor - 1) * proximity(toPage: $0))
         }
         let total = max(weights.reduce(0, +), 0.0001)
+        // ⚠️ THE CLIP'S SHAPE HAS TO REACH THE GAPS TOO. A page the bar has
+        // squeezed to nothing still sat between two seams, so seven pages of a
+        // long post contributed seven gaps of pure air — the bar was 28pt short
+        // of the width it claimed and a tap could land on a segment with no
+        // width at all. What a seam is worth is what the SEGMENTS either side
+        // are drawn as, clip shape included.
+        let clipness = clipPageProximity
+        let clipWeights = clipness > 0 ? clipShapeWeights(available: bounds.width) : nil
+        let shown = segments.indices.map { index -> CGFloat in
+            guard let clipWeights else { return rooms[index] }
+            let inTheClipsShape: CGFloat = clipWeights[index] > 0 ? 1 : 0
+            return rooms[index] * (1 - clipness * (1 - inTheClipsShape))
+        }
         // A gap belongs to a seam, and a seam is only as present as the thinner
         // of the two segments it separates.
-        let gaps = segments.indices.dropLast().map { Self.gap * min(rooms[$0], rooms[$0 + 1]) }
+        let gaps = segments.indices.dropLast().map { Self.gap * min(shown[$0], shown[$0 + 1]) }
         let available = max(bounds.width - gaps.reduce(0, +), 1)
+        // ⚠️ THE CLIP'S SHAPE IS BLENDED IN, not switched to. `clipness` is the
+        // tent again — how much of the page you are on is the clip — so the
+        // strip grows into a progress bar across the swipe that arrives at one
+        // and shrinks back across the swipe that leaves. A mode switched at the
+        // crossing would be the boolean mistake this file has already made
+        // once, in the taper.
+        let clipTargets = clipWeights.map { targets in
+            // Re-scaled to what is actually left after the gaps this shape
+            // leaves behind, so the bar fills the width rather than most of it.
+            let sum = max(targets.reduce(0, +), 0.0001)
+            return targets.map { $0 / sum * available }
+        }
         var x: CGFloat = 0
         for (index, segment) in segments.enumerated() {
-            let width = available * weights[index] / total
+            let share = available * weights[index] / total
+            let width = clipTargets.map { share + ($0[index] - share) * clipness } ?? share
             // ⚠️ bounds + centre rather than frame. They are the same thing
             // while nothing is transformed, and they stay right if anything
             // ever is: assigning a frame to a transformed view re-derives its
@@ -236,8 +312,22 @@ final class SnapMediaPageBarView: UIView {
             segment.bounds = CGRect(x: 0, y: 0, width: max(width, 0), height: bounds.height)
             segment.center = CGPoint(x: x + width / 2, y: bounds.height / 2)
             segment.layer.cornerRadius = min(bounds.height, max(width, 0)) / 2
-            segment.alpha = rooms[index]
-                * (Self.restingAlpha + (1 - Self.restingAlpha) * proximity(toPage: index))
+            // ⚠️ A CLIP'S BAR IS A TRACK, so the segment carrying it steps back
+            // to the resting ink and the PLAYED part is the bright thing. Left
+            // at full white it would be a bar that reads as finished from the
+            // first frame.
+            //
+            // ⚠️ AND THE DIMMING IS IN THE COLOUR, NOT IN `alpha`. A view's
+            // alpha applies to its whole subtree, so a track dimmed that way
+            // dims the played part inside it by exactly the same amount — the
+            // fill was drawn, correctly sized, and invisible. `alpha` is left
+            // to carry PRESENCE alone, which is a property of the segment and
+            // everything in it.
+            let lit = Self.restingAlpha + (1 - Self.restingAlpha) * proximity(toPage: index)
+            let ink = lit - (lit - Self.restingAlpha) * clipness
+            segment.alpha = shown[index]
+            segment.backgroundColor = UIColor.white.withAlphaComponent(ink)
+            layoutFill(onPage: index, width: width, clipness: clipness)
             x += width + (index < gaps.count ? gaps[index] : 0)
         }
         // ⚠️ THE SCRUB TRACKS THE STRIP IT IS DRAWN ON. One page per average
@@ -247,6 +337,49 @@ final class SnapMediaPageBarView: UIView {
         // travelled. Off the WINDOW, not the count: with a long run the thumb
         // still walks one slot per page, and the pages beyond simply arrive.
         scrubber.pointsPerPage = (bounds.width + Self.gap) / CGFloat(visible)
+    }
+
+    /// How much of the page under the viewer is a clip: 1 on one, 0 on a
+    /// photograph, and shared across a swipe between the two.
+    private var clipPageProximity: CGFloat {
+        clipPages.reduce(0) { max($0, proximity(toPage: $1)) }
+    }
+
+    /// The widths the strip would have if the page under the viewer were wholly
+    /// a clip: slivers for the neighbours, everything else for the bar, nothing
+    /// at all for the pages beyond them.
+    private func clipShapeWeights(available: CGFloat) -> [CGFloat] {
+        let centre = Int(position.rounded())
+        let sliver = Self.clipNeighbourWidth
+        let neighbours = segments.indices.filter { abs($0 - centre) == 1 }
+        let bar = max(available - sliver * CGFloat(neighbours.count), 1)
+        return segments.indices.map { index in
+            if index == centre { return bar }
+            return abs(index - centre) == 1 ? sliver : 0
+        }
+    }
+
+    /// The played part of a clip's bar, drawn inside the segment that carries
+    /// it. Minted on the page that needs one and never on any other.
+    private func layoutFill(onPage index: Int, width: CGFloat, clipness: CGFloat) {
+        let isBar = clipPages.contains(index) && clipness > 0 && index == Int(position.rounded())
+        guard isBar, let playhead else {
+            fills[index]?.isHidden = true
+            return
+        }
+        let fill = fills[index] ?? {
+            let view = UIView()
+            view.backgroundColor = .white
+            view.isUserInteractionEnabled = false
+            segments[index].addSubview(view)
+            fills[index] = view
+            return view
+        }()
+        fill.isHidden = false
+        fill.alpha = clipness
+        let played = max(min(CGFloat(playhead), 1), 0) * width
+        fill.frame = CGRect(x: 0, y: 0, width: played, height: bounds.height)
+        fill.layer.cornerRadius = min(bounds.height, played) / 2
     }
 
     /// 1 on the page itself, 0 a page away, linear between — the tent above.
@@ -323,22 +456,89 @@ final class SnapMediaPageBarView: UIView {
         handleScrub(recognizer.state, atX: recognizer.location(in: self).x)
     }
 
-    /// ⚠️ TOUCHING IT ASKS FOR NOTHING; ONLY DRAGGING DOES — the card's rule,
-    /// and it matters more here: this strip is full-width, so an absolute read
-    /// would send a twelve-page post to page six the moment a thumb landed
-    /// anywhere near the middle of the screen.
+    /// ⚠️ A TAP SELECTS; A DRAG MEANS THE FINER OF THE TWO THINGS ON OFFER.
+    ///
+    /// The card's chip refuses a tap outright — it is 50pt of dots between two
+    /// counters, so a press there is as often a miss as an instruction. This
+    /// strip is the width of the column with segments a thumb can hit, and once
+    /// the active segment becomes a clip's bar the neighbours are slivers that
+    /// a viewer has no other way to reach. So a press that does not travel
+    /// selects the segment under it, absolutely.
+    ///
+    /// A drag that does travel asks for the finer thing: the PLAYHEAD on a
+    /// clip, where the segment under the finger IS the clip, and the pages on a
+    /// photograph. Both are relative to where the touch went down, so nothing
+    /// jumps under the thumb that landed on it.
     private func handleScrub(_ state: UIGestureRecognizer.State, atX x: CGFloat) {
         guard pageCount >= 2 else { return }
         switch state {
         case .began:
+            touchDownX = x
+            travelled = false
             scrubber.begin(atX: x, page: Int(position.rounded()))
+            seekAnchor = playhead
         case .changed:
-            if let page = scrubber.page(draggedTo: x, pageCount: pageCount) {
+            if abs(x - touchDownX) > Self.travelThreshold { travelled = true }
+            guard travelled else { return }
+            if isScrubbingAClip {
+                seek(draggedTo: x)
+            } else if let page = scrubber.page(draggedTo: x, pageCount: pageCount) {
                 onPageRequested?(page)
             }
+        case .ended:
+            guard !travelled else { return }
+            onPageRequested?(page(under: x))
         default:
             break
         }
+    }
+
+    /// Whether this drag is moving the playhead rather than the pages: the page
+    /// the viewer is ON carries a clip, and the strip is drawn as its bar.
+    private var isScrubbingAClip: Bool {
+        clipPages.contains(Int(position.rounded())) && playhead != nil
+    }
+
+    /// The playhead the drag started from, so the seek is relative — the same
+    /// rule the pages get, for the same reason: a thumb landing mid-bar must
+    /// not throw the clip to the middle before it has moved.
+    private var seekAnchor: Double?
+    private var touchDownX: CGFloat = 0
+    private var travelled = false
+
+    /// How far a finger must move before it stops being a tap. A few points:
+    /// enough to absorb the roll of a thumb, far less than the shortest
+    /// deliberate drag.
+    private static let travelThreshold: CGFloat = 6
+
+    private func seek(draggedTo x: CGFloat) {
+        guard let seekAnchor, let bar = barWidth, bar > 0 else { return }
+        let moved = Double((x - touchDownX) / bar)
+        onSeekRequested?(min(max(seekAnchor + moved, 0), 1))
+    }
+
+    /// The drawn width of the segment carrying the clip's bar — the distance
+    /// the whole clip is worth, which is what makes the seek 1:1 with the thumb.
+    private var barWidth: CGFloat? {
+        let centre = Int(position.rounded())
+        guard segments.indices.contains(centre) else { return nil }
+        return segments[centre].bounds.width
+    }
+
+    /// The segment under a point, for the tap. Absolute on purpose: a tap is an
+    /// instruction to go somewhere, and the somewhere is where the thumb is.
+    ///
+    /// ⚠️ AMONG THE SEGMENTS ACTUALLY DRAWN. A clip's bar squeezes the pages
+    /// beyond its neighbours to nothing, and a nearest-centre search that
+    /// counted them would answer with a page that is not on the strip: a tap on
+    /// the right-hand sliver of an eight-page post asked for page five, because
+    /// five zero-width segments were stacked at that end.
+    private func page(under x: CGFloat) -> Int {
+        let drawn = segments.indices.filter { segments[$0].bounds.width > 1 }
+        let hit = drawn.min { first, second in
+            abs(segments[first].center.x - x) < abs(segments[second].center.x - x)
+        }
+        return hit ?? Int(position.rounded())
     }
 
     /// ⚠️ A STRIP THIS THIN NEEDS A TALLER TARGET. Six points is a legible
@@ -371,8 +571,17 @@ final class SnapMediaPageBarView: UIView {
     }
 
     /// How strongly a segment is drawn — the mark, read without a screenshot.
+    ///
+    /// ⚠️ Both halves multiplied: the segment's own `alpha` carries presence and
+    /// its colour carries the ink, and a reader asking "how strong is this"
+    /// means the product. Reading either alone was how a track that dimmed its
+    /// own fill went unnoticed.
     func debugSegmentAlpha(_ index: Int) -> CGFloat? {
-        segments.indices.contains(index) ? segments[index].alpha : nil
+        guard segments.indices.contains(index) else { return nil }
+        let segment = segments[index]
+        var ink: CGFloat = 1
+        segment.backgroundColor?.getWhite(nil, alpha: &ink)
+        return segment.alpha * ink
     }
 
     /// Whether anything about a segment is animating.
@@ -389,6 +598,19 @@ final class SnapMediaPageBarView: UIView {
     /// Drives the scrub without a finger; the simulator injects none.
     func debugScrub(_ state: UIGestureRecognizer.State, atX x: CGFloat) {
         handleScrub(state, atX: x)
+    }
+
+    /// A press that lands and lifts without travelling — the tap.
+    func debugTap(atX x: CGFloat) {
+        handleScrub(.began, atX: x)
+        handleScrub(.ended, atX: x)
+    }
+
+    /// The played part of a clip's bar, as a rectangle in the strip's own
+    /// coordinates — nil when the page draws no bar.
+    func debugFillFrame(_ index: Int) -> CGRect? {
+        guard let fill = fills[index], !fill.isHidden, fill.alpha > 0.01 else { return nil }
+        return fill.convert(fill.bounds, to: self)
     }
     #endif
 }

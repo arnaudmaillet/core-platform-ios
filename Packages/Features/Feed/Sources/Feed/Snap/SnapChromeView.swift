@@ -751,8 +751,8 @@ final class SnapChromeView: UIView {
     /// How many media pages the post has, and which one is showing. A count
     /// below two hides the indicator — a readout for a single photograph is
     /// furniture answering a question nobody asked.
-    func setMediaPageCount(_ count: Int, current: Int) {
-        mediaPageBar.configure(count: count, current: current)
+    func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
+        mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
     }
 
     /// Where the page's BOTTOM READOUT begins — the top of the comment band.
@@ -792,6 +792,20 @@ final class SnapChromeView: UIView {
     /// gesture rather than at the crossing. See `SnapMediaPageBarView`.
     func setMediaScrollPosition(_ position: CGFloat) {
         mediaPageBar.setPosition(position)
+    }
+
+    /// How far through the clip the page is showing, when there is one whose
+    /// length is known — the strip draws it inside the segment it has grown
+    /// into a bar.
+    func setMediaPlayhead(_ fraction: Double?) {
+        mediaPageBar.setPlayhead(fraction)
+    }
+
+    /// The viewer dragged along a clip's bar. The CELL owns playback, so the
+    /// request travels out rather than the chrome reaching for a player.
+    var onMediaSeekRequested: ((Double) -> Void)? {
+        get { mediaPageBar.onSeekRequested }
+        set { mediaPageBar.onSeekRequested = newValue }
     }
 
 

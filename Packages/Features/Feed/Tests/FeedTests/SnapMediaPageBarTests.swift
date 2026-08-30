@@ -338,6 +338,175 @@ struct SnapMediaPageBarTests {
         }
     }
 
+    // MARK: - A clip's own bar
+
+    private func clipBar(pages: Int, current: Int, clips: Set<Int>,
+                         playhead: Double?, width: CGFloat = 370) -> SnapMediaPageBarView {
+        let view = SnapMediaPageBarView(frame: CGRect(
+            x: 0, y: 0, width: width, height: SnapMediaPageBarView.thickness
+        ))
+        view.configure(count: pages, current: current, clipPages: clips)
+        view.setPlayhead(playhead)
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// ⚠️ ON A CLIP, THE STRIP IS THE CLIP'S BAR. A video page has two things
+    /// to say and they are the same shape — where you are in the post, and
+    /// where you are in the picture — so the segment grows to nearly the whole
+    /// width and carries the playhead, with the neighbours left as slivers.
+    @Test func aClipsSegmentTakesNearlyTheWholeWidth() throws {
+        let width: CGFloat = 370
+        let view = clipBar(pages: 5, current: 2, clips: [2], playhead: 0.5, width: width)
+
+        let bar = try #require(view.debugSegmentFrame(2))
+        #expect(bar.width > width * 0.8)
+
+        // The neighbours are still there — they are the only way back to the
+        // other pages once the bar has taken the strip.
+        #expect(try #require(view.debugSegmentFrame(1)).width > 4)
+        #expect(try #require(view.debugSegmentFrame(3)).width > 4)
+        // …and the pages beyond them are not.
+        #expect(try #require(view.debugSegmentFrame(0)).width < 1)
+        #expect(try #require(view.debugSegmentFrame(4)).width < 1)
+    }
+
+    /// The played part is drawn inside the bar, and it is the bright thing:
+    /// the track steps back to the resting ink so a bar does not read as
+    /// finished from its first frame.
+    @Test func thePlayedPartIsDrawnInsideTheBar() throws {
+        let view = clipBar(pages: 5, current: 2, clips: [2], playhead: 0.25)
+
+        let bar = try #require(view.debugSegmentFrame(2))
+        let played = try #require(view.debugFillFrame(2))
+        #expect(abs(played.width - bar.width * 0.25) < 1)
+        #expect(try #require(view.debugSegmentAlpha(2)) < 0.5)   // the track, not the fill
+    }
+
+    /// ⚠️ NIL IS AN ANSWER. A clip whose length is not known yet draws NO bar
+    /// rather than an empty one: a bar at zero says "at the beginning", which
+    /// is a different claim from "not yet known" and the one a viewer acts on.
+    @Test func aClipWithNoKnownLengthDrawsNoBar() {
+        let view = clipBar(pages: 5, current: 2, clips: [2], playhead: nil)
+        #expect(view.debugFillFrame(2) == nil)
+    }
+
+    /// A photograph is a photograph: no bar, and the strip keeps its ordinary
+    /// shape even on a post whose OTHER pages are clips.
+    @Test func aPhotographKeepsTheOrdinaryStrip() throws {
+        let view = clipBar(pages: 5, current: 0, clips: [2], playhead: 0.5)
+
+        let mark = try #require(view.debugSegmentFrame(0))
+        #expect(mark.width < 370 * 0.5)
+        #expect(view.debugFillFrame(0) == nil)
+    }
+
+    // MARK: - What a touch means
+
+    /// ⚠️ A TAP SELECTS, ABSOLUTELY. The card's chip refuses a tap because it is
+    /// 50pt of dots between two counters; this strip is the width of the column,
+    /// and once a clip's bar has taken it the slivers either side are the only
+    /// way to the other pages.
+    @Test func aTapAsksForTheSegmentUnderIt() throws {
+        let view = bar(pages: 5, current: 0, width: 370)
+        var asked: [Int] = []
+        view.onPageRequested = { asked.append($0) }
+
+        let third = try #require(view.debugSegmentFrame(3))
+        view.debugTap(atX: third.midX)
+
+        #expect(asked == [3])
+    }
+
+    /// ⚠️ AND A TAP ON A CLIP'S SLIVER ASKS FOR THAT PAGE — which is the whole
+    /// reason the tap had to exist. Once the bar has taken the strip, the two
+    /// slivers are the only way to the rest of the post.
+    ///
+    /// ⚠️ It is answered from the segments actually DRAWN. The pages beyond the
+    /// slivers are squeezed to nothing, and a nearest-centre search that
+    /// counted them answered with a page that is not on the strip: measured in
+    /// the simulator as a tap on the right-hand sliver of an eight-page post
+    /// jumping to page five.
+    @Test func aTapOnAClipsSliverAsksForThatPage() throws {
+        let view = clipBar(pages: 8, current: 3, clips: [3], playhead: 0.1)
+        var asked: [Int] = []
+        view.onPageRequested = { asked.append($0) }
+
+        let right = try #require(view.debugSegmentFrame(4))
+        view.debugTap(atX: right.midX)
+        let left = try #require(view.debugSegmentFrame(2))
+        view.debugTap(atX: left.midX)
+
+        #expect(asked == [4, 2])
+    }
+
+    /// ⚠️ AND THE BAR FILLS THE COLUMN. A page squeezed to nothing still sat
+    /// between two seams, so a long post spent seven gaps of pure air and the
+    /// bar was that much shorter than it claimed.
+    @Test func theClipsBarSpansTheColumnWithItsSlivers() throws {
+        let width: CGFloat = 370
+        let view = clipBar(pages: 8, current: 3, clips: [3], playhead: 0.1, width: width)
+
+        let left = try #require(view.debugSegmentFrame(2))
+        let bar = try #require(view.debugSegmentFrame(3))
+        let right = try #require(view.debugSegmentFrame(4))
+        #expect(left.minX < 1)
+        #expect(right.maxX > width - 1)
+        #expect(abs(bar.minX - left.maxX - SnapMediaPageBarView.gap) < 0.5)
+        #expect(abs(right.minX - bar.maxX - SnapMediaPageBarView.gap) < 0.5)
+    }
+
+    /// ⚠️ AND A DRAG STILL MEANS THE PAGES, not a selection: the two must not
+    /// both fire, or a scrub would end by teleporting to wherever the thumb
+    /// happened to lift.
+    @Test func aDragThatTravelsIsNotATap() {
+        let view = bar(pages: 5, current: 0, width: 370)
+        var asked: [Int] = []
+        view.onPageRequested = { asked.append($0) }
+
+        let stride = (370 + SnapMediaPageBarView.gap) / 5
+        view.debugScrub(.began, atX: 20)
+        view.debugScrub(.changed, atX: 20 + stride)
+        view.debugScrub(.ended, atX: 20 + stride)
+
+        #expect(asked == [1])   // the drag's request, and no second one on lift
+    }
+
+    /// ⚠️ ON A CLIP, THE DRAG IS THE PLAYHEAD — the finer of the two things the
+    /// strip offers. The pages are still reachable by tapping a sliver, which
+    /// is why the tap had to exist before this could.
+    @Test func draggingAClipsBarMovesThePlayheadAndNotThePages() {
+        let view = clipBar(pages: 5, current: 2, clips: [2], playhead: 0.5)
+        var pages: [Int] = []
+        var seeks: [Double] = []
+        view.onPageRequested = { pages.append($0) }
+        view.onSeekRequested = { seeks.append($0) }
+
+        let barWidth = view.debugSegmentFrame(2)?.width ?? 0
+        view.debugScrub(.began, atX: 100)
+        view.debugScrub(.changed, atX: 100 + barWidth * 0.25)
+
+        #expect(pages.isEmpty)
+        #expect(seeks.count == 1)
+        // Relative to where the touch went down: half way, plus a quarter of
+        // the bar, is three quarters — nothing jumped when the thumb landed.
+        #expect(abs((seeks.first ?? 0) - 0.75) < 0.02)
+    }
+
+    /// And it clamps rather than running off either end of the clip.
+    @Test func seekingPastTheEndsOfAClipClamps() {
+        let view = clipBar(pages: 5, current: 2, clips: [2], playhead: 0.5)
+        var seeks: [Double] = []
+        view.onSeekRequested = { seeks.append($0) }
+
+        view.debugScrub(.began, atX: 100)
+        view.debugScrub(.changed, atX: 100 + 10_000)
+        view.debugScrub(.changed, atX: 100 - 10_000)
+
+        #expect(seeks.first == 1)
+        #expect(seeks.last == 0)
+    }
+
     // MARK: - Where it sits in the column
 
     private func chrome(pages: Int) -> SnapChromeView {

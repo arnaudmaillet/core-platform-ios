@@ -577,6 +577,47 @@ public final class VideoPlaybackController {
         return true
     }
 
+    /// Where the clip `view` is drawing has got to, as a fraction of its
+    /// length, with the length in seconds beside it.
+    ///
+    /// ⚠️ NIL IS AN ANSWER, and the caller must draw it as one. There is no
+    /// playhead when there is no player, and none worth reporting while the
+    /// length is unknown — a stream still resolving, or a live one that has no
+    /// end at all. A bar that draws zero for those is a bar that says "at the
+    /// beginning" when the truth is "not yet known", which is the reading a
+    /// viewer will act on.
+    ///
+    /// Asked of the WATCHED player, so a page that joined a grid tile's clip
+    /// answers about the picture in front of the viewer — see `watchedPlayer`.
+    public func playhead(in view: VideoRenderView) -> (fraction: Double, seconds: Double)? {
+        guard let player = watchedPlayer(in: view), let item = player.currentItem else { return nil }
+        let duration = item.duration.seconds
+        guard duration.isFinite, duration > 0 else { return nil }
+        let time = item.currentTime().seconds
+        guard time.isFinite else { return nil }
+        return (min(max(time / duration, 0), 1), duration)
+    }
+
+    /// Moves the playhead of the clip `view` is drawing.
+    ///
+    /// ⚠️ TOLERANT, not exact. A finger on a scrubber asks for a new position
+    /// thirty times a second and every exact seek is a decode from the nearest
+    /// keyframe forward: asked exactly, the picture falls behind the thumb and
+    /// then catches up in lurches. A quarter-second either way is inside what
+    /// the eye reads as "there", and it lets the player answer from frames it
+    /// already has.
+    public func seek(toFraction fraction: Double, in view: VideoRenderView) {
+        guard let player = watchedPlayer(in: view), let item = player.currentItem else { return }
+        let duration = item.duration.seconds
+        guard duration.isFinite, duration > 0 else { return }
+        let seconds = duration * min(max(fraction, 0), 1)
+        let tolerance = CMTime(seconds: 0.25, preferredTimescale: 600)
+        player.seek(
+            to: CMTime(seconds: seconds, preferredTimescale: 600),
+            toleranceBefore: tolerance, toleranceAfter: tolerance
+        )
+    }
+
     /// Toggles play/pause for the player bound to `view` (a user tapping the
     /// full-screen cell). Returns the new paused state. No-op returning `false`
     /// when no player is active for the view (e.g. an image/text cell).
