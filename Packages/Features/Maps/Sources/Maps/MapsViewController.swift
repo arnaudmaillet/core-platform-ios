@@ -1124,10 +1124,16 @@ final class MapsViewController: UIViewController {
     /// rather than an impression. Same instrument that found both For You defects.
     private func installChromeTrace() {
         guard ProcessInfo.processInfo.arguments.contains("-maps-trace-chrome") else { return }
-        CADisplayLink(target: self, selector: #selector(sampleChrome)).add(to: .main, forMode: .common)
+        // Weak-target proxy, not `target: self`: a display link retains its
+        // target, so the direct form pinned this controller for the life of
+        // the process. The proxy dies with the controller; the link retires
+        // itself on the next tick.
+        let proxy = MapsChromeTraceProxy(target: self)
+        CADisplayLink(target: proxy, selector: #selector(MapsChromeTraceProxy.tick))
+            .add(to: .main, forMode: .common)
     }
 
-    @objc private func sampleChrome() {
+    @objc fileprivate func sampleChrome() {
         guard let window = view.window else { return }
         let bars = barsStack.convert(barsStack.bounds, to: window)
         print(String(
@@ -1874,3 +1880,16 @@ private final class MapNotificationBag: @unchecked Sendable {
     func add(_ token: any NSObjectProtocol) { tokens.append(token) }
     deinit { tokens.forEach(NotificationCenter.default.removeObserver) }
 }
+
+#if DEBUG
+/// Weak-target beat for `-maps-trace-chrome` — see `installChromeTrace`.
+private final class MapsChromeTraceProxy {
+    private weak var target: MapsViewController?
+    init(target: MapsViewController) { self.target = target }
+
+    @objc func tick(_ link: CADisplayLink) {
+        guard let target else { return link.invalidate() }
+        target.sampleChrome()
+    }
+}
+#endif

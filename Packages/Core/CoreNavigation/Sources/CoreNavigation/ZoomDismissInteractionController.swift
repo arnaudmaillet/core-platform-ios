@@ -118,6 +118,19 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private var axes: Set<ZoomDismissAxis> = [.horizontal]
     private var activeAxis: ZoomDismissAxis = .horizontal
 
+    override init() {
+        super.init()
+        #if DEBUG
+        ZoomDebugCensus.increment(ZoomDebugCensus.Key.grabDriver)
+        #endif
+    }
+
+    #if DEBUG
+    deinit {
+        ZoomDebugCensus.decrement(ZoomDebugCensus.Key.grabDriver)
+    }
+    #endif
+
     /// Set by the owner alongside `attach`; see `returningChrome`.
     func setReturningChrome(_ chrome: UIView?) {
         returningChrome = chrome
@@ -622,40 +635,56 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private func finishTransition(cancelled: Bool) {
         // Whatever happens below, the staged frame-0 hide is stale from here.
         hasAbandonedContentHide = true
-        // The two steps the non-interactive completion performs and this one
-        // did not: hand the card's live surface to the source, then hold the
-        // card over the landing until that surface is actually drawing.
+        // The settlement is decided by `ZoomGrabSettlement.plan` — pure, so
+        // the branch that only a cancelled grab with a donated surface reaches
+        // is pinned by a unit test rather than by a device session.
         //
-        // This path is the one a real finger takes, and it removed the card on
-        // its first line — so whenever the landing tile was not already
+        // Commit: hand the card's live surface to the source, then hold the
+        // card over the landing until that surface is actually drawing. This
+        // path is the one a real finger takes, and it used to remove the card
+        // on its first line — so whenever the landing tile was not already
         // rendering, the card vanished and the tile's COVER IMAGE was what
-        // appeared. A scripted dismissal hides this because it always lands on
-        // the post it left from, whose player never stopped; anything that
-        // makes the landing not-instant (a slow stream, a dismissal to a post
-        // the viewer scrolled to) exposes it.
+        // appeared.
         //
-        // The hold owns removing the card. A cancelled grab has no landing to
-        // wait for — the page is coming back — so its card goes immediately.
-        if !cancelled, let card = flight?.card {
-            if let surface = card.zoomLiveMediaSurface {
-                source?.zoomAdoptLiveMediaView(surface)
+        // Cancel: give a donated surface BACK first (`zoomReclaimLiveMediaView`
+        // — the same hand-back `ZoomAnimator`'s cancel branch performs; under
+        // the `AVPlayerLayer` backing the donation physically removed the
+        // page's render view from its cell, so a cancelled grab that only
+        // dropped the card restored a page with a dead media area), then the
+        // card goes outright — no landing to wait for.
+        let card = flight?.card
+        for action in ZoomGrabSettlement.plan(
+            cancelled: cancelled,
+            cardHasLiveSurface: card?.zoomLiveMediaSurface != nil
+        ) {
+            switch action {
+            case .reclaimSurfaceToDestination:
+                if let surface = card?.zoomLiveMediaSurface {
+                    destination?.zoomReclaimLiveMediaView(surface)
+                }
+            case .adoptSurfaceToSource:
+                if let surface = card?.zoomLiveMediaSurface {
+                    source?.zoomAdoptLiveMediaView(surface)
+                }
+            case .holdCardOverLanding:
+                guard let card else { break }
+                ZoomAnimator.holdCard(card,
+                                      liveMediaIsDrawing: { [weak card] in
+                                          card?.zoomLiveMediaIsDrawing ?? true
+                                      },
+                                      liveMediaState: { [weak card] in
+                                          card?.zoomLiveMediaDebugState ?? "card gone"
+                                      },
+                                      finalizeLanding: { [weak sourceRef = source] in
+                                          sourceRef?.zoomFinalizeLanding()
+                                      },
+                                      path: "grab",
+                                      while: { [weak sourceRef = source] in
+                                          sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
+                                      })
+            case .removeCardNow:
+                card?.removeFromSuperview()
             }
-            ZoomAnimator.holdCard(card,
-                                  liveMediaIsDrawing: { [weak card] in
-                                      card?.zoomLiveMediaIsDrawing ?? true
-                                  },
-                                  liveMediaState: { [weak card] in
-                                      card?.zoomLiveMediaDebugState ?? "card gone"
-                                  },
-                                  finalizeLanding: { [weak sourceRef = source] in
-                                      sourceRef?.zoomFinalizeLanding()
-                                  },
-                                  path: "grab",
-                                  while: { [weak sourceRef = source] in
-                                      sourceRef.map { !$0.zoomLandingMediaIsReady } ?? false
-                                  })
-        } else {
-            flight?.card.removeFromSuperview()
         }
         flight?.shadow.removeFromSuperview()
         dim?.removeFromSuperview()

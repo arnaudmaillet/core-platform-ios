@@ -2258,13 +2258,20 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// `-foryou-trace-chrome`: samples the chrome's window-space position every
     /// frame while a hero transition is alive, so "does it move?" is a number.
+    ///
+    /// Through a weak-target proxy, not `target: self`: a display link retains
+    /// its target, so the direct form pinned this controller for the life of
+    /// the process — un-noticeable on a root tab today, and exactly the shape
+    /// of leak the hero census exists to keep at zero. The proxy lets the
+    /// controller die normally, and the link retires itself on the next tick.
     private func debugTraceChrome() {
         guard ProcessInfo.processInfo.arguments.contains("-foryou-trace-chrome") else { return }
-        let link = CADisplayLink(target: self, selector: #selector(debugSampleChrome))
+        let proxy = ChromeTraceProxy(target: self)
+        let link = CADisplayLink(target: proxy, selector: #selector(ChromeTraceProxy.tick))
         link.add(to: .main, forMode: .common)
     }
 
-    @objc private func debugSampleChrome() {
+    @objc fileprivate func debugSampleChrome() {
         // Samples ALWAYS, not only while a transition is live: the resting
         // position is the baseline every other reading is judged against, and a
         // snap at teardown is only visible as "settled != during the drag".
@@ -2581,6 +2588,22 @@ extension ForYouViewController: DebugItemSelectable {
     /// the stress harness exercises the hero rather than a router push.
     func debugSelectFirstItem() -> Bool {
         pager.page(for: viewModel.format)?.debugSelectItem(at: 0) ?? false
+    }
+}
+#endif
+
+#if DEBUG
+/// Weak-target beat for the chrome trace: a `CADisplayLink` retains its
+/// target, so pointing one at the controller pinned it for the process's
+/// life. The proxy is what the link retains; when the controller goes, the
+/// next tick retires the link.
+private final class ChromeTraceProxy {
+    private weak var target: ForYouViewController?
+    init(target: ForYouViewController) { self.target = target }
+
+    @objc func tick(_ link: CADisplayLink) {
+        guard let target else { return link.invalidate() }
+        target.debugSampleChrome()
     }
 }
 #endif

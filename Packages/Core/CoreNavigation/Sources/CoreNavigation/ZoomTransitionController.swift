@@ -97,6 +97,15 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// close-outs of the same flight.
     public var onPresentationCancelled: (() -> Void)?
 
+    #if DEBUG
+    deinit {
+        ZoomDebugCensus.decrement(ZoomDebugCensus.Key.controller)
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print("[zoom-live] ZoomTransitionController deinit")
+        }
+    }
+    #endif
+
     public init(source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
         self.source = source
         self.destination = destination
@@ -104,6 +113,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         super.init()
         #if DEBUG
         Self.debugMostRecent = self
+        ZoomDebugCensus.increment(ZoomDebugCensus.Key.controller)
         #endif
         // Before the destination is pushed, and so before it lays out and
         // activates its first page — the only point early enough for it to

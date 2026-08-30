@@ -36,6 +36,10 @@ public final class InteractiveSlideDismissal: NSObject {
     /// Whether `savedDelegate` holds the delegate from BEFORE this screen —
     /// as opposed to whatever happened to be installed during a re-assert.
     private var hasCapturedSavedDelegate = false
+    /// Whether a `didShow` has ever observed the feed ON the stack — the
+    /// precondition for "not on the stack" meaning POPPED rather than "not
+    /// pushed yet". See the note in `navigationController(_:didShow:)`.
+    private var hasSeenFeedOnStack = false
 
     /// Non-nil exactly while a swipe drives a pop; the delegate vends the
     /// slide animator (and this driver) only then, so back-button pops and
@@ -192,6 +196,7 @@ public final class InteractiveSlideDismissal: NSObject {
     /// on the right screen, and moving it there is its own bug.
     public func resetForNewPresentation() {
         hasCapturedSavedDelegate = false
+        hasSeenFeedOnStack = false
         prepareForDismissal = nil
         revealGeometry = nil
         revealPresents = false
@@ -227,6 +232,7 @@ public final class InteractiveSlideDismissal: NSObject {
         }
         savedDelegate = nil
         hasCapturedSavedDelegate = false
+        hasSeenFeedOnStack = false
         navigationController = nil
     }
 
@@ -516,7 +522,21 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         let feedStillOnStack = feedViewController.map {
             navigationController.viewControllers.contains($0)
         } ?? false
-        if !feedStillOnStack {
+        // ⚠️ ONLY A FEED THAT HAS BEEN SEEN ON THE STACK CAN BE POPPED OFF IT.
+        //
+        // `didShow` for an EARLIER, unrelated transition can be delivered in
+        // the window between this driver taking the delegate slot and its feed
+        // actually being pushed — measured with a gallery pushed
+        // `animated:false` whose deferred `didShow` landed during the very
+        // `presentSnapFeedHero` that was arming the escape. "Not on the stack"
+        // then meant "not YET", but this read it as "popped": it tore down,
+        // fired `onFeedPopped`, and that closure wiped the flight's retainer —
+        // the transition controller deallocated before its push even began,
+        // leaving the pushed post with no grab and the tab bar restored over
+        // it. Seen-then-gone is the only sequence that means a pop.
+        if feedStillOnStack {
+            hasSeenFeedOnStack = true
+        } else if hasSeenFeedOnStack {
             teardown()
             onFeedPopped?(navigationController)
         }

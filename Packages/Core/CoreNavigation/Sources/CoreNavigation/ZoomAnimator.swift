@@ -79,6 +79,30 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         self.source = source
         self.destination = destination
         self.returningChrome = returningChrome
+        super.init()
+        #if DEBUG
+        ZoomDebugCensus.increment(ZoomDebugCensus.Key.animator)
+        #endif
+    }
+
+    #if DEBUG
+    deinit {
+        ZoomDebugCensus.decrement(ZoomDebugCensus.Key.animator)
+    }
+    #endif
+
+    /// Drops everything this animator holds about a finished flight — the
+    /// cached property animator above all. Its completion blocks capture
+    /// `self` while `self` retains it, a cycle that is normally broken when
+    /// the animator finishes and releases its blocks; a transition UIKit
+    /// abandons never finishes, and the pair then keeps each other (and the
+    /// staged card they capture) alive for the life of the process. Called in
+    /// every terminal branch, where the cycle stops earning its keep.
+    private func releaseFlightState() {
+        interruptible = nil
+        interruptibleContext = nil
+        stagedFlightCard = nil
+        stagedFlightEndpoints = nil
     }
 
     func transitionDuration(using transitionContext: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
@@ -358,6 +382,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 ZoomFlight.clearRecededChrome(from: presentingView)
                 self.destination?.zoomTransitionDidEnd()
                 self.source.setZoomSourceHidden(false)
+                self.releaseFlightState()
                 context.completeTransition(false)
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -432,6 +457,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 presentingView?.transform = .identity
                 ZoomFlight.clearRecededChrome(from: presentingView)
                 self.destination?.zoomTransitionDidEnd()
+                self.releaseFlightState()
                 context.completeTransition(!context.transitionWasCancelled)
             }
         }
@@ -974,6 +1000,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 // Undoes `zoomSourceWillStageDismissal`, which hid the tile and
                 // froze the grid's inset for a landing that is not coming.
                 self.source.setZoomSourceHidden(false)
+                self.releaseFlightState()
                 context.completeTransition(false)
                 #if DEBUG
                 Self.logTeardown("reversed", context: context, card: flight.card, fromView: fromView)
@@ -1022,6 +1049,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             self.destination?.setZoomContentHidden(false)
             self.destination?.zoomTransitionDidEnd()
             self.source.setZoomSourceHidden(false)
+            self.releaseFlightState()
             context.completeTransition(true)
             #if DEBUG
             Self.logTeardown("done", context: context, card: flight.card, fromView: fromView)

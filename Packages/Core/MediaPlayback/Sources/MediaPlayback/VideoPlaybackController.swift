@@ -1105,6 +1105,7 @@ public final class VideoPlaybackController {
     public var debugPausedAnchorCount: Int { pausedAnchors.count }
     public var debugStallObserverCount: Int { stallObservers.count }
     public var debugGenerationEntryCount: Int { generation.count }
+    public var debugIdlePlayerCount: Int { idlePlayers.count }
 
     func activePlayer(in view: VideoRenderView) -> AVPlayer? { activePlayers[ObjectIdentifier(view)] }
     func peakBitRate(in view: VideoRenderView) -> Double? {
