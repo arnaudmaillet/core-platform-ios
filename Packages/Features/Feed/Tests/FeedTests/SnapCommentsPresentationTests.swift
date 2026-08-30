@@ -1121,17 +1121,17 @@ struct SnapCommentsPresentationTests {
         #expect(items.last?.customView is UIButton)
     }
 
-    /// ⚠️ THE FOOTER'S CORNER CARRIES THE EXIT: ⋯ at rest, ✕ while a MEDIA
-    /// post's comments are open, ⋯ again when they close.
+    /// ⚠️ THE FOOTER'S CORNER KEEPS ITS ⋯ IN EVERY STATE — and the toolbar is
+    /// state-invariant again, which is where it started.
     ///
-    /// The toolbar was state-invariant for a while, and that was a real
-    /// property: three item sets whose only difference was this slot became
-    /// one, so a text engagement and a media engagement could not disagree
-    /// about what the corner meant. Two things changed. The ⋯ has a platter of
-    /// its own now, so the swap is one bubble changing glyph rather than a run
-    /// re-composing; and a TEXT page still never swaps — its comments ARE the
-    /// page, so there is nothing to close.
-    @Test func theFooterCornerCarriesTheCommentsExit() throws {
+    /// The exit borrowed this corner for a while, on the reading that a bubble
+    /// changing glyph is cheaper than a run re-composing. What it actually cost
+    /// was the ⋯ itself for as long as the thread was open: Share, Report and
+    /// Not interested, gone exactly when a reader is deepest in the post. The
+    /// exit lives in the TRAILING NAV slot now (see
+    /// `theExitTakesTheAuthorsSlotWhileTheThreadIsOpen`), where what it
+    /// displaces has already been read.
+    @Test func theFooterCornerKeepsItsMenuInEveryState() throws {
         let (_, feed) = Self.chromeHost()
         let resting = feed.toolbarItems ?? []
         #expect(!resting.isEmpty)
@@ -1141,13 +1141,38 @@ struct SnapCommentsPresentationTests {
         #expect(cornerLabel() == "More actions")
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(cornerLabel() == "Close comments")
-        // ONLY the corner: everything to its left is untouched, which is what
-        // makes this a swap rather than a rebuild.
-        #expect(feed.toolbarItems?.dropLast() ?? [] == resting.dropLast())
+        #expect(cornerLabel() == "More actions")
+        #expect(feed.toolbarItems ?? [] == resting)
+
+        feed.setEngagedChrome(true, hasMedia: false, animated: false)
+        #expect(feed.toolbarItems ?? [] == resting)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(feed.toolbarItems ?? [] == resting)
+    }
+
+    /// ⚠️ THE EXIT TAKES THE AUTHOR'S SLOT while a media post's thread is open.
+    ///
+    /// The two are the same kind of thing — the outermost item at the end that
+    /// says what the screen is ABOUT — and only one of them is worth the slot
+    /// at a time: with the thread open, whose post it is has already been read
+    /// and the way back to the picture has not. A TEXT post keeps its author,
+    /// because its comments ARE the page and there is nothing to close.
+    @Test func theExitTakesTheAuthorsSlotWhileTheThreadIsOpen() throws {
+        let (_, feed) = Self.chromeHost()
+        func trailingFirst() -> UIView? {
+            feed.navigationItem.rightBarButtonItems?.first?.customView
+        }
+        #expect(trailingFirst() is SnapAuthorIdentityView)
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect((trailingFirst() as? UIButton)?.accessibilityLabel == "Close comments")
+
+        feed.setEngagedChrome(true, hasMedia: false, animated: false)
+        #expect(trailingFirst() is SnapAuthorIdentityView)
+
+        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect(trailingFirst() is SnapAuthorIdentityView)
     }
 
     /// A TEXT page's corner never changes: its comments are its resting state,
@@ -1187,8 +1212,8 @@ struct SnapCommentsPresentationTests {
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == [arrow])
     }
 
-    /// A TAB-ROOT feed has no back arrow — and still gains the ✕, in the
-    /// corner. The two answer different questions, and only the second is
+    /// A TAB-ROOT feed has no back arrow — and still gains the ✕, at the
+    /// trailing end. The two answer different questions, and only the second is
     /// always available.
     ///
     /// ⚠️ AND THE SORT STANDS ALONE THERE, with no spacer: the leading group's
@@ -1208,8 +1233,8 @@ struct SnapCommentsPresentationTests {
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect((feed.toolbarItems?.last?.customView as? UIButton)?.accessibilityLabel
-                == "Close comments")
+        #expect((feed.navigationItem.rightBarButtonItems?.first?.customView as? UIButton)?
+                    .accessibilityLabel == "Close comments")
         let leading = feed.navigationItem.leftBarButtonItems ?? []
         #expect(leading.count == 1)
         #expect(leading.first?.customView is SnapCommentSortButton)
@@ -1245,14 +1270,17 @@ struct SnapCommentsPresentationTests {
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting)
     }
 
-    /// ⚠️ THE WHOLE BAR, ENGAGED: [‹ back] [⇅ sort] ——— [◎ balance] [author].
+    /// ⚠️ THE WHOLE BAR, ENGAGED ON A MEDIA POST: [‹ back] [⇅ sort] ———
+    /// [◎ balance] [✕].
     ///
     /// Stated end to end in one place, because the arrangement is the product
-    /// decision and it has moved three times: the two groups say different
-    /// kinds of thing — what the screen is DOING on the left, what the post IS
-    /// on the right — and a rule that only pins one half cannot catch an item
-    /// crossing between them.
-    @Test func theEngagedBarReadsBackSortThenBalanceAuthor() throws {
+    /// decision and it has moved four times: the two groups say different kinds
+    /// of thing — what the screen is DOING on the left, what the post IS on the
+    /// right — and a rule that only pins one half cannot catch an item crossing
+    /// between them. The ✕ is at the right edge because with the thread open
+    /// the way back to the picture outranks whose post it is; a TEXT post keeps
+    /// its author there, having nothing to close.
+    @Test func theEngagedBarReadsBackSortThenBalanceExit() throws {
         let suite = "snap.chrome.order.test"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.removePersistentDomain(forName: suite)
@@ -1275,10 +1303,10 @@ struct SnapCommentsPresentationTests {
         #expect(leading[1].customView == nil) // the fixed space that keeps them two pills
         #expect(leading[2].customView is SnapCommentSortButton)
 
-        // TRAILING, right to left: the author at the edge, the balance inboard.
+        // TRAILING, right to left: the exit at the edge, the balance inboard.
         let trailing = feed.navigationItem.rightBarButtonItems ?? []
-        #expect(trailing.count == 3, "the trailing run is [author][space][balance]: \(trailing.count)")
-        #expect(trailing[0].customView is SnapAuthorIdentityView)
+        #expect(trailing.count == 3, "the trailing run is [✕][space][balance]: \(trailing.count)")
+        #expect((trailing[0].customView as? UIButton)?.accessibilityLabel == "Close comments")
         #expect(trailing[1].customView == nil)
         #expect(trailing[2].customView is WalletBadgeButton)
         // Nothing crossed between the groups.
