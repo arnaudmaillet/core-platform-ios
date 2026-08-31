@@ -61,8 +61,11 @@ enum MapClusterEngine {
 
         var isCluster: Bool { memberIDs.count > 1 }
 
-        /// A multi-post group whose members all share one place — the ONLY
-        /// marker whose tap opens the place gallery behind the feed (Case B).
+        /// A multi-post group whose members all share one place. An engine
+        /// FACT, not a routing decision: since 2026-08-31 only HIERARCHY
+        /// markers (`isHierarchyMarker` — the band's own city/country
+        /// clusters) open the place page behind their feed; a proximity
+        /// cluster that happens to share a leaf place stays a plain feed.
         var isSemanticCluster: Bool { isCluster && place != nil }
 
         /// The representative's id. Note this is NOT a stable marker identity: a

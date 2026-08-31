@@ -98,6 +98,81 @@ final class PlaceProfileViewController: UIViewController {
     /// feed settled on when a dismissal stages.
     private var anchorID: PostID
     private var loadTask: Task<Void, Never>?
+
+    // MARK: - The map return flight
+
+    /// Produces a FRESH flight source for the cluster marker this page
+    /// belongs to — assigned by the builder
+    /// (`FeedFeatureBuilding.makeClusterGallery`), resolved lazily because
+    /// the marker's face, ring and presence can all churn while this page is
+    /// buried under the feed. `nil` — or a `nil` answer — keeps the plain
+    /// slide: the fallback dismissal for a marker the map no longer shows.
+    var mapReturn: (() -> (any ZoomTransitionSource)?)?
+
+    /// The page's own hero return to the map — created once, then installed
+    /// as the stack's delegate whenever this page is top, so BOTH the back
+    /// button and the horizontal grab fly home to the marker instead of
+    /// sliding. Retained here (the controller holds its destination weakly).
+    private var mapReturnTransition: ZoomTransitionController?
+    /// Whoever owned the delegate slot before this page's first install —
+    /// handed the slot back when the page pops for good.
+    private weak var mapReturnPreviousDelegate: (any UINavigationControllerDelegate)?
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        installMapReturnIfTop()
+        #if DEBUG
+        scheduleDebugPopIfRequested()
+        #endif
+    }
+
+    /// Installs the hero return each time this page becomes the top screen.
+    /// The transition is built ONCE (its grab attaches a pan; a rebuild per
+    /// appearance would stack recognizers) from the first source `mapReturn`
+    /// yields; the DELEGATE install repeats, because every feed pushed above
+    /// takes the slot and hands back whatever it captured.
+    private func installMapReturnIfTop() {
+        guard let nav = navigationController, nav.topViewController === self else { return }
+        if mapReturnTransition == nil, let source = mapReturn?() {
+            let transition = ZoomTransitionController(source: source, destination: self)
+            transition.attachInteractiveDismissal(to: view, axes: [.horizontal]) { [weak nav] in
+                nav?.popViewController(animated: true)
+            }
+            transition.onSourceReturned = { [weak self, weak nav] in
+                // Landed on the map: the flow is over, the slot goes back to
+                // whoever owned it before this page existed.
+                guard let self, let nav else { return }
+                if nav.delegate === self.mapReturnTransition {
+                    nav.delegate = self.mapReturnPreviousDelegate
+                }
+            }
+            mapReturnTransition = transition
+        }
+        guard let transition = mapReturnTransition, nav.delegate !== transition else { return }
+        if mapReturnPreviousDelegate == nil {
+            mapReturnPreviousDelegate = nav.delegate
+        }
+        nav.delegate = transition
+    }
+
+    #if DEBUG
+    private var didScheduleDebugPop = false
+
+    /// `-maps-place-pop-demo`: pops this page ~1.5s after it becomes top —
+    /// the sim can't tap the back button, and the non-interactive pop is
+    /// exactly the leg that proves the hero return animator is installed.
+    private func scheduleDebugPopIfRequested() {
+        guard !didScheduleDebugPop,
+              ProcessInfo.processInfo.arguments.contains("-maps-place-pop-demo")
+        else { return }
+        didScheduleDebugPop = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, let nav = self.navigationController,
+                  nav.topViewController === self else { return }
+            nav.popViewController(animated: true)
+        }
+    }
+    #endif
     private var bannerTask: Task<Void, Never>?
 
     /// How many posts seed a feed opened from a tile — the same window (and
@@ -826,5 +901,51 @@ private extension UIFont {
     func withBoldTrait() -> UIFont {
         guard let descriptor = fontDescriptor.withSymbolicTraits(.traitBold) else { return self }
         return UIFont(descriptor: descriptor, size: pointSize)
+    }
+}
+
+// MARK: - The map return flight's destination half
+//
+// This screen is BOTH sides of a zoom now, deliberately: the SOURCE of the
+// tile flights above it (the extension near the top), and the DESTINATION of
+// its own dismissal to the map — the whole page lifts off and the marker's
+// card (built by `MapPinZoomSource`, the marker's exact twin) flies home to
+// the cluster. The two conformances share no members, so neither can
+// impersonate the other.
+extension PlaceProfileViewController: ZoomTransitionDestination {
+    /// The card lifts from the whole page.
+    func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect {
+        view.convert(view.bounds, to: container)
+    }
+
+    /// The flying card is the MARKER's face — the source builds it; this
+    /// page has no per-post chrome to ride along.
+    func zoomFlightChrome() -> UIView? { nil }
+
+    func setZoomContentHidden(_ hidden: Bool) {
+        view.isHidden = hidden
+    }
+
+    func zoomTransitionDidEnd() {}
+
+    var isReadyForInteractiveDismissal: Bool { true }
+
+    /// TRUE ONLY WHILE THE HERO RETURN IS INSTALLED. The default (`true`,
+    /// "this screen owns its dismissal") tells `NativePopPolicy` to refuse
+    /// the native edge pop — correct when the grab below is armed, and
+    /// exactly wrong for the fallback case where `mapReturn` yielded nothing
+    /// and the native slide IS the dismissal.
+    var zoomOwnsInteractiveDismissal: Bool { mapReturnTransition != nil }
+
+    /// A rightward drag means "previous tab" everywhere but the first one —
+    /// the profile pager's own rule. The back button flies from any tab.
+    func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
+        activeIndex == 0
+    }
+
+    /// Freeze the tab pager while a grab drives, so the drag that is flying
+    /// the page home cannot also page it sideways.
+    func setContentScrollEnabled(_ enabled: Bool) {
+        pager.isPagingEnabled = enabled
     }
 }

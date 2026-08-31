@@ -237,8 +237,10 @@ struct MapSemanticClusterTests {
     }
 
     /// Co-located members at the local band form an ordinary PROXIMITY
-    /// cluster: it keeps its gallery tap (all members still share the leaf
-    /// place) but it is NOT a hierarchy marker — its ring is neutral.
+    /// cluster: the shared leaf is still a FACT on the item
+    /// (`isSemanticCluster`), but it is NOT a hierarchy marker — it dresses
+    /// neutral, and since 2026-08-31 it routes as a plain feed too: only the
+    /// band's own city/country markers open the place page.
     @Test func aLocalProximityClusterIsNotAHierarchyMarker() {
         let venue = [
             pin("post-1", lat: 48.85, lng: 2.33, places: parisLadder),
@@ -249,8 +251,9 @@ struct MapSemanticClusterTests {
         )
         #expect(items.count == 1)
         #expect(items[0].isCluster)
-        #expect(items[0].isSemanticCluster, "the shared leaf still routes the tap to the gallery")
-        #expect(!items[0].isHierarchyMarker, "but below the city band it dresses neutral")
+        #expect(items[0].isSemanticCluster, "the shared leaf stays a fact on the item")
+        #expect(!items[0].isHierarchyMarker,
+                "and NOT being a hierarchy marker is what keeps its feed plain")
     }
 
     /// A place with ONE member at the active depth renders as a lone pin,

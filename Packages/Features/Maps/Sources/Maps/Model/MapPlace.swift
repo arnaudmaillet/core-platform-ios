@@ -1,8 +1,10 @@
 import Foundation
 
-/// A semantic place a pin belongs to — a city or a country. This is
-/// what separates a CASE-B cluster (tap → feed with a place gallery beneath)
-/// from an ordinary proximity cluster (tap → feed, dismiss back to the pin).
+/// A semantic place a pin belongs to — a city or a country. The active
+/// band's marker for one of these (a HIERARCHY marker) is a Case-B cluster:
+/// tap → feed with the place's page beneath. Every other marker — proximity
+/// clusters included, even leaf-sharing ones — keeps the plain feed and
+/// dismisses back to the pin.
 ///
 /// ⚠️ MOCK-ONLY today. `geo_discovery.v1` carries no place identity of any
 /// kind (`dev/BACKEND_GAPS.md` §18, spec in

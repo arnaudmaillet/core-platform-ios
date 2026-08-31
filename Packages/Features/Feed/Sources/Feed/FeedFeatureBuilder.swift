@@ -353,7 +353,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         postIDs: [PostID],
         title: String,
         following: ClusterGalleryFollowing?,
-        feed: UIViewController
+        feed: UIViewController,
+        mapReturn: @escaping () -> (any ZoomTransitionSource)?
     ) -> UIViewController {
         let base = repository
         let engagement = engagementProvider
@@ -399,6 +400,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // the feed (a mid-stack insertion never loads its view), and the
         // first anyone sees of it is a dismissal LANDING on it.
         gallery.beginLoading()
+        // The page's own way home — staged when it becomes top
+        // (`installMapReturnIfTop`): hero to the marker, slide as fallback.
+        gallery.mapReturn = mapReturn
         return gallery
     }
 

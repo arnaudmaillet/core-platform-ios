@@ -51,13 +51,17 @@ final class MapsViewController: UIViewController {
         [PostID], UIViewController, TextRevealOrigin,
         ((UIViewController) -> UIViewController)?
     ) -> Void
-    /// Builds the place gallery a SEMANTIC cluster's feed dismisses into
+    /// Builds the place gallery a HIERARCHY cluster's feed dismisses into
     /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, the place
-    /// itself, the feed about to cover it) → the gallery screen, which also
-    /// serves as the vertical grab's flight target (`ZoomTransitionSource`).
-    /// The whole `MapPlace` travels (not just its `galleryTitle`) so the
-    /// builder can wire the header's follow toggle to this place's identity.
-    private let makeClusterGallery: ([PostID], MapPlace, UIViewController) -> UIViewController
+    /// itself, the feed about to cover it, the map-return flight source) →
+    /// the gallery screen, which also serves as the vertical grab's flight
+    /// target (`ZoomTransitionSource`). The whole `MapPlace` travels (not
+    /// just its `galleryTitle`) so the builder can wire the header's follow
+    /// toggle to this place's identity; the last argument stages the page's
+    /// OWN dismissal back to the cluster marker (`makeMapReturnSource`).
+    private let makeClusterGallery: (
+        [PostID], MapPlace, UIViewController, @escaping () -> (any ZoomTransitionSource)?
+    ) -> UIViewController
     /// Warms the given posts into the shared cache so a tap opens instantly.
     private let prewarm: ([PostID]) async -> Void
     /// Opens someone's profile (the sub-filter sheet's Profile swipe). A
@@ -190,7 +194,9 @@ final class MapsViewController: UIViewController {
             [PostID], UIViewController, TextRevealOrigin,
             ((UIViewController) -> UIViewController)?
         ) -> Void,
-        makeClusterGallery: @escaping ([PostID], MapPlace, UIViewController) -> UIViewController,
+        makeClusterGallery: @escaping (
+            [PostID], MapPlace, UIViewController, @escaping () -> (any ZoomTransitionSource)?
+        ) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void
@@ -472,6 +478,17 @@ final class MapsViewController: UIViewController {
         super.viewDidAppear(animated)
         // Kick the first query; coalesces with any region-settle callback.
         scheduleQuery()
+        // Any marker a departed flow concealed comes back now. The window
+        // reveal hides the tapped marker and un-hides it on ITS return leg —
+        // but a feed that dismissed INTO the place page never runs that leg,
+        // and the page's own pop landed on a map missing its cluster
+        // (recorded on video, 2026-08-31). Every transition is over by
+        // `viewDidAppear`, so a blanket un-hide can't flash under a flying
+        // card; a hero return has already un-hidden its own marker and this
+        // is a no-op there.
+        for annotation in mapView.annotations {
+            mapView.view(for: annotation)?.isHidden = false
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -1329,6 +1346,33 @@ final class MapsViewController: UIViewController {
 
     private static func singleIdentity(_ postID: PostID) -> String { "p:" + postID.rawValue }
 
+    /// The place page's way home: a closure producing a FRESH flight source
+    /// for `annotation`'s marker, resolved when the page stages its own
+    /// dismissal — the marker's face, ring and even presence can all have
+    /// changed since the tap, so nothing is captured beyond the annotation's
+    /// identity. `nil` when the marker has left the map entirely, which is
+    /// the page's cue to keep the plain slide (the fallback dismissal).
+    private func makeMapReturnSource(
+        for annotation: any MKAnnotation
+    ) -> () -> (any ZoomTransitionSource)? {
+        { [weak self, weak box = annotation as AnyObject] in
+            guard let self, let box, let annotation = box as? any MKAnnotation,
+                  self.mapView.annotations.contains(where: { ($0 as AnyObject) === box })
+            else { return nil }
+            let view = self.mapView.view(for: annotation)
+            let thumbnail = (view as? MapClusterAnnotationView)?.heroImage
+                ?? (view as? MapAnnotationView)?.heroImage
+            let cluster = annotation as? MapComputedCluster
+            return MapPinZoomSource(
+                mapView: self.mapView,
+                annotation: annotation,
+                thumbnail: thumbnail,
+                face: Self.face(of: annotation),
+                ringKind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil }
+            )
+        }
+    }
+
     /// Re-points and re-faces a marker already on the map for a recomputed item.
     private func update(_ annotation: any MKAnnotation, to item: MapClusterEngine.Item) {
         if let cluster = annotation as? MapComputedCluster {
@@ -1588,16 +1632,21 @@ extension MapsViewController: MKMapViewDelegate {
             // origin that says where the marker is, what shape and colour it
             // is, and what to draw in the window at each end.
             isPlainFeedPushed = true
-            // A SEMANTIC cluster always offers its place page, whatever face
+            // A HIERARCHY marker always offers its place page, whatever face
             // it wears (a city or country is a place before it is a
             // photograph): the same builder the hero's Case B uses, handed
             // through the seam so the vertical dismissal lands on it. Same
-            // criterion as the hero path (`cluster.place != nil`), so the two
-            // presentations answer "does this marker have a place?" alike.
-            let clusterPlace = (annotation as? MapComputedCluster)?.place
-            let placePage: ((UIViewController) -> UIViewController)? = clusterPlace.map {
-                place in { [makeClusterGallery] feed in
-                    makeClusterGallery(postIDs, place, feed)
+            // criterion as the hero path — `isHierarchyMarker` — so the two
+            // presentations answer "is this marker a city or a country?"
+            // alike, and an ordinary proximity cluster (leaf-shared or not)
+            // gets the plain feed on both.
+            let hierarchyPlace = (annotation as? MapComputedCluster).flatMap {
+                $0.isHierarchyMarker ? $0.place : nil
+            }
+            let placePage: ((UIViewController) -> UIViewController)? = hierarchyPlace.map { place in
+                let mapReturn = makeMapReturnSource(for: annotation)
+                return { [makeClusterGallery] feed in
+                    makeClusterGallery(postIDs, place, feed, mapReturn)
                 }
             }
             revealSnapFeed(
@@ -1725,17 +1774,20 @@ extension MapsViewController: MKMapViewDelegate {
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
 
-        // CASE B (cluster-gallery milestone): a SEMANTIC cluster — one whose
-        // members all share a city/country (mock-only today, see
-        // `MapPlace`) — carries a place gallery beneath its feed. The gallery
-        // joins the stack invisibly in the same transaction as the feed
-        // (UIKit animates a stack whose last element is new exactly like a
-        // push, and never even loads the mid controller's view), and the
-        // VERTICAL grab flies the active post into its tile there instead of
-        // back to the pin. Generic clusters and single pins skip all of this.
+        // CASE B (cluster-gallery milestone): a HIERARCHY marker — the active
+        // band's own city or country cluster — carries a place page beneath
+        // its feed. The page joins the stack invisibly in the same
+        // transaction as the feed (UIKit animates a stack whose last element
+        // is new exactly like a push, and never even loads the mid
+        // controller's view), and the VERTICAL grab flies the active post
+        // into its tile there instead of back to the pin. ORDINARY clusters
+        // — proximity groups, even ones whose members happen to share a leaf
+        // place — and single pins skip all of this: only a city or a country
+        // has a place page (product call, 2026-08-31).
         var gallery: UIViewController?
-        if let cluster = annotation as? MapComputedCluster, let place = cluster.place {
-            let built = makeClusterGallery(postIDs, place, feedVC)
+        if let cluster = annotation as? MapComputedCluster,
+           cluster.isHierarchyMarker, let place = cluster.place {
+            let built = makeClusterGallery(postIDs, place, feedVC, makeMapReturnSource(for: annotation))
             gallery = built
             if let gallerySource = built as? any ZoomTransitionSource {
                 transition.setDismissSource(gallerySource, for: built)

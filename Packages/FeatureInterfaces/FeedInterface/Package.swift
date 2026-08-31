@@ -9,12 +9,13 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Kit/CoreModels"),
-        .package(path: "../../Core/PostGrid")
+        .package(path: "../../Core/PostGrid"),
+        .package(path: "../../Core/CoreNavigation")
     ],
     targets: [
         .target(
             name: "FeedInterface",
-            dependencies: ["CoreModels", "PostGrid"]
+            dependencies: ["CoreModels", "PostGrid", "CoreNavigation"]
         )
     ]
 )

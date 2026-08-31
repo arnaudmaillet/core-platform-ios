@@ -117,10 +117,11 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                     postIDs: postIDs, from: presenter, origin: origin, beneath: beneath
                 )
             },
-            // The place gallery a semantic cluster's feed dismisses into —
+            // The place gallery a hierarchy cluster's feed dismisses into —
             // built by the Feed feature because the grid, the flight card and
-            // the retarget wiring are all its internals.
-            makeClusterGallery: { postIDs, place, feed in
+            // the retarget wiring are all its internals. `mapReturn` rides
+            // through so the page's own dismissal can fly home to the marker.
+            makeClusterGallery: { postIDs, place, feed, mapReturn in
                 feedFeature().makeClusterGallery(
                     postIDs: postIDs,
                     title: place.galleryTitle,
@@ -132,7 +133,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                         isFollowing: { placeFollows.isFollowed(place.id) },
                         toggle: { placeFollows.toggle(place.id) }
                     ),
-                    feed: feed
+                    feed: feed,
+                    mapReturn: mapReturn
                 )
             },
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import UIKit
 
 /// How the post-detail screen presents.
@@ -195,11 +196,20 @@ public protocol FeedFeatureBuilding {
     ///
     /// `following` puts the follow-this-place toggle in the gallery's header
     /// (`nil` hides it — a caller whose subject has no followable identity).
+    ///
+    /// `mapReturn` stages the gallery's OWN dismissal back to the map: called
+    /// when the gallery becomes the top screen, it produces a fresh flight
+    /// source for the cluster's marker — fresh because the marker's face,
+    /// ring and even presence can all have changed since the tap — and the
+    /// gallery's pop then flies home to it (hero), with the plain slide kept
+    /// as the fallback whenever the closure answers `nil` (the marker left
+    /// the map).
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,
         following: ClusterGalleryFollowing?,
-        feed: UIViewController
+        feed: UIViewController,
+        mapReturn: @escaping () -> (any ZoomTransitionSource)?
     ) -> UIViewController
 }
 
