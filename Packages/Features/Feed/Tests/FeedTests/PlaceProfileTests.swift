@@ -144,19 +144,22 @@ struct PlaceProfileTests {
         ))
         profile.loadViewIfNeeded()
 
-        let button = try #require(profile.navigationItem.rightBarButtonItem?.customView as? UIButton)
-        func label() -> String? {
-            button.configuration?.attributedTitle.map { String($0.characters) }
-        }
-        #expect(label() == "Follow")
+        // The heart alone carries the state — no word rides beside it, so the
+        // FILL is what a test reads and what a viewer sees.
+        let item = try #require(profile.navigationItem.rightBarButtonItems?.first)
+        #expect(item.title == nil, "a titled item would be charged its word against the bar")
+        #expect(item.image == UIImage(systemName: "heart"))
+        #expect(item.accessibilityLabel == "Follow this place")
 
-        button.sendActions(for: .primaryActionTriggered)
+        let action = try #require(item.primaryAction)
+        action.performWithSender(nil, target: nil)
         #expect(followed, "the toggle reached the caller's store")
-        #expect(label() == "Following")
+        #expect(item.image == UIImage(systemName: "heart.fill"))
+        #expect(item.accessibilityLabel == "Unfollow this place")
 
-        button.sendActions(for: .primaryActionTriggered)
+        action.performWithSender(nil, target: nil)
         #expect(!followed)
-        #expect(label() == "Follow")
+        #expect(item.image == UIImage(systemName: "heart"))
     }
 
     /// A profile whose subject has no followable identity shows no HEART — an
@@ -167,8 +170,8 @@ struct PlaceProfileTests {
         profile.loadViewIfNeeded()
         let items = profile.navigationItem.rightBarButtonItems ?? []
         #expect(items.count == 1)
-        #expect(items.first?.customView == nil, "no heart")
-        #expect(items.first?.menu != nil, "…but the overflow is still there")
+        #expect(items.first?.menu != nil, "the overflow is still there…")
+        #expect(items.first?.image == UIImage(systemName: "ellipsis"), "…and it is the only item")
     }
 
     /// The trailing pair, in the order the eye reads it: [...][Follow].
@@ -181,10 +184,14 @@ struct PlaceProfileTests {
         profile.loadViewIfNeeded()
         let items = try #require(profile.navigationItem.rightBarButtonItems)
         #expect(items.count == 2)
-        #expect(items[0].customView is UIButton, "the corner is the follow button's")
+        #expect(items[0].image == UIImage(systemName: "heart"), "the corner is the heart's")
         let menu = try #require(items[1].menu)
         #expect(menu.children.compactMap { ($0 as? UIAction)?.title } == ["Share"],
                 "one honest row: a place cannot be reported and has no link to copy")
+        // ⚠️ Each in its OWN bubble. Sharing the group's one platter is what
+        // makes two controls read as a segmented pair — the map's coin and
+        // bell, the profile's tray and For You's all opt out the same way.
+        #expect(items.allSatisfy { !$0.sharesBackground })
     }
 
     /// The selector docks into the navigation bar's LEADING group, beside the

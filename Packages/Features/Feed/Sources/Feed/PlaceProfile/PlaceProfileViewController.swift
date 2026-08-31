@@ -115,7 +115,6 @@ final class PlaceProfileViewController: UIViewController {
     /// The header's follow-this-place toggle, when the caller's subject has a
     /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
     private let following: ClusterGalleryFollowing?
-    private let followButton = UIButton(configuration: .plain())
     /// The two trailing items, held so the bar's group is composed in one
     /// place — see `configureNavigationItems`. `followItem` stays nil when no
     /// follow seam was supplied; the "..." is always there.
@@ -417,6 +416,15 @@ final class PlaceProfileViewController: UIViewController {
 
         inlineBarSlot.translatesAutoresizingMaskIntoConstraints = false
         headerHost.addSubview(inlineBarSlot)
+        // ⚠️ SPREAD, not hugged. A `.navigationTitle` bar hugs its titles by
+        // default — right in a bar item, where the capsule is sized to what
+        // it holds, and wrong in the page, where two tabs then huddle in the
+        // middle of a full-width slot. `fillsWidth` gives the hugging bar the
+        // floating bar's ARRANGEMENT (fillEqually, pinned to both ends)
+        // without its type ramp, so the docked and inline copies stay the
+        // same control at two sizes. The profile's inline copy does exactly
+        // this, for exactly this reason.
+        inlineBar.fillsWidth = true
         inlineBar.translatesAutoresizingMaskIntoConstraints = false
         inlineBarSlot.addSubview(inlineBar)
 
@@ -627,19 +635,7 @@ final class PlaceProfileViewController: UIViewController {
         )
         guard shouldDock != isBarDocked else { return }
         isBarDocked = shouldDock
-        let animated = DockThreshold.isAnimated(step: step)
-        // Before the hand-over, so the space the label gives up is already
-        // free when the arriving selector is measured against the bar.
-        if animated {
-            UIView.animate(withDuration: Self.dockTransition, delay: 0,
-                           options: [.curveEaseInOut, .beginFromCurrentState]) {
-                self.renderFollowState(self.followState)
-                self.navigationController?.navigationBar.layoutIfNeeded()
-            }
-        } else {
-            renderFollowState(followState)
-        }
-        applyDockedAppearance(animated: animated)
+        applyDockedAppearance(animated: DockThreshold.isAnimated(step: step))
     }
 
     /// The hand-over itself: a crossfade with a small zoom, never a move.
@@ -871,10 +867,19 @@ final class PlaceProfileViewController: UIViewController {
     private func configureNavigationItems() {
         configureFollowButton()
         configureMoreButton()
-        // ⚠️ INDEX 0 IS THE RIGHTMOST. Follow keeps the corner it has always
-        // had and the "..." sits inboard of it, which is the order the eye
-        // reads as [...][Follow]. The "..." is present whether or not a
-        // follow seam was supplied — its one row does not depend on one.
+        // ⚠️ INDEX 0 IS THE RIGHTMOST. The heart keeps the corner it has
+        // always had and the "..." sits inboard of it, which is the order the
+        // eye reads as [...][♡]. The "..." is present whether or not a follow
+        // seam was supplied — its rows do not depend on one.
+        //
+        // ⚠️ EACH IN ITS OWN BUBBLE. `sharesBackground = false` is UIKit's
+        // opt-out from the one glass pill a trailing group otherwise draws
+        // around everything in it — the arrangement the map's coin and bell
+        // use, and the profile's tray, and For You's. Left sharing, the two
+        // read as one segmented control with a divider nobody drew.
+        for item in [followItem, moreItem].compactMap({ $0 }) {
+            item.sharesBackground = false
+        }
         navigationItem.rightBarButtonItems = [followItem, moreItem].compactMap { $0 }
         // ⚠️ AFTER the trailing items, and that ordering is load-bearing:
         // `installLeadingSelector` measures the bar's whole budget to size
@@ -925,64 +930,37 @@ final class PlaceProfileViewController: UIViewController {
         present(sheet, animated: true)
     }
 
-    /// The header's trailing item: heart + "Follow" flipping to filled heart
-    /// + "Following". A custom view rather than a plain `UIBarButtonItem`
-    /// because the design pairs the icon WITH a label, and a bar item shows
-    /// one or the other.
+    /// The trailing heart, and nothing but the heart.
+    ///
+    /// ⚠️ A PLAIN BAR ITEM, where this was a custom view carrying a label.
+    /// The word is gone on purpose — the state is already in the fill, and a
+    /// titled item is charged its whole word against the bar's budget
+    /// (`LeadingSelectorBudget.wantedWidth`), which is width the docked
+    /// selector then does not have: measured, "Activity" came back clipped to
+    /// "Activi" on a 402pt device with the label up. A glyph item costs the
+    /// 44pt every glyph costs, and UIKit draws it as the same bubble the
+    /// map's bell and the profile's tray wear.
     private func configureFollowButton() {
         guard let following else { return }
-        var configuration = UIButton.Configuration.plain()
-        configuration.imagePadding = 4
-        configuration.preferredSymbolConfigurationForImage =
-            UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
-        followButton.configuration = configuration
-        // The bar squeezes a custom view before it truncates the TITLE; let
-        // the long nav title give way instead — "Following" must never wrap
-        // into "Follow-ing".
-        followButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-        followButton.titleLabel?.numberOfLines = 1
-        followButton.addAction(UIAction { [weak self] _ in
+        let item = UIBarButtonItem(primaryAction: UIAction { [weak self] _ in
             guard let self, let following = self.following else { return }
             self.renderFollowState(following.toggle())
-        }, for: .primaryActionTriggered)
+        })
+        followItem = item
         renderFollowState(following.isFollowing())
-        followItem = UIBarButtonItem(customView: followButton)
     }
 
-    /// One place decides both states' looks, so they can't drift: outline
-    /// heart + tinted "Follow" against filled heart + neutral "Following"
-    /// (the resting state whispers; the call to action doesn't).
-    ///
-    /// ⚠️ THE LABEL GIVES WAY TO THE DOCKED SELECTOR, and it has to. Once the
-    /// selector arrives in the bar the leading group is competing with a back
-    /// chevron, a "..." and this button for one row: measured on a 402pt
-    /// device, "Activity" came back clipped to "Activi". The word is also the
-    /// most redundant thing up there by then — the heart carries both states
-    /// on its own fill, and a viewer deep enough in the page to have docked
-    /// the header has already read it once. Widths are not negotiable, so
-    /// something has to yield; this is the piece that loses the least.
+    /// One place decides both states' looks, so they can't drift: the outline
+    /// heart calls, the filled one rests. The word that used to sit beside it
+    /// is gone (see `configureFollowButton`), so the FILL is the whole of the
+    /// state — which is why the label a screen reader hears still says both
+    /// words.
     private func renderFollowState(_ isFollowing: Bool) {
         followState = isFollowing
-        guard var configuration = followButton.configuration else { return }
-        configuration.image = UIImage(systemName: isFollowing ? "heart.fill" : "heart")
-        if isBarDocked {
-            configuration.attributedTitle = nil
-        } else {
-            var title = AttributedString(isFollowing ? "Following" : "Follow")
-            title.font = UIFont.systemFont(
-                ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize,
-                weight: .semibold
-            )
-            configuration.attributedTitle = title
-        }
-        configuration.baseForegroundColor = isFollowing ? .secondaryLabel : .tintColor
-        followButton.configuration = configuration
-        // Unchanged either way: the label is what goes, never the meaning.
-        followButton.accessibilityLabel = isFollowing ? "Unfollow this place" : "Follow this place"
-        // The bar sizes a custom view from its own frame, so a button that
-        // just lost its title has to be re-measured before the selector is
-        // offered the space it freed.
-        followButton.sizeToFit()
+        followItem?.image = UIImage(systemName: isFollowing ? "heart.fill" : "heart")
+        followItem?.tintColor = isFollowing ? .secondaryLabel : .tintColor
+        followItem?.accessibilityLabel = isFollowing
+            ? "Unfollow this place" : "Follow this place"
     }
 
     // MARK: - Opening a tile
