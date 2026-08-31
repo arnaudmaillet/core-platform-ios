@@ -268,17 +268,25 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
 
     /// The European anchors the spread rotates over, matching the zone
     /// ladders in the Maps feature's `MapMockPlaces` (the spec's mock-parity
-    /// contract ties the two files): three cities, four country-level
-    /// scatters (the old Provence/Catalonia region scatters read as France/
-    /// Spain countryside since the region level was cut, 2026-08-31).
+    /// contract ties the two files): seven cities at tight jitter (0.10 —
+    /// inside their 0.15° city circles, so every pin carries the city
+    /// ladder) and three country-level countryside scatters (wide jitter,
+    /// outside any circle → country-only ladders, hidden at the city band).
+    /// Madrid and Berlin were promoted from countryside to cities on
+    /// 2026-08-31 (with Rome and London added); the German countryside
+    /// anchor keeps the country-only coverage Berlin's wide ring used to
+    /// provide.
     static let hierarchyAnchors: [(lat: Double, lng: Double, jitter: Double)] = [
         (45.7640, 4.8357, 0.10),  // Lyon (city)
         (43.2965, 5.3698, 0.10),  // Marseille (city)
         (43.9000, 6.2000, 0.30),  // Provence countryside (France, country)
         (41.3874, 2.1686, 0.10),  // Barcelona (city)
         (41.9000, 1.6000, 0.30),  // Catalonia countryside (Spain, country)
-        (40.4200, -3.7000, 0.30), // Madrid area (Spain, country)
-        (52.5200, 13.4050, 0.30), // Berlin area (Germany, country)
+        (40.4200, -3.7000, 0.10), // Madrid (city)
+        (52.5200, 13.4050, 0.10), // Berlin (city)
+        (51.0000, 9.5000, 0.40),  // Hesse countryside (Germany, country)
+        (41.8933, 12.4829, 0.10), // Rome (city)
+        (51.5074, -0.1278, 0.10), // London (city)
     ]
 
     /// Deterministic scatter: two coprime strides over the index fan posts out

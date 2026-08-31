@@ -67,6 +67,22 @@ enum MapMockPlaces {
         id: "city:barcelona", name: "Barcelona", kind: .city,
         h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 20)
     )
+    static let madrid = MapPlace(
+        id: "city:madrid", name: "Madrid", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 20)
+    )
+    static let berlin = MapPlace(
+        id: "city:berlin", name: "Berlin", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 15)
+    )
+    static let rome = MapPlace(
+        id: "city:rome", name: "Rome", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 21)
+    )
+    static let london = MapPlace(
+        id: "city:london", name: "London", kind: .city,
+        h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 25)
+    )
     static let spain = MapPlace(
         id: "country:spain", name: "Spain", kind: .country,
         h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 20)
@@ -74,6 +90,14 @@ enum MapMockPlaces {
     static let germany = MapPlace(
         id: "country:germany", name: "Germany", kind: .country,
         h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 15)
+    )
+    static let italy = MapPlace(
+        id: "country:italy", name: "Italy", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 21)
+    )
+    static let unitedKingdom = MapPlace(
+        id: "country:uk", name: "United Kingdom", kind: .country,
+        h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 25)
     )
 
     static var isEnabled: Bool {
@@ -119,10 +143,20 @@ enum MapMockPlaces {
         // The European roster: cities first (each inside its country), then
         // country boxes — most specific wins. (The old Provence/Catalonia
         // region boxes fell inside the France/Spain boxes, so their zones
-        // degrade to country ladders with no gap.)
+        // degrade to country ladders with no gap.) City circle centers
+        // mirror `MockGeoDiscoveryService.hierarchyAnchors` verbatim — the
+        // mock-parity contract.
         if within(pin, of: (45.7640, 4.8357), radius: 0.15) { return [lyon, france] }
         if within(pin, of: (43.2965, 5.3698), radius: 0.15) { return [marseille, france] }
         if within(pin, of: (41.3874, 2.1686), radius: 0.15) { return [barcelona, spain] }
+        if within(pin, of: (40.4200, -3.7000), radius: 0.15) { return [madrid, spain] }
+        if within(pin, of: (52.5200, 13.4050), radius: 0.15) { return [berlin, germany] }
+        if within(pin, of: (41.8933, 12.4829), radius: 0.15) { return [rome, italy] }
+        if within(pin, of: (51.5074, -0.1278), radius: 0.15) { return [london, unitedKingdom] }
+        // Country boxes, France FIRST on purpose: it wins its Alps overlap
+        // with Italy and its Channel overlap with the UK box the same way it
+        // already wins Alsace against Germany — no seeds sit in any of the
+        // contested strips.
         if (42.30...51.10).contains(pin.latitude), (-5.00...8.20).contains(pin.longitude) {
             return [france]
         }
@@ -131,6 +165,12 @@ enum MapMockPlaces {
         }
         if (47.20...55.00).contains(pin.latitude), (5.90...15.00).contains(pin.longitude) {
             return [germany]
+        }
+        if (36.60...47.10).contains(pin.latitude), (6.60...18.60).contains(pin.longitude) {
+            return [italy]
+        }
+        if (49.90...58.70).contains(pin.latitude), (-8.20...1.80).contains(pin.longitude) {
+            return [unitedKingdom]
         }
         return []
     }

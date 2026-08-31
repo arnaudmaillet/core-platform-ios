@@ -210,8 +210,25 @@ enum MapClusterEngine {
         guard zoomScale > 0, cellPoints > 0 else {
             return semantic + lone + unmasked.map(Self.single)
         }
-        return semantic + lone
+        let result = collide(semantic + lone, zoomScale: zoomScale, cellPoints: cellPoints)
             + proximityCluster(unmasked, zoomScale: zoomScale, cellPoints: cellPoints)
+        #if DEBUG
+        // `-maps-banding-log` second line: the engine's OUTPUT — what merged
+        // into what. The banding decision alone can't explain a marker the
+        // collision pass produced.
+        if ProcessInfo.processInfo.arguments.contains("-maps-banding-log") {
+            let described = result
+                .map { item in
+                    "\(item.place?.id ?? "generic")×\(item.memberIDs.count)"
+                        + (item.isHierarchyMarker ? "†" : "")
+                        + String(format: "@(%.2f,%.2f)", item.latitude, item.longitude)
+                }
+                .sorted().joined(separator: " ")
+            print("[banding] out: bandItems=\(semantic.count)+\(lone.count)lone"
+                + " cell=\(String(format: "%.0f", cellPoints / zoomScale))mp → \(described)")
+        }
+        #endif
+        return result
     }
 
     /// The band's own collision pass. The semantic pre-pass guarantees one

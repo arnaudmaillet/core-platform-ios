@@ -82,6 +82,29 @@ struct MapPlacePopularityTests {
         #expect(Set(items[0].memberIDs) == [PostID("post-1"), PostID("post-2"), PostID("post-3")])
     }
 
+    /// Same-band markers folded by the collision pass keep the popularity
+    /// rule EXACT: each marker's face is already its own group's most-liked/
+    /// lowest-id member, so choosing among faces IS choosing over the whole
+    /// union — and the memberIDs rotation still leads with that face.
+    @Test func aMergedBandClusterWearsTheUnionsMostLikedFace() {
+        let spain = MapPlace(
+            id: "country:spain", name: "Spain", kind: .country,
+            h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 20)
+        )
+        let world = 402.0 / 268_435_456.0
+        let items = MapClusterEngine.cluster(
+            [
+                pin("post-1", lat: 48.80, lng: 2.30, likes: 40, places: [paris, france]),
+                pin("post-2", lat: 48.90, lng: 2.40, likes: 3, places: [paris, france]),
+                pin("post-3", lat: 40.42, lng: -3.70, likes: 250, places: [spain]),
+            ],
+            zoomScale: world, cellPoints: 64, viewportDiagonalKm: 9000
+        )
+        #expect(items.count == 1)
+        #expect(items[0].representative.postID == PostID("post-3"))
+        #expect(items[0].memberIDs == [PostID("post-3"), PostID("post-1"), PostID("post-2")])
+    }
+
     // MARK: - The counter hydration
 
     /// The pure stamping rule: known ids take their count, unknown ids keep 0.

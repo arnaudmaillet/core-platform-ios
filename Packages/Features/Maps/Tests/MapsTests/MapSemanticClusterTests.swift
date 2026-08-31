@@ -320,9 +320,17 @@ struct MapSemanticClusterTests {
                 == ["country:france"])
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 41.9000, lng: 1.6000)).map(\.id)
                 == ["country:spain"])
+        // Madrid and Berlin are CITIES since 2026-08-31 (Rome and London
+        // joined the same day); Hesse keeps Germany's country-only coverage.
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 40.4200, lng: -3.7000)).map(\.id)
-                == ["country:spain"])
+                == ["city:madrid", "country:spain"])
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 52.5200, lng: 13.4050)).map(\.id)
+                == ["city:berlin", "country:germany"])
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 41.8933, lng: 12.4829)).map(\.id)
+                == ["city:rome", "country:italy"])
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 51.5074, lng: -0.1278)).map(\.id)
+                == ["city:london", "country:uk"])
+        #expect(MapMockPlaces.ladder(for: pin("p", lat: 51.0000, lng: 9.5000)).map(\.id)
                 == ["country:germany"])
     }
 
@@ -369,6 +377,63 @@ struct MapSemanticClusterTests {
             #expect(spans.count == ladder.count, "every rung carries a decodable cell")
             #expect(spans == spans.sorted(), "cells must widen leaf → root")
         }
+    }
+
+    // MARK: - Same-band collisions
+
+    /// Zoomed out far enough that two countries' markers would stack on
+    /// screen, they fuse into ONE cluster — and a group spanning places
+    /// speaks for none: `place == nil`, neutral dress, plain viewer. The
+    /// zoom scale is the realistic world-on-one-screen figure, not a
+    /// contrived one.
+    @Test func collidingCountryMarkersMergeIntoAGenericCluster() {
+        let world = 402.0 / 268_435_456.0 // screen points per map point, world framed
+        let items = MapClusterEngine.cluster(
+            [
+                pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
+                pin("post-2", lat: 48.90, lng: 2.40, places: parisLadder),
+                pin("post-3", lat: 40.42, lng: -3.70, places: [MapMockPlaces.spain]),
+                pin("post-4", lat: 41.39, lng: 2.17,
+                    places: [MapMockPlaces.barcelona, MapMockPlaces.spain]),
+            ],
+            zoomScale: world, cellPoints: 64, viewportDiagonalKm: 9000
+        )
+        #expect(items.count == 1, "overlapping band markers must fuse")
+        #expect(items[0].isCluster)
+        #expect(items[0].place == nil, "a France+Spain group speaks for no single place")
+        #expect(!items[0].isHierarchyMarker)
+        #expect(items[0].representative.postID == PostID("post-1"),
+                "unhydrated corpus → the union's lowest id wears the face")
+        #expect(items[0].memberIDs.first == PostID("post-1"))
+        #expect(Set(items[0].memberIDs) == Set((1...4).map { PostID("post-\($0)") }))
+    }
+
+    /// The same collision rule holds one band down: two cities whose markers
+    /// stack fuse into one generic cluster, and at a zoom where they fit
+    /// apart each keeps its own hierarchy marker
+    /// (`theCityBandRendersOneMarkerPerCity` is that separated half).
+    @Test func collidingCityMarkersMergeIntoAGenericCluster() {
+        let pins = [
+            pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
+            pin("post-2", lat: 48.90, lng: 2.40, places: parisLadder),
+            pin("post-3", lat: 48.70, lng: 2.20, places: versaillesLadder),
+            pin("post-4", lat: 48.72, lng: 2.50, places: versaillesLadder),
+        ]
+        let separated = MapClusterEngine.cluster(
+            pins, zoomScale: 1, cellPoints: 64, viewportDiagonalKm: cityDiagonal
+        )
+        #expect(separated.count == 2, "far apart on screen, one marker per city")
+
+        // The two city centroids sit 0.14° of latitude apart ≈ 158k map
+        // points (Mercator at 48.8°); cell = 64 / 0.00035 ≈ 183k → the
+        // markers overlap and must fold into one.
+        let colliding = MapClusterEngine.cluster(
+            pins, zoomScale: 0.00035, cellPoints: 64, viewportDiagonalKm: cityDiagonal
+        )
+        #expect(colliding.count == 1)
+        #expect(colliding[0].place == nil)
+        #expect(!colliding[0].isHierarchyMarker)
+        #expect(Set(colliding[0].memberIDs).count == 4)
     }
 
     // MARK: - The annotation mirror
