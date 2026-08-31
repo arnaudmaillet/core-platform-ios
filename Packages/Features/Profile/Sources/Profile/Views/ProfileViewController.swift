@@ -2016,6 +2016,29 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 galleryPager.horizontalPan.require(toFail: pan)
             }
         }
+        // ⚠️ NEVER while a transition is still settling. `viewDidAppear` for a
+        // popped-back-to profile runs INSIDE `completeTransition`, before the
+        // stack delegate's `didShow` — and the delegate at that instant is the
+        // returning flight's `ZoomTransitionController`. Installing over it
+        // routed `didShow` to this slide, which forwards only to its
+        // captured-once saved delegate, so the flight never heard its own
+        // completion: its dormant interruptor, its retainer and its grab
+        // drivers leaked once per profile-opened post, and `onSourceReturned`
+        // (the tab-bar and delegate hand-back) never ran. Measured by the
+        // hero census as `interruptors=1` forever after a tap-back.
+        //
+        // Deferred to after the transition — completion block, plus one
+        // runloop hop so `didShow` (which UIKit sends after completion) has
+        // landed. The recovery this re-assert exists for (a child that handed
+        // the slot back to nobody) still happens, one beat later; and when
+        // the flight restored this very slide via its own hand-back, the
+        // deferred install finds itself already the delegate and returns.
+        if let coordinator = transitionCoordinator {
+            coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+                DispatchQueue.main.async { self?.installSlideDismissalIfNeeded() }
+            }
+            return
+        }
         slideDismissal.install(on: nav)
     }
 
