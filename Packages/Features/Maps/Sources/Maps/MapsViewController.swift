@@ -1705,7 +1705,7 @@ extension MapsViewController: MKMapViewDelegate {
         activeTransition = transition
 
         // CASE B (cluster-gallery milestone): a SEMANTIC cluster — one whose
-        // members all share a city/country/region (mock-only today, see
+        // members all share a city/country (mock-only today, see
         // `MapPlace`) — carries a place gallery beneath its feed. The gallery
         // joins the stack invisibly in the same transaction as the feed
         // (UIKit animates a stack whose last element is new exactly like a

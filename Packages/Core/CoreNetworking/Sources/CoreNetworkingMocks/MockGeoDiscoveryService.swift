@@ -254,7 +254,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// Mirrors the Maps feature's semantic-clusters launch argument (read
     /// here the same way `-maps-force-video` is): with it, a deterministic
     /// THIRD of the non-venue corpus is seeded across European anchors —
-    /// cities, regions and countries beyond Paris — so the H3 hierarchy has
+    /// cities and countries beyond Paris — so the H3 hierarchy has
     /// several distinct entities per level to band, at every geographic
     /// scale. Without the flag the scatter is exactly the historical
     /// Paris-only fixture.
@@ -263,14 +263,15 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
 
     /// The European anchors the spread rotates over, matching the zone
     /// ladders in the Maps feature's `MapMockPlaces` (the spec's mock-parity
-    /// contract ties the two files): three cities, two region scatters, two
-    /// country scatters.
+    /// contract ties the two files): three cities, four country-level
+    /// scatters (the old Provence/Catalonia region scatters read as France/
+    /// Spain countryside since the region level was cut, 2026-08-31).
     static let hierarchyAnchors: [(lat: Double, lng: Double, jitter: Double)] = [
         (45.7640, 4.8357, 0.10),  // Lyon (city)
         (43.2965, 5.3698, 0.10),  // Marseille (city)
-        (43.9000, 6.2000, 0.30),  // Provence scatter (region)
+        (43.9000, 6.2000, 0.30),  // Provence countryside (France, country)
         (41.3874, 2.1686, 0.10),  // Barcelona (city)
-        (41.9000, 1.6000, 0.30),  // Catalonia scatter (region)
+        (41.9000, 1.6000, 0.30),  // Catalonia countryside (Spain, country)
         (40.4200, -3.7000, 0.30), // Madrid area (Spain, country)
         (52.5200, 13.4050, 0.30), // Berlin area (Germany, country)
     ]

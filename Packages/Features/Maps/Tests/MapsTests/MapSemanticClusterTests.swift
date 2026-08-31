@@ -3,7 +3,7 @@ import Testing
 import CoreModels
 
 /// The semantic-cluster rules: which markers are Case B (gallery-backed
-/// feed), and how the NESTED hierarchy (city ⊂ region ⊂ country) renders
+/// feed), and how the NESTED hierarchy (city ⊂ country) renders
 /// under DYNAMIC banding — each level's H3 cell span against the camera
 /// viewport's diagonal, one level on screen at a time, with the zoom
 /// thresholds surviving only as the H3-less fallback.
@@ -15,10 +15,6 @@ struct MapSemanticClusterTests {
     private let versailles = MapPlace(
         id: "city:versailles", name: "Versailles", kind: .city,
         h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14)
-    )
-    private let idf = MapPlace(
-        id: "region:idf", name: "Île-de-France", kind: .region,
-        h3Index: H3CellGeometry.makeIndex(resolution: 3, baseCell: 14) // span ~120 km
     )
     private let france = MapPlace(
         id: "country:france", name: "France", kind: .country,
@@ -33,7 +29,9 @@ struct MapSemanticClusterTests {
     /// double a wide target's geographic diagonal).
     private let localDiagonal = 35.7    // Paris framed (48.85,2.35,0.25)
     private let cityDiagonal = 228.6    // Île-de-France framed (48.7,2.5,1.6)
-    private let regionDiagonal = 1398.6 // France framed (46.6,2.4,9.5)
+    // France framed (46.6,2.4,9.5) — the country's boundary fits, so with
+    // the region level cut (2026-08-31) this framing shows CITIES.
+    private let franceFramedDiagonal = 1398.6
     private let countryDiagonal = 2884.3 // Europe framed (47.0,5.0,20)
 
     private func pin(
@@ -43,8 +41,8 @@ struct MapSemanticClusterTests {
                thumbnailURL: nil, kind: .text, places: places)
     }
 
-    private var parisLadder: [MapPlace] { [paris, idf, france] }
-    private var versaillesLadder: [MapPlace] { [versailles, idf, france] }
+    private var parisLadder: [MapPlace] { [paris, france] }
+    private var versaillesLadder: [MapPlace] { [versailles, france] }
 
     // MARK: - Leaf semantics (proximity clusters, Case B routing)
 
@@ -84,14 +82,15 @@ struct MapSemanticClusterTests {
     /// The four QA anchors, straight through the banding rule with the mock
     /// resolutions' spans.
     @Test func theViewportDiagonalSelectsTheBand() {
-        let spans: [MapPlace.Kind: Double] = [.city: 17.1, .region: 119.6, .country: 837.4]
+        let spans: [MapPlace.Kind: Double] = [.city: 17.1, .country: 837.4]
         func kind(_ diagonal: Double) -> MapPlace.Kind? {
             MapHierarchyBanding.activeKind(
                 viewportDiagonalKm: diagonal, spansByKind: spans, zoomLevel: nil
             )
         }
         #expect(kind(cityDiagonal) == .city)
-        #expect(kind(regionDiagonal) == .region)
+        #expect(kind(franceFramedDiagonal) == .city,
+                "France filling the screen dissolves the country → its cities")
         #expect(kind(countryDiagonal) == .country)
         #expect(kind(localDiagonal) == nil, "inside the city cell → local")
         #expect(kind(5000) == .country, "zoomed out past everything, the coarsest level holds")
@@ -100,9 +99,9 @@ struct MapSemanticClusterTests {
     /// The dissolve thresholds themselves — each level dies exactly when the
     /// viewport closes to within `dissolveSpanMultiple ×` its own span. The
     /// country edge is the reported regression: France filling the screen
-    /// (~1400 km measured) must show REGIONS, never one France marker.
+    /// (~1400 km measured) must never show one France marker.
     @Test func aLevelDissolvesOnceItsBoundaryFitsTheViewport() {
-        let spans: [MapPlace.Kind: Double] = [.city: 17.1, .region: 119.6, .country: 837.4]
+        let spans: [MapPlace.Kind: Double] = [.city: 17.1, .country: 837.4]
         func kind(_ diagonal: Double) -> MapPlace.Kind? {
             MapHierarchyBanding.activeKind(
                 viewportDiagonalKm: diagonal, spansByKind: spans, zoomLevel: nil
@@ -110,20 +109,19 @@ struct MapSemanticClusterTests {
         }
         let multiple = MapHierarchyBanding.dissolveSpanMultiple
         #expect(kind(837.4 * multiple + 1) == .country, "just wider than the country's window")
-        #expect(kind(837.4 * multiple - 1) == .region, "the country's boundary fits → regions")
-        #expect(kind(119.6 * multiple + 1) == .region)
-        #expect(kind(119.6 * multiple - 1) == .city, "the region's boundary fits → cities")
+        #expect(kind(837.4 * multiple - 1) == .city, "the country's boundary fits → cities")
         #expect(kind(17.1 * multiple + 1) == .city)
         #expect(kind(17.1 * multiple - 1) == nil, "the city's boundary fits → local")
     }
 
-    /// The fallback ladder for an H3-less corpus: country ≤ 5, region 6–8,
-    /// city 9–11, local 12+.
+    /// The fallback ladder for an H3-less corpus: country ≤ 5, city 6–11
+    /// (the city band absorbed the cut region level's 6–8 window),
+    /// local 12+.
     @Test func theZoomFallbackBandsAnH3LessCorpus() {
         #expect(MapHierarchyBanding.fallbackKind(atZoomLevel: 0) == .country)
         #expect(MapHierarchyBanding.fallbackKind(atZoomLevel: 5) == .country)
-        #expect(MapHierarchyBanding.fallbackKind(atZoomLevel: 6) == .region)
-        #expect(MapHierarchyBanding.fallbackKind(atZoomLevel: 8) == .region)
+        #expect(MapHierarchyBanding.fallbackKind(atZoomLevel: 6) == .city)
+        #expect(MapHierarchyBanding.fallbackKind(atZoomLevel: 8) == .city)
         #expect(MapHierarchyBanding.fallbackKind(atZoomLevel: 9) == .city)
         #expect(MapHierarchyBanding.fallbackKind(atZoomLevel: 11) == .city)
         #expect(MapHierarchyBanding.fallbackKind(atZoomLevel: 12) == nil)
@@ -144,7 +142,7 @@ struct MapSemanticClusterTests {
     // MARK: - The nested roll-up, dynamically banded
 
     /// CITY band: each city masks its own posts into its own marker —
-    /// two cities of one region stay two markers.
+    /// two cities of one country stay two markers.
     @Test func theCityBandRendersOneMarkerPerCity() {
         let items = MapClusterEngine.cluster(
             [
@@ -160,24 +158,7 @@ struct MapSemanticClusterTests {
         #expect(items.allSatisfy { $0.memberIDs.count == 2 && $0.isHierarchyMarker })
     }
 
-    /// REGION band: whole cities collapse into their parent region's ONE
-    /// marker, which speaks at the region level — not any member's city.
-    @Test func theRegionBandCollapsesItsCitiesIntoOneMarker() {
-        let items = MapClusterEngine.cluster(
-            [
-                pin("post-1", lat: 48.80, lng: 2.30, places: parisLadder),
-                pin("post-2", lat: 48.90, lng: 2.40, places: parisLadder),
-                pin("post-3", lat: 48.70, lng: 2.20, places: versaillesLadder),
-                pin("post-4", lat: 48.72, lng: 2.50, places: [idf, france]),
-            ],
-            zoomScale: 1, cellPoints: 64, viewportDiagonalKm: regionDiagonal
-        )
-        #expect(items.count == 1)
-        #expect(items[0].place == idf)
-        #expect(items[0].memberIDs.count == 4, "both cities AND the region's own posts fold in")
-    }
-
-    /// COUNTRY band: regions collapse into the country's ONE marker, a
+    /// COUNTRY band: cities collapse into the country's ONE marker, a
     /// country-only pin joins it — and an untagged bystander is HIDDEN,
     /// because a hierarchical corpus shows exactly one kind of marker.
     @Test func theCountryBandShowsTheCountryAndNothingElse() {
@@ -196,13 +177,13 @@ struct MapSemanticClusterTests {
         #expect(!items[0].memberIDs.contains(PostID("post-4")))
     }
 
-    /// The strict filter, dynamically: a region-only post while the city
+    /// The strict filter, dynamically: a country-only post while the city
     /// band is up belongs to a higher level and is hidden outright.
     @Test func aPinWithoutTheActiveDepthIsStrictlyHidden() {
         let items = MapClusterEngine.cluster(
             [
-                pin("post-1", lat: 48.80, lng: 2.30, places: [idf, france]),
-                pin("post-2", lat: 48.90, lng: 2.40, places: [idf, france]),
+                pin("post-1", lat: 48.80, lng: 2.30, places: [france]),
+                pin("post-2", lat: 48.90, lng: 2.40, places: [france]),
                 pin("post-3", lat: 48.70, lng: 2.20, places: parisLadder),
                 pin("post-4", lat: 48.71, lng: 2.21, places: parisLadder),
             ],
@@ -222,7 +203,7 @@ struct MapSemanticClusterTests {
             pin("post-2", lat: 48.80, lng: 2.30), // co-located pair
             pin("post-3", lat: 48.95, lng: 2.45),
         ]
-        for diagonal in [localDiagonal, cityDiagonal, regionDiagonal, countryDiagonal] {
+        for diagonal in [localDiagonal, cityDiagonal, franceFramedDiagonal, countryDiagonal] {
             let items = MapClusterEngine.cluster(
                 scatter, zoomScale: 1, cellPoints: 64,
                 zoomLevel: 12, viewportDiagonalKm: diagonal
@@ -307,12 +288,14 @@ struct MapSemanticClusterTests {
     /// footprint's resolution.
     @Test func theVenuesAnchorTheirRungs() {
         let city = MapMockPlaces.ladder(for: pin("p", lat: 48.8500, lng: 2.3380))
-        #expect(city.map(\.kind) == [.city, .region, .country])
+        #expect(city.map(\.kind) == [.city, .country])
         #expect(city.allSatisfy { place in
             place.h3Index.flatMap { H3CellGeometry(index: $0) } != nil
         })
+        // The mixed venue sat in the cut region level's slice — country-only
+        // since 2026-08-31, same as the text venue.
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 48.8640, lng: 2.3400)).map(\.kind)
-                == [.region, .country])
+                == [.country])
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 48.8480, lng: 2.3660)).map(\.kind)
                 == [.country])
     }
@@ -328,13 +311,15 @@ struct MapSemanticClusterTests {
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 45.7640, lng: 4.8357)).map(\.id)
                 == ["city:lyon", "country:france"])
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 43.2965, lng: 5.3698)).map(\.id)
-                == ["city:marseille", "region:paca", "country:france"])
+                == ["city:marseille", "country:france"])
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 41.3874, lng: 2.1686)).map(\.id)
-                == ["city:barcelona", "region:catalonia", "country:spain"])
+                == ["city:barcelona", "country:spain"])
+        // The old Provence / Catalonia region scatters degrade to their
+        // country's ladder — the region level was cut on 2026-08-31.
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 43.9000, lng: 6.2000)).map(\.id)
-                == ["region:paca", "country:france"])
+                == ["country:france"])
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 41.9000, lng: 1.6000)).map(\.id)
-                == ["region:catalonia", "country:spain"])
+                == ["country:spain"])
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 40.4200, lng: -3.7000)).map(\.id)
                 == ["country:spain"])
         #expect(MapMockPlaces.ladder(for: pin("p", lat: 52.5200, lng: 13.4050)).map(\.id)
@@ -352,7 +337,7 @@ struct MapSemanticClusterTests {
                 pin("post-2", lat: 45.76, lng: 4.84,
                     places: [MapMockPlaces.lyon, MapMockPlaces.france]),
                 pin("post-3", lat: 41.39, lng: 2.17,
-                    places: [MapMockPlaces.barcelona, MapMockPlaces.catalonia, MapMockPlaces.spain]),
+                    places: [MapMockPlaces.barcelona, MapMockPlaces.spain]),
                 pin("post-4", lat: 40.42, lng: -3.70, places: [MapMockPlaces.spain]),
                 pin("post-5", lat: 52.52, lng: 13.40, places: [MapMockPlaces.germany]),
                 pin("post-6", lat: 52.60, lng: 13.30, places: [MapMockPlaces.germany]),
@@ -373,7 +358,7 @@ struct MapSemanticClusterTests {
         for (lat, lng) in [(48.85, 2.33), (48.87, 2.34), (48.80, 2.45), (48.79, 2.30)] {
             let ladder = MapMockPlaces.ladder(for: pin("p", lat: lat, lng: lng))
             let depths = ladder.map(\.kind).map { kind -> Int in
-                switch kind { case .city: 0; case .region: 1; case .country: 2 }
+                switch kind { case .city: 0; case .country: 1 }
             }
             #expect(depths == depths.sorted(), "ladder must run leaf → root")
             #expect(ladder.isEmpty || ladder.last?.kind == .country,

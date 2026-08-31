@@ -88,6 +88,9 @@ final class MapClusterAnnotationView: MKAnnotationView {
         // neutral.
         let kind = cluster.isHierarchyMarker ? cluster.place?.kind : nil
         card.setRing(color: MapMarkerRing.color(for: kind), width: MapMarkerRing.width(for: kind))
+        #if DEBUG
+        applyDebugBandingBorder(for: kind)
+        #endif
         // Idempotent: a tracked cluster is re-configured on every reconcile even
         // when its face is unchanged (same representative thumbnail). Blanking
         // and re-fetching it then would flash the card, so leave it be.
@@ -119,6 +122,32 @@ final class MapClusterAnnotationView: MKAnnotationView {
         representedFace = nil
         card.imageView.image = nil
         card.setRing(color: MapMarkerRing.color(for: nil), width: MapMarkerRing.width(for: nil))
+        #if DEBUG
+        applyDebugBandingBorder(for: nil)
+        #endif
         applyFace(.media)
     }
+
+    #if DEBUG
+    /// DEBUG-ONLY banding verifier, compiled out of release builds: a square
+    /// outline on this outer view — blue for a COUNTRY cluster, red for a
+    /// CITY one — so a screenshot says which band produced every marker.
+    /// Deliberately square (the product ring is rounded, on the card) and on
+    /// a separate layer, so the two never mix; a color that doesn't follow
+    /// trait changes is fine for a diagnostic. `nil` (a generic cluster)
+    /// wears no debug border.
+    private func applyDebugBandingBorder(for kind: MapPlace.Kind?) {
+        switch kind {
+        case .country:
+            layer.borderColor = UIColor.systemBlue.cgColor
+            layer.borderWidth = 2
+        case .city:
+            layer.borderColor = UIColor.systemRed.cgColor
+            layer.borderWidth = 2
+        case nil:
+            layer.borderColor = nil
+            layer.borderWidth = 0
+        }
+    }
+    #endif
 }

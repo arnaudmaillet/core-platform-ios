@@ -24,7 +24,7 @@ final class MapPinZoomSource: ZoomTransitionSource {
     /// source can't be live (a cluster, or no playback coordinator).
     private let mirrorLive: ((VideoRenderView) -> Bool)?
     /// The hierarchy level the tapped marker's ring announced (a semantic
-    /// cluster's city/region/country color), so the flying card takes off as
+    /// cluster's city/country color), so the flying card takes off as
     /// the marker's exact twin — ring included. `nil` flies the neutral ring.
     private let ringKind: MapPlace.Kind?
     /// Matches the tapped marker's own geometry so the hero starts pin-sized —

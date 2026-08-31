@@ -1,6 +1,6 @@
 import Foundation
 
-/// A semantic place a pin belongs to — a city, a country, a region. This is
+/// A semantic place a pin belongs to — a city or a country. This is
 /// what separates a CASE-B cluster (tap → feed with a place gallery beneath)
 /// from an ordinary proximity cluster (tap → feed, dismiss back to the pin).
 ///
@@ -13,12 +13,13 @@ import Foundation
 /// now. When `GeoCluster` ships, this type becomes the projection of its
 /// `kind`/`name`/`cluster_id` and the catalog is deleted.
 public struct MapPlace: Sendable, Equatable, Hashable {
-    /// Mirrors the proposed `geo_discovery.v1.ClusterKind` (city/country/
-    /// region). `rawValue` is the display word the gallery title wears.
+    /// Mirrors the proposed `geo_discovery.v1.ClusterKind` (city/country —
+    /// the proposal's REGION level was cut from the product on 2026-08-31,
+    /// so a wire value outside these two is dropped at the projection).
+    /// `rawValue` is the display word the gallery title wears.
     public enum Kind: String, Sendable {
         case city = "City"
         case country = "Country"
-        case region = "Region"
 
         // Which depth renders at a given camera is `MapHierarchyBanding`'s
         // question now — dynamic from H3 cell spans, with a zoom fallback.

@@ -1,11 +1,11 @@
 import UIKit
 
 /// The marker ring's hierarchy palette: a cluster's border says AT A GLANCE
-/// which depth it speaks for — blue for a city, purple for a region, amber
-/// for a country — while generic markers (proximity clusters, single pins)
-/// keep the neutral ring they have always had. Semantic rings are a point
-/// wider than neutral ones, so the depth reads even where a color is
-/// ambiguous against the map beneath.
+/// which depth it speaks for — blue for a city, amber for a country — while
+/// generic markers (proximity clusters, single pins) keep the neutral ring
+/// they have always had. Semantic rings are a point wider than neutral ones,
+/// so the depth reads even where a color is ambiguous against the map
+/// beneath.
 ///
 /// Pure mapping, separate from the views, so the palette is unit-testable
 /// and pin, cluster and flight card all resolve one table (the flying card
@@ -31,7 +31,6 @@ enum MapMarkerRing {
     static func color(for kind: MapPlace.Kind?) -> UIColor {
         switch kind {
         case .city: .systemBlue
-        case .region: .systemPurple
         case .country: amber
         case nil: .systemBackground
         }

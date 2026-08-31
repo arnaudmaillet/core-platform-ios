@@ -14,10 +14,6 @@ struct MapPlacePopularityTests {
         id: "city:paris", name: "Paris", kind: .city,
         h3Index: H3CellGeometry.makeIndex(resolution: 5, baseCell: 14)
     )
-    private let idf = MapPlace(
-        id: "region:idf", name: "Île-de-France", kind: .region,
-        h3Index: H3CellGeometry.makeIndex(resolution: 3, baseCell: 14)
-    )
     private let france = MapPlace(
         id: "country:france", name: "France", kind: .country,
         h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 14)
@@ -70,7 +66,7 @@ struct MapPlacePopularityTests {
     /// marker's cover is the place's most liked post, however far apart the
     /// members sit.
     @Test func aHierarchyMarkerWearsThePlacesMostLikedFace() {
-        let ladder = [paris, idf, france]
+        let ladder = [paris, france]
         let items = MapClusterEngine.cluster(
             [
                 pin("post-1", lat: 48.80, lng: 2.30, likes: 3, places: ladder),
