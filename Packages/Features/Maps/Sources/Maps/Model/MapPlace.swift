@@ -6,12 +6,13 @@ import Foundation
 ///
 /// ⚠️ MOCK-ONLY today. `geo_discovery.v1` carries no place identity of any
 /// kind (`dev/BACKEND_GAPS.md` §18, spec in
-/// `dev/issues/BACKEND_CLUSTER_TYPES.md`), so in production builds no pin
-/// ever has one and every cluster stays generic. Under
-/// `-maps-mock-semantic-clusters` (DEBUG), `MapMockPlaces` decorates the mock
-/// venues with places so the whole Case-B surface is buildable and testable
-/// now. When `GeoCluster` ships, this type becomes the projection of its
-/// `kind`/`name`/`cluster_id` and the catalog is deleted.
+/// `dev/issues/BACKEND_CLUSTER_TYPES.md`), so on the fleet no pin ever has
+/// one and every cluster stays generic. In DEBUG mock mode `MapMockPlaces`
+/// decorates the pins with places BY DEFAULT (the composition root's
+/// `seedsMapPlaces`; opt out with `-maps-mock-no-places`), so the whole
+/// Case-B surface is buildable and testable now. When `GeoCluster` ships,
+/// this type becomes the projection of its `kind`/`name`/`cluster_id` and
+/// the catalog is deleted.
 public struct MapPlace: Sendable, Equatable, Hashable {
     /// Mirrors the proposed `geo_discovery.v1.ClusterKind` (city/country —
     /// the proposal's REGION level was cut from the product on 2026-08-31,

@@ -2,9 +2,8 @@ import Foundation
 
 /// DEBUG stand-in for the semantic-cluster metadata the backend cannot send
 /// (`dev/BACKEND_GAPS.md` §18, contract proposal in
-/// `dev/issues/BACKEND_CLUSTER_TYPES.md`): under
-/// `-maps-mock-semantic-clusters`, pins inside geographic ZONES of the
-/// mock's Paris scatter are tagged with a nested place ladder
+/// `dev/issues/BACKEND_CLUSTER_TYPES.md`): pins inside geographic ZONES of
+/// the mock's Paris scatter are tagged with a nested place ladder
 /// (Paris ⊂ France), so both Case-B shapes — "Paris • City Cluster" and
 /// "France • Country Cluster" — are reachable in the sim, and each place
 /// has spread-out children for the hierarchical masking
@@ -12,17 +11,22 @@ import Foundation
 /// viewer zooms. (The REGION level between them was cut from the product
 /// on 2026-08-31.)
 ///
+/// The DEFAULT mock experience since 2026-08-31 — no launch argument
+/// required. Whether the decoration runs is the COMPOSITION ROOT's call
+/// (`AppContainer.seedsMapPlaces`, mock mode only, opt out with
+/// `-maps-mock-no-places`), threaded through `MapsFeatureBuilder` into the
+/// view model; this catalog itself is a pure mapping, so tests reach for
+/// `ladder(for:)`/`decorate` without any ambient state deciding for them.
+///
 /// Keyed on COORDINATES, deliberately: post ids shift with seeding,
 /// geography is the zones' identity. The anchor values mirror the mock
 /// service's venue constants — the spec's mock-parity section ties the two
-/// files together, and when `GeoCluster` ships both this catalog and the
-/// launch argument are deleted.
+/// files together, and when `GeoCluster` ships this catalog is deleted.
 ///
 /// The whole type is DEBUG-only so no production build can grow a code path
 /// that manufactures place identity the wire never asserted.
 #if DEBUG
 enum MapMockPlaces {
-    static let launchArgument = "-maps-mock-semantic-clusters"
 
     /// The two nested places of the Paris scatter (see `ladder(for:)`).
     ///
@@ -99,10 +103,6 @@ enum MapMockPlaces {
         id: "country:uk", name: "United Kingdom", kind: .country,
         h3Index: H3CellGeometry.makeIndex(resolution: 1, baseCell: 25)
     )
-
-    static var isEnabled: Bool {
-        ProcessInfo.processInfo.arguments.contains(launchArgument)
-    }
 
     /// The place LADDER a pin belongs to, most specific first — genuinely
     /// NESTED zones (Paris ⊂ France), so the zoom-banded roll-up has a
@@ -183,11 +183,10 @@ enum MapMockPlaces {
         return dLat * dLat + dLng * dLng <= radius * radius
     }
 
-    /// Tags every pin with its zone ladder. A no-op (identity, not even a
-    /// copy) when the launch argument is absent.
+    /// Tags every pin with its zone ladder. PURE — whether it runs at all is
+    /// the composition root's decision, not ambient state read here.
     static func decorate(_ pins: [MapPin]) -> [MapPin] {
-        guard isEnabled else { return pins }
-        return pins.map { pin in
+        pins.map { pin in
             let ladder = ladder(for: pin)
             return ladder.isEmpty ? pin : pin.tagged(with: ladder)
         }

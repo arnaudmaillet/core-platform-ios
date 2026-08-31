@@ -19,9 +19,15 @@ public struct MockBackend: Sendable {
 
     /// `mediaCatalog` defaults to `.synthetic` so tests and previews stay
     /// offline; `AppContainer` passes `.realAssets` under `-rich-media`.
+    /// `seedsMapHierarchy` spreads a third of the corpus across the European
+    /// geo anchors (`MockGeoDiscoveryService`) — the app passes true in mock
+    /// mode (semantic map clusters are the default experience, opt out with
+    /// `-maps-mock-no-places`); the false default keeps tests and previews
+    /// on the Paris-only scatter their fixtures are calibrated against.
     public init(
         conditions: SimulatedConditions = .none,
-        mediaCatalog: MockSocialDataset.MediaCatalog = .synthetic
+        mediaCatalog: MockSocialDataset.MediaCatalog = .synthetic,
+        seedsMapHierarchy: Bool = false
     ) {
         let dataset = Self.seededPostCount.map {
             MockSocialDataset(postCount: $0, mediaCatalog: mediaCatalog)
@@ -45,7 +51,8 @@ public struct MockBackend: Sendable {
         MockCommentService(dataset: dataset).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
         MockSocialGraphService(dataset: dataset).register(on: bff)
-        MockGeoDiscoveryService(dataset: dataset).register(on: bff)
+        MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
+            .register(on: bff)
         moderationService.register(on: bff)
 
         self.dataset = dataset
@@ -63,8 +70,8 @@ public struct MockBackend: Sendable {
         ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
     }
 
-    /// `-mock-post-count <n>`: opt-in larger seeded corpus for QA (pair with
-    /// `-maps-mock-semantic-clusters` to fill the map's hierarchy bands).
+    /// `-mock-post-count <n>`: opt-in larger seeded corpus for QA (fills the
+    /// map's hierarchy bands, which seed by default in mock mode).
     /// The DEFAULT (120, `MockSocialDataset.init`) must stay untouched:
     /// position-measured fixtures — the venue walk, the opening-viewport pin
     /// census, the pinned-category indexes — are calibrated against it, and

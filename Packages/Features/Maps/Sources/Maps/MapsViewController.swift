@@ -1520,7 +1520,7 @@ extension MapsViewController: MKMapViewDelegate {
         let wantsText = arguments.contains("-maps-open-first-text-cluster")
         // `-maps-open-first-media-cluster`: the biggest MEDIA-faced cluster —
         // the hero-presented kind, which is also what the semantic-cluster
-        // gallery flow rides (pair with `-maps-mock-semantic-clusters`).
+        // gallery flow rides (places seed by default in mock mode).
         let wantsMedia = arguments.contains("-maps-open-first-media-cluster")
         guard !didDebugOpenPin,
               wantsText || wantsMedia || arguments.contains("-maps-open-first-cluster")

@@ -52,8 +52,19 @@ final class AppContainer {
     /// (`-mock-latency`, `-mock-fail`, `-mock-fail-code`, `-mock-fail-rate`).
     private lazy var mockBackend = MockBackend(
         conditions: .fromLaunchArguments(),
-        mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic
+        mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic,
+        seedsMapHierarchy: Self.seedsMapPlaces
     )
+
+    /// Semantic map clusters (city/country places on the mock pins, and the
+    /// European seed behind them) are the DEFAULT mock experience — no
+    /// launch argument required. `-maps-mock-no-places` opts out, for the
+    /// proximity/Case-A QA where strict banding would otherwise hide
+    /// untagged pins. One decision, handed to both the geo mock's seeding
+    /// and the Maps feature's place decoration so the two can never
+    /// disagree.
+    static let seedsMapPlaces =
+        !ProcessInfo.processInfo.arguments.contains("-maps-mock-no-places")
 
     /// `-rich-media`: seed the mock dataset from `MockMediaFixtures` — real HLS
     /// ladders, progressive MP4s, and real photographs at exact dimensions —
@@ -283,7 +294,10 @@ final class AppContainer {
         },
         openConversation: { [unowned self] id in
             self.router.route(to: .messageUser(id, stub: nil))
-        }
+        },
+        // Mock mode only: fleet pins are real posts and must never wear the
+        // stand-in place catalog, however the flag reads.
+        seedsMockPlaces: environment == .mock && Self.seedsMapPlaces
     )
 
     // MARK: - Profile

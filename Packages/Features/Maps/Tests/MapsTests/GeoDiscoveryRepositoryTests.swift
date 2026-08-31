@@ -254,6 +254,36 @@ struct GeoDiscoveryRepositoryTests {
         #expect(result.pins.filter { !$0.isText }.allSatisfy { $0.thumbnailURL != nil })
     }
 
+    /// The European seed is the composition root's INJECTED decision, not
+    /// ambient ProcessInfo: constructed plain (every test's default), the
+    /// mock keeps the historical Paris-only scatter and Berlin is empty;
+    /// constructed with `spreadsHierarchy: true` (what the app passes in
+    /// mock mode), a third of the corpus fans out and the Berlin anchor has
+    /// pins.
+    @Test func theEuropeanSeedIsInjectedNotAmbient() async throws {
+        let dataset = MockSocialDataset()
+        let berlin = MapViewport.make(
+            centerLat: 52.52, centerLng: 13.405, latitudeSpan: 1, longitudeSpan: 1
+        )
+        func pins(spreads: Bool) async throws -> [MapPin] {
+            let bff = MockBFF()
+            MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: spreads)
+                .register(on: bff)
+            let client = ConnectClientFactory.makeUnauthenticated(
+                host: "https://mock.bff.local", httpClient: bff
+            )
+            let repository = GeoDiscoveryRepository(
+                geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: client)
+            )
+            return try await repository.queryTile(berlin).pins
+        }
+
+        let plain = try await pins(spreads: false)
+        let seeded = try await pins(spreads: true)
+        #expect(plain.isEmpty, "the default corpus never leaves the Paris scatter")
+        #expect(!seeded.isEmpty, "the seeded corpus reaches the Berlin anchor")
+    }
+
     @Test func surfacesTransportFailuresAsGeoDiscoveryError() async throws {
         // No route registered for QueryTile → MockBFF answers `unimplemented`,
         // which the repository must surface as a `.transport` error (not crash,
