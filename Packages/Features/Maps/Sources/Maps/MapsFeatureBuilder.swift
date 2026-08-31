@@ -87,8 +87,13 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             },
             // The same feed again, opened as a window growing out of a text
             // marker's disc — what a marker with no cover to fly opens with now.
-            revealSnapFeed: { postIDs, presenter, origin in
-                feedFeature().revealSnapFeed(postIDs: postIDs, from: presenter, origin: origin)
+            // `beneath` carries the semantic cluster's place page through, so a
+            // text-faced city or country dismisses into it like a media-faced
+            // one does.
+            revealSnapFeed: { postIDs, presenter, origin, beneath in
+                feedFeature().revealSnapFeed(
+                    postIDs: postIDs, from: presenter, origin: origin, beneath: beneath
+                )
             },
             // The place gallery a semantic cluster's feed dismisses into —
             // built by the Feed feature because the grid, the flight card and

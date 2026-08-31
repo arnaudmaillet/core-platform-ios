@@ -44,8 +44,13 @@ final class MapsViewController: UIViewController {
     private let pushPlainSnapFeed: ([PostID], UIViewController) -> Void
     /// Pushes the feed as a WINDOW growing out of a marker — the text pin's
     /// path. Injected like its plain sibling, and for the same reason: the
-    /// pushed screen's gestures and its transition are the feed's own.
-    private let revealSnapFeed: ([PostID], UIViewController, TextRevealOrigin) -> Void
+    /// pushed screen's gestures and its transition are the feed's own. The
+    /// last argument builds the screen a VERTICAL dismissal lands on (the
+    /// semantic cluster's place page), or `nil` for a plain marker.
+    private let revealSnapFeed: (
+        [PostID], UIViewController, TextRevealOrigin,
+        ((UIViewController) -> UIViewController)?
+    ) -> Void
     /// Builds the place gallery a SEMANTIC cluster's feed dismisses into
     /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, the place
     /// itself, the feed about to cover it) → the gallery screen, which also
@@ -181,7 +186,10 @@ final class MapsViewController: UIViewController {
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
-        revealSnapFeed: @escaping ([PostID], UIViewController, TextRevealOrigin) -> Void,
+        revealSnapFeed: @escaping (
+            [PostID], UIViewController, TextRevealOrigin,
+            ((UIViewController) -> UIViewController)?
+        ) -> Void,
         makeClusterGallery: @escaping ([PostID], MapPlace, UIViewController) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
@@ -1580,6 +1588,18 @@ extension MapsViewController: MKMapViewDelegate {
             // origin that says where the marker is, what shape and colour it
             // is, and what to draw in the window at each end.
             isPlainFeedPushed = true
+            // A SEMANTIC cluster always offers its place page, whatever face
+            // it wears (a city or country is a place before it is a
+            // photograph): the same builder the hero's Case B uses, handed
+            // through the seam so the vertical dismissal lands on it. Same
+            // criterion as the hero path (`cluster.place != nil`), so the two
+            // presentations answer "does this marker have a place?" alike.
+            let clusterPlace = (annotation as? MapComputedCluster)?.place
+            let placePage: ((UIViewController) -> UIViewController)? = clusterPlace.map {
+                place in { [makeClusterGallery] feed in
+                    makeClusterGallery(postIDs, place, feed)
+                }
+            }
             revealSnapFeed(
                 postIDs,
                 self,
@@ -1598,7 +1618,8 @@ extension MapsViewController: MKMapViewDelegate {
                         mapView?.view(for: annotation)?.isHidden = concealed
                     },
                     depthView: { [weak self] in self?.view }
-                )
+                ),
+                placePage
             )
         case .plainPush where navigationController != nil:
             // Nothing to fly (see `MapMarkerPresentation`): the platform's own

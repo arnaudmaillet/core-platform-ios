@@ -247,7 +247,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // the post is top and nothing is transitioning, then run the
             // ordinary, fully cancellable single pop, which now lands on
             // whatever sat beneath the gallery (the map).
-            slide.onWillBeginPop = { [weak nav, weak destination, weak slide, gallery] in
+            slide.onWillBeginPop = { [weak nav, weak destination, weak slide, gallery] _ in
                 guard let nav else { return }
                 // The slide owns this pop: delegate per-gesture, not at
                 // attach — the vertical grab above needs the zoom flight's
@@ -422,10 +422,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     public func revealSnapFeed(
-        postIDs: [PostID], from presenter: UIViewController, origin: TextRevealOrigin
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?
     ) {
         guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
-        pushWithoutFlight(makeSnapFeedViewController(postIDs: postIDs), on: nav, reveal: origin)
+        pushWithoutFlight(
+            makeSnapFeedViewController(postIDs: postIDs),
+            on: nav, reveal: origin, beneath: beneath
+        )
     }
 
     /// Pushes the feed with no flight, and gives it a way back by hand.
@@ -447,7 +453,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private func pushWithoutFlight(
         _ destination: UIViewController,
         on nav: UINavigationController,
-        reveal: TextRevealOrigin?
+        reveal: TextRevealOrigin?,
+        beneath: ((UIViewController) -> UIViewController)? = nil
     ) {
         (destination as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = true
         // A surface that can describe the ROW it is opening from gets the
@@ -496,7 +503,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // grid's layout while nothing is in flight. Inside the transition
             // instead, the bar comes back as a row of empty glass capsules that
             // never paint.
-            dismissal.onWillBeginPop = { [weak nav] in
+            dismissal.onWillBeginPop = { [weak nav] _ in
                 nav?.tabBarController?.setTabBarHidden(false, animated: false)
                 nav?.tabBarController?.tabBar.alpha = 0
             }
@@ -515,6 +522,57 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // length: `hidesBottomBarWhenPushed`'s choreography does not scrub
             // with a custom interactive pop, and this screen now has one.
             nav.tabBarController?.setTabBarHidden(true, animated: true)
+        }
+        // A place page beneath a semantic cluster's feed: the VERTICAL
+        // dismissal's landing, slid under the feed at swipe-begin — the
+        // Case-B restaging recipe, inverted (INSERT instead of drop) — so
+        // the plain single pop that follows lands on it. The horizontal
+        // close and the back button never see the page: they keep the
+        // window-shaped return to the map, which is exactly why the reveal's
+        // return narrows to `[.horizontal]` — a window can only shrink back
+        // to a disc that is on the screen being revealed, and the vertical
+        // leg's landing no longer is.
+        if let beneath {
+            // Built NOW and captured STRONGLY: until a vertical swipe
+            // inserts it, this closure chain is the page's only owner.
+            // Hydration starts inside the builder (`makeClusterGallery`
+            // begins loading), so the first dismissal lands on tiles rather
+            // than a skeleton.
+            let landing = beneath(destination)
+            dismissal.revealReturnAxes = [.horizontal]
+            let staged = dismissal.onWillBeginPop
+            dismissal.onWillBeginPop = { [weak nav, weak destination] axis in
+                staged?(axis)
+                guard axis == .vertical, let nav, let destination,
+                      !nav.viewControllers.contains(landing),
+                      let feedIndex = nav.viewControllers.firstIndex(of: destination)
+                else { return }
+                var stack = nav.viewControllers
+                stack.insert(landing, at: feedIndex)
+                nav.setViewControllers(stack, animated: false)
+                // The removal half, for an abandoned swipe: the page leaves
+                // again so the back button and the horizontal close keep
+                // their map landing. Both hops are load-bearing — the
+                // coordinator exists only once the pop has begun (next
+                // turn), and its completion fires inside
+                // `completeTransition(false)`'s call stack, where a
+                // same-turn `setViewControllers` is silently swallowed
+                // (measured on the map's escape; see its cancel closure).
+                DispatchQueue.main.async { [weak nav, weak destination] in
+                    guard let coordinator = destination?.transitionCoordinator else { return }
+                    coordinator.animate(alongsideTransition: nil) { context in
+                        guard context.isCancelled else { return }
+                        DispatchQueue.main.async { [weak nav, weak destination] in
+                            guard let nav, let destination,
+                                  nav.topViewController === destination,
+                                  nav.viewControllers.contains(landing) else { return }
+                            var stack = nav.viewControllers
+                            stack.removeAll { $0 === landing }
+                            nav.setViewControllers(stack, animated: false)
+                        }
+                    }
+                }
+            }
         }
         nav.pushViewController(destination, animated: true)
         #if DEBUG
@@ -543,10 +601,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         if let position = arguments.firstIndex(of: "-text-swipe-demo"),
            position + 1 < arguments.count,
            let peak = Double(arguments[position + 1]) {
+            // `-zoom-demo-grab-vertical` flips this script to the vertical
+            // axis, exactly as it does the zoom demos — the axis a semantic
+            // cluster's feed dismisses into its place page on.
+            let axis: ZoomDismissAxis = arguments.contains("-zoom-demo-grab-vertical")
+                ? .vertical : .horizontal
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
-                let driven = await dismissal.debugPerformSwipe(peakProgress: CGFloat(peak))
-                print("[text-swipe] peak=\(peak) driven=\(driven)")
+                let driven = await dismissal.debugPerformSwipe(
+                    peakProgress: CGFloat(peak), axis: axis
+                )
+                print("[text-swipe] peak=\(peak) axis=\(axis) driven=\(driven)")
             }
         }
         #endif

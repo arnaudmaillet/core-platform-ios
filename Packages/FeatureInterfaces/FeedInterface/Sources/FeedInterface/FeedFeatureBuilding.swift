@@ -158,8 +158,18 @@ public protocol FeedFeatureBuilding {
     ///
     /// What this takes is exactly what the reveal reads: where the source is,
     /// what shape and colour it is, and what to draw in the window at each end.
+    ///
+    /// `beneath` builds the screen a VERTICAL dismissal of this feed lands on
+    /// — the place page a city/country cluster must always offer, whatever
+    /// face its marker wears. Handed the freshly built feed (the page's grid
+    /// tracks the feed's active post) and slid under it at dismissal-begin,
+    /// never pushed: the horizontal close and the back button keep landing on
+    /// `presenter`, window-shaped, exactly as they do with `nil`.
     func revealSnapFeed(
-        postIDs: [PostID], from presenter: UIViewController, origin: TextRevealOrigin
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?
     )
     /// Best-effort, cancellable warming of these posts into the shared cache, so
     /// a subsequent `makeSnapFeedViewController` hydrates from memory rather than

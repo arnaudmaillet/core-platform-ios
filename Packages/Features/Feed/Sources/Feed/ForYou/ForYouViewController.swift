@@ -926,7 +926,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // the hero path, which restores it at grab-begin for this exact
         // reason). The pop then drives its alpha from 0, so it fades in with
         // the grid rather than switching on after it.
-        textSlideDismissal.onWillBeginPop = { [weak self] in
+        textSlideDismissal.onWillBeginPop = { [weak self] _ in
             log("beginPop  pre")
             self?.showTabBar(alpha: 0)
             log("beginPop post")
