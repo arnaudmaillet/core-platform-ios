@@ -30,8 +30,13 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     private static let baseLng = 2.3522
     /// Scatter radius in degrees (~±16 km), enough to exercise pan and clustering.
     private static let spread = 0.15
-    /// Per-response cap, standing in for the server's per-tile Top-K.
-    private static let topK = 80
+    /// Per-response cap, standing in for the server's per-tile Top-K. Loose
+    /// on purpose: the real service caps per TILE, so a wide viewport's
+    /// response spans many tiles and grows with them — a tight per-response
+    /// number here would silently hide the tail of a corpus enlarged via
+    /// `-mock-post-count` (the prefix is dataset-ordered, so everything past
+    /// it would simply never reach the map).
+    private static let topK = 200
 
     public init(dataset: MockSocialDataset) {
         self.dataset = dataset

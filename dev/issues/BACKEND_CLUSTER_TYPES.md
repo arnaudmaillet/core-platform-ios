@@ -42,7 +42,7 @@ catalog are deleted the day the fields below land.
    returns a display name for any geographic grouping (there is no reverse
    geocoding anywhere in the contracts).
 3. **Top-K starves aggregation.** `QueryTileResponse` caps pins per tile
-   (mock: 80). At country zoom the viewport spans many tiles and the response is
+   (mock: 200). At country zoom the viewport spans many tiles and the response is
    a sample. Client-side counting over a sample cannot say "France, 12,438
    posts" — only the server can.
 4. **No ranking for the gallery.** The gallery shows the place's

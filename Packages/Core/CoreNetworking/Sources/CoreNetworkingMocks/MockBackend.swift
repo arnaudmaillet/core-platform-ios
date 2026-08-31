@@ -23,7 +23,9 @@ public struct MockBackend: Sendable {
         conditions: SimulatedConditions = .none,
         mediaCatalog: MockSocialDataset.MediaCatalog = .synthetic
     ) {
-        let dataset = MockSocialDataset(mediaCatalog: mediaCatalog)
+        let dataset = Self.seededPostCount.map {
+            MockSocialDataset(postCount: $0, mediaCatalog: mediaCatalog)
+        } ?? MockSocialDataset(mediaCatalog: mediaCatalog)
         let counterStore = MockCounterStore(dataset: dataset)
         let blobStore = MockBlobStore()
         let postStore = MockPostStore()
@@ -59,5 +61,24 @@ public struct MockBackend: Sendable {
     /// enough for previews and tests to feed generated service clients.
     public func makeRPCClient() -> ProtocolClientInterface {
         ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+    }
+
+    /// `-mock-post-count <n>`: opt-in larger seeded corpus for QA (pair with
+    /// `-maps-mock-semantic-clusters` to fill the map's hierarchy bands).
+    /// The DEFAULT (120, `MockSocialDataset.init`) must stay untouched:
+    /// position-measured fixtures — the venue walk, the opening-viewport pin
+    /// census, the pinned-category indexes — are calibrated against it, and
+    /// tests construct their datasets directly so the argument never reaches
+    /// them. Appending at the tail is the safe direction; this argument only
+    /// ever changes `postCount`, never the head of the corpus. Clamped to
+    /// 1...2000 (the scatter/venue arithmetic has no meaning past that, and a
+    /// typo'd huge number should not hang the app seeding posts).
+    private static var seededPostCount: Int? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let position = arguments.firstIndex(of: "-mock-post-count"),
+              arguments.indices.contains(position + 1),
+              let count = Int(arguments[position + 1])
+        else { return nil }
+        return min(max(count, 1), 2000)
     }
 }
