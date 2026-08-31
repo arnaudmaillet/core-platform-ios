@@ -83,7 +83,16 @@ final class ZoomFlightInterruptor: UIPercentDrivenInteractiveTransition {
             advancesOnDownwardDrag: advancesOnDownwardDrag, span: 1
         )
         super.init()
+        #if DEBUG
+        ZoomDebugCensus.increment(ZoomDebugCensus.Key.interruptor)
+        #endif
     }
+
+    #if DEBUG
+    deinit {
+        ZoomDebugCensus.decrement(ZoomDebugCensus.Key.interruptor)
+    }
+    #endif
 
     override func startInteractiveTransition(_ transitionContext: any UIViewControllerContextTransitioning) {
         super.startInteractiveTransition(transitionContext)

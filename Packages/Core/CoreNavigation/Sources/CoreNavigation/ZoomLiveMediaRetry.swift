@@ -79,7 +79,16 @@ final class ZoomLiveMediaRetry: NSObject {
         self.ask = ask
         self.deadline = CACurrentMediaTime() + window
         super.init()
+        #if DEBUG
+        ZoomDebugCensus.increment(ZoomDebugCensus.Key.liveMediaRetry)
+        #endif
     }
+
+    #if DEBUG
+    deinit {
+        ZoomDebugCensus.decrement(ZoomDebugCensus.Key.liveMediaRetry)
+    }
+    #endif
 
     #if DEBUG
     /// The display link's own beat, for a suite that cannot wait for frames.

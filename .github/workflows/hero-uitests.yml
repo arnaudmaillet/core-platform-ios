@@ -1,0 +1,67 @@
+# The hero-transition UI suites (UITests/Hero*), on demand.
+#
+# Deliberately NOT part of the PR-gating `build-test` loop: these boot a
+# simulator, drive real gestures and record evidence — minutes of runner time
+# per suite, and the package-level hero suites already gate every PR for
+# free. Trigger this manually (or from a branch) when the transition stack
+# changes in ways only a finger can vouch for.
+name: hero-uitests
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "One suite (e.g. HeroMatrixUITests) or empty for all Hero suites"
+        required: false
+        default: ""
+
+jobs:
+  hero-uitests:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same nondeterministic-runner dance as ci.yml: pick the newest Xcode 26.
+      - name: Select Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then echo "no Xcode 26.x on this runner"; exit 1; fi
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
+
+      - name: Resolve packages
+        run: |
+          xcodebuild -resolvePackageDependencies -project core-platform-ios.xcodeproj \
+            -scheme core-platform-ios -clonedSourcePackagesDirPath .spm
+
+      - name: Pick simulator
+        id: sim
+        run: |
+          DEST_ID=$(xcodebuild -project core-platform-ios.xcodeproj -scheme core-platform-ios \
+            -showdestinations 2>/dev/null \
+            | grep "platform:iOS Simulator" | grep "name:iPhone" \
+            | head -1 | sed -E 's/.*id:([A-F0-9-]+).*/\1/')
+          if [ -z "$DEST_ID" ]; then echo "no iPhone simulator destination"; exit 1; fi
+          echo "id=$DEST_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Run Hero UI suites
+        run: |
+          ONLY="-only-testing:core-platform-iosUITests"
+          if [ -n "${{ inputs.suite }}" ]; then
+            ONLY="-only-testing:core-platform-iosUITests/${{ inputs.suite }}"
+          fi
+          xcodebuild test -project core-platform-ios.xcodeproj \
+            -scheme core-platform-ios \
+            -destination "id=${{ steps.sim.outputs.id }}" \
+            -clonedSourcePackagesDirPath .spm -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            -resultBundlePath hero-uitests.xcresult \
+            "$ONLY"
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hero-uitests-results
+          path: hero-uitests.xcresult
+          if-no-files-found: ignore

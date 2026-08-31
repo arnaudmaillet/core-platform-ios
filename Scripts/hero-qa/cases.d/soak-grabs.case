@@ -1,0 +1,8 @@
+# K2: six full open->grab->return cycles, then the leaks tool over the
+# still-running app. The audit's final census is the verdict; leaks output is
+# attached for the reviewer.
+CASE_ARGS=(-select-tab 1 -foryou-open 0 -foryou-demo-grab -foryou-grab-cycles 5)
+CASE_DURATION=75
+CASE_BASELINE_AT=5
+CASE_CHECKS=(audit settle-baseline)
+CASE_LEAKS=1

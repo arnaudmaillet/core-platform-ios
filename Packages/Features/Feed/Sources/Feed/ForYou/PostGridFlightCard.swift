@@ -99,6 +99,11 @@ final class PostGridFlightCard: UIView {
     init(post: GalleryPost, cover: UIImage?, style: Style) {
         self.style = style
         super.init(frame: .zero)
+        #if DEBUG
+        // Balanced in deinit: a card alive after its flight settled is the
+        // hero census's `cards` count, asserted zero by the UI suites.
+        ZoomDebugCensus.increment(ZoomDebugCensus.Key.flightCard)
+        #endif
         clipsToBounds = true
         // Video bricks keep a dark floor, exactly as the tile cell does: the
         // poster may be unrenderable and the glyph needs a stage.
@@ -162,6 +167,12 @@ final class PostGridFlightCard: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    #if DEBUG
+    deinit {
+        ZoomDebugCensus.decrement(ZoomDebugCensus.Key.flightCard)
+    }
+    #endif
 
 }
 

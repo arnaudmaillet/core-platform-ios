@@ -62,4 +62,47 @@ struct SchemeRoutingImageFetcherTests {
         #expect(await placeholder.callCount == 1)
         #expect(await remote.callCount == 0)
     }
+
+    private actor FailingSpy: ImageFetching {
+        private(set) var callCount = 0
+        func fetchImageData(for url: URL) async throws -> Data {
+            callCount += 1
+            throw URLError(.timedOut)
+        }
+    }
+
+    /// ⚠️ A dead fixture host degrades to the placeholder, never to a blank.
+    ///
+    /// Found live: picsum's edge completed TLS and then hung, and every photo
+    /// of the `-rich-media` catalog — plus every clip's poster — became a
+    /// 60-second wait ending in nothing, which reads as "media doesn't load".
+    /// The rule is the video fixtures' own: a test-fixture convenience must
+    /// never be the reason nothing shows.
+    @Test func aDeadRemoteFallsBackToThePlaceholder() async throws {
+        let remote = FailingSpy()
+        let placeholder = Spy(payload: Data("placeholder".utf8))
+        let fetcher = SchemeRoutingImageFetcher(remote: remote, placeholder: placeholder)
+
+        let data = try await fetcher.fetchImageData(
+            for: URL(string: "https://picsum.photos/id/1/10/10")!
+        )
+
+        #expect(data == Data("placeholder".utf8))
+        #expect(await remote.callCount == 1, "the real asset was never even tried")
+        #expect(await placeholder.callCount == 1)
+    }
+
+    /// The fallback is for REMOTE failures only: a placeholder that throws for
+    /// a `mock://` URL is a genuine defect and must stay visible as one.
+    @Test func aFailingPlaceholderIsNotRescued() async {
+        let remote = Spy(payload: Data("remote".utf8))
+        let placeholder = FailingSpy()
+        let fetcher = SchemeRoutingImageFetcher(remote: remote, placeholder: placeholder)
+
+        await #expect(throws: URLError.self) {
+            _ = try await fetcher.fetchImageData(for: URL(string: "mock://media/3")!)
+        }
+        #expect(await placeholder.callCount == 1)
+        #expect(await remote.callCount == 0, "a mock URL must never reach the network")
+    }
 }

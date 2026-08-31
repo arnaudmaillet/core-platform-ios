@@ -1,0 +1,6 @@
+# D07: catch the present flight mid-air and REVERSE it — the branch that has
+# to give everything back; the settle must match the pre-flight grid.
+CASE_ARGS=(-select-tab 1 -foryou-open 0 -zoom-interrupt cancel)
+CASE_DURATION=16
+CASE_BASELINE_AT=4
+CASE_CHECKS=(audit motion settle-baseline)

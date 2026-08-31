@@ -1,0 +1,5 @@
+# D02/D03 scripted: the same grabs on the VERTICAL axis (forward-only pager).
+CASE_ARGS=(-select-tab 1 -foryou-open 0 -foryou-demo-grab -zoom-demo-grab-vertical)
+CASE_DURATION=22
+CASE_BASELINE_AT=5
+CASE_CHECKS=(audit motion no-black settle-baseline)

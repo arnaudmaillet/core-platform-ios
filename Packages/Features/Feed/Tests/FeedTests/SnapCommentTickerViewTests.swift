@@ -127,7 +127,17 @@ struct SnapCommentTickerViewTests {
         #expect(labels.allSatisfy {
             $0.layer.animation(forKey: "flight") != nil || $0.layer.position.x <= 0
         })
-        #expect(labels.contains { $0.layer.animation(forKey: "flight") != nil })
+        // "At least one is still MID-flight" was the second half — and it is
+        // pure wall-clock racing: a starved runner stretched the 1s sleep to
+        // 66s once, every finite flight legitimately finished, and the line
+        // reddened with no product defect behind it (the failure it hunted —
+        // handover never happened, bubbles frozen mid-band — is a label with
+        // NO animation at positive x, which the allSatisfy above already
+        // catches). So the evidence accepted is "release produced motion":
+        // in flight, or completed at its exit.
+        #expect(labels.contains {
+            $0.layer.animation(forKey: "flight") != nil || $0.layer.position.x <= 0
+        })
     }
 
     // MARK: - Device-bug regressions (2026-07-13)

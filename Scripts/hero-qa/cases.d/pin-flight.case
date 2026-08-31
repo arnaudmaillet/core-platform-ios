@@ -1,0 +1,5 @@
+# S08: the Maps pin flight (PinCardView), auto-dismissed — the second surface
+# on the shared machinery.
+CASE_ARGS=(-maps-open-first-pin -maps-force-video -snap-auto-dismiss)
+CASE_DURATION=18
+CASE_CHECKS=(audit motion no-black)

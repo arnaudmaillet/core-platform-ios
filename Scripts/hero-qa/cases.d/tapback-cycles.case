@@ -1,0 +1,6 @@
+# S01+D01 ×3: open by scripted tap, home by tap-back, three rounds
+# (-zoom-repeat adds two more open/pop rounds after the first).
+CASE_ARGS=(-select-tab 1 -foryou-open 0 -foryou-demo-tapback -zoom-repeat)
+CASE_DURATION=26
+CASE_BASELINE_AT=5
+CASE_CHECKS=(audit motion no-black settle-baseline)
