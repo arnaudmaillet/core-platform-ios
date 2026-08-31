@@ -16,14 +16,29 @@ public protocol ImageFetching: Sendable {
 public struct URLSessionImageFetcher: ImageFetching {
     private let session: URLSession
     private let hostRewrite: HostRewrite?
+    private let timeout: TimeInterval?
 
-    public init(hostRewrite: HostRewrite? = nil, session: URLSession = .shared) {
+    /// `timeout` caps the per-request wait; nil keeps URLSession's default
+    /// (60s). Production leaves it nil — a slow CDN is still the CDN. The
+    /// fixture path sets it tight, because a PUBLIC TEST HOST that accepts
+    /// the connection and never answers (measured: picsum's edge completing
+    /// TLS and then hanging) otherwise pins every image slot for a minute
+    /// each, and the whole feed reads as "media doesn't load".
+    public init(
+        hostRewrite: HostRewrite? = nil,
+        session: URLSession = .shared,
+        timeout: TimeInterval? = nil
+    ) {
         self.session = session
         self.hostRewrite = hostRewrite
+        self.timeout = timeout
     }
 
     public func fetchImageData(for url: URL) async throws -> Data {
         var request = URLRequest(url: url)
+        if let timeout {
+            request.timeoutInterval = timeout
+        }
         if let rewrite = hostRewrite?.apply(to: url) {
             request.url = rewrite.url
             if let hostHeader = rewrite.hostHeader {
@@ -50,8 +65,17 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
     private let remote: any ImageFetching
     private let placeholder: any ImageFetching
 
+    /// The default remote carries a TIGHT timeout, and remote failures fall
+    /// back to the placeholder below — both halves of one rule the video
+    /// fixtures already state: a test-fixture convenience must never be the
+    /// reason nothing shows. `-rich-media` leans on public test hosts, and
+    /// when one dies mid-session (picsum: TLS completes, response never
+    /// comes) every photo and every clip poster used to become a permanent
+    /// blank behind a 60-second wait each. Degrading to the synthesized
+    /// color keeps the post VISIBLE and honest; `-media-audit` still logs
+    /// the failed URL, so an outage stays observable rather than masked.
     public init(
-        remote: any ImageFetching = URLSessionImageFetcher(),
+        remote: any ImageFetching = URLSessionImageFetcher(timeout: 8),
         placeholder: any ImageFetching = PlaceholderImageFetcher()
     ) {
         self.remote = remote
@@ -60,7 +84,8 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
 
     public func fetchImageData(for url: URL) async throws -> Data {
         let scheme = url.scheme?.lowercased()
-        let fetcher = scheme == "http" || scheme == "https" ? remote : placeholder
+        let isRemote = scheme == "http" || scheme == "https"
+        let fetcher = isRemote ? remote : placeholder
         #if DEBUG
         // `-slow-media <ms>`: holds every image back, so the states that only
         // exist WHILE a picture is missing can be seen at all.
@@ -74,8 +99,31 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
         // grace, the cell, the surface) is the real path.
         if let delay = Self.debugMediaDelay { try? await Task.sleep(nanoseconds: delay) }
         #endif
-        return try await fetcher.fetchImageData(for: url)
+        do {
+            return try await fetcher.fetchImageData(for: url)
+        } catch where isRemote {
+            // The fallback half of the init's rule: a dead fixture host
+            // degrades to the post's synthesized color instead of a blank.
+            // The pipeline caches what we return — right for an outage that
+            // outlives any one request; a relaunch retries the real asset.
+            #if DEBUG
+            // Logged HERE because the fallback makes the failure invisible
+            // downstream: the cell receives bytes and `-media-audit`'s
+            // failed-load line never fires. A silent rescue and a healthy
+            // fetch must not read identically.
+            if Self.logsFallbacks {
+                print("[fixtures] remote image FAILED, placeholder served: \(url.absoluteString)")
+            }
+            #endif
+            return try await placeholder.fetchImageData(for: url)
+        }
     }
+
+    #if DEBUG
+    private static let logsFallbacks = ProcessInfo.processInfo.arguments.contains { argument in
+        argument == "-media-audit" || argument == "-media-log"
+    }
+    #endif
 
     #if DEBUG
     private static let debugMediaDelay: UInt64? = {
