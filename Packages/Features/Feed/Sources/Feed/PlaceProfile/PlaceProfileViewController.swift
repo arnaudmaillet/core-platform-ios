@@ -19,12 +19,13 @@ import UIKit
 ///   are one post);
 /// - a two-metric band: the place's aggregated REACTIONS and VIEWS. No
 ///   avatar, no bio, no edit/share — a place is not an account;
-/// - three tabs under the metrics — **Gallery** (the popularity grid),
-///   **Shorts** (the place's video posts), **Activity** (a chronological
-///   stream of check-ins and posts) — a `PagedTabBar` over a
-///   `HorizontalPagerView`, the same pairing the profile's relationship
-///   screen ships.
-/// The follow-this-place heart keeps the top-right navigation slot.
+/// - two tabs under the metrics — **Discover** (the popularity grid) and
+///   **Activity** (the same posts as CARDS, newest first) — a `PagedTabBar`
+///   over a `HorizontalPagerView`, the same pairing the profile's
+///   relationship screen ships. Deliberately For You's own vocabulary and
+///   shapes: its Discover is a media grid and its Following is a card list,
+///   which is exactly this pair for one place.
+/// The follow-this-place heart and a "..." menu keep the top-right slots.
 ///
 /// It remains an ordinary navigation citizen — plain title ("Paris • City
 /// Cluster"), tab bar visible, native edge-pop back to the map — because
@@ -33,18 +34,40 @@ import UIKit
 /// the zoom stack's, and this type only has to host its column and answer
 /// the `ZoomTransitionSource` questions about the Gallery grid.
 final class PlaceProfileViewController: UIViewController {
-    /// The Gallery tab's grid — the flight anchor every dismissal lands on.
+    /// The Discover tab's grid — the flight anchor every dismissal lands on.
     private let page: ForYouGridPage
-    /// The Shorts tab: the same grid machinery over the place's videos only.
-    private let shortsPage: ForYouGridPage
-    /// The Activity tab: newest-first check-ins/posts derived from members.
-    private let activityList = PlaceActivityListView()
+    /// The Activity tab: the SAME component For You's "Following" is — a
+    /// `ForYouGridPage` in `.list` style — over the same corpus in
+    /// chronological order. Not a bespoke list: a place's activity is posts,
+    /// and a viewer who reads them as cards on For You must read them as the
+    /// same cards here.
+    private let activityPage: ForYouGridPage
 
     private let bannerView = UIImageView()
     private let bannerScrim = GradientScrimView()
     private let reactionsMetric = PlaceMetricView(title: "Reactions")
     private let viewsMetric = PlaceMetricView(title: "Views")
-    private let tabBar = PagedTabBar(titles: ["Gallery", "Shorts", "Activity"], style: .floating)
+
+    /// The tab titles, one source for both selector copies.
+    private static let tabTitles = ["Discover", "Activity"]
+    /// ⚠️ TWO selectors, and that is the profile screen's hard-won shape
+    /// (`ProfileViewController`): one view cannot be in two places, and the
+    /// hand-over is a CROSSFADE — for a quarter of a second both are on
+    /// screen, one shrinking away and one growing in, which is not a state a
+    /// re-parented view can express at any price. `inlineBar` lives in the
+    /// header's slot; `dockedBar` rides the navigation bar's LEADING group,
+    /// beside the back chevron.
+    private let inlineBar = PagedTabBar(titles: tabTitles, style: .navigationTitle)
+    private let dockedBar = PagedTabBar(titles: tabTitles, style: .navigationTitle)
+    private var selectorBars: [PagedTabBar] { [inlineBar, dockedBar] }
+    /// The fixed-height seat the inline selector sits in. It keeps its height
+    /// when the selector fades out, so the header's own height — and every
+    /// number derived from it — does not change at the dock.
+    private let inlineBarSlot = UIView()
+    private var selectorBarItem: UIBarButtonItem?
+    private var isBarDocked = false
+    private var isMirroringSelection = false
+    private var lastDockingTravel: CGFloat = 0
     private var pager: HorizontalPagerView!
 
     /// The floating header: banner + metrics + tab bar in one host that
@@ -55,20 +78,21 @@ final class PlaceProfileViewController: UIViewController {
     private let headerHost = UIView()
     private var headerTopConstraint: NSLayoutConstraint?
     /// The place's display title ("Paris • City Cluster") — worn as the HERO
-    /// TITLE on the banner while the header is expanded, and crossfading into
-    /// the navigation bar's title slot as the banner scrolls under the chrome.
-    /// The navigation item's own `title` stays empty for the whole life of
-    /// the screen: the name is either on the banner or in `navTitleLabel`,
-    /// never in both places at full strength.
+    /// TITLE on the banner, and nowhere else.
+    ///
+    /// ⚠️ THE NAME DOES NOT DOCK, and that is a consequence rather than a
+    /// preference. `installLeadingSelector` must overwrite `titleView` with a
+    /// zero-sized view: a nil or sized title keeps a central reservation that
+    /// collapses the leading group into a `•••` below 440pt. So the docked
+    /// name and the docked selector cannot both exist, and the profile screen
+    /// faced the identical choice and made the identical call — once the
+    /// selector docks, a name up there is competing with the one control the
+    /// chrome exists to hold.
     private let placeName: String
     /// The banner's hero identity: the place kind whispered above the name.
     private let heroKindLabel = UILabel()
     private let heroNameLabel = UILabel()
-    /// The docked replacement, alpha-driven from the same scroll ramp the
-    /// identity fade runs on — the two are complements, so the name is
-    /// always exactly once on screen.
-    private let navTitleLabel = UILabel()
-    /// The three pages under their hosted-header contract, pager order.
+    /// The two pages under their hosted-header contract, pager order.
     private var hostedPages: [any PlaceProfileHostedPage] = []
     /// Which page the header is riding. Adopted at tab-tap time (the
     /// destination takes the offset BEFORE it travels) and confirmed on
@@ -92,6 +116,14 @@ final class PlaceProfileViewController: UIViewController {
     /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
     private let following: ClusterGalleryFollowing?
     private let followButton = UIButton(configuration: .plain())
+    /// The two trailing items, held so the bar's group is composed in one
+    /// place — see `configureNavigationItems`. `followItem` stays nil when no
+    /// follow seam was supplied; the "..." is always there.
+    private var followItem: UIBarButtonItem?
+    private var moreItem: UIBarButtonItem?
+    /// The follow state as last rendered, so the dock hand-over can redraw
+    /// the button without asking the caller's store again.
+    private var followState = false
 
     /// The tile a dismissal is currently flying to. Starts at the cluster's
     /// representative (the feed's first post) and re-points to whatever the
@@ -120,10 +152,40 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        assertAppTabBar()
         installMapReturnIfTop()
+        syncAutoplay()
         #if DEBUG
         scheduleDebugPopIfRequested()
+        scheduleDebugDrivesIfRequested()
         #endif
+    }
+
+    /// This screen shows the app's dock, so it says so itself.
+    ///
+    /// ⚠️ NOT REDUNDANT with the restores the feed above it runs, and the
+    /// reason is a collision between two things this page does. The feed's
+    /// dismissal driver puts the bar back from its `didShow` — and UIKit
+    /// delivers `didShow` AFTER the appearing screen's `viewDidAppear`, which
+    /// is exactly where `installMapReturnIfTop` below takes the navigation
+    /// delegate for this page's own return flight. So the driver that was
+    /// going to restore the dock is no longer the delegate when the news
+    /// arrives, and never hears that the feed left (measured with
+    /// `-grab-log`: one `didShow SnapFeedViewController` for the push, and
+    /// none at all for the landing).
+    ///
+    /// Rather than forbid the hand-over, or make the flight forward someone
+    /// else's bookkeeping, the screen that OWNS the bottom of the display
+    /// asserts it — the rule the map root and the profile already follow. In
+    /// `viewDidAppear`, never `viewWillAppear`: UIKit runs the latter at
+    /// interactive-pop BEGIN, so a restore there would raise the dock over a
+    /// feed still on screen and strand it there when the grab is released
+    /// short of the threshold.
+    private func assertAppTabBar() {
+        guard let tabBarController else { return }
+        tabBarController.tabBar.alpha = 1
+        guard tabBarController.isTabBarHidden else { return }
+        tabBarController.setTabBarHidden(false, animated: false)
     }
 
     /// Installs the hero return each time this page becomes the top screen.
@@ -157,10 +219,40 @@ final class PlaceProfileViewController: UIViewController {
 
     #if DEBUG
     private var didScheduleDebugPop = false
+    private var didScheduleDebugDrives = false
 
     /// `-maps-place-pop-demo`: pops this page ~1.5s after it becomes top —
     /// the sim can't tap the back button, and the non-interactive pop is
     /// exactly the leg that proves the hero return animator is installed.
+    /// `-maps-place-tab <index>` selects a tab and `-maps-place-scroll <pt>`
+    /// drives the active page's offset — the two gestures this screen is
+    /// read by, neither of which the simulator can inject. The scroll runs
+    /// last and later, so a run can ask for "the Activity tab, docked".
+    private func scheduleDebugDrivesIfRequested() {
+        guard !didScheduleDebugDrives else { return }
+        didScheduleDebugDrives = true
+        let arguments = ProcessInfo.processInfo.arguments
+        func value(_ flag: String) -> Double? {
+            guard let position = arguments.firstIndex(of: flag),
+                  position + 1 < arguments.count else { return nil }
+            return Double(arguments[position + 1])
+        }
+        if let index = value("-maps-place-tab").map(Int.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                self?.inlineBar.debugSimulateTap(at: index)
+            }
+        }
+        if let offset = value("-maps-place-scroll") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let self else { return }
+                debugScrollActivePage(to: CGFloat(offset))
+                print("[place] scrolled to \(offset) docked=\(isBarDocked)"
+                    + " inline=\(inlineBar.alpha) dockedBar=\(dockedBar.alpha)"
+                    + " item=\(debugDockedSelectorItemPresent)")
+            }
+        }
+    }
+
     private func scheduleDebugPopIfRequested() {
         guard !didScheduleDebugPop,
               ProcessInfo.processInfo.arguments.contains("-maps-place-pop-demo")
@@ -199,8 +291,8 @@ final class PlaceProfileViewController: UIViewController {
         self.page = ForYouGridPage(
             imagePipeline: imagePipeline, style: .grid, videoPlayback: videoPlayback
         )
-        self.shortsPage = ForYouGridPage(
-            imagePipeline: imagePipeline, style: .grid, videoPlayback: videoPlayback
+        self.activityPage = ForYouGridPage(
+            imagePipeline: imagePipeline, style: .list, videoPlayback: videoPlayback
         )
         super.init(nibName: nil, bundle: nil)
     }
@@ -219,10 +311,49 @@ final class PlaceProfileViewController: UIViewController {
         configureHeader()
         configureTabs()
         page.render(.loading)
-        shortsPage.render(.loading)
+        activityPage.render(.loading)
         page.onItemTapped = { [weak self] index in self?.openTile(at: index, in: self?.page) }
-        shortsPage.onItemTapped = { [weak self] index in self?.openTile(at: index, in: self?.shortsPage) }
-        configureFollowButton()
+        activityPage.onItemTapped = { [weak self] index in
+            self?.openTile(at: index, in: self?.activityPage)
+        }
+        // The comment chip opens the post, not the thread — deliberately, for
+        // now. Landing ON the comments needs the pushed feed itself
+        // (`openComments(for:revealingFrom:)`), and this screen never holds
+        // it: `openPost` hands an origin across the feature seam and the
+        // builder constructs the destination. Widening that seam for a
+        // secondary affordance is the wrong trade; a chip that opens the post
+        // is honest, where a chip that did nothing would not be.
+        activityPage.onItemCommentsTapped = { [weak self] index in
+            self?.openTile(at: index, in: self?.activityPage)
+        }
+        // The card band's own "..." stays dark here: the reporting and
+        // social-graph seams are not threaded into this screen, and a menu
+        // whose rows cannot act is worse than no control. An empty answer is
+        // how `PostAuthorBandView` is told to hide it.
+        activityPage.authorMenuActions = { _ in [] }
+        configureNavigationItems()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        syncAutoplay()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Off screen, this page holds no claim on the shared player pool —
+        // the feed pushed above it is about to want every loan.
+        for hosted in hostedPages { (hosted as? ForYouGridPage)?.setAutoplayActive(false) }
+    }
+
+    /// Exactly one page may drive playback: two grids competing for one pool
+    /// is how a working set of six turns into a queue nobody wins. For You's
+    /// pager makes the same call from the same three places (settle, tab tap,
+    /// appearance).
+    private func syncAutoplay() {
+        for (index, hosted) in hostedPages.enumerated() {
+            (hosted as? ForYouGridPage)?.setAutoplayActive(index == activeIndex)
+        }
     }
 
     // MARK: - Layout (floating header over full-screen pages)
@@ -232,8 +363,8 @@ final class PlaceProfileViewController: UIViewController {
         // over them (added second, so it draws above the content sliding
         // under it) and is moved by its top constraint from whichever page
         // is being read.
-        hostedPages = [page, shortsPage, activityList]
-        pager = HorizontalPagerView(pages: [page, shortsPage, activityList])
+        hostedPages = [page, activityPage]
+        pager = HorizontalPagerView(pages: [page, activityPage])
         pager.pin(to: view)
 
         headerHost.translatesAutoresizingMaskIntoConstraints = false
@@ -278,41 +409,16 @@ final class PlaceProfileViewController: UIViewController {
         heroTitle.translatesAutoresizingMaskIntoConstraints = false
         bannerView.addSubview(heroTitle)
 
-        // The docked twin, in the navigation bar's title slot from day one —
-        // at alpha 0 while the hero is on the banner; the scroll ramp
-        // crossfades the two (`applyHeaderOffset`). The item's own `title`
-        // is never set, so nothing else can draw the name at full strength.
-        //
-        // ⚠️ The label rides inside a WRAPPER, and the wrapper is what the
-        // bar gets. iOS 26's navigation bar animates its title slot through
-        // snapshots and NORMALIZES the hosted view's alpha around push/pop
-        // (measured: the label arrived at alpha 1 after the pop into this
-        // screen, with nothing of ours having written it) — so the driven
-        // knob has to live one level below the view UIKit manages.
-        navTitleLabel.text = placeName
-        navTitleLabel.font = UIFont.systemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .headline).pointSize, weight: .semibold
-        )
-        navTitleLabel.alpha = 0
-        navTitleLabel.translatesAutoresizingMaskIntoConstraints = false
-        let navTitleHost = UIView()
-        navTitleHost.addSubview(navTitleLabel)
-        NSLayoutConstraint.activate([
-            navTitleLabel.topAnchor.constraint(equalTo: navTitleHost.topAnchor),
-            navTitleLabel.leadingAnchor.constraint(equalTo: navTitleHost.leadingAnchor),
-            navTitleLabel.trailingAnchor.constraint(equalTo: navTitleHost.trailingAnchor),
-            navTitleLabel.bottomAnchor.constraint(equalTo: navTitleHost.bottomAnchor),
-        ])
-        navigationItem.titleView = navTitleHost
-
         let metrics = UIStackView(arrangedSubviews: [reactionsMetric, viewsMetric])
         metrics.distribution = .fillEqually
         metrics.translatesAutoresizingMaskIntoConstraints = false
         headerHost.addSubview(metrics)
         self.metricsBand = metrics
 
-        tabBar.translatesAutoresizingMaskIntoConstraints = false
-        headerHost.addSubview(tabBar)
+        inlineBarSlot.translatesAutoresizingMaskIntoConstraints = false
+        headerHost.addSubview(inlineBarSlot)
+        inlineBar.translatesAutoresizingMaskIntoConstraints = false
+        inlineBarSlot.addSubview(inlineBar)
 
         // ⚠️ Stretchy banner, the profile's own mechanism: the host is moved
         // by its TOP CONSTRAINT rather than a transform precisely so this
@@ -353,15 +459,38 @@ final class PlaceProfileViewController: UIViewController {
             ),
             metrics.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor, constant: 16),
             metrics.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor, constant: -16),
-            // Both edges, not leading-only: a `.floating` bar SPANS its host
-            // (its intrinsic width is `noIntrinsicMetric`), so an unpinned
-            // trailing edge collapses it to zero width.
-            tabBar.topAnchor.constraint(equalTo: metrics.bottomAnchor, constant: 8),
-            tabBar.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
-            tabBar.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
-            tabBar.bottomAnchor.constraint(equalTo: headerHost.bottomAnchor),
+            // ⚠️ A SLOT WITH A STATED HEIGHT, not the selector itself. The
+            // inline bar fades out at the dock, and a header whose height
+            // followed it would shrink under every number derived from it
+            // (`headerHeight`, and through it the pages' inset and the dock
+            // line) at the exact moment the dock is being decided.
+            inlineBarSlot.topAnchor.constraint(equalTo: metrics.bottomAnchor, constant: 8),
+            inlineBarSlot.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
+            inlineBarSlot.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
+            inlineBarSlot.bottomAnchor.constraint(equalTo: headerHost.bottomAnchor),
+            inlineBarSlot.heightAnchor.constraint(equalToConstant: Self.selectorSlotHeight),
+            // Both edges, not leading-only: `fillsWidth` gives a hugging
+            // `.navigationTitle` bar the floating bar's ARRANGEMENT
+            // (fillEqually, pinned to both ends) without its type ramp, so an
+            // unpinned trailing edge would collapse it to zero width.
+            inlineBar.topAnchor.constraint(equalTo: inlineBarSlot.topAnchor),
+            inlineBar.leadingAnchor.constraint(
+                equalTo: inlineBarSlot.leadingAnchor, constant: 16
+            ),
+            inlineBar.trailingAnchor.constraint(
+                equalTo: inlineBarSlot.trailingAnchor, constant: -16
+            ),
         ])
     }
+
+    /// The inline selector's seat: the bar's own height plus the gap that
+    /// separates it from the first row of content.
+    private static let selectorSlotHeight = PagedTabBar.Style.navigationTitle.height + 16
+    /// The crossfade's length and the size the leaving copy shrinks to —
+    /// the profile screen's measured pair, shared so the two screens that
+    /// perform the same hand-over cannot drift apart.
+    private static let dockTransition: TimeInterval = 0.26
+    private static let dockZoomScale: CGFloat = 0.88
 
     private var metricsBand: UIStackView!
 
@@ -377,22 +506,29 @@ final class PlaceProfileViewController: UIViewController {
         // Tap → the destination takes its aligned position BEFORE it
         // travels, and the header adopts it immediately — so the page
         // sliding in is already where it belongs.
-        tabBar.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            let destination = tabBar.selectedIndex
-            guard destination != activeIndex, hostedPages.indices.contains(destination)
-            else { return }
-            hostedPages[destination].setVerticalOffset(alignedOffset(for: destination))
-            activeIndex = destination
-            pager.setActivePage(destination, animated: true)
-            applyHeaderOffset(hostedPages[destination].verticalOffset)
-        }, for: .valueChanged)
+        // BOTH copies answer a tap — whichever the finger reached — and both
+        // are told the outcome, so the invisible one is already correct when
+        // it fades in rather than catching up afterwards.
+        for bar in selectorBars {
+            bar.addAction(UIAction { [weak self, weak bar] _ in
+                guard let self, let bar else { return }
+                let destination = bar.selectedIndex
+                mirrorSelection(to: destination)
+                guard destination != activeIndex, hostedPages.indices.contains(destination)
+                else { return }
+                hostedPages[destination].setVerticalOffset(alignedOffset(for: destination))
+                activeIndex = destination
+                syncAutoplay()
+                pager.setActivePage(destination, animated: true)
+                applyHeaderOffset(hostedPages[destination].verticalOffset)
+            }, for: .valueChanged)
+        }
         // Swipe → lens, every frame — and the neighbours are settled every
         // frame too: mid-swipe both pages are on screen, and a neighbour
         // arriving at a stale offset is a header jump the viewer watches.
         pager.onProgress = { [weak self] progress in
             guard let self else { return }
-            tabBar.setProgress(progress)
+            for bar in selectorBars { bar.setProgress(progress) }
             for (index, hosted) in hostedPages.enumerated() where index != activeIndex {
                 hosted.setVerticalOffset(alignedOffset(for: index))
             }
@@ -400,12 +536,25 @@ final class PlaceProfileViewController: UIViewController {
         pager.onSettled = { [weak self] index in
             guard let self, hostedPages.indices.contains(index) else { return }
             activeIndex = index
-            tabBar.select(index)
+            mirrorSelection(to: index)
+            syncAutoplay()
             // Re-read where the landed page ACTUALLY is — a short page takes
             // as much of the shared offset as it has content for, and a
             // header riding a stale number stays hidden over a page sitting
             // at its top.
             applyHeaderOffset(hostedPages[index].verticalOffset)
+        }
+    }
+
+    /// Keeps the two selector copies on one selection. Re-entrancy guarded:
+    /// `select` fires `.valueChanged`, and the action above mirrors, which
+    /// would select again.
+    private func mirrorSelection(to index: Int) {
+        guard !isMirroringSelection else { return }
+        isMirroringSelection = true
+        defer { isMirroringSelection = false }
+        for bar in selectorBars where bar.selectedIndex != index {
+            bar.select(index)
         }
     }
 
@@ -424,7 +573,7 @@ final class PlaceProfileViewController: UIViewController {
     /// How far the header travels before the tab bar reaches the navigation
     /// bar — the moment it docks and stops climbing.
     private var headerTravel: CGFloat {
-        max(0, headerHeight - PagedTabBar.height - view.safeAreaInsets.top)
+        max(0, headerHeight - Self.selectorSlotHeight - view.safeAreaInsets.top)
     }
 
     /// The offset that puts a page's FIRST ROW directly under the navigation
@@ -460,13 +609,109 @@ final class PlaceProfileViewController: UIViewController {
         let alpha = Self.identityAlpha(travelled: travelled, dockLine: headerTravel)
         bannerView.alpha = alpha
         metricsBand?.alpha = alpha
-        // The name's two homes are COMPLEMENTS on one ramp: as the hero
-        // title (a banner subview, riding `bannerView.alpha`) fades out
-        // under the chrome, the navigation title fades in by exactly the
-        // amount the hero gave up — expanded shows the banner name only,
-        // docked shows the inline name only, and mid-ramp the crossfade
-        // sums to one.
-        navTitleLabel.alpha = 1 - alpha
+        updateBarDocking(travelled: travelled)
+    }
+
+    /// Hands the selector between the header and the navigation bar as the
+    /// header reaches the dock line.
+    private func updateBarDocking(travelled: CGFloat) {
+        guard isViewLoaded else { return }
+        // How far the header moved since the last callback. Callbacks arrive
+        // per displayed frame, so this is a velocity in the only unit that
+        // matters here: distance the viewer sees between one frame and the
+        // next.
+        let step = travelled - lastDockingTravel
+        lastDockingTravel = travelled
+        let shouldDock = DockThreshold.isDocked(
+            travelled: travelled, dockLine: headerTravel, step: step, wasDocked: isBarDocked
+        )
+        guard shouldDock != isBarDocked else { return }
+        isBarDocked = shouldDock
+        let animated = DockThreshold.isAnimated(step: step)
+        // Before the hand-over, so the space the label gives up is already
+        // free when the arriving selector is measured against the bar.
+        if animated {
+            UIView.animate(withDuration: Self.dockTransition, delay: 0,
+                           options: [.curveEaseInOut, .beginFromCurrentState]) {
+                self.renderFollowState(self.followState)
+                self.navigationController?.navigationBar.layoutIfNeeded()
+            }
+        } else {
+            renderFollowState(followState)
+        }
+        applyDockedAppearance(animated: animated)
+    }
+
+    /// The hand-over itself: a crossfade with a small zoom, never a move.
+    ///
+    /// Scale is by TRANSFORM only — these capsules derive their corner radius
+    /// from their own bounds, so resizing toward a target would need the
+    /// radius re-derived every frame.
+    private func applyDockedAppearance(animated: Bool) {
+        let leaving = isBarDocked ? inlineBar : dockedBar
+        let arriving = isBarDocked ? dockedBar : inlineBar
+        let shrunk = CGAffineTransform(scaleX: Self.dockZoomScale, y: Self.dockZoomScale)
+
+        leaving.isHidden = false
+        arriving.isHidden = false
+        // ⚠️ The BAR ITEM's own visibility, not just the view's: UIKit draws
+        // the system glass capsule for the item, and hiding only the view
+        // inside it leaves an empty pill beside the back chevron.
+        if arriving === dockedBar { setSelectorItemPresent(true) }
+        // The arriving copy starts small — but ONLY when it is arriving from
+        // nothing. A hand-over reversed half way through finds it already
+        // part grown, and snapping it back is what turns a change of mind
+        // into a stutter.
+        if arriving.alpha < 0.01 { arriving.transform = shrunk }
+
+        let settle = {
+            leaving.alpha = 0
+            leaving.transform = shrunk
+            arriving.alpha = 1
+            arriving.transform = .identity
+        }
+        // ⚠️ Whichever copy ends up invisible is HIDDEN, not merely
+        // transparent — a navigation bar owns its items' alpha around pushes
+        // and pops, so one parked at alpha 0 comes back at full strength over
+        // an un-scrolled page. `isHidden` is not a property UIKit touches.
+        let settleVisibility = { [weak self] in
+            leaving.isHidden = true
+            if leaving === self?.dockedBar { self?.setSelectorItemPresent(false) }
+        }
+
+        guard animated else {
+            // ⚠️ Stop whatever is in flight FIRST. This path is taken because
+            // the scroll is too fast to animate through, and a hand-over
+            // already running would go on interpolating over the values just
+            // written — the flash, arriving a frame late. Setting model
+            // values does not cancel a running animation; removing it does.
+            for bar in selectorBars { bar.layer.removeAllAnimations() }
+            settle()
+            settleVisibility()
+            return
+        }
+        UIView.animate(
+            withDuration: Self.dockTransition,
+            delay: 0,
+            options: [.curveEaseInOut, .beginFromCurrentState],
+            animations: settle,
+            completion: { [weak self] _ in
+                guard let self else { return }
+                // The dock state can have flipped back while this was
+                // running, in which case a later call already owns the two
+                // bars and this completion would hide the one now arriving.
+                guard (isBarDocked ? inlineBar : dockedBar) === leaving else { return }
+                settleVisibility()
+            }
+        )
+    }
+
+    /// ⚠️ `isHidden`, NOT membership. Rewriting `leftBarButtonItems` hands
+    /// UIKit the group again, which tears the platters down and rebuilds them
+    /// EMPTY (measured on the profile screen at 0x44 beside a healthy
+    /// trailing item). Hiding an item leaves the group alone.
+    private func setSelectorItemPresent(_ present: Bool) {
+        selectorBarItem?.isHidden = !present
     }
 
     /// The identity fade's ramp: opaque until the last stretch of travel,
@@ -529,7 +774,7 @@ final class PlaceProfileViewController: UIViewController {
                 // hydration here is almost certainly transient — say so
                 // plainly rather than rendering a dead end.
                 page.render(.failed(message: "Couldn't load this place's posts."))
-                shortsPage.render(.failed(message: "Couldn't load this place's posts."))
+                activityPage.render(.failed(message: "Couldn't load this place's posts."))
             }
         }
     }
@@ -540,11 +785,14 @@ final class PlaceProfileViewController: UIViewController {
         page.render(ranked.isEmpty
             ? .empty(.init(title: "No posts here yet"))
             : .content(ranked))
-        let shorts = Self.shorts(in: ranked)
-        shortsPage.render(shorts.isEmpty
-            ? .empty(.init(title: "No shorts here yet"))
-            : .content(shorts))
-        activityList.render(Self.activity(from: ranked))
+        // The SAME corpus, read the other way round: Discover is what the
+        // place is known for, Activity is what happened here. One hydration
+        // fans out to both, so the two can never disagree about what the
+        // place contains — only about the order.
+        let recent = Self.chronological(ranked)
+        activityPage.render(recent.isEmpty
+            ? .empty(.init(title: "Nothing has happened here yet"))
+            : .content(recent))
         let totals = Self.aggregatedMetrics(of: ranked)
         reactionsMetric.setValue(totals.reactions)
         viewsMetric.setValue(totals.views)
@@ -587,9 +835,13 @@ final class PlaceProfileViewController: UIViewController {
         ranked.first
     }
 
-    /// The Shorts tab's corpus: the place's video posts, ranking preserved.
-    static func shorts(in ranked: [GalleryPost]) -> [GalleryPost] {
-        ranked.filter { $0.kind == .video }
+    /// The Activity tab's corpus: every member, NEWEST first — the one
+    /// surface of this page that is chronological, because "what is happening
+    /// here" is a different question from "what is this place known for".
+    /// Every KIND travels: a place's activity is its posts, so the cards show
+    /// words, stills and video exactly as For You's own card tab does.
+    static func chronological(_ posts: [GalleryPost]) -> [GalleryPost] {
+        DiscoverySource.recent.ordering(posts)
     }
 
     /// The place's aggregated counters. Missing values count as zero rather
@@ -602,39 +854,76 @@ final class PlaceProfileViewController: UIViewController {
         }
     }
 
-    /// The Activity tab's stream: one event per member, NEWEST first — the
-    /// one surface of this page that is chronological, because "what is
-    /// happening here" is a different question from "what is this place
-    /// known for". The event vocabulary comes from the post's kind: words
-    /// are a check-in, stills are shared, videos are posted.
-    static func activity(from posts: [GalleryPost]) -> [PlaceActivityEvent] {
-        posts.map { post in
-            let kind: PlaceActivityEvent.Kind = switch post.kind {
-            case .text: .checkIn
-            case .photo: .photo
-            case .video: .short
-            }
-            return PlaceActivityEvent(
-                id: post.id,
-                authorName: post.authorName ?? "Someone",
-                kind: kind,
-                timestampMS: post.publishedAtMS
-            )
-        }
-        .sorted { ($0.timestampMS, $0.id.rawValue) > ($1.timestampMS, $1.id.rawValue) }
+    /// What the Discover grid currently shows, in its rendered order — for
+    /// the tests that pin the popularity ranking without reaching into the
+    /// page.
+    var renderedPosts: [GalleryPost] { page.posts }
+    /// The Activity cards as rendered, same purpose.
+    var renderedActivity: [GalleryPost] { activityPage.posts }
+    /// The tab strip's titles, pinned by tests against silent drift. Read off
+    /// the INLINE copy; `mirrorSelection` is what keeps the docked one equal.
+    var tabTitles: [String] { inlineBar.currentTitles }
+
+    // MARK: - The navigation bar
+
+    /// The bar, left to right: back chevron · selector (docked only) ·
+    /// dynamic space · "..." · Follow.
+    private func configureNavigationItems() {
+        configureFollowButton()
+        configureMoreButton()
+        // ⚠️ INDEX 0 IS THE RIGHTMOST. Follow keeps the corner it has always
+        // had and the "..." sits inboard of it, which is the order the eye
+        // reads as [...][Follow]. The "..." is present whether or not a
+        // follow seam was supplied — its one row does not depend on one.
+        navigationItem.rightBarButtonItems = [followItem, moreItem].compactMap { $0 }
+        // ⚠️ AFTER the trailing items, and that ordering is load-bearing:
+        // `installLeadingSelector` measures the bar's whole budget to size
+        // its capsule, and a trailing group installed afterwards would leave
+        // it sized against a bar that no longer exists.
+        selectorBarItem = navigationItem.installLeadingSelector(dockedBar)
+        // The inline copy owns the un-scrolled state, so the item leaves the
+        // bar until the header docks.
+        setSelectorItemPresent(isBarDocked)
+        applyDockedAppearance(animated: false)
     }
 
-    /// What the Gallery grid currently shows, in its rendered order — for the
-    /// tests that pin the popularity ranking without reaching into the page.
-    var renderedPosts: [GalleryPost] { page.posts }
-    /// The Shorts grid's rendered corpus, same purpose.
-    var renderedShorts: [GalleryPost] { shortsPage.posts }
-    /// The Activity stream as rendered, same purpose.
-    var renderedActivity: [PlaceActivityEvent] { activityList.events }
-    /// The tab strip's titles, pinned by tests against silent drift.
-    var tabTitles: [String] { tabBar.currentTitles }
+    /// The trailing "...": one honest row.
+    ///
+    /// ⚠️ ONE ROW, and the omissions are deliberate rather than unfinished.
+    /// Report has nothing to file — `moderation.v1` has no place entity, so
+    /// the row could only misfile against a post or a profile. Copy Link has
+    /// nothing to copy — the app has no URL scheme and no associated domain,
+    /// and a place id does not cross this screen's seam. Follow is already
+    /// the button beside it. A menu offering dead actions is worse than a
+    /// menu with one live one.
+    ///
+    /// A plain bar item, not the profile's glass bubble: that one is tray
+    /// furniture floating over a banner, and in a bar it double-stacks
+    /// material over the platter UIKit already draws.
+    private func configureMoreButton() {
+        let share = UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) {
+            [weak self] _ in self?.presentShareSheet()
+        }
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "ellipsis"),
+            menu: UIMenu(children: [share])
+        )
+        item.accessibilityLabel = "More actions"
+        moreItem = item
+    }
 
-    // MARK: - Follow (header trailing item)
+    /// Shares the place as TEXT. No URL exists to share — the same honest
+    /// concession the map's own share sheet and the snap feed's make, for the
+    /// same reason.
+    private func presentShareSheet() {
+        let sheet = UIActivityViewController(
+            activityItems: [placeName], applicationActivities: nil
+        )
+        // Anchored on the item that opened it, or the sheet arrives from the
+        // screen's corner on a regular-width layout.
+        sheet.popoverPresentationController?.barButtonItem = moreItem
+        present(sheet, animated: true)
+    }
 
     /// The header's trailing item: heart + "Follow" flipping to filled heart
     /// + "Following". A custom view rather than a plain `UIBarButtonItem`
@@ -657,24 +946,43 @@ final class PlaceProfileViewController: UIViewController {
             self.renderFollowState(following.toggle())
         }, for: .primaryActionTriggered)
         renderFollowState(following.isFollowing())
-        navigationItem.rightBarButtonItem = UIBarButtonItem(customView: followButton)
+        followItem = UIBarButtonItem(customView: followButton)
     }
 
     /// One place decides both states' looks, so they can't drift: outline
     /// heart + tinted "Follow" against filled heart + neutral "Following"
     /// (the resting state whispers; the call to action doesn't).
+    ///
+    /// ⚠️ THE LABEL GIVES WAY TO THE DOCKED SELECTOR, and it has to. Once the
+    /// selector arrives in the bar the leading group is competing with a back
+    /// chevron, a "..." and this button for one row: measured on a 402pt
+    /// device, "Activity" came back clipped to "Activi". The word is also the
+    /// most redundant thing up there by then — the heart carries both states
+    /// on its own fill, and a viewer deep enough in the page to have docked
+    /// the header has already read it once. Widths are not negotiable, so
+    /// something has to yield; this is the piece that loses the least.
     private func renderFollowState(_ isFollowing: Bool) {
+        followState = isFollowing
         guard var configuration = followButton.configuration else { return }
         configuration.image = UIImage(systemName: isFollowing ? "heart.fill" : "heart")
-        var title = AttributedString(isFollowing ? "Following" : "Follow")
-        title.font = UIFont.systemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize,
-            weight: .semibold
-        )
-        configuration.attributedTitle = title
+        if isBarDocked {
+            configuration.attributedTitle = nil
+        } else {
+            var title = AttributedString(isFollowing ? "Following" : "Follow")
+            title.font = UIFont.systemFont(
+                ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize,
+                weight: .semibold
+            )
+            configuration.attributedTitle = title
+        }
         configuration.baseForegroundColor = isFollowing ? .secondaryLabel : .tintColor
         followButton.configuration = configuration
+        // Unchanged either way: the label is what goes, never the meaning.
         followButton.accessibilityLabel = isFollowing ? "Unfollow this place" : "Follow this place"
+        // The bar sizes a custom view from its own frame, so a button that
+        // just lost its title has to be re-measured before the selector is
+        // offered the space it freed.
+        followButton.sizeToFit()
     }
 
     // MARK: - Opening a tile
@@ -687,12 +995,21 @@ final class PlaceProfileViewController: UIViewController {
         let stream = Array(posts[index...].prefix(Self.seedWindow))
         let hero = grid.hero(for: tapped.id, in: view)
         let appearance = grid.heroAppearance(for: tapped.id)
+        // The page's own card style, translated into the one the seam speaks
+        // — `ExternalHeroZoomSource` makes the same trip in the other
+        // direction. Two enums with the same cases on purpose: one is this
+        // feature's, the other crosses the interface.
+        let flightStyle: SnapFeedHeroStyle = appearance?.style == .listMedia ? .listMedia : .tile
         let origin = SnapFeedHeroOrigin(
             post: tapped,
             stream: stream,
             hasHero: hero != nil,
             cover: appearance?.cover,
-            style: .tile,
+            // ⚠️ ASKED, not assumed. A card's cover is a wide row, not a
+            // square tile, and the literal `.tile` this used to pass was only
+            // ever right because every page here was a grid. The page that
+            // drew the thing knows what shape it drew.
+            style: flightStyle,
             frame: { [weak grid] space in grid?.hero(for: tapped.id, in: space)?.frame },
             isOnScreen: { [weak grid] in grid?.isPostVisible(tapped.id) ?? false },
             setConcealed: { [weak grid] concealed in
@@ -748,13 +1065,14 @@ extension PlaceProfileViewController: ZoomTransitionSource {
     /// the honest landing is the post's own place in the ranking.
     func zoomSourceWillStageDismissal() {
         if activeIndex != 0 {
-            // Adopt the Gallery tab through the same alignment rule as a tap,
-            // so the header does not move for the switch.
+            // Adopt the Discover tab through the same alignment rule as a
+            // tap, so the header does not move for the switch.
             page.setVerticalOffset(alignedOffset(for: 0))
             activeIndex = 0
             applyHeaderOffset(page.verticalOffset)
+            syncAutoplay()
         }
-        tabBar.select(0)
+        mirrorSelection(to: 0)
         pager.setActivePage(0, animated: false)
         page.beginHeroFreeze()
         if let active = activePostID?(), page.post(for: active) != nil {
@@ -797,10 +1115,14 @@ extension PlaceProfileViewController {
     /// The dock line, as the coordinator computed it for this layout.
     var debugHeaderTravel: CGFloat { headerTravel }
     var debugIdentityAlpha: CGFloat { bannerView.alpha }
-    var debugNavTitleAlpha: CGFloat { navTitleLabel.alpha }
     var debugHeroName: String? { heroNameLabel.text }
     var debugHeroKind: String? { heroKindLabel.isHidden ? nil : heroKindLabel.text }
-    var debugNavTitleText: String? { navTitleLabel.text }
+    /// The selector hand-over, as the two copies actually stand: the inline
+    /// one owns the un-scrolled state, the docked one the scrolled state.
+    var debugIsBarDocked: Bool { isBarDocked }
+    var debugInlineSelectorAlpha: CGFloat { inlineBar.alpha }
+    var debugDockedSelectorAlpha: CGFloat { dockedBar.alpha }
+    var debugDockedSelectorItemPresent: Bool { selectorBarItem.map { !$0.isHidden } ?? false }
     /// Drives the active page to a travel offset through the same path a
     /// finger's scroll reports through.
     func debugScrollActivePage(to offset: CGFloat) {
@@ -825,7 +1147,6 @@ protocol PlaceProfileHostedPage: UIView {
 }
 
 extension ForYouGridPage: PlaceProfileHostedPage {}
-extension PlaceActivityListView: PlaceProfileHostedPage {}
 
 // MARK: - Header pieces
 
@@ -913,6 +1234,17 @@ private extension UIFont {
 // the cluster. The two conformances share no members, so neither can
 // impersonate the other.
 extension PlaceProfileViewController: ZoomTransitionDestination {
+    /// ⚠️ FALSE, and this is the member that exists BECAUSE of this screen.
+    ///
+    /// Conforming to this protocol used to be read across the shell as "a
+    /// full-bleed surface that covers the dock" — a question it never asked.
+    /// This page flies home to a map marker like a snap surface AND shows the
+    /// app's tab bar like the ordinary navigation citizen it is, which is
+    /// what made the two come apart: the day it gained this conformance, the
+    /// shell started hiding the dock underneath it and the restores that run
+    /// on the way back stopped firing.
+    var concealsAppTabBar: Bool { false }
+
     /// The card lifts from the whole page.
     func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect {
         view.convert(view.bounds, to: container)

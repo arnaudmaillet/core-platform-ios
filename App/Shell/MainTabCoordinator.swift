@@ -483,8 +483,15 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         // unflagged one above it, and the bar stays down. `dropFirst` because a
         // stack ROOT is never pushed, so its flag says nothing about this.
         let hidesForPush = stack.viewControllers.dropFirst().contains { $0.hidesBottomBarWhenPushed }
-        let isSnapSurface = stack.topViewController is any ZoomTransitionDestination
-        tabBarController.setTabBarHidden(isSnapSurface || hidesForPush, animated: false)
+        // ⚠️ Asks the screen whether it COVERS the bar; it used to test
+        // conformance to `ZoomTransitionDestination` and treat that as the same
+        // fact. It stopped being the same fact when the place page conformed so
+        // its own dismissal could fly home to the map marker — an ordinary
+        // pushed screen that shows the dock, which this reconciliation then
+        // actively hid on every tab switch back onto it.
+        let concealsBar = (stack.topViewController as? any ZoomTransitionDestination)?
+            .concealsAppTabBar == true
+        tabBarController.setTabBarHidden(concealsBar || hidesForPush, animated: false)
     }
 }
 

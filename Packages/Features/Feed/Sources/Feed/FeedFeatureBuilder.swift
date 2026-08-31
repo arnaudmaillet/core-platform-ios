@@ -672,8 +672,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// frontend — captured into the flight's own callbacks, it segfaulted the
     /// compiler rather than failing to typecheck. A method is not a workaround
     /// here; it is the thing that compiles.
+    ///
+    /// ⚠️ The refusal below asks `concealsAppTabBar`, NOT conformance. It used
+    /// to test `is any ZoomTransitionDestination` and read that as "another
+    /// full-bleed surface is underneath, whose own mechanic owns the dock". The
+    /// place page conforms without covering anything, so a feed popping onto it
+    /// took this early return and left the viewer on a perfectly ordinary
+    /// screen with no dock.
     private static func restoreTabBar(on nav: UINavigationController?) {
-        guard let nav, !(nav.topViewController is any ZoomTransitionDestination) else { return }
+        guard let nav,
+              (nav.topViewController as? any ZoomTransitionDestination)?.concealsAppTabBar != true
+        else { return }
         nav.tabBarController?.tabBar.alpha = 1
         // Idempotent, because the screen underneath may have got there first:
         // a tab ROOT asserts its own dock on the far side of a committed scrub

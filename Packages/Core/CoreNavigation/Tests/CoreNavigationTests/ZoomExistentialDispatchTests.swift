@@ -44,7 +44,7 @@ struct ZoomExistentialDispatchTests {
         ])
     }
 
-    // MARK: - Destination (13 defaulted members)
+    // MARK: - Destination (14 defaulted members)
 
     @Test func everyDefaultedDestinationMemberDispatchesDynamically() {
         let spy = SpyDestination()
@@ -54,6 +54,7 @@ struct ZoomExistentialDispatchTests {
         #expect(destination.zoomDismissalKind == .card)
         #expect(destination.zoomDestinationContentIsReady == false)
         #expect(destination.zoomOwnsInteractiveDismissal == false)
+        #expect(destination.concealsAppTabBar == false)
         #expect(destination.zoomDestinationMediaIsRendering == false)
         #expect(destination.zoomVerticalDismissalPermitted(at: .zero, in: probe) == false)
         #expect(destination.zoomHorizontalDismissalPermitted(at: .zero, in: probe) == false)
@@ -68,7 +69,7 @@ struct ZoomExistentialDispatchTests {
         #expect(destination.zoomParkLiveMediaForHandoff())
 
         #expect(spy.calls == [
-            "kind", "contentReady", "ownsDismissal", "mediaRendering",
+            "kind", "contentReady", "ownsDismissal", "concealsTabBar", "mediaRendering",
             "verticalPermitted", "horizontalPermitted", "mirror", "donate",
             "reclaim", "adopt", "willBegin", "dismissState", "park",
         ])
@@ -144,6 +145,7 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
     var zoomDismissalKind: ZoomDismissalKind { calls.append("kind"); return .card }
     var zoomDestinationContentIsReady: Bool { calls.append("contentReady"); return false }
     var zoomOwnsInteractiveDismissal: Bool { calls.append("ownsDismissal"); return false }
+    var concealsAppTabBar: Bool { calls.append("concealsTabBar"); return false }
     var zoomDestinationMediaIsRendering: Bool { calls.append("mediaRendering"); return false }
     func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
         calls.append("verticalPermitted"); return false

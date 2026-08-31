@@ -97,46 +97,26 @@ struct PlaceProfileTests {
         #expect(totals.views == 1_500)
     }
 
-    // MARK: - Shorts
-
-    /// The Shorts tab is the place's VIDEOS, ranking preserved — never a
-    /// re-sort, never a still.
-    @Test func shortsKeepOnlyVideosInRankedOrder() {
-        let ranked = PlaceProfileViewController.ranked([
-            post("post-1", kind: .photo, reactions: 900),
-            post("post-2", kind: .video, reactions: 300),
-            post("post-3", kind: .text, reactions: 200),
-            post("post-4", kind: .video, reactions: 700),
-        ])
-        let shorts = PlaceProfileViewController.shorts(in: ranked)
-        #expect(shorts.map(\.id.rawValue) == ["post-4", "post-2"])
-    }
-
     // MARK: - Activity
 
-    /// The Activity stream is CHRONOLOGICAL, newest first — the one surface
-    /// of the page that is not popularity — and each post's kind decides the
-    /// event's verb: words check in, stills are shared, videos are posted.
-    @Test func activityIsNewestFirstWithKindVerbs() {
-        let events = PlaceProfileViewController.activity(from: [
-            post("post-1", kind: .photo, publishedAtMS: 1_000, author: "Ava"),
-            post("post-2", kind: .text, publishedAtMS: 3_000, author: "Kenji"),
+    /// The Activity tab is CHRONOLOGICAL, newest first — the one surface of
+    /// the page that is not popularity — and it carries EVERY kind: a
+    /// place's activity is its posts, so words, stills and video all travel.
+    @Test func activityIsNewestFirstAndKeepsEveryKind() {
+        let recent = PlaceProfileViewController.chronological([
+            post("post-1", kind: .photo, publishedAtMS: 1_000),
+            post("post-2", kind: .text, publishedAtMS: 3_000),
             post("post-3", kind: .video, publishedAtMS: 2_000),
         ])
-        #expect(events.map(\.id.rawValue) == ["post-2", "post-3", "post-1"])
-        #expect(events[0].kind == .checkIn)
-        #expect(events[0].authorName == "Kenji")
-        #expect(events[1].kind == .short)
-        #expect(events[1].authorName == "Someone", "a nameless author still makes a sentence")
-        #expect(events[2].kind == .photo)
-        #expect(PlaceActivityEvent.Kind.checkIn.verb == "checked in")
-        #expect(PlaceActivityEvent.Kind.photo.verb == "shared a photo")
-        #expect(PlaceActivityEvent.Kind.short.verb == "posted a short")
+        #expect(recent.map(\.id.rawValue) == ["post-2", "post-3", "post-1"])
+        #expect(Set(recent.map(\.kind)) == [.photo, .text, .video],
+                "no kind is filtered out — the cards show what For You's own card tab shows")
     }
 
-    /// The whole fan-out through one hydration: gallery, shorts and activity
-    /// all populated from one corpus, each under its own rule.
-    @Test func oneHydrationFansOutToAllThreeTabs() async {
+    /// The whole fan-out through one hydration: both tabs populated from one
+    /// corpus, each under its own rule — popularity on Discover, recency on
+    /// Activity — so the two can only ever disagree about ORDER.
+    @Test func oneHydrationFansOutToBothTabs() async {
         let profile = makeProfile(posts: [
             post("post-1", kind: .photo, reactions: 50, publishedAtMS: 1_000),
             post("post-2", kind: .video, reactions: 90, publishedAtMS: 2_000),
@@ -145,9 +125,10 @@ struct PlaceProfileTests {
         profile.beginLoading()
         for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
         #expect(profile.renderedPosts.map(\.id.rawValue) == ["post-2", "post-1", "post-3"])
-        #expect(profile.renderedShorts.map(\.id.rawValue) == ["post-2"])
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["post-3", "post-2", "post-1"])
-        #expect(profile.tabTitles == ["Gallery", "Shorts", "Activity"])
+        #expect(Set(profile.renderedActivity.map(\.id)) == Set(profile.renderedPosts.map(\.id)),
+                "one corpus, two orders")
+        #expect(profile.tabTitles == ["Discover", "Activity"])
     }
 
     // MARK: - The follow toggle
@@ -178,12 +159,53 @@ struct PlaceProfileTests {
         #expect(label() == "Follow")
     }
 
-    /// A profile whose subject has no followable identity shows no button at
-    /// all — an inert heart would promise a feature the caller can't honor.
-    @Test func withoutAFollowSeamTheHeaderStaysBare() {
+    /// A profile whose subject has no followable identity shows no HEART — an
+    /// inert one would promise a feature the caller can't honor. The "..."
+    /// stays, because its one row does not depend on a follow seam.
+    @Test func withoutAFollowSeamOnlyTheOverflowRemains() {
         let profile = makeProfile(following: nil)
         profile.loadViewIfNeeded()
-        #expect(profile.navigationItem.rightBarButtonItem == nil)
+        let items = profile.navigationItem.rightBarButtonItems ?? []
+        #expect(items.count == 1)
+        #expect(items.first?.customView == nil, "no heart")
+        #expect(items.first?.menu != nil, "…but the overflow is still there")
+    }
+
+    /// The trailing pair, in the order the eye reads it: [...][Follow].
+    /// Index 0 is the RIGHTMOST item, so the heart keeps the corner it has
+    /// always had and the overflow sits inboard of it.
+    @Test func theOverflowSitsInboardOfTheFollowButton() throws {
+        let profile = makeProfile(following: ClusterGalleryFollowing(
+            isFollowing: { false }, toggle: { true }
+        ))
+        profile.loadViewIfNeeded()
+        let items = try #require(profile.navigationItem.rightBarButtonItems)
+        #expect(items.count == 2)
+        #expect(items[0].customView is UIButton, "the corner is the follow button's")
+        let menu = try #require(items[1].menu)
+        #expect(menu.children.compactMap { ($0 as? UIAction)?.title } == ["Share"],
+                "one honest row: a place cannot be reported and has no link to copy")
+    }
+
+    /// The selector docks into the navigation bar's LEADING group, beside the
+    /// back chevron, and the inline copy owns the un-scrolled state. Both
+    /// copies exist from the start — the hand-over is a crossfade, which is
+    /// not a state one re-parented view can express.
+    @Test func theSelectorHandsOverToTheBarAtTheDockLine() {
+        let profile = makeProfile()
+        profile.loadViewIfNeeded()
+        profile.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        profile.view.layoutIfNeeded()
+
+        #expect(!profile.debugIsBarDocked, "expanded: the inline copy owns it")
+        #expect(profile.debugInlineSelectorAlpha == 1)
+        #expect(!profile.debugDockedSelectorItemPresent,
+                "…and the bar item is absent, not merely transparent")
+
+        profile.debugScrollActivePage(to: profile.debugHeaderTravel + 40)
+        #expect(profile.debugIsBarDocked)
+        #expect(profile.debugDockedSelectorItemPresent)
+        #expect(profile.debugDockedSelectorAlpha == 1)
     }
 
     // MARK: - The collapsible header's coordinator rules
@@ -250,12 +272,12 @@ struct PlaceProfileTests {
         profile.debugScrollActivePage(to: dock + 400)
         #expect(abs(profile.debugHeaderConstant + dock) < 1, "past the line the header is DOCKED")
         #expect(profile.debugIdentityAlpha == 0, "identity is gone under the bar")
-        #expect(profile.debugNavTitleAlpha == 1, "…and the name has moved into the bar")
+        #expect(profile.debugIsBarDocked, "…and the selector has moved into the bar")
 
         profile.debugScrollActivePage(to: 0)
         #expect(abs(profile.debugHeaderConstant) < 1, "and it comes all the way back")
         #expect(profile.debugIdentityAlpha == 1)
-        #expect(profile.debugNavTitleAlpha == 0, "expanded, the bar's title slot is empty again")
+        #expect(!profile.debugIsBarDocked, "expanded, the selector is back in the header")
 
         profile.debugScrollActivePage(to: -60)
         #expect(profile.debugHeaderConstant == 60, "overscroll carries the header down, unclamped")
@@ -274,34 +296,21 @@ struct PlaceProfileTests {
         #expect(bare.kind == nil)
     }
 
-    /// The name lives on the banner while expanded and in the bar while
-    /// docked — one string, two homes, complementary alphas — and the
-    /// navigation item's own `title` stays empty so nothing draws it at
-    /// full strength over either.
-    @Test func thePlaceNameCrossfadesBetweenBannerAndBar() {
+    /// The name lives on the banner and ONLY there.
+    ///
+    /// ⚠️ It does not dock, and that is a consequence rather than a taste:
+    /// `installLeadingSelector` must overwrite `titleView` with a zero-sized
+    /// view (a sized one keeps a central reservation that collapses the
+    /// leading group into a `•••` on a narrow bar), so the docked name and
+    /// the docked selector cannot both exist. The profile screen made the
+    /// same call for the same reason.
+    @Test func thePlaceNameLivesOnTheBannerOnly() {
         let profile = makeProfile()
         profile.loadViewIfNeeded()
         #expect(profile.debugHeroName == "Paris")
         #expect(profile.debugHeroKind == "CITY CLUSTER")
-        #expect(profile.debugNavTitleText == "Paris • City Cluster")
-        #expect(profile.debugNavTitleAlpha == 0, "expanded: the bar slot starts empty")
-        #expect(profile.navigationItem.title == nil)
-        #expect(profile.navigationItem.titleView != nil)
+        #expect(profile.navigationItem.title == nil,
+                "nothing may draw the name at full strength in the bar")
     }
 
-    // MARK: - Relative age
-
-    @Test func relativeAgeSpeaksTheFeedsShortVocabulary() {
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        func age(secondsAgo: TimeInterval) -> String {
-            PlaceActivityListView.relativeAge(
-                ofMS: Int64((now.timeIntervalSince1970 - secondsAgo) * 1000), now: now
-            )
-        }
-        #expect(age(secondsAgo: 30) == "1m", "sub-minute rounds up — nothing reads 0m")
-        #expect(age(secondsAgo: 300) == "5m")
-        #expect(age(secondsAgo: 7_200) == "2h")
-        #expect(age(secondsAgo: 200_000) == "2d")
-        #expect(age(secondsAgo: 1_300_000) == "2w")
-    }
 }

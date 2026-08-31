@@ -2322,7 +2322,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// this moment; fading the pair would apply that transition twice to one of
     /// them.
     private func applyIdentityFade(travelled: CGFloat) {
-        let alpha = ProfileDockThreshold.identityAlpha(
+        let alpha = DockThreshold.identityAlpha(
             travelled: travelled, dockLine: headerTravel
         )
         guard abs(headerView.alpha - alpha) > 0.001 else { return }
@@ -2494,7 +2494,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// as far as it can, and gives it back on the way down.
     ///
     /// Both decisions — whether to change, and whether to animate the change —
-    /// come from `ProfileDockThreshold`, and both depend on how fast the header
+    /// come from `DockThreshold`, and both depend on how fast the header
     /// is moving. See there for why speed is the input that matters.
     private func updateBarDocking(travelled: CGFloat) {
         guard viewModel.hasGallery, isViewLoaded else { return }
@@ -2503,12 +2503,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // here: distance the viewer sees between one frame and the next.
         let step = travelled - lastDockingTravel
         lastDockingTravel = travelled
-        let shouldDock = ProfileDockThreshold.isDocked(
+        let shouldDock = DockThreshold.isDocked(
             travelled: travelled, dockLine: headerTravel, step: step, wasDocked: isBarDocked
         )
         guard shouldDock != isBarDocked else { return }
         isBarDocked = shouldDock
-        let animated = ProfileDockThreshold.isAnimated(step: step)
+        let animated = DockThreshold.isAnimated(step: step)
         #if DEBUG
         // Dev convenience: `-profile-dock-trace` prints every hand-over with the
         // speed that produced it. The flicker this rule exists to stop is a

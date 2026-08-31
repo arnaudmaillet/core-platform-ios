@@ -489,6 +489,25 @@ final class MapsViewController: UIViewController {
         for annotation in mapView.annotations {
             mapView.view(for: annotation)?.isHidden = false
         }
+        // WHEN ON THE MAP, THE TAB BAR IS ALWAYS THERE. The map is a tab ROOT:
+        // there is no state in the product where an on-screen map has no dock
+        // under it, so it asserts one rather than trusting whichever departing
+        // flow was supposed to hand it back. The flows above hide the bar on
+        // their way out and each restores it on exactly one of its several
+        // endings; a path nobody wired — the place page popping home, which the
+        // shell's restores skipped while it was read as a full-bleed surface —
+        // left the map docked to nothing.
+        //
+        // `viewDidAppear` and NOT `viewWillAppear`: UIKit runs the latter at
+        // interactive-pop BEGIN, so a restore there would show the bar over the
+        // feed for the whole return flight and strand it there when the grab is
+        // cancelled. By here every transition is over and the assertion is safe.
+        //
+        // Both failure modes are repaired, because `restoreBottomChromeForReturn`
+        // writes `tabBar.alpha` BEFORE its `isTabBarHidden` guard: a bar left
+        // hidden comes back, and a bar left at alpha 0 by an interrupted flight
+        // gets its opacity back even though its state already read visible.
+        restoreBottomChromeForReturn(alpha: 1)
     }
 
     override func viewWillAppear(_ animated: Bool) {
