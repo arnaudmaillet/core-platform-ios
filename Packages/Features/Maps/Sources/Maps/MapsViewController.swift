@@ -1398,6 +1398,83 @@ final class MapsViewController: UIViewController {
         }
     }
 
+    // MARK: - The picture the viewer is leaving
+
+    /// What a flight home to `annotation` has to dissolve away, asked when the
+    /// dismissal stages.
+    ///
+    /// The ARRIVAL is `postIDs(of:).first` — the marker's representative, which
+    /// is also the post the flight opened from, because that is the order the
+    /// feed was seeded in. The map never substitutes: the marker the viewer
+    /// tapped has not moved and is what they expect to fall back onto, so what
+    /// adapts is the card's departure face, never its landing.
+    private func returnCover(
+        to annotation: any MKAnnotation, leaving feed: UIViewController?
+    ) -> MapReturnCover {
+        let departure = (feed as? any SnapFeedSettleReporting)?.settledPostID
+        let arrival = Self.postIDs(of: annotation).first
+        let cover = MapReturnCover.resolve(
+            departure: departure,
+            arrival: arrival,
+            picture: { [weak self] in self?.cachedPicture(for: $0) }
+        )
+        #if DEBUG
+        // `-zoom-blend-log`: which row of the product rule this flight took.
+        //
+        // Worth a channel of its own because the rows fail in opposite,
+        // equally quiet ways — `none` where a blend was due is a cut nobody
+        // reads as a bug, and a blend where `none` was due is a slightly soft
+        // landing. The ids are printed too: a `none` is only correct if the
+        // two of them actually match.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-blend-log") {
+            print("[zoom-blend] departure=\(departure?.rawValue ?? "nil")"
+                + " arrival=\(arrival?.rawValue ?? "nil") cover=\(cover.debugRow)")
+        }
+        #endif
+        return cover
+    }
+
+    /// A post's cover, if it is already in memory.
+    ///
+    /// A rendered marker first: it holds the decoded image the viewer has been
+    /// looking at, and reading it costs nothing. Otherwise the pipeline's cache,
+    /// which is a peek and never a fetch — resolving a cover is on the first
+    /// frame of a gesture, and a flight that waited on the network would stall
+    /// under the finger.
+    private func cachedPicture(for postID: PostID) -> UIImage? {
+        if let annotation = displayed[Self.singleIdentity(postID)],
+           let view = mapView.view(for: annotation),
+           let image = (view as? MapAnnotationView)?.heroImage {
+            return image
+        }
+        guard let url = pins[postID]?.thumbnailURL else { return nil }
+        return imagePipeline.cachedImage(for: url)
+    }
+
+    /// The same answer, allowed to take as long as a fetch — the row
+    /// `cachedPicture` had to decline.
+    ///
+    /// Every member of a cluster is a post the map knows the URL of, but only
+    /// the representative ever had a marker, so the others were never fetched:
+    /// paging into one and dismissing is precisely the case that comes back
+    /// empty. Reports at most once, and only if it actually got a picture, so
+    /// the flight's own `none` stands when this comes back with nothing.
+    private func awaitReturnCover(
+        to annotation: any MKAnnotation,
+        leaving feed: UIViewController?,
+        then report: @escaping (MapReturnCover) -> Void
+    ) {
+        guard let departure = (feed as? any SnapFeedSettleReporting)?.settledPostID,
+              departure != Self.postIDs(of: annotation).first,
+              pins[departure]?.isText == false,
+              let url = pins[departure]?.thumbnailURL
+        else { return }
+        Task { [imagePipeline] in
+            guard let image = try? await imagePipeline.image(for: url) else { return }
+            report(.picture(image))
+        }
+    }
+
     /// Re-points and re-faces a marker already on the map for a recomputed item.
     private func update(_ annotation: any MKAnnotation, to item: MapClusterEngine.Item) {
         if let cluster = annotation as? MapComputedCluster {
@@ -1790,6 +1867,15 @@ extension MapsViewController: MKMapViewDelegate {
             },
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
+            },
+            // Asked at DISMISSAL staging, so it reports where the viewer
+            // actually stopped rather than where they started. The card lands
+            // on this marker either way; only its departure face adapts.
+            departureCover: { [weak self, weak feedVC] in
+                self?.returnCover(to: annotation, leaving: feedVC) ?? .none
+            },
+            awaitDepartureCover: { [weak self, weak feedVC] report in
+                self?.awaitReturnCover(to: annotation, leaving: feedVC, then: report)
             }
         )
         // A *push*, not a modal: the feed joins this tab's stack, so the one

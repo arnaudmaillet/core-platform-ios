@@ -57,7 +57,14 @@ enum MapPinRevealSource {
             // until the page is what the viewer should be looking at.
             captionEnd: nil,
             depthView: depthView,
-            makeDismissStandIn: { marker(face: face, ringKind: ringKind) },
+            // The settled post is deliberately ignored, and this is the one
+            // surface where ignoring it is right. A window's departure operand
+            // is the LIVE PAGE it is closing over — which is already whichever
+            // post the viewer paged to — so the disc fading in over it is the
+            // product rule's "media onto an icon" cross-fade, drawn from the
+            // real thing rather than from a copy of it. Handing the stand-in a
+            // second picture here would draw that page twice.
+            makeDismissStandIn: { _ in marker(face: face, ringKind: ringKind) },
             makePresentStandIn: { marker(face: face, ringKind: ringKind) },
             // Nothing to align to. The page holds still and the window opens
             // over it — see `TextRevealOrigin.alignsPageToSource`.
