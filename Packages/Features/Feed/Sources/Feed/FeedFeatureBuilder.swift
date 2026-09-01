@@ -333,6 +333,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 nav.delegate = nav.viewControllers.contains(gallery) ? previousDelegate : nil
                 retainer.transition = nil
                 retainer.slideEscape = nil
+                retainer.cardClose = nil
                 Self.restoreTabBar(on: nav)
             }
             slide.onFeedPopped = escapeCloseOut
@@ -454,6 +455,19 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         transition.onPresentationCancelled = { [weak nav] in Self.restoreTabBar(on: nav) }
         nav.delegate = transition
         nav.pushViewController(destination, animated: true)
+        // ⚠️ AFTER THE PUSH, and that is the whole of whether it works. The
+        // line above hands the stack's delegate to the flight, so a driver
+        // installed before it captures a slot it is about to lose — and a
+        // dismissal it never hears about is one UIKit never asks for an
+        // interaction controller for, which reads as a dead gesture. Installing
+        // here makes the FLIGHT what this driver saves and forwards a `.hero`
+        // pop back to. The map's own card-close says the same thing about the
+        // same ordering.
+        if let gallery = galleryPresenter {
+            Self.attachTileCardClose(
+                feed: destination, landing: gallery, on: nav, retainer: retainer
+            )
+        }
     }
 
     public func makeClusterGallery(
@@ -814,6 +828,99 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// place page conforms without covering anything, so a feed popping onto it
     /// took this early return and left the viewer on a perfectly ordinary
     /// screen with no dock.
+    /// The way back for a post the viewer PAGED onto that has nothing to fly.
+    ///
+    /// ⚠️ THE PRESENTATION WAS CHOSEN AT THE TAP. A tile opens with a hero;
+    /// swipe to a text post and there is no media left for that hero to carry.
+    /// Both zoom grabs then refuse — they gate on `zoomDismissalKind != .card`
+    /// BEFORE they look at an axis — the pop animator declines for the same
+    /// reason, and this push has already disclaimed the stack's native edge
+    /// gesture. Measured one level up on the map, where the drag did nothing at
+    /// all on either axis and the chevron was the only way out; the map cured
+    /// it with `attachCardCloseAlongsideFlight` and this path never got the
+    /// equivalent.
+    ///
+    /// ⚠️ VERTICAL ONLY, unlike both shipped card-closes. The horizontal axis
+    /// already has two tenants here (the flight escape and its own card-shaped
+    /// slide), and a third arming that axis would be the one thing the
+    /// arbitration cannot resolve: two `InteractiveSlideDismissal`s both
+    /// claiming `.card` on the same drag.
+    private static func attachTileCardClose(
+        feed: UIViewController,
+        landing: any CardCloseLanding,
+        on nav: UINavigationController,
+        retainer: HeroTransitionRetainer
+    ) {
+        let close = InteractiveSlideDismissal()
+        retainer.cardClose = close
+        close.resetForNewPresentation()
+        close.arbitratesWithHeroGrab = true
+        close.attach(to: feed, axes: [.vertical])
+        // ⚠️ ONCE. A swipe asks twice — when the grab claims the screen, and
+        // again when the pop it triggers asks for an animator — and the staging
+        // below MOVES a scroll position and releases a concealment, so a second
+        // pass would re-do both against a screen already halfway home.
+        var hasPrepared = false
+        close.prepareForDismissal = { [weak feed, weak landing, weak close] _ in
+            guard !hasPrepared, let feed, let landing, let close else { return }
+            // ⚠️ ONLY FOR A CLOSE THAT CARRIES A CARD. This runs for every
+            // dismissal including the flight's, and the staging conceals the
+            // landing — a flight arriving on a hidden tile reads as no
+            // animation at all. Asked of the same authority both grabs gate on,
+            // so the three can never disagree about what the post is.
+            guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
+            else { return }
+            hasPrepared = true
+            close.revealGeometry = landing.cardCloseGeometry(dismissing: feed)
+        }
+        // The backstop: whatever animated the close, nothing stays hidden. The
+        // staging conceals a tile and only the reveal's own completion pays
+        // that back, so a pop finished by anything else would leave a hole.
+        close.onFeedPopped = { [weak landing] _ in
+            landing?.clearLandingConcealment()
+            retainer.cardClose = nil
+        }
+        // AFTER the push, so the flight controller is what `install` captures
+        // and a `.hero` pop forwards straight back to it.
+        close.install(on: nav)
+        #if DEBUG
+        // `-tile-card-close-demo <peak>`: the driver's OWN scripted route.
+        //
+        // Nothing else can reach it. `debugScriptedGrab` picks among the ZOOM
+        // drivers, every one of which refuses `.card` before it looks at an
+        // axis; `-text-swipe-demo` is bound to whichever slide its own block
+        // closes over, and this one has no block. A driver with no scripted
+        // route is a driver nobody verifies — the hole that had just been
+        // closed for the neighbouring leg.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-tile-card-close-demo"),
+           position + 1 < arguments.count,
+           let peak = Double(arguments[position + 1]) {
+            // Optional second argument: how long to wait. The default is the
+            // usual beat after the push, but a run that pages the feed first
+            // has to outlast that paging — a swipe scripted before the pager
+            // has SETTLED asks about the post the feed opened on, which is the
+            // one row this driver is not for.
+            let delay = position + 2 < arguments.count
+                ? (Double(arguments[position + 2]) ?? 2.5) : 2.5
+            Task { @MainActor [weak close, weak feed] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                // The three things that decide whether this driver may claim
+                // the drag at all, said before it tries: a refusal and a
+                // failure look identical from the outside.
+                let kind = (feed as? any ZoomTransitionDestination)?.zoomDismissalKind
+                let driven = await close?.debugPerformSwipe(
+                    peakProgress: CGFloat(peak), axis: .vertical
+                )
+                let settled = (feed as? any SnapFeedSettleReporting)?.settledPostID
+                print("[tile-card-close] peak=\(peak) settled=\(settled?.rawValue ?? "nil")"
+                    + " kind=\(kind.map(String.init(describing:)) ?? "nil")"
+                    + " geometry=\(close?.revealGeometry != nil) driven=\(driven ?? false)")
+            }
+        }
+        #endif
+    }
+
     private static func restoreTabBar(on nav: UINavigationController?) {
         guard let nav,
               (nav.topViewController as? any ZoomTransitionDestination)?.concealsAppTabBar != true
@@ -960,6 +1067,11 @@ final class HeroTransitionRetainer {
     /// whichever close-out fires: the vertical return to the gallery or the
     /// escape's own landing on the map.
     var slideEscape: InteractiveSlideDismissal?
+    /// The VERTICAL card-shaped close of a gallery-opened post — the way back
+    /// for a page the viewer swiped onto that has no media to fly. Nil'd by
+    /// both close-outs, because the flight's return and the escape's landing
+    /// are two different exits and either can be the last one.
+    var cardClose: InteractiveSlideDismissal?
 }
 
 /// Keeps a plain push's swipe-to-dismiss alive for the length of the screen.

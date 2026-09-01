@@ -157,6 +157,14 @@ final class PlaceProfileViewController: UIViewController {
     /// pager settled on into the marker's own face.
     var mapReturn: ((UIViewController?) -> (any ZoomTransitionSource)?)?
 
+    /// The tile a flight left THIS page from, and which tab it sat on — nil
+    /// whenever the open post did not come from here (the map's Case B, where
+    /// the viewer arrived from a marker and has never seen this grid).
+    ///
+    /// It is the whole of what distinguishes the two card-shaped closes: one
+    /// has somewhere the viewer actually was, the other does not.
+    private var tileDeparture: (id: PostID, isActivity: Bool)?
+
     /// The page's own hero return to the map — created once, then installed
     /// as the stack's delegate whenever this page is top, so BOTH the back
     /// button and the horizontal grab fly home to the marker instead of
@@ -179,10 +187,11 @@ final class PlaceProfileViewController: UIViewController {
         // this page takes the delegate slot back before `didShow` reaches it.
         // Whatever happened above, nothing on THIS page may be hidden while it
         // is the screen: the same blanket rule the map applies to its markers.
-        for hosted in hostedPages {
-            (hosted as? ForYouGridPage)?.clearRevealConcealment()
-            (hosted as? ForYouGridPage)?.endHeroFreeze()
-        }
+        clearLandingConcealment()
+        // The flight that left here is over, whichever way it ended. A stale
+        // departure would answer for the NEXT close — including the map's Case
+        // B, whose whole point is that it has no departure on this page.
+        tileDeparture = nil
         installMapReturnIfTop()
         syncAutoplay()
         #if DEBUG
@@ -1101,6 +1110,12 @@ final class PlaceProfileViewController: UIViewController {
             // get the window every other list gives it. This is that window.
             textReveal: textRowReveal(for: tapped, in: grid)
         )
+        // Remembered for the CLOSE. A flight opened from this page has a tile
+        // to go home to, which is exactly what tells that close apart from the
+        // map's Case B — see `cardCloseGeometry`. Cleared when this page is the
+        // screen again (`viewDidAppear`), so a stale departure can never answer
+        // for a later flight that came from somewhere else.
+        tileDeparture = (id: tapped.id, isActivity: grid === activityPage)
         openPost(self, origin, stream.map(\.id))
     }
 
@@ -1206,6 +1221,12 @@ final class PlaceProfileViewController: UIViewController {
 /// close simply brings the landing post's own tile on screen and lands on it.
 extension PlaceProfileViewController: CardCloseLanding {
     func cardCloseGeometry(dismissing feed: UIViewController) -> RevealGeometry? {
+        // A flight that left THIS page has a tile to go back to. Answered
+        // first, because it is the case with somewhere the viewer actually was
+        // — everything below is for the flight that arrived from a marker.
+        if let tileDeparture {
+            return tileCardCloseGeometry(dismissing: feed, departure: tileDeparture)
+        }
         // The post the SWIPES ENDED ON, not the one the tap opened: the
         // landing has to answer for where the viewer actually is.
         guard let landed = activePostID?() else { return nil }
@@ -1261,12 +1282,107 @@ extension PlaceProfileViewController: CardCloseLanding {
     }
 
     func clearLandingConcealment() {
-        // BOTH channels: the flight hid the tapped marker's tile at the push
-        // and only its own return puts that back, so a visit that ends on a
-        // text post — closed by the card driver — would leave it blank.
-        page.clearRevealConcealment()
-        page.clearHeroConcealment()
-        page.endHeroFreeze()
+        // BOTH channels, on BOTH pages: the flight hid the departure at the
+        // push and only its own return puts that back, so a visit that ends on
+        // a text post — closed by the card driver — would leave it blank. Which
+        // page held it depends on which tab the viewer opened from, and by the
+        // time this runs that is no longer a question worth asking.
+        for hosted in hostedPages {
+            guard let grid = hosted as? ForYouGridPage else { continue }
+            grid.clearRevealConcealment()
+            grid.clearHeroConcealment()
+            grid.endHeroFreeze()
+        }
+    }
+
+    /// The close for a flight this page itself opened: home to the very tile
+    /// the viewer tapped, on the tab they tapped it on.
+    ///
+    /// ⚠️ NO SUBSTITUTION, and that is the whole difference from the sibling
+    /// above. That one departed from a MAP MARKER onto a grid the viewer has
+    /// never seen, so it is free to pick the nearest landable tile — there is
+    /// no "where they were" to honour. Here there is one, they chose it, and
+    /// the product rule for this screen is that the arrival is always the post
+    /// the flight opened. A ranked list is also not free to be re-pointed into.
+    ///
+    /// ⚠️ THE FLIGHT'S CONCEALMENT COMES OFF FIRST, before anything is
+    /// measured. The push hid the departure through the HERO channel
+    /// (`setHeroHidden`), and the reveal's own channel cannot pay that back: on
+    /// the Discover grid `setRevealConcealed` resolves a list-row cell and a
+    /// tile is a different type, so both the hide and the restore would land on
+    /// nothing. Left alone, the window closes onto a hole — and its own rule
+    /// says the restore must happen a beat BEFORE the window retires, never
+    /// after, because at the landing rect the two are identical and doing it in
+    /// two transactions is a flash of empty grid.
+    private func tileCardCloseGeometry(
+        dismissing feed: UIViewController, departure: (id: PostID, isActivity: Bool)
+    ) -> RevealGeometry? {
+        let grid = departure.isActivity ? activityPage : page
+        grid.clearHeroConcealment()
+        if departure.isActivity {
+            stageActivityLanding(for: departure.id, sizedTo: nil)
+        } else {
+            stageDiscoverLanding(revealing: departure.id, sizedTo: nil)
+        }
+        guard let post = grid.post(for: departure.id),
+              grid.rowFrame(for: departure.id, in: grid) != nil
+        else {
+            debugLogLanding("no realized departure for \(departure.id.rawValue)")
+            return nil
+        }
+        debugLogLanding("landing on its own departure \(departure.id.rawValue)"
+            + " tab=\(departure.isActivity ? "activity" : "discover")")
+        let anchor = departure.id
+        let onList = departure.isActivity
+        let origin = TextRevealOrigin(
+            rowFrame: { [weak self] space in
+                guard let self else { return nil }
+                let grid = onList ? activityPage : page
+                return grid.rowFrame(for: anchor, in: space)
+            },
+            // No cut on either tab: a tile has no caption to cut against, and
+            // an Activity row's caption belongs to the DEPARTURE post while the
+            // page being closed may be showing a different one.
+            captionEnd: nil,
+            depthView: { [weak self] in self?.pager },
+            makeDismissStandIn: { [weak self] _ in
+                guard let self else { return nil }
+                // The settled post is deliberately ignored — this window closes
+                // onto what the viewer opened.
+                return onList
+                    ? activityPage.makeDismissStandIn(for: anchor)
+                    : page.makeTileStandIn(for: post, slotOf: anchor)
+            },
+            // ⚠️ FALSE on both tabs, for the two reasons this file already
+            // gives: a full page aligned to a small tile slides most of the
+            // screen's width, and a caption measured on one post cannot align
+            // a page showing another.
+            alignsPageToSource: false,
+            cornerRadius: onList ? nil : PostGridTileCell.mosaicCornerRadius,
+            fill: onList ? nil : PostGridTileCell.fillColor(for: post),
+            setConcealed: { [weak self] concealed in
+                guard let self else { return }
+                (onList ? activityPage : page).setRevealConcealed(concealed, for: anchor)
+            },
+            willStageDismissal: { [weak self] in
+                guard let self else { return }
+                // And again, for the same reason: the pass that SETS an offset
+                // does not realize the cells at it.
+                (onList ? activityPage : page).clearHeroConcealment()
+                if onList {
+                    stageActivityLanding(for: anchor, sizedTo: nil)
+                } else {
+                    stageDiscoverLanding(revealing: anchor, sizedTo: nil)
+                }
+            },
+            dismissalDidEnd: { [weak self] committed in
+                guard let self else { return }
+                let grid = onList ? activityPage : page
+                grid.endHeroFreeze()
+                if !committed { grid.clearRevealConcealment() }
+            }
+        )
+        return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
     }
 }
 

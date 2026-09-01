@@ -53,10 +53,10 @@ struct HeroElectionTests {
 
     // MARK: - The gallery presenter's axis split
 
-    /// A post opened from the PLACE GALLERY splits its two dismissal axes: the
-    /// vertical grab keeps the tile morph while a second, horizontal driver
-    /// escapes past the gallery — so the pushed post carries TWO pans where an
-    /// ordinary presenter's carries one, and the escape hook is armed.
+    /// A post opened from the PLACE GALLERY carries three drivers where an
+    /// ordinary presenter's carries one: the vertical grab keeps the tile
+    /// morph, a horizontal one escapes past the gallery, and a vertical
+    /// card-shaped close catches the pages the grab refuses.
     @Test func aGalleryPresenterSplitsItsDismissalAxes() throws {
         let stack = Stack()
         let gallery = stack.builder.makeClusterGallery(
@@ -76,13 +76,20 @@ struct HeroElectionTests {
         #expect(stack.nav.viewControllers.count == 3, "precondition: the post was pushed")
         #expect(ZoomTransitionController.debugMostRecent != nil,
                 "the flight controller was DEALLOCATED — its retainer cycle broke")
-        #expect(stack.nav.delegate is ZoomTransitionController,
-                "the tile flight still owns the stack")
+        // ⚠️ THE CARD-SHAPED CLOSE OWNS THE SLOT, not the flight — it is
+        // installed last, on purpose, so that it hears every pop and hands the
+        // ones it does not own straight back. A flight holding the slot itself
+        // would never let a `.card` page begin a dismissal at all, which is the
+        // defect this driver exists to cure.
+        let owner = try #require(stack.nav.delegate as? InteractiveSlideDismissal,
+                                 "the card-shaped close must be the one UIKit asks")
+        #expect(owner.debugSavedDelegate is ZoomTransitionController,
+                "it took the slot from the flight and saved nothing to give back")
         let pushed = try #require(stack.nav.viewControllers.last)
         let pans = pushed.view.gestureRecognizers?
             .filter { $0 is UIPanGestureRecognizer } ?? []
-        #expect(pans.count == 2,
-                "expected the vertical grab AND the horizontal escape, found \(pans.count)")
+        #expect(pans.count == 3,
+                "expected the vertical grab, the horizontal escape and the vertical card-shaped close, found \(pans.count)")
     }
 
     /// With a MARKER to fly home to, the horizontal escape gains a second
@@ -109,15 +116,20 @@ struct HeroElectionTests {
         let pushed = try #require(stack.nav.viewControllers.last)
         let pans = pushed.view.gestureRecognizers?
             .filter { $0 is UIPanGestureRecognizer } ?? []
-        #expect(pans.count == 3,
-                "expected the vertical grab, the horizontal flight and the card-shaped escape beside it, found \(pans.count)")
+        #expect(pans.count == 4,
+                "expected the vertical grab, the horizontal flight, the card-shaped escape beside it and the vertical card-shaped close, found \(pans.count)")
 
         // The arbitration IS the safety: without it two drivers self-gate on
         // the same axis and race for the same drag.
+        // ⚠️ BOTH slides arbitrate here, and by count rather than by identity:
+        // the two are indistinguishable from outside except by the axis they
+        // were armed on, which they do not publish. The escape claims only
+        // `.card` because the flight beside it owns the media pages; the
+        // vertical close claims only `.card` because the zoom grab does.
         let slides = pans.compactMap { $0.delegate as? InteractiveSlideDismissal }
-        let slide = try #require(slides.first, "the card-shaped escape went missing")
-        #expect(slide.arbitratesWithHeroGrab,
-                "the slide would claim media pages out from under the flight")
+        #expect(slides.count == 2, "expected the escape and the card-shaped close")
+        #expect(slides.filter { $0.arbitratesWithHeroGrab }.count == 2,
+                "an unarbitrated slide would claim media pages out from under the flight")
     }
 
     /// And the fallback keeps the slide UNARBITRATED. A marker that has left
@@ -138,9 +150,13 @@ struct HeroElectionTests {
         let pushed = try #require(stack.nav.viewControllers.last)
         let pans = pushed.view.gestureRecognizers?
             .filter { $0 is UIPanGestureRecognizer } ?? []
+        // Exactly one of the two still arbitrates — the vertical close, which
+        // shares its axis with the zoom grab either way. The escape does not,
+        // because with no flight beside it there is nothing to arbitrate WITH
+        // and a media post would otherwise have no horizontal way out at all.
         let slides = pans.compactMap { $0.delegate as? InteractiveSlideDismissal }
-        let slide = try #require(slides.first)
-        #expect(!slide.arbitratesWithHeroGrab)
+        #expect(slides.count == 2)
+        #expect(slides.filter { $0.arbitratesWithHeroGrab }.count == 1)
     }
 
     /// The control: an ordinary presenter's post carries exactly one pan —

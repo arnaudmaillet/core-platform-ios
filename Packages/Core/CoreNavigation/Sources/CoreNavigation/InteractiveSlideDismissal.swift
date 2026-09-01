@@ -33,6 +33,14 @@ public final class InteractiveSlideDismissal: NSObject {
     /// dormant `ZoomTransitionController`, when a deep link pushes the timeline
     /// above a pin-opened feed) — restored on teardown.
     private weak var savedDelegate: (any UINavigationControllerDelegate)?
+
+    #if DEBUG
+    /// Who this driver hands a pop it does not own back to. A driver that took
+    /// the slot from a FLIGHT and saved nothing is a screen whose media pages
+    /// have quietly lost their hero — visible only as a plain slide, which is
+    /// a perfectly good animation.
+    public var debugSavedDelegate: (any UINavigationControllerDelegate)? { savedDelegate }
+    #endif
     /// Whether `savedDelegate` holds the delegate from BEFORE this screen —
     /// as opposed to whatever happened to be installed during a re-assert.
     private var hasCapturedSavedDelegate = false
