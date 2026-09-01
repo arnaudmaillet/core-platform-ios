@@ -60,8 +60,7 @@ final class MapsViewController: UIViewController {
     /// toggle to this place's identity; the last argument stages the page's
     /// OWN dismissal back to the cluster marker (`makeMapReturnSource`).
     private let makeClusterGallery: (
-        [PostID], MapPlace, UIViewController,
-        @escaping (UIViewController?) -> (any ZoomTransitionSource)?
+        [PostID], MapPlace, UIViewController, @escaping () -> (any ZoomTransitionSource)?
     ) -> UIViewController
     /// Warms the given posts into the shared cache so a tap opens instantly.
     private let prewarm: ([PostID]) async -> Void
@@ -202,8 +201,7 @@ final class MapsViewController: UIViewController {
             ((UIViewController) -> UIViewController)?
         ) -> Void,
         makeClusterGallery: @escaping (
-            [PostID], MapPlace, UIViewController,
-        @escaping (UIViewController?) -> (any ZoomTransitionSource)?
+            [PostID], MapPlace, UIViewController, @escaping () -> (any ZoomTransitionSource)?
         ) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
@@ -1379,14 +1377,10 @@ final class MapsViewController: UIViewController {
     /// changed since the tap, so nothing is captured beyond the annotation's
     /// identity. `nil` when the marker has left the map entirely, which is
     /// the page's cue to keep the plain slide (the fallback dismissal).
-    /// `departing` is the screen the flight leaves — see the seam's own doc.
-    /// Nil (the gallery itself) means there is no single post being left, so
-    /// the card carries only the marker. A pushed PAGER means there is, and the
-    /// same two closures the tapped-marker flight already uses resolve it.
     private func makeMapReturnSource(
         for annotation: any MKAnnotation
-    ) -> (UIViewController?) -> (any ZoomTransitionSource)? {
-        { [weak self, weak box = annotation as AnyObject] departing in
+    ) -> () -> (any ZoomTransitionSource)? {
+        { [weak self, weak box = annotation as AnyObject] in
             guard let self, let box, let annotation = box as? any MKAnnotation,
                   self.mapView.annotations.contains(where: { ($0 as AnyObject) === box })
             else { return nil }
@@ -1399,19 +1393,11 @@ final class MapsViewController: UIViewController {
                 annotation: annotation,
                 thumbnail: thumbnail,
                 face: Self.face(of: annotation),
-                ringKind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil },
-                // ⚠️ WEAK, both of them. This source outlives the gesture that
-                // built it — the driver holds it, the transition holds the
-                // driver, the retainer holds the transition — so a strong
-                // capture here would keep a dismissed feed alive for as long as
-                // the flow lasts. The tapped-marker flight captures the same
-                // way for the same reason.
-                departureCover: { [weak self, weak departing] in
-                    self?.returnCover(to: annotation, leaving: departing) ?? .none
-                },
-                awaitDepartureCover: { [weak self, weak departing] report in
-                    self?.awaitReturnCover(to: annotation, leaving: departing, then: report)
-                }
+                ringKind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil }
+                // No departure cover: the only screen that uses this source is
+                // the place page itself, and a whole grid is not a post with a
+                // picture to dissolve. A post pushed over that page goes home
+                // to its own tile now, on both axes.
             )
         }
     }

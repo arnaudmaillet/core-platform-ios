@@ -206,26 +206,18 @@ public protocol FeedFeatureBuilding {
     /// the plain slide kept as the fallback whenever it answers `nil` (the
     /// marker left the map).
     ///
-    /// Its argument is WHICH SCREEN IS DEPARTING, and it exists because there
-    /// are two of them. The gallery itself is one: it becomes top, the viewer
-    /// swipes, and the card flies home carrying the marker's own picture —
-    /// `nil`, because a whole grid is not a post and there is nothing to
-    /// dissolve. The other is a post pushed OVER the gallery, whose horizontal
-    /// swipe escapes past it to the map: that screen is a PAGER, so what the
-    /// viewer is leaving is a picture the marker may know nothing about, and
-    /// the flight has to dissolve it into the marker's own. Pass the pushed
-    /// controller and the source resolves that for itself.
-    ///
-    /// ⚠️ Still resolved at the DEPARTING screen's own staging, not at its
-    /// push. The argument names a screen, never a picture: what that screen is
-    /// showing is asked for later, through `SnapFeedSettleReporting`, because
-    /// the viewer goes on paging after the caller has stopped watching.
+    /// Called when the gallery becomes the top screen — the ONE departure it
+    /// has. A post pushed over it used to escape past it to the map on a
+    /// horizontal swipe, which is why this briefly took a "which screen is
+    /// departing" argument; that post now goes home to its own tile instead,
+    /// so the only screen that ever leaves for the map is this one, and a whole
+    /// grid is not a post with a picture to carry.
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
-        mapReturn: @escaping (UIViewController?) -> (any ZoomTransitionSource)?
+        mapReturn: @escaping () -> (any ZoomTransitionSource)?
     ) -> UIViewController
 }
 
