@@ -259,6 +259,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // The disjoint-axis rule is about drivers that self-gate on the
             // axis alone, which these two do not.
             let mapSource = gallery.mapReturn?(destination)
+            #if DEBUG
+            // `-grab-log`: whether the escape has a marker to fly to. Its two
+            // outcomes are a flight and a slide, and a slide is a perfectly
+            // good animation — so the choice has to be said out loud or the
+            // fallback is indistinguishable from the feature.
+            if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+                print("[escape] armed flight=\(mapSource != nil)")
+            }
+            #endif
             let slide = InteractiveSlideDismissal()
             retainer.slideEscape = slide
             // Only when there IS a flight to arbitrate with. A marker that has
