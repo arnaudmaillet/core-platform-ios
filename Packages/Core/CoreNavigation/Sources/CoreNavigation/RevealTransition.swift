@@ -256,6 +256,31 @@ public protocol RevealStandInShaping: AnyObject {
     /// The card's opacity INSIDE the stand-in, separate from the stand-in's
     /// own — see `RevealStage.swapToStandIn`.
     func setContentOpacity(_ alpha: CGFloat)
+    /// ⚠️ TRUE WHEN THE STAND-IN IS ALREADY SHOWING WHAT THE PAGE WAS SHOWING,
+    /// which takes it out of the three-act swap entirely.
+    ///
+    /// `swapFractions` exists because a fade only works against NOTHING: the
+    /// stand-in's fill comes up over the page, the window empties for a beat,
+    /// and only then does the card's content arrive. That is right for a card
+    /// the page has no copy of — a marker's glyph, a row's caption.
+    ///
+    /// It is wrong for a stand-in handed the page's OWN media. There the fill
+    /// ramp is a fade between two copies of one picture — the page's, clipped
+    /// by the window, and the card's, anchored in it — which is precisely the
+    /// double image the beat was invented to prevent, arriving by the other
+    /// door. Filmed and reported as "a fade between one that stays cropped and
+    /// one properly anchored, when there should be the media once".
+    ///
+    /// Such a stand-in is opaque from frame 0. The swap it replaces the page on
+    /// is invisible, because the two are the same picture at the same size, and
+    /// the only fade left is the card's own content arriving over a media it
+    /// fully covers — one dissolve between two finished drawings.
+    var revealStandInCarriesDeparture: Bool { get }
+}
+
+public extension RevealStandInShaping {
+    /// Everything that does not hold a copy of the page keeps the three acts.
+    var revealStandInCarriesDeparture: Bool { false }
 }
 
 // MARK: - Shared staging
@@ -465,6 +490,20 @@ enum RevealStage {
     static func swapFractions(at progress: CGFloat) -> (fill: CGFloat, content: CGFloat) {
         (fill: easeIn(ramp(progress, from: pageFadeStart, to: pageFadeEnd)),
          content: easeOut(ramp(progress, from: cardFadeStart, to: cardFadeEnd)))
+    }
+
+    /// Whether this stand-in opted out of the fill ramp — see
+    /// `RevealStandInShaping.revealStandInCarriesDeparture`. Asked in one place
+    /// so the three sites that raise a stand-in's alpha cannot disagree about
+    /// which ones have a page to fade in over.
+    static func carriesDeparture(_ standIn: UIView?) -> Bool {
+        (standIn as? RevealStandInShaping)?.revealStandInCarriesDeparture ?? false
+    }
+
+    /// The fill a stand-in should be wearing at `fraction`: the ramp, or solid
+    /// for one that is already the page's picture.
+    static func fill(_ fraction: CGFloat, for standIn: UIView?) -> CGFloat {
+        carriesDeparture(standIn) ? 1 : fraction
     }
 
     private static func ramp(_ value: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
@@ -1128,7 +1167,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = 0
+            standIn.alpha = RevealStage.fill(0, for: standIn)
             (standIn as? RevealStandInShaping)?.setContentOpacity(0)
         }
         // The same rule the grab leg states at length: the cell the window is
@@ -1190,12 +1229,17 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // card-shaped stand-ins hid it, because a card's fill lands at the
             // same moment the real row takes over.
             let total = transitionDuration(using: context) * RevealStage.springVisibleFraction
-            UIView.animate(
-                withDuration: total * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
-                delay: total * RevealStage.pageFadeStart,
-                options: [.curveEaseIn]
-            ) {
-                standIn.alpha = 1
+            // Skipped whole for a stand-in that is already the page's picture:
+            // it was staged solid, and animating it up from nothing is the
+            // double image this leg's opt-out exists to remove.
+            if !RevealStage.carriesDeparture(standIn) {
+                UIView.animate(
+                    withDuration: total * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
+                    delay: total * RevealStage.pageFadeStart,
+                    options: [.curveEaseIn]
+                ) {
+                    standIn.alpha = 1
+                }
             }
             UIView.animate(
                 withDuration: total * (RevealStage.cardFadeEnd - RevealStage.cardFadeStart),

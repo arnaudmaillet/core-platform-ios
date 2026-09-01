@@ -484,6 +484,12 @@ private final class PinTextFaceView: UIView {
 /// transition. `setCornerRadius` is already the shape channel; this adds the
 /// content one, so the two can be handed over separately.
 extension PinCardView: RevealStandInShaping {
+    /// The card holds the departing page's picture, so it REPLACES that page
+    /// rather than fading in over it. See the protocol's own note: the fill
+    /// ramp would be a cross-fade between two copies of one media — the page's,
+    /// clipped by the window, and this one, anchored in it.
+    var revealStandInCarriesDeparture: Bool { departureCoverView.image != nil }
+
     /// The marker's CONTENT, which the page repeats none of: the glyph, the
     /// cover, and the ring that draws the marker's edge. Not the ground under
     /// them — that is the fill, faded by the view's own alpha, and it is the

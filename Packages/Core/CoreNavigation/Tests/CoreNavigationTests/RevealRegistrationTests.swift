@@ -158,6 +158,51 @@ struct RevealRegistrationTests {
         }
     }
 
+    /// ⚠️ AND A STAND-IN THAT ALREADY HOLDS THE PAGE'S PICTURE SITS OUT THE
+    /// FILL ENTIRELY — solid at every progress, including zero.
+    ///
+    /// The three acts above protect a fade from having text on both sides. A
+    /// stand-in handed the page's own media has the opposite problem: raising
+    /// it from nothing cross-fades two copies of ONE picture, the page's
+    /// clipped by the window against the card's anchored in it. Filmed and
+    /// reported as "a fade between one that stays cropped and one properly
+    /// anchored, when there should be the media once".
+    ///
+    /// The content ramp is untouched — the marker's own face still arrives on
+    /// its own clock, over a media it fully covers.
+    @Test func aStandInHoldingTheDeparturesPictureNeverRidesTheFill() {
+        let carrying = CarryingStandIn()
+        let ordinary = OrdinaryStandIn()
+
+        for step in 0...100 {
+            let progress = CGFloat(step) / 100
+            let swap = RevealStage.swapFractions(at: progress)
+            #expect(RevealStage.fill(swap.fill, for: carrying) == 1,
+                    "the page showed through its own copy at \(progress)")
+            #expect(RevealStage.fill(swap.fill, for: ordinary) == swap.fill,
+                    "the three acts were taken away from a card that needs them")
+        }
+        #expect(RevealStage.carriesDeparture(carrying))
+        #expect(!RevealStage.carriesDeparture(ordinary))
+        #expect(!RevealStage.carriesDeparture(nil), "no stand-in carries nothing")
+    }
+
+    /// ⚠️ AND THE OPT-OUT IS A PROTOCOL REQUIREMENT, not an extension-only
+    /// member — the static-dispatch trap `ZoomExistentialDispatchTests` guards
+    /// for the flight's blend channel, arriving on the reveal's.
+    ///
+    /// Every call site holds the stand-in as a plain `UIView` and reaches this
+    /// through an `as?` cast. Declared only in an extension, that cast would
+    /// resolve the DEFAULT for every conformer that overrides it, and a card
+    /// carrying the page's picture would ride the fill anyway — the defect,
+    /// silently back, with the flag still reading true everywhere it is
+    /// printed.
+    @Test func theOptOutDispatchesThroughTheExistential() {
+        let carrying: any RevealStandInShaping = CarryingStandIn()
+        #expect(carrying.revealStandInCarriesDeparture,
+                "the default answered for an overriding conformer")
+    }
+
     /// And it is over before the drag is: a swap still running at the release
     /// would land a half-drawn card on the row.
     @Test func theSwapFinishesBeforeTheDragCan() {
@@ -217,4 +262,20 @@ struct RevealRegistrationTests {
             carrying: Self.landing, anchor: nil, progress: 1
         ) == .zero)
     }
+}
+
+/// A stand-in that holds the departing page's own picture.
+@MainActor
+private final class CarryingStandIn: UIView, RevealStandInShaping {
+    func setCornerRadius(_ radius: CGFloat) {}
+    func setContentOpacity(_ alpha: CGFloat) {}
+    var revealStandInCarriesDeparture: Bool { true }
+}
+
+/// The ordinary case: a card the page has no copy of, which needs all three
+/// acts.
+@MainActor
+private final class OrdinaryStandIn: UIView, RevealStandInShaping {
+    func setCornerRadius(_ radius: CGFloat) {}
+    func setContentOpacity(_ alpha: CGFloat) {}
 }
