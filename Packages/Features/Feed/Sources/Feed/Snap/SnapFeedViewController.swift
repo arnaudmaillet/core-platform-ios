@@ -3,6 +3,7 @@ import MediaCore
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import FeedInterface
 import MediaPlayback
 import PostGrid
 import UIKit
@@ -3637,6 +3638,19 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if !decelerate { updateActiveItem() }
         updatePagingFooter(for: scrollView)
     }
+}
+
+// MARK: - SnapFeedSettleReporting
+
+/// Where the viewer stopped, published to presenters outside this package.
+///
+/// `activePostID` is already the answer every close inside Feed uses; the
+/// conformance simply lets the MAP ask the same question. It has to: the map
+/// stages its flight home when the dismissal begins, and the post it is flying
+/// away FROM is whatever the viewer paged to, which the map has no other way to
+/// learn — it handed over a list of ids and got back a `UIViewController`.
+extension SnapFeedViewController: SnapFeedSettleReporting {
+    public var settledPostID: PostID? { activePostID }
 }
 
 // MARK: - ZoomTransitionDestination

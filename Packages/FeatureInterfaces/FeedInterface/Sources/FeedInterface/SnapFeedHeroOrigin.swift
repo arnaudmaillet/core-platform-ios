@@ -54,7 +54,15 @@ public struct TextRevealOrigin {
     /// page seen through a window — see `RevealGeometry.makeDismissStandIn`.
     /// `nil` keeps the page itself, which is still correct for a surface that
     /// cannot draw one.
-    public let makeDismissStandIn: () -> UIView?
+    ///
+    /// Handed the post the viewer actually STOPPED on, which after any paging
+    /// is not the post that opened the feed. A source that lands on a fixed
+    /// place — a marker, a row that must not be reordered — ignores it for the
+    /// purpose of choosing WHERE to land, and uses it to decide what the card
+    /// must show at the departure end: the two are different questions, and
+    /// conflating them is how a list quietly re-sorted itself under the window.
+    /// `nil` means nothing has settled yet.
+    public let makeDismissStandIn: (PostID?) -> UIView?
     /// Builds what the OPENING starts as, for a source whose content the page
     /// does not repeat.
     ///
@@ -112,7 +120,7 @@ public struct TextRevealOrigin {
         depthView: @escaping () -> UIView? = { nil },
         captionTop: CGFloat = 0,
         authorBand: PostAuthorBandView.Model? = nil,
-        makeDismissStandIn: @escaping () -> UIView? = { nil },
+        makeDismissStandIn: @escaping (PostID?) -> UIView? = { _ in nil },
         makePresentStandIn: @escaping () -> UIView? = { nil },
         alignsPageToSource: Bool = true,
         cornerRadius: CGFloat? = nil,

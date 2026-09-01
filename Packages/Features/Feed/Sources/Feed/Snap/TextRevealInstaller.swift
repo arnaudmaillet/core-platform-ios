@@ -132,7 +132,15 @@ enum TextRevealInstaller {
                 (feed as? SnapFeedViewController)?.revealCaptionAnchor(in: space)
             },
             sourceCaptionTop: origin.captionTop,
-            makeDismissStandIn: origin.makeDismissStandIn,
+            // Re-asked at dismissal like `anchorFrame` above, and for the same
+            // reason turned inside out: the viewer may have paged, so the post
+            // the source is being asked to draw is not the post it was opened
+            // from. The source decides what that means — a marker draws its own
+            // face and blends the settled post's picture into it; a row keeps
+            // its own position and does the same.
+            makeDismissStandIn: { [weak feed] in
+                origin.makeDismissStandIn((feed as? SnapFeedViewController)?.activePostID)
+            },
             makePresentStandIn: origin.makePresentStandIn,
             setSourceConcealed: origin.setConcealed,
             depthView: origin.depthView,

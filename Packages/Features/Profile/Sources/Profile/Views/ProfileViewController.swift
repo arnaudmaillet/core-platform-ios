@@ -526,7 +526,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                     // why the two screens' reveals did not feel the same: this
                     // one flew the live page home and gained its header in a
                     // single frame.
-                    makeDismissStandIn: { [weak self] in
+                    makeDismissStandIn: { [weak self] _ in
                         self?.galleryPager.makeDismissStandIn(for: post.id)
                     },
                     // The gallery's own concealment, which the media hero

@@ -115,6 +115,9 @@ public protocol FeedFeatureBuilding {
         postIDs: [PostID],
         ownsInteractiveDismissal: Bool
     ) -> UIViewController
+    // (see `SnapFeedSettleReporting` below for asking a built feed where the
+    // viewer stopped — the one question a presenter outside this package has
+    // to be able to put to it.)
     /// Pushes that same feed onto `presenter`'s stack with a HERO flight from
     /// `origin`, instead of a standard slide.
     ///
@@ -245,4 +248,23 @@ extension FeedFeatureBuilding {
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
         makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true)
     }
+}
+
+/// A pushed feed, asked where the viewer actually stopped.
+///
+/// The feed is a PAGER, and every transition a presenter stages was decided
+/// when the post was OPENED. A presenter outside this package — the map,
+/// staging a flight home to its marker — has no other way to learn that the
+/// viewer swiped on, and staging the close against the post that was tapped
+/// is how a card ends up flying a photograph the viewer has not seen for
+/// several pages.
+///
+/// Deliberately one property and no more: the answer is needed at dismissal
+/// STAGING, so a caller reads it inside the hook that stages, never captures
+/// it. The seam exists because the concrete feed type is one this interface
+/// hides on purpose.
+@MainActor
+public protocol SnapFeedSettleReporting: AnyObject {
+    /// The post whose page is settled, or nil before the first settle.
+    var settledPostID: PostID? { get }
 }

@@ -38,7 +38,7 @@ struct TextRevealOriginRelayTests {
                     authorID: ProfileID("prof-1"), authorName: "Ada", authorHandle: "ada"
                 )
             ),
-            makeDismissStandIn: { UIView() },
+            makeDismissStandIn: { _ in UIView() },
             setConcealed: { box.concealed.append($0) },
             presentationDidEnd: { _ in box.chrome.append("inner-present") },
             willStageDismissal: { box.chrome.append("stage") },
@@ -59,7 +59,7 @@ struct TextRevealOriginRelayTests {
 
         #expect(relayed.captionTop == 52)
         #expect(relayed.authorBand?.handle == "ada")
-        #expect(relayed.makeDismissStandIn() != nil)
+        #expect(relayed.makeDismissStandIn(nil) != nil)
         relayed.setConcealed(true)
         #expect(box.concealed == [true])
     }

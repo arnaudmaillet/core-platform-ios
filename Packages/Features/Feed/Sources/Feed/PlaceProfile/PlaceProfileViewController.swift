@@ -1080,7 +1080,7 @@ extension PlaceProfileViewController: CardCloseLanding {
             // answer the map's marker gives, and for the same reason.
             captionEnd: nil,
             depthView: { [weak self] in self?.pager },
-            makeDismissStandIn: { [weak self] in
+            makeDismissStandIn: { [weak self] _ in
                 // The CLONE: a free-standing tile drawn from the substitute's
                 // own model, which loads its own cover. Sized from the slot it
                 // is landing on.
@@ -1256,7 +1256,7 @@ extension PlaceProfileViewController: ZoomTransitionSource {
             depthView: { [weak self] in self?.pager },
             captionTop: activityPage.textRowCaptionTop(for: anchor),
             authorBand: activityPage.textRowAuthorBand(for: anchor),
-            makeDismissStandIn: { [weak self] in
+            makeDismissStandIn: { [weak self] _ in
                 self?.activityPage.makeDismissStandIn(for: anchor)
             },
             // No cornerRadius and no fill: a ROW must take the card's own

@@ -963,7 +963,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // read off the page, so a viewer who scrolled the comments
                 // still lands on the card they came from — see
                 // `RevealDismissCardView`.
-                makeDismissStandIn: { [weak page] in page?.makeDismissStandIn(for: anchorID) },
+                makeDismissStandIn: { [weak page] _ in page?.makeDismissStandIn(for: anchorID) },
                 // The reveal's OWN concealment slot, not the hero's — see
                 // `ForYouGridPage.revealConcealedPostID`. Applied on every
                 // dequeue too, so a row that recycles mid-flight comes back
