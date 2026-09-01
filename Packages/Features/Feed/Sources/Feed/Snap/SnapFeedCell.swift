@@ -2726,6 +2726,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.showsCollection ? mediaCard.currentPage : nil
     }
 
+    /// The still this page is actually drawing — the picture a presenter's
+    /// flight home has to dissolve away when the viewer is leaving from HERE
+    /// rather than from the post that opened the feed.
+    ///
+    /// Read off the rendered surface rather than re-derived from the model, for
+    /// the same reason `currentMediaPage` is: a post with a carousel is showing
+    /// one of several pictures, and only the surface knows which. Nil for a
+    /// text page, which has no picture to hand over.
+    var currentPageCover: UIImage? { mediaCard.renderedStill }
+
     /// Which pages are holding a playback surface — the retention window's
     /// footprint, which is otherwise invisible from outside.
     var debugSurfacedPages: [Int] { mediaCard.surfacedPages }

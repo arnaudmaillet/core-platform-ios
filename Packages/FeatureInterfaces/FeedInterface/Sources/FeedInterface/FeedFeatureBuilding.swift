@@ -267,4 +267,13 @@ extension FeedFeatureBuilding {
 public protocol SnapFeedSettleReporting: AnyObject {
     /// The post whose page is settled, or nil before the first settle.
     var settledPostID: PostID? { get }
+    /// The still that page is drawing — the picture a flight home has to
+    /// dissolve away when it is landing somewhere else.
+    ///
+    /// From the FEED rather than from the presenter's own thumbnail of the same
+    /// post, and the difference is visible twice over: a carousel post is
+    /// showing one of several pictures and only the page knows which, and a
+    /// presenter's copy may not exist at all (an off-screen row has no
+    /// rendered cover to give). Nil for a text page, which has no picture.
+    var settledCoverImage: UIImage? { get }
 }

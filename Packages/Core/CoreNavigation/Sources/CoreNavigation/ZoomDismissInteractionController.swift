@@ -118,6 +118,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private var axes: Set<ZoomDismissAxis> = [.horizontal]
     private var activeAxis: ZoomDismissAxis = .horizontal
 
+    #if DEBUG
+    /// Which axes this driver was armed for, so a harness can pick the one it
+    /// means. A stack that carries an intermediate screen attaches TWO drivers
+    /// with disjoint axis sets, and a script that always drove the first could
+    /// only ever reach one of the two destinations.
+    var debugArmedAxes: Set<ZoomDismissAxis> { axes }
+    #endif
+
     override init() {
         super.init()
         #if DEBUG

@@ -176,7 +176,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             pushWithoutFlight(destination, on: nav, reveal: origin.textReveal)
             return
         }
-        let source = ExternalHeroZoomSource(origin: origin)
+        // The feed is a pager and this origin lands where it took off, so the
+        // one thing the source cannot work out for itself is what the viewer is
+        // leaving — asked of the feed, at staging, never captured here.
+        let source = ExternalHeroZoomSource(
+            origin: origin,
+            settle: { [weak destination] in
+                let feed = destination as? any SnapFeedSettleReporting
+                return (id: feed?.settledPostID, cover: feed?.settledCoverImage)
+            }
+        )
         let transition = ZoomTransitionController(source: source, destination: flyable)
         // The pushed feed owns its dismissal grab, exactly as it does when the
         // For You grid opens it — otherwise the stack's edge gesture and the

@@ -3651,6 +3651,30 @@ extension SnapFeedViewController: UICollectionViewDelegate {
 /// learn — it handed over a list of ids and got back a `UIViewController`.
 extension SnapFeedViewController: SnapFeedSettleReporting {
     public var settledPostID: PostID? { activePostID }
+
+    /// ⚠️ The SETTLED page's cell, not `activeSnapCell`. That one is gated on
+    /// visibility, which is the right gate for playback and the wrong one here:
+    /// by the time a dismissal asks, this screen is already reporting itself
+    /// invisible, so the visibility-gated cell answers about the wrong post or
+    /// about none at all.
+    public var settledCoverImage: UIImage? {
+        let index = settledPageIndex
+        guard orderedIDs.indices.contains(index) else { return nil }
+        let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+        let still = (cell as? SnapFeedCell)?.currentPageCover
+        #if DEBUG
+        // `-zoom-blend-log`: WHY there is no picture, which is the only part of
+        // this a caller cannot see. An inert blend has three quite different
+        // causes — an unrealized cell, a text page, a video page — and they are
+        // the same nil.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-blend-log"), still == nil {
+            print("[zoom-blend] no still at page \(index):"
+                + " cell=\(cell == nil ? "unrealized" : "realized")"
+                + " media=\(modelsByID[orderedIDs[index]]?.mediaURL?.lastPathComponent ?? "none")")
+        }
+        #endif
+        return still
+    }
 }
 
 // MARK: - ZoomTransitionDestination

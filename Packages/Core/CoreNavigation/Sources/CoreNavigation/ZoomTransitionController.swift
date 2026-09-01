@@ -179,12 +179,24 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     public func debugScriptedGrab() {
         let axis: ZoomDismissAxis = ProcessInfo.processInfo.arguments
             .contains("-zoom-demo-grab-vertical") ? .vertical : .horizontal
-        Task { @MainActor [weak self] in
-            await self?.interaction.debugPerformGrab(
+        // ⚠️ THE DRIVER THAT IS ARMED FOR THIS AXIS, not always the first one.
+        //
+        // A stack with an intermediate screen attaches a second driver with a
+        // DISJOINT axis set — the cluster-gallery shape, where a vertical grab
+        // lands on the gallery beneath and a horizontal one escapes past it.
+        // Driving `interaction` unconditionally reached only ever one of those
+        // two destinations, and silently: the script asked for `.vertical`, the
+        // marker-bound driver took it, and the run looked like a working
+        // vertical grab that simply went somewhere else. The gallery leg had no
+        // scripted route at all, which is why it was only ever verified by hand.
+        let driver = ([interaction] + extraInteractions)
+            .first { $0.debugArmedAxes.contains(axis) } ?? interaction
+        Task { @MainActor in
+            await driver.debugPerformGrab(
                 peakProgress: 0.22, verticalDrift: 180, axis: axis
             )
             try? await Task.sleep(nanoseconds: 1_200_000_000)
-            await self?.interaction.debugPerformGrab(
+            await driver.debugPerformGrab(
                 peakProgress: 0.55, verticalDrift: 70, axis: axis
             )
         }

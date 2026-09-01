@@ -363,6 +363,22 @@ final class SnapMediaCardView: UIView {
     /// poster is what makes `play` hide the surface on its way through.
     var currentPageCover: UIImage? { carousel?.renderedCover }
 
+    /// The still this card is drawing, WHICHEVER layout it is in.
+    ///
+    /// Deliberately not folded into `currentPageCover` above, whose nil for a
+    /// single-media post is load-bearing: its caller hands the result to a
+    /// playback surface as a poster, and an empty poster is what makes `play`
+    /// hide the surface on its way through. This is the other question — "what
+    /// picture is on screen" — asked by a presenter's flight home, which has to
+    /// dissolve that picture away when it is landing somewhere else.
+    ///
+    /// Nil for a text page, which has no picture, and for a VIDEO page, whose
+    /// frames belong to a player rather than to an image view. Both degrade the
+    /// blend to nothing, which is the flight exactly as it was.
+    var renderedStill: UIImage? {
+        showsCollection ? carousel?.renderedCover : imageView.image
+    }
+
     /// The stream the current PAGE carries, nil when it is a still or when this
     /// card is not drawing a collection at all.
     var currentPageVideoURL: URL? {

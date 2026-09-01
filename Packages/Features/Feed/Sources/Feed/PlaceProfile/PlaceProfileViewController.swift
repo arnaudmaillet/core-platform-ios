@@ -262,6 +262,34 @@ final class PlaceProfileViewController: UIViewController {
                     + " item=\(debugDockedSelectorItemPresent)")
             }
         }
+        // `-maps-place-open-tile <index>`: opens a post from whichever tab is
+        // up, which is the gesture that decides where a dismissal has to come
+        // BACK to. Runs after the tab drive so a run can ask for "open the
+        // third post of the Activity list" — the case where the departure
+        // screen and the landing screen can disagree, and the only way to see
+        // that disagreement is to leave from the tab that is not the default.
+        if let index = value("-maps-place-open-tile").map(Int.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in
+                guard let self else { return }
+                let grid = hostedPages.indices.contains(activeIndex)
+                    ? hostedPages[activeIndex] as? ForYouGridPage : nil
+                print("[place] opening tile \(index) from tab \(activeIndex)"
+                    + " posts=\(grid?.posts.count ?? -1)")
+                openTile(at: index, in: grid)
+            }
+        }
+        // `-maps-place-tile-dismiss <seconds>`: grabs the feed that tile just
+        // opened, back to this page. The flight is `presentSnapFeedHero`'s, not
+        // this screen's, so the harness reaches it the only way anything can —
+        // `debugMostRecent`, which is exactly the "present one screen and
+        // dismiss that one" usage it exists for. Delay is absolute rather than
+        // chained off the open so a run can settle a page first.
+        if let after = value("-maps-place-tile-dismiss") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + after) {
+                print("[place] scripting tile-feed dismissal")
+                ZoomTransitionController.debugMostRecent?.debugScriptedGrab()
+            }
+        }
     }
 
     private func scheduleDebugPopIfRequested() {
