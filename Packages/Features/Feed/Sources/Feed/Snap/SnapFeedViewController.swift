@@ -3668,13 +3668,6 @@ extension SnapFeedViewController: SnapFeedSettleReporting {
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
     }
 
-    /// Lends a transition a second surface on the settled page's playback — see
-    /// `SnapFeedSettlement.attachLiveMedia`, which owns the contract.
-    public func attachRevealLiveMedia(_ surface: UIView) -> Bool {
-        guard let surface = surface as? VideoRenderView else { return false }
-        return settledCell?.attachLiveSurface(surface) ?? false
-    }
-
     public var settledCoverImage: UIImage? {
         let index = settledPageIndex
         guard orderedIDs.indices.contains(index) else { return nil }

@@ -252,48 +252,10 @@ final class PinCardView: UIView {
 
     /// The shared rule — see `DepartureCoverLayout`, which states why the
     /// cover is scaled uniformly rather than re-fitted to the card.
-    ///
-    /// Both departure operands go through it, and from the SAME base: a still
-    /// and a live surface showing the same video at two different scales is
-    /// two departures, visible the moment either moves.
     private func layoutDepartureCover() {
         departureBaseSize = DepartureCoverLayout.apply(
             to: departureCoverView, in: bounds, departureBase: departureBaseSize
         )
-        guard posesLiveMediaWithDeparture else { return }
-        departureBaseSize = DepartureCoverLayout.apply(
-            to: videoRenderView, in: bounds,
-            departureBase: departureBaseSize, hasContent: true
-        )
-    }
-
-    /// ⚠️ SET ONLY BY THE REVEAL. The FLIGHT owns this surface's geometry
-    /// itself — `prepareVideoForFlight` pins its bounds and `ZoomFlight` poses
-    /// it every frame — so posing it here as well would be two writers on one
-    /// view, each undoing the other.
-    private var posesLiveMediaWithDeparture = false
-
-    /// ⚠️ BORROWS A SURFACE ON THE DEPARTING PAGE'S PLAYBACK, so the video
-    /// keeps PLAYING inside the window instead of freezing at the frame the
-    /// close began on.
-    ///
-    /// The still underneath is not replaced by this, it is the floor: a joining
-    /// surface is primed with the renderer's retained frame but still needs one
-    /// dispatch to draw, and the cover is already showing exactly that frame.
-    /// So there is no gap to see, whichever arrives first.
-    ///
-    /// Refused attachment is ordinary, not an error — `-avplayer-render` has no
-    /// second surface to give, and a page that stopped playing has nothing to
-    /// borrow. The card then carries the still alone, which is the animation
-    /// this one is an improvement on rather than a replacement for.
-    func adoptDepartureLiveMedia(_ attach: (UIView) -> Bool) {
-        guard attach(videoRenderView) else { return }
-        // Autoresizing and a transform do not compose; from here the surface is
-        // posed by hand, with the cover and off the same base.
-        videoRenderView.autoresizingMask = []
-        posesLiveMediaWithDeparture = true
-        videoRenderView.isHidden = false
-        setNeedsLayout()
     }
 
     /// The blend channel: `t == 0` is the departure picture, `t == 1` the
@@ -485,12 +447,6 @@ private final class PinTextFaceView: UIView {
 /// transition. `setCornerRadius` is already the shape channel; this adds the
 /// content one, so the two can be handed over separately.
 extension PinCardView: RevealStandInShaping {
-    /// The card holds the departing page's picture, so it REPLACES that page
-    /// rather than fading in over it. See the protocol's own note: the fill
-    /// ramp would be a cross-fade between two copies of one media — the page's,
-    /// clipped by the window, and this one, anchored in it.
-    var revealStandInCarriesDeparture: Bool { departureCoverView.image != nil }
-
     /// The marker's CONTENT, which the page repeats none of: the glyph, the
     /// cover, and the ring that draws the marker's edge. Not the ground under
     /// them — that is the fill, faded by the view's own alpha, and it is the

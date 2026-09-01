@@ -45,17 +45,7 @@ public enum DepartureCoverLayout {
     public static func apply(
         to cover: UIImageView, in bounds: CGRect, departureBase: CGSize?
     ) -> CGSize? {
-        apply(to: cover, in: bounds, departureBase: departureBase, hasContent: cover.image != nil)
-    }
-
-    /// The same rule for a view whose content the layout cannot see — a
-    /// playback surface, which is the OTHER thing a card can carry a departing
-    /// page in. Both operands must be posed identically or they separate
-    /// mid-flight, which is two departures rather than one.
-    public static func apply(
-        to cover: UIView, in bounds: CGRect, departureBase: CGSize?, hasContent: Bool
-    ) -> CGSize? {
-        guard hasContent, bounds.width > 0, bounds.height > 0 else {
+        guard cover.image != nil, bounds.width > 0, bounds.height > 0 else {
             cover.transform = .identity
             cover.frame = bounds
             return departureBase

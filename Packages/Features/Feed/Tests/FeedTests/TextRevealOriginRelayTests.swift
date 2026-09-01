@@ -64,7 +64,7 @@ struct TextRevealOriginRelayTests {
         #expect(relayed.pageCoversWindow)
         #expect(relayed.captionTop == 52)
         #expect(relayed.authorBand?.handle == "ada")
-        #expect(relayed.makeDismissStandIn(SnapFeedSettlement(postID: nil, still: nil)) != nil)
+        #expect(relayed.makeDismissStandIn(nil) != nil)
         relayed.setConcealed(true)
         #expect(box.concealed == [true])
     }

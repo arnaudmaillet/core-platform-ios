@@ -315,53 +315,6 @@ struct PinCardBlendTests {
                 "the cover was re-cropped rather than scaled")
     }
 
-    // MARK: - The borrowed live surface
-
-    /// ⚠️ THE TWO DEPARTURE OPERANDS ARE POSED OFF ONE BASE, and stay
-    /// coincident for the whole close.
-    ///
-    /// The still and the borrowed surface show the same video. Posed
-    /// separately they drift apart the moment the card moves, and what the
-    /// viewer sees is the same picture twice at two sizes — the double image
-    /// this whole area of the code exists to avoid, arriving through the one
-    /// door left open.
-    @Test func aBorrowedLiveSurfaceIsPosedWithTheStill() {
-        let page = CGSize(width: 402, height: 874)
-        let card = PinCardView(frame: CGRect(origin: .zero, size: page))
-        card.setFace(.text)
-        card.setDeparturePicture(picture())
-        card.adoptDepartureLiveMedia { _ in true }
-        card.layoutIfNeeded()
-
-        let cover = departureCover(of: card)
-        let live = liveSurface(of: card)
-        #expect(!live.isHidden, "the borrowed surface was never shown")
-        #expect(abs(cover.frame.width - live.frame.width) < 0.5)
-        #expect(abs(cover.frame.height - live.frame.height) < 0.5)
-
-        card.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
-        card.layoutIfNeeded()
-
-        #expect(abs(cover.frame.width - live.frame.width) < 0.5,
-                "the two departures separated as the card shrank")
-        #expect(abs(cover.frame.height - live.frame.height) < 0.5)
-        #expect(live.frame.width > 44 - 0.5, "the surface stopped covering the window")
-    }
-
-    /// A refused attachment is ORDINARY — no second surface exists under the
-    /// single-layer backing, and a page that stopped playing has none to lend.
-    /// The card then carries the still alone, which is the animation this is an
-    /// improvement on rather than a replacement for.
-    @Test func aRefusedLiveSurfaceLeavesTheCardCarryingTheStill() {
-        let card = makeCard(.text)
-        card.setDeparturePicture(picture())
-        card.adoptDepartureLiveMedia { _ in false }
-        card.layoutIfNeeded()
-
-        #expect(liveSurface(of: card).isHidden, "a refused surface was shown anyway")
-        #expect(isAlpha(departureCover(of: card), 1), "the still stopped carrying the close")
-    }
-
     // MARK: - The face still decides everything else
 
     /// The ARRIVAL face alone owns `side`, `cornerRadius` and the background

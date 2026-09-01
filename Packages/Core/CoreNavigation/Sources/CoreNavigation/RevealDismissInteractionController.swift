@@ -148,11 +148,7 @@ final class RevealDismissInteractionController: NSObject,
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            // Solid from frame 0 when it already holds the page's own media —
-            // see `RevealStandInShaping.revealStandInCarriesDeparture`.
-            standIn.alpha = RevealStage.fill(
-                at: 0, for: standIn, covering: geometry.pageCoversWindow
-            )
+            standIn.alpha = RevealStage.fill(at: 0, covering: geometry.pageCoversWindow)
             (standIn as? RevealStandInShaping)?.setContentOpacity(
                 RevealStage.contentOpacity(at: 0, covering: geometry.pageCoversWindow)
             )
@@ -289,7 +285,7 @@ final class RevealDismissInteractionController: NSObject,
         // version this replaces lost its second half to exactly that.
         if let standIn {
             standIn.alpha = RevealStage.fill(
-                at: staged.progress, for: standIn, covering: geometry.pageCoversWindow
+                at: staged.progress, covering: geometry.pageCoversWindow
             )
             (standIn as? RevealStandInShaping)?.setContentOpacity(
                 RevealStage.contentOpacity(

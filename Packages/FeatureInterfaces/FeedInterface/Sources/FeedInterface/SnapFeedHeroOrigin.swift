@@ -2,50 +2,6 @@ import CoreModels
 import PostGrid
 import UIKit
 
-/// Where the viewer stopped in a pushed feed, and what that page is drawing.
-///
-/// The two travel together because a dismissal needs BOTH and they must agree:
-/// the id says which post the close is about, the still is what a card has to
-/// carry so the window does not cut to something the viewer has not seen.
-///
-/// ⚠️ THE STILL IS NOT THE ID'S THUMBNAIL. A card takes off full screen and
-/// aspect-fills what it is handed, so a small square cover blown up there is a
-/// magnified fragment. This is the PAGE's own rendered picture — already the
-/// right shape — which is why it is carried rather than looked up.
-///
-/// Nil id means nothing has settled yet; nil still means the page has no
-/// picture to give — which is a TEXT page, and only a text page. A video
-/// answers with the frame it is showing, or with the poster it is showing
-/// before one arrives; see `VideoRenderView.currentStill`.
-public struct SnapFeedSettlement {
-    public let postID: PostID?
-    public let still: UIImage?
-    /// Puts the given surface on the settled page's playback, so a card can
-    /// carry the video still PLAYING rather than frozen at the frame the close
-    /// began on. Returns whether it took.
-    ///
-    /// ⚠️ A SECOND surface, never the page's own — the page keeps rendering
-    /// behind it. A transition that renders its own window has no handshake to
-    /// give a borrowed surface back with, so it may only borrow one nothing
-    /// else needs.
-    ///
-    /// False is ordinary: a still page, a page that stopped playing, or the
-    /// single-layer `-avplayer-render` backing where there is no second surface
-    /// to be had. The caller carries `still` alone, which is the animation this
-    /// improves on rather than replaces.
-    public let attachLiveMedia: (UIView) -> Bool
-
-    public init(
-        postID: PostID?,
-        still: UIImage?,
-        attachLiveMedia: @escaping (UIView) -> Bool = { _ in false }
-    ) {
-        self.postID = postID
-        self.still = still
-        self.attachLiveMedia = attachLiveMedia
-    }
-}
-
 /// What the flying card should look like, named without naming the view.
 ///
 /// The two shapes a post is shown in across the app: a mosaic BRICK, which is
@@ -99,14 +55,13 @@ public struct TextRevealOrigin {
     /// `nil` keeps the page itself, which is still correct for a surface that
     /// cannot draw one.
     ///
-    /// Handed WHERE THE VIEWER STOPPED and WHAT THAT PAGE IS SHOWING, which
-    /// after any paging is neither the post nor the picture the window opened
-    /// from. A source that lands on a fixed place — a marker, a row that must
-    /// not be reordered — ignores the id for the purpose of choosing where to
-    /// land, and uses the pair to decide what the card must show at the
-    /// departure end: the two are different questions, and conflating them is
-    /// how a list quietly re-sorted itself under the window.
-    public let makeDismissStandIn: (SnapFeedSettlement) -> UIView?
+    /// Handed the post the viewer actually STOPPED on, which after any paging
+    /// is not the post that opened the feed. A source that lands on a fixed
+    /// place — a marker, a row that must not be reordered — ignores it for the
+    /// purpose of choosing WHERE to land: the two are different questions, and
+    /// conflating them is how a list quietly re-sorted itself under the window.
+    /// `nil` means nothing has settled yet.
+    public let makeDismissStandIn: (PostID?) -> UIView?
     /// Builds what the OPENING starts as, for a source whose content the page
     /// does not repeat.
     ///
@@ -173,7 +128,7 @@ public struct TextRevealOrigin {
         depthView: @escaping () -> UIView? = { nil },
         captionTop: CGFloat = 0,
         authorBand: PostAuthorBandView.Model? = nil,
-        makeDismissStandIn: @escaping (SnapFeedSettlement) -> UIView? = { _ in nil },
+        makeDismissStandIn: @escaping (PostID?) -> UIView? = { _ in nil },
         makePresentStandIn: @escaping () -> UIView? = { nil },
         alignsPageToSource: Bool = true,
         pageCoversWindow: Bool = false,

@@ -267,31 +267,6 @@ public protocol RevealStandInShaping: AnyObject {
     /// The card's opacity INSIDE the stand-in, separate from the stand-in's
     /// own — see `RevealStage.swapToStandIn`.
     func setContentOpacity(_ alpha: CGFloat)
-    /// ⚠️ TRUE WHEN THE STAND-IN IS ALREADY SHOWING WHAT THE PAGE WAS SHOWING,
-    /// which takes it out of the three-act swap entirely.
-    ///
-    /// `swapFractions` exists because a fade only works against NOTHING: the
-    /// stand-in's fill comes up over the page, the window empties for a beat,
-    /// and only then does the card's content arrive. That is right for a card
-    /// the page has no copy of — a marker's glyph, a row's caption.
-    ///
-    /// It is wrong for a stand-in handed the page's OWN media. There the fill
-    /// ramp is a fade between two copies of one picture — the page's, clipped
-    /// by the window, and the card's, anchored in it — which is precisely the
-    /// double image the beat was invented to prevent, arriving by the other
-    /// door. Filmed and reported as "a fade between one that stays cropped and
-    /// one properly anchored, when there should be the media once".
-    ///
-    /// Such a stand-in is opaque from frame 0. The swap it replaces the page on
-    /// is invisible, because the two are the same picture at the same size, and
-    /// the only fade left is the card's own content arriving over a media it
-    /// fully covers — one dissolve between two finished drawings.
-    var revealStandInCarriesDeparture: Bool { get }
-}
-
-public extension RevealStandInShaping {
-    /// Everything that does not hold a copy of the page keeps the three acts.
-    var revealStandInCarriesDeparture: Bool { false }
 }
 
 // MARK: - Shared staging
@@ -571,30 +546,6 @@ enum RevealStage {
          content: easeOut(ramp(progress, from: cardFadeStart, to: cardFadeEnd)))
     }
 
-    /// Whether this stand-in opted out of the fill ramp — see
-    /// `RevealStandInShaping.revealStandInCarriesDeparture`. Asked in one place
-    /// so the three sites that raise a stand-in's alpha cannot disagree about
-    /// which ones have a page to fade in over.
-    static func carriesDeparture(_ standIn: UIView?) -> Bool {
-        (standIn as? RevealStandInShaping)?.revealStandInCarriesDeparture ?? false
-    }
-
-    /// A carrier is solid by the time an ordinary stand-in starts to appear.
-    ///
-    /// ⚠️ NOT A STEP AT ZERO, and the difference is the page's CHROME.
-    ///
-    /// A carrier holds the page's media and nothing else — no caption card, no
-    /// author band, no comment stream. Staged solid at progress 0 it replaced
-    /// all of that in the frame the finger went down, before anything had
-    /// visibly moved, and a cancelled drag faded it back: a full chrome blink
-    /// for a 10pt pull.
-    ///
-    /// A short leading ramp costs nothing where it matters. The window has
-    /// barely shrunk this early, so the carrier's copy of the media is still
-    /// coincident with the page's and the ramp is invisible ON THE MEDIA — it
-    /// is only visible on what the page draws over it, which is exactly the
-    /// thing that should be leaving.
-    static let carryFadeEnd: CGFloat = pageFadeStart
 
     /// When the marker's face begins arriving over a page that is covering the
     /// window. Its own constant, so it can be pulled earlier or later without
@@ -602,11 +553,11 @@ enum RevealStage {
     static let coveringFaceFadeStart: CGFloat = cardFadeStart
 
     /// The fill a stand-in should be wearing at `progress`: one dissolve over a
-    /// covering page, a carrier's short leading ramp, or the three acts.
+    /// covering page, or the three acts.
     ///
-    /// Takes PROGRESS rather than the computed fill, because neither of the
-    /// first two runs on the third's schedule and cannot be expressed as a
-    /// function of it.
+    /// Takes PROGRESS rather than the computed fill, because the covering
+    /// dissolve does not run on the three acts' schedule and cannot be
+    /// expressed as a function of them.
     ///
     /// ⚠️ THE FILL ACT IS DELETED ON THE COVERING PATH, not rescheduled. That
     /// act exists to give an arriving CAPTION a nothing to fade against — and a
@@ -614,12 +565,9 @@ enum RevealStage {
     /// the post used to be. That hole is what a viewer, playing with the grab,
     /// described as the post fading away over its own media. The "nothing" the
     /// face fades against here is the opaque live post itself.
-    static func fill(
-        at progress: CGFloat, for standIn: UIView?, covering: Bool = false
-    ) -> CGFloat {
+    static func fill(at progress: CGFloat, covering: Bool = false) -> CGFloat {
         if covering { return easeOut(ramp(progress, from: coveringFaceFadeStart, to: cardFadeEnd)) }
-        guard carriesDeparture(standIn) else { return swapFractions(at: progress).fill }
-        return easeIn(ramp(progress, from: 0, to: carryFadeEnd))
+        return swapFractions(at: progress).fill
     }
 
     /// ⚠️ EXACTLY ONE ALPHA MOVES over a covering page, and it is the view's.
@@ -1304,9 +1252,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = RevealStage.fill(
-                at: 0, for: standIn, covering: geometry.pageCoversWindow
-            )
+            standIn.alpha = RevealStage.fill(at: 0, covering: geometry.pageCoversWindow)
             (standIn as? RevealStandInShaping)?.setContentOpacity(
                 RevealStage.contentOpacity(at: 0, covering: geometry.pageCoversWindow)
             )
@@ -1384,14 +1330,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                         - RevealStage.coveringFaceFadeStart),
                     delay: total * RevealStage.coveringFaceFadeStart,
                     options: [.curveEaseOut]
-                ) {
-                    standIn.alpha = 1
-                }
-            } else if RevealStage.carriesDeparture(standIn) {
-                UIView.animate(
-                    withDuration: total * RevealStage.carryFadeEnd,
-                    delay: 0,
-                    options: [.curveEaseIn]
                 ) {
                     standIn.alpha = 1
                 }
