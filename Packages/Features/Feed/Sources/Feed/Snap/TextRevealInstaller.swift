@@ -174,7 +174,8 @@ enum TextRevealInstaller {
             // A source that has no caption cannot be aligned to, whatever the
             // launch argument says: asking anyway slid the page 448pt sideways
             // under a 44pt disc that was covering it.
-            matchesAnchor: matchesAnchor && origin.alignsPageToSource
+            matchesAnchor: matchesAnchor && origin.alignsPageToSource,
+            pageCoversWindow: origin.pageCoversWindow
         )
     }
 }

@@ -39,6 +39,7 @@ struct TextRevealOriginRelayTests {
                 )
             ),
             makeDismissStandIn: { _ in UIView() },
+            pageCoversWindow: true,
             setConcealed: { box.concealed.append($0) },
             presentationDidEnd: { _ in box.chrome.append("inner-present") },
             willStageDismissal: { _ in box.chrome.append("stage") },
@@ -46,17 +47,21 @@ struct TextRevealOriginRelayTests {
         )
     }
 
-    /// The four that were lost. Each one is a visible piece of the transition:
-    /// the caption offset places the window, the band is what the destination
-    /// borrows, the stand-in is what the close flies home, and concealment is
-    /// what stops the row being a second copy of the post beside its own
-    /// window.
+    /// The four that were lost, and the one added since. Each is a visible
+    /// piece of the transition: the caption offset places the window, the band
+    /// is what the destination borrows, the stand-in is what the close flies
+    /// home, concealment is what stops the row being a second copy of the post
+    /// beside its own window — and `pageCoversWindow` decides whether the whole
+    /// post travels or only a window onto it.
     @Test func theFlightFieldsSurviveTheRelay() {
         let box = Box()
         let relayed = origin(box).replacingChrome(
             presentationDidEnd: { _ in }, dismissalDidEnd: { _ in }
         )
 
+        // A field `replacingChrome` forgets defaults SILENTLY, and this one
+        // decides whether the whole post travels or only a window onto it.
+        #expect(relayed.pageCoversWindow)
         #expect(relayed.captionTop == 52)
         #expect(relayed.authorBand?.handle == "ada")
         #expect(relayed.makeDismissStandIn(SnapFeedSettlement(postID: nil, still: nil)) != nil)

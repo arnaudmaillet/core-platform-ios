@@ -221,6 +221,84 @@ struct RevealRegistrationTests {
                 "the default answered for an overriding conformer")
     }
 
+    // MARK: - The page covering the window
+
+    /// ⚠️ AT REST THE COVERING POSE IS THE IDENTITY. That is what lets an
+    /// abandoned grab need no special case: the cancel spring drives the pose
+    /// back to `open`, and `open` is an unscaled, unmoved page.
+    @Test func aCoveringPageAtRestIsUnscaledAndUnmoved() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let pose = RevealStage.pageCovering(screen, from: screen)
+
+        #expect(abs(pose.scale - 1) < 0.0001)
+        #expect(abs(pose.translation.x) < 0.0001)
+        #expect(abs(pose.translation.y) < 0.0001)
+    }
+
+    /// ⚠️ COVER, NEVER FIT — the window may not show ground where the page ran
+    /// out. Swept over the whole gesture, because the window's aspect changes
+    /// continuously and a rule that covers at both ends can fail in between.
+    @Test func aCoveringPageAlwaysContainsItsWindow() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let marker = CGRect(x: 300, y: 500, width: 44, height: 44)
+
+        for step in 0...100 {
+            let t = CGFloat(step) / 100
+            let window = CGRect(
+                x: screen.minX + (marker.minX - screen.minX) * t,
+                y: screen.minY + (marker.minY - screen.minY) * t,
+                width: screen.width + (marker.width - screen.width) * t,
+                height: screen.height + (marker.height - screen.height) * t
+            )
+            let pose = RevealStage.pageCovering(window, from: screen)
+            // The page's rendered rect: scaled about its own centre, then moved.
+            let drawn = CGRect(
+                x: window.midX - screen.width * pose.scale / 2,
+                y: window.midY - screen.height * pose.scale / 2,
+                width: screen.width * pose.scale,
+                height: screen.height * pose.scale
+            )
+            #expect(drawn.insetBy(dx: -0.01, dy: -0.01).contains(window),
+                    "the window showed ground at \(t): \(drawn) does not cover \(window)")
+        }
+    }
+
+    /// ⚠️ EXACTLY ONE ALPHA MOVES over a covering page.
+    ///
+    /// The stand-in's own alpha brings the marker in as one opaque unit. Ramp
+    /// the content as well and the glyph renders at alpha squared — fading
+    /// faster than the disc beneath it, which is the half-drawn overlay this
+    /// transition's blend law forbids.
+    @Test func exactlyOneAlphaMovesOverACoveringPage() {
+        let standIn = OrdinaryStandIn()
+        var fills: Set<String> = []
+
+        for step in 0...100 {
+            let progress = CGFloat(step) / 100
+            #expect(RevealStage.contentOpacity(at: progress, covering: true) == 1,
+                    "the content ramped as well, at \(progress)")
+            fills.insert(String(format: "%.4f", RevealStage.fill(
+                at: progress, for: standIn, covering: true
+            )))
+        }
+        #expect(fills.count > 1, "the face never arrived at all")
+        #expect(RevealStage.fill(at: 0, for: standIn, covering: true) == 0,
+                "the marker was already over the post before the drag began")
+        #expect(RevealStage.fill(at: 1, for: standIn, covering: true) == 1,
+                "the close ended on a half-drawn marker")
+    }
+
+    /// The post stays whole for most of the gesture: the marker's face may not
+    /// begin arriving until the window is well on its way home, or the viewer
+    /// watches the post disappear while it is still large enough to read.
+    @Test func theMarkersFaceArrivesLate() {
+        #expect(RevealStage.coveringFaceFadeStart >= RevealStage.cardFadeStart)
+        #expect(RevealStage.fill(
+            at: RevealStage.coveringFaceFadeStart - 0.01,
+            for: OrdinaryStandIn(), covering: true
+        ) == 0)
+    }
+
     /// And it is over before the drag is: a swap still running at the release
     /// would land a half-drawn card on the row.
     @Test func theSwapFinishesBeforeTheDragCan() {

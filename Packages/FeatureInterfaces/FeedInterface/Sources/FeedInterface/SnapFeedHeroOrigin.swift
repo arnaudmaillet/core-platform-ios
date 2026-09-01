@@ -128,6 +128,10 @@ public struct TextRevealOrigin {
     /// stand-in that is covering it. Measured before this existed: `travel=448`
     /// for a 44pt disc.
     public let alignsPageToSource: Bool
+    /// Whether the PAGE itself scales into the window rather than being seen
+    /// through it — see `RevealStage.pageCovering`. True for a marker, whose
+    /// landing is a 44pt disc and not a card.
+    public let pageCoversWindow: Bool
     /// The source's own rounding. `nil` means the card's, which is what every
     /// row is; a marker supplies its own, and for a disc that is half its side.
     public let cornerRadius: CGFloat?
@@ -172,6 +176,7 @@ public struct TextRevealOrigin {
         makeDismissStandIn: @escaping (SnapFeedSettlement) -> UIView? = { _ in nil },
         makePresentStandIn: @escaping () -> UIView? = { nil },
         alignsPageToSource: Bool = true,
+        pageCoversWindow: Bool = false,
         cornerRadius: CGFloat? = nil,
         fill: UIColor? = nil,
         setConcealed: @escaping (Bool) -> Void = { _ in },
@@ -187,6 +192,7 @@ public struct TextRevealOrigin {
         self.makeDismissStandIn = makeDismissStandIn
         self.makePresentStandIn = makePresentStandIn
         self.alignsPageToSource = alignsPageToSource
+        self.pageCoversWindow = pageCoversWindow
         self.cornerRadius = cornerRadius
         self.fill = fill
         self.setConcealed = setConcealed
@@ -229,6 +235,7 @@ public struct TextRevealOrigin {
             makeDismissStandIn: makeDismissStandIn,
             makePresentStandIn: makePresentStandIn,
             alignsPageToSource: alignsPageToSource,
+            pageCoversWindow: pageCoversWindow,
             cornerRadius: cornerRadius,
             fill: fill,
             setConcealed: setConcealed,

@@ -57,34 +57,34 @@ enum MapPinRevealSource {
             // until the page is what the viewer should be looking at.
             captionEnd: nil,
             depthView: depthView,
-            // ⚠️ THE STAND-IN CARRIES THE DEPARTING PICTURE, and the reasoning
-            // that once said it need not is recorded here because it was wrong
-            // in an instructive way.
+            // ⚠️ THE PAGE TRAVELS WHOLE, and this note is the third answer
+            // to one question — both earlier ones are kept because each was
+            // wrong in a way the next could only be found by living through.
             //
-            // "A window's departure operand is the LIVE PAGE it is closing
-            // over" is true about IDENTITY and false about BEHAVIOUR. A reveal
-            // window CLIPS that page: as the mask shrinks toward a 44pt disc
-            // the viewer sees less and less of it, and then a beat of empty
-            // fill before the disc arrives. Filmed — a photograph truncating
-            // into a blank rounded rect, reported as "the departure content
-            // gets truncated in the transition window".
+            // FIRST: nothing is carried, the window simply clips the live page.
+            // Filmed as the departure content "truncating in the transition
+            // window" — a disc is not a card, and clipping a full screen down
+            // to 44pt is a keyhole onto one corner of it.
             //
-            // A copy inside the stand-in SCALES instead, because the card owns
-            // it: the media stays whole and shrinks with the window, which is
-            // what the flight home to a media marker already does and what this
-            // was asked to match. The page underneath is covered by the
-            // stand-in, so nothing is drawn twice.
-            makeDismissStandIn: { settlement in
-                marker(
-                    face: face, ringKind: ringKind,
-                    departure: settlement.still,
-                    attachLiveMedia: settlement.attachLiveMedia
-                )
-            },
+            // SECOND: the stand-in carries a COPY of the page's media, scaled
+            // uniformly so it shrinks whole. That fixed the truncation and
+            // introduced its own: a viewer playing with the grab saw the media
+            // anchored in the window while the post — caption, band, comment
+            // stream — faded away over it. A copy of the media is not the post.
+            //
+            // THIRD, and this one: the page itself is scaled to COVER the
+            // window (`RevealStage.pageCovering`), so the whole post travels,
+            // live, with its video still playing because it is the page's own
+            // surface and a transform leaves bounds alone. Nothing is copied,
+            // so nothing can disagree with the original. The stand-in goes back
+            // to being what it always was on the opening leg — the marker's
+            // face, and only that.
+            makeDismissStandIn: { _ in marker(face: face, ringKind: ringKind) },
             makePresentStandIn: { marker(face: face, ringKind: ringKind) },
             // Nothing to align to. The page holds still and the window opens
             // over it — see `TextRevealOrigin.alignsPageToSource`.
             alignsPageToSource: false,
+            pageCoversWindow: true,
             cornerRadius: face.cornerRadius,
             fill: PinCardView.textRevealGround,
             setConcealed: concealMarker,
@@ -100,24 +100,12 @@ enum MapPinRevealSource {
     /// The card fades its whole face — disc AND glyph, one opaque unit — in over
     /// it, which keeps this a dissolve between two finished drawings rather than
     /// two half-drawn ones.
-    private static func marker(
-        face: PinCardView.Face,
-        ringKind: MapPlace.Kind?,
-        departure: UIImage? = nil,
-        attachLiveMedia: ((UIView) -> Bool)? = nil
-    ) -> UIView {
+    private static func marker(face: PinCardView.Face, ringKind: MapPlace.Kind?) -> UIView {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
         card.setFace(face)
         card.setRing(
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
         )
-        card.setDeparturePicture(departure)
-        // AFTER the picture, never before: the still is the floor the video
-        // paints over, and a surface installed onto a card with no cover would
-        // have the marker's own opaque disc under it instead.
-        if let attachLiveMedia {
-            card.adoptDepartureLiveMedia(attachLiveMedia)
-        }
         card.isUserInteractionEnabled = false
         return card
     }

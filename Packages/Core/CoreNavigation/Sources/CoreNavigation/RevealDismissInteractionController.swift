@@ -27,15 +27,23 @@ import UIKit
 /// (commit) or back to the whole screen (cancel), seeded with the hand's
 /// velocity, so the window is visibly caught rather than restarted.
 ///
-/// ## What the window does NOT do
+/// ## What the window does NOT do — with one exception
 ///
-/// It never scales its contents. The media grab shrinks a card and the picture
-/// inside it shrinks too, which is right for a picture; doing that to text
-/// would shrink the type on the way down and then have to restore it at the
-/// landing, against a card whose type is at 1:1 — the exact class of last-frame
-/// pop this transition spent five rounds eliminating. The window's WIDTH goes
-/// to the card's width and its HEIGHT collapses, the type stays put, and the
-/// veil covers what no longer fits. Same reason the close has always worked.
+/// It does not scale its contents when it is landing on a CARD. The media grab
+/// shrinks a card and the picture inside it shrinks too, which is right for a
+/// picture; doing that to text would shrink the type on the way down and then
+/// have to restore it at the landing, against a card whose type is at 1:1 — the
+/// exact class of last-frame pop this transition spent five rounds eliminating.
+/// The window's WIDTH goes to the card's width and its HEIGHT collapses, the
+/// type stays put, and the veil covers what no longer fits.
+///
+/// ⚠️ THE EXCEPTION IS A LANDING THAT IS NOT A CARD. A 44pt map marker draws
+/// none of the page's type, so there is no 1:1 type to pop against and the
+/// argument above has nothing to protect: what it protects instead is a
+/// keyhole, a full-size page clipped down to a disc showing one corner of
+/// itself. Such a landing sets `RevealGeometry.pageCoversWindow` and the page
+/// travels whole, scaled — see `RevealStage.pageCovering`. Everywhere there IS
+/// a card to pop against, the rule above still holds, and it is the default.
 @MainActor
 final class RevealDismissInteractionController: NSObject,
                                                 UIViewControllerInteractiveTransitioning {
@@ -142,8 +150,12 @@ final class RevealDismissInteractionController: NSObject,
             host.addSubview(standIn)
             // Solid from frame 0 when it already holds the page's own media —
             // see `RevealStandInShaping.revealStandInCarriesDeparture`.
-            standIn.alpha = RevealStage.fill(at: 0, for: standIn)
-            (standIn as? RevealStandInShaping)?.setContentOpacity(0)
+            standIn.alpha = RevealStage.fill(
+                at: 0, for: standIn, covering: geometry.pageCoversWindow
+            )
+            (standIn as? RevealStandInShaping)?.setContentOpacity(
+                RevealStage.contentOpacity(at: 0, covering: geometry.pageCoversWindow)
+            )
         }
         self.standIn = standIn
         // ⚠️ THE LANDING GOES AWAY FOR THE WHOLE CLOSE, exactly as the opening
@@ -226,6 +238,21 @@ final class RevealDismissInteractionController: NSObject,
             width: size.width, height: size.height
         )
         let radius = screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
+        // ⚠️ THE LIVE RECT, not a progress-derived size — the same rect the
+        // window is being given, so the page cannot separate from it under a
+        // rubber-banded or back-dragged finger.
+        if geometry.pageCoversWindow {
+            let covering = RevealStage.pageCovering(rect, from: openRect)
+            return (
+                RevealStage.Pose(
+                    mask: rect,
+                    maskRadius: radius,
+                    pageTranslation: covering.translation,
+                    pageScale: covering.scale
+                ),
+                progress
+            )
+        }
         let staged = RevealStage.Pose(
             mask: rect,
             maskRadius: radius,
@@ -261,9 +288,14 @@ final class RevealDismissInteractionController: NSObject,
         // runs where `UIView.animate` applies without animating, and the timed
         // version this replaces lost its second half to exactly that.
         if let standIn {
-            let swap = RevealStage.swapFractions(at: staged.progress)
-            standIn.alpha = RevealStage.fill(at: staged.progress, for: standIn)
-            (standIn as? RevealStandInShaping)?.setContentOpacity(swap.content)
+            standIn.alpha = RevealStage.fill(
+                at: staged.progress, for: standIn, covering: geometry.pageCoversWindow
+            )
+            (standIn as? RevealStandInShaping)?.setContentOpacity(
+                RevealStage.contentOpacity(
+                    at: staged.progress, covering: geometry.pageCoversWindow
+                )
+            )
         }
 
         let pose = staged
@@ -312,7 +344,8 @@ final class RevealDismissInteractionController: NSObject,
             anchor: anchor,
             matchesAnchor: geometry.matchesAnchor,
             captionTop: geometry.sourceCaptionTop,
-            ridingFrom: standIn != nil ? openRect : nil
+            ridingFrom: standIn != nil ? openRect : nil,
+            covers: geometry.pageCoversWindow
         )
         let target = commit
             ? closed
@@ -355,7 +388,11 @@ final class RevealDismissInteractionController: NSObject,
             // it stayed at whatever the drag had reached — often zero — and the
             // card appeared only when the stand-in was retired.
             self.standIn?.alpha = commit ? 1 : 0
-            (self.standIn as? RevealStandInShaping)?.setContentOpacity(commit ? 1 : 0)
+            // Pinned under a covering page: only the view's alpha may move, so
+            // an abandoned grab leaves the face at 0 with its content still 1.
+            (self.standIn as? RevealStandInShaping)?.setContentOpacity(
+                self.geometry.pageCoversWindow ? 1 : (commit ? 1 : 0)
+            )
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0
             self.geometry.setDestinationVeilOpacity(commit ? 1 : 0)

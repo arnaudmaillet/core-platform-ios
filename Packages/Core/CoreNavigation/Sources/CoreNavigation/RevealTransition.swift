@@ -204,6 +204,15 @@ public struct RevealGeometry {
     /// (`false`). The prototype exposes both because the choice is a matter of
     /// taste that no argument settles — see `-text-reveal-plain`.
     public let matchesAnchor: Bool
+    /// ⚠️ THE PAGE TRAVELS WHOLE, SCALED TO COVER THE WINDOW — see
+    /// `RevealStage.pageCovering`, which states why and what it costs.
+    ///
+    /// False for every landing that is a CARD, and it must stay false there:
+    /// those windows show the page at the size the card will show it, and the
+    /// hand-off at the end is 1:1. Several of them also land on a DIFFERENT
+    /// post from the one the page is showing, where flying the live page would
+    /// carry post X onto post Y's slot.
+    public let pageCoversWindow: Bool
 
     public init(
         sourceFrame: @escaping (UICoordinateSpace) -> CGRect?,
@@ -224,7 +233,8 @@ public struct RevealGeometry {
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping () -> Void = {},
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in },
-        matchesAnchor: Bool = true
+        matchesAnchor: Bool = true,
+        pageCoversWindow: Bool = false
     ) {
         self.sourceFrame = sourceFrame
         self.sourceCornerRadius = sourceCornerRadius
@@ -245,6 +255,7 @@ public struct RevealGeometry {
         self.willStageDismissal = willStageDismissal
         self.dismissalDidEnd = dismissalDidEnd
         self.matchesAnchor = matchesAnchor
+        self.pageCoversWindow = pageCoversWindow
     }
 }
 
@@ -313,6 +324,21 @@ public extension RevealStandInShaping {
 ///   page is drawn, not where the page is;
 /// * the page's travel is a `transform`, which moves pixels and leaves bounds
 ///   — and therefore safe area, and therefore the caption — alone.
+///
+/// ⚠️ AND A SCALE IS ADMITTED ON THE SAME TERMS, for a landing that draws none
+/// of the page's type — see `RevealStage.pageCovering`. It is the same kind of
+/// operation as the translation: it moves pixels and leaves bounds alone.
+///
+/// That is a claim about UIKit, so it was MEASURED rather than argued. With
+/// `CGAffineTransform(scaleX: 0.6, y: 0.6)` applied to a staged page,
+/// `safeAreaInsets` came back `{116, 0, 86, 0}` — identical to the
+/// untransformed run — and `viewSafeAreaInsetsDidChange` did not fire. The
+/// re-parenting failure above is about a view being somewhere else; a
+/// transformed view is not.
+///
+/// A covering pose registers by the page's CENTRE, because a transform is
+/// applied about the layer's anchor point and an origin-to-origin translation
+/// stops registering the moment a scale enters the matrix.
 @MainActor
 enum RevealStage {
     /// `mask` is in container coordinates; `pageTranslation` is the page's
@@ -329,6 +355,12 @@ enum RevealStage {
         let mask: CGRect
         let maskRadius: CGFloat
         let pageTranslation: CGPoint
+        /// ⚠️ `var` WITH A DEFAULT, not `let`. A `let` with an initial value is
+        /// excluded from the memberwise initializer entirely; a `var` with one
+        /// gives that initializer a defaulted parameter, so every existing
+        /// `Pose(...)` literal keeps compiling and keeps meaning exactly what
+        /// it meant.
+        var pageScale: CGFloat = 1
     }
 
     /// The whole page, unmasked and untranslated — the landed pose, identical
@@ -352,9 +384,19 @@ enum RevealStage {
         anchor: CGRect?,
         matchesAnchor: Bool,
         captionTop: CGFloat = 0,
-        ridingFrom open: CGRect? = nil
+        ridingFrom open: CGRect? = nil,
+        covers: Bool = false
     ) -> Pose {
         if let open {
+            if covers {
+                let pose = pageCovering(sourceRect, from: open)
+                return Pose(
+                    mask: sourceRect,
+                    maskRadius: radius,
+                    pageTranslation: pose.translation,
+                    pageScale: pose.scale
+                )
+            }
             return Pose(
                 mask: sourceRect,
                 maskRadius: radius,
@@ -390,6 +432,43 @@ enum RevealStage {
         return Pose(
             mask: sourceRect, maskRadius: radius,
             pageTranslation: CGPoint(x: 0, y: translation)
+        )
+    }
+
+    /// ⚠️ THE PAGE COVERS THE WINDOW — it is not seen THROUGH it.
+    ///
+    /// The other two laws leave the page at its own size and change which part
+    /// of it is drawn: `pageRiding` carries it by the window's displacement, and
+    /// the plain pose does not move it at all. Both are right for a landing that
+    /// is a CARD — a row, a tile — because the window is then showing the page
+    /// at the size the card will show it, and the hand-off at the end is 1:1.
+    ///
+    /// A 44pt marker is not a card. Clipping a full-size page down to a disc
+    /// shows a keyhole onto one corner of it, which is why this transition grew
+    /// a stand-in carrying a copy of the page's MEDIA — and that copy is what a
+    /// viewer, playing with the grab, called out: the media anchored in the
+    /// window with the post fading away over it, when the post is what should
+    /// have been travelling.
+    ///
+    /// So the page travels whole. Scaled to COVER the window (never to fit it,
+    /// which would letterbox and show ground where the page ran out) and
+    /// registered by its CENTRE — because a view's transform is applied about
+    /// its anchor point, and an origin-to-origin translation stops registering
+    /// the moment a scale enters the matrix.
+    ///
+    /// At rest it is the identity: an unmoved, unscaled page, so an abandoned
+    /// grab needs no special case.
+    ///
+    /// ⚠️ It assumes the page's frame IS the open window — true for a pushed
+    /// full-screen page, and asserted at both staging sites, because if that
+    /// ever stops holding the pose silently stops reducing to `open` at rest.
+    static func pageCovering(
+        _ window: CGRect, from open: CGRect
+    ) -> (scale: CGFloat, translation: CGPoint) {
+        let scale = max(window.width / max(open.width, 1), window.height / max(open.height, 1))
+        return (
+            scale: scale,
+            translation: CGPoint(x: window.midX - open.midX, y: window.midY - open.midY)
         )
     }
 
@@ -517,15 +596,42 @@ enum RevealStage {
     /// thing that should be leaving.
     static let carryFadeEnd: CGFloat = pageFadeStart
 
-    /// The fill a stand-in should be wearing at `progress`: the three acts, or
-    /// a carrier's short leading ramp.
+    /// When the marker's face begins arriving over a page that is covering the
+    /// window. Its own constant, so it can be pulled earlier or later without
+    /// disturbing the shared three-act schedule.
+    static let coveringFaceFadeStart: CGFloat = cardFadeStart
+
+    /// The fill a stand-in should be wearing at `progress`: one dissolve over a
+    /// covering page, a carrier's short leading ramp, or the three acts.
     ///
-    /// Takes PROGRESS rather than the computed fill, because a carrier's ramp
-    /// runs where the ordinary one is still flat zero and cannot be expressed
-    /// as a function of it.
-    static func fill(at progress: CGFloat, for standIn: UIView?) -> CGFloat {
+    /// Takes PROGRESS rather than the computed fill, because neither of the
+    /// first two runs on the third's schedule and cannot be expressed as a
+    /// function of it.
+    ///
+    /// ⚠️ THE FILL ACT IS DELETED ON THE COVERING PATH, not rescheduled. That
+    /// act exists to give an arriving CAPTION a nothing to fade against — and a
+    /// 44pt disc has no caption, so all it buys there is a coloured hole where
+    /// the post used to be. That hole is what a viewer, playing with the grab,
+    /// described as the post fading away over its own media. The "nothing" the
+    /// face fades against here is the opaque live post itself.
+    static func fill(
+        at progress: CGFloat, for standIn: UIView?, covering: Bool = false
+    ) -> CGFloat {
+        if covering { return easeOut(ramp(progress, from: coveringFaceFadeStart, to: cardFadeEnd)) }
         guard carriesDeparture(standIn) else { return swapFractions(at: progress).fill }
         return easeIn(ramp(progress, from: 0, to: carryFadeEnd))
+    }
+
+    /// ⚠️ EXACTLY ONE ALPHA MOVES over a covering page, and it is the view's.
+    ///
+    /// The stand-in's own alpha fades the marker in as ONE opaque unit — disc
+    /// and glyph together — which is the only shape of fade this transition
+    /// permits against a finished drawing. Ramp the content as well and the
+    /// glyph renders at alpha squared: it fades faster than the disc beneath
+    /// it, and the frame in the middle is the half-drawn overlay the blend law
+    /// forbids.
+    static func contentOpacity(at progress: CGFloat, covering: Bool) -> CGFloat {
+        covering ? 1 : swapFractions(at: progress).content
     }
 
     private static func ramp(_ value: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
@@ -650,6 +756,13 @@ enum RevealStage {
         let host = UIView(frame: container.bounds)
         container.addSubview(host)
         host.addSubview(page)
+        // Cleared BEFORE the frame is assigned: `frame` is derived from bounds
+        // and transform, so framing a still-transformed page sets the wrong
+        // bounds. Inert today on a first staging, and not inert on the
+        // documented double-stage (UIKit asks for `interruptibleAnimator` even
+        // under an interaction controller), where under a scale it would
+        // mis-SIZE the page rather than only mis-place it.
+        page.transform = .identity
         page.frame = pageFrame
         // Opaque, because a mask reads its alpha channel — a clear view masks
         // everything away, which is a blank screen rather than a clipped one.
@@ -667,9 +780,11 @@ enum RevealStage {
     static func apply(_ pose: Pose, mask: UIView, page: UIView, standIn: UIView? = nil) {
         mask.frame = pose.mask
         mask.layer.cornerRadius = pose.maskRadius
+        // Scale first, then translate — so the translation is in the
+        // container's own points and does not shrink with the page.
         page.transform = CGAffineTransform(
             translationX: pose.pageTranslation.x, y: pose.pageTranslation.y
-        )
+        ).scaledBy(x: pose.pageScale, y: pose.pageScale)
         standIn?.frame = pose.mask
         (standIn as? RevealStandInShaping)?.setCornerRadius(pose.maskRadius)
         // LAID OUT HERE, inside whatever block is applying the pose, and that
@@ -1189,8 +1304,12 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = RevealStage.fill(at: 0, for: standIn)
-            (standIn as? RevealStandInShaping)?.setContentOpacity(0)
+            standIn.alpha = RevealStage.fill(
+                at: 0, for: standIn, covering: geometry.pageCoversWindow
+            )
+            (standIn as? RevealStandInShaping)?.setContentOpacity(
+                RevealStage.contentOpacity(at: 0, covering: geometry.pageCoversWindow)
+            )
         }
         // The same rule the grab leg states at length: the cell the window is
         // landing on is hidden for the whole close, or it shows beside the
@@ -1203,7 +1322,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             anchor: anchor,
             matchesAnchor: geometry.matchesAnchor,
             captionTop: geometry.sourceCaptionTop,
-            ridingFrom: standIn != nil ? open.mask : nil
+            ridingFrom: standIn != nil ? open.mask : nil,
+            covers: geometry.pageCoversWindow
         )
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         geometry.setDestinationGround(nil)
@@ -1255,7 +1375,19 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // act — see `RevealStage.carryFadeEnd`. Not skipped, and not the
             // three acts either: it has to be solid before the window has
             // shrunk enough for two copies of the media to read as two.
-            if RevealStage.carriesDeparture(standIn) {
+            if geometry.pageCoversWindow {
+                // One dissolve, late: the post is under it and opaque until the
+                // very end. `setContentOpacity` is already 1 and stays there —
+                // see `RevealStage.contentOpacity`.
+                UIView.animate(
+                    withDuration: total * (RevealStage.cardFadeEnd
+                        - RevealStage.coveringFaceFadeStart),
+                    delay: total * RevealStage.coveringFaceFadeStart,
+                    options: [.curveEaseOut]
+                ) {
+                    standIn.alpha = 1
+                }
+            } else if RevealStage.carriesDeparture(standIn) {
                 UIView.animate(
                     withDuration: total * RevealStage.carryFadeEnd,
                     delay: 0,
