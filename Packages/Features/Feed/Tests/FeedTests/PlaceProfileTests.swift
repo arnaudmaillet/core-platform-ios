@@ -179,6 +179,41 @@ struct PlaceProfileTests {
         #expect(profile.tabTitles == ["Discover", "Activity"])
     }
 
+    /// ⚠️ A DISMISSAL FROM THE MAP LANDS ON THE FIRST POST, however far the
+    /// viewer paged.
+    ///
+    /// This flight arrives from a MARKER: the grid beneath it has never been
+    /// seen, so there is no place on it the viewer was and no reason to put the
+    /// page down scrolled to an arbitrary row with everything above it unseen.
+    /// It used to land on the settled post's own tile.
+    ///
+    /// Its violation is quiet — a page that opens mid-list reads as a scroll
+    /// position, not as a bug — which is why the rule is pinned rather than
+    /// left to the animation.
+    @Test func aDismissalFromTheMapLandsOnTheFirstPost() async {
+        let profile = makeProfile(posts: [
+            post("post-1", kind: .photo, reactions: 50),
+            post("post-2", kind: .photo, reactions: 90),
+            post("post-3", kind: .photo, reactions: 10),
+        ])
+        profile.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        profile.beginLoading()
+        for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
+        let first = try? #require(profile.renderedPosts.first?.id)
+        #expect(first == PostID("post-2"), "precondition: the ranking put post-2 first")
+
+        // The viewer paged three posts on before closing.
+        profile.activePostID = { PostID("post-3") }
+        profile.zoomSourceWillStageDismissal()
+        #expect(profile.debugLandingAnchor == PostID("post-2"),
+                "the landing followed the viewer instead of introducing the page")
+
+        // And with no paging at all it is the same answer, not a special case.
+        profile.activePostID = { PostID("post-2") }
+        profile.zoomSourceWillStageDismissal()
+        #expect(profile.debugLandingAnchor == PostID("post-2"))
+    }
+
     /// The gallery's rule, on its own: the ranking minus what a grid cannot
     /// draw, in that order.
     @Test func theGalleryIsTheRankingMinusWhatHasNoCover() {

@@ -361,6 +361,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         gallery.activePostID = { [weak feed] in
             (feed as? SnapFeedViewController)?.activePostID
         }
+        gallery.activeCover = { [weak feed] in
+            (feed as? any SnapFeedSettleReporting)?.settledCoverImage
+        }
         // Eager on purpose: the gallery lives its early life invisible under
         // the feed (a mid-stack insertion never loads its view), and the
         // first anyone sees of it is a dismissal LANDING on it.

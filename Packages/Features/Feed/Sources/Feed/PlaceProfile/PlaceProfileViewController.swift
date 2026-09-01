@@ -113,6 +113,13 @@ final class PlaceProfileViewController: UIViewController {
     /// so this screen never has to know what a feed is.
     var activePostID: (() -> PostID?)?
 
+    /// The PICTURE that post is showing, for the same reason and from the same
+    /// place. A landing that no longer aims at the settled post has to carry it
+    /// anyway — the card takes off from a full screen the viewer is looking at,
+    /// and arriving as the first tile's photograph without passing through
+    /// theirs is a cut.
+    var activeCover: (() -> UIImage?)?
+
     /// The header's follow-this-place toggle, when the caller's subject has a
     /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
     private let following: ClusterGalleryFollowing?
@@ -1273,24 +1280,26 @@ extension PlaceProfileViewController: CardCloseLanding {
         if let tileDeparture {
             return tileCardCloseGeometry(dismissing: feed, departure: tileDeparture)
         }
-        // The post the SWIPES ENDED ON, not the one the tap opened: the
-        // landing has to answer for where the viewer actually is.
-        guard let landed = activePostID?() else { return nil }
-        stageDiscoverLanding(revealing: landed, sizedTo: view.bounds)
-        // ⚠️ A DIFFERENT POST ON PURPOSE (the product call): a text post's own
-        // tile is a coloured page, so the close lands on the next post the
-        // viewer would have reached with one more swipe — which is what the
-        // grid's rendered order means (`nextLandableMedia`). The window then
-        // carries that tile's own picture home, rather than a blank rect
-        // wearing a media page's furniture, which is what the flight did.
-        guard let substitute = page.nextLandableMedia(after: landed) else { return nil }
+        // ⚠️ THE FIRST TILE, like the flight beside it — the same product rule,
+        // for the same reason: this grid arrived from a marker and the viewer
+        // has never seen it, so there is nowhere on it they were.
+        //
+        // It used to hunt for the next landable MEDIA after the settled post
+        // (`nextLandableMedia`), which was the honest answer while a text post
+        // had a tile of its own to be "after". Discover is media-only now, so
+        // the settled text post is not in that array at all and the lookup
+        // returned nil for every one of these closes — a dead branch that read
+        // as a plain slide. Asking for the first tile needs no lookup.
+        guard let landed = activePostID?(), let first = page.posts.first else { return nil }
+        stageDiscoverLanding(revealing: first.id, sizedTo: view.bounds)
+        let substitute = first
         stageDiscoverLanding(revealing: substitute.id, sizedTo: nil)
         guard page.rowFrame(for: substitute.id, in: page) != nil else {
             debugLogLanding("no realized tile for \(substitute.id.rawValue)")
             return nil
         }
         anchorID = substitute.id
-        debugLogLanding("landing \(landed.rawValue) on tile \(substitute.id.rawValue)")
+        debugLogLanding("landing \(landed.rawValue) on FIRST tile \(substitute.id.rawValue)")
         let origin = TextRevealOrigin(
             rowFrame: { [weak self] space in
                 self?.page.rowFrame(for: substitute.id, in: space)
@@ -1457,11 +1466,22 @@ extension PlaceProfileViewController: ZoomTransitionSource {
 
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let appearance = page.heroAppearance(for: anchorID)
-        return PostGridFlightCard(
+        let card = PostGridFlightCard(
             post: page.post(for: anchorID) ?? Self.placeholder(id: anchorID),
             cover: appearance?.cover,
             style: appearance?.style ?? .tile
         )
+        // ⚠️ AND THE PICTURE THE VIEWER IS LEAVING, dissolved into it.
+        //
+        // The landing is the first tile now, which is almost never the post on
+        // screen — so the card would take off wearing a photograph the viewer
+        // has not seen, from the first frame. That is the cut the blend channel
+        // exists for. Nil when they never paged, which leaves the flight
+        // exactly the single-pictured one it has always been.
+        if let settled = activePostID?(), settled != anchorID {
+            card.setDeparturePicture(activeCover?())
+        }
+        return card
     }
 
     func setZoomSourceHidden(_ hidden: Bool) {
@@ -1492,9 +1512,24 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         mirrorSelection(to: 0)
         pager.setActivePage(0, animated: false)
         page.beginHeroFreeze()
-        if let active = activePostID?(), page.post(for: active) != nil {
-            anchorID = active
+        // ⚠️ THE FIRST TILE, whatever the viewer paged to (product call).
+        //
+        // This flight came from a MAP MARKER: the viewer has never seen this
+        // grid, so there is no place on it they were, and no reason to arrive
+        // in the middle of it. Landing on the settled post's own tile — what
+        // this did — meant tapping a cluster, swiping twice and closing put the
+        // page down scrolled to an arbitrary row, with everything above it
+        // unseen. The first tile is the page introducing itself.
+        //
+        // A post opened FROM this page is the opposite case and keeps the
+        // opposite rule: it lands on the very tile that was tapped, through
+        // `ExternalHeroZoomSource`, which never asks this source anything.
+        if let first = page.posts.first?.id {
+            anchorID = first
         }
+        debugLogLanding("flight from \(activePostID?()?.rawValue ?? "nil")"
+            + " to FIRST tile \(anchorID.rawValue)"
+            + " blend=\(activePostID?() != anchorID && activeCover?() != nil)")
         page.revealPost(anchorID)
         // Visible for the whole return: the card is landing ON this tile.
         page.setHeroHidden(true, for: anchorID, conceals: false)
@@ -1542,14 +1577,19 @@ extension PlaceProfileViewController: ZoomTransitionSource {
     /// measures in; giving the view that size and laying it out is what makes
     /// the row real enough to describe.
     func activityCardRevealOrigin(sizedTo bounds: CGRect) -> TextRevealOrigin? {
-        // RE-POINTED FIRST: the viewer may have paged the feed past the post
-        // that opened it, and the card to land on is the one they are
-        // actually looking at — which must be settled before anything is
-        // measured against it.
-        var anchor = anchorID
-        if let active = activePostID?(), activityPage.post(for: active) != nil {
-            anchor = active
-        }
+        // ⚠️ THE FIRST ROW, whatever the viewer paged to — the same product
+        // rule the flight and the Discover close beside it now follow, and for
+        // the same reason: this list arrived from a MARKER, the viewer has
+        // never seen it, so there is nowhere on it they were.
+        //
+        // It used to re-point at the settled post. That was the honest answer
+        // while "where they are" meant something here; from a marker it does
+        // not, and it put the page down scrolled to an arbitrary row with
+        // everything above it unseen.
+        //
+        // ⚠️ Settled BEFORE anything is measured, because every caption field
+        // below is read as a VALUE off this row.
+        let anchor = activityPage.posts.first?.id ?? anchorID
         guard activityPage.post(for: anchor) != nil else {
             debugLogLanding("no post for \(anchor.rawValue)")
             return nil
@@ -1696,6 +1736,11 @@ extension PlaceProfileViewController {
     var debugIdentityAlpha: CGFloat { bannerView.alpha }
     /// The band's two numbers as rendered — the place's own totals, which are
     /// deliberately NOT the gallery's (see `render`).
+    /// Which post a dismissal from the MAP is currently aimed at. The rule it
+    /// pins is a product one — always the first — and its violation is a page
+    /// that lands scrolled to an arbitrary row, which looks like a scroll
+    /// position rather than like a bug.
+    var debugLandingAnchor: PostID { anchorID }
     var debugMetrics: (reactions: Int64, views: Int64) {
         (reactionsMetric.debugValue, viewsMetric.debugValue)
     }
