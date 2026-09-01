@@ -144,6 +144,19 @@ final class RevealDismissInteractionController: NSObject,
             (standIn as? RevealStandInShaping)?.setContentOpacity(0)
         }
         self.standIn = standIn
+        // ⚠️ THE LANDING GOES AWAY FOR THE WHOLE CLOSE, exactly as the opening
+        // hides the row it grew out of. The window is bigger than the cell for
+        // most of the trip, so a cell left showing is a SECOND copy of the post
+        // sitting beside the one under the finger. Only the opening leg used to
+        // do this; the close set the flag back at `finish` and never set it in
+        // the first place, so on a grid landing the tile stayed visible the
+        // whole way down. Filmed.
+        //
+        // Released in `finish(cancelled:)`, which already runs
+        // `setSourceConcealed(cancelled)` in the same transaction as the
+        // unwrap — the cell and the window are identical at the landing rect,
+        // so swapping them there is invisible.
+        geometry.setSourceConcealed(true)
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         openRect = open.mask
         openCentre = CGPoint(x: open.mask.midX, y: open.mask.midY)

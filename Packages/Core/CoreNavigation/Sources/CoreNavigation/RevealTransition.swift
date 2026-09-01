@@ -1131,6 +1131,11 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             standIn.alpha = 0
             (standIn as? RevealStandInShaping)?.setContentOpacity(0)
         }
+        // The same rule the grab leg states at length: the cell the window is
+        // landing on is hidden for the whole close, or it shows beside the
+        // window as a second copy of the same post. Put back below, in the same
+        // transaction as the unwrap.
+        geometry.setSourceConcealed(true)
         let closed = RevealStage.closed(
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,

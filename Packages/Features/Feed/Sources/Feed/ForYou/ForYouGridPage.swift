@@ -302,7 +302,10 @@ final class ForYouGridPage: UIView {
     /// The reveal channel's equivalent, and it exists for the same reason —
     /// see `setRevealConcealed`. Weak for the same reason too: the collection
     /// view owns cells, and a recycled one is corrected at `cellForItemAt`.
-    private weak var revealConcealedCell: PostGridListRowCell?
+    /// ⚠️ ANY CELL, not just a row. Typed to the row while only list surfaces
+    /// opened windows, which quietly made every grid landing a no-op — see
+    /// `setRevealConcealed`.
+    private weak var revealConcealedCell: UICollectionViewCell?
     /// The post whose twin is in the air, concealed or not.
     ///
     /// Split from `heroHiddenPostID` because the two questions came apart: a
@@ -2102,18 +2105,25 @@ final class ForYouGridPage: UIView {
 
     func setRevealConcealed(_ concealed: Bool, for postID: PostID) {
         revealConcealedPostID = concealed ? postID : nil
-        let row = cell(for: postID) as? PostGridListRowCell
+        // ⚠️ WHATEVER KIND OF CELL IT IS. This resolved `as? PostGridListRowCell`
+        // and did nothing at all for anything else — so on the Discover GRID,
+        // whose cells are tiles, the landing was never hidden: the window
+        // closed onto a tile that was visible underneath it the whole way, two
+        // copies of the same post. Filmed. The hero channel beside this one has
+        // always switched on the cell (`applyHeroConcealment`); this one was
+        // written when only list surfaces opened windows and never caught up.
+        let target = cell(for: postID)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
-            // Whether the row it names is REALIZED, because a concealment
+            // Whether the cell it names is REALIZED, because a concealment
             // applied to nothing looks exactly like one that was never asked
-            // for — and the row it must hide is the one a dismissal just
-            // adopted into the departure slot.
+            // for — and the cell it must hide is the one a dismissal is landing
+            // on.
             print("[text-reveal] conceal=\(concealed) post=\(postID.rawValue)"
-                + " row=\(row == nil ? "MISSING" : "found")")
+                + " cell=\(target.map { String(describing: type(of: $0)) } ?? "MISSING")")
         }
         #endif
-        row?.setHeroConcealed(concealed)
+        Self.applyHeroConcealment(concealed, to: target)
         // ⚠️ THE INSTANCE, NOT JUST THE ID — the hero channel has kept one of
         // these since the day a lookup cleared the wrong cell, and this channel
         // never got the same treatment.
@@ -2132,9 +2142,9 @@ final class ForYouGridPage: UIView {
         // cost is a weak reference — but it has not been shown to fix anything,
         // and this note is what stops the next reader assuming it did.
         if concealed {
-            revealConcealedCell = row
+            revealConcealedCell = target
         } else {
-            revealConcealedCell?.setHeroConcealed(false)
+            Self.applyHeroConcealment(false, to: revealConcealedCell)
             revealConcealedCell = nil
         }
     }

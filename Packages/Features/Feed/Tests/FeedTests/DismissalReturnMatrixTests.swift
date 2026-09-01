@@ -403,6 +403,36 @@ struct DismissalReturnMatrixTests {
         #expect(page.isPostVisible(media), "the landing row is concealed under the card")
     }
 
+    /// ⚠️ A GRID'S LANDING IS CONCEALED TOO, and for a long time it was not.
+    ///
+    /// `setRevealConcealed` resolved its cell `as? PostGridListRowCell` and did
+    /// nothing at all for anything else, so on the Discover GRID — whose cells
+    /// are tiles — the window closed onto a tile that stayed visible underneath
+    /// it the whole way: two copies of the same post, one inside the window and
+    /// one behind it. Filmed before this test existed, and invisible to every
+    /// other assertion in this suite because they all use `.list`.
+    ///
+    /// The hero channel beside it has always switched on the cell; this one was
+    /// written when only list surfaces opened windows and never caught up.
+    @Test func aGridsLandingIsConcealedLikeARows() {
+        for style in [ForYouGridPage.Style.grid, .list] {
+            let page = page(style: style)
+            let target = page.posts[1].id
+            #expect(page.isPostVisible(target), "precondition: it is on screen to begin with")
+
+            // ⚠️ Asked of the CELLS, not of the concealment flags: the flag
+            // was being set the whole time — it is the cell that was never
+            // touched, which is exactly the shape of the defect.
+            page.setRevealConcealed(true, for: target)
+            #expect(concealedPosts(in: page).contains(target),
+                    "the \(style) landing was left showing under its own window")
+
+            page.setRevealConcealed(false, for: target)
+            #expect(!concealedPosts(in: page).contains(target),
+                    "the \(style) landing never came back")
+        }
+    }
+
     /// And the row the window departed from comes back when the flight lands —
     /// it is the other end of the same swap, and nothing else revisits it.
     @Test func theWindowsOwnRowComesBackAfterAFlightCloses() {
