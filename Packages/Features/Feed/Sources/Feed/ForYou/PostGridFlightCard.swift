@@ -13,10 +13,20 @@ import UIKit
 /// rather than restating them: the brick's 10pt continuous rounding, and the
 /// counter overlay's glyphs, font and inset.
 ///
-/// Layer order (bottom → top): cover image, live video surface, resting chrome
-/// (counters + play badge). The flight fades the resting chrome out as the card
-/// leaves the grid and back in as it returns, so a landed brick never pops its
-/// furniture on.
+/// Layer order (bottom → top): cover image, DEPARTURE cover image, live video
+/// surface, resting chrome (counters + play badge). The flight fades the resting
+/// chrome out as the card leaves the grid and back in as it returns, so a landed
+/// brick never pops its furniture on.
+///
+/// **Which half of the card belongs to which end of the flight.** The card's own
+/// cover, its floor colour and its rounding are the TILE — the source end, and
+/// `setZoomContentBlend`'s `t == 1`. The departure cover and the live surface are
+/// both the PAGE at the other end (`t == 0`): on a dismissal the surface is the
+/// picture the viewer is actually watching and the cover is that page's poster,
+/// which is why the cover sits beneath it. Only the cover is in the FADE, though
+/// — the surface owns its own alpha and needs no help covering the card, so the
+/// blend leaves it alone (`applyBlend`). The counters and the play badge belong
+/// to neither end.
 final class PostGridFlightCard: UIView {
     /// Which surface the card is impersonating. The two pages present media
     /// differently, and a hero that flew from both with one set of constants
@@ -72,6 +82,26 @@ final class PostGridFlightCard: UIView {
     /// which is a black frame at the moment the feed hands over.
     fileprivate var hasAdoptedLiveMedia = false
     private let imageView = UIImageView()
+    /// The PAGE's cover — the blend's second operand, empty and hidden until a
+    /// flight hands one in (`setDeparturePicture`).
+    ///
+    /// ABOVE the tile's cover because the blend only ever moves the alpha of
+    /// whichever operand is on TOP and leaves the other fully opaque beneath it
+    /// (see `applyBlend`). BELOW the live surface because on a dismissal that
+    /// surface is the departing page's own moving picture and this is nothing
+    /// but its poster — burying the video under a still would fly a frozen frame
+    /// for the whole flight, which is the regression the live media work exists
+    /// to prevent.
+    private let departureCoverView = UIImageView()
+    /// The floor the card rests on, kept so `applyContentFloor` can put it back.
+    ///
+    /// Not re-derivable from `backgroundColor`: the hot-adopt path clears that
+    /// property, so by the time anything needs the resting value it is gone.
+    private let restingBackground: UIColor
+    /// Whether the card is flying a donated surface that ALREADY had a frame at
+    /// adopt — the case that earns the transparent floor, and the only case
+    /// `applyContentFloor` has to weigh the blend against.
+    private var fliesHotLiveMedia = false
     /// The card's own surface, used when it has to mirror. Replaced by a
     /// donated one whenever the source can hand over the layer it is already
     /// rendering — see `adoptZoomLiveMediaView`.
@@ -98,6 +128,9 @@ final class PostGridFlightCard: UIView {
 
     init(post: GalleryPost, cover: UIImage?, style: Style) {
         self.style = style
+        // Video bricks keep a dark floor, exactly as the tile cell does: the
+        // poster may be unrenderable and the glyph needs a stage.
+        restingBackground = post.kind == .video ? .darkGray : .secondarySystemBackground
         super.init(frame: .zero)
         #if DEBUG
         // Balanced in deinit: a card alive after its flight settled is the
@@ -105,9 +138,7 @@ final class PostGridFlightCard: UIView {
         ZoomDebugCensus.increment(ZoomDebugCensus.Key.flightCard)
         #endif
         clipsToBounds = true
-        // Video bricks keep a dark floor, exactly as the tile cell does: the
-        // poster may be unrenderable and the glyph needs a stage.
-        backgroundColor = post.kind == .video ? .darkGray : .secondarySystemBackground
+        backgroundColor = restingBackground
         layer.cornerRadius = style.cornerRadius
         layer.cornerCurve = .continuous
 
@@ -117,6 +148,18 @@ final class PostGridFlightCard: UIView {
         imageView.frame = bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(imageView)
+
+        departureCoverView.contentMode = .scaleAspectFill
+        departureCoverView.clipsToBounds = true
+        // OPAQUE ground, and the same one the card rests on. An operand that is
+        // see-through anywhere sums with the other to a half-drawn frame, which
+        // is precisely what the fade law forbids; the matching ground also makes
+        // the two letterbox identically at every size the card passes through.
+        departureCoverView.backgroundColor = restingBackground
+        departureCoverView.isHidden = true
+        departureCoverView.frame = bounds
+        departureCoverView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(departureCoverView)
 
         videoRenderView.frame = bounds
         videoRenderView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -174,6 +217,134 @@ final class PostGridFlightCard: UIView {
     }
     #endif
 
+    // MARK: - Departure blend
+
+    /// How far the card has blended toward its OWN content: 0 draws the page's
+    /// picture, 1 the tile's.
+    ///
+    /// 1 at rest, because a card that was never handed a departure picture is
+    /// only ever the tile.
+    private var blend: CGFloat = 1
+
+    /// Hands the card the picture at the OTHER end of the flight, as the blend's
+    /// second operand. The card keeps drawing the tile's cover; this only gives
+    /// the blend something to draw against.
+    ///
+    /// It exists because a grid tile is a doorway into a PAGING feed, so the two
+    /// ends of a flight are routinely not the same picture — page five posts on
+    /// and dismiss and the card opens on a cover the viewer last saw five posts
+    /// ago, cut in at full screen. `ForYouGridZoomSource` re-points its anchor to
+    /// close that gap; `ExternalHeroZoomSource` deliberately cannot, and even the
+    /// re-pointing one falls back to the departure tile whenever the landed post
+    /// cannot be flown to.
+    ///
+    /// `nil` means there is no second operand: the channel goes inert and the
+    /// card renders exactly as it did before this existed, byte for byte,
+    /// transparent floor included. That is how the row of the product rule that
+    /// must NOT blend gets there — one picture at both ends, which a blend could
+    /// only soften.
+    ///
+    /// An operand that is not a photograph is still fine as long as it is an
+    /// opaque IMAGE: a text page can hand in the flat ground it was drawn on and
+    /// the fade runs from that colour to the tile. What must never arrive here is
+    /// its TEXT — blending two runs of text draws both of them, which is the law
+    /// this whole channel is built around.
+    ///
+    /// ⚠️ CALLER CONTRACT: this is the picture a card flies when it has no LIVE
+    /// one. A card that is still holding a live surface at the landing lands on
+    /// the page's moving picture rather than on the tile's cover, because the
+    /// surface covers the card at every instant and the blend cannot fade it —
+    /// see `applyBlend`. That is the right answer where the landing tile adopts
+    /// that very surface (`ForYouGridZoomSource.zoomAdoptLiveMediaView`), and it
+    /// is unchanged behaviour everywhere else; what it is not is something this
+    /// channel can be asked to fix.
+    ///
+    /// So a picture handed in here is never WRONG — the donation may arrive
+    /// after staging, and the caller cannot know at staging whether it will —
+    /// but it is only ever SEEN on a card that ends up without live media, which
+    /// includes the hoisted dismissal, where the host flies the page's surface
+    /// itself and leaves this card holding nothing.
+    func setDeparturePicture(_ image: UIImage?) {
+        departureCoverView.image = image
+        departureCoverView.isHidden = image == nil
+        applyContentFloor()
+        applyBlend()
+    }
+
+    /// The blend channel: `t == 0` is the page's picture, `t == 1` the tile's.
+    /// Alpha-only, so calling this inside an animation block sweeps it with the
+    /// rest of the flight.
+    ///
+    /// ⚠️ DELIBERATELY DISJOINT FROM `zoomRestingChrome`. That channel is the
+    /// flight's own, it owns the counters and the play badge, and it runs on a
+    /// different clock on purpose — `ZoomFlight.poseInterpolated` excludes the
+    /// chrome alphas and swaps them inside the release spring instead. A blend
+    /// riding it would drag the counters onto the pictures' clock and vice versa.
+    func setBlend(_ t: CGFloat) {
+        blend = min(max(t, 0), 1)
+        applyBlend()
+    }
+
+    /// Applies `blend` to the page operand, which is always the one on top.
+    ///
+    /// ⚠️ EXACTLY ONE operand's alpha ever moves; the tile's cover stays fully
+    /// opaque underneath it. That is the whole argument for why this blend is
+    /// allowed where the flight's other fades are not. Two half-drawn layers over
+    /// the card's floor is the "two half-drawn overlays" that
+    /// `ZoomFlight.poseInterpolated` rules out for the chrome alphas and that
+    /// `RevealTransition`'s window law rules out for the caption. With one opaque
+    /// operand behind, every intermediate frame is an opaque sum of two
+    /// photographs — a whole picture, never two transparent ones.
+    ///
+    /// ⚠️ THE COUNTERS AND THE BADGE ARE IN NEITHER OPERAND, and the counters are
+    /// why. They are a run of TEXT over the media, and text is exactly what the
+    /// fade law is about; they are also the TILE's furniture rather than a
+    /// picture of anything, so there is no page-side half for them to cross-fade
+    /// against. They keep the owner they already have — `zoomRestingChrome`,
+    /// posed by the flight. `.listMedia` has no furniture at all: a timeline
+    /// row's caption, author line and metrics are drawn by the row BELOW the
+    /// media and the card never carries them, which is what leaves both styles
+    /// with two pictures and nothing else to blend.
+    ///
+    /// ⚠️ AND THE LIVE SURFACE IS NOT IN THE FADE, which is where this card and
+    /// `PinCardView` genuinely differ rather than merely being spelt differently.
+    /// The pin's surface only ever arrives by mirroring, so nothing but the pin
+    /// writes its alpha; this card's arrives donated and already running, through
+    /// `VideoRenderView.revealOnFirstFrame` — a mechanism whose entire job is to
+    /// OWN that alpha, holding it at 0 until a frame exists and taking it to 1 in
+    /// a two-frame cross-fade the instant one lands. That moment is not the
+    /// card's to schedule, so a blend writing the same property would be two
+    /// drivers on one layer: the defect `zoomLiveMediaSurface` already records
+    /// for `frame`, in `alpha`.
+    ///
+    /// It also does not need to be. A surface is laid out to cover the card at
+    /// every instant of the morph, so while it draws it IS the page operand, and
+    /// the cover fading underneath it is simply not on screen. The consequence is
+    /// a caller's to weigh, not this method's — see `setDeparturePicture`.
+    private func applyBlend() {
+        // No second operand: back to the resting value, which is the un-blended
+        // card exactly as it was.
+        departureCoverView.alpha = departureCoverView.image == nil ? 1 : 1 - blend
+    }
+
+    /// Whether the card draws anything of its own beneath the page operand.
+    ///
+    /// A card flying an already-rendering surface is deliberately transparent
+    /// under it: the surface's content rides outside the CATransaction, so its
+    /// first composite can lag its commit by a pass, and an opaque cover or floor
+    /// under it turns that pass into a visible content blink — the landing tile's
+    /// stale cover drawn over the still-live source (video → cover → video).
+    ///
+    /// A departure picture cancels that, because it removes the reason. What sits
+    /// under the surface then is the PAGE's own poster rather than the tile's
+    /// cover, so the lagging pass shows the picture already in flight instead of
+    /// a foreign one — and the blend positively requires an opaque floor, since
+    /// fading the page operand off a transparent card lands on a hole.
+    private func applyContentFloor() {
+        let isOpaque = departureCoverView.image != nil || !fliesHotLiveMedia
+        imageView.isHidden = !isOpaque
+        backgroundColor = isOpaque ? restingBackground : .clear
+    }
 }
 
 // MARK: - ZoomFlightCard
@@ -241,7 +412,9 @@ extension PostGridFlightCard: ZoomFlightCard {
         view.frame = bounds
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.clipsToBounds = true
-        insertSubview(view, aboveSubview: imageView)
+        // ABOVE the page operand, never merely above the tile's cover: the
+        // surface IS that operand in motion and this cover is only its poster.
+        insertSubview(view, aboveSubview: departureCoverView)
         hasAdoptedLiveMedia = true
         // A card flying a surface that ALREADY HAS A FRAME must be
         // transparent beneath it. The surface's content rides outside the
@@ -253,10 +426,13 @@ extension PostGridFlightCard: ZoomFlightCard {
         // of a flash. A COLD surface keeps the cover: there is no video
         // anywhere yet, so the cover is the content, exactly as on a card
         // with no live media at all.
-        if view.hasFrame {
-            imageView.isHidden = true
-            backgroundColor = .clear
-        }
+        //
+        // Latched rather than assigned, and re-derived rather than applied
+        // here: a departure picture may be handed in on either side of this
+        // call, and `applyContentFloor` is what decides between the two of
+        // them whichever order they arrive in.
+        if view.hasFrame { fliesHotLiveMedia = true }
+        applyContentFloor()
         // Not `isHidden = false`. On a cold flight this surface has no frame
         // yet, and showing it would replace the cover — the very pixels the
         // tile is displaying — with an empty surface for one decode interval.
@@ -292,6 +468,17 @@ extension PostGridFlightCard: ZoomFlightCard {
 
     func setZoomCornerRadius(_ radius: CGFloat) {
         layer.cornerRadius = radius
+    }
+
+    /// The tile is the flight's `t == 1` end and the page's picture its `t == 0`
+    /// end, which is already what `setBlend` means — the tile is the arrival on a
+    /// dismissal and the departure on a present, but either way "1" is the card's
+    /// own content and "0" is the picture at the other end.
+    ///
+    /// Inert until a departure picture has been handed in, so every flight that
+    /// does not need a blend is untouched by this.
+    func setZoomContentBlend(_ t: CGFloat) {
+        setBlend(t)
     }
 
     /// The surface fills the card and resizes with it, so `resizeAspectFill`
