@@ -167,8 +167,19 @@ final class MapPinZoomSource: ZoomTransitionSource {
         return mapView.convert(rect, to: container)
     }
 
+    /// ⚠️ PRESENCE AS WELL AS POSITION, and the second half is not redundant.
+    ///
+    /// The rect test alone answers about a COORDINATE, and a marker that a
+    /// reconcile removed while the feed was open still has one — inside the
+    /// viewport, as often as not. The flight then declines the centred fallback
+    /// it exists for and lands on a square of empty map instead, while
+    /// `setZoomSourceHidden` silently no-ops because there is no view to hide.
+    /// Asking the map whether it still holds the annotation is the difference
+    /// between a graceful collapse and a card settling onto nothing.
     var zoomSourceIsOnScreen: Bool {
-        guard let mapView else { return false }
+        guard let mapView,
+              mapView.annotations.contains(where: { ($0 as AnyObject) === (annotation as AnyObject) })
+        else { return false }
         return mapView.visibleMapRect.contains(MKMapPoint(annotation.coordinate))
     }
 

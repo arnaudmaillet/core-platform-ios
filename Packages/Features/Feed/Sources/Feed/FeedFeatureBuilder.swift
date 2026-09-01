@@ -239,8 +239,34 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             nav?.popViewController(animated: true)
         }
         if let gallery = galleryPresenter {
+            // THE ESCAPE, in two drivers on ONE axis, split by KIND.
+            //
+            // ⚠️ BOTH ARE LOAD-BEARING, and the split is not a preference.
+            // A post with media has something to fly, so the horizontal swipe
+            // should be a FLIGHT home to the marker rather than the platform's
+            // slide — that is what this branch gained. But the feed is a PAGER,
+            // and a viewer who swipes onto a text post has nothing left to fly:
+            // every zoom gate refuses `.card` before it even looks at an axis,
+            // the pop animator declines for the same reason, and
+            // `zoomOwnsInteractiveDismissal` has already told the stack's own
+            // edge gesture to stay away. Take the slide out and that page has
+            // no way back but the chevron — the exact shipped defect the map
+            // wrote `attachCardCloseAlongsideFlight` to cure one level up.
+            //
+            // Two drivers may share an axis ONLY through this arbitration: the
+            // flight refuses `.card` from one side, the slide refuses
+            // everything else from the other, so exactly one claims any drag.
+            // The disjoint-axis rule is about drivers that self-gate on the
+            // axis alone, which these two do not.
+            let mapSource = gallery.mapReturn?(destination)
             let slide = InteractiveSlideDismissal()
             retainer.slideEscape = slide
+            // Only when there IS a flight to arbitrate with. A marker that has
+            // left the map yields no source (the documented fallback), and the
+            // slide must then go back to claiming every kind — otherwise the
+            // fallback would answer for text pages and nothing at all for the
+            // media ones it exists to carry.
+            slide.arbitratesWithHeroGrab = mapSource != nil
             slide.attach(to: destination, axes: [.horizontal])
             // Installed NOW — before the push hands the delegate slot to the
             // zoom flight below — for two reasons: the driver's begin gate
@@ -292,17 +318,89 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                     }
                 }
             }
-            slide.onFeedPopped = { [weak previousDelegate] nav in
-                // The escape landed on the map: the same close-out the
-                // vertical return runs through `onSourceReturned`, minus the
-                // tile reveal — the gallery left the stack with the drop.
-                // (`install`'s own teardown restored the ZOOM controller a
-                // beat ago; the flight is over, so the slot goes back to
-                // whoever owned it before the push.)
-                nav.delegate = previousDelegate
+            // The escape landed: the same close-out the vertical return runs
+            // through `onSourceReturned`, minus the tile reveal — the gallery
+            // left the stack with the drop.
+            //
+            // ⚠️ The slot goes to NOBODY when the gallery is gone, rather than
+            // back to whoever owned it before this push. That owner is the
+            // gallery's own return flight, and handing the stack's delegate to
+            // a controller whose screen has just left it is how a later push
+            // ends up popping on someone else's animator. The map's own
+            // landing nils it for exactly this reason.
+            let escapeCloseOut: (UINavigationController) -> Void = {
+                [weak previousDelegate, gallery] nav in
+                nav.delegate = nav.viewControllers.contains(gallery) ? previousDelegate : nil
                 retainer.transition = nil
                 retainer.slideEscape = nil
                 Self.restoreTabBar(on: nav)
+            }
+            slide.onFeedPopped = escapeCloseOut
+
+            // THE FLIGHT HALF. Same reorder-then-single-pop recipe as the
+            // slide's — UIKit commits a popTo's stack mutation at begin and a
+            // cancel does not restore it — with the flight driving the pop.
+            if let mapSource {
+                transition.attachInteractiveDismissal(
+                    to: destination.view, axes: [.horizontal], towards: mapSource
+                ) { [weak nav, weak transition] in
+                    guard let nav, let transition else { return }
+                    if let index = nav.viewControllers.firstIndex(of: gallery) {
+                        var stack = nav.viewControllers
+                        stack.remove(at: index)
+                        nav.setViewControllers(stack, animated: false)
+                    }
+                    // ⚠️ REGISTERED HERE, against the LIVE stack, and not at
+                    // the push against a guess. The flight's animator picks its
+                    // source by the controller the pop LANDS on
+                    // (`dismissSource(for:)`), and the only honest answer to
+                    // "what will that be" is the one below the feed once the
+                    // gallery has actually gone. Registering a marker's source
+                    // for the wrong screen flies a card to a rect computed
+                    // through a map that is not on screen.
+                    if nav.viewControllers.count >= 2 {
+                        transition.setDismissSource(
+                            mapSource, for: nav.viewControllers[nav.viewControllers.count - 2]
+                        )
+                    }
+                    // AFTER the stack edit: the un-animated `setViewControllers`
+                    // above reports a `didShow` of its own, and this controller
+                    // has no idempotence guard against hearing one for a screen
+                    // that is merely staying put.
+                    nav.delegate = transition
+                    nav.popViewController(animated: true)
+                }
+                // `setDismissSource` reroutes the landing: `didShow` on a
+                // registered target reports through here and deliberately NOT
+                // through `onSourceReturned`. Without the same close-out on
+                // both, the failure is invisible in the animation and surfaces
+                // as the NEXT push on this stack being unswipeable.
+                transition.onDismissedToIntermediate = { [weak nav] _ in
+                    guard let nav else { return }
+                    escapeCloseOut(nav)
+                }
+                // The reinsert half, for an abandoned swipe: the gallery goes
+                // back beneath the post so the vertical grab keeps its landing.
+                //
+                // ⚠️ THIS FIRES FOR EVERY DRIVER, the vertical grab included —
+                // hence the `!contains` guard, which makes it a no-op for a
+                // cancel that never dropped anything. `gallery` is captured
+                // STRONGLY on purpose: while off the stack this closure chain
+                // is its only owner. The one-runloop hop is load-bearing too —
+                // a same-turn `setViewControllers` inside
+                // `completeTransition(false)`'s call stack is silently
+                // swallowed, measured on the map's own escape.
+                transition.onDismissalCancelled = { [gallery, weak nav, weak destination] in
+                    DispatchQueue.main.async {
+                        guard let nav, let destination,
+                              !nav.viewControllers.contains(gallery),
+                              let feedIndex = nav.viewControllers.firstIndex(of: destination)
+                        else { return }
+                        var stack = nav.viewControllers
+                        stack.insert(gallery, at: feedIndex)
+                        nav.setViewControllers(stack, animated: false)
+                    }
+                }
             }
         }
         #if DEBUG
@@ -363,7 +461,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         title: String,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
-        mapReturn: @escaping () -> (any ZoomTransitionSource)?
+        mapReturn: @escaping (UIViewController?) -> (any ZoomTransitionSource)?
     ) -> UIViewController {
         let base = repository
         let engagement = engagementProvider

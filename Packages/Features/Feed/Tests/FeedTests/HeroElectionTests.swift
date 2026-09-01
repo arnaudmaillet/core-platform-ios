@@ -64,7 +64,7 @@ struct HeroElectionTests {
             feed: UIViewController(),
             // No map beneath this host: the page keeps the plain-slide
             // fallback, which is exactly the axis-split under test.
-            mapReturn: { nil }
+            mapReturn: { _ in nil }
         )
         stack.nav.pushViewController(gallery, animated: false)
         #expect(gallery.navigationController === stack.nav, "precondition: gallery on the stack")
@@ -83,6 +83,64 @@ struct HeroElectionTests {
             .filter { $0 is UIPanGestureRecognizer } ?? []
         #expect(pans.count == 2,
                 "expected the vertical grab AND the horizontal escape, found \(pans.count)")
+    }
+
+    /// With a MARKER to fly home to, the horizontal escape gains a second
+    /// tenant: the flight. The two share the axis and are told apart by KIND —
+    /// the flight refuses a `.card` dismissal, the slide refuses everything
+    /// else — so exactly one claims any drag.
+    ///
+    /// ⚠️ The sibling above deliberately yields no source, so it exercises the
+    /// FALLBACK and can say nothing about this. Without a fixture that returns
+    /// a real one, the flight escape would ship with no headless coverage at
+    /// all while the suite stayed green.
+    @Test func aMarkerToFlyToPutsAFlightBesideTheEscape() throws {
+        let stack = Stack()
+        let gallery = stack.builder.makeClusterGallery(
+            postIDs: [PostID("g1")], title: "Paris", following: nil,
+            feed: UIViewController(),
+            mapReturn: { _ in StubZoomSource() }
+        )
+        stack.nav.pushViewController(gallery, animated: false)
+        stack.builder.presentSnapFeedHero(
+            postIDs: [PostID("m1")], from: gallery, origin: origin(hasHero: true)
+        )
+
+        let pushed = try #require(stack.nav.viewControllers.last)
+        let pans = pushed.view.gestureRecognizers?
+            .filter { $0 is UIPanGestureRecognizer } ?? []
+        #expect(pans.count == 3,
+                "expected the vertical grab, the horizontal flight and the card-shaped escape beside it, found \(pans.count)")
+
+        // The arbitration IS the safety: without it two drivers self-gate on
+        // the same axis and race for the same drag.
+        let slides = pans.compactMap { $0.delegate as? InteractiveSlideDismissal }
+        let slide = try #require(slides.first, "the card-shaped escape went missing")
+        #expect(slide.arbitratesWithHeroGrab,
+                "the slide would claim media pages out from under the flight")
+    }
+
+    /// And the fallback keeps the slide UNARBITRATED. A marker that has left
+    /// the map yields no flight, so a slide that still refused everything but
+    /// `.card` would leave a media post with no horizontal way out at all —
+    /// the fallback answering for the one case it is not the fallback for.
+    @Test func withNoMarkerTheEscapeClaimsEveryKind() throws {
+        let stack = Stack()
+        let gallery = stack.builder.makeClusterGallery(
+            postIDs: [PostID("g1")], title: "Paris", following: nil,
+            feed: UIViewController(), mapReturn: { _ in nil }
+        )
+        stack.nav.pushViewController(gallery, animated: false)
+        stack.builder.presentSnapFeedHero(
+            postIDs: [PostID("m1")], from: gallery, origin: origin(hasHero: true)
+        )
+
+        let pushed = try #require(stack.nav.viewControllers.last)
+        let pans = pushed.view.gestureRecognizers?
+            .filter { $0 is UIPanGestureRecognizer } ?? []
+        let slides = pans.compactMap { $0.delegate as? InteractiveSlideDismissal }
+        let slide = try #require(slides.first)
+        #expect(!slide.arbitratesWithHeroGrab)
     }
 
     /// The control: an ordinary presenter's post carries exactly one pan —
@@ -214,4 +272,25 @@ private struct SilentElectionProvider: FeedProviding {
     func loadPost(_ id: PostID) async throws -> FeedEntry {
         throw FeedError.transport(message: "unused")
     }
+}
+
+/// A marker's flight source, reduced to the four answers `presentSnapFeedHero`
+/// actually needs to arm an escape. Nothing here flies: the suite asserts the
+/// WIRING (which drivers exist, and how they arbitrate), per this file's
+/// headless rule that nothing waits on an animation.
+@MainActor
+private final class StubZoomSource: ZoomTransitionSource {
+    func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect {
+        CGRect(x: 0, y: 0, width: 56, height: 56)
+    }
+
+    var zoomSourceIsOnScreen: Bool { true }
+    func makeZoomFlightCard() -> any ZoomFlightCard { StubFlightCard() }
+    func setZoomSourceHidden(_ hidden: Bool) {}
+}
+
+private final class StubFlightCard: UIView, ZoomFlightCard {
+    var zoomRestingCornerRadius: CGFloat { 12 }
+    var zoomRestingChrome: UIView? { nil }
+    func setZoomCornerRadius(_ radius: CGFloat) {}
 }

@@ -177,8 +177,18 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// With `-zoom-demo-grab-vertical` alongside, the same script drives the
     /// VERTICAL grab (forward-only milestone) instead of the horizontal one.
     public func debugScriptedGrab() {
-        let axis: ZoomDismissAxis = ProcessInfo.processInfo.arguments
-            .contains("-zoom-demo-grab-vertical") ? .vertical : .horizontal
+        debugScriptedGrab(
+            axis: ProcessInfo.processInfo.arguments.contains("-zoom-demo-grab-vertical")
+                ? .vertical : .horizontal
+        )
+    }
+
+    /// The same script with the axis said out loud, for a run that needs BOTH
+    /// — a chain that reaches a screen by one axis and then leaves it by the
+    /// other. `-zoom-demo-grab-vertical` is process-wide, so it cannot express
+    /// that, and a harness forced to pick one axis for the whole run can only
+    /// ever verify half of a two-gesture path.
+    public func debugScriptedGrab(axis: ZoomDismissAxis) {
         // ⚠️ THE DRIVER THAT IS ARMED FOR THIS AXIS, not always the first one.
         //
         // A stack with an intermediate screen attaches a second driver with a

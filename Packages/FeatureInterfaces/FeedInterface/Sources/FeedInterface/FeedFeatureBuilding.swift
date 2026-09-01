@@ -200,19 +200,32 @@ public protocol FeedFeatureBuilding {
     /// `following` puts the follow-this-place toggle in the gallery's header
     /// (`nil` hides it — a caller whose subject has no followable identity).
     ///
-    /// `mapReturn` stages the gallery's OWN dismissal back to the map: called
-    /// when the gallery becomes the top screen, it produces a fresh flight
-    /// source for the cluster's marker — fresh because the marker's face,
-    /// ring and even presence can all have changed since the tap — and the
-    /// gallery's pop then flies home to it (hero), with the plain slide kept
-    /// as the fallback whenever the closure answers `nil` (the marker left
-    /// the map).
+    /// `mapReturn` stages a dismissal back to the map: it produces a fresh
+    /// flight source for the cluster's marker — fresh because the marker's
+    /// face, ring and even presence can all have changed since the tap — with
+    /// the plain slide kept as the fallback whenever it answers `nil` (the
+    /// marker left the map).
+    ///
+    /// Its argument is WHICH SCREEN IS DEPARTING, and it exists because there
+    /// are two of them. The gallery itself is one: it becomes top, the viewer
+    /// swipes, and the card flies home carrying the marker's own picture —
+    /// `nil`, because a whole grid is not a post and there is nothing to
+    /// dissolve. The other is a post pushed OVER the gallery, whose horizontal
+    /// swipe escapes past it to the map: that screen is a PAGER, so what the
+    /// viewer is leaving is a picture the marker may know nothing about, and
+    /// the flight has to dissolve it into the marker's own. Pass the pushed
+    /// controller and the source resolves that for itself.
+    ///
+    /// ⚠️ Still resolved at the DEPARTING screen's own staging, not at its
+    /// push. The argument names a screen, never a picture: what that screen is
+    /// showing is asked for later, through `SnapFeedSettleReporting`, because
+    /// the viewer goes on paging after the caller has stopped watching.
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
-        mapReturn: @escaping () -> (any ZoomTransitionSource)?
+        mapReturn: @escaping (UIViewController?) -> (any ZoomTransitionSource)?
     ) -> UIViewController
 }
 

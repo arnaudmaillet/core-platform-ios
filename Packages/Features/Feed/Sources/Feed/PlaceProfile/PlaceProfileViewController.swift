@@ -150,7 +150,12 @@ final class PlaceProfileViewController: UIViewController {
     /// the marker's face, ring and presence can all churn while this page is
     /// buried under the feed. `nil` — or a `nil` answer — keeps the plain
     /// slide: the fallback dismissal for a marker the map no longer shows.
-    var mapReturn: (() -> (any ZoomTransitionSource)?)?
+    /// The map's way home, asked WHICH SCREEN IS DEPARTING — see
+    /// `FeedFeatureBuilding.makeClusterGallery`. This page passes nil for its
+    /// own return (a grid is not a post, so there is nothing to dissolve); a
+    /// post pushed over it passes itself, and the flight blends what that
+    /// pager settled on into the marker's own face.
+    var mapReturn: ((UIViewController?) -> (any ZoomTransitionSource)?)?
 
     /// The page's own hero return to the map — created once, then installed
     /// as the stack's delegate whenever this page is top, so BOTH the back
@@ -206,7 +211,7 @@ final class PlaceProfileViewController: UIViewController {
     /// takes the slot and hands back whatever it captured.
     private func installMapReturnIfTop() {
         guard let nav = navigationController, nav.topViewController === self else { return }
-        if mapReturnTransition == nil, let source = mapReturn?() {
+        if mapReturnTransition == nil, let source = mapReturn?(nil) {
             let transition = ZoomTransitionController(source: source, destination: self)
             transition.attachInteractiveDismissal(to: view, axes: [.horizontal]) { [weak nav] in
                 nav?.popViewController(animated: true)
@@ -285,9 +290,17 @@ final class PlaceProfileViewController: UIViewController {
         // dismiss that one" usage it exists for. Delay is absolute rather than
         // chained off the open so a run can settle a page first.
         if let after = value("-maps-place-tile-dismiss") {
+            // ⚠️ ITS OWN AXIS, not the process-wide `-zoom-demo-grab-vertical`.
+            // A run that reaches this page by a VERTICAL grab and then leaves
+            // the post above it HORIZONTALLY needs both in one process, and a
+            // single global flag cannot say that — which is how the escape leg
+            // went unscripted while the flag was set for the leg before it.
+            // Horizontal by default: that is the escape this hook exists for.
+            let axis: ZoomDismissAxis =
+                arguments.contains("-maps-place-tile-dismiss-vertical") ? .vertical : .horizontal
             DispatchQueue.main.asyncAfter(deadline: .now() + after) {
-                print("[place] scripting tile-feed dismissal")
-                ZoomTransitionController.debugMostRecent?.debugScriptedGrab()
+                print("[place] scripting tile-feed dismissal axis=\(axis)")
+                ZoomTransitionController.debugMostRecent?.debugScriptedGrab(axis: axis)
             }
         }
     }
