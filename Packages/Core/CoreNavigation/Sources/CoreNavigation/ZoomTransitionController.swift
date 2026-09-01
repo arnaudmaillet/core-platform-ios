@@ -211,6 +211,39 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
             }
             return animator
         case .pop where fromVC === feed:
+            // ⚠️ ONLY FOR A POST THAT HAS SOMETHING TO FLY — the third and last
+            // place one rule is stated.
+            //
+            // `ZoomDismissInteractionController.gestureRecognizerShouldBegin`
+            // asks the destination this before it even looks at an axis, and
+            // `InteractiveSlideDismissal.animationControllerFor` asks it to
+            // decide whether to forward a pop back to this controller. This
+            // branch answered unconditionally, which left exactly one dismissal
+            // ungated: a pop nobody drove, on a stack with no card driver
+            // attached beside the flight — the back chevron on the map's Case A
+            // (single pin / generic cluster), where the whole point of the two
+            // gates above is that both grabs refuse.
+            //
+            // Measured there: page the feed to a TEXT post, press back, and the
+            // card flies home to the pin as a blank
+            // `.secondarySystemBackground` rounded rect wearing a replica of the
+            // MEDIA page's furniture. It is the hero animation about nothing
+            // `MapMarkerPresentation` rejects in prose — a graphic effect rather
+            // than continuity, since the destination has no cover at either end.
+            //
+            // Nil is the honest floor: UIKit's own pop, which is what a screen
+            // with nothing to fly should have had all along. No live grab can be
+            // mid-pop when we decline, because the gate above refuses `.card`
+            // ahead of the axis match — so the interaction controller UIKit now
+            // never asks for is one nothing was waiting on.
+            guard destination.zoomDismissalKind != .card else {
+                // The push's hide is this controller's to pay back. Only the
+                // return FLIGHT ever did, so declining without this would land
+                // the pop on a map missing the marker that was tapped —
+                // trading a hero about nothing for a hole.
+                source.setZoomSourceHidden(false)
+                return nil
+            }
             return ZoomAnimator(
                 // The flight flies to whichever screen this pop LANDS on —
                 // the presenting screen normally, a registered intermediate

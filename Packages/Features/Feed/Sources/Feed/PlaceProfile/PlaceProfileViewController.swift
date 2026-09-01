@@ -1036,6 +1036,88 @@ final class PlaceProfileViewController: UIViewController {
     }
 }
 
+// MARK: - The close a flight cannot carry
+
+/// What a TEXT post closes onto when it was opened by a FLIGHT.
+///
+/// ⚠️ THE PRESENTATION WAS CHOSEN AT THE TAP, and the feed is a pager: a
+/// media-faced marker opens with a hero, the viewer swipes to a text post,
+/// and now there is no media for that hero to fly. The map attaches a
+/// card-shaped driver alongside the flight for exactly this
+/// (`attachCardCloseAlongsideFlight`) and asks this screen where to land it.
+///
+/// ⚠️ THERE IS NO DEPARTURE TILE HERE, which is what makes this simpler than
+/// For You's version of the same close. That screen departs FROM a grid tile
+/// and must MOVE the landed post into the slot it left, or the close lands
+/// somewhere the viewer never was. This flight departed from a map marker and
+/// this grid has never been seen — so nothing has to be swapped anywhere. The
+/// close simply brings the landing post's own tile on screen and lands on it.
+extension PlaceProfileViewController: CardCloseLanding {
+    func cardCloseGeometry(dismissing feed: UIViewController) -> RevealGeometry? {
+        // The post the SWIPES ENDED ON, not the one the tap opened: the
+        // landing has to answer for where the viewer actually is.
+        guard let landed = activePostID?() else { return nil }
+        stageDiscoverLanding(revealing: landed, sizedTo: view.bounds)
+        // ⚠️ A DIFFERENT POST ON PURPOSE (the product call): a text post's own
+        // tile is a coloured page, so the close lands on the next post the
+        // viewer would have reached with one more swipe — which is what the
+        // grid's rendered order means (`nextLandableMedia`). The window then
+        // carries that tile's own picture home, rather than a blank rect
+        // wearing a media page's furniture, which is what the flight did.
+        guard let substitute = page.nextLandableMedia(after: landed) else { return nil }
+        stageDiscoverLanding(revealing: substitute.id, sizedTo: nil)
+        guard page.rowFrame(for: substitute.id, in: page) != nil else {
+            debugLogLanding("no realized tile for \(substitute.id.rawValue)")
+            return nil
+        }
+        anchorID = substitute.id
+        debugLogLanding("landing \(landed.rawValue) on tile \(substitute.id.rawValue)")
+        let origin = TextRevealOrigin(
+            rowFrame: { [weak self] space in
+                self?.page.rowFrame(for: substitute.id, in: space)
+            },
+            // A tile has no caption to cut against, so no veil — the same
+            // answer the map's marker gives, and for the same reason.
+            captionEnd: nil,
+            depthView: { [weak self] in self?.pager },
+            makeDismissStandIn: { [weak self] in
+                // The CLONE: a free-standing tile drawn from the substitute's
+                // own model, which loads its own cover. Sized from the slot it
+                // is landing on.
+                self?.page.makeTileStandIn(for: substitute, slotOf: substitute.id)
+            },
+            // ⚠️ FALSE, like the marker's. Aligning a full page to a small
+            // tile slides it most of the screen's width; the page holds still
+            // and the window closes over it.
+            alignsPageToSource: false,
+            cornerRadius: PostGridTileCell.mosaicCornerRadius,
+            // The tile's own floor, so the beat where the window carries
+            // neither picture is the colour of the brick it lands on.
+            fill: PostGridTileCell.fillColor(for: substitute),
+            setConcealed: { [weak self] concealed in
+                self?.page.setRevealConcealed(concealed, for: substitute.id)
+            },
+            willStageDismissal: { [weak self] in
+                self?.stageDiscoverLanding(revealing: substitute.id, sizedTo: nil)
+            },
+            dismissalDidEnd: { [weak self] committed in
+                self?.page.endHeroFreeze()
+                if !committed { self?.page.clearRevealConcealment() }
+            }
+        )
+        return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
+    }
+
+    func clearLandingConcealment() {
+        // BOTH channels: the flight hid the tapped marker's tile at the push
+        // and only its own return puts that back, so a visit that ends on a
+        // text post — closed by the card driver — would leave it blank.
+        page.clearRevealConcealment()
+        page.clearHeroConcealment()
+        page.endHeroFreeze()
+    }
+}
+
 // MARK: - The landing side of the cluster feed's vertical grab
 
 extension PlaceProfileViewController: ZoomTransitionSource {
@@ -1251,6 +1333,25 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         activityPage.revealPost(anchor)
         // And again: cells at the landed offset are realized by the pass
         // AFTER it is set, never by the one that set it.
+        view.layoutIfNeeded()
+    }
+
+    /// Puts this page on its Discover tab with `anchor`'s tile on screen.
+    /// Same shape and same two layout traps as `stageActivityLanding`.
+    private func stageDiscoverLanding(revealing anchor: PostID, sizedTo bounds: CGRect?) {
+        loadViewIfNeeded()
+        if let bounds, view.bounds.size != bounds.size { view.frame = bounds }
+        view.layoutIfNeeded()
+        if activeIndex != 0 {
+            page.setVerticalOffset(alignedOffset(for: 0))
+            activeIndex = 0
+            applyHeaderOffset(page.verticalOffset)
+            syncAutoplay()
+        }
+        mirrorSelection(to: 0)
+        pager.setActivePage(0, animated: false)
+        page.beginHeroFreeze()
+        page.revealPost(anchor)
         view.layoutIfNeeded()
     }
 

@@ -29,6 +29,29 @@ import UIKit
 /// page's `transform`. Neither touches the page's layout, which is what keeps
 /// the caption exactly where it was measured (see `RevealStage`).
 ///
+/// A screen a CARD-SHAPED close can land on, asked for the shape of that
+/// landing.
+///
+/// It exists because the surface that stages the close and the surface it
+/// lands on can be in different features: the map presents a cluster's feed
+/// and has to give it a dismissal, but the landing is the Feed package's
+/// place page, which Maps cannot name. The one thing Maps needs from it — a
+/// geometry — is already a CoreNavigation type, so the seam belongs here
+/// beside it rather than in either feature.
+///
+/// `nil` means "nothing to land on", which is how the caller selects the
+/// plain slide instead.
+@MainActor
+public protocol CardCloseLanding: AnyObject {
+    /// The window's landing, staged and measured. `feed` is the screen being
+    /// dismissed, so the landing can ask it what it settled on.
+    func cardCloseGeometry(dismissing feed: UIViewController) -> RevealGeometry?
+
+    /// Undo whatever the staging concealed. Called on completed pops only —
+    /// by then the landing is on screen and anything still hidden is a bug.
+    func clearLandingConcealment()
+}
+
 @MainActor
 public struct RevealGeometry {
     /// The rect the window opens from / closes onto, in the given space.

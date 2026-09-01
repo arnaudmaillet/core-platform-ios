@@ -2223,6 +2223,19 @@ public final class PostGridTileCell: UICollectionViewCell {
         didSet { contentView.layer.cornerRadius = cornerRadius }
     }
 
+    /// The floor a brick draws its cover on: a dark stage for video, whose
+    /// poster may be unrenderable (or plain black in the simulator), and the
+    /// system fill for everything else.
+    ///
+    /// Static because a stand-in needs the SAME answer with no cell to ask —
+    /// see `PostGridTileStandInView`, where this is the view's own fill and the
+    /// tile it holds is what fades over it. Two spellings of one colour would
+    /// make the empty beat of a dismissal a different shade from the brick it
+    /// lands on.
+    public static func fillColor(for post: GalleryPost) -> UIColor {
+        post.kind == .video ? .darkGray : .secondarySystemBackground
+    }
+
     /// The image the brick is currently showing — see `PostGridListRowCell`'s
     /// note for why a hero reads this rather than the image pipeline.
     public var renderedCover: UIImage? { imageView.image }
@@ -2430,7 +2443,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
         // Video tiles keep a dark floor: their poster may be unrenderable
         // (or plain black in the simulator), and the glyph needs a stage.
-        contentView.backgroundColor = post.kind == .video ? .darkGray : .secondarySystemBackground
+        contentView.backgroundColor = Self.fillColor(for: post)
 
         views.set(post.viewCount)
 

@@ -80,6 +80,12 @@ final class MapsViewController: UIViewController {
     private static let prewarmCap = 16
     /// Retains the transitioning delegate for the life of a presentation.
     private var activeTransition: ZoomTransitionController?
+    /// The card-shaped close that rides alongside the flight, for the posts
+    /// the flight cannot carry (see `attachCardCloseAlongsideFlight`). Held
+    /// because `UINavigationController.delegate` is weak and nothing else
+    /// would keep this driver alive to see its own swipe; released by its
+    /// `onFeedPopped`.
+    private var cardClose: InteractiveSlideDismissal?
     /// True from the moment a plain push is fired until the map is back on
     /// screen. It does for that path exactly what `activeTransition` does for
     /// the flight: the instant-tap recognizer and MapKit's own `didSelect` can
@@ -1958,9 +1964,86 @@ extension MapsViewController: MKMapViewDelegate {
             // seen — its view is not even loaded (pinned by the spike suite,
             // `InteractivePopToStackTests`).
             nav.setViewControllers(nav.viewControllers + [gallery, feedVC], animated: true)
+            attachCardCloseAlongsideFlight(feed: feedVC, gallery: gallery, on: nav)
         } else {
             nav.pushViewController(feedVC, animated: true)
         }
+    }
+
+    /// A dismissal for the posts this flight cannot carry.
+    ///
+    /// ⚠️ THE FEED IS A PAGER AND THE PRESENTATION WAS CHOSEN AT THE TAP. A
+    /// media-faced marker opens with a hero; swipe to a TEXT post and there is
+    /// no media left for that hero to fly. Both zoom grabs then refuse —
+    /// `ZoomDismissInteractionController` gates on `zoomDismissalKind != .card`
+    /// BEFORE it looks at the axis, so the horizontal one refuses too — and
+    /// the native edge pop is already disclaimed. Measured: on that page the
+    /// drag did nothing at all, on either axis, and the back chevron was the
+    /// only way out.
+    ///
+    /// For You hit this first and answered it with exactly this driver
+    /// (`attachCardCloseAlongsideFlight`); Case B never received the
+    /// equivalent. `arbitratesWithHeroGrab` is what divides the work: each
+    /// side refuses the other's kind, so exactly one claims any grab.
+    private func attachCardCloseAlongsideFlight(
+        feed: UIViewController, gallery: UIViewController, on nav: UINavigationController
+    ) {
+        guard let landing = gallery as? any CardCloseLanding else { return }
+        let slide = InteractiveSlideDismissal()
+        cardClose = slide
+        slide.resetForNewPresentation()
+        slide.arbitratesWithHeroGrab = true
+        slide.attach(to: feed, axes: [.horizontal, .vertical])
+        // ⚠️ ONCE. A swipe asks twice — when the grab claims the screen, and
+        // again when the pop it triggers asks for an animator — and the
+        // adoption below is a MOVE, so a second one would put the two tiles
+        // back where they started.
+        var hasPrepared = false
+        slide.prepareForDismissal = { [weak feed, weak landing] _ in
+            guard !hasPrepared, let feed, let landing else { return }
+            // ⚠️ ONLY FOR A CLOSE THAT CARRIES A CARD. This runs for every
+            // dismissal including a hero's, and the staging below CONCEALS a
+            // tile — a flight landing on a hidden tile reads as no animation
+            // at all. Asked of the same authority both grabs gate on, so the
+            // three can never disagree about what the post is.
+            guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
+            else { return }
+            hasPrepared = true
+            slide.revealGeometry = landing.cardCloseGeometry(dismissing: feed)
+        }
+        // The backstop: whatever animated the close, no tile stays hidden. The
+        // staging above conceals one, and only the reveal's own completion
+        // pays that back — a pop finished by anything else would leave a hole
+        // in the mosaic for good.
+        slide.onFeedPopped = { [weak self, weak landing] _ in
+            landing?.clearLandingConcealment()
+            self?.cardClose = nil
+        }
+        // AFTER the push, so the flight controller is what `install` captures
+        // and a `.hero` pop forwards straight back to it.
+        slide.install(on: nav)
+        #if DEBUG
+        // `-text-swipe-demo <peak>` (+ `-zoom-demo-grab-vertical` for the
+        // axis): the same script the reveal path honours, on the driver that
+        // is otherwise unreachable — this grab only exists for a post the
+        // viewer has PAGED to, and the simulator injects neither the paging
+        // nor the drag. Pair with `-snap-start-index N` to settle on a text
+        // page first.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-text-swipe-demo"),
+           position + 1 < arguments.count,
+           let peak = Double(arguments[position + 1]) {
+            let axis: ZoomDismissAxis = arguments.contains("-zoom-demo-grab-vertical")
+                ? .vertical : .horizontal
+            Task { @MainActor [weak slide] in
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                let driven = await slide?.debugPerformSwipe(
+                    peakProgress: CGFloat(peak), axis: axis
+                )
+                print("[card-close] peak=\(peak) axis=\(axis) driven=\(driven ?? false)")
+            }
+        }
+        #endif
     }
 }
 

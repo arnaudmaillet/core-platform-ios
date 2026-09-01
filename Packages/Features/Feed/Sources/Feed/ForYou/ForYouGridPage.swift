@@ -1324,6 +1324,70 @@ final class ForYouGridPage: UIView {
         style == .grid || post.kind != .text
     }
 
+    /// The next post in the RENDERED order after `postID` that a close can
+    /// honestly land on: one with a cover, that `canLandHero` accepts.
+    ///
+    /// ⚠️ "NEXT" IS NEXT IN `posts`, and only this page can answer it. The
+    /// snap feed a tap opens is seeded as a SUFFIX of this page's ordered ids
+    /// — `ForYouViewController.openFeed` hands it `posts[index...]` — so the
+    /// post after the anchor here is literally the one the viewer would have
+    /// reached with one more swipe. The view model's corpus is neither
+    /// ordered nor filtered the same way (`arrange` permutes it into slots and
+    /// `partitioned` groups the arrivals), so the same question asked there
+    /// answers about a different list.
+    ///
+    /// Wraps to the HEAD of the page only when nothing after the anchor
+    /// qualifies — the last post on a page still has to land somewhere, and
+    /// the alternative is nil, which is a close with no arrival.
+    ///
+    /// Two preferences decide between candidates, and the order between them
+    /// is a judgement:
+    ///
+    /// - OFF-SCREEN first. The landing swaps this post into the departure slot
+    ///   (`adoptForClose`), so a post the viewer is looking at right now
+    ///   vanishes from where it lives and reappears in the arrival cell,
+    ///   mid-landing, in front of them.
+    /// - A DECODED cover second. `isLandingPlaybackReady` holds the card until
+    ///   the arrival tile has a face, so a candidate the pipeline already holds
+    ///   lands immediately and one it does not costs the wait.
+    ///
+    /// Off-screen wins the conflict because the two failures are not the same
+    /// size: an undecoded cover is a slower close, which the readiness gate is
+    /// built to cover and the adoption's prefetch shortens, while a tile
+    /// changing under the viewer's eye is a wrong frame.
+    func nextLandableMedia(after postID: PostID) -> GalleryPost? {
+        guard let anchor = posts.firstIndex(where: { $0.id == postID }) else { return nil }
+        return bestLandableMedia(in: posts[(anchor + 1)...])
+            ?? bestLandableMedia(in: posts[..<anchor])
+    }
+
+    /// The best candidate in one run, or nil if the run holds none.
+    ///
+    /// Scanned rather than sorted, and a tie keeps the EARLIER post: order is
+    /// the whole meaning of "next", so two equally good candidates must resolve
+    /// to the nearer one.
+    private func bestLandableMedia(in run: ArraySlice<GalleryPost>) -> GalleryPost? {
+        var best: (rank: Int, post: GalleryPost)?
+        for post in run
+        where post.kind != .text && post.thumbnailURL != nil && canLandHero(on: post) {
+            let rank = (isPostVisible(post.id) ? 2 : 0) + (hasDecodedCover(post) ? 0 : 1)
+            // Off screen and already decoded: nothing further along can beat it.
+            if rank == 0 { return post }
+            if rank < (best?.rank ?? Int.max) { best = (rank, post) }
+        }
+        return best?.post
+    }
+
+    /// Whether the pipeline is already holding this post's cover.
+    ///
+    /// The CACHE, which is the only question this page can ask without
+    /// suspending — the same synchronous lookup `hasCover` makes before letting
+    /// a tile play against a blank face.
+    private func hasDecodedCover(_ post: GalleryPost) -> Bool {
+        guard let url = post.thumbnailURL else { return false }
+        return imagePipeline.cachedImage(for: url) != nil
+    }
+
     /// What the flight card should *look* like, without needing a coordinate
     /// space — the card is built before anyone knows the container, and asking
     /// for a frame there would mean inventing one.
@@ -1469,6 +1533,36 @@ final class ForYouGridPage: UIView {
             // The ROW's own height when it is realized — see the profile's
             // twin, and `RevealDismissCardView.init`.
             height: cell(for: postID)?.bounds.height
+        )
+    }
+
+    /// A free-standing tile drawn from `post`, sized and rounded like the cell
+    /// currently occupying `slotOf`'s place — what a close lands on when the
+    /// arrival shows a DIFFERENT post from the one that departed.
+    ///
+    /// The occupant decides the geometry rather than `post` itself, and it has
+    /// to: the landing swaps `post` into that slot, so the rect the window
+    /// closes onto is the SLOT's, whatever was in it a moment ago. Reading the
+    /// size off `post`'s own cell would measure wherever it happens to live
+    /// now, which is the tile the swap is about to empty.
+    ///
+    /// The stand-in loads its own cover, which is the whole reason it exists —
+    /// a `PostGridFlightCard` flies the cover it was handed, and for a post
+    /// that never departed there is none.
+    ///
+    /// Nil when nothing is realized at the slot: there is no rect to size to,
+    /// and a stand-in built at a guessed size lands at the wrong one.
+    func makeTileStandIn(for post: GalleryPost, slotOf occupantID: PostID) -> UIView? {
+        guard let size = cell(for: occupantID)?.bounds.size,
+              size.width > 0, size.height > 0
+        else { return nil }
+        return PostGridTileStandInView(
+            post: post,
+            size: size,
+            // The PAGE's rounding, not the cell default: this grid's gutter and
+            // curve are one decision — see `tileCornerRadius`.
+            cornerRadius: tileCornerRadius,
+            imagePipeline: imagePipeline
         )
     }
 

@@ -49,6 +49,48 @@ struct ZoomTransitionRoutingTests {
         #expect(foreignPop == nil, "a pop that is not the feed's must stay native")
     }
 
+    /// ⚠️ A POST WITH NOTHING TO FLY GETS NO FLIGHT FROM HERE.
+    ///
+    /// The same `zoomDismissalKind` the two grabs gate on
+    /// (`ZoomDismissInteractionController.gestureRecognizerShouldBegin`,
+    /// `InteractiveSlideDismissal.animationControllerFor`), asked at the one
+    /// decision point that used to answer unconditionally. What that cost, on
+    /// the map's Case A where no card driver is attached beside the flight: the
+    /// back chevron on a TEXT page flew a blank rounded rect wearing a replica
+    /// of the media page's furniture home to the pin.
+    ///
+    /// Nil is the answer, not a different animator — UIKit's native pop is the
+    /// floor a screen with nothing to fly should have had.
+    @Test func aPostThatTravelsAsACardGetsNoFlight() {
+        let (controller, nav, feed, _) = staged()
+        let map = UIViewController()
+
+        feed.kind = .card
+        #expect(controller.navigationController(
+            nav, animationControllerFor: .pop, from: feed, to: map
+        ) == nil, "a page with no media flew a hero about nothing")
+
+        feed.kind = .hero
+        #expect(controller.navigationController(
+            nav, animationControllerFor: .pop, from: feed, to: map
+        ) != nil, "a post with media lost its flight")
+    }
+
+    /// And the refusal is not a shrug: the push hid the tapped marker, and only
+    /// the return flight ever put it back. Declining without paying that back
+    /// would trade the hero about nothing for a map with a hole in it.
+    @Test func decliningTheFlightPutsBackWhatThePushHid() {
+        let (controller, nav, feed, source) = staged()
+        source.setZoomSourceHidden(true)
+        feed.kind = .card
+
+        _ = controller.navigationController(
+            nav, animationControllerFor: .pop, from: feed, to: UIViewController()
+        )
+
+        #expect(source.isHidden == false, "the tapped marker was left hidden on the map it lands on")
+    }
+
     /// Presenting asks the destination to stand its playback down BEFORE the
     /// push (the only moment early enough), through the initialiser.
     @Test func constructionWarnsTheDestinationBeforeAnythingMoves() {
@@ -129,12 +171,16 @@ struct ZoomTransitionRoutingTests {
 // MARK: - Doubles
 
 private final class RoutedSource: NSObject, ZoomTransitionSource {
+    /// The map pin's own state, recorded rather than swallowed: the push hides
+    /// it and the pop is the only thing that ever shows it again.
+    private(set) var isHidden = false
+
     func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect {
         CGRect(x: 10, y: 10, width: 80, height: 80)
     }
     var zoomSourceIsOnScreen: Bool { true }
     func makeZoomFlightCard() -> any ZoomFlightCard { RoutedCard() }
-    func setZoomSourceHidden(_ hidden: Bool) {}
+    func setZoomSourceHidden(_ hidden: Bool) { isHidden = hidden }
 }
 
 private final class RoutedCard: UIView, ZoomFlightCard {
@@ -145,6 +191,12 @@ private final class RoutedCard: UIView, ZoomFlightCard {
 
 private final class RoutedFeed: UIViewController, ZoomTransitionDestination {
     private(set) var willBeginCalls = 0
+    /// Settable per test, and read at the pop rather than at construction —
+    /// this screen is a pager, so the post being dismissed is routinely not the
+    /// one that opened it. `.hero` is the default every other test here wants.
+    var kind: ZoomDismissalKind = .hero
+
+    var zoomDismissalKind: ZoomDismissalKind { kind }
     func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect { .zero }
     func zoomFlightChrome() -> UIView? { nil }
     func setZoomContentHidden(_ hidden: Bool) {}
