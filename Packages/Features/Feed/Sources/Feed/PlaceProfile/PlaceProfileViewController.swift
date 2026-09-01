@@ -165,12 +165,6 @@ final class PlaceProfileViewController: UIViewController {
     /// has somewhere the viewer actually was, the other does not.
     private var tileDeparture: (id: PostID, isActivity: Bool)?
 
-    /// Which row the open text window is currently aimed at — the tapped post
-    /// until the close tells it otherwise. Stored rather than passed because
-    /// the rect, the stand-in and the concealment are three separate closures
-    /// that must all name the SAME post, and only one of them is handed the
-    /// settled id.
-    private var textRevealLanding: PostID?
 
     /// The page's own hero return to the map — created once, then installed
     /// as the stack's delegate whenever this page is top, so BOTH the back
@@ -1159,18 +1153,25 @@ final class PlaceProfileViewController: UIViewController {
     /// still and the card opens over it. Never mis-aimed, at the cost of the
     /// growth effect.
     ///
-    /// ⚠️ IT LANDS ON THE POST THE VIEWER STOPPED ON, not the one they tapped,
-    /// and that is not the same rule the media hero on this screen follows.
-    /// A hero opened from a media tile can fly home to that tile because both
-    /// ends are photographs. This opens from WORDS: page on to a picture and
-    /// there is nothing about that picture a text row can receive, so a window
-    /// aimed back at it closes onto a card that has nothing to do with what is
-    /// on screen — filmed as no animation at all, because a close with nothing
-    /// to carry degrades to the platform's slide.
+    /// ⚠️ IT LANDS ON THE POST THE VIEWER TAPPED, always — even several pages
+    /// on, even onto a photograph.
     ///
-    /// Re-pointing here is a SCROLL, never a reorder: `revealPost` moves the
-    /// list to the row, and nothing on this screen adopts or swaps. The ranked
-    /// order the product rule protects is untouched.
+    /// This was briefly re-pointed at the settled post, on the reasoning that a
+    /// window opened from WORDS has nothing a text row can receive once the
+    /// viewer is on a picture. That reasoning was answering the wrong
+    /// complaint. What made a paged close look like no animation at all was a
+    /// forwarded pop returning nil and stranding the grab
+    /// (`InteractiveSlideDismissal`'s decline rule); with that fixed the window
+    /// runs either way, and re-pointing bought nothing but a list that appeared
+    /// to shuffle. A scroll is not a reorder in the code and IS one to the eye:
+    /// the post that was under the card is replaced by another, which is
+    /// exactly what the product rule for this ranked tab forbids.
+    ///
+    /// So the fade is the answer, and the machinery already gives it:
+    /// `RevealStage.swapFractions` puts an empty beat between the page and the
+    /// card, so the departing media dissolves out and the original's words
+    /// dissolve in with nothing drawn over anything. That beat is also why this
+    /// is legal at all — neither half of the fade ever has text on both sides.
     private func textRowReveal(
         for post: GalleryPost, in grid: ForYouGridPage
     ) -> TextRevealOrigin? {
@@ -1184,45 +1185,34 @@ final class PlaceProfileViewController: UIViewController {
               grid.rowFrame(for: post.id, in: grid) != nil
         else { return nil }
         let anchor = post.id
-        textRevealLanding = anchor
         return TextRevealOrigin(
             rowFrame: { [weak self] space in
                 guard let self else { return nil }
-                let landing = textRevealLanding ?? anchor
-                return activityPage.textRowFrame(for: landing, in: space)
-                    ?? activityPage.rowFrame(for: landing, in: space)
+                return activityPage.textRowFrame(for: anchor, in: space)
+                    ?? activityPage.rowFrame(for: anchor, in: space)
             },
             captionEnd: nil,
             depthView: { [weak self] in self?.pager },
             makeDismissStandIn: { [weak self] _ in
-                guard let self else { return nil }
-                // Resolved through the same stored landing the rect uses, and
-                // never from the argument directly: the two must name ONE post
-                // or the window opens onto one row and draws another.
-                return activityPage.makeDismissStandIn(for: textRevealLanding ?? anchor)
+                // The settled post is deliberately ignored: this window closes
+                // onto the row it opened from, whatever the viewer paged to.
+                self?.activityPage.makeDismissStandIn(for: anchor)
             },
             alignsPageToSource: false,
             setConcealed: { [weak self] concealed in
-                guard let self else { return }
-                activityPage.setRevealConcealed(concealed, for: textRevealLanding ?? anchor)
+                self?.activityPage.setRevealConcealed(concealed, for: anchor)
             },
-            // Where the close is going is decided HERE, before anything is
-            // measured — the one moment this hook exists for. Two things
-            // happen: the landing is re-pointed at the post the viewer stopped
-            // on (when this list holds it), and the row is scrolled back into
-            // view. A hydration or an engagement decoration re-realizes this
-            // list under the open post, and an unrealized row answers nil for
-            // its rect — which sends the window to a centred fallback that on
-            // screen is indistinguishable from a working close.
-            willStageDismissal: { [weak self] settled in
+            // The row may have scrolled away under the open post — a hydration
+            // or an engagement decoration re-realizes this list — and an
+            // unrealized row answers nil for its rect, which sends the window
+            // to a centred fallback that on screen is indistinguishable from a
+            // working close. Bringing it back is all this does; the SETTLED
+            // post is deliberately unused, see the note above.
+            willStageDismissal: { [weak self] _ in
                 guard let self else { return }
-                if let settled, activityPage.post(for: settled) != nil {
-                    textRevealLanding = settled
-                }
-                let landing = textRevealLanding ?? anchor
                 view.layoutIfNeeded()
                 activityPage.beginHeroFreeze()
-                activityPage.revealPost(landing)
+                activityPage.revealPost(anchor)
                 view.layoutIfNeeded()
             },
             dismissalDidEnd: { [weak self] committed in
