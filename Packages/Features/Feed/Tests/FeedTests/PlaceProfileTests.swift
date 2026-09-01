@@ -84,15 +84,28 @@ struct PlaceProfileTests {
 
     // MARK: - Banner and metrics
 
-    /// The hero banner wears the RANKING's top post — the same post the
-    /// cluster pin's face and the Gallery's first tile show.
-    @Test func theBannerWearsTheTopRankedPost() {
-        let ranked = PlaceProfileViewController.ranked([
+    /// The hero banner wears the GALLERY's top post — the same post the
+    /// cluster pin's face and Discover's first tile show.
+    ///
+    /// ⚠️ THREE FACES, ONE PICTURE, and it is the reason the banner is asked of
+    /// the gallery rather than of the whole corpus. The pin wears its most-liked
+    /// MEDIA member; so does the first tile. Handed the full ranking instead, a
+    /// place whose loudest post is a check-in would show a neutral banner over
+    /// a grid whose first tile is the very photograph the pin is wearing.
+    @Test func theBannerWearsTheTopGalleryPost() {
+        let posts = [
             post("post-1", reactions: 12, thumbnail: "mock://cover-1"),
             post("post-2", reactions: 480, thumbnail: "mock://cover-2"),
-        ])
-        #expect(PlaceProfileViewController.bannerPost(in: ranked)?.id == PostID("post-2"))
+        ]
+        #expect(PlaceProfileViewController.bannerPost(
+            in: PlaceProfileViewController.gallery(posts))?.id == PostID("post-2"))
         #expect(PlaceProfileViewController.bannerPost(in: []) == nil)
+
+        // The loudest post in the place is words: the banner takes the loudest
+        // PICTURE instead, which is what the pin and the first tile are wearing.
+        let shouted = posts + [post("post-3", kind: .text, reactions: 9_000)]
+        #expect(PlaceProfileViewController.bannerPost(
+            in: PlaceProfileViewController.gallery(shouted))?.id == PostID("post-2"))
     }
 
     /// The metric band's two numbers are straight sums; a counter the
@@ -145,7 +158,12 @@ struct PlaceProfileTests {
 
     /// The whole fan-out through one hydration: both tabs populated from one
     /// corpus, each under its own rule — popularity on Discover, recency on
-    /// Activity — so the two can only ever disagree about ORDER.
+    /// Activity.
+    ///
+    /// ⚠️ THEY NO LONGER SHOW THE SAME POSTS. Discover is a GRID of covers and
+    /// drops what has none; Activity is a column of cards and keeps every kind.
+    /// The place's own numbers still come from the whole corpus — see
+    /// `theMetricsCountTheWholePlaceNotJustItsGallery`.
     @Test func oneHydrationFansOutToBothTabs() async {
         let profile = makeProfile(posts: [
             post("post-1", kind: .photo, reactions: 50, publishedAtMS: 1_000),
@@ -154,11 +172,38 @@ struct PlaceProfileTests {
         ])
         profile.beginLoading()
         for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
-        #expect(profile.renderedPosts.map(\.id.rawValue) == ["post-2", "post-1", "post-3"])
-        #expect(profile.renderedActivity.map(\.id.rawValue) == ["post-3", "post-2", "post-1"])
-        #expect(Set(profile.renderedActivity.map(\.id)) == Set(profile.renderedPosts.map(\.id)),
-                "one corpus, two orders")
+        #expect(profile.renderedPosts.map(\.id.rawValue) == ["post-2", "post-1"],
+                "a text post has no cover and cannot be a tile")
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["post-3", "post-2", "post-1"],
+                "the cards keep every kind — its words are not lost, only moved")
         #expect(profile.tabTitles == ["Discover", "Activity"])
+    }
+
+    /// The gallery's rule, on its own: the ranking minus what a grid cannot
+    /// draw, in that order.
+    @Test func theGalleryIsTheRankingMinusWhatHasNoCover() {
+        let ordered = PlaceProfileViewController.gallery([
+            post("post-1", kind: .photo, reactions: 50),
+            post("post-2", kind: .text, reactions: 900),
+            post("post-3", kind: .video, reactions: 90),
+        ])
+        #expect(ordered.map(\.id.rawValue) == ["post-3", "post-1"],
+                "the loudest post in the place is words, and words are not a tile")
+    }
+
+    /// ⚠️ AND THE NUMBERS ARE NOT THE GALLERY'S. A check-in with no photograph
+    /// is still something that happened here; dropping it from a total because
+    /// a grid cannot draw it would make the place look quieter than it is.
+    @Test func theMetricsCountTheWholePlaceNotJustItsGallery() async {
+        let profile = makeProfile(posts: [
+            post("post-1", kind: .photo, reactions: 50, views: 100, publishedAtMS: 1_000),
+            post("post-2", kind: .text, reactions: 7, views: 20, publishedAtMS: 2_000),
+        ])
+        profile.beginLoading()
+        for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
+        #expect(profile.renderedPosts.count == 1, "precondition: the text post left the grid")
+        #expect(profile.debugMetrics.reactions == 57)
+        #expect(profile.debugMetrics.views == 120)
     }
 
     // MARK: - The follow toggle

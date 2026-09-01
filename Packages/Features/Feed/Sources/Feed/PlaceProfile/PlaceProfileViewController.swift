@@ -150,12 +150,10 @@ final class PlaceProfileViewController: UIViewController {
     /// the marker's face, ring and presence can all churn while this page is
     /// buried under the feed. `nil` — or a `nil` answer — keeps the plain
     /// slide: the fallback dismissal for a marker the map no longer shows.
-    /// The map's way home, asked WHICH SCREEN IS DEPARTING — see
-    /// `FeedFeatureBuilding.makeClusterGallery`. This page passes nil for its
-    /// own return (a grid is not a post, so there is nothing to dissolve); a
-    /// post pushed over it passes itself, and the flight blends what that
-    /// pager settled on into the marker's own face.
-    var mapReturn: ((UIViewController?) -> (any ZoomTransitionSource)?)?
+    /// The map's way home — see `FeedFeatureBuilding.makeClusterGallery`.
+    /// This page is the only screen that leaves for the map: a post opened
+    /// from it goes home to its own tile on both axes.
+    var mapReturn: (() -> (any ZoomTransitionSource)?)?
 
     /// The tile a flight left THIS page from, and which tab it sat on — nil
     /// whenever the open post did not come from here (the map's Case B, where
@@ -235,7 +233,7 @@ final class PlaceProfileViewController: UIViewController {
     /// takes the slot and hands back whatever it captured.
     private func installMapReturnIfTop() {
         guard let nav = navigationController, nav.topViewController === self else { return }
-        if mapReturnTransition == nil, let source = mapReturn?(nil) {
+        if mapReturnTransition == nil, let source = mapReturn?() {
             let transition = ZoomTransitionController(source: source, destination: self)
             transition.attachInteractiveDismissal(to: view, axes: [.horizontal]) { [weak nav] in
                 nav?.popViewController(animated: true)
@@ -851,9 +849,9 @@ final class PlaceProfileViewController: UIViewController {
         loadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let posts = Self.ranked(try await loadPosts())
+                let members = try await loadPosts()
                 guard !Task.isCancelled else { return }
-                render(posts)
+                render(members)
             } catch {
                 guard !Task.isCancelled else { return }
                 // The members were already open in the feed above, so a failed
@@ -867,22 +865,28 @@ final class PlaceProfileViewController: UIViewController {
 
     /// One place fans the hydrated corpus out to every surface of the page,
     /// so they can never disagree about what the place contains.
-    private func render(_ ranked: [GalleryPost]) {
-        page.render(ranked.isEmpty
-            ? .empty(.init(title: "No posts here yet"))
-            : .content(ranked))
-        // The SAME corpus, read the other way round: Discover is what the
-        // place is known for, Activity is what happened here. One hydration
-        // fans out to both, so the two can never disagree about what the
-        // place contains — only about the order.
-        let recent = Self.chronological(ranked)
+    private func render(_ members: [GalleryPost]) {
+        // ⚠️ THE TWO TABS NO LONGER SHOW THE SAME POSTS, only the same place.
+        // Discover is a GRID of covers and drops what has none; Activity is a
+        // column of cards and keeps everything. One hydration still fans out to
+        // both, so they can only disagree about what this line says they
+        // disagree about.
+        let gallery = Self.gallery(members)
+        page.render(gallery.isEmpty
+            ? .empty(.init(title: "No photos or videos here yet"))
+            : .content(gallery))
+        let recent = Self.chronological(members)
         activityPage.render(recent.isEmpty
             ? .empty(.init(title: "Nothing has happened here yet"))
             : .content(recent))
-        let totals = Self.aggregatedMetrics(of: ranked)
+        // ⚠️ THE WHOLE CORPUS, not the gallery's. These are the PLACE's
+        // numbers, and a check-in with no photograph is still something that
+        // happened here — dropping it from a total because a grid cannot draw
+        // it would make the place look quieter than it is.
+        let totals = Self.aggregatedMetrics(of: members)
         reactionsMetric.setValue(totals.reactions)
         viewsMetric.setValue(totals.views)
-        renderBanner(for: Self.bannerPost(in: ranked))
+        renderBanner(for: Self.bannerPost(in: gallery))
     }
 
     /// The hero banner wears the TOP post's cover. A coverless top post (a
@@ -914,9 +918,30 @@ final class PlaceProfileViewController: UIViewController {
         DiscoverySource.trending.ordering(posts)
     }
 
-    /// The banner's subject: the top post of the ranking — "the previous
+    /// Discover's corpus: the ranking, minus what a GRID cannot draw.
+    ///
+    /// ⚠️ MEDIA ONLY (product call). A text post has no cover, so as a tile it
+    /// is a coloured rectangle with a caption at a size nobody reads — and this
+    /// grid is the place's shop window. Its words are not lost: Activity shows
+    /// every kind, as cards, at a size where they are the point.
+    ///
+    /// Kept as a filter over `ranked` rather than a filter at the source,
+    /// because the ORDER is the same contract either way — and because the
+    /// numbers and the Activity column are still drawn from the whole corpus.
+    static func gallery(_ posts: [GalleryPost]) -> [GalleryPost] {
+        ranked(posts).filter { $0.kind != .text }
+    }
+
+    /// The banner's subject: the top post of the GALLERY — "the previous
     /// cycle's top post" once cycles exist on the wire; until then the
     /// highest-engagement member IS the standing cycle winner.
+    ///
+    /// ⚠️ Asked of the gallery rather than of the whole corpus, so that the
+    /// three faces this page and the map show for one place stay the same
+    /// picture: the cluster's pin wears its most-liked MEDIA member, which is
+    /// this banner and Discover's first tile. Passed the full corpus instead,
+    /// a place whose loudest post is a check-in would show a neutral banner
+    /// over a grid whose first tile is the photograph the pin is wearing.
     static func bannerPost(in ranked: [GalleryPost]) -> GalleryPost? {
         ranked.first
     }
@@ -1669,6 +1694,11 @@ extension PlaceProfileViewController {
     /// The dock line, as the coordinator computed it for this layout.
     var debugHeaderTravel: CGFloat { headerTravel }
     var debugIdentityAlpha: CGFloat { bannerView.alpha }
+    /// The band's two numbers as rendered — the place's own totals, which are
+    /// deliberately NOT the gallery's (see `render`).
+    var debugMetrics: (reactions: Int64, views: Int64) {
+        (reactionsMetric.debugValue, viewsMetric.debugValue)
+    }
     var debugHeroName: String? { heroNameLabel.text }
     var debugHeroKind: String? { heroKindLabel.isHidden ? nil : heroKindLabel.text }
     /// The selector hand-over, as the two copies actually stand: the inline
@@ -1739,9 +1769,23 @@ private final class PlaceMetricView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func setValue(_ value: Int64) {
+        stored = value
         valueLabel.text = CountFormatter.compactString(for: value)
         accessibilityValue = valueLabel.text
     }
+
+    #if DEBUG
+    /// The raw total, before `CountFormatter` rounds it into something a
+    /// column can hold. A test asserting "57" against "57" through the
+    /// formatter would pass just as well against "57.4K".
+    private(set) var debugValue: Int64 = 0
+    private var stored: Int64 {
+        get { debugValue }
+        set { debugValue = newValue }
+    }
+    #else
+    private var stored: Int64 = 0
+    #endif
 }
 
 /// The banner's legibility scrim: clear at the top, background-colored at the
