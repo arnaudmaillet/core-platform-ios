@@ -141,7 +141,11 @@ enum TextRevealInstaller {
             makeDismissStandIn: { [weak feed] in
                 let snap = feed as? SnapFeedViewController
                 let settlement = SnapFeedSettlement(
-                    postID: snap?.activePostID, still: snap?.settledCoverImage
+                    postID: snap?.activePostID,
+                    still: snap?.settledCoverImage,
+                    attachLiveMedia: { surface in
+                        snap?.attachRevealLiveMedia(surface) ?? false
+                    }
                 )
                 #if DEBUG
                 // `-text-reveal-log`: whether the close has a picture to carry.

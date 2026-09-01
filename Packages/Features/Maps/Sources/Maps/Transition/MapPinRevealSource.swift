@@ -75,7 +75,11 @@ enum MapPinRevealSource {
             // was asked to match. The page underneath is covered by the
             // stand-in, so nothing is drawn twice.
             makeDismissStandIn: { settlement in
-                marker(face: face, ringKind: ringKind, departure: settlement.still)
+                marker(
+                    face: face, ringKind: ringKind,
+                    departure: settlement.still,
+                    attachLiveMedia: settlement.attachLiveMedia
+                )
             },
             makePresentStandIn: { marker(face: face, ringKind: ringKind) },
             // Nothing to align to. The page holds still and the window opens
@@ -97,7 +101,10 @@ enum MapPinRevealSource {
     /// it, which keeps this a dissolve between two finished drawings rather than
     /// two half-drawn ones.
     private static func marker(
-        face: PinCardView.Face, ringKind: MapPlace.Kind?, departure: UIImage? = nil
+        face: PinCardView.Face,
+        ringKind: MapPlace.Kind?,
+        departure: UIImage? = nil,
+        attachLiveMedia: ((UIView) -> Bool)? = nil
     ) -> UIView {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
         card.setFace(face)
@@ -105,6 +112,12 @@ enum MapPinRevealSource {
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
         )
         card.setDeparturePicture(departure)
+        // AFTER the picture, never before: the still is the floor the video
+        // paints over, and a surface installed onto a card with no cover would
+        // have the marker's own opaque disc under it instead.
+        if let attachLiveMedia {
+            card.adoptDepartureLiveMedia(attachLiveMedia)
+        }
         card.isUserInteractionEnabled = false
         return card
     }

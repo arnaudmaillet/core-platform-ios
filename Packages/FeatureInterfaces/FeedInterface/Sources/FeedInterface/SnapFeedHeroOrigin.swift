@@ -20,10 +20,29 @@ import UIKit
 public struct SnapFeedSettlement {
     public let postID: PostID?
     public let still: UIImage?
+    /// Puts the given surface on the settled page's playback, so a card can
+    /// carry the video still PLAYING rather than frozen at the frame the close
+    /// began on. Returns whether it took.
+    ///
+    /// ⚠️ A SECOND surface, never the page's own — the page keeps rendering
+    /// behind it. A transition that renders its own window has no handshake to
+    /// give a borrowed surface back with, so it may only borrow one nothing
+    /// else needs.
+    ///
+    /// False is ordinary: a still page, a page that stopped playing, or the
+    /// single-layer `-avplayer-render` backing where there is no second surface
+    /// to be had. The caller carries `still` alone, which is the animation this
+    /// improves on rather than replaces.
+    public let attachLiveMedia: (UIView) -> Bool
 
-    public init(postID: PostID?, still: UIImage?) {
+    public init(
+        postID: PostID?,
+        still: UIImage?,
+        attachLiveMedia: @escaping (UIView) -> Bool = { _ in false }
+    ) {
         self.postID = postID
         self.still = still
+        self.attachLiveMedia = attachLiveMedia
     }
 }
 

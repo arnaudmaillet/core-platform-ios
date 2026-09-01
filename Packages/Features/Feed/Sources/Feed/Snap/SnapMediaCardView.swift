@@ -401,10 +401,7 @@ final class SnapMediaCardView: UIView {
             // Only an EXISTING surface is asked. `surface(forPage:)` mints one,
             // and minting a playback surface to read a picture off it would
             // start a second decode for a page nobody is going to watch.
-            if let page = carousel?.currentPage, let surface = pageSurfaces[page],
-               let frame = surface.currentStill {
-                return frame
-            }
+            if let frame = currentPageSurface?.currentStill { return frame }
             return carousel?.renderedCover
         }
         return imageView.image ?? renderView.currentStill
@@ -474,6 +471,16 @@ final class SnapMediaCardView: UIView {
     private var pageSurfaces: [Int: VideoRenderView] = [:]
 
     /// The surface for a page, minted on first use.
+    /// The surface the page on screen is ALREADY rendering into, if any.
+    ///
+    /// Deliberately not `surface(forPage:)` below, which mints one: a caller
+    /// asking "what is drawing right now" must not start a second decode by
+    /// asking.
+    var currentPageSurface: VideoRenderView? {
+        guard showsCollection, let page = carousel?.currentPage else { return nil }
+        return pageSurfaces[page]
+    }
+
     func surface(forPage page: Int) -> VideoRenderView {
         if let existing = pageSurfaces[page] { return existing }
         // The first page to ask inherits the card's OWN surface rather than

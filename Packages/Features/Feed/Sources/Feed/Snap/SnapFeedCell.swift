@@ -2223,6 +2223,38 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// which is blank for ~70ms — the flash at the start of a back-tap. The
     /// page keeps the view in its hierarchy but hands rendering over; on a
     /// cancelled grab `reclaimDonatedPlayback` puts everything back.
+    /// Puts a SECOND surface on this page's playback — never this page's own.
+    ///
+    /// The difference from `donateLiveRenderView` below is the whole reason
+    /// this exists separately. That one, on the legacy `-avplayer-render`
+    /// backing, hands over the page's actual surface and parks the player
+    /// behind it, which is only safe because a landing or a cancel hands it
+    /// back. A transition that renders its own window has no such handshake, so
+    /// it may only ever borrow a surface the page does not need back.
+    ///
+    /// Nil under `-avplayer-render`, where one player draws into one layer and
+    /// there is no second surface to be had. The caller degrades to the still
+    /// it already carries.
+    ///
+    /// ALONGSIDE this page's own surface, by identity — never by URL. Two
+    /// players can exist for one asset (the cold-open race) and a URL lookup
+    /// answers from dictionary order, so the borrower could prime from the
+    /// other player's playhead: the frame-0 jump at the start of a dismissal.
+    @discardableResult
+    func attachLiveSurface(_ surface: VideoRenderView) -> Bool {
+        guard playsVideo, let videoPlayback, VideoRenderFlags.usesSampleBufferLayer
+        else { return false }
+        let sibling = mediaCard.currentPageSurface ?? mediaCard.renderView
+        let attached = videoPlayback.attachSurface(surface, alongsideSurface: sibling)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f producer FEED attachLiveSurface -> %@",
+                         CACurrentMediaTime(), attached ? "attached" : "REFUSED"))
+        }
+        #endif
+        return attached
+    }
+
     func donateLiveRenderView() -> VideoRenderView? {
         guard playsVideo, let videoPlayback else { return nil }
         if VideoRenderFlags.usesSampleBufferLayer {

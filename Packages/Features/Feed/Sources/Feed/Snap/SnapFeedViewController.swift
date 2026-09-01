@@ -3657,11 +3657,29 @@ extension SnapFeedViewController: SnapFeedSettleReporting {
     /// by the time a dismissal asks, this screen is already reporting itself
     /// invisible, so the visibility-gated cell answers about the wrong post or
     /// about none at all.
+    /// The cell for the page the viewer stopped on.
+    ///
+    /// ⚠️ Not `activeSnapCell`, for the reason `settledCoverImage` states at
+    /// length: that one is gated on visibility, which is the right gate for
+    /// playback and the wrong one at a dismissal.
+    private var settledCell: SnapFeedCell? {
+        let index = settledPageIndex
+        guard orderedIDs.indices.contains(index) else { return nil }
+        return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
+    }
+
+    /// Lends a transition a second surface on the settled page's playback — see
+    /// `SnapFeedSettlement.attachLiveMedia`, which owns the contract.
+    public func attachRevealLiveMedia(_ surface: UIView) -> Bool {
+        guard let surface = surface as? VideoRenderView else { return false }
+        return settledCell?.attachLiveSurface(surface) ?? false
+    }
+
     public var settledCoverImage: UIImage? {
         let index = settledPageIndex
         guard orderedIDs.indices.contains(index) else { return nil }
-        let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
-        let still = (cell as? SnapFeedCell)?.currentPageCover
+        let cell = settledCell
+        let still = cell?.currentPageCover
         #if DEBUG
         // `-zoom-blend-log`: WHY there is no picture, which is the only part of
         // this a caller cannot see. An inert blend has three quite different
