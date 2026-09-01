@@ -123,6 +123,26 @@ struct PlaceProfileTests {
                 "no kind is filtered out — the cards show what For You's own card tab shows")
     }
 
+    /// Which posts open through a WINDOW rather than the platform's slide.
+    ///
+    /// ⚠️ Both errors here are silent, which is why the rule is pinned apart
+    /// from the animation. A text row denied its window keeps the plain push —
+    /// a perfectly good slide, and precisely how this screen shipped without
+    /// one while every other list had it. A media row handed one would open a
+    /// card onto a photograph the card does not draw.
+    @Test func onlyTextRowsOnTheListTabOpenThroughAWindow() {
+        #expect(PlaceProfileViewController.textWindowIsAvailable(
+            for: post("post-1", kind: .text), onListTab: true))
+        #expect(!PlaceProfileViewController.textWindowIsAvailable(
+            for: post("post-2", kind: .photo), onListTab: true))
+        #expect(!PlaceProfileViewController.textWindowIsAvailable(
+            for: post("post-3", kind: .video), onListTab: true))
+        // Discover is a GRID: its text posts are tiles, with no caption to
+        // open out of and nothing for the window to be shaped like.
+        #expect(!PlaceProfileViewController.textWindowIsAvailable(
+            for: post("post-4", kind: .text), onListTab: false))
+    }
+
     /// The whole fan-out through one hydration: both tabs populated from one
     /// corpus, each under its own rule — popularity on Discover, recency on
     /// Activity — so the two can only ever disagree about ORDER.

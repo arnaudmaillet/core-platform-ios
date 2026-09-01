@@ -169,6 +169,20 @@ final class PlaceProfileViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         assertAppTabBar()
+        // ⚠️ THE BELT FOR A CONCEALED ROW, and it has to live here.
+        //
+        // A window opened from a row hides that row for as long as it is in
+        // the air, and only the reveal's own completion pays it back. Every
+        // other way off the pushed post — an unwind, a `popToRoot`, a
+        // `setViewControllers` — leaves the row invisible for the rest of the
+        // session, and the driver's own `onFeedPopped` cannot cover it because
+        // this page takes the delegate slot back before `didShow` reaches it.
+        // Whatever happened above, nothing on THIS page may be hidden while it
+        // is the screen: the same blanket rule the map applies to its markers.
+        for hosted in hostedPages {
+            (hosted as? ForYouGridPage)?.clearRevealConcealment()
+            (hosted as? ForYouGridPage)?.endHeroFreeze()
+        }
         installMapReturnIfTop()
         syncAutoplay()
         #if DEBUG
@@ -278,8 +292,17 @@ final class PlaceProfileViewController: UIViewController {
                 guard let self else { return }
                 let grid = hostedPages.indices.contains(activeIndex)
                     ? hostedPages[activeIndex] as? ForYouGridPage : nil
+                // The ELECTION, not just the tap: a text row that opens with
+                // no window is a plain push, and a plain push looks like a
+                // perfectly good animation. Only the line says which happened.
+                let post = grid?.posts.indices.contains(index) == true
+                    ? grid?.posts[index] : nil
+                let window = post.flatMap { p in grid.flatMap { textRowReveal(for: p, in: $0) } }
                 print("[place] opening tile \(index) from tab \(activeIndex)"
-                    + " posts=\(grid?.posts.count ?? -1)")
+                    + " posts=\(grid?.posts.count ?? -1)"
+                    + " post=\(post?.id.rawValue ?? "nil")"
+                    + " hero=\(post.flatMap { grid?.heroAppearance(for: $0.id) } != nil)"
+                    + " window=\(window != nil)")
                 openTile(at: index, in: grid)
             }
         }
@@ -1071,9 +1094,97 @@ final class PlaceProfileViewController: UIViewController {
             setConcealed: { [weak grid] concealed in
                 grid?.setHeroHidden(concealed, for: tapped.id)
             },
-            depthView: { [weak grid] in grid }
+            depthView: { [weak grid] in grid },
+            // A row with no media has nothing to fly, and `hasHero` above is
+            // already false for it — which used to mean the platform's plain
+            // slide, on the one surface in the app where a text post did not
+            // get the window every other list gives it. This is that window.
+            textReveal: textRowReveal(for: tapped, in: grid)
         )
         openPost(self, origin, stream.map(\.id))
+    }
+
+    /// Which posts on this screen are even CANDIDATES for a window.
+    ///
+    /// Pure and apart from the view for the reason the other two rules on this
+    /// screen are: both ways of getting it wrong are silent. A media row handed
+    /// a window would open a card onto a photograph the card does not draw; a
+    /// text row denied one keeps the plain push, which is a perfectly good
+    /// slide and looks like nothing is broken — which is exactly how it went
+    /// unnoticed on this surface in the first place.
+    ///
+    /// `onListTab` rather than "which tab is up": Discover is a GRID, whose
+    /// text posts are tiles with no caption to open out of, and a future third
+    /// tab must not inherit a window by sitting at the right index.
+    static func textWindowIsAvailable(for post: GalleryPost, onListTab: Bool) -> Bool {
+        onListTab && post.kind == .text
+    }
+
+    /// The window a TEXT row opens through, or nil for anything that is not
+    /// one — which keeps the plain push as the honest floor.
+    ///
+    /// Only the Activity tab can produce one: it is the `.list` page, and
+    /// Discover is `.grid`, whose text posts are tiles with no caption to open
+    /// out of. Asked of the page that was actually tapped rather than assumed,
+    /// so a future third tab cannot inherit a window it cannot draw.
+    ///
+    /// ⚠️ MARKER-SHAPED, not row-shaped, and that is a deliberate trade. A
+    /// row's caption normally lets the window align the page to it — the
+    /// effect that reads as the card growing — but that alignment is only
+    /// honest while the row and the page are the SAME post. This close lands on
+    /// the post the viewer opened, always, even after they have paged the feed
+    /// several posts on; the caption cut and the page offset would then be
+    /// measured on one post's words and applied to another's. So the window
+    /// takes the same answers the map's marker takes (`alignsPageToSource:
+    /// false`, no cut, no borrowed band): the page holds still and the card
+    /// opens over it. Never mis-aimed, at the cost of the growth effect.
+    private func textRowReveal(
+        for post: GalleryPost, in grid: ForYouGridPage
+    ) -> TextRevealOrigin? {
+        // ⚠️ THE MODEL SAYS WHAT THE POST IS, the page only says whether it can
+        // be described. Asking `heroAppearance` for the first half conflates
+        // "has no media" with "has no realized cell", and an off-screen MEDIA
+        // row would answer the same as a text one. The rect stays a question
+        // for the page — a window needs somewhere to open from, and nil there
+        // is the documented plain-push floor.
+        guard Self.textWindowIsAvailable(for: post, onListTab: grid === activityPage),
+              grid.rowFrame(for: post.id, in: grid) != nil
+        else { return nil }
+        let anchor = post.id
+        return TextRevealOrigin(
+            rowFrame: { [weak self] space in
+                guard let self else { return nil }
+                return activityPage.textRowFrame(for: anchor, in: space)
+                    ?? activityPage.rowFrame(for: anchor, in: space)
+            },
+            captionEnd: nil,
+            depthView: { [weak self] in self?.pager },
+            makeDismissStandIn: { [weak self] _ in
+                // The settled post is deliberately ignored: this window closes
+                // onto the row it opened from, whatever the viewer paged to.
+                self?.activityPage.makeDismissStandIn(for: anchor)
+            },
+            alignsPageToSource: false,
+            setConcealed: { [weak self] concealed in
+                self?.activityPage.setRevealConcealed(concealed, for: anchor)
+            },
+            // The row may have scrolled away under the open post — a hydration
+            // or an engagement decoration re-realizes this list. Bringing it
+            // back is what stops the close falling to a centred fallback, which
+            // on screen is indistinguishable from a working one.
+            willStageDismissal: { [weak self] in
+                guard let self else { return }
+                view.layoutIfNeeded()
+                activityPage.beginHeroFreeze()
+                activityPage.revealPost(anchor)
+                view.layoutIfNeeded()
+            },
+            dismissalDidEnd: { [weak self] committed in
+                guard let self else { return }
+                activityPage.endHeroFreeze()
+                if !committed { activityPage.clearRevealConcealment() }
+            }
+        )
     }
 }
 
