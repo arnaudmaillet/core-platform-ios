@@ -231,7 +231,10 @@ extension HorizontalPagerView: UIScrollViewDelegate {
 ///    pop, outright. A tab root has nothing to pop today, but the rule costs
 ///    nothing and keeps the container correct the day it is pushed — the same
 ///    guarantee `ProfileGalleryPagerView` makes.
-/// 2. **Horizontally scrollable content under the touch** owns the drag.
+/// 2. **Content under the touch with somewhere left to go IN THE DRAG'S
+///    DIRECTION** owns it. Not "content that scrolls horizontally", which was
+///    the first version of this rule and half of one: a carousel parked at
+///    either end still scrolls, and still had nothing to spend the drag on.
 ///
 /// ⚠️ PUBLIC because this app has more than one pager, and the second one did
 /// not have these rules. The tab-swipe fix was written here first and changed
@@ -245,64 +248,123 @@ public final class HorizontalPagerScrollView: UIScrollView {
     private static let popEdgeZone: CGFloat = 20
 
     override public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if gestureRecognizer === panGestureRecognizer,
-           shouldYield(at: gestureRecognizer.location(in: self)) {
+        if let pan = gestureRecognizer as? UIPanGestureRecognizer, pan === panGestureRecognizer,
+           shouldYield(at: pan.location(in: self), velocity: pan.velocity(in: self)) {
             return false
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
     /// Whether a drag beginning at `point` belongs to something other than this
-    /// pager. Split out of the delegate callback so it can be asked directly:
-    /// the callback only fires for the scroll view's OWN recognizer, and a test
-    /// cannot make a real one report a location.
+    /// pager, with no direction to go on. Split out of the delegate callback so
+    /// it can be asked directly: the callback only fires for the scroll view's
+    /// OWN recognizer, and a test cannot make a real one report a location.
     ///
     /// - Parameter point: in this scroll view's content coordinates.
     public func shouldYield(at point: CGPoint) -> Bool {
-        // Remove the offset to get the viewport-relative x the edge zone is
-        // defined in.
+        shouldYield(at: point, velocity: .zero)
+    }
+
+    /// The same question asked of a drag whose DIRECTION is known, which is what
+    /// the recognizer itself always has.
+    ///
+    /// - Parameters:
+    ///   - point: in this scroll view's content coordinates.
+    ///   - velocity: the pan's, in this view's space. `.zero` means "direction
+    ///     unknown" and answers exactly as this rule did before it could tell
+    ///     the two apart, so a caller holding a location and no pan keeps the
+    ///     behaviour it had.
+    public func shouldYield(at point: CGPoint, velocity: CGPoint) -> Bool {
+        // ⚠️ FIRST AND ABSOLUTE, ahead of any question about direction or
+        // travel. Remove the offset to get the viewport-relative x the edge zone
+        // is defined in.
         if point.x - contentOffset.x <= Self.popEdgeZone { return true }
-        // A horizontal drag that STARTS on horizontally-scrollable content
-        // belongs to that content, not to the tab pager.
+        // A horizontal drag that STARTS on content with somewhere to go belongs
+        // to that content, not to the tab pager.
         //
         // Two `UIScrollView` pans do not recognise simultaneously and UIKit
         // picks no winner by depth, so without this the pager took every drag
         // and a post card's carousel could not be swiped at all — it changed
         // tab instead. Reported exactly that way.
         //
-        // The inner view owns the gesture for its whole duration, including past
-        // its last page: handing the pager the overflow would mean a drag that
-        // starts as a carousel and finishes as a tab change, and a gesture whose
-        // meaning depends on how far it got is worse than one that ends against
-        // a stop.
-        if let hit = hitTest(point, with: nil), Self.scrollsHorizontally(hit, within: self) {
+        // ⚠️ "SOMEWHERE TO GO" USED TO MEAN "SCROLLS HORIZONTALLY AT ALL", and
+        // the half it was missing is the one `ProfileDismissalPolicy` states for
+        // tabs: a carousel on its FIRST page has nothing to its left, so a
+        // rightward drag there could only rubber-band. Holding it swallowed a
+        // movement the tenant had no use for and left the surface around it —
+        // the previous tab, the screen's dismissal — with nothing. The mirror
+        // holds at the other end for the same reason, and holds harder here than
+        // anywhere else: leftward is the direction a pager moves FORWARD in, so
+        // the drag buys a real page change rather than a dead spring.
+        //
+        // ⚠️ THIS IS STILL DECIDED ONCE, AT BEGIN, and the older rule it does
+        // not touch: the inner view owns the gesture for its whole DURATION,
+        // including past its last page. Handing the pager the overflow mid-drag
+        // would mean a gesture that starts as a carousel and finishes as a tab
+        // change, and one whose meaning depends on how far it got is worse than
+        // one that ends against a stop. Direction is read from the pan's
+        // velocity at that single moment; nothing re-asks it later.
+        if let hit = hitTest(point, with: nil),
+           Self.ownsHorizontalDrag(hit, within: self, velocity: velocity) {
             return true
         }
         return false
     }
 
     /// Whether `view` sits inside something — other than `container` — that owns
-    /// horizontal drags: a scroll view with somewhere to go, or a view that says
-    /// so.
+    /// a horizontal drag heading the way `velocity` says: a scroll view with
+    /// travel left in that direction, or a view that declares it owns drags.
     ///
-    /// The width test matters: the feed's own vertical collection view is a
-    /// scroll view on this path too, and its content is exactly as wide as it
-    /// is. Without the test the pager would refuse every drag in the list.
+    /// The travel test matters twice over. The feed's own vertical collection
+    /// view is a scroll view on this path too, and its content is exactly as
+    /// wide as it is — without a width test the pager would refuse every drag in
+    /// the list. And a carousel parked against one of its ends is that same
+    /// case, in one direction only.
     ///
-    /// The declared case covers what the measured one cannot see — a control
-    /// that scrubs with a pan recognizer rather than by scrolling, which has no
-    /// content size to ask about.
-    private static func scrollsHorizontally(_ view: UIView, within container: UIView) -> Bool {
+    /// ⚠️ THE DECLARED CASE IS UNCONDITIONAL, and must stay so: a control that
+    /// scrubs with a pan recognizer rather than by scrolling has no content size
+    /// and no offset to interrogate, so there is no direction in which it can be
+    /// shown to have "nothing left". Asking it the travel question would answer
+    /// from a `contentOffset` of zero it never moves, and silently take every
+    /// rightward drag away from it.
+    private static func ownsHorizontalDrag(
+        _ view: UIView, within container: UIView, velocity: CGPoint
+    ) -> Bool {
         var node: UIView? = view
         while let current = node, current !== container {
             if current is HorizontalDragOwning { return true }
             if let scrollView = current as? UIScrollView,
-               scrollView.contentSize.width > scrollView.bounds.width + 0.5 {
+               hasTravel(scrollView, towardsVelocityX: velocity.x) {
                 return true
             }
             node = current.superview
         }
         return false
+    }
+
+    /// The slack every travel test allows, so a sub-point offset left behind by
+    /// a snap does not read as somewhere to go.
+    private static let travelSlack: CGFloat = 0.5
+
+    /// Whether `scrollView` can still move horizontally under a finger pushing
+    /// it at `velocityX`.
+    ///
+    /// ⚠️ The signs run opposite, which is the easy thing to get backwards: a
+    /// RIGHTWARD finger (`velocityX > 0`) drags the content back towards its
+    /// start, so it needs offset BEHIND the current one; a leftward finger needs
+    /// room before the maximum.
+    ///
+    /// Zero is "direction unknown" and answers the older, weaker question — is
+    /// there anywhere to go at all.
+    private static func hasTravel(
+        _ scrollView: UIScrollView, towardsVelocityX velocityX: CGFloat
+    ) -> Bool {
+        let maximum = scrollView.contentSize.width - scrollView.bounds.width
+        guard maximum > travelSlack else { return false }
+        let offset = scrollView.contentOffset.x
+        if velocityX > 0 { return offset > travelSlack }
+        if velocityX < 0 { return offset < maximum - travelSlack }
+        return true
     }
 }
 

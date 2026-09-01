@@ -840,13 +840,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// identical to the row's, so the swap at the landing is the identity.
     /// Every part of this row now arrives that way.
 
-    #if DEBUG
-    /// Presses "Show more". Returns false when there was nothing to reveal,
-    /// which is the answer a harness must not mistake for success.
-    ///
-    /// The simulator injects no touches, so this is the only way this control
-    /// is reachable in an automated run.
-    ///
     /// Fired when the viewer taps the media of a COLLECTION row.
     ///
     /// A row with one photograph needs nothing here — the collection view's own
@@ -900,6 +893,22 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return carousel.currentPage
     }
 
+    /// Whether this row's carousel can still travel `delta` pages — the cell's
+    /// twin of `MediaCarouselView.hasTravel(towardsPageDelta:)`, for a host that
+    /// holds cells rather than carousels.
+    ///
+    /// ⚠️ A row with no collection answers `false`, not nil, and the difference
+    /// matters at the only kind of call site there is: a gesture gate. `false`
+    /// reads as "nothing here wants this drag", which is the truth for a text
+    /// row and for a single photograph — an optional would make every caller
+    /// invent that answer for itself, and the first one to invent `true` would
+    /// hand the drag to a carousel that does not exist.
+    public func mediaHasTravel(towardsPageDelta delta: Int) -> Bool {
+        guard let carousel, !carousel.isHidden else { return false }
+        return carousel.hasTravel(towardsPageDelta: delta)
+    }
+
+    #if DEBUG
     /// Scrolls this row's carousel, or false if it has none.
     @discardableResult
     public func debugScrollCarousel(toPage index: Int, animated: Bool = true) -> Bool {
@@ -907,6 +916,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return carousel.debugScroll(toPage: index, animated: animated)
     }
 
+    /// Presses "Show more". Returns false when there was nothing to reveal,
+    /// which is the answer a harness must not mistake for success.
+    ///
+    /// The simulator injects no touches, so this is the only way this control
+    /// is reachable in an automated run.
     @discardableResult
     public func debugTapShowMore() -> Bool {
         guard showMoreRange != nil else { return false }

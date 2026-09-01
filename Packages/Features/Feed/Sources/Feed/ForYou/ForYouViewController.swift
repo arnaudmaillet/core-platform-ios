@@ -1645,7 +1645,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // again when the pop it triggers asks for an animator — and a second
         // swap would put the two cards back where they started.
         var hasPrepared = false
-        textSlideDismissal.prepareForDismissal = { [weak self, weak feed] in
+        textSlideDismissal.prepareForDismissal = { [weak self, weak feed] _ in
             guard !hasPrepared else { return }
             guard let self, let feed,
                   let page = pager.page(for: format),

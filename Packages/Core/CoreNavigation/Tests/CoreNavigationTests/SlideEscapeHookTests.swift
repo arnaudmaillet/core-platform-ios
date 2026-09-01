@@ -117,6 +117,61 @@ struct SlideEscapeHookTests {
                 "the insert is a begin-time stack transaction, beneath the feed before the pop")
     }
 
+    /// The preparation hook is told which axis is closing, because on a
+    /// screen whose two axes land on DIFFERENT places it is the only moment
+    /// early enough to swap the geometry the close will carry — the driver
+    /// reads it three lines later.
+    @Test func theOwnerIsToldWhichAxisIsClosing() async {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let root = UIViewController()
+        let feed = UIViewController()
+        let nav = UINavigationController(rootViewController: root)
+        window.rootViewController = nav
+        window.makeKeyAndVisible()
+        nav.setViewControllers([root, feed], animated: false)
+        window.layoutIfNeeded()
+
+        let slide = InteractiveSlideDismissal()
+        slide.attach(to: feed, axes: [.horizontal, .vertical])
+        slide.install(on: nav)
+        var axes: [ZoomDismissAxis] = []
+        slide.prepareForDismissal = { axes.append($0) }
+
+        await slide.debugPerformSwipe(peakProgress: 0.9, axis: .vertical)
+        #expect(axes.first == .vertical, "the hand's own axis, not a default")
+        #expect(axes.allSatisfy { $0 == .vertical },
+                "the second ask — the pop's — must agree with the first")
+    }
+
+    /// ⚠️ The fallback slide can be TRANSPOSED. A downward grab exists because
+    /// that is how this app closes a page, but a screen sliding down reads as
+    /// being dropped; an owner may ask for the platform's own direction while
+    /// keeping the gesture that started it.
+    @Test func theFallbackSlideCanTravelOffTheGesturesAxis() async {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let root = UIViewController()
+        let feed = UIViewController()
+        let nav = UINavigationController(rootViewController: root)
+        window.rootViewController = nav
+        window.makeKeyAndVisible()
+        nav.setViewControllers([root, feed], animated: false)
+        window.layoutIfNeeded()
+
+        let slide = InteractiveSlideDismissal()
+        slide.attach(to: feed, axes: [.horizontal, .vertical])
+        slide.install(on: nav)
+        slide.fallbackSlideAxis = .horizontal
+
+        let driven = await slide.debugPerformSwipe(peakProgress: 0.9, axis: .vertical)
+        #expect(driven, "the vertical gesture still drives its own pop")
+        // The animator is the observable half; a transposition that did not
+        // reach it would look right in state and wrong on screen.
+        let animator = slide.navigationController(
+            nav, animationControllerFor: .pop, from: feed, to: root
+        )
+        #expect(animator != nil)
+    }
+
     /// A delegate that answers nothing — the stand-in for a zoom flight
     /// holding the slot between gestures.
     @MainActor

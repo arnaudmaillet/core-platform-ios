@@ -88,15 +88,28 @@ public final class InteractiveSlideDismissal: NSObject {
     public weak var revealReturningChrome: UIView?
 
     /// Which axes close as a WINDOW when `revealGeometry` is set. Both by
-    /// default — the shipped behaviour, where every pop of a revealed screen
-    /// lands back on the screen the disc lives on.
+    /// default, and both is now the shipped case for the place page too: the
+    /// rightward close lands on the map's marker and the downward one on the
+    /// place page's own Activity card, each with its own geometry supplied by
+    /// `prepareForDismissal`.
     ///
-    /// An owner that restages the vertical pop onto a DIFFERENT screen (the
-    /// place page slid beneath a semantic cluster's feed) narrows this to
-    /// `[.horizontal]`: a window can only shrink back to a disc that is on
-    /// the screen being revealed, and the vertical leg's landing no longer
-    /// is. The excluded axis rides the plain slide instead.
+    /// The narrowing survives for an owner that has NOTHING to aim the
+    /// excluded axis at — a window can only shrink onto a rect some screen is
+    /// really showing, and an axis with no such rect must ride the plain
+    /// slide instead.
     public var revealReturnAxes: Set<ZoomDismissAxis> = [.horizontal, .vertical]
+
+    /// The axis the FALLBACK slide travels on, when it is not the axis the
+    /// finger travelled on.
+    ///
+    /// ⚠️ A DELIBERATE TRANSPOSITION, not an oversight. The vertical grab on a
+    /// cluster's feed exists because a downward flick is how this app closes a
+    /// page — but when it falls back to a plain slide, sliding the screen DOWN
+    /// reads as the page being dropped rather than left behind. The platform's
+    /// own back-direction is horizontal, and that is what the fallback should
+    /// look like whatever the hand did. Nil keeps the gesture's own axis,
+    /// which is what every other surface wants.
+    public var fallbackSlideAxis: ZoomDismissAxis?
 
     /// An extra veto the owner can impose, asked at begin-time.
     ///
@@ -134,11 +147,19 @@ public final class InteractiveSlideDismissal: NSObject {
     /// `revealGeometry` — from a swipe claiming the screen, and from a pop
     /// with no gesture behind it at all.
     ///
+    /// Handed the axis the dismissal is travelling on, because on this screen
+    /// the two axes go to DIFFERENT places: a text-faced cluster's feed closes
+    /// rightward onto the map's marker and downward onto its place page's own
+    /// card. One geometry cannot describe both, so the owner swaps it here —
+    /// which is exactly early enough, `revealGeometry` being read three lines
+    /// below the call. A pop with no gesture is told `.horizontal`, the
+    /// platform's own direction and the one the back button means.
+    ///
     /// ⚠️ MUST BE IDEMPOTENT. A swipe reaches it twice: once when the grab
     /// claims the screen, and again when the pop it triggers asks for an
     /// animator. What it does — moving a card into the slot the dismissal
     /// flies to — undoes itself if it runs a second time.
-    public var prepareForDismissal: (() -> Void)?
+    public var prepareForDismissal: ((ZoomDismissAxis) -> Void)?
 
     /// The recognizer, so an owner can order a competing one behind it —
     /// `require(toFail:)` needs the object, and a caller that cannot see it
@@ -215,6 +236,7 @@ public final class InteractiveSlideDismissal: NSObject {
         revealGeometry = nil
         revealPresents = false
         revealReturnAxes = [.horizontal, .vertical]
+        fallbackSlideAxis = nil
     }
 
     public func install(on nav: UINavigationController) {
@@ -297,7 +319,7 @@ public final class InteractiveSlideDismissal: NSObject {
         // Before the geometry is read three lines down, and that ordering is
         // the whole point: `onWillBeginPop` fires after the grab exists, which
         // is too late to decide what the grab is carrying.
-        prepareForDismissal?()
+        prepareForDismissal?(activeAxis)
         // Freeze the pager so a diagonal drag can't page mid-pop.
         (feed as? any ZoomTransitionDestination)?.setContentScrollEnabled(false)
         if let revealGeometry, revealReturnAxes.contains(activeAxis) {
@@ -440,7 +462,11 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // earliest moment anything of ours hears about it — still early enough,
         // since the animator below is built from the geometry it produces.
         // Idempotent by contract, because a swipe arrives here as well.
-        prepareForDismissal?()
+        //
+        // `.horizontal` for a pop with no gesture: the back button means the
+        // platform's own direction, and a swipe re-asks with its real axis a
+        // moment earlier in `beginSwipe`.
+        prepareForDismissal?(interaction != nil || revealGrab != nil ? activeAxis : .horizontal)
         // ⚠️ A POST THAT FLIES GOES BACK TO WHOEVER HELD THIS SLOT BEFORE US.
         //
         // This driver holds the delegate slot for the whole of the screen's
@@ -482,9 +508,11 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
                 geometry: revealGeometry, returningChrome: revealReturningChrome
             )
         }
-        // The axis is the live swipe's; a back-button pop (no interaction)
-        // exits horizontally, the platform's own direction.
-        return TimelineSlidePopAnimator(axis: interaction != nil ? activeAxis : .horizontal)
+        // The axis is the live swipe's — unless the owner transposed it (see
+        // `fallbackSlideAxis`). A back-button pop (no interaction) exits
+        // horizontally, the platform's own direction.
+        guard interaction != nil else { return TimelineSlidePopAnimator(axis: .horizontal) }
+        return TimelineSlidePopAnimator(axis: fallbackSlideAxis ?? activeAxis)
     }
 
     public func navigationController(

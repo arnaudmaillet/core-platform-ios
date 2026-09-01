@@ -170,7 +170,7 @@ struct DismissalDriverArbitrationTests {
     /// A hook that ran afterwards would decide nothing.
     @Test func theGeometryBuiltByThePreparationIsTheOneUsed() {
         let rig = rig(kind: .card)
-        rig.driver.prepareForDismissal = { [weak driver = rig.driver] in
+        rig.driver.prepareForDismissal = { [weak driver = rig.driver] _ in
             driver?.revealGeometry = RevealGeometry(
                 sourceFrame: { _ in .zero }, sourceCornerRadius: 0
             )
@@ -197,7 +197,7 @@ struct DismissalDriverArbitrationTests {
     @Test func thePreparationIsAlsoAskedForAPopItWillNotAnimate() {
         let rig = rig(kind: .hero)
         var asks = 0
-        rig.driver.prepareForDismissal = { asks += 1 }
+        rig.driver.prepareForDismissal = { _ in asks += 1 }
 
         _ = popAnimator(rig)
 
@@ -289,7 +289,7 @@ struct DismissalDriverArbitrationTests {
     @Test func aNewPresentationRunsNoneOfTheLastOnesPreparation() {
         let rig = rig(kind: .card)
         var stale = 0
-        rig.driver.prepareForDismissal = { stale += 1 }
+        rig.driver.prepareForDismissal = { _ in stale += 1 }
         rig.driver.revealGeometry = RevealGeometry(sourceFrame: { _ in .zero }, sourceCornerRadius: 0)
 
         rig.driver.resetForNewPresentation()

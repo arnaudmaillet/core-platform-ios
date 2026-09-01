@@ -1111,6 +1111,149 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         page.adoptLivePlayback(view, for: anchorID)
     }
 
+    // MARK: - The Activity card a text post closes onto
+
+    /// Where a TEXT-faced cluster's feed goes home: the post's own CARD on the
+    /// Activity tab, described as a reveal origin.
+    ///
+    /// ⚠️ A REVEAL, NOT A HERO FLIGHT, and the difference is not a preference.
+    /// The zoom stack refuses this post three separate ways — the hero grab
+    /// declines a `.card` dismissal outright, the slide forwards to a flight
+    /// delegate only for `.hero`, and the one flight card this feature owns
+    /// (`PostGridFlightCard`) has no style that can carry a caption, so it
+    /// would fly a blank rounded rect. That is precisely the
+    /// "hero animation about nothing" this codebase already rejected once for
+    /// the map's text markers. The reveal's stand-in is a REAL
+    /// `PostGridListRowCell` carrying this post's own words, author and age,
+    /// floating free under the finger — the card morph, with nothing
+    /// impersonated.
+    ///
+    /// Returns nil when the Activity tab has no card for the post, which is
+    /// what selects the plain-slide fallback.
+    ///
+    /// ⚠️ IT STAGES BEFORE IT MEASURES, and it has to. A `RevealGeometry`
+    /// takes the caption's cut, the caption's top and the author band as
+    /// VALUES — read the moment it is built — while only the rect is a
+    /// closure the transition re-asks later. This page is off-stack and
+    /// unsized when the driver asks, so its cards do not exist yet and every
+    /// one of those numbers would be zero. `sizedTo` is the bar the caller
+    /// measures in; giving the view that size and laying it out is what makes
+    /// the row real enough to describe.
+    func activityCardRevealOrigin(sizedTo bounds: CGRect) -> TextRevealOrigin? {
+        // RE-POINTED FIRST: the viewer may have paged the feed past the post
+        // that opened it, and the card to land on is the one they are
+        // actually looking at — which must be settled before anything is
+        // measured against it.
+        var anchor = anchorID
+        if let active = activePostID?(), activityPage.post(for: active) != nil {
+            anchor = active
+        }
+        guard activityPage.post(for: anchor) != nil else {
+            debugLogLanding("no post for \(anchor.rawValue)")
+            return nil
+        }
+        stageActivityLanding(for: anchor, sizedTo: bounds)
+        // Nothing to describe — no cell for this post even after staging.
+        guard activityPage.rowFrame(for: anchor, in: activityPage) != nil else {
+            debugLogLanding("no realized row for \(anchor.rawValue)"
+                + " bounds=\(view.bounds.size) posts=\(activityPage.posts.count)")
+            return nil
+        }
+        debugLogLanding("staged \(anchor.rawValue)"
+            + " row=\(activityPage.rowFrame(for: anchor, in: activityPage).map(\.debugDescription) ?? "nil")")
+        return TextRevealOrigin(
+            rowFrame: { [weak self] space in
+                guard let self else { return nil }
+                // The text row's own rect, falling back to the whole row —
+                // the two-step For You's own close uses, because a row that
+                // carries media has no text rect to give.
+                return activityPage.textRowFrame(for: anchor, in: space)
+                    ?? activityPage.rowFrame(for: anchor, in: space)
+            },
+            captionEnd: activityPage.textRowCaptionEnd(for: anchor),
+            depthView: { [weak self] in self?.pager },
+            captionTop: activityPage.textRowCaptionTop(for: anchor),
+            authorBand: activityPage.textRowAuthorBand(for: anchor),
+            makeDismissStandIn: { [weak self] in
+                self?.activityPage.makeDismissStandIn(for: anchor)
+            },
+            // No cornerRadius and no fill: a ROW must take the card's own
+            // values (`TextRevealInstaller` reads them from PostGrid). Only a
+            // map marker, which is a disc in its own tint, overrides them.
+            setConcealed: { [weak self] concealed in
+                // The reveal's OWN channel, never `setHeroHidden` — the two
+                // conceal flags are deliberately separate.
+                self?.activityPage.setRevealConcealed(concealed, for: anchor)
+            },
+            // Re-asserted once the page is really on the stack and sized by
+            // the transition's own container: idempotent by construction, and
+            // the only chance to correct anything the off-stack staging got
+            // wrong about a width it had to be told.
+            willStageDismissal: { [weak self] in
+                self?.stageActivityLanding(for: anchor, sizedTo: nil)
+            },
+            dismissalDidEnd: { [weak self] committed in
+                guard let self else { return }
+                activityPage.endHeroFreeze()
+                // A cancelled close leaves the row concealed under a page that
+                // sprang back, and the viewer may then leave by the chevron.
+                if !committed { activityPage.clearRevealConcealment() }
+            }
+        )
+    }
+
+    /// `-grab-log`: why a text close did or did not get its card. The two
+    /// outcomes are indistinguishable on screen — a plain slide is what a
+    /// refusal looks like, and it is also a perfectly good animation — so the
+    /// reason has to be said out loud or a regression here is invisible.
+    private func debugLogLanding(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-grab-log") else { return }
+        print("[place-landing] \(message())")
+        #endif
+    }
+
+    /// Puts this page on its Activity tab with `anchor`'s card on screen —
+    /// the landing a text close aims at.
+    ///
+    /// `sizedTo` is for the off-stack call, where the view has no bounds of
+    /// its own yet; pass nil once the transition's container owns the size.
+    /// Idempotent: it is run once to measure and again to land.
+    private func stageActivityLanding(for anchor: PostID, sizedTo bounds: CGRect?) {
+        loadViewIfNeeded()
+        if let bounds, view.bounds.size != bounds.size {
+            view.frame = bounds
+        }
+        // ⚠️ A PASS BEFORE THE PAGER IS TOUCHED. `setActivePage` moves a
+        // scroll view by PAGE WIDTH, and a pager that has never been laid out
+        // has none — so the offset it computes is zero and page 1 is never
+        // brought on, whatever it was asked for. Measured: the landing row
+        // stayed unrealized on the first ask and only appeared on the second,
+        // one run loop later, which sent every close to the fallback slide.
+        view.layoutIfNeeded()
+        if activeIndex != 1 {
+            activityPage.setVerticalOffset(alignedOffset(for: 1))
+            activeIndex = 1
+            applyHeaderOffset(activityPage.verticalOffset)
+            syncAutoplay()
+        }
+        mirrorSelection(to: 1)
+        pager.setActivePage(1, animated: false)
+        // ⚠️ LAY OUT BEFORE REVEALING, and this ordering is the whole of it.
+        // `revealPost` asks the collection view for the landing row's layout
+        // attributes; on a page that has only just been given a size those
+        // are nil, so the scroll goes nowhere and the row is never realized —
+        // measured as "no realized row" on the FIRST ask and a correct row on
+        // the second, which is what made the close silently fall back to a
+        // slide every time.
+        view.layoutIfNeeded()
+        activityPage.beginHeroFreeze()
+        activityPage.revealPost(anchor)
+        // And again: cells at the landed offset are realized by the pass
+        // AFTER it is set, never by the one that set it.
+        view.layoutIfNeeded()
+    }
+
     /// A landing post the grid does not hold (hydration raced the grab, or
     /// the feed paged past the members somehow) still needs a card to fly —
     /// a plain dark square, which is what a missing cover renders as anyway.
@@ -1285,9 +1428,18 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
     var zoomOwnsInteractiveDismissal: Bool { mapReturnTransition != nil }
 
     /// A rightward drag means "previous tab" everywhere but the first one —
-    /// the profile pager's own rule. The back button flies from any tab.
+    /// the profile pager's own rule. The back button flies from any tab. And
+    /// on a card's carousel with a photograph to its left, the carousel is
+    /// the tenant and wins its own territory.
     func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
-        activeIndex == 0
+        guard activeIndex == 0 else { return false }
+        // ⚠️ `-1`: the drag is RIGHTWARD and pages run the other way to the
+        // finger. Both rules ask the same question — what else could this
+        // drag be for — see `MediaCarouselTouchRouting`.
+        return MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: self.view.convert(location, from: view),
+            in: self.view, towardsPageDelta: -1
+        )
     }
 
     /// Freeze the tab pager while a grab drives, so the drag that is flying

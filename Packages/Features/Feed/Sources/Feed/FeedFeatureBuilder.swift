@@ -535,20 +535,43 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // A place page beneath a semantic cluster's feed: the VERTICAL
         // dismissal's landing, slid under the feed at swipe-begin — the
         // Case-B restaging recipe, inverted (INSERT instead of drop) — so
-        // the plain single pop that follows lands on it. The horizontal
-        // close and the back button never see the page: they keep the
-        // window-shaped return to the map, which is exactly why the reveal's
-        // return narrows to `[.horizontal]` — a window can only shrink back
-        // to a disc that is on the screen being revealed, and the vertical
-        // leg's landing no longer is.
+        // the plain single pop that follows lands on it.
+        //
+        // THE TWO AXES GO TO DIFFERENT PLACES, and each closes onto what is
+        // really there: rightward onto the map's marker, downward onto the
+        // post's own card on the place page's Activity tab. One
+        // `revealGeometry` cannot describe both, so `prepareForDismissal`
+        // swaps it for the live axis — which is early enough by construction,
+        // the driver reading the geometry three lines after asking.
         if let beneath {
             // Built NOW and captured STRONGLY: until a vertical swipe
             // inserts it, this closure chain is the page's only owner.
             // Hydration starts inside the builder (`makeClusterGallery`
-            // begins loading), so the first dismissal lands on tiles rather
+            // begins loading), so the first dismissal lands on cards rather
             // than a skeleton.
             let landing = beneath(destination)
-            dismissal.revealReturnAxes = [.horizontal]
+            // The marker's own geometry, kept for the rightward leg.
+            let markerGeometry = dismissal.revealGeometry
+            // ⚠️ THE FALLBACK TRAVELS SIDEWAYS whatever the hand did. A
+            // downward slide reads as the page being dropped; the platform's
+            // back-direction is the honest look for a close that could not
+            // stage its card.
+            dismissal.fallbackSlideAxis = .horizontal
+            dismissal.prepareForDismissal = { [weak landing] axis in
+                guard axis == .vertical else {
+                    dismissal.revealGeometry = markerGeometry
+                    return
+                }
+                // Nil origin — no card to land on — leaves the geometry nil,
+                // which is exactly how the driver selects the plain slide.
+                dismissal.revealGeometry = (landing as? PlaceProfileViewController)?
+                    .activityCardRevealOrigin(sizedTo: nav.view.bounds)
+                    .map {
+                        TextRevealInstaller.geometry(
+                            feed: destination, origin: $0, pipeline: imagePipeline
+                        )
+                    }
+            }
             let staged = dismissal.onWillBeginPop
             dismissal.onWillBeginPop = { [weak nav, weak destination] axis in
                 staged?(axis)

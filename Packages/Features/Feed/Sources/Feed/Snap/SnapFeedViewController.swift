@@ -4526,16 +4526,24 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     ///    holding the gesture would spend it on a rubber-band. It passes
     ///    straight through — which is also what makes leaving a gallery feel
     ///    like leaving anything else once you have paged back to the start.
+    ///
+    /// ⚠️ Answers 2 and 3 are `MediaCarouselTouchRouting`'s, not this screen's.
+    /// The walk down to the carousel under the touch was written here first and
+    /// the next screen with a gallery on it was about to copy it — the twin-pager
+    /// mistake, a third time. And this gate is only ever HALF the answer: it says
+    /// the dismissal MAY claim the drag, and the carousel's own scroll view has
+    /// to give it up as well, which it does in `yieldsRightwardDrag`.
     public func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
         if location.x - view.bounds.minX <= Self.backEdgeZone { return true }
-        let point = collectionView.convert(location, from: view)
-        guard let hit = collectionView.hitTest(point, with: nil) else { return true }
-        for current in sequence(first: hit, next: { $0.superview }) {
-            if let carousel = current as? MediaCarouselView {
-                return carousel.currentPage == 0
-            }
-        }
-        return true
+        // ⚠️ `-1`, because the drag is RIGHTWARD and pages run the other way to
+        // the finger. Rightward is the only horizontal direction this gate is
+        // ever asked about — `ZoomDismissAxis.match` demands `velocity.x > 0`
+        // before anyone reaches here — so the mirror case is not this screen's
+        // to answer; see `MediaCarouselView.yieldsRightwardDrag`.
+        return MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: collectionView.convert(location, from: view),
+            in: collectionView, towardsPageDelta: -1
+        )
     }
 
     /// The system's back-gesture strip. Matched to `HorizontalPagerScrollView`'s
