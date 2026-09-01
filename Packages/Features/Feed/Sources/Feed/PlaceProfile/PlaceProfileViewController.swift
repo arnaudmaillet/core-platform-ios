@@ -1328,13 +1328,19 @@ extension PlaceProfileViewController: CardCloseLanding {
     ///
     /// ⚠️ THE FLIGHT'S CONCEALMENT COMES OFF FIRST, before anything is
     /// measured. The push hid the departure through the HERO channel
-    /// (`setHeroHidden`), and the reveal's own channel cannot pay that back: on
-    /// the Discover grid `setRevealConcealed` resolves a list-row cell and a
-    /// tile is a different type, so both the hide and the restore would land on
-    /// nothing. Left alone, the window closes onto a hole — and its own rule
-    /// says the restore must happen a beat BEFORE the window retires, never
-    /// after, because at the landing rect the two are identical and doing it in
-    /// two transactions is a flash of empty grid.
+    /// (`setHeroHidden`), and only the flight's own return leg pays that back —
+    /// a return this close is replacing. Left alone the window shrinks onto a
+    /// hole, and the restore must land a beat BEFORE the window retires, never
+    /// after: at the landing rect the cell and the window are identical, so
+    /// swapping them inside one transaction is invisible while doing it in two
+    /// is a flash of empty grid.
+    ///
+    /// The REVEAL's own channel then takes over and hides the same cell for the
+    /// length of the close, which is what stops it showing beside the window.
+    /// (That channel used to resolve a list-row cell only, so on the Discover
+    /// grid both its hide and its restore landed on nothing — fixed in
+    /// `setRevealConcealed`, which now switches on the cell like the hero
+    /// channel beside it always has.)
     private func tileCardCloseGeometry(
         dismissing feed: UIViewController, departure: (id: PostID, isActivity: Bool)
     ) -> RevealGeometry? {
