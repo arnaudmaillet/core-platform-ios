@@ -75,7 +75,7 @@ struct ZoomExistentialDispatchTests {
         ])
     }
 
-    // MARK: - Flight card (9 defaulted members)
+    // MARK: - Flight card (10 defaulted members)
 
     @Test func everyDefaultedFlightCardMemberDispatchesDynamically() {
         let spy = SpyCard()
@@ -89,12 +89,13 @@ struct ZoomExistentialDispatchTests {
         card.adoptZoomLiveMedia { _ in true }
         card.adoptZoomLiveMediaView(probe)
         #expect(card.zoomLiveMediaTracksCardBounds)
+        card.setZoomContentBlend(0.5)
         card.prepareZoomLiveMediaForFlight(destinationSize: CGSize(width: 3, height: 4))
         card.applyZoomRestingShadow(to: CALayer())
 
         #expect(spy.calls == [
             "isDrawing", "debugState", "nativeSize", "surface", "adoptMirror",
-            "adoptView", "tracksBounds", "prepare", "applyShadow",
+            "adoptView", "tracksBounds", "blend", "prepare", "applyShadow",
         ])
     }
 }
@@ -179,6 +180,7 @@ private final class SpyCard: UIView, ZoomFlightCard {
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) { calls.append("adoptMirror") }
     func adoptZoomLiveMediaView(_ view: UIView) { calls.append("adoptView") }
     var zoomLiveMediaTracksCardBounds: Bool { calls.append("tracksBounds"); return true }
+    func setZoomContentBlend(_ t: CGFloat) { calls.append("blend") }
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) { calls.append("prepare") }
     func applyZoomRestingShadow(to layer: CALayer) { calls.append("applyShadow") }
 }

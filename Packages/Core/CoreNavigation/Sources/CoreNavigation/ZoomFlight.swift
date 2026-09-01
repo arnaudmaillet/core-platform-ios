@@ -204,6 +204,12 @@ struct ZoomFlight {
     func poseAtSource(at landing: CGRect) {
         card.frame = landing
         card.setZoomCornerRadius(card.zoomRestingCornerRadius)
+        // The thumbnail end is the source's OWN picture, whole. Set
+        // unconditionally, like every other channel in this pose, so a flight
+        // that was caught and released mid-blend still lands on the exact twin
+        // the handshake depends on rather than on whatever fraction it was
+        // holding.
+        card.setZoomContentBlend(1)
         card.zoomRestingChrome?.alpha = 1
         shadow.frame = CGRect(origin: landing.origin, size: shadow.frame.size)
         shadow.alpha = 1
@@ -228,6 +234,10 @@ struct ZoomFlight {
     func poseAsPage(cornerRadius: CGFloat) {
         card.frame = pageFrame
         card.setZoomCornerRadius(cornerRadius)
+        // The full-screen end is the PAGE's picture — the one the card was
+        // handed as its departure operand. A card with no second picture reads
+        // this as the no-op it is.
+        card.setZoomContentBlend(0)
         card.zoomRestingChrome?.alpha = 0
         shadow.alpha = 0
         let center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
@@ -253,6 +263,14 @@ struct ZoomFlight {
             size: CGSize(width: pageFrame.width * scale, height: pageFrame.height * scale)
         )
         card.setZoomCornerRadius(cornerRadius)
+        // Still the page, so still the page's picture. A held card is the thing
+        // being decided about rather than a thing on its way home — the same
+        // reasoning that keeps the page's ASPECT here instead of morphing it
+        // under the finger — so the blend belongs to the release, which is when
+        // the outcome is known. Stated rather than left implicit: this pose is
+        // re-applied on every pan event, and a channel it does not name is a
+        // channel that can carry a stale value into a whole grab.
+        card.setZoomContentBlend(0)
         card.zoomRestingChrome?.alpha = 0
         shadow.alpha = 0
         let center = CGPoint(x: card.bounds.width / 2, y: card.bounds.height / 2)
@@ -285,6 +303,18 @@ struct ZoomFlight {
     /// the page's caption against the tile's counters mid-drag reads as two
     /// half-drawn overlays. They swap inside the release spring
     /// (`poseAtSource`/`poseAsPage`), where one of them is always the answer.
+    ///
+    /// The card's PICTURE blend does interpolate, and the difference is not an
+    /// inconsistency. The rule above is not "never cross-fade": it is that a
+    /// fade only works against NOTHING, because two half-drawn runs of text
+    /// draw both of them. The blend's two operands are opaque pictures with one
+    /// of them fully opaque behind the other at every instant, so every frame
+    /// it produces is a whole photograph rather than two transparent ones —
+    /// and a card whose far end is line art blends the disc and the glyph as
+    /// one opaque unit for exactly that reason. Excluding it would also put
+    /// back the snap this function exists to remove: the card would be
+    /// pin-sized and pin-shaped at `t == 1` while still wearing the page's
+    /// picture, and the swap would have to land in a single frame.
     func poseInterpolated(
         _ progress: CGFloat, from startSize: CGSize, to landing: CGRect, startCornerRadius: CGFloat
     ) {
@@ -297,6 +327,10 @@ struct ZoomFlight {
         card.setZoomCornerRadius(
             startCornerRadius + (card.zoomRestingCornerRadius - startCornerRadius) * t
         )
+        // Ahead of the live-surface block below, which returns early for cards
+        // that size their own surface — the blend belongs to every card, not
+        // only to the ones that fall through.
+        card.setZoomContentBlend(t)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         if let surface = card.zoomLiveMediaSurface {
             guard !card.zoomLiveMediaTracksCardBounds else { return }
