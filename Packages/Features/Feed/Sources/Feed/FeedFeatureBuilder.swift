@@ -364,6 +364,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             following: following,
+            // The same balance the map's toolbar shows under this page, and
+            // the same sheet it opens — one wallet instance app-wide, because
+            // `WalletStore`'s change post is scoped to the instance.
+            wallet: wallet,
+            makeWalletSheet: makeWalletSheet,
             loadPosts: {
                 // One hydration over the same provider shape the feed above
                 // uses, so every member is a cache hit. Unranked: the

@@ -1,4 +1,6 @@
 import CoreModels
+import CoreStorage
+import DesignSystem
 import FeedInterface
 import MediaCore
 import PostGrid
@@ -31,6 +33,7 @@ struct PlaceProfileTests {
 
     private func makeProfile(
         following: ClusterGalleryFollowing? = nil,
+        wallet: WalletStore? = nil,
         posts: [GalleryPost] = []
     ) -> PlaceProfileViewController {
         PlaceProfileViewController(
@@ -39,9 +42,16 @@ struct PlaceProfileTests {
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
             following: following,
+            wallet: wallet,
             loadPosts: { posts },
             openPost: { _, _, _ in }
         )
+    }
+
+    /// A defaults suite of this test's own: `WalletStore` persists there, and
+    /// a shared one would let two runs read each other's balance.
+    private static func makeWalletDefaults() -> UserDefaults {
+        UserDefaults(suiteName: "place-profile-wallet-\(UUID().uuidString)") ?? .standard
     }
 
     // MARK: - Popularity ordering (the Gallery tab's contract)
@@ -162,32 +172,36 @@ struct PlaceProfileTests {
         #expect(item.image == UIImage(systemName: "heart"))
     }
 
-    /// A profile whose subject has no followable identity shows no HEART — an
-    /// inert one would promise a feature the caller can't honor. The "..."
-    /// stays, because its one row does not depend on a follow seam.
-    @Test func withoutAFollowSeamOnlyTheOverflowRemains() {
-        let profile = makeProfile(following: nil)
-        profile.loadViewIfNeeded()
-        let items = profile.navigationItem.rightBarButtonItems ?? []
-        #expect(items.count == 1)
-        #expect(items.first?.menu != nil, "the overflow is still there…")
-        #expect(items.first?.image == UIImage(systemName: "ellipsis"), "…and it is the only item")
-    }
+    /// Each trailing item earns its place from a seam: no follow closure, no
+    /// heart; no wallet, no balance. An inert control would promise a feature
+    /// the caller cannot honor.
+    @Test func trailingItemsAppearOnlyWithTheirSeams() {
+        let bare = makeProfile(following: nil)
+        bare.loadViewIfNeeded()
+        #expect((bare.navigationItem.rightBarButtonItems ?? []).isEmpty)
 
-    /// The trailing pair, in the order the eye reads it: [...][Follow].
-    /// Index 0 is the RIGHTMOST item, so the heart keeps the corner it has
-    /// always had and the overflow sits inboard of it.
-    @Test func theOverflowSitsInboardOfTheFollowButton() throws {
-        let profile = makeProfile(following: ClusterGalleryFollowing(
+        let followable = makeProfile(following: ClusterGalleryFollowing(
             isFollowing: { false }, toggle: { true }
         ))
+        followable.loadViewIfNeeded()
+        #expect(followable.navigationItem.rightBarButtonItems?.count == 1)
+    }
+
+    /// The trailing pair, in the order the eye reads it: [points][♡]. Index 0
+    /// is the RIGHTMOST item, so the heart keeps the corner it has always had
+    /// and the balance sits inboard of it — the order the map already puts
+    /// its coin inboard of the bell.
+    @Test func thePointsBalanceSitsInboardOfTheHeart() throws {
+        let profile = makeProfile(
+            following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }),
+            wallet: WalletStore(defaults: Self.makeWalletDefaults())
+        )
         profile.loadViewIfNeeded()
         let items = try #require(profile.navigationItem.rightBarButtonItems)
         #expect(items.count == 2)
         #expect(items[0].image == UIImage(systemName: "heart"), "the corner is the heart's")
-        let menu = try #require(items[1].menu)
-        #expect(menu.children.compactMap { ($0 as? UIAction)?.title } == ["Share"],
-                "one honest row: a place cannot be reported and has no link to copy")
+        #expect(items[1].customView is WalletBadgeButton)
+        #expect(items[1].accessibilityLabel == "Points balance")
         // ⚠️ Each in its OWN bubble. Sharing the group's one platter is what
         // makes two controls read as a segmented pair — the map's coin and
         // bell, the profile's tray and For You's all opt out the same way.

@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import MediaCore
@@ -116,10 +117,21 @@ final class PlaceProfileViewController: UIViewController {
     /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
     private let following: ClusterGalleryFollowing?
     /// The two trailing items, held so the bar's group is composed in one
-    /// place — see `configureNavigationItems`. `followItem` stays nil when no
-    /// follow seam was supplied; the "..." is always there.
+    /// place — see `configureNavigationItems`. Either can be nil: the heart
+    /// needs a follow seam, the balance needs a wallet.
     private var followItem: UIBarButtonItem?
-    private var moreItem: UIBarButtonItem?
+    private var walletItem: UIBarButtonItem?
+    /// The viewer's spendable balance, in the same face it wears on the map,
+    /// For You, the profile and the post screen.
+    private let walletBadge = WalletBadgeButton()
+    private let wallet: WalletStore?
+    /// Vends the wallet/claim sheet the badge presents — shell-owned, because
+    /// it is the same sheet every other badge opens and the five must never
+    /// diverge. Nil leaves the badge display-only.
+    private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    /// Held in a bag rather than a property: a main-actor screen's `deinit`
+    /// is nonisolated and may not even read one to unregister it.
+    private let walletObservers = NotificationObserverBag()
     /// The follow state as last rendered, so the dock hand-over can redraw
     /// the button without asking the caller's store again.
     private var followState = false
@@ -277,6 +289,8 @@ final class PlaceProfileViewController: UIViewController {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
         following: ClusterGalleryFollowing? = nil,
+        wallet: WalletStore? = nil,
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         loadPosts: @escaping () async throws -> [GalleryPost],
         openPost: @escaping (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void
     ) {
@@ -284,6 +298,8 @@ final class PlaceProfileViewController: UIViewController {
         self.placeName = placeName
         self.imagePipeline = imagePipeline
         self.following = following
+        self.wallet = wallet
+        self.makeWalletSheet = makeWalletSheet
         self.loadPosts = loadPosts
         self.openPost = openPost
         self.anchorID = postIDs.first ?? PostID("")
@@ -863,24 +879,11 @@ final class PlaceProfileViewController: UIViewController {
     // MARK: - The navigation bar
 
     /// The bar, left to right: back chevron · selector (docked only) ·
-    /// dynamic space · "..." · Follow.
+    /// dynamic space · points balance · Follow.
     private func configureNavigationItems() {
         configureFollowButton()
-        configureMoreButton()
-        // ⚠️ INDEX 0 IS THE RIGHTMOST. The heart keeps the corner it has
-        // always had and the "..." sits inboard of it, which is the order the
-        // eye reads as [...][♡]. The "..." is present whether or not a follow
-        // seam was supplied — its rows do not depend on one.
-        //
-        // ⚠️ EACH IN ITS OWN BUBBLE. `sharesBackground = false` is UIKit's
-        // opt-out from the one glass pill a trailing group otherwise draws
-        // around everything in it — the arrangement the map's coin and bell
-        // use, and the profile's tray, and For You's. Left sharing, the two
-        // read as one segmented control with a divider nobody drew.
-        for item in [followItem, moreItem].compactMap({ $0 }) {
-            item.sharesBackground = false
-        }
-        navigationItem.rightBarButtonItems = [followItem, moreItem].compactMap { $0 }
+        configureWalletBadge()
+        applyTrailingItems()
         // ⚠️ AFTER the trailing items, and that ordering is load-bearing:
         // `installLeadingSelector` measures the bar's whole budget to size
         // its capsule, and a trailing group installed afterwards would leave
@@ -892,42 +895,76 @@ final class PlaceProfileViewController: UIViewController {
         applyDockedAppearance(animated: false)
     }
 
-    /// The trailing "...": one honest row.
+    /// ⚠️ INDEX 0 IS THE RIGHTMOST. The heart keeps the corner it has always
+    /// had and the balance sits inboard of it — the same order the map puts
+    /// its coin inboard of the bell.
     ///
-    /// ⚠️ ONE ROW, and the omissions are deliberate rather than unfinished.
-    /// Report has nothing to file — `moderation.v1` has no place entity, so
-    /// the row could only misfile against a post or a profile. Copy Link has
-    /// nothing to copy — the app has no URL scheme and no associated domain,
-    /// and a place id does not cross this screen's seam. Follow is already
-    /// the button beside it. A menu offering dead actions is worse than a
-    /// menu with one live one.
-    ///
-    /// A plain bar item, not the profile's glass bubble: that one is tray
-    /// furniture floating over a banner, and in a bar it double-stacks
-    /// material over the platter UIKit already draws.
-    private func configureMoreButton() {
-        let share = UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) {
-            [weak self] _ in self?.presentShareSheet()
-        }
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "ellipsis"),
-            menu: UIMenu(children: [share])
-        )
-        item.accessibilityLabel = "More actions"
-        moreItem = item
+    /// ⚠️ EACH IN ITS OWN BUBBLE. `sharesBackground = false` is UIKit's
+    /// opt-out from the one glass pill a trailing group otherwise draws
+    /// around everything in it. Left sharing, a balance and a heart read as
+    /// one segmented control with a divider nobody drew.
+    private func applyTrailingItems() {
+        let items = [followItem, walletItem].compactMap { $0 }
+        for item in items { item.sharesBackground = false }
+        navigationItem.rightBarButtonItems = items
     }
 
-    /// Shares the place as TEXT. No URL exists to share — the same honest
-    /// concession the map's own share sheet and the snap feed's make, for the
-    /// same reason.
-    private func presentShareSheet() {
-        let sheet = UIActivityViewController(
-            activityItems: [placeName], applicationActivities: nil
+    /// The viewer's spendable points, in the toolbar — the fifth host of one
+    /// badge (the map, For You, the profile, the post screen, and here).
+    ///
+    /// Built in this package rather than through the shell's
+    /// `WalletBadgeInstaller`, for the reason the post screen is: a pushed
+    /// screen owns its own navigation item, and what the installer exists to
+    /// share — the freshness rules — is two closures here.
+    private func configureWalletBadge() {
+        guard let wallet else { return }
+        // A badge with no sheet behind it is a read-out, not a control.
+        walletBadge.isUserInteractionEnabled = makeWalletSheet != nil
+        walletBadge.addAction(
+            UIAction { [weak self] _ in
+                guard let self, let sheet = self.makeWalletSheet?() else { return }
+                self.present(sheet, animated: true)
+            },
+            for: .primaryActionTriggered
         )
-        // Anchored on the item that opened it, or the sheet arrives from the
-        // screen's corner on a regular-width layout.
-        sheet.popoverPresentationController?.barButtonItem = moreItem
-        present(sheet, animated: true)
+        // ⚠️ A GROWN COUNT NEEDS A FRESH WRAPPER. Re-assigning the same item
+        // hands the bar the same wrapper at the same frozen size (measured on
+        // the post screen: "120" still came back wrapped), so a new item is
+        // the only thing a bar measures anew.
+        walletBadge.onFittedWidthChange = { [weak self] in
+            guard let self else { return }
+            self.walletItem = self.makeWalletItem()
+            self.applyTrailingItems()
+        }
+        walletItem = makeWalletItem()
+        refreshWalletBadge()
+        // Spends and claims wherever they happen — a boost in the feed pushed
+        // over this page, a claim taken on the map beneath it.
+        walletObservers.add(NotificationCenter.default.addObserver(
+            forName: WalletStore.didChangeNotification, object: wallet, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshWalletBadge() }
+        })
+    }
+
+    private func makeWalletItem() -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: walletBadge)
+        item.accessibilityLabel = "Points balance"
+        return item
+    }
+
+    private func refreshWalletBadge() {
+        guard let wallet else { return }
+        let snapshot = wallet.snapshot()
+        walletBadge.update(
+            balance: snapshot.balance,
+            // A badge with no sheet to open must not advertise a claim the
+            // viewer has no way to take from here.
+            claimAvailable: makeWalletSheet != nil && snapshot.claimAvailable,
+            claimProgress: snapshot.claimCountdown.map {
+                WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
+            }
+        )
     }
 
     /// The trailing heart, and nothing but the heart.
