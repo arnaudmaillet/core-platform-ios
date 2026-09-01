@@ -1425,12 +1425,28 @@ final class MapsViewController: UIViewController {
     private func returnCover(
         to annotation: any MKAnnotation, leaving feed: UIViewController?
     ) -> MapReturnCover {
-        let departure = (feed as? any SnapFeedSettleReporting)?.settledPostID
+        let settled = feed as? any SnapFeedSettleReporting
+        let departure = settled?.settledPostID
         let arrival = Self.postIDs(of: annotation).first
         let cover = MapReturnCover.resolve(
             departure: departure,
             arrival: arrival,
-            picture: { [weak self] in self?.cachedPicture(for: $0) }
+            // ⚠️ THE FEED'S OWN STILL FIRST, and the map's thumbnail only as a
+            // fallback.
+            //
+            // Both are "the departure's picture" and they are not
+            // interchangeable in the card. The card takes off FULL SCREEN and
+            // aspect-fills whatever it is handed: the page's own still is
+            // already that shape, so it lands 1:1 and reads as the picture the
+            // viewer is looking at, anchored in the window. A marker's
+            // thumbnail is a small square — filled into a 402x874 card it is a
+            // magnified fragment, which is the crop this was reported as.
+            //
+            // The fallback still earns its place: a VIDEO page has no still, and
+            // a marker's cover is better than nothing there.
+            picture: { [weak self] id in
+                settled?.settledCoverImage ?? self?.cachedPicture(for: id)
+            }
         )
         #if DEBUG
         // `-zoom-blend-log`: which row of the product rule this flight took.
