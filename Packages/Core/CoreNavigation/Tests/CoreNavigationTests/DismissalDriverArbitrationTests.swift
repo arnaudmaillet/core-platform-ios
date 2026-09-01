@@ -47,6 +47,10 @@ struct DismissalDriverArbitrationTests {
     /// "forwarded and got nil" are different failures.
     private final class SavedDelegate: NSObject, UINavigationControllerDelegate {
         let animator = UIViewControllerAnimatedTransitioningStub()
+        /// Whether it has anything to say about this pop. False is the case
+        /// that mattered: a delegate holding the slot for a DIFFERENT screen
+        /// declines, and a decline is not permission to stop asking.
+        var answers = true
         private(set) var animatorAsks = 0
         private(set) var didShows = 0
         private(set) var interactionAsks = 0
@@ -66,7 +70,7 @@ struct DismissalDriverArbitrationTests {
             to toVC: UIViewController
         ) -> (any UIViewControllerAnimatedTransitioning)? {
             animatorAsks += 1
-            return animator
+            return answers ? animator : nil
         }
 
         func navigationController(
@@ -344,6 +348,55 @@ struct DismissalDriverArbitrationTests {
             from: rig.nav.viewControllers[0], to: rig.feed
         )
         #expect(claimed is RevealPresentAnimator)
+    }
+
+    // MARK: - A decline is not an answer
+
+    /// ⚠️ A FORWARD THAT COMES BACK NIL MUST NOT STRAND A LIVE GRAB.
+    ///
+    /// Forwarding exists so a post that FLIES reaches the flight this driver
+    /// displaced. But nil from that delegate is not "no opinion" — it is
+    /// UIKit's own default pop, which is not interactive. Returned as though it
+    /// were an answer, the grab created moments earlier drove nothing and the
+    /// screen slid away as if there had been no gesture: filmed on a post
+    /// opened as a REVEAL, whose displaced delegate belongs to a different
+    /// screen entirely and has nothing to say about this pop.
+    @Test func aDeclinedForwardLeavesTheLiveGrabDriving() async {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let feed = StubFeed()
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(feed, animated: false)
+        window.rootViewController = nav
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+
+        // The delegate is in the slot BEFORE the install, which is what makes
+        // it the saved one: `install` captures whoever owned the stack and
+        // takes the slot from them.
+        let saved = SavedDelegate()
+        saved.answers = false
+        nav.delegate = saved
+
+        let slide = InteractiveSlideDismissal()
+        slide.attach(to: feed, axes: [.horizontal])
+        slide.install(on: nav)
+        #expect(slide.debugSavedDelegate === saved, "precondition: it has someone to forward to")
+
+        let driven = await slide.debugPerformSwipe(peakProgress: 0.9)
+
+        #expect(saved.animatorAsks > 0, "it must still ASK — the flight case depends on it")
+        #expect(driven, "the finger drove nothing: the decline was taken for an answer")
+    }
+
+    /// And the narrowing: a pop with NO gesture keeps forwarding exactly as it
+    /// did, nil included. There is nothing being driven that a decline could
+    /// strand, and the animator this would otherwise fall through to is chosen
+    /// from a geometry a back-button pop never re-staged.
+    @Test func aBackButtonPopStillForwardsEvenADecline() {
+        let rig = rig(kind: .hero)
+        rig.saved.answers = false
+        #expect(popAnimator(rig) == nil)
+        #expect(rig.saved.animatorAsks == 1)
     }
 }
 
