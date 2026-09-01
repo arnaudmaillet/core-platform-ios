@@ -244,8 +244,11 @@ extension HorizontalPagerView: UIScrollViewDelegate {
 /// simulator caught and a unit test on this class had just called green. Sharing
 /// the class is what stops it happening a third time.
 public final class HorizontalPagerScrollView: UIScrollView {
-    /// Matches the system's edge-gesture strip.
-    private static let popEdgeZone: CGFloat = 20
+    /// Matches the system's edge-gesture strip — see
+    /// `PagedScreenDismissalPolicy.edgeZone`, which is the one definition. This
+    /// pager yielding a band the screen above it does not claim is a drag that
+    /// belongs to nobody.
+    private static var popEdgeZone: CGFloat { PagedScreenDismissalPolicy.edgeZone }
 
     override public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if let pan = gestureRecognizer as? UIPanGestureRecognizer, pan === panGestureRecognizer,

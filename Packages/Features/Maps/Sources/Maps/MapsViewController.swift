@@ -60,7 +60,8 @@ final class MapsViewController: UIViewController {
     /// toggle to this place's identity; the last argument stages the page's
     /// OWN dismissal back to the cluster marker (`makeMapReturnSource`).
     private let makeClusterGallery: (
-        [PostID], MapPlace, UIViewController, @escaping () -> (any ZoomTransitionSource)?
+        [PostID], MapPlace, UIViewController,
+        @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
     ) -> UIViewController
     /// Warms the given posts into the shared cache so a tap opens instantly.
     private let prewarm: ([PostID]) async -> Void
@@ -201,7 +202,8 @@ final class MapsViewController: UIViewController {
             ((UIViewController) -> UIViewController)?
         ) -> Void,
         makeClusterGallery: @escaping (
-            [PostID], MapPlace, UIViewController, @escaping () -> (any ZoomTransitionSource)?
+            [PostID], MapPlace, UIViewController,
+        @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
         ) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
@@ -1377,10 +1379,13 @@ final class MapsViewController: UIViewController {
     /// changed since the tap, so nothing is captured beyond the annotation's
     /// identity. `nil` when the marker has left the map entirely, which is
     /// the page's cue to keep the plain slide (the fallback dismissal).
+    /// `departureStill` draws the screen the flight is leaving — see the seam's
+    /// own doc. Asked at STAGING, so it costs one render on the first frame of
+    /// the gesture and nothing at all when the flight never happens.
     private func makeMapReturnSource(
         for annotation: any MKAnnotation
-    ) -> () -> (any ZoomTransitionSource)? {
-        { [weak self, weak box = annotation as AnyObject] in
+    ) -> (@escaping () -> UIImage?) -> (any ZoomTransitionSource)? {
+        { [weak self, weak box = annotation as AnyObject] departureStill in
             guard let self, let box, let annotation = box as? any MKAnnotation,
                   self.mapView.annotations.contains(where: { ($0 as AnyObject) === box })
             else { return nil }
@@ -1393,11 +1398,16 @@ final class MapsViewController: UIViewController {
                 annotation: annotation,
                 thumbnail: thumbnail,
                 face: Self.face(of: annotation),
-                ringKind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil }
-                // No departure cover: the only screen that uses this source is
-                // the place page itself, and a whole grid is not a post with a
-                // picture to dissolve. A post pushed over that page goes home
-                // to its own tile now, on both axes.
+                ringKind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil },
+                // ⚠️ THE WHOLE DEPARTING SCREEN, not a post's cover. Every other
+                // departure on this source is one post leaving another; here a
+                // GRID is collapsing into an icon, and without an operand the
+                // card wore that icon from the first frame — a full-screen page
+                // cutting straight to a 44pt disc with nothing carried across.
+                //
+                // Resolved through the same channel a post's picture uses, so
+                // the blend does not learn a second shape.
+                departureCover: { departureStill().map { .picture($0) } ?? .none }
             )
         }
     }

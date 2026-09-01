@@ -314,7 +314,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         title: String,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
-        mapReturn: @escaping () -> (any ZoomTransitionSource)?
+        mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
     ) -> UIViewController {
         let base = repository
         let engagement = engagementProvider

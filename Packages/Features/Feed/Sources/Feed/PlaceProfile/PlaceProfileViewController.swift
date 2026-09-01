@@ -160,7 +160,10 @@ final class PlaceProfileViewController: UIViewController {
     /// The map's way home — see `FeedFeatureBuilding.makeClusterGallery`.
     /// This page is the only screen that leaves for the map: a post opened
     /// from it goes home to its own tile on both axes.
-    var mapReturn: (() -> (any ZoomTransitionSource)?)?
+    ///
+    /// Handed a closure that draws this page, so the flight can dissolve what
+    /// is on screen into the marker's face instead of cutting to it.
+    var mapReturn: ((@escaping () -> UIImage?) -> (any ZoomTransitionSource)?)?
 
     /// The tile a flight left THIS page from, and which tab it sat on — nil
     /// whenever the open post did not come from here (the map's Case B, where
@@ -238,9 +241,30 @@ final class PlaceProfileViewController: UIViewController {
     /// appearance would stack recognizers) from the first source `mapReturn`
     /// yields; the DELEGATE install repeats, because every feed pushed above
     /// takes the slot and hands back whatever it captured.
+    /// This page as one picture, for the flight home to dissolve into the
+    /// marker's face.
+    ///
+    /// ⚠️ A SNAPSHOT, which this codebase is otherwise wary of — a text hero
+    /// once tried photographing a page to impersonate it and the attempt is
+    /// recorded as a warning. This is the other use: not a stand-in pretending
+    /// to be a live screen, but one operand of a fade whose other half is a
+    /// 44pt icon. Nothing is impersonated and nothing outlives the transition.
+    ///
+    /// `afterScreenUpdates: false` on purpose: it must not force a layout pass
+    /// on the first frame of a gesture the finger is already driving, and what
+    /// is already on screen is exactly what the viewer is leaving.
+    private func departureStill() -> UIImage? {
+        guard view.bounds.width > 0, view.bounds.height > 0 else { return nil }
+        let renderer = UIGraphicsImageRenderer(bounds: view.bounds)
+        return renderer.image { _ in
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
+        }
+    }
+
     private func installMapReturnIfTop() {
         guard let nav = navigationController, nav.topViewController === self else { return }
-        if mapReturnTransition == nil, let source = mapReturn?() {
+        if mapReturnTransition == nil,
+           let source = mapReturn?({ [weak self] in self?.departureStill() }) {
             let transition = ZoomTransitionController(source: source, destination: self)
             transition.attachInteractiveDismissal(to: view, axes: [.horizontal]) { [weak nav] in
                 nav?.popViewController(animated: true)
@@ -1917,13 +1941,27 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
     /// on a card's carousel with a photograph to its left, the carousel is
     /// the tenant and wins its own territory.
     func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
-        guard activeIndex == 0 else { return false }
+        let point = self.view.convert(location, from: view)
+        let isPushed = navigationController.map { $0.viewControllers.first !== self } ?? false
+        // ⚠️ THE EDGE IS NOT THE FIRST TAB'S PRIVILEGE. This asked only "am I on
+        // the first tab" and refused everything else outright — including the
+        // leading strip, which `HorizontalPagerScrollView` had already yielded
+        // as the platform's own. Two surfaces both giving the drag up leaves it
+        // claimed by nobody: on the Activity tab a rightward swipe did nothing
+        // at all, from anywhere. Reported.
+        guard PagedScreenDismissalPolicy.allowsDismissal(
+            atX: point.x, activeIndex: activeIndex, isPushed: isPushed
+        ) else { return false }
+        // On the strip the answer is already yes — it is absolute, the way the
+        // pager treats it. Elsewhere the drag may still belong to a carousel
+        // under the finger.
+        //
         // ⚠️ `-1`: the drag is RIGHTWARD and pages run the other way to the
         // finger. Both rules ask the same question — what else could this
         // drag be for — see `MediaCarouselTouchRouting`.
+        guard point.x > PagedScreenDismissalPolicy.edgeZone else { return true }
         return MediaCarouselTouchRouting.dragPassesThroughCarousel(
-            at: self.view.convert(location, from: view),
-            in: self.view, towardsPageDelta: -1
+            at: point, in: self.view, towardsPageDelta: -1
         )
     }
 

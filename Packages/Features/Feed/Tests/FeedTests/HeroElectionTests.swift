@@ -70,7 +70,7 @@ struct HeroElectionTests {
             feed: UIViewController(),
             // No map beneath this host: the page keeps the plain-slide
             // fallback, which is exactly the axis-split under test.
-            mapReturn: { nil }
+            mapReturn: { _ in nil }
         )
         stack.nav.pushViewController(gallery, animated: false)
         #expect(gallery.navigationController === stack.nav, "precondition: gallery on the stack")

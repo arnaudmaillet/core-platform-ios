@@ -207,17 +207,25 @@ public protocol FeedFeatureBuilding {
     /// marker left the map).
     ///
     /// Called when the gallery becomes the top screen — the ONE departure it
-    /// has. A post pushed over it used to escape past it to the map on a
-    /// horizontal swipe, which is why this briefly took a "which screen is
-    /// departing" argument; that post now goes home to its own tile instead,
-    /// so the only screen that ever leaves for the map is this one, and a whole
-    /// grid is not a post with a picture to carry.
+    /// has, now that a post pushed over it goes home to its own tile rather
+    /// than escaping past it to the map.
+    ///
+    /// `departureStill` is what that screen LOOKS LIKE, asked when the flight
+    /// stages and never before. Without it the card wears the marker's own face
+    /// from the first frame — a whole page collapsing straight into an icon,
+    /// with nothing of what was on screen carried across. The closure returning
+    /// nil leaves exactly that behaviour, which is the honest floor for a
+    /// screen that cannot draw itself.
+    ///
+    /// ⚠️ A PICTURE, not a post. The departing screen here is a GRID: there is
+    /// no single post leaving, which is why this is a still and not an id the
+    /// way every other departure on this seam is.
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
-        mapReturn: @escaping () -> (any ZoomTransitionSource)?
+        mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
     ) -> UIViewController
 }
 
