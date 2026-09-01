@@ -500,10 +500,32 @@ enum RevealStage {
         (standIn as? RevealStandInShaping)?.revealStandInCarriesDeparture ?? false
     }
 
-    /// The fill a stand-in should be wearing at `fraction`: the ramp, or solid
-    /// for one that is already the page's picture.
-    static func fill(_ fraction: CGFloat, for standIn: UIView?) -> CGFloat {
-        carriesDeparture(standIn) ? 1 : fraction
+    /// A carrier is solid by the time an ordinary stand-in starts to appear.
+    ///
+    /// ⚠️ NOT A STEP AT ZERO, and the difference is the page's CHROME.
+    ///
+    /// A carrier holds the page's media and nothing else — no caption card, no
+    /// author band, no comment stream. Staged solid at progress 0 it replaced
+    /// all of that in the frame the finger went down, before anything had
+    /// visibly moved, and a cancelled drag faded it back: a full chrome blink
+    /// for a 10pt pull.
+    ///
+    /// A short leading ramp costs nothing where it matters. The window has
+    /// barely shrunk this early, so the carrier's copy of the media is still
+    /// coincident with the page's and the ramp is invisible ON THE MEDIA — it
+    /// is only visible on what the page draws over it, which is exactly the
+    /// thing that should be leaving.
+    static let carryFadeEnd: CGFloat = pageFadeStart
+
+    /// The fill a stand-in should be wearing at `progress`: the three acts, or
+    /// a carrier's short leading ramp.
+    ///
+    /// Takes PROGRESS rather than the computed fill, because a carrier's ramp
+    /// runs where the ordinary one is still flat zero and cannot be expressed
+    /// as a function of it.
+    static func fill(at progress: CGFloat, for standIn: UIView?) -> CGFloat {
+        guard carriesDeparture(standIn) else { return swapFractions(at: progress).fill }
+        return easeIn(ramp(progress, from: 0, to: carryFadeEnd))
     }
 
     private static func ramp(_ value: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
@@ -1167,7 +1189,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = RevealStage.fill(0, for: standIn)
+            standIn.alpha = RevealStage.fill(at: 0, for: standIn)
             (standIn as? RevealStandInShaping)?.setContentOpacity(0)
         }
         // The same rule the grab leg states at length: the cell the window is
@@ -1229,10 +1251,19 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // card-shaped stand-ins hid it, because a card's fill lands at the
             // same moment the real row takes over.
             let total = transitionDuration(using: context) * RevealStage.springVisibleFraction
-            // Skipped whole for a stand-in that is already the page's picture:
-            // it was staged solid, and animating it up from nothing is the
-            // double image this leg's opt-out exists to remove.
-            if !RevealStage.carriesDeparture(standIn) {
+            // A carrier runs the short leading ramp instead of the fill's own
+            // act — see `RevealStage.carryFadeEnd`. Not skipped, and not the
+            // three acts either: it has to be solid before the window has
+            // shrunk enough for two copies of the media to read as two.
+            if RevealStage.carriesDeparture(standIn) {
+                UIView.animate(
+                    withDuration: total * RevealStage.carryFadeEnd,
+                    delay: 0,
+                    options: [.curveEaseIn]
+                ) {
+                    standIn.alpha = 1
+                }
+            } else {
                 UIView.animate(
                     withDuration: total * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
                     delay: total * RevealStage.pageFadeStart,

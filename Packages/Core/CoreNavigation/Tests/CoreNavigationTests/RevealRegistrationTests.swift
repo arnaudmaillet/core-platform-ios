@@ -174,14 +174,32 @@ struct RevealRegistrationTests {
         let carrying = CarryingStandIn()
         let ordinary = OrdinaryStandIn()
 
+        // Solid before the window has shrunk enough for two copies of one
+        // picture to read as two — and an ordinary card keeps all three acts.
         for step in 0...100 {
             let progress = CGFloat(step) / 100
             let swap = RevealStage.swapFractions(at: progress)
-            #expect(RevealStage.fill(swap.fill, for: carrying) == 1,
-                    "the page showed through its own copy at \(progress)")
-            #expect(RevealStage.fill(swap.fill, for: ordinary) == swap.fill,
+            if progress >= RevealStage.carryFadeEnd {
+                #expect(RevealStage.fill(at: progress, for: carrying) == 1,
+                        "the page showed through its own copy at \(progress)")
+            }
+            #expect(RevealStage.fill(at: progress, for: ordinary) == swap.fill,
                     "the three acts were taken away from a card that needs them")
         }
+        // ⚠️ AND NOT A STEP AT ZERO. A carrier holds the page's media and none
+        // of its chrome, so staging it solid erased the caption, the band and
+        // the comment stream in the frame the finger went down. The ramp is
+        // invisible on the media — the copies are still coincident there — and
+        // visible only on what was supposed to be leaving.
+        #expect(RevealStage.fill(at: 0, for: carrying) == 0,
+                "the page's chrome vanished in one frame")
+        #expect(RevealStage.fill(at: RevealStage.carryFadeEnd / 2, for: carrying) > 0,
+                "the carrier never arrives")
+        #expect(RevealStage.fill(at: RevealStage.carryFadeEnd / 2, for: carrying) < 1,
+                "the ramp is a step in disguise")
+        // It is over before an ordinary stand-in's own fill begins, so nothing
+        // downstream had to learn a second schedule.
+        #expect(RevealStage.carryFadeEnd <= RevealStage.pageFadeStart)
         #expect(RevealStage.carriesDeparture(carrying))
         #expect(!RevealStage.carriesDeparture(ordinary))
         #expect(!RevealStage.carriesDeparture(nil), "no stand-in carries nothing")

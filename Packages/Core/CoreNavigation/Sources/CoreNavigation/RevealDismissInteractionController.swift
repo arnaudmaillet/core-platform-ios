@@ -142,7 +142,7 @@ final class RevealDismissInteractionController: NSObject,
             host.addSubview(standIn)
             // Solid from frame 0 when it already holds the page's own media —
             // see `RevealStandInShaping.revealStandInCarriesDeparture`.
-            standIn.alpha = RevealStage.fill(0, for: standIn)
+            standIn.alpha = RevealStage.fill(at: 0, for: standIn)
             (standIn as? RevealStandInShaping)?.setContentOpacity(0)
         }
         self.standIn = standIn
@@ -262,7 +262,7 @@ final class RevealDismissInteractionController: NSObject,
         // version this replaces lost its second half to exactly that.
         if let standIn {
             let swap = RevealStage.swapFractions(at: staged.progress)
-            standIn.alpha = RevealStage.fill(swap.fill, for: standIn)
+            standIn.alpha = RevealStage.fill(at: staged.progress, for: standIn)
             (standIn as? RevealStandInShaping)?.setContentOpacity(swap.content)
         }
 

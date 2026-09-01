@@ -390,7 +390,23 @@ final class SnapMediaCardView: UIView {
     /// Still nil for a TEXT page, which has no picture of any kind — that nil
     /// is meaningful and every caller is written around it.
     var renderedStill: UIImage? {
-        if showsCollection { return carousel?.renderedCover }
+        if showsCollection {
+            // ⚠️ AND A COLLECTION'S VIDEO PAGE IS THE SAME QUESTION. Its
+            // `renderedCover` is that page's THUMBNAIL — the right answer for a
+            // still page and a frame-0 freeze for a playing one, which now
+            // matters more than it did: a non-nil still makes the stand-in an
+            // opaque replacement for the page, so the wrong picture is not a
+            // degraded blend any more, it is the whole window.
+            //
+            // Only an EXISTING surface is asked. `surface(forPage:)` mints one,
+            // and minting a playback surface to read a picture off it would
+            // start a second decode for a page nobody is going to watch.
+            if let page = carousel?.currentPage, let surface = pageSurfaces[page],
+               let frame = surface.currentStill {
+                return frame
+            }
+            return carousel?.renderedCover
+        }
         return imageView.image ?? renderView.currentStill
     }
 

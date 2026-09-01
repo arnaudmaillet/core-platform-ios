@@ -529,6 +529,22 @@ extension PinCardView: ZoomFlightCard {
     /// does not need a blend is untouched by this.
     func setZoomContentBlend(_ t: CGFloat) {
         setBlend(t)
+        // ⚠️ THE COVER IS POSED HERE, and it has to be, because a layout pass
+        // is not an animation.
+        //
+        // Autoresizing used to carry the cover, and autoresizing is applied
+        // synchronously from inside `setBounds` — so it swept with an animated
+        // `card.frame` for free. The uniform scale replaced it with
+        // `layoutSubviews`, which UIKit DEFERS to the end of the runloop turn,
+        // outside whatever animation block set the frame. The cover then
+        // snapped to its landing size on the flight's first frame and sat
+        // there, a small patch on a card still filling the screen.
+        //
+        // The reveal never showed it because `RevealStage.apply` already calls
+        // `layoutIfNeeded()` from inside its block for exactly this reason. The
+        // flight has no such call, and every pose sets the card's bounds and
+        // then calls this — so this is where the flight gets one.
+        layoutDepartureCover()
         #if DEBUG
         // `-blend-frame-log`: whether the two operands are actually TRACKING the
         // card. A cover that stays put while the card's edge sweeps over it is

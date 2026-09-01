@@ -355,6 +355,40 @@ struct PostGridFlightCardDepartureGeometryTests {
                 "the picture was re-cropped, not scaled")
     }
 
+
+    /// ⚠️ THE FLIGHT POSES THE COVER WITHOUT A LAYOUT PASS, and this is the
+    /// assertion — no `layoutIfNeeded()` anywhere below.
+    ///
+    /// Autoresizing used to carry the cover, and autoresizing is applied
+    /// synchronously from inside `setBounds`, so it swept with an animated
+    /// `card.frame` for free. The uniform scale replaced it with
+    /// `layoutSubviews`, which UIKit DEFERS past the animation block that set
+    /// the frame — so the cover snapped to its landing size on the flight's
+    /// first frame and sat there as a small patch on a card still filling the
+    /// screen. The reveal never showed it because `RevealStage.apply` calls
+    /// `layoutIfNeeded()` from inside its own block; the flight has no such
+    /// call, and every pose ends in `setZoomContentBlend`.
+    ///
+    /// A test that laid the card out itself would pass against the defect.
+    @Test func theFlightPosesTheDepartureCoverWithoutALayoutPass() {
+        let page = CGSize(width: 402, height: 874)
+        let card = card(at: page)
+        card.setDeparturePicture(picture())
+        card.setZoomContentBlend(0)
+        let cover = departureCover(of: card)
+        #expect(abs(cover.frame.width - page.width) < 0.5, "precondition: it starts covering")
+
+        // What a pose does: the frame, then the blend — inside an animation
+        // block, where a deferred layout pass would not reach it.
+        card.frame = CGRect(x: 0, y: 0, width: 128, height: 170)
+        card.setZoomContentBlend(1)
+
+        #expect(cover.frame.width < page.width - 1,
+                "the cover did not follow the card down — it is waiting for a layout pass")
+        #expect(abs(cover.frame.width / cover.frame.height - page.width / page.height) < 0.01,
+                "the cover was re-cropped rather than scaled")
+    }
+
     /// And a card that never grew is untouched — the flight path, posed by a
     /// transform and handed its cover before it is ever sized.
     @Test func aCardThatNeverGrewFillsItsBounds() {
@@ -367,4 +401,3 @@ struct PostGridFlightCardDepartureGeometryTests {
         #expect(abs(departureCover(of: card).frame.height - side.height) < 0.5)
     }
 }
-

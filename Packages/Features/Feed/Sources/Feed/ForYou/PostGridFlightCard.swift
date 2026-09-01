@@ -504,6 +504,12 @@ extension PostGridFlightCard: ZoomFlightCard {
     /// does not need a blend is untouched by this.
     func setZoomContentBlend(_ t: CGFloat) {
         setBlend(t)
+        // Posed from inside the flight's animation block — see the note on the
+        // marker card's own `setZoomContentBlend`. A deferred `layoutSubviews`
+        // is not an animation, and this is the only hook every pose runs.
+        departureBaseSize = DepartureCoverLayout.apply(
+            to: departureCoverView, in: bounds, departureBase: departureBaseSize
+        )
     }
 
     /// The surface fills the card and resizes with it, so `resizeAspectFill`
