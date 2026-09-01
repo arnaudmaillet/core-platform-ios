@@ -238,7 +238,61 @@ final class PinCardView: UIView {
     func setDeparturePicture(_ image: UIImage?) {
         departureCoverView.image = image
         departureCoverView.isHidden = image == nil
+        if image == nil { departureBaseSize = nil }
+        // Autoresizing and a transform do not compose; the cover is positioned
+        // by hand from here on.
+        departureCoverView.autoresizingMask = []
+        setNeedsLayout()
         applyBlend()
+    }
+
+    /// The largest size this card has been laid out at while carrying a
+    /// departure picture — which, for anything that travels home, is the size
+    /// it set off from.
+    ///
+    /// ⚠️ NOT captured when the picture is handed in. A flight is given its
+    /// cover before it is ever sized (`PinCardView()` is born at `.zero`) and
+    /// may be handed a late one mid-descent, so the moment of the call says
+    /// nothing about where the card started. Taking the maximum instead reads
+    /// the departure off the animation itself, and degrades honestly for a
+    /// card that only ever shrinks under a transform: its bounds never grow,
+    /// the scale below stays 1, and the cover behaves exactly as it did before
+    /// any of this existed.
+    private var departureBaseSize: CGSize?
+
+    /// ⚠️ A UNIFORM SCALE, NOT AN ASPECT-FILL RESIZE, and the difference is the
+    /// whole of this.
+    ///
+    /// Aspect-filling a view that is resized to the card recomputes the crop
+    /// every frame: as the card narrows toward a 44pt disc the picture keeps
+    /// its height and loses its sides, so the viewer watches the media get cut
+    /// away rather than travel. Filmed and reported as the departure content
+    /// "truncating" in the window. A tile landing hides it — its aspect is
+    /// close to the page's, so the recrop is small — and a marker cannot: the
+    /// aspect goes from 402x874 to a circle.
+    ///
+    /// Laid out at the page's size and scaled to COVER the card instead, the
+    /// picture shrinks as one thing and still fills the window at every
+    /// instant. It is the model `ZoomFlight` already drives live media with,
+    /// and the reason is the same.
+    private func layoutDepartureCover() {
+        guard departureCoverView.image != nil,
+              bounds.width > 0, bounds.height > 0
+        else {
+            departureCoverView.transform = .identity
+            departureCoverView.frame = bounds
+            return
+        }
+        let base = CGSize(
+            width: max(departureBaseSize?.width ?? 0, bounds.width),
+            height: max(departureBaseSize?.height ?? 0, bounds.height)
+        )
+        departureBaseSize = base
+        departureCoverView.transform = .identity
+        departureCoverView.bounds = CGRect(origin: .zero, size: base)
+        let scale = max(bounds.width / base.width, bounds.height / base.height)
+        departureCoverView.transform = CGAffineTransform(scaleX: scale, y: scale)
+        departureCoverView.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
     /// The blend channel: `t == 0` is the departure picture, `t == 1` the
@@ -249,9 +303,13 @@ final class PinCardView: UIView {
     /// ring as well as the cover, and it owns it for a reason of its own (a
     /// border reads as an outline drawn around the whole screen at full size,
     /// so it has to be gone well before the window is — see the note there).
-    /// A blend riding it would drag the ring's fade onto the pictures' clock
-    /// and vice versa. The two channels touch disjoint properties and compose
-    /// by multiplication where they overlap on the same view.
+    /// A blend riding it would drag the ring's fade onto the pictures' clock.
+    /// That direction still holds: nothing here touches the ring.
+    ///
+    /// The other direction does not, and deliberately so — `setContentOpacity`
+    /// re-aims this blend whenever a departure picture is loaded, because the
+    /// reveal has only that one ramp to hand a picture over on. See the note
+    /// there. A card with no departure picture is unaffected either way.
     func setBlend(_ t: CGFloat) {
         blend = min(max(t, 0), 1)
         applyBlend()
@@ -305,6 +363,11 @@ final class PinCardView: UIView {
     /// Rounds the card and its ring together. Both properties are
     /// UIView-animatable, so calling this inside an animation block sweeps the
     /// radius smoothly (pin 12pt ↔ device display corners).
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layoutDepartureCover()
+    }
+
     func setCornerRadius(_ radius: CGFloat) {
         layer.cornerRadius = radius
         ringView.layer.cornerRadius = radius
@@ -433,6 +496,18 @@ extension PinCardView: RevealStandInShaping {
         textFaceView.setContentOpacity(alpha)
         imageView.alpha = alpha
         ringView.alpha = alpha
+        // ⚠️ WITH A DEPARTURE PICTURE, THIS CHANNEL IS ALSO THE BLEND.
+        //
+        // A window closing onto a marker now hands its stand-in the picture it
+        // is leaving, so that the media SCALES with the window instead of being
+        // clipped by it. But the card's face is opaque at rest — it would sit
+        // over that picture from frame 0 and nothing would have been gained.
+        // The reveal has exactly one content ramp, and it means the same thing
+        // the blend means: 0 is what is being left, 1 is the marker.
+        //
+        // Only when there IS a second operand. Without one this is the channel
+        // it has always been, byte for byte.
+        if departureCoverView.image != nil { setBlend(alpha) }
     }
 
     /// The colour a page wears while a reveal opened from a TEXT marker is
@@ -485,6 +560,18 @@ extension PinCardView: ZoomFlightCard {
     /// does not need a blend is untouched by this.
     func setZoomContentBlend(_ t: CGFloat) {
         setBlend(t)
+        #if DEBUG
+        // `-blend-frame-log`: whether the two operands are actually TRACKING the
+        // card. A cover that stays put while the card's edge sweeps over it is
+        // a truncation, and it looks exactly like an aspect-fill re-crop from
+        // the outside — the numbers are the only way to tell them apart.
+        if ProcessInfo.processInfo.arguments.contains("-blend-frame-log") {
+            print("[blend-frame] t=\(String(format: "%.2f", t))"
+                + " card=\(NSCoder.string(for: bounds))"
+                + " arrival=\(NSCoder.string(for: imageView.frame))"
+                + " departure=\(NSCoder.string(for: departureCoverView.frame))")
+        }
+        #endif
     }
 
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {

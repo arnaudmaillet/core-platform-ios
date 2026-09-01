@@ -139,7 +139,21 @@ enum TextRevealInstaller {
             // face and blends the settled post's picture into it; a row keeps
             // its own position and does the same.
             makeDismissStandIn: { [weak feed] in
-                origin.makeDismissStandIn((feed as? SnapFeedViewController)?.activePostID)
+                let snap = feed as? SnapFeedViewController
+                let settlement = SnapFeedSettlement(
+                    postID: snap?.activePostID, still: snap?.settledCoverImage
+                )
+                #if DEBUG
+                // `-text-reveal-log`: whether the close has a picture to carry.
+                // Without one the window CLIPS the live page instead of scaling
+                // a copy of it, which is a different animation and not an
+                // obviously broken one.
+                if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+                    print("[text-reveal] settlement post=\(settlement.postID?.rawValue ?? "nil")"
+                        + " still=\(settlement.still != nil)")
+                }
+                #endif
+                return origin.makeDismissStandIn(settlement)
             },
             makePresentStandIn: origin.makePresentStandIn,
             setSourceConcealed: origin.setConcealed,

@@ -183,23 +183,101 @@ struct PinCardBlendTests {
         }
     }
 
-    /// And the reverse: a blend already set is not disturbed by the reveal's
-    /// channel. The two write disjoint properties, so whichever runs second
-    /// leaves the other's exactly where it was.
-    @Test func theTwoChannelsDoNotOverwriteEachOther() {
+    /// ⚠️ AND THE REVERSE IS NO LONGER SYMMETRIC: with a departure picture
+    /// loaded, the reveal's channel RE-AIMS the blend.
+    ///
+    /// This used to assert the two never overwrote each other, and the change
+    /// is the point rather than a concession. A reveal closing onto a marker
+    /// carries the picture it is leaving — that is what makes the media scale
+    /// with the window instead of being clipped by it — and
+    /// `RevealStandInShaping` gives it exactly one content ramp to hand that
+    /// picture over on. Left independent, the card's opaque face would sit on
+    /// top of the departing picture from frame 0 and the viewer would see none
+    /// of it.
+    ///
+    /// What did NOT change is the direction that mattered: the blend still
+    /// never drags the ring onto its clock, which is the reason the two were
+    /// ever separate. Only the reveal writes across, and only when there is a
+    /// second operand to write about.
+    @Test func theRevealChannelAimsTheBlendAndTheBlendLeavesTheRingAlone() {
         let card = makeCard(.media)
         card.setDeparturePicture(picture())
         card.setBlend(0.25)
-        card.setContentOpacity(0.5)
+        #expect(isAlpha(departureCover(of: card), 0.75), "precondition: the blend took")
 
-        #expect(isAlpha(departureCover(of: card), 0.75))
+        card.setContentOpacity(0.5)
+        #expect(isAlpha(departureCover(of: card), 0.5),
+                "the reveal's ramp must carry the departing picture with it")
         #expect(isAlpha(card.ringView, 0.5))
         #expect(isAlpha(card.imageView, 0.5))
 
         card.setBlend(0.75)
         #expect(isAlpha(departureCover(of: card), 0.25))
+        #expect(isAlpha(card.ringView, 0.5), "the blend dragged the ring onto its clock")
+        #expect(isAlpha(card.imageView, 0.5))
+    }
+
+    /// And with NO second operand the reveal's channel is what it always was,
+    /// byte for byte — the coupling above is conditional on there being a
+    /// picture to hand over, not a new fact about every marker.
+    @Test func theRevealChannelIsUnchangedWithoutADeparturePicture() {
+        let card = makeCard(.media)
+        card.setContentOpacity(0.5)
+
         #expect(isAlpha(card.ringView, 0.5))
         #expect(isAlpha(card.imageView, 0.5))
+        #expect(isAlpha(departureCover(of: card), 1),
+                "a cover with no picture must stay at its resting value")
+    }
+
+    // MARK: - The departing picture's geometry
+
+    /// ⚠️ THE PICTURE SHRINKS WHOLE. It is not re-cropped to the card.
+    ///
+    /// The defect this pins was filmed twice and described both times as the
+    /// departure content "truncating in the transition window": a cover that
+    /// aspect-FILLS a view resized to the card recomputes its crop every
+    /// frame, so as a 402x874 page closes toward a 44pt marker the picture
+    /// keeps its height and loses its sides — the viewer watches the media get
+    /// cut away instead of travelling. Laid out at the departure's size and
+    /// scaled uniformly, the same picture stays whole AND still covers the
+    /// window at every instant.
+    ///
+    /// Both halves are asserted, because either alone is satisfiable by a bug:
+    /// covering alone is what the re-crop already did, and preserving the
+    /// aspect alone would letterbox the window with the card's ground showing
+    /// through.
+    @Test func theDeparturePictureShrinksWholeRatherThanBeingRecropped() {
+        let page = CGSize(width: 402, height: 874)
+        let card = PinCardView(frame: CGRect(origin: .zero, size: page))
+        card.setFace(.text)
+        card.setDeparturePicture(picture())
+        card.layoutIfNeeded()
+        let cover = departureCover(of: card)
+        #expect(abs(cover.frame.width - page.width) < 0.5, "precondition: it starts covering")
+
+        let marker = CGSize(width: 44, height: 44)
+        card.frame = CGRect(origin: .zero, size: marker)
+        card.layoutIfNeeded()
+
+        let shrunk = cover.frame.size
+        #expect(shrunk.width >= marker.width - 0.5 && shrunk.height >= marker.height - 0.5,
+                "the window showed its own ground: \(shrunk) does not cover \(marker)")
+        #expect(abs(shrunk.width / shrunk.height - page.width / page.height) < 0.01,
+                "the picture was re-cropped, not scaled: \(shrunk) is not \(page)'s shape")
+    }
+
+    /// And a card that never grew keeps the behaviour it always had. A flight
+    /// is handed its cover before it is ever sized and is posed by a transform
+    /// rather than by a resize, so there is no departure size to read off it —
+    /// this is the degradation that keeps that path exactly as it was.
+    @Test func aCardThatNeverGrewFillsItsBoundsAsBefore() {
+        let card = makeCard(.media)
+        card.setDeparturePicture(picture())
+        card.layoutIfNeeded()
+
+        #expect(abs(departureCover(of: card).frame.width - Self.side) < 0.5)
+        #expect(abs(departureCover(of: card).frame.height - Self.side) < 0.5)
     }
 
     // MARK: - The face still decides everything else

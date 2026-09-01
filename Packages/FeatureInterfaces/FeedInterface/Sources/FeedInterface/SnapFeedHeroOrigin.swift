@@ -2,6 +2,29 @@ import CoreModels
 import PostGrid
 import UIKit
 
+/// Where the viewer stopped in a pushed feed, and what that page is drawing.
+///
+/// The two travel together because a dismissal needs BOTH and they must agree:
+/// the id says which post the close is about, the still is what a card has to
+/// carry so the window does not cut to something the viewer has not seen.
+///
+/// ⚠️ THE STILL IS NOT THE ID'S THUMBNAIL. A card takes off full screen and
+/// aspect-fills what it is handed, so a small square cover blown up there is a
+/// magnified fragment. This is the PAGE's own rendered picture — already the
+/// right shape — which is why it is carried rather than looked up.
+///
+/// Nil id means nothing has settled yet; nil still means the page has no
+/// picture to give (a text page, or a video, whose frames belong to a player).
+public struct SnapFeedSettlement {
+    public let postID: PostID?
+    public let still: UIImage?
+
+    public init(postID: PostID?, still: UIImage?) {
+        self.postID = postID
+        self.still = still
+    }
+}
+
 /// What the flying card should look like, named without naming the view.
 ///
 /// The two shapes a post is shown in across the app: a mosaic BRICK, which is
@@ -55,14 +78,14 @@ public struct TextRevealOrigin {
     /// `nil` keeps the page itself, which is still correct for a surface that
     /// cannot draw one.
     ///
-    /// Handed the post the viewer actually STOPPED on, which after any paging
-    /// is not the post that opened the feed. A source that lands on a fixed
-    /// place — a marker, a row that must not be reordered — ignores it for the
-    /// purpose of choosing WHERE to land, and uses it to decide what the card
-    /// must show at the departure end: the two are different questions, and
-    /// conflating them is how a list quietly re-sorted itself under the window.
-    /// `nil` means nothing has settled yet.
-    public let makeDismissStandIn: (PostID?) -> UIView?
+    /// Handed WHERE THE VIEWER STOPPED and WHAT THAT PAGE IS SHOWING, which
+    /// after any paging is neither the post nor the picture the window opened
+    /// from. A source that lands on a fixed place — a marker, a row that must
+    /// not be reordered — ignores the id for the purpose of choosing where to
+    /// land, and uses the pair to decide what the card must show at the
+    /// departure end: the two are different questions, and conflating them is
+    /// how a list quietly re-sorted itself under the window.
+    public let makeDismissStandIn: (SnapFeedSettlement) -> UIView?
     /// Builds what the OPENING starts as, for a source whose content the page
     /// does not repeat.
     ///
@@ -125,7 +148,7 @@ public struct TextRevealOrigin {
         depthView: @escaping () -> UIView? = { nil },
         captionTop: CGFloat = 0,
         authorBand: PostAuthorBandView.Model? = nil,
-        makeDismissStandIn: @escaping (PostID?) -> UIView? = { _ in nil },
+        makeDismissStandIn: @escaping (SnapFeedSettlement) -> UIView? = { _ in nil },
         makePresentStandIn: @escaping () -> UIView? = { nil },
         alignsPageToSource: Bool = true,
         cornerRadius: CGFloat? = nil,
