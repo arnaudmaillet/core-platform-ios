@@ -41,7 +41,7 @@ struct TextRevealOriginRelayTests {
             makeDismissStandIn: { _ in UIView() },
             setConcealed: { box.concealed.append($0) },
             presentationDidEnd: { _ in box.chrome.append("inner-present") },
-            willStageDismissal: { box.chrome.append("stage") },
+            willStageDismissal: { _ in box.chrome.append("stage") },
             dismissalDidEnd: { _ in box.chrome.append("inner-dismiss") }
         )
     }
@@ -73,7 +73,7 @@ struct TextRevealOriginRelayTests {
         #expect(relayed.rowFrame(UIView()) == CGRect(x: 1, y: 2, width: 3, height: 4))
         #expect(relayed.captionEnd == 76)
         #expect(relayed.depthView() != nil)
-        relayed.willStageDismissal()
+        relayed.willStageDismissal(nil)
         #expect(box.chrome == ["stage"])
     }
 

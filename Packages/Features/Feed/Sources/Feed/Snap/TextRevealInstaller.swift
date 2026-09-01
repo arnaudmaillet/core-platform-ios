@@ -145,7 +145,13 @@ enum TextRevealInstaller {
             setSourceConcealed: origin.setConcealed,
             depthView: origin.depthView,
             presentationDidEnd: origin.presentationDidEnd,
-            willStageDismissal: origin.willStageDismissal,
+            // Told where the viewer stopped, exactly as the stand-in above
+            // is: it runs before anything is measured, so a source that wants
+            // to land on the settled post has to learn of it here or move
+            // after the rect has already been read.
+            willStageDismissal: { [weak feed] in
+                origin.willStageDismissal((feed as? SnapFeedViewController)?.activePostID)
+            },
             dismissalDidEnd: origin.dismissalDidEnd,
             // A source that has no caption cannot be aligned to, whatever the
             // launch argument says: asking anyway slid the page 448pt sideways

@@ -766,10 +766,26 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // `-zoom-demo-grab-vertical` flips this script to the vertical
             // axis, exactly as it does the zoom demos — the axis a semantic
             // cluster's feed dismisses into its place page on.
-            let axis: ZoomDismissAxis = arguments.contains("-zoom-demo-grab-vertical")
-                ? .vertical : .horizontal
+            //
+            // `-text-swipe-demo-horizontal` overrides it back, for the run that
+            // needs BOTH in one process: reach the place page by a vertical
+            // dismiss, then leave the post above it sideways. A single
+            // process-wide flag cannot say that, which is how this leg went
+            // unscripted while the flag was set for the leg before it.
+            let axis: ZoomDismissAxis
+            if arguments.contains("-text-swipe-demo-horizontal") {
+                axis = .horizontal
+            } else {
+                axis = arguments.contains("-zoom-demo-grab-vertical") ? .vertical : .horizontal
+            }
+            // Optional second argument: how long to wait. A run that PAGES the
+            // feed first has to outlast that paging — a swipe scripted before
+            // the pager has settled asks about the post the feed opened on,
+            // which is the one case the re-pointing exists for.
+            let delay = position + 2 < arguments.count
+                ? (Double(arguments[position + 2]) ?? 1.5) : 1.5
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 let driven = await dismissal.debugPerformSwipe(
                     peakProgress: CGFloat(peak), axis: axis
                 )

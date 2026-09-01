@@ -484,11 +484,25 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // asked of the POST rather than of who happens to be driving — a
         // back-button pop has no driver at all, and it must still leave as the
         // right kind.
+        //
+        // ⚠️ ONLY IF IT ACTUALLY ANSWERS. Forwarding used to return whatever
+        // the saved delegate said INCLUDING nil, and nil is not "no opinion" —
+        // it is UIKit's own default pop, which is not interactive. A grab was
+        // created three lines earlier in `beginSwipe`, so the finger then drove
+        // nothing and the screen slid away as if there had been no gesture at
+        // all.
+        //
+        // Reached whenever the slot's previous owner is not this screen's
+        // flight: a post opened as a REVEAL from a place page has no flight
+        // behind it, so the delegate it displaced is the page's own return to
+        // the map — a controller with nothing to say about this pop. Page onto
+        // a photograph and every close became a plain slide. Filmed.
         if (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind == .hero,
-           let savedDelegate {
-            return savedDelegate.navigationController?(
-                navigationController, animationControllerFor: operation, from: fromVC, to: toVC
-            )
+           let savedDelegate,
+           let forwarded = savedDelegate.navigationController?(
+               navigationController, animationControllerFor: operation, from: fromVC, to: toVC
+           ) {
+            return forwarded
         }
         #if DEBUG
         // `-grab-log`: which animator a pop got, and why.

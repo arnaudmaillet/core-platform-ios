@@ -983,7 +983,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // animates the safe area and this collection view adds it to
                 // its own inset, so an unpinned grid keeps drifting under a
                 // close that has already measured where it is going.
-                willStageDismissal: { [weak self, weak page, weak feed] in
+                willStageDismissal: { [weak self, weak page, weak feed] _ in
                     log("freeze    pre")
                     page?.beginHeroFreeze()
                     // ⚠️ THE CARD THE VIEWER ENDED ON TAKES THE DEPARTURE SLOT,

@@ -109,7 +109,12 @@ public struct TextRevealOrigin {
     public let presentationDidEnd: (Bool) -> Void
     /// Last chance to move before the dismissal measures its landing — pinning
     /// a content inset, or scrolling the row back into view.
-    public let willStageDismissal: () -> Void
+    /// Handed the post the viewer actually stopped on, like
+    /// `makeDismissStandIn` above and for the same reason: this hook fires
+    /// BEFORE the rect and the stand-in are read, so it is the one moment a
+    /// source can decide what the close is landing on and move to meet it.
+    /// A source that lands on a fixed place ignores it.
+    public let willStageDismissal: (PostID?) -> Void
     /// The close is over, WHICHEVER WAY IT WENT: `true` committed, `false`
     /// sprang back. Both, because what it undoes is set on every dismissal.
     public let dismissalDidEnd: (Bool) -> Void
@@ -127,7 +132,7 @@ public struct TextRevealOrigin {
         fill: UIColor? = nil,
         setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
-        willStageDismissal: @escaping () -> Void = {},
+        willStageDismissal: @escaping (PostID?) -> Void = { _ in },
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in }
     ) {
         self.rowFrame = rowFrame
