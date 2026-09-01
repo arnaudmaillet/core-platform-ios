@@ -808,12 +808,30 @@ final class ForYouGridPage: UIView {
     /// when the first dismissal stages, so there is no viewer context to
     /// preserve and the grid is free to travel to the landing post's own
     /// tile.
+    /// ⚠️ CENTRED, not merely revealed. Revealing moves as little as it can,
+    /// which is right for a tap and wrong for a landing: a post tucked under
+    /// the bottom chrome came up until it just cleared, so the window closed
+    /// onto a row pinned to the bottom edge — the post the viewer had been
+    /// reading, delivered as far from where they were looking as it could be
+    /// while still being on screen. Filmed on the place page's first vertical
+    /// dismiss. Centring costs nothing anywhere else: this page only scrolls
+    /// like this when it is being landed on.
     func revealPost(_ postID: PostID) {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
         collectionView.layoutIfNeeded()
-        ScrollIntoView.revealImmediately(
+        // ⚠️ NO OCCLUSION, which is not the same as forgetting one. This page's
+        // top inset is LAYOUT — room reserved for a header that scrolls away —
+        // and `ScrollIntoView` defaults the band to the content inset because
+        // that is right wherever the insets exist BECAUSE of chrome. Here it
+        // pushes the band's middle hundreds of points down the screen, and the
+        // landing arrives at two thirds of the way down: measured at 607pt of
+        // 874 on the place page, from a 440pt reserved header. The inset still
+        // clamps — it is the scrollable range either way — it just no longer
+        // decides where the middle is.
+        ScrollIntoView.centreImmediately(
             collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame,
-            in: collectionView
+            in: collectionView,
+            occlusion: .zero
         )
     }
 
