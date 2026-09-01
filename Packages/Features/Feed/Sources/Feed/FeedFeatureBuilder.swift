@@ -695,11 +695,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// it with `attachCardCloseAlongsideFlight` and this path never got the
     /// equivalent.
     ///
-    /// ⚠️ VERTICAL ONLY, unlike both shipped card-closes. The horizontal axis
-    /// already has two tenants here (the flight escape and its own card-shaped
-    /// slide), and a third arming that axis would be the one thing the
-    /// arbitration cannot resolve: two `InteractiveSlideDismissal`s both
-    /// claiming `.card` on the same drag.
+    /// ⚠️ BOTH AXES, like every other card-close.
+    ///
+    /// It was vertical-only for exactly as long as the horizontal axis had a
+    /// second slide on it — the escape past this page to the map, which also
+    /// claimed `.card`, and two `InteractiveSlideDismissal`s claiming the same
+    /// kind on the same drag is the one thing the arbitration cannot resolve.
+    /// The escape is gone; the narrowing outlived it by one commit, and what it
+    /// left behind was a page with NOTHING on its horizontal axis: the flight
+    /// refuses `.card` before it looks at an axis, and the only driver that
+    /// would take it was armed elsewhere. Open a post from Activity, page onto
+    /// a text one, swipe right — nothing at all happened. Reported.
     private static func attachTileCardClose(
         feed: UIViewController,
         landing: any CardCloseLanding,
@@ -710,7 +716,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         retainer.cardClose = close
         close.resetForNewPresentation()
         close.arbitratesWithHeroGrab = true
-        close.attach(to: feed, axes: [.vertical])
+        close.attach(to: feed, axes: [.horizontal, .vertical])
         // ⚠️ ONCE. A swipe asks twice — when the grab claims the screen, and
         // again when the pop it triggers asks for an animator — and the staging
         // below MOVES a scroll position and releases a concealment, so a second
@@ -764,11 +770,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // the drag at all, said before it tries: a refusal and a
                 // failure look identical from the outside.
                 let kind = (feed as? any ZoomTransitionDestination)?.zoomDismissalKind
+                // Both axes carry this driver now, so a run has to be able to
+                // ask for either — the defect that put them back was one axis
+                // silently having no tenant at all.
+                let axis: ZoomDismissAxis = arguments
+                    .contains("-tile-card-close-demo-horizontal") ? .horizontal : .vertical
                 let driven = await close?.debugPerformSwipe(
-                    peakProgress: CGFloat(peak), axis: .vertical
+                    peakProgress: CGFloat(peak), axis: axis
                 )
                 let settled = (feed as? any SnapFeedSettleReporting)?.settledPostID
-                print("[tile-card-close] peak=\(peak) settled=\(settled?.rawValue ?? "nil")"
+                print("[tile-card-close] peak=\(peak) axis=\(axis) settled=\(settled?.rawValue ?? "nil")"
                     + " kind=\(kind.map(String.init(describing:)) ?? "nil")"
                     + " geometry=\(close?.revealGeometry != nil) driven=\(driven ?? false)")
             }

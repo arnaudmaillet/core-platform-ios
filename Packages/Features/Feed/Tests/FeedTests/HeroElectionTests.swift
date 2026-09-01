@@ -100,8 +100,22 @@ struct HeroElectionTests {
                 "expected the flight and the card-shaped close, found \(pans.count)")
         let slides = pans.compactMap { $0.delegate as? InteractiveSlideDismissal }
         #expect(slides.count == 1, "a second slide is the escape come back")
-        #expect(slides.first?.arbitratesWithHeroGrab == true,
+        let close = try #require(slides.first)
+        #expect(close.arbitratesWithHeroGrab,
                 "the close must claim only the pages the flight refuses")
+
+        // ⚠️ EVERY AXIS NEEDS A TENANT FOR EVERY KIND, and this is the property
+        // that actually matters — not who is armed where.
+        //
+        // The flight refuses `.card` before it looks at an axis, so the
+        // card-shaped close is the only driver that can take those pages; arm
+        // it on one axis and the OTHER axis has nothing at all on it for a
+        // viewer who has paged onto a text post. The drag then does nothing —
+        // no window, no slide, no native pop, because this push disclaimed
+        // that too. Shipped twice: once on the map, and once here when the
+        // close's narrowing outlived the escape it was narrowed for.
+        #expect(close.debugArmedAxes == [.horizontal, .vertical],
+                "an axis with no card-shaped tenant is an axis a text page cannot leave on")
     }
 
     /// The control: an ordinary presenter's post carries exactly one pan —

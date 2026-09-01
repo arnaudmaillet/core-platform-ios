@@ -35,6 +35,15 @@ public final class InteractiveSlideDismissal: NSObject {
     private weak var savedDelegate: (any UINavigationControllerDelegate)?
 
     #if DEBUG
+    /// Which axes this driver was armed for.
+    ///
+    /// Published because the property worth checking is not any one driver's
+    /// but the SCREEN's: every axis needs a tenant for every dismissal kind, or
+    /// a drag lands on nothing at all and the screen simply refuses to close.
+    /// That is not observable from outside without knowing who is armed where —
+    /// and it has now shipped twice, once on the map and once here.
+    public var debugArmedAxes: Set<ZoomDismissAxis> { axes }
+
     /// Who this driver hands a pop it does not own back to. A driver that took
     /// the slot from a FLIGHT and saved nothing is a screen whose media pages
     /// have quietly lost their hero — visible only as a plain slide, which is
