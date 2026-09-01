@@ -30,10 +30,24 @@ import UIKit
 public final class PostGridTileStandInView: UIView, RevealStandInShaping {
     private let tile: PostGridTileCell
 
-    /// `size` is the LANDING CELL's, not the window's: the window is larger
-    /// than the tile for most of a flight and narrows onto it, and a brick
-    /// stretched to meet it would re-crop its cover every frame — the same
-    /// reason the card is built at the row's width rather than the window's.
+    /// `size` is the LANDING CELL's — what the tile is built and configured at,
+    /// so its cover is fetched for the right scale — but the tile then FILLS
+    /// this view and travels with it.
+    ///
+    /// ⚠️ FILLED, NOT CENTRED, and this is where the tile parts company with
+    /// `RevealDismissCardView`. That one centres a fixed-width card because
+    /// stretching a card would re-wrap its CAPTION, and the extra width around
+    /// it is fill on fill — invisible. A tile has no caption and its extra is
+    /// not invisible at all: the window starts full-screen, so a brick pinned
+    /// to the landing size sat as a small rectangle in the middle of a large
+    /// grey one for most of the flight. Measured on video — a grey card with a
+    /// postage stamp of the photograph inside it.
+    ///
+    /// Re-cropping every frame is the CORRECT behaviour here, not the thing to
+    /// avoid: the cover is aspect-fill, and letting it recompute against the
+    /// travelling bounds is what makes the morph continuous at any aspect —
+    /// the same reasoning `ZoomFlightCard.zoomLiveMediaTracksCardBounds`
+    /// already records for the flight card.
     ///
     /// `cornerRadius` is the page's, not the cell default: the two grids that
     /// share `PostGridTileCell` space their tiles differently, and gap and
@@ -55,18 +69,14 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
         tile.configure(with: post, imagePipeline: imagePipeline)
         tile.layoutIfNeeded()
 
+        clipsToBounds = true
         tile.translatesAutoresizingMaskIntoConstraints = false
         addSubview(tile)
         NSLayoutConstraint.activate([
-            // CENTRED, and at a fixed size — the card's arrangement, for the
-            // card's reason. The window is bigger than the brick at the start
-            // of a flight and the extra is fill on fill, invisible; at the
-            // landing the window IS the brick and centred and pinned are the
-            // same thing.
-            tile.centerXAnchor.constraint(equalTo: centerXAnchor),
-            tile.centerYAnchor.constraint(equalTo: centerYAnchor),
-            tile.widthAnchor.constraint(equalToConstant: size.width),
-            tile.heightAnchor.constraint(equalToConstant: size.height)
+            tile.leadingAnchor.constraint(equalTo: leadingAnchor),
+            tile.trailingAnchor.constraint(equalTo: trailingAnchor),
+            tile.topAnchor.constraint(equalTo: topAnchor),
+            tile.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
@@ -81,8 +91,13 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
     }
 
     /// The window's rounding, driven by the flight.
+    ///
+    /// Both layers, now that the tile fills this view: the tile clips its own
+    /// cover, so a tile still wearing the landing radius would square off its
+    /// picture inside a window that has already rounded.
     public func setCornerRadius(_ radius: CGFloat) {
         layer.cornerRadius = radius
+        tile.cornerRadius = radius
     }
 
     /// The TILE's opacity, separate from this view's own — see the note above

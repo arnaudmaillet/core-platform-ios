@@ -72,29 +72,44 @@ struct PostGridTileStandInTests {
         #expect(standIn(.photo).backgroundColor != standIn(.video).backgroundColor)
     }
 
-    /// Built at the LANDING CELL's size, not the window's — a brick stretched to
-    /// meet a window that is still shrinking re-crops its cover every frame.
-    @Test func theTileIsBuiltAtTheLandingCellsSize() {
-        let size = CGSize(width: 128, height: 194)
-        let view = standIn(size: size)
-        view.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
-        view.layoutIfNeeded()
-
-        #expect(view.subviews.first?.bounds.size == size)
-    }
-
-    /// CENTRED, not pinned: the window is larger than the brick for most of a
-    /// flight and the extra is fill on fill. At the landing the window IS the
-    /// brick, where centred and pinned are the same thing.
-    @Test func theTileStaysCentredAtAnyWindowSize() {
+    /// ⚠️ THE TILE FILLS THE WINDOW AT EVERY SIZE. It used to be built at the
+    /// landing cell's size and centred — the CARD's arrangement, whose reason
+    /// is that stretching a card re-wraps its caption and the extra width
+    /// around it is fill on fill, invisible. Neither half transfers to a brick.
+    /// A tile has no caption, and its extra is the opposite of invisible: the
+    /// window starts full-screen, so the flight showed a large grey rectangle
+    /// with a postage stamp of the photograph in the middle of it, for most of
+    /// its length. Filmed before this changed.
+    ///
+    /// Re-cropping every frame is what the fix BUYS, not what it costs: the
+    /// cover is aspect-fill, and recomputing it against the travelling bounds
+    /// is what keeps the morph continuous at any aspect —
+    /// `zoomLiveMediaTracksCardBounds` records the same reasoning for the
+    /// flight card.
+    @Test func theTileFillsTheWindowAtEverySize() {
         let view = standIn(size: CGSize(width: 130, height: 190))
-        for size in [CGSize(width: 393, height: 700), CGSize(width: 130, height: 190)] {
+        for size in [
+            CGSize(width: 393, height: 700),
+            CGSize(width: 260, height: 400),
+            CGSize(width: 130, height: 190)
+        ] {
             view.frame = CGRect(origin: .zero, size: size)
             view.layoutIfNeeded()
             let tile = view.subviews.first
-            #expect(abs((tile?.center.x ?? 0) - size.width / 2) < 0.5)
-            #expect(abs((tile?.center.y ?? 0) - size.height / 2) < 0.5)
+            #expect(tile?.bounds.size == size,
+                    "a brick smaller than its window leaves the fill showing around it")
         }
+    }
+
+    /// And the tile rounds WITH the window. It clips its own cover, so a tile
+    /// left at the landing radius would square off the picture inside a window
+    /// that has already rounded.
+    @Test func theTileRoundsWithTheWindow() throws {
+        let view = standIn(size: CGSize(width: 130, height: 190))
+        let tile = try #require(view.subviews.first as? PostGridTileCell)
+        view.setCornerRadius(28)
+        #expect(view.layer.cornerRadius == 28)
+        #expect(tile.cornerRadius == 28)
     }
 
     /// The window's rounding is the flight's to drive, so the stand-in is the
