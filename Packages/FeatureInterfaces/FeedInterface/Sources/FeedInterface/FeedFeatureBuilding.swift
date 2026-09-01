@@ -287,6 +287,7 @@ public protocol SnapFeedSettleReporting: AnyObject {
     /// post, and the difference is visible twice over: a carousel post is
     /// showing one of several pictures and only the page knows which, and a
     /// presenter's copy may not exist at all (an off-screen row has no
-    /// rendered cover to give). Nil for a text page, which has no picture.
+    /// rendered cover to give). Nil for a text page, which has no picture — and
+    /// for a text page alone: a video answers with its current frame.
     var settledCoverImage: UIImage? { get }
 }

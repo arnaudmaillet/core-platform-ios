@@ -301,3 +301,70 @@ struct PostGridFlightCardBlendTests {
         #expect(drawn.isEmpty)
     }
 }
+
+/// The tile card's DEPARTURE cover, as geometry rather than as alpha.
+///
+/// It shares `DepartureCoverLayout` with the marker's card, and it is here for
+/// a reason that only became visible once a video page could hand over a
+/// picture at all: a tile's aspect is close to a page's, so re-cropping this
+/// cover every frame recomputes almost the crop it had, and nobody has filmed
+/// it. That is a property of the pictures that have reached it so far, not of
+/// the code.
+@MainActor
+struct PostGridFlightCardDepartureGeometryTests {
+    private func picture() -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+    }
+
+    private func card(at size: CGSize) -> PostGridFlightCard {
+        let card = PostGridFlightCard(
+            post: GalleryPost(
+                id: PostID("m1"), kind: .photo, isRepost: false,
+                thumbnailURL: nil, caption: "c", publishedAtMS: 0
+            ),
+            cover: picture(),
+            style: .tile
+        )
+        card.frame = CGRect(origin: .zero, size: size)
+        return card
+    }
+
+    private func departureCover(of card: PostGridFlightCard) -> UIView { card.subviews[1] }
+
+    /// The page's picture shrinks whole into the tile, rather than being
+    /// re-cropped to it at every size the card passes through.
+    @Test func theDeparturePictureShrinksWholeRatherThanBeingRecropped() {
+        let page = CGSize(width: 402, height: 874)
+        let card = card(at: page)
+        card.setDeparturePicture(picture())
+        card.layoutIfNeeded()
+        let cover = departureCover(of: card)
+        #expect(abs(cover.frame.width - page.width) < 0.5, "precondition: it starts covering")
+
+        let tile = CGSize(width: 128, height: 170)
+        card.frame = CGRect(origin: .zero, size: tile)
+        card.layoutIfNeeded()
+
+        let shrunk = cover.frame.size
+        #expect(shrunk.width >= tile.width - 0.5 && shrunk.height >= tile.height - 0.5,
+                "the card showed its own ground: \(shrunk) does not cover \(tile)")
+        #expect(abs(shrunk.width / shrunk.height - page.width / page.height) < 0.01,
+                "the picture was re-cropped, not scaled")
+    }
+
+    /// And a card that never grew is untouched — the flight path, posed by a
+    /// transform and handed its cover before it is ever sized.
+    @Test func aCardThatNeverGrewFillsItsBounds() {
+        let side = CGSize(width: 56, height: 56)
+        let card = card(at: side)
+        card.setDeparturePicture(picture())
+        card.layoutIfNeeded()
+
+        #expect(abs(departureCover(of: card).frame.width - side.width) < 0.5)
+        #expect(abs(departureCover(of: card).frame.height - side.height) < 0.5)
+    }
+}
+

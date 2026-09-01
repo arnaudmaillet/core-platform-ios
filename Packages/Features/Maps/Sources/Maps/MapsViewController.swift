@@ -1442,8 +1442,10 @@ final class MapsViewController: UIViewController {
             // thumbnail is a small square — filled into a 402x874 card it is a
             // magnified fragment, which is the crop this was reported as.
             //
-            // The fallback still earns its place: a VIDEO page has no still, and
-            // a marker's cover is better than nothing there.
+            // The fallback still earns its place, though it earns it less
+            // often than it used to: a video page answers now, so what is left
+            // here is a text page and an unrealized cell, where a marker's
+            // cover is better than nothing.
             picture: { [weak self] id in
                 settled?.settledCoverImage ?? self?.cachedPicture(for: id)
             }

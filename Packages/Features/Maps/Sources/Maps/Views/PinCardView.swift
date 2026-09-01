@@ -246,53 +246,16 @@ final class PinCardView: UIView {
         applyBlend()
     }
 
-    /// The largest size this card has been laid out at while carrying a
-    /// departure picture — which, for anything that travels home, is the size
-    /// it set off from.
-    ///
-    /// ⚠️ NOT captured when the picture is handed in. A flight is given its
-    /// cover before it is ever sized (`PinCardView()` is born at `.zero`) and
-    /// may be handed a late one mid-descent, so the moment of the call says
-    /// nothing about where the card started. Taking the maximum instead reads
-    /// the departure off the animation itself, and degrades honestly for a
-    /// card that only ever shrinks under a transform: its bounds never grow,
-    /// the scale below stays 1, and the cover behaves exactly as it did before
-    /// any of this existed.
+    /// The departure size carried between layout passes — see
+    /// `DepartureCoverLayout.apply`, which owns what it means.
     private var departureBaseSize: CGSize?
 
-    /// ⚠️ A UNIFORM SCALE, NOT AN ASPECT-FILL RESIZE, and the difference is the
-    /// whole of this.
-    ///
-    /// Aspect-filling a view that is resized to the card recomputes the crop
-    /// every frame: as the card narrows toward a 44pt disc the picture keeps
-    /// its height and loses its sides, so the viewer watches the media get cut
-    /// away rather than travel. Filmed and reported as the departure content
-    /// "truncating" in the window. A tile landing hides it — its aspect is
-    /// close to the page's, so the recrop is small — and a marker cannot: the
-    /// aspect goes from 402x874 to a circle.
-    ///
-    /// Laid out at the page's size and scaled to COVER the card instead, the
-    /// picture shrinks as one thing and still fills the window at every
-    /// instant. It is the model `ZoomFlight` already drives live media with,
-    /// and the reason is the same.
+    /// The shared rule — see `DepartureCoverLayout`, which states why the
+    /// cover is scaled uniformly rather than re-fitted to the card.
     private func layoutDepartureCover() {
-        guard departureCoverView.image != nil,
-              bounds.width > 0, bounds.height > 0
-        else {
-            departureCoverView.transform = .identity
-            departureCoverView.frame = bounds
-            return
-        }
-        let base = CGSize(
-            width: max(departureBaseSize?.width ?? 0, bounds.width),
-            height: max(departureBaseSize?.height ?? 0, bounds.height)
+        departureBaseSize = DepartureCoverLayout.apply(
+            to: departureCoverView, in: bounds, departureBase: departureBaseSize
         )
-        departureBaseSize = base
-        departureCoverView.transform = .identity
-        departureCoverView.bounds = CGRect(origin: .zero, size: base)
-        let scale = max(bounds.width / base.width, bounds.height / base.height)
-        departureCoverView.transform = CGAffineTransform(scaleX: scale, y: scale)
-        departureCoverView.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
     /// The blend channel: `t == 0` is the departure picture, `t == 1` the

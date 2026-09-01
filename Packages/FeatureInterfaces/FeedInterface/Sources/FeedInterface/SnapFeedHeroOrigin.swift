@@ -14,7 +14,9 @@ import UIKit
 /// right shape — which is why it is carried rather than looked up.
 ///
 /// Nil id means nothing has settled yet; nil still means the page has no
-/// picture to give (a text page, or a video, whose frames belong to a player).
+/// picture to give — which is a TEXT page, and only a text page. A video
+/// answers with the frame it is showing, or with the poster it is showing
+/// before one arrives; see `VideoRenderView.currentStill`.
 public struct SnapFeedSettlement {
     public let postID: PostID?
     public let still: UIImage?

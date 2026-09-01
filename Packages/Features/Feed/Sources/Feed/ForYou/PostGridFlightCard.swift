@@ -267,8 +267,33 @@ final class PostGridFlightCard: UIView {
     func setDeparturePicture(_ image: UIImage?) {
         departureCoverView.image = image
         departureCoverView.isHidden = image == nil
+        if image == nil { departureBaseSize = nil }
+        // Autoresizing and a transform do not compose; from here the cover is
+        // posed by hand — see `DepartureCoverLayout`.
+        departureCoverView.autoresizingMask = []
+        setNeedsLayout()
         applyContentFloor()
         applyBlend()
+    }
+
+    /// The departure size carried between layout passes — see
+    /// `DepartureCoverLayout.apply`, which owns what it means.
+    private var departureBaseSize: CGSize?
+
+    /// ⚠️ THE SAME RULE THE MARKER'S CARD USES, and it belongs here for a
+    /// reason that only became visible once a video page could hand over a
+    /// picture at all.
+    ///
+    /// A tile's aspect is close to a page's, so re-cropping this cover every
+    /// frame has never been filmed on this card — the crop it recomputes is
+    /// almost the crop it had. That is a property of the pictures that have
+    /// reached it so far, not of the code: it is the defect
+    /// `DepartureCoverLayout` documents, one page shape away from showing.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        departureBaseSize = DepartureCoverLayout.apply(
+            to: departureCoverView, in: bounds, departureBase: departureBaseSize
+        )
     }
 
     /// The blend channel: `t == 0` is the page's picture, `t == 1` the tile's.

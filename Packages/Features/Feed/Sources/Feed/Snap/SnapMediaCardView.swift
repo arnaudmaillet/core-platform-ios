@@ -372,11 +372,26 @@ final class SnapMediaCardView: UIView {
     /// picture is on screen" — asked by a presenter's flight home, which has to
     /// dissolve that picture away when it is landing somewhere else.
     ///
-    /// Nil for a text page, which has no picture, and for a VIDEO page, whose
-    /// frames belong to a player rather than to an image view. Both degrade the
-    /// blend to nothing, which is the flight exactly as it was.
+    /// ⚠️ A VIDEO PAGE ANSWERS THIS, and the reason it once did not was never
+    /// about video.
+    ///
+    /// `configure(kind:)` empties this image view for `.video` and routes the
+    /// poster to the surface instead, so the single-attachment branch below
+    /// returned nil — not because a player's frames are unreachable, but
+    /// because the picture had moved to the one place this was not looking.
+    /// A video page inside a CAROUSEL never had the gap, which is what gave it
+    /// away.
+    ///
+    /// So the surface is asked too: `currentStill` is the decoded frame it is
+    /// showing, or the poster it is showing before one arrives. A page that
+    /// dismisses toward a marker now carries the picture the viewer was
+    /// actually looking at, instead of leaving the window to clip the live page.
+    ///
+    /// Still nil for a TEXT page, which has no picture of any kind — that nil
+    /// is meaningful and every caller is written around it.
     var renderedStill: UIImage? {
-        showsCollection ? carousel?.renderedCover : imageView.image
+        if showsCollection { return carousel?.renderedCover }
+        return imageView.image ?? renderView.currentStill
     }
 
     /// The stream the current PAGE carries, nil when it is a still or when this

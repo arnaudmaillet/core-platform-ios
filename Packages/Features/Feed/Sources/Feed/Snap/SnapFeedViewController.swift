@@ -3665,8 +3665,8 @@ extension SnapFeedViewController: SnapFeedSettleReporting {
         #if DEBUG
         // `-zoom-blend-log`: WHY there is no picture, which is the only part of
         // this a caller cannot see. An inert blend has three quite different
-        // causes — an unrealized cell, a text page, a video page — and they are
-        // the same nil.
+        // causes — an unrealized cell, a text page, a video with neither a
+        // decoded frame nor a poster — and they are the same nil.
         if ProcessInfo.processInfo.arguments.contains("-zoom-blend-log"), still == nil {
             print("[zoom-blend] no still at page \(index):"
                 + " cell=\(cell == nil ? "unrealized" : "realized")"

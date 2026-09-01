@@ -2609,6 +2609,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         videoPlayback.reclaim(mediaCard.renderView)
     }
 
+    /// The still this page is actually drawing — the picture a presenter's
+    /// flight home has to dissolve away when the viewer is leaving from HERE
+    /// rather than from the post that opened the feed.
+    ///
+    /// Read off the rendered surface rather than re-derived from the model, for
+    /// the same reason `currentMediaPage` is: a post with a carousel is showing
+    /// one of several pictures, and only the surface knows which. Nil for a
+    /// text page, which has no picture to hand over.
+    var currentPageCover: UIImage? { mediaCard.renderedStill }
+
     #if DEBUG
     /// The page's playback surface, for a test that needs to ask the pool about
     /// it. Playback ownership is the pool's, so a test has to name the surface.
@@ -2725,16 +2735,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     var currentMediaPage: Int? {
         mediaCard.showsCollection ? mediaCard.currentPage : nil
     }
-
-    /// The still this page is actually drawing — the picture a presenter's
-    /// flight home has to dissolve away when the viewer is leaving from HERE
-    /// rather than from the post that opened the feed.
-    ///
-    /// Read off the rendered surface rather than re-derived from the model, for
-    /// the same reason `currentMediaPage` is: a post with a carousel is showing
-    /// one of several pictures, and only the surface knows which. Nil for a
-    /// text page, which has no picture to hand over.
-    var currentPageCover: UIImage? { mediaCard.renderedStill }
 
     /// Which pages are holding a playback surface — the retention window's
     /// footprint, which is otherwise invisible from outside.
