@@ -8,18 +8,17 @@ import UIKit
 struct MapMarkerRingTests {
     @Test func eachLevelWearsItsColor() {
         #expect(MapMarkerRing.color(for: .city) == .systemBlue)
-        #expect(MapMarkerRing.color(for: .region) == .systemPurple)
         #expect(MapMarkerRing.color(for: .country) == MapMarkerRing.amber)
         #expect(MapMarkerRing.color(for: nil) == .systemBackground)
     }
 
-    /// The four rings must be tellable apart in BOTH appearances — resolve
+    /// The three rings must be tellable apart in BOTH appearances — resolve
     /// each dynamic color under each style and require pairwise-distinct
     /// results, which is the actual "recognizable at a glance" contract.
     @Test func thePaletteIsDistinctInLightAndDark() {
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
-            let resolved = [MapPlace.Kind.city, .region, .country].map {
+            let resolved = [MapPlace.Kind.city, .country].map {
                 MapMarkerRing.color(for: $0).resolvedColor(with: traits)
             } + [MapMarkerRing.color(for: nil).resolvedColor(with: traits)]
             for (i, a) in resolved.enumerated() {
@@ -49,7 +48,7 @@ struct MapMarkerRingTests {
     /// even where a color is ambiguous against the map beneath.
     @Test func semanticRingsAreHeavier() {
         #expect(MapMarkerRing.width(for: nil) == PinCardView.ringWidth)
-        for kind in [MapPlace.Kind.city, .region, .country] {
+        for kind in [MapPlace.Kind.city, .country] {
             #expect(MapMarkerRing.width(for: kind) == MapMarkerRing.hierarchyWidth)
             #expect(MapMarkerRing.width(for: kind) > MapMarkerRing.width(for: nil))
         }

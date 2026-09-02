@@ -840,13 +840,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// identical to the row's, so the swap at the landing is the identity.
     /// Every part of this row now arrives that way.
 
-    #if DEBUG
-    /// Presses "Show more". Returns false when there was nothing to reveal,
-    /// which is the answer a harness must not mistake for success.
-    ///
-    /// The simulator injects no touches, so this is the only way this control
-    /// is reachable in an automated run.
-    ///
     /// Fired when the viewer taps the media of a COLLECTION row.
     ///
     /// A row with one photograph needs nothing here — the collection view's own
@@ -900,6 +893,22 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return carousel.currentPage
     }
 
+    /// Whether this row's carousel can still travel `delta` pages — the cell's
+    /// twin of `MediaCarouselView.hasTravel(towardsPageDelta:)`, for a host that
+    /// holds cells rather than carousels.
+    ///
+    /// ⚠️ A row with no collection answers `false`, not nil, and the difference
+    /// matters at the only kind of call site there is: a gesture gate. `false`
+    /// reads as "nothing here wants this drag", which is the truth for a text
+    /// row and for a single photograph — an optional would make every caller
+    /// invent that answer for itself, and the first one to invent `true` would
+    /// hand the drag to a carousel that does not exist.
+    public func mediaHasTravel(towardsPageDelta delta: Int) -> Bool {
+        guard let carousel, !carousel.isHidden else { return false }
+        return carousel.hasTravel(towardsPageDelta: delta)
+    }
+
+    #if DEBUG
     /// Scrolls this row's carousel, or false if it has none.
     @discardableResult
     public func debugScrollCarousel(toPage index: Int, animated: Bool = true) -> Bool {
@@ -907,6 +916,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return carousel.debugScroll(toPage: index, animated: animated)
     }
 
+    /// Presses "Show more". Returns false when there was nothing to reveal,
+    /// which is the answer a harness must not mistake for success.
+    ///
+    /// The simulator injects no touches, so this is the only way this control
+    /// is reachable in an automated run.
     @discardableResult
     public func debugTapShowMore() -> Bool {
         guard showMoreRange != nil else { return false }
@@ -2209,6 +2223,19 @@ public final class PostGridTileCell: UICollectionViewCell {
         didSet { contentView.layer.cornerRadius = cornerRadius }
     }
 
+    /// The floor a brick draws its cover on: a dark stage for video, whose
+    /// poster may be unrenderable (or plain black in the simulator), and the
+    /// system fill for everything else.
+    ///
+    /// Static because a stand-in needs the SAME answer with no cell to ask —
+    /// see `PostGridTileStandInView`, where this is the view's own fill and the
+    /// tile it holds is what fades over it. Two spellings of one colour would
+    /// make the empty beat of a dismissal a different shade from the brick it
+    /// lands on.
+    public static func fillColor(for post: GalleryPost) -> UIColor {
+        post.kind == .video ? .darkGray : .secondarySystemBackground
+    }
+
     /// The image the brick is currently showing — see `PostGridListRowCell`'s
     /// note for why a hero reads this rather than the image pipeline.
     public var renderedCover: UIImage? { imageView.image }
@@ -2416,7 +2443,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     public func configure(with post: GalleryPost, imagePipeline: ImagePipeline) {
         // Video tiles keep a dark floor: their poster may be unrenderable
         // (or plain black in the simulator), and the glyph needs a stage.
-        contentView.backgroundColor = post.kind == .video ? .darkGray : .secondarySystemBackground
+        contentView.backgroundColor = Self.fillColor(for: post)
 
         views.set(post.viewCount)
 

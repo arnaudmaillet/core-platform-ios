@@ -69,6 +69,15 @@ final class VideoFrameRenderer {
     /// `primeWithLastFrame` for why this one retention is allowed.
     private var lastFrame: (buffer: CVPixelBuffer, itemTime: CMTime)?
 
+    /// The buffer every attached surface is currently showing, for a caller
+    /// that needs a still of it.
+    ///
+    /// Read-only, and deliberately the SAME retention the priming path uses
+    /// rather than a second one: a still asked for at a dismissal is asking the
+    /// identical question a joining surface asks, and answering it twice would
+    /// be two frames that could differ.
+    var currentFrameBuffer: CVPixelBuffer? { lastFrame?.buffer }
+
     private var lastItemTime: CMTime = .invalid
     private var lastDispatchHostTime: CFTimeInterval = 0
     private var maxGapSinceRateSample: CFTimeInterval = 0

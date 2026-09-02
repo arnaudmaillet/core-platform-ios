@@ -138,6 +138,33 @@ struct MapsViewModelTests {
         #expect(viewModel.activeFilter == nil)
     }
 
+    /// The composition root's decoration seam: place tags ride an INJECTED
+    /// transform, applied to every tile response — not ambient state read
+    /// inside the view model. Identity is the default (every other test
+    /// here runs undecorated), and whatever the root injected is what the
+    /// diff carries out.
+    @Test func injectedDecorationRunsOverEveryTileResponse() async {
+        let provider = FakeGeoProvider()
+        provider.stubbedPins = [
+            MapPin(postID: PostID("post-1"), latitude: 48.85, longitude: 2.35,
+                   thumbnailURL: nil, kind: .text)
+        ]
+        let place = MapPlace(id: "city:test", name: "Test", kind: .city)
+        let viewModel = MapsViewModel(
+            repository: provider,
+            decorate: { pins in pins.map { $0.tagged(with: [place]) } }
+        )
+        var received: [MapPin] = []
+        viewModel.onDiff = { received.append(contentsOf: $0.added) }
+
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { !received.isEmpty }
+
+        #expect(received.count == 1)
+        #expect(received[0].place?.id == "city:test",
+                "the tile response reaches the diff wearing the injected tags")
+    }
+
     /// Bounded yield-polling: the fake answers synchronously, so the query
     /// task only needs scheduler turns, never wall-clock time.
     private func waitUntil(_ condition: () -> Bool) async {
@@ -154,9 +181,12 @@ private final class FakeGeoProvider: GeoDiscoveryProviding, @unchecked Sendable 
     private let lock = NSLock()
     private var _calls: [Call] = []
     var calls: [Call] { lock.withLock { _calls } }
+    /// What every query answers with — empty by default, which is what the
+    /// choreography tests want; the decoration test seeds real pins.
+    var stubbedPins: [MapPin] = []
 
     func queryTile(_ viewport: MapViewport, filter: MapFilter?) async throws -> TileResult {
         lock.withLock { _calls.append(Call(viewport: viewport, filter: filter)) }
-        return TileResult(pins: [], tileCount: 1)
+        return TileResult(pins: lock.withLock { stubbedPins }, tileCount: 1)
     }
 }

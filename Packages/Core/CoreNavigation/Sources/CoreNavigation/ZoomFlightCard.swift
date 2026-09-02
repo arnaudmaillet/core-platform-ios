@@ -106,6 +106,42 @@ public protocol ZoomFlightCard: UIView {
     /// called inside an animation block, it sweeps.
     func setZoomCornerRadius(_ radius: CGFloat)
 
+    /// How far the card has blended toward its OWN, resting content: `1` is the
+    /// source's face (a pin's cover, or its icon), `0` the picture of the page
+    /// at the other end of the flight — which the source hands the card before
+    /// takeoff, or does not, in which case there is nothing to blend and this
+    /// does nothing.
+    ///
+    /// It exists because the two ends of a flight are not always the same
+    /// picture. A post dismissed onto the marker it came from is one picture at
+    /// both ends and must not blend at all; a post dismissed onto a DIFFERENT
+    /// marker is two, and swapping them in a frame at the landing is a pop.
+    ///
+    /// ⚠️ ONLY EVER TWO PICTURES. The fade law this module keeps re-learning —
+    /// the chrome alphas excluded from `ZoomFlight.poseInterpolated`, the
+    /// caption's beat in `RevealTransition`'s window law — is an argument about
+    /// TEXT and LINE ART: blending two runs of text draws both of them, so a
+    /// fade only works against nothing. Two OPAQUE photographs at 50/50 sum to
+    /// an opaque frame, so the objection does not reach them. It does still
+    /// reach a card whose other end is line art (a symbol on a disc): that
+    /// operand must blend as the disc AND the glyph, one opaque unit, never the
+    /// glyph alone over a see-through ground.
+    ///
+    /// Animatable: called inside an animation block, it sweeps.
+    ///
+    /// ⚠️ A REQUIREMENT, not merely a defaulted extension member. Every piece
+    /// of machinery here holds the card as `any ZoomFlightCard` (`ZoomFlight`
+    /// poses one; both drivers pass one around; `ZoomFlightInterruptor` vends
+    /// one), and a protocol-extension member with no requirement behind it
+    /// dispatches STATICALLY through an existential — the conformer's override
+    /// invisible, the default the only answer anyone ever gets. That trap has
+    /// already shipped once in this file's neighbourhood
+    /// (`ZoomTransitionSource.zoomLiveMediaSurfaceIfReady`) and cost a whole
+    /// investigation; `ZoomExistentialDispatchTests` is the standing guard.
+    ///
+    /// Defaults to nothing: a card with one picture has nothing to blend.
+    func setZoomContentBlend(_ t: CGFloat)
+
     /// Re-anchors the live surface for a flight. An `AVPlayerLayer` whose
     /// *bounds* animate does not track the animation smoothly — its video rect
     /// snaps — so the surface is laid out once at destination size and driven
@@ -128,6 +164,7 @@ public extension ZoomFlightCard {
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
     func adoptZoomLiveMediaView(_ view: UIView) {}
     var zoomLiveMediaTracksCardBounds: Bool { false }
+    func setZoomContentBlend(_ t: CGFloat) {}
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {}
     func applyZoomRestingShadow(to layer: CALayer) {}
 }

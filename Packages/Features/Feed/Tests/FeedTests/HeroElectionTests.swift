@@ -53,15 +53,24 @@ struct HeroElectionTests {
 
     // MARK: - The gallery presenter's axis split
 
-    /// A post opened from the PLACE GALLERY splits its two dismissal axes: the
-    /// vertical grab keeps the tile morph while a second, horizontal driver
-    /// escapes past the gallery — so the pushed post carries TWO pans where an
-    /// ordinary presenter's carries one, and the escape hook is armed.
-    @Test func aGalleryPresenterSplitsItsDismissalAxes() throws {
+    /// ⚠️ A POST OPENED FROM THE PLACE PAGE GOES HOME ON BOTH AXES.
+    ///
+    /// It used to split them: the vertical grab flew home while the horizontal
+    /// one ESCAPED past the gallery to the map. That read as a level being
+    /// skipped, so a post opened from a place now returns to that place either
+    /// way, and leaving the place for the map is the place's own gesture.
+    ///
+    /// Two drivers, not three: the flight, armed on both axes, and the
+    /// card-shaped close beside it for the pages the flight refuses. A THIRD
+    /// slide would be the escape come back — which is what this counts.
+    @Test func aGalleryOpenedPostGoesHomeOnBothAxes() throws {
         let stack = Stack()
         let gallery = stack.builder.makeClusterGallery(
             postIDs: [PostID("g1")], title: "Paris", following: nil,
-            feed: UIViewController()
+            feed: UIViewController(),
+            // No map beneath this host: the page keeps the plain-slide
+            // fallback, which is exactly the axis-split under test.
+            mapReturn: { _ in nil }
         )
         stack.nav.pushViewController(gallery, animated: false)
         #expect(gallery.navigationController === stack.nav, "precondition: gallery on the stack")
@@ -71,15 +80,42 @@ struct HeroElectionTests {
         )
 
         #expect(stack.nav.viewControllers.count == 3, "precondition: the post was pushed")
+        #expect(stack.nav.viewControllers.contains(gallery),
+                "nothing may drop the gallery from the stack any more")
         #expect(ZoomTransitionController.debugMostRecent != nil,
                 "the flight controller was DEALLOCATED — its retainer cycle broke")
-        #expect(stack.nav.delegate is ZoomTransitionController,
-                "the tile flight still owns the stack")
+        // ⚠️ THE CARD-SHAPED CLOSE OWNS THE SLOT, not the flight — it is
+        // installed last, on purpose, so that it hears every pop and hands the
+        // ones it does not own straight back. A flight holding the slot itself
+        // would never let a `.card` page begin a dismissal at all, which is the
+        // defect this driver exists to cure.
+        let owner = try #require(stack.nav.delegate as? InteractiveSlideDismissal,
+                                 "the card-shaped close must be the one UIKit asks")
+        #expect(owner.debugSavedDelegate is ZoomTransitionController,
+                "it took the slot from the flight and saved nothing to give back")
         let pushed = try #require(stack.nav.viewControllers.last)
         let pans = pushed.view.gestureRecognizers?
             .filter { $0 is UIPanGestureRecognizer } ?? []
         #expect(pans.count == 2,
-                "expected the vertical grab AND the horizontal escape, found \(pans.count)")
+                "expected the flight and the card-shaped close, found \(pans.count)")
+        let slides = pans.compactMap { $0.delegate as? InteractiveSlideDismissal }
+        #expect(slides.count == 1, "a second slide is the escape come back")
+        let close = try #require(slides.first)
+        #expect(close.arbitratesWithHeroGrab,
+                "the close must claim only the pages the flight refuses")
+
+        // ⚠️ EVERY AXIS NEEDS A TENANT FOR EVERY KIND, and this is the property
+        // that actually matters — not who is armed where.
+        //
+        // The flight refuses `.card` before it looks at an axis, so the
+        // card-shaped close is the only driver that can take those pages; arm
+        // it on one axis and the OTHER axis has nothing at all on it for a
+        // viewer who has paged onto a text post. The drag then does nothing —
+        // no window, no slide, no native pop, because this push disclaimed
+        // that too. Shipped twice: once on the map, and once here when the
+        // close's narrowing outlived the escape it was narrowed for.
+        #expect(close.debugArmedAxes == [.horizontal, .vertical],
+                "an axis with no card-shaped tenant is an axis a text page cannot leave on")
     }
 
     /// The control: an ordinary presenter's post carries exactly one pan —
@@ -211,4 +247,25 @@ private struct SilentElectionProvider: FeedProviding {
     func loadPost(_ id: PostID) async throws -> FeedEntry {
         throw FeedError.transport(message: "unused")
     }
+}
+
+/// A marker's flight source, reduced to the four answers `presentSnapFeedHero`
+/// actually needs to arm an escape. Nothing here flies: the suite asserts the
+/// WIRING (which drivers exist, and how they arbitrate), per this file's
+/// headless rule that nothing waits on an animation.
+@MainActor
+private final class StubZoomSource: ZoomTransitionSource {
+    func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect {
+        CGRect(x: 0, y: 0, width: 56, height: 56)
+    }
+
+    var zoomSourceIsOnScreen: Bool { true }
+    func makeZoomFlightCard() -> any ZoomFlightCard { StubFlightCard() }
+    func setZoomSourceHidden(_ hidden: Bool) {}
+}
+
+private final class StubFlightCard: UIView, ZoomFlightCard {
+    var zoomRestingCornerRadius: CGFloat { 12 }
+    var zoomRestingChrome: UIView? { nil }
+    func setZoomCornerRadius(_ radius: CGFloat) {}
 }

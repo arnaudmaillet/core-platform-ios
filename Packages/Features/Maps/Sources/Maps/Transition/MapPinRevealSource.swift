@@ -57,11 +57,34 @@ enum MapPinRevealSource {
             // until the page is what the viewer should be looking at.
             captionEnd: nil,
             depthView: depthView,
-            makeDismissStandIn: { marker(face: face, ringKind: ringKind) },
+            // ⚠️ THE PAGE TRAVELS WHOLE, and this note is the third answer
+            // to one question — both earlier ones are kept because each was
+            // wrong in a way the next could only be found by living through.
+            //
+            // FIRST: nothing is carried, the window simply clips the live page.
+            // Filmed as the departure content "truncating in the transition
+            // window" — a disc is not a card, and clipping a full screen down
+            // to 44pt is a keyhole onto one corner of it.
+            //
+            // SECOND: the stand-in carries a COPY of the page's media, scaled
+            // uniformly so it shrinks whole. That fixed the truncation and
+            // introduced its own: a viewer playing with the grab saw the media
+            // anchored in the window while the post — caption, band, comment
+            // stream — faded away over it. A copy of the media is not the post.
+            //
+            // THIRD, and this one: the page itself is scaled to COVER the
+            // window (`RevealStage.pageCovering`), so the whole post travels,
+            // live, with its video still playing because it is the page's own
+            // surface and a transform leaves bounds alone. Nothing is copied,
+            // so nothing can disagree with the original. The stand-in goes back
+            // to being what it always was on the opening leg — the marker's
+            // face, and only that.
+            makeDismissStandIn: { _ in marker(face: face, ringKind: ringKind) },
             makePresentStandIn: { marker(face: face, ringKind: ringKind) },
             // Nothing to align to. The page holds still and the window opens
             // over it — see `TextRevealOrigin.alignsPageToSource`.
             alignsPageToSource: false,
+            pageFit: .covering,
             cornerRadius: face.cornerRadius,
             fill: PinCardView.textRevealGround,
             setConcealed: concealMarker,
@@ -72,6 +95,11 @@ enum MapPinRevealSource {
     /// The marker, drawn fresh — the same component the map itself renders, so
     /// the window is the disc's twin at the handshake by construction rather
     /// than by two places agreeing on a radius and a tint.
+    ///
+    /// `departure` is the picture the window is closing OVER, when there is one.
+    /// The card fades its whole face — disc AND glyph, one opaque unit — in over
+    /// it, which keeps this a dissolve between two finished drawings rather than
+    /// two half-drawn ones.
     private static func marker(face: PinCardView.Face, ringKind: MapPlace.Kind?) -> UIView {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
         card.setFace(face)

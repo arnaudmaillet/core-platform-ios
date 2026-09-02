@@ -118,6 +118,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     private var axes: Set<ZoomDismissAxis> = [.horizontal]
     private var activeAxis: ZoomDismissAxis = .horizontal
 
+    #if DEBUG
+    /// Which axes this driver was armed for, so a harness can pick the one it
+    /// means. A stack that carries an intermediate screen attaches TWO drivers
+    /// with disjoint axis sets, and a script that always drove the first could
+    /// only ever reach one of the two destinations.
+    var debugArmedAxes: Set<ZoomDismissAxis> { axes }
+    #endif
+
     override init() {
         super.init()
         #if DEBUG
@@ -339,18 +347,32 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// which is the very jump this replaces. Winding the duration down to the
     /// deadline makes the animation vanish into a direct set exactly when the
     /// window closes, so there is nothing left to discharge.
-    /// The card's corner for a drag progress: the display's at the page, the
-    /// source's own at the landing. One curve, so the card and anything drawing
-    /// beside it can never be rounded differently.
-    private static func grabCornerRadius(
-        at progress: CGFloat, screen: CGFloat, flight: ZoomFlight
-    ) -> CGFloat {
-        screen + (flight.card.zoomRestingCornerRadius - screen) * min(max(progress, 0), 1)
+    /// The card's corner for a drag progress: the display's own, scaled with
+    /// the card. One curve, so the card and anything drawing beside it can
+    /// never be rounded differently.
+    ///
+    /// ⚠️ IT USED TO SWEEP TOWARD THE LANDING'S, and the note that asked for
+    /// that is kept here because it was solving a real problem the wrong way.
+    /// It read: the card "held the display's radius for the whole drag and
+    /// jumped to the source's on release, which is a step in the one channel
+    /// the eye is most sensitive to". True of a radius that was CONSTANT while
+    /// the card shrank — the shape drifting further from the screen's the
+    /// smaller it got — and the answer was to start arriving early instead.
+    ///
+    /// Scaled with the card, there is no drift to compensate and no step to
+    /// avoid: radius over size is the screen's at every instant of the drag,
+    /// and the release's spring carries the corner to the landing's along with
+    /// the frame (`poseAtSource` sets it from inside the animation block). The
+    /// reveal reached the same rule from the other end — see
+    /// `RevealStage.heldRadius` — after a viewer reported its window turning
+    /// into a capsule halfway through a drag that had decided nothing.
+    private static func grabCornerRadius(at progress: CGFloat, screen: CGFloat) -> CGFloat {
+        screen * grabScale(at: progress)
     }
 
     private func springDetach(_ flight: ZoomFlight, to scale: CGFloat, progress: CGFloat) {
         let remaining = max(detachDeadline - CACurrentMediaTime(), 0)
-        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius, flight: flight)
+        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius)
         UIView.animate(
             withDuration: remaining, delay: 0, usingSpringWithDamping: 0.8,
             initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
@@ -421,7 +443,12 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // can still be abandoned.
         let along = activeAxis.along(translation)
         let bandedAlong = along >= 0
-            ? ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.forwardDragLimit)
+            ? ZoomTransitionGeometry.rubberBand(
+                along,
+                limit: ZoomTransitionGeometry.forwardDragLimit(
+                    forSpan: activeAxis.span(of: view.bounds.size)
+                )
+            )
             : ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.backDragLimit)
         let bandedAcross = ZoomTransitionGeometry.rubberBand(
             activeAxis.across(translation), limit: ZoomTransitionGeometry.crossDriftLimit
@@ -453,7 +480,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // the release inherits the shape the drag already had, and a
         // destination that draws alongside the card can be told the same
         // number instead of guessing it.
-        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius, flight: flight)
+        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius)
         if isDetachSettling {
             springDetach(flight, to: scale, progress: progress)
         } else {
@@ -624,7 +651,11 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // either way (measured). So this watches the card's PRESENTATION
         // instead, which is on whatever clock the animation is actually on, and
         // keeps a wall-clock ceiling as the backstop the old timer was.
-        whenViewSettles(flight.card, ceiling: viewSettleCeiling) { [weak self] in
+        whenViewSettles(
+            flight.card,
+            settlingAt: commit ? landing : flight.pageFrame,
+            ceiling: viewSettleCeiling
+        ) { [weak self] in
             self?.finishTransition(cancelled: !commit)
         }
     }
@@ -730,6 +761,25 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         peakProgress: CGFloat, verticalDrift: CGFloat = 0, axis: ZoomDismissAxis = .horizontal
     ) async {
         guard let view = pannedView else { return }
+        // ⚠️ THE SAME TWO AUTHORITIES A FINGER PASSES, or this script reports on
+        // a transition the app would never have run.
+        //
+        // `gestureRecognizerShouldBegin` cannot be called here — it needs a real
+        // recognizer with a velocity — so the two gates that decide whether this
+        // driver claims a drag AT ALL are restated. Everything else in that
+        // method is about touches and timing; these two are about the post.
+        //
+        // Without them the harness drove a hero over a landing the hero refuses,
+        // filmed it, and called the result the product's behaviour. The card
+        // close is what a finger gets there, and it was never once measured.
+        guard destination?.zoomDismissalKind != .card,
+              source?.zoomLandingAcceptsHero != false
+        else {
+            print("[zoom-live] scripted grab DECLINED"
+                + " kind=\(String(describing: destination?.zoomDismissalKind))"
+                + " landingAcceptsHero=\(String(describing: source?.zoomLandingAcceptsHero))")
+            return
+        }
         activeAxis = axis
         beginGrab()
         let peak = axis.offset(
@@ -772,6 +822,16 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         // exactly one of them claims any given grab.
         guard destination?.zoomDismissalKind != .card
         else { return grabLog("post wants a card, not a hero", false) }
+        // ⚠️ AND ONLY WHERE THERE IS SOMETHING TO FLY IT ONTO — see
+        // `ZoomTransitionSource.zoomLandingAcceptsHero`.
+        //
+        // The gate above asks the DEPARTURE's half of the question. A close
+        // that lands on the post it left from needs no second half, and one
+        // that does not — a list keeps its order under a pager — can be
+        // carrying a photograph home to a row made of words. Refusing leaves
+        // the drag to the card close, exactly as the kind gate does.
+        guard source?.zoomLandingAcceptsHero != false
+        else { return grabLog("landing cannot receive a hero", false) }
         // `context == nil` only covers OUR transitions. A pop of a screen
         // pushed above the feed (profile, comments) can still be settling —
         // the feed is already `topViewController` then, and beginning a grab

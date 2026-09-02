@@ -664,6 +664,18 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// who scrolled the comments has already broken that. Same view For You
     /// flies, because a viewer opening the same post from either screen is
     /// looking at one screen and must get one transition.
+    /// ⚠️ THE ANY-KIND FLOOR under `textRowFrame`, which refuses a row carrying
+    /// media on purpose.
+    ///
+    /// A close whose anchor turned out to be a photograph asked for a rect, was
+    /// told nil, and landed on a 96pt square in the middle of the screen — a
+    /// white card floating over the list, unaligned with anything. Filmed. For
+    /// You added this floor for the same reason and this list never got it.
+    func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let cell = cell(for: postID) else { return nil }
+        return cell.convert(cell.bounds, to: space)
+    }
+
     func makeDismissStandIn(for postID: PostID) -> UIView? {
         guard let post = posts.first(where: { $0.id == postID }) else { return nil }
         // The realized row's width when there is one, the list's own otherwise:

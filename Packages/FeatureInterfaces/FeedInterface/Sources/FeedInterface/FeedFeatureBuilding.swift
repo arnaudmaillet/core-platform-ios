@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import UIKit
 
 /// How the post-detail screen presents.
@@ -114,6 +115,9 @@ public protocol FeedFeatureBuilding {
         postIDs: [PostID],
         ownsInteractiveDismissal: Bool
     ) -> UIViewController
+    // (see `SnapFeedSettleReporting` below for asking a built feed where the
+    // viewer stopped — the one question a presenter outside this package has
+    // to be able to put to it.)
     /// Pushes that same feed onto `presenter`'s stack with a HERO flight from
     /// `origin`, instead of a standard slide.
     ///
@@ -158,8 +162,18 @@ public protocol FeedFeatureBuilding {
     ///
     /// What this takes is exactly what the reveal reads: where the source is,
     /// what shape and colour it is, and what to draw in the window at each end.
+    ///
+    /// `beneath` builds the screen a VERTICAL dismissal of this feed lands on
+    /// — the place page a city/country cluster must always offer, whatever
+    /// face its marker wears. Handed the freshly built feed (the page's grid
+    /// tracks the feed's active post) and slid under it at dismissal-begin,
+    /// never pushed: the horizontal close and the back button keep landing on
+    /// `presenter`, window-shaped, exactly as they do with `nil`.
     func revealSnapFeed(
-        postIDs: [PostID], from presenter: UIViewController, origin: TextRevealOrigin
+        postIDs: [PostID],
+        from presenter: UIViewController,
+        origin: TextRevealOrigin,
+        beneath: ((UIViewController) -> UIViewController)?
     )
     /// Best-effort, cancellable warming of these posts into the shared cache, so
     /// a subsequent `makeSnapFeedViewController` hydrates from memory rather than
@@ -185,11 +199,33 @@ public protocol FeedFeatureBuilding {
     ///
     /// `following` puts the follow-this-place toggle in the gallery's header
     /// (`nil` hides it — a caller whose subject has no followable identity).
+    ///
+    /// `mapReturn` stages a dismissal back to the map: it produces a fresh
+    /// flight source for the cluster's marker — fresh because the marker's
+    /// face, ring and even presence can all have changed since the tap — with
+    /// the plain slide kept as the fallback whenever it answers `nil` (the
+    /// marker left the map).
+    ///
+    /// Called when the gallery becomes the top screen — the ONE departure it
+    /// has, now that a post pushed over it goes home to its own tile rather
+    /// than escaping past it to the map.
+    ///
+    /// `departureStill` is what that screen LOOKS LIKE, asked when the flight
+    /// stages and never before. Without it the card wears the marker's own face
+    /// from the first frame — a whole page collapsing straight into an icon,
+    /// with nothing of what was on screen carried across. The closure returning
+    /// nil leaves exactly that behaviour, which is the honest floor for a
+    /// screen that cannot draw itself.
+    ///
+    /// ⚠️ A PICTURE, not a post. The departing screen here is a GRID: there is
+    /// no single post leaving, which is why this is a still and not an id the
+    /// way every other departure on this seam is.
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,
         following: ClusterGalleryFollowing?,
-        feed: UIViewController
+        feed: UIViewController,
+        mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
     ) -> UIViewController
 }
 
@@ -225,4 +261,33 @@ extension FeedFeatureBuilding {
     public func makeSnapFeedViewController(postIDs: [PostID]) -> UIViewController {
         makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true)
     }
+}
+
+/// A pushed feed, asked where the viewer actually stopped.
+///
+/// The feed is a PAGER, and every transition a presenter stages was decided
+/// when the post was OPENED. A presenter outside this package — the map,
+/// staging a flight home to its marker — has no other way to learn that the
+/// viewer swiped on, and staging the close against the post that was tapped
+/// is how a card ends up flying a photograph the viewer has not seen for
+/// several pages.
+///
+/// Deliberately one property and no more: the answer is needed at dismissal
+/// STAGING, so a caller reads it inside the hook that stages, never captures
+/// it. The seam exists because the concrete feed type is one this interface
+/// hides on purpose.
+@MainActor
+public protocol SnapFeedSettleReporting: AnyObject {
+    /// The post whose page is settled, or nil before the first settle.
+    var settledPostID: PostID? { get }
+    /// The still that page is drawing — the picture a flight home has to
+    /// dissolve away when it is landing somewhere else.
+    ///
+    /// From the FEED rather than from the presenter's own thumbnail of the same
+    /// post, and the difference is visible twice over: a carousel post is
+    /// showing one of several pictures and only the page knows which, and a
+    /// presenter's copy may not exist at all (an off-screen row has no
+    /// rendered cover to give). Nil for a text page, which has no picture — and
+    /// for a text page alone: a video answers with its current frame.
+    var settledCoverImage: UIImage? { get }
 }

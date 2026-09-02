@@ -76,9 +76,17 @@ final class FeedFlowCoordinator: Coordinator {
     /// timeline was deep-linked above a pin-opened feed), whose own mechanic
     /// owns the bar, or the feed is already on its way onto another stack
     /// (the relocation path re-hides immediately; don't flash it in between).
+    ///
+    /// ⚠️ "Full-bleed snap surface" is asked as `concealsAppTabBar` and not as
+    /// conformance to the zoom protocol. The two were the same answer until the
+    /// place page conformed in order to fly its own dismissal home to the map
+    /// while showing the bar exactly like any other pushed screen — at which
+    /// point the old proxy started refusing the restore over a screen that
+    /// never owned the bar in the first place.
     private func restoreTabBar(on navigationController: UINavigationController) {
+        let top = navigationController.topViewController
         guard feedViewController.navigationController == nil,
-              !(navigationController.topViewController is any ZoomTransitionDestination)
+              (top as? any ZoomTransitionDestination)?.concealsAppTabBar != true
         else { return }
         navigationController.tabBarController?.setTabBarHidden(false, animated: true)
     }

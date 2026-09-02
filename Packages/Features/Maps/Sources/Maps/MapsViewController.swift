@@ -44,15 +44,25 @@ final class MapsViewController: UIViewController {
     private let pushPlainSnapFeed: ([PostID], UIViewController) -> Void
     /// Pushes the feed as a WINDOW growing out of a marker — the text pin's
     /// path. Injected like its plain sibling, and for the same reason: the
-    /// pushed screen's gestures and its transition are the feed's own.
-    private let revealSnapFeed: ([PostID], UIViewController, TextRevealOrigin) -> Void
-    /// Builds the place gallery a SEMANTIC cluster's feed dismisses into
+    /// pushed screen's gestures and its transition are the feed's own. The
+    /// last argument builds the screen a VERTICAL dismissal lands on (the
+    /// semantic cluster's place page), or `nil` for a plain marker.
+    private let revealSnapFeed: (
+        [PostID], UIViewController, TextRevealOrigin,
+        ((UIViewController) -> UIViewController)?
+    ) -> Void
+    /// Builds the place gallery a HIERARCHY cluster's feed dismisses into
     /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, the place
-    /// itself, the feed about to cover it) → the gallery screen, which also
-    /// serves as the vertical grab's flight target (`ZoomTransitionSource`).
-    /// The whole `MapPlace` travels (not just its `galleryTitle`) so the
-    /// builder can wire the header's follow toggle to this place's identity.
-    private let makeClusterGallery: ([PostID], MapPlace, UIViewController) -> UIViewController
+    /// itself, the feed about to cover it, the map-return flight source) →
+    /// the gallery screen, which also serves as the vertical grab's flight
+    /// target (`ZoomTransitionSource`). The whole `MapPlace` travels (not
+    /// just its `galleryTitle`) so the builder can wire the header's follow
+    /// toggle to this place's identity; the last argument stages the page's
+    /// OWN dismissal back to the cluster marker (`makeMapReturnSource`).
+    private let makeClusterGallery: (
+        [PostID], MapPlace, UIViewController,
+        @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
+    ) -> UIViewController
     /// Warms the given posts into the shared cache so a tap opens instantly.
     private let prewarm: ([PostID]) async -> Void
     /// Opens someone's profile (the sub-filter sheet's Profile swipe). A
@@ -71,6 +81,12 @@ final class MapsViewController: UIViewController {
     private static let prewarmCap = 16
     /// Retains the transitioning delegate for the life of a presentation.
     private var activeTransition: ZoomTransitionController?
+    /// The card-shaped close that rides alongside the flight, for the posts
+    /// the flight cannot carry (see `attachCardCloseAlongsideFlight`). Held
+    /// because `UINavigationController.delegate` is weak and nothing else
+    /// would keep this driver alive to see its own swipe; released by its
+    /// `onFeedPopped`.
+    private var cardClose: InteractiveSlideDismissal?
     /// True from the moment a plain push is fired until the map is back on
     /// screen. It does for that path exactly what `activeTransition` does for
     /// the flight: the instant-tap recognizer and MapKit's own `didSelect` can
@@ -181,8 +197,14 @@ final class MapsViewController: UIViewController {
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
-        revealSnapFeed: @escaping ([PostID], UIViewController, TextRevealOrigin) -> Void,
-        makeClusterGallery: @escaping ([PostID], MapPlace, UIViewController) -> UIViewController,
+        revealSnapFeed: @escaping (
+            [PostID], UIViewController, TextRevealOrigin,
+            ((UIViewController) -> UIViewController)?
+        ) -> Void,
+        makeClusterGallery: @escaping (
+            [PostID], MapPlace, UIViewController,
+        @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
+        ) -> UIViewController,
         prewarm: @escaping ([PostID]) async -> Void,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void
@@ -464,6 +486,36 @@ final class MapsViewController: UIViewController {
         super.viewDidAppear(animated)
         // Kick the first query; coalesces with any region-settle callback.
         scheduleQuery()
+        // Any marker a departed flow concealed comes back now. The window
+        // reveal hides the tapped marker and un-hides it on ITS return leg —
+        // but a feed that dismissed INTO the place page never runs that leg,
+        // and the page's own pop landed on a map missing its cluster
+        // (recorded on video, 2026-08-31). Every transition is over by
+        // `viewDidAppear`, so a blanket un-hide can't flash under a flying
+        // card; a hero return has already un-hidden its own marker and this
+        // is a no-op there.
+        for annotation in mapView.annotations {
+            mapView.view(for: annotation)?.isHidden = false
+        }
+        // WHEN ON THE MAP, THE TAB BAR IS ALWAYS THERE. The map is a tab ROOT:
+        // there is no state in the product where an on-screen map has no dock
+        // under it, so it asserts one rather than trusting whichever departing
+        // flow was supposed to hand it back. The flows above hide the bar on
+        // their way out and each restores it on exactly one of its several
+        // endings; a path nobody wired — the place page popping home, which the
+        // shell's restores skipped while it was read as a full-bleed surface —
+        // left the map docked to nothing.
+        //
+        // `viewDidAppear` and NOT `viewWillAppear`: UIKit runs the latter at
+        // interactive-pop BEGIN, so a restore there would show the bar over the
+        // feed for the whole return flight and strand it there when the grab is
+        // cancelled. By here every transition is over and the assertion is safe.
+        //
+        // Both failure modes are repaired, because `restoreBottomChromeForReturn`
+        // writes `tabBar.alpha` BEFORE its `isTabBarHidden` guard: a bar left
+        // hidden comes back, and a bar left at alpha 0 by an interrupted flight
+        // gets its opacity back even though its state already read visible.
+        restoreBottomChromeForReturn(alpha: 1)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -1321,6 +1373,140 @@ final class MapsViewController: UIViewController {
 
     private static func singleIdentity(_ postID: PostID) -> String { "p:" + postID.rawValue }
 
+    /// The place page's way home: a closure producing a FRESH flight source
+    /// for `annotation`'s marker, resolved when the page stages its own
+    /// dismissal — the marker's face, ring and even presence can all have
+    /// changed since the tap, so nothing is captured beyond the annotation's
+    /// identity. `nil` when the marker has left the map entirely, which is
+    /// the page's cue to keep the plain slide (the fallback dismissal).
+    /// `departureStill` draws the screen the flight is leaving — see the seam's
+    /// own doc. Asked at STAGING, so it costs one render on the first frame of
+    /// the gesture and nothing at all when the flight never happens.
+    private func makeMapReturnSource(
+        for annotation: any MKAnnotation
+    ) -> (@escaping () -> UIImage?) -> (any ZoomTransitionSource)? {
+        { [weak self, weak box = annotation as AnyObject] departureStill in
+            guard let self, let box, let annotation = box as? any MKAnnotation,
+                  self.mapView.annotations.contains(where: { ($0 as AnyObject) === box })
+            else { return nil }
+            let view = self.mapView.view(for: annotation)
+            let thumbnail = (view as? MapClusterAnnotationView)?.heroImage
+                ?? (view as? MapAnnotationView)?.heroImage
+            let cluster = annotation as? MapComputedCluster
+            return MapPinZoomSource(
+                mapView: self.mapView,
+                annotation: annotation,
+                thumbnail: thumbnail,
+                face: Self.face(of: annotation),
+                ringKind: cluster.flatMap { $0.isHierarchyMarker ? $0.place?.kind : nil },
+                // ⚠️ THE WHOLE DEPARTING SCREEN, not a post's cover. Every other
+                // departure on this source is one post leaving another; here a
+                // GRID is collapsing into an icon, and without an operand the
+                // card wore that icon from the first frame — a full-screen page
+                // cutting straight to a 44pt disc with nothing carried across.
+                //
+                // Resolved through the same channel a post's picture uses, so
+                // the blend does not learn a second shape.
+                departureCover: { departureStill().map { .picture($0) } ?? .none }
+            )
+        }
+    }
+
+    // MARK: - The picture the viewer is leaving
+
+    /// What a flight home to `annotation` has to dissolve away, asked when the
+    /// dismissal stages.
+    ///
+    /// The ARRIVAL is `postIDs(of:).first` — the marker's representative, which
+    /// is also the post the flight opened from, because that is the order the
+    /// feed was seeded in. The map never substitutes: the marker the viewer
+    /// tapped has not moved and is what they expect to fall back onto, so what
+    /// adapts is the card's departure face, never its landing.
+    private func returnCover(
+        to annotation: any MKAnnotation, leaving feed: UIViewController?
+    ) -> MapReturnCover {
+        let settled = feed as? any SnapFeedSettleReporting
+        let departure = settled?.settledPostID
+        let arrival = Self.postIDs(of: annotation).first
+        let cover = MapReturnCover.resolve(
+            departure: departure,
+            arrival: arrival,
+            // ⚠️ THE FEED'S OWN STILL FIRST, and the map's thumbnail only as a
+            // fallback.
+            //
+            // Both are "the departure's picture" and they are not
+            // interchangeable in the card. The card takes off FULL SCREEN and
+            // aspect-fills whatever it is handed: the page's own still is
+            // already that shape, so it lands 1:1 and reads as the picture the
+            // viewer is looking at, anchored in the window. A marker's
+            // thumbnail is a small square — filled into a 402x874 card it is a
+            // magnified fragment, which is the crop this was reported as.
+            //
+            // The fallback still earns its place, though it earns it less
+            // often than it used to: a video page answers now, so what is left
+            // here is a text page and an unrealized cell, where a marker's
+            // cover is better than nothing.
+            picture: { [weak self] id in
+                settled?.settledCoverImage ?? self?.cachedPicture(for: id)
+            }
+        )
+        #if DEBUG
+        // `-zoom-blend-log`: which row of the product rule this flight took.
+        //
+        // Worth a channel of its own because the rows fail in opposite,
+        // equally quiet ways — `none` where a blend was due is a cut nobody
+        // reads as a bug, and a blend where `none` was due is a slightly soft
+        // landing. The ids are printed too: a `none` is only correct if the
+        // two of them actually match.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-blend-log") {
+            print("[zoom-blend] departure=\(departure?.rawValue ?? "nil")"
+                + " arrival=\(arrival?.rawValue ?? "nil") cover=\(cover.debugRow)")
+        }
+        #endif
+        return cover
+    }
+
+    /// A post's cover, if it is already in memory.
+    ///
+    /// A rendered marker first: it holds the decoded image the viewer has been
+    /// looking at, and reading it costs nothing. Otherwise the pipeline's cache,
+    /// which is a peek and never a fetch — resolving a cover is on the first
+    /// frame of a gesture, and a flight that waited on the network would stall
+    /// under the finger.
+    private func cachedPicture(for postID: PostID) -> UIImage? {
+        if let annotation = displayed[Self.singleIdentity(postID)],
+           let view = mapView.view(for: annotation),
+           let image = (view as? MapAnnotationView)?.heroImage {
+            return image
+        }
+        guard let url = pins[postID]?.thumbnailURL else { return nil }
+        return imagePipeline.cachedImage(for: url)
+    }
+
+    /// The same answer, allowed to take as long as a fetch — the row
+    /// `cachedPicture` had to decline.
+    ///
+    /// Every member of a cluster is a post the map knows the URL of, but only
+    /// the representative ever had a marker, so the others were never fetched:
+    /// paging into one and dismissing is precisely the case that comes back
+    /// empty. Reports at most once, and only if it actually got a picture, so
+    /// the flight's own `none` stands when this comes back with nothing.
+    private func awaitReturnCover(
+        to annotation: any MKAnnotation,
+        leaving feed: UIViewController?,
+        then report: @escaping (MapReturnCover) -> Void
+    ) {
+        guard let departure = (feed as? any SnapFeedSettleReporting)?.settledPostID,
+              departure != Self.postIDs(of: annotation).first,
+              pins[departure]?.isText == false,
+              let url = pins[departure]?.thumbnailURL
+        else { return }
+        Task { [imagePipeline] in
+            guard let image = try? await imagePipeline.image(for: url) else { return }
+            report(.picture(image))
+        }
+    }
+
     /// Re-points and re-faces a marker already on the map for a recomputed item.
     private func update(_ annotation: any MKAnnotation, to item: MapClusterEngine.Item) {
         if let cluster = annotation as? MapComputedCluster {
@@ -1512,7 +1698,7 @@ extension MapsViewController: MKMapViewDelegate {
         let wantsText = arguments.contains("-maps-open-first-text-cluster")
         // `-maps-open-first-media-cluster`: the biggest MEDIA-faced cluster —
         // the hero-presented kind, which is also what the semantic-cluster
-        // gallery flow rides (pair with `-maps-mock-semantic-clusters`).
+        // gallery flow rides (places seed by default in mock mode).
         let wantsMedia = arguments.contains("-maps-open-first-media-cluster")
         guard !didDebugOpenPin,
               wantsText || wantsMedia || arguments.contains("-maps-open-first-cluster")
@@ -1580,6 +1766,23 @@ extension MapsViewController: MKMapViewDelegate {
             // origin that says where the marker is, what shape and colour it
             // is, and what to draw in the window at each end.
             isPlainFeedPushed = true
+            // A HIERARCHY marker always offers its place page, whatever face
+            // it wears (a city or country is a place before it is a
+            // photograph): the same builder the hero's Case B uses, handed
+            // through the seam so the vertical dismissal lands on it. Same
+            // criterion as the hero path — `isHierarchyMarker` — so the two
+            // presentations answer "is this marker a city or a country?"
+            // alike, and an ordinary proximity cluster (leaf-shared or not)
+            // gets the plain feed on both.
+            let hierarchyPlace = (annotation as? MapComputedCluster).flatMap {
+                $0.isHierarchyMarker ? $0.place : nil
+            }
+            let placePage: ((UIViewController) -> UIViewController)? = hierarchyPlace.map { place in
+                let mapReturn = makeMapReturnSource(for: annotation)
+                return { [makeClusterGallery] feed in
+                    makeClusterGallery(postIDs, place, feed, mapReturn)
+                }
+            }
             revealSnapFeed(
                 postIDs,
                 self,
@@ -1598,7 +1801,8 @@ extension MapsViewController: MKMapViewDelegate {
                         mapView?.view(for: annotation)?.isHidden = concealed
                     },
                     depthView: { [weak self] in self?.view }
-                )
+                ),
+                placePage
             )
         case .plainPush where navigationController != nil:
             // Nothing to fly (see `MapMarkerPresentation`): the platform's own
@@ -1695,6 +1899,15 @@ extension MapsViewController: MKMapViewDelegate {
             },
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
+            },
+            // Asked at DISMISSAL staging, so it reports where the viewer
+            // actually stopped rather than where they started. The card lands
+            // on this marker either way; only its departure face adapts.
+            departureCover: { [weak self, weak feedVC] in
+                self?.returnCover(to: annotation, leaving: feedVC) ?? .none
+            },
+            awaitDepartureCover: { [weak self, weak feedVC] report in
+                self?.awaitReturnCover(to: annotation, leaving: feedVC, then: report)
             }
         )
         // A *push*, not a modal: the feed joins this tab's stack, so the one
@@ -1704,17 +1917,20 @@ extension MapsViewController: MKMapViewDelegate {
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
 
-        // CASE B (cluster-gallery milestone): a SEMANTIC cluster — one whose
-        // members all share a city/country/region (mock-only today, see
-        // `MapPlace`) — carries a place gallery beneath its feed. The gallery
-        // joins the stack invisibly in the same transaction as the feed
-        // (UIKit animates a stack whose last element is new exactly like a
-        // push, and never even loads the mid controller's view), and the
-        // VERTICAL grab flies the active post into its tile there instead of
-        // back to the pin. Generic clusters and single pins skip all of this.
+        // CASE B (cluster-gallery milestone): a HIERARCHY marker — the active
+        // band's own city or country cluster — carries a place page beneath
+        // its feed. The page joins the stack invisibly in the same
+        // transaction as the feed (UIKit animates a stack whose last element
+        // is new exactly like a push, and never even loads the mid
+        // controller's view), and the VERTICAL grab flies the active post
+        // into its tile there instead of back to the pin. ORDINARY clusters
+        // — proximity groups, even ones whose members happen to share a leaf
+        // place — and single pins skip all of this: only a city or a country
+        // has a place page (product call, 2026-08-31).
         var gallery: UIViewController?
-        if let cluster = annotation as? MapComputedCluster, let place = cluster.place {
-            let built = makeClusterGallery(postIDs, place, feedVC)
+        if let cluster = annotation as? MapComputedCluster,
+           cluster.isHierarchyMarker, let place = cluster.place {
+            let built = makeClusterGallery(postIDs, place, feedVC, makeMapReturnSource(for: annotation))
             gallery = built
             if let gallerySource = built as? any ZoomTransitionSource {
                 transition.setDismissSource(gallerySource, for: built)
@@ -1866,9 +2082,86 @@ extension MapsViewController: MKMapViewDelegate {
             // seen — its view is not even loaded (pinned by the spike suite,
             // `InteractivePopToStackTests`).
             nav.setViewControllers(nav.viewControllers + [gallery, feedVC], animated: true)
+            attachCardCloseAlongsideFlight(feed: feedVC, gallery: gallery, on: nav)
         } else {
             nav.pushViewController(feedVC, animated: true)
         }
+    }
+
+    /// A dismissal for the posts this flight cannot carry.
+    ///
+    /// ⚠️ THE FEED IS A PAGER AND THE PRESENTATION WAS CHOSEN AT THE TAP. A
+    /// media-faced marker opens with a hero; swipe to a TEXT post and there is
+    /// no media left for that hero to fly. Both zoom grabs then refuse —
+    /// `ZoomDismissInteractionController` gates on `zoomDismissalKind != .card`
+    /// BEFORE it looks at the axis, so the horizontal one refuses too — and
+    /// the native edge pop is already disclaimed. Measured: on that page the
+    /// drag did nothing at all, on either axis, and the back chevron was the
+    /// only way out.
+    ///
+    /// For You hit this first and answered it with exactly this driver
+    /// (`attachCardCloseAlongsideFlight`); Case B never received the
+    /// equivalent. `arbitratesWithHeroGrab` is what divides the work: each
+    /// side refuses the other's kind, so exactly one claims any grab.
+    private func attachCardCloseAlongsideFlight(
+        feed: UIViewController, gallery: UIViewController, on nav: UINavigationController
+    ) {
+        guard let landing = gallery as? any CardCloseLanding else { return }
+        let slide = InteractiveSlideDismissal()
+        cardClose = slide
+        slide.resetForNewPresentation()
+        slide.arbitratesWithHeroGrab = true
+        slide.attach(to: feed, axes: [.horizontal, .vertical])
+        // ⚠️ ONCE. A swipe asks twice — when the grab claims the screen, and
+        // again when the pop it triggers asks for an animator — and the
+        // adoption below is a MOVE, so a second one would put the two tiles
+        // back where they started.
+        var hasPrepared = false
+        slide.prepareForDismissal = { [weak feed, weak landing] _ in
+            guard !hasPrepared, let feed, let landing else { return }
+            // ⚠️ ONLY FOR A CLOSE THAT CARRIES A CARD. This runs for every
+            // dismissal including a hero's, and the staging below CONCEALS a
+            // tile — a flight landing on a hidden tile reads as no animation
+            // at all. Asked of the same authority both grabs gate on, so the
+            // three can never disagree about what the post is.
+            guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
+            else { return }
+            hasPrepared = true
+            slide.revealGeometry = landing.cardCloseGeometry(dismissing: feed)
+        }
+        // The backstop: whatever animated the close, no tile stays hidden. The
+        // staging above conceals one, and only the reveal's own completion
+        // pays that back — a pop finished by anything else would leave a hole
+        // in the mosaic for good.
+        slide.onFeedPopped = { [weak self, weak landing] _ in
+            landing?.clearLandingConcealment()
+            self?.cardClose = nil
+        }
+        // AFTER the push, so the flight controller is what `install` captures
+        // and a `.hero` pop forwards straight back to it.
+        slide.install(on: nav)
+        #if DEBUG
+        // `-text-swipe-demo <peak>` (+ `-zoom-demo-grab-vertical` for the
+        // axis): the same script the reveal path honours, on the driver that
+        // is otherwise unreachable — this grab only exists for a post the
+        // viewer has PAGED to, and the simulator injects neither the paging
+        // nor the drag. Pair with `-snap-start-index N` to settle on a text
+        // page first.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let position = arguments.firstIndex(of: "-text-swipe-demo"),
+           position + 1 < arguments.count,
+           let peak = Double(arguments[position + 1]) {
+            let axis: ZoomDismissAxis = arguments.contains("-zoom-demo-grab-vertical")
+                ? .vertical : .horizontal
+            Task { @MainActor [weak slide] in
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                let driven = await slide?.debugPerformSwipe(
+                    peakProgress: CGFloat(peak), axis: axis
+                )
+                print("[card-close] peak=\(peak) axis=\(axis) driven=\(driven ?? false)")
+            }
+        }
+        #endif
     }
 }
 

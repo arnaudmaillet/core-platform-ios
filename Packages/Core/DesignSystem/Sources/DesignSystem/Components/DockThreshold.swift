@@ -1,13 +1,21 @@
 import CoreGraphics
 
-/// When the profile's selector changes homes, and whether that change is worth
-/// animating.
+/// When a screen's leading selector changes homes, and whether that change is
+/// worth animating.
 ///
 /// Arithmetic, pulled out of the view controller, because the symptom it exists
 /// to prevent is invisible in a screenshot and tedious to reproduce by hand: a
 /// selector that doubles and flashes when the header is flicked hard past the
 /// line where it docks.
-enum ProfileDockThreshold {
+///
+/// ⚠️ **Two screens run this, and a viewer moving between them must not be able
+/// to tell.** The profile and the place page dock the same selector out of the
+/// same kind of header; the moment their numbers differ the hand-over is two
+/// slightly different animations wearing one design, and the difference reads as
+/// a fault in whichever screen is met second. That is why the arithmetic left
+/// the Profile package. A screen that wants a different band changes it here,
+/// for both — forking a constant is not a local tuning decision.
+public enum DockThreshold {
     /// The band below the dock line inside which an already-docked selector
     /// stays docked.
     ///
@@ -16,7 +24,7 @@ enum ProfileDockThreshold {
     /// puts it behind the chrome. It is coming back that needs slack, so that a
     /// viewer resting a finger on the line does not watch the selector flicker
     /// between its two homes.
-    static let restingBand: CGFloat = 12
+    public static let restingBand: CGFloat = 12
 
     /// How far the header may travel between two scroll callbacks and still get
     /// the animated hand-over.
@@ -34,7 +42,7 @@ enum ProfileDockThreshold {
     /// 14pt a callback is a little above a brisk read — an ordinary scroll moves
     /// the header 6–10pt a frame — so scrolling still gets the animation and only
     /// a flick skips it.
-    static let animationSpeedLimit: CGFloat = 14
+    public static let animationSpeedLimit: CGFloat = 14
 
     /// Whether the selector should be docked now.
     ///
@@ -45,7 +53,7 @@ enum ProfileDockThreshold {
     /// deceleration overshoot and rubber-banding both do exactly this. A band
     /// narrower than one step is not a band at all at the speed that needs one,
     /// so it is at least two steps wide.
-    static func isDocked(
+    public static func isDocked(
         travelled: CGFloat, dockLine: CGFloat, step: CGFloat, wasDocked: Bool
     ) -> Bool {
         guard wasDocked else { return travelled >= dockLine }
@@ -53,7 +61,7 @@ enum ProfileDockThreshold {
     }
 
     /// Whether the hand-over at this speed should be animated or simply made.
-    static func isAnimated(step: CGFloat) -> Bool {
+    public static func isAnimated(step: CGFloat) -> Bool {
         abs(step) < animationSpeedLimit
     }
 
@@ -62,10 +70,10 @@ enum ProfileDockThreshold {
     /// Long enough to read as a fade rather than a blink; short enough that the
     /// block is at full strength for almost all of its travel, since it is the
     /// thing the viewer came to read.
-    static let identityFadeDistance: CGFloat = 90
+    public static let identityFadeDistance: CGFloat = 90
 
-    /// How visible the identity block — avatar, name, stats, bio — should be for
-    /// a given header position.
+    /// How visible the identity block — the avatar, name and detail a header
+    /// leads with — should be for a given header position.
     ///
     /// ⚠️ **Driven by the SCROLL, not by the docking state.** Docking is a
     /// discrete event that a flick can cross at 150pt a frame; an alpha animated
@@ -79,7 +87,7 @@ enum ProfileDockThreshold {
     /// It reaches zero exactly AT the dock line, which is what lets the host
     /// stop being hidden there: nothing is drawn, so nothing bleeds through the
     /// transparent navigation bar, and nothing has to pop to make that true.
-    static func identityAlpha(travelled: CGFloat, dockLine: CGFloat) -> CGFloat {
+    public static func identityAlpha(travelled: CGFloat, dockLine: CGFloat) -> CGFloat {
         guard dockLine > 0, identityFadeDistance > 0 else { return 1 }
         let start = dockLine - identityFadeDistance
         let faded = (travelled - start) / identityFadeDistance

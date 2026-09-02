@@ -106,7 +106,23 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     }
     #endif
 
-    public init(source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
+    /// ⚠️ `presents: false` FOR A CONTROLLER THAT ONLY EVER FLIES A DISMISSAL.
+    ///
+    /// The last line of this initializer tells the destination a flight is
+    /// STAGING, so it can suppress its own playback for the duration — right,
+    /// and load-bearing, when this controller is about to present. A close-only
+    /// controller, built beside an already-pushed feed, said the same thing and
+    /// nothing ever retracted it: the feed stayed in presentation-staging for
+    /// its whole life, so its cells realized with playback deferred, the paged
+    /// -to video never played, and the grab could not be handed the live
+    /// surface it is supposed to carry home.
+    ///
+    /// Defaulted, so every presenting call site is unchanged.
+    public init(
+        source: any ZoomTransitionSource,
+        destination: any ZoomTransitionDestination,
+        presents: Bool = true
+    ) {
         self.source = source
         self.destination = destination
         self.feedViewController = destination as? UIViewController
@@ -118,7 +134,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // Before the destination is pushed, and so before it lays out and
         // activates its first page — the only point early enough for it to
         // suppress its own playback for the duration of the flight.
-        destination.zoomTransitionWillBegin()
+        if presents { destination.zoomTransitionWillBegin() }
     }
 
     /// Installs the grab-to-dismiss gesture on the pushed feed's view. Called
@@ -177,14 +193,36 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// With `-zoom-demo-grab-vertical` alongside, the same script drives the
     /// VERTICAL grab (forward-only milestone) instead of the horizontal one.
     public func debugScriptedGrab() {
-        let axis: ZoomDismissAxis = ProcessInfo.processInfo.arguments
-            .contains("-zoom-demo-grab-vertical") ? .vertical : .horizontal
-        Task { @MainActor [weak self] in
-            await self?.interaction.debugPerformGrab(
+        debugScriptedGrab(
+            axis: ProcessInfo.processInfo.arguments.contains("-zoom-demo-grab-vertical")
+                ? .vertical : .horizontal
+        )
+    }
+
+    /// The same script with the axis said out loud, for a run that needs BOTH
+    /// — a chain that reaches a screen by one axis and then leaves it by the
+    /// other. `-zoom-demo-grab-vertical` is process-wide, so it cannot express
+    /// that, and a harness forced to pick one axis for the whole run can only
+    /// ever verify half of a two-gesture path.
+    public func debugScriptedGrab(axis: ZoomDismissAxis) {
+        // ⚠️ THE DRIVER THAT IS ARMED FOR THIS AXIS, not always the first one.
+        //
+        // A stack with an intermediate screen attaches a second driver with a
+        // DISJOINT axis set — the cluster-gallery shape, where a vertical grab
+        // lands on the gallery beneath and a horizontal one escapes past it.
+        // Driving `interaction` unconditionally reached only ever one of those
+        // two destinations, and silently: the script asked for `.vertical`, the
+        // marker-bound driver took it, and the run looked like a working
+        // vertical grab that simply went somewhere else. The gallery leg had no
+        // scripted route at all, which is why it was only ever verified by hand.
+        let driver = ([interaction] + extraInteractions)
+            .first { $0.debugArmedAxes.contains(axis) } ?? interaction
+        Task { @MainActor in
+            await driver.debugPerformGrab(
                 peakProgress: 0.22, verticalDrift: 180, axis: axis
             )
             try? await Task.sleep(nanoseconds: 1_200_000_000)
-            await self?.interaction.debugPerformGrab(
+            await driver.debugPerformGrab(
                 peakProgress: 0.55, verticalDrift: 70, axis: axis
             )
         }
@@ -211,6 +249,39 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
             }
             return animator
         case .pop where fromVC === feed:
+            // ⚠️ ONLY FOR A POST THAT HAS SOMETHING TO FLY — the third and last
+            // place one rule is stated.
+            //
+            // `ZoomDismissInteractionController.gestureRecognizerShouldBegin`
+            // asks the destination this before it even looks at an axis, and
+            // `InteractiveSlideDismissal.animationControllerFor` asks it to
+            // decide whether to forward a pop back to this controller. This
+            // branch answered unconditionally, which left exactly one dismissal
+            // ungated: a pop nobody drove, on a stack with no card driver
+            // attached beside the flight — the back chevron on the map's Case A
+            // (single pin / generic cluster), where the whole point of the two
+            // gates above is that both grabs refuse.
+            //
+            // Measured there: page the feed to a TEXT post, press back, and the
+            // card flies home to the pin as a blank
+            // `.secondarySystemBackground` rounded rect wearing a replica of the
+            // MEDIA page's furniture. It is the hero animation about nothing
+            // `MapMarkerPresentation` rejects in prose — a graphic effect rather
+            // than continuity, since the destination has no cover at either end.
+            //
+            // Nil is the honest floor: UIKit's own pop, which is what a screen
+            // with nothing to fly should have had all along. No live grab can be
+            // mid-pop when we decline, because the gate above refuses `.card`
+            // ahead of the axis match — so the interaction controller UIKit now
+            // never asks for is one nothing was waiting on.
+            guard destination.zoomDismissalKind != .card else {
+                // The push's hide is this controller's to pay back. Only the
+                // return FLIGHT ever did, so declining without this would land
+                // the pop on a map missing the marker that was tapped —
+                // trading a hero about nothing for a hole.
+                source.setZoomSourceHidden(false)
+                return nil
+            }
             return ZoomAnimator(
                 // The flight flies to whichever screen this pop LANDS on —
                 // the presenting screen normally, a registered intermediate

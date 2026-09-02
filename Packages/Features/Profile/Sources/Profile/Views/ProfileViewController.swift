@@ -462,6 +462,16 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // away". The closures below re-ask the transient question for as
             // long as the flight needs it.
             let geometry = galleryPager.heroGeometry(for: post.id)
+            // ⚠️ THE CLOSE LANDS ON THE POST THAT OPENED IT, whatever the
+            // viewer paged to — the product rule for a ranked list, and the
+            // same one the place page's own note states at length.
+            //
+            // Re-pointing at the settled post was tried here and taken out
+            // again: it needs the arrival's row brought on screen, and a scroll
+            // is not a re-order in the code and IS one to the eye — the post
+            // that was under the card is replaced by another. What travels
+            // instead is the PAGE, into the row it left from.
+            let anchorID = post.id
             let origin = SnapFeedHeroOrigin(
                 post: post,
                 stream: window,
@@ -504,7 +514,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 // row answers nil from `textRowFrame` anyway.
                 textReveal: TextRevealOrigin(
                     rowFrame: { [weak self] space in
-                        self?.galleryPager.textRowFrame(for: post.id, in: space)
+                        // The text row's rect, or ANY row's — see
+                        // `ProfileGalleryGridView.rowFrame`. A close whose
+                        // anchor turned out to carry media used to land on a
+                        // 96pt square in the middle of the screen.
+                        self?.galleryPager.textRowFrame(for: anchorID, in: space)
+                            ?? self?.galleryPager.rowFrame(for: anchorID, in: space)
                     },
                     // Read ONCE, at tap, for the reason the geometry above is:
                     // the viewer just touched this cell, so it is realized by
@@ -526,14 +541,21 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                     // why the two screens' reveals did not feel the same: this
                     // one flew the live page home and gained its header in a
                     // single frame.
-                    makeDismissStandIn: { [weak self] in
-                        self?.galleryPager.makeDismissStandIn(for: post.id)
+                    makeDismissStandIn: { [weak self] _ in
+                        self?.galleryPager.makeDismissStandIn(for: anchorID)
                     },
+                    // ⚠️ THE PAGE TRAVELS — this list never got the transition
+                    // every other surface now runs. Under `.clipped` it handed
+                    // the destination over DURING the drag, with the TAPPED
+                    // post's veil cut and borrowed band drawn over whatever the
+                    // viewer had paged to. A carrying fit refuses both and
+                    // moves the whole hand-over to the release.
+                    pageFit: .covering,
                     // The gallery's own concealment, which the media hero
                     // beside this already drives — one mechanism, two kinds of
                     // flight.
                     setConcealed: { [weak self] concealed in
-                        self?.galleryPager.setHeroConcealed(concealed, for: post.id)
+                        self?.galleryPager.setHeroConcealed(concealed, for: anchorID)
                     },
                     // No inset to pin, unlike For You's grid: these pages run
                     // `contentInsetAdjustmentBehavior = .never` for their whole
@@ -2322,7 +2344,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// this moment; fading the pair would apply that transition twice to one of
     /// them.
     private func applyIdentityFade(travelled: CGFloat) {
-        let alpha = ProfileDockThreshold.identityAlpha(
+        let alpha = DockThreshold.identityAlpha(
             travelled: travelled, dockLine: headerTravel
         )
         guard abs(headerView.alpha - alpha) > 0.001 else { return }
@@ -2494,7 +2516,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// as far as it can, and gives it back on the way down.
     ///
     /// Both decisions — whether to change, and whether to animate the change —
-    /// come from `ProfileDockThreshold`, and both depend on how fast the header
+    /// come from `DockThreshold`, and both depend on how fast the header
     /// is moving. See there for why speed is the input that matters.
     private func updateBarDocking(travelled: CGFloat) {
         guard viewModel.hasGallery, isViewLoaded else { return }
@@ -2503,12 +2525,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // here: distance the viewer sees between one frame and the next.
         let step = travelled - lastDockingTravel
         lastDockingTravel = travelled
-        let shouldDock = ProfileDockThreshold.isDocked(
+        let shouldDock = DockThreshold.isDocked(
             travelled: travelled, dockLine: headerTravel, step: step, wasDocked: isBarDocked
         )
         guard shouldDock != isBarDocked else { return }
         isBarDocked = shouldDock
-        let animated = ProfileDockThreshold.isAnimated(step: step)
+        let animated = DockThreshold.isAnimated(step: step)
         #if DEBUG
         // Dev convenience: `-profile-dock-trace` prints every hand-over with the
         // speed that produced it. The flicker this rule exists to stop is a

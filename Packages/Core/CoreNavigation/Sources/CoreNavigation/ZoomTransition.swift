@@ -136,6 +136,28 @@ public protocol ZoomTransitionSource: AnyObject {
     /// hosted, drawing at the grid cell's rect over the feed that just came
     /// back. `nil` when nothing is hosted.
     func zoomReleaseHoistedMedia() -> UIView?
+
+    /// Whether the row this dismissal would land on can RECEIVE a flight.
+    ///
+    /// ⚠️ THE OTHER HALF OF A QUESTION THAT WAS ONLY EVER ASKED OF THE
+    /// DEPARTURE. `ZoomTransitionDestination.zoomDismissalKind` says whether the
+    /// post on screen has something to fly, and both grabs gate on it from
+    /// opposite sides so exactly one claims a drag. That is sufficient only
+    /// while a close lands on the post it left from.
+    ///
+    /// It no longer does. A list keeps its order, so a viewer who pages ends up
+    /// dismissing a photograph onto whatever row they opened — and that row may
+    /// be TEXT, which no card can draw: a flight's two operands are pictures,
+    /// and a row's words are not one (blending two runs of text draws both,
+    /// which is the law the blend channel is built around). Filmed as a card
+    /// dissolving away over an EMPTY grey row, the words snapping in five
+    /// frames later.
+    ///
+    /// Answering `false` hands the drag to the driver that carries a whole page
+    /// instead, which is the mechanism that can land anything on anything.
+    /// Default `true`: a source whose landing is always a picture — a map's
+    /// marker, a mosaic that adopts what it lands on — has nothing to decline.
+    var zoomLandingAcceptsHero: Bool { get }
 }
 
 public extension ZoomTransitionSource {
@@ -153,6 +175,7 @@ public extension ZoomTransitionSource {
     func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool { false }
     func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {}
     func zoomReleaseHoistedMedia() -> UIView? { nil }
+    var zoomLandingAcceptsHero: Bool { true }
 }
 
 /// **WHERE A DISMISSING FLIGHT IS**, in one value.
@@ -256,6 +279,27 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// Defaults to true, so every existing caller keeps the behaviour it had;
     /// a screen pushed without a flight says false and gets the ordinary pop.
     var zoomOwnsInteractiveDismissal: Bool { get }
+
+    /// Whether this destination COVERS the app's tab bar for its whole visit.
+    ///
+    /// ⚠️ THE SAME MISTAKE AS ABOVE, made a second time in a different place.
+    /// Three call sites in the shell — `MainTabCoordinator.syncTabBarVisibility`,
+    /// `FeedFlowCoordinator.restoreTabBar` and `FeedFeatureBuilder.restoreTabBar`
+    /// — read `topViewController is any ZoomTransitionDestination` as "the top
+    /// screen is a full-bleed snap surface, so the dock belongs to it". That
+    /// held only as long as every conformer happened to be one.
+    ///
+    /// The place page broke it: it conforms so its OWN dismissal can fly home
+    /// to the map marker, while being an ordinary navigation citizen that shows
+    /// the bar like any pushed screen. Conformance and dock-concealment came
+    /// apart, and the shell believed the proxy — it hid the bar under the place
+    /// page and then skipped every restore, so the map came back with no dock
+    /// at all and no gesture that brought one back.
+    ///
+    /// Defaults to `true`: every other conformer today is a full-bleed snap
+    /// surface and keeps behaving exactly as it does. A screen that flies but
+    /// does not cover says `false`.
+    var concealsAppTabBar: Bool { get }
 
 
     /// Whether the destination's active page is actually COMPOSITING its
@@ -413,6 +457,7 @@ public extension ZoomTransitionDestination {
     var zoomDismissalKind: ZoomDismissalKind { .hero }
     var zoomDestinationContentIsReady: Bool { true }
     var zoomOwnsInteractiveDismissal: Bool { true }
+    var concealsAppTabBar: Bool { true }
     var zoomDestinationMediaIsRendering: Bool { true }
     func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { true }
     func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool { true }

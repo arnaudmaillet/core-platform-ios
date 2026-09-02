@@ -363,6 +363,50 @@ final class SnapMediaCardView: UIView {
     /// poster is what makes `play` hide the surface on its way through.
     var currentPageCover: UIImage? { carousel?.renderedCover }
 
+    /// The still this card is drawing, WHICHEVER layout it is in.
+    ///
+    /// Deliberately not folded into `currentPageCover` above, whose nil for a
+    /// single-media post is load-bearing: its caller hands the result to a
+    /// playback surface as a poster, and an empty poster is what makes `play`
+    /// hide the surface on its way through. This is the other question — "what
+    /// picture is on screen" — asked by a presenter's flight home, which has to
+    /// dissolve that picture away when it is landing somewhere else.
+    ///
+    /// ⚠️ A VIDEO PAGE ANSWERS THIS, and the reason it once did not was never
+    /// about video.
+    ///
+    /// `configure(kind:)` empties this image view for `.video` and routes the
+    /// poster to the surface instead, so the single-attachment branch below
+    /// returned nil — not because a player's frames are unreachable, but
+    /// because the picture had moved to the one place this was not looking.
+    /// A video page inside a CAROUSEL never had the gap, which is what gave it
+    /// away.
+    ///
+    /// So the surface is asked too: `currentStill` is the decoded frame it is
+    /// showing, or the poster it is showing before one arrives. A page that
+    /// dismisses toward a marker now carries the picture the viewer was
+    /// actually looking at, instead of leaving the window to clip the live page.
+    ///
+    /// Still nil for a TEXT page, which has no picture of any kind — that nil
+    /// is meaningful and every caller is written around it.
+    var renderedStill: UIImage? {
+        if showsCollection {
+            // ⚠️ AND A COLLECTION'S VIDEO PAGE IS THE SAME QUESTION. Its
+            // `renderedCover` is that page's THUMBNAIL — the right answer for a
+            // still page and a frame-0 freeze for a playing one, which now
+            // matters more than it did: a non-nil still makes the stand-in an
+            // opaque replacement for the page, so the wrong picture is not a
+            // degraded blend any more, it is the whole window.
+            //
+            // Only an EXISTING surface is asked. `surface(forPage:)` mints one,
+            // and minting a playback surface to read a picture off it would
+            // start a second decode for a page nobody is going to watch.
+            if let frame = currentPageSurface?.currentStill { return frame }
+            return carousel?.renderedCover
+        }
+        return imageView.image ?? renderView.currentStill
+    }
+
     /// The stream the current PAGE carries, nil when it is a still or when this
     /// card is not drawing a collection at all.
     var currentPageVideoURL: URL? {
@@ -427,6 +471,16 @@ final class SnapMediaCardView: UIView {
     private var pageSurfaces: [Int: VideoRenderView] = [:]
 
     /// The surface for a page, minted on first use.
+    /// The surface the page on screen is ALREADY rendering into, if any.
+    ///
+    /// Deliberately not `surface(forPage:)` below, which mints one: a caller
+    /// asking "what is drawing right now" must not start a second decode by
+    /// asking.
+    var currentPageSurface: VideoRenderView? {
+        guard showsCollection, let page = carousel?.currentPage else { return nil }
+        return pageSurfaces[page]
+    }
+
     func surface(forPage page: Int) -> VideoRenderView {
         if let existing = pageSurfaces[page] { return existing }
         // The first page to ask inherits the card's OWN surface rather than

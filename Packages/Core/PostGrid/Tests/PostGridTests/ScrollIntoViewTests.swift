@@ -360,3 +360,92 @@ struct ScrollIntoViewOcclusionTests {
         }
     }
 }
+
+/// CENTRING IS A DIFFERENT QUESTION FROM REVEALING, and the difference is the
+/// difference between a tap and a landing.
+///
+/// Revealing moves as little as it can, which is right when the viewer is
+/// reaching for something. A window closing onto a row is the other case: the
+/// post they were just reading arrived pinned to the bottom edge of the list,
+/// as far from where they were looking as it could be while still being on
+/// screen. Filmed on the place page's first vertical dismiss.
+struct ScrollIntoViewCentringTests {
+    /// The same 800pt viewport as the suite above: a 100pt bar at the top, a
+    /// 90pt one at the bottom. Band: offsetY+100 … offsetY+710, so the band's
+    /// own middle sits 305pt below the top bar.
+    private func offset(for rect: CGRect, offsetY: CGFloat = 0,
+                        contentHeight: CGFloat = 5000) -> CGPoint? {
+        ScrollIntoView.offset(
+            toCentre: rect,
+            bounds: CGRect(x: 0, y: offsetY, width: 390, height: 800),
+            contentInset: UIEdgeInsets(top: 100, left: 0, bottom: 90, right: 0),
+            contentSize: CGSize(width: 390, height: contentHeight)
+        )
+    }
+
+    /// ⚠️ MID-BAND, NOT MID-SCREEN. The chrome is not symmetrical — 100pt above
+    /// and 90pt below — so the two differ by several points, and a row centred
+    /// on the viewport would sit slightly under the top bar's shadow.
+    @Test func aRowLandsInTheMiddleOfTheVISIBLEBand() throws {
+        // A 200pt row whose middle should end up 100 + 305 = 405pt down the
+        // viewport, so the content must scroll to 2000 - 405 = 1595.
+        let point = try #require(offset(for: CGRect(x: 0, y: 1900, width: 390, height: 200)))
+        #expect(abs(point.y - 1595) < 0.5)
+    }
+
+    /// The row that is ALREADY centred must not move: this runs on every close,
+    /// and a list that nudged itself under a landing window would read as the
+    /// content shifting out from under the card.
+    @Test func aRowAlreadyCentredDoesNotMove() {
+        // midY 405 = the band's own middle at offset 0.
+        #expect(offset(for: CGRect(x: 0, y: 305, width: 390, height: 200)) == nil)
+    }
+
+    /// ⚠️ A ROW THAT IS MERELY VISIBLE STILL MOVES, which is the whole point
+    /// and the one thing the reveal rule would not do. The defect was a row
+    /// sitting legally on screen near the bottom edge, and revealing left it
+    /// exactly where it was.
+    @Test func aRowLowOnScreenIsBroughtToTheMiddle() throws {
+        // Low in the band but clear of the bottom bar's padding, so the reveal
+        // rule has nothing to say about it.
+        let low = CGRect(x: 0, y: 600, width: 390, height: 60)
+        #expect(ScrollIntoView.offset(
+            toReveal: low,
+            bounds: CGRect(x: 0, y: 0, width: 390, height: 800),
+            contentInset: UIEdgeInsets(top: 100, left: 0, bottom: 90, right: 0),
+            contentSize: CGSize(width: 390, height: 5000)
+        ) == nil, "precondition: the reveal rule is content to leave it there")
+        let point = try #require(offset(for: low))
+        #expect(abs(point.y - 225) < 0.5)
+    }
+
+    /// Clamped at both ends, so a post near the start or the end of the list
+    /// settles as close to the middle as the content allows rather than
+    /// rubber-banding to reach it.
+    @Test func theEndsOfTheListClampRatherThanOvershoot() throws {
+        // ⚠️ Compared inside a tolerance, never with `==`: a CGPoint's y is a
+        // Double and these are sums of insets, which is the comparison this
+        // repo has already had go red on CI while it was green locally.
+        let first = try #require(offset(for: CGRect(x: 0, y: 0, width: 390, height: 200)))
+        #expect(abs(first.y + 100) < 0.5, "the top of the content, inset included")
+        let last = try #require(
+            offset(for: CGRect(x: 0, y: 4800, width: 390, height: 200), contentHeight: 5000)
+        )
+        #expect(abs(last.y - (5000 + 90 - 800)) < 0.5)
+    }
+
+    /// A row taller than the band cannot be centred meaningfully — both edges
+    /// cannot clear — so it takes the reveal rule's own answer: show its TOP,
+    /// because opening an item by showing its last few points is worse.
+    @Test func aRowTallerThanTheBandFallsBackToTheRevealRule() {
+        let tall = CGRect(x: 0, y: 1000, width: 390, height: 900)
+        let centred = offset(for: tall)
+        let revealed = ScrollIntoView.offset(
+            toReveal: tall,
+            bounds: CGRect(x: 0, y: 0, width: 390, height: 800),
+            contentInset: UIEdgeInsets(top: 100, left: 0, bottom: 90, right: 0),
+            contentSize: CGSize(width: 390, height: 5000)
+        )
+        #expect(centred == revealed)
+    }
+}

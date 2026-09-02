@@ -3,6 +3,7 @@ import MediaCore
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import FeedInterface
 import MediaPlayback
 import PostGrid
 import UIKit
@@ -3639,6 +3640,54 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     }
 }
 
+// MARK: - SnapFeedSettleReporting
+
+/// Where the viewer stopped, published to presenters outside this package.
+///
+/// `activePostID` is already the answer every close inside Feed uses; the
+/// conformance simply lets the MAP ask the same question. It has to: the map
+/// stages its flight home when the dismissal begins, and the post it is flying
+/// away FROM is whatever the viewer paged to, which the map has no other way to
+/// learn — it handed over a list of ids and got back a `UIViewController`.
+extension SnapFeedViewController: SnapFeedSettleReporting {
+    public var settledPostID: PostID? { activePostID }
+
+    /// ⚠️ The SETTLED page's cell, not `activeSnapCell`. That one is gated on
+    /// visibility, which is the right gate for playback and the wrong one here:
+    /// by the time a dismissal asks, this screen is already reporting itself
+    /// invisible, so the visibility-gated cell answers about the wrong post or
+    /// about none at all.
+    /// The cell for the page the viewer stopped on.
+    ///
+    /// ⚠️ Not `activeSnapCell`, for the reason `settledCoverImage` states at
+    /// length: that one is gated on visibility, which is the right gate for
+    /// playback and the wrong one at a dismissal.
+    private var settledCell: SnapFeedCell? {
+        let index = settledPageIndex
+        guard orderedIDs.indices.contains(index) else { return nil }
+        return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapFeedCell
+    }
+
+    public var settledCoverImage: UIImage? {
+        let index = settledPageIndex
+        guard orderedIDs.indices.contains(index) else { return nil }
+        let cell = settledCell
+        let still = cell?.currentPageCover
+        #if DEBUG
+        // `-zoom-blend-log`: WHY there is no picture, which is the only part of
+        // this a caller cannot see. An inert blend has three quite different
+        // causes — an unrealized cell, a text page, a video with neither a
+        // decoded frame nor a poster — and they are the same nil.
+        if ProcessInfo.processInfo.arguments.contains("-zoom-blend-log"), still == nil {
+            print("[zoom-blend] no still at page \(index):"
+                + " cell=\(cell == nil ? "unrealized" : "realized")"
+                + " media=\(modelsByID[orderedIDs[index]]?.mediaURL?.lastPathComponent ?? "none")")
+        }
+        #endif
+        return still
+    }
+}
+
 // MARK: - ZoomTransitionDestination
 
 extension SnapFeedViewController: ZoomTransitionDestination {
@@ -4526,16 +4575,24 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     ///    holding the gesture would spend it on a rubber-band. It passes
     ///    straight through — which is also what makes leaving a gallery feel
     ///    like leaving anything else once you have paged back to the start.
+    ///
+    /// ⚠️ Answers 2 and 3 are `MediaCarouselTouchRouting`'s, not this screen's.
+    /// The walk down to the carousel under the touch was written here first and
+    /// the next screen with a gallery on it was about to copy it — the twin-pager
+    /// mistake, a third time. And this gate is only ever HALF the answer: it says
+    /// the dismissal MAY claim the drag, and the carousel's own scroll view has
+    /// to give it up as well, which it does in `yieldsRightwardDrag`.
     public func zoomHorizontalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
         if location.x - view.bounds.minX <= Self.backEdgeZone { return true }
-        let point = collectionView.convert(location, from: view)
-        guard let hit = collectionView.hitTest(point, with: nil) else { return true }
-        for current in sequence(first: hit, next: { $0.superview }) {
-            if let carousel = current as? MediaCarouselView {
-                return carousel.currentPage == 0
-            }
-        }
-        return true
+        // ⚠️ `-1`, because the drag is RIGHTWARD and pages run the other way to
+        // the finger. Rightward is the only horizontal direction this gate is
+        // ever asked about — `ZoomDismissAxis.match` demands `velocity.x > 0`
+        // before anyone reaches here — so the mirror case is not this screen's
+        // to answer; see `MediaCarouselView.yieldsRightwardDrag`.
+        return MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: collectionView.convert(location, from: view),
+            in: collectionView, towardsPageDelta: -1
+        )
     }
 
     /// The system's back-gesture strip. Matched to `HorizontalPagerScrollView`'s
@@ -4589,7 +4646,16 @@ extension SnapFeedViewController: ZoomTransitionDestination {
 /// which happens when the owning view controller is released. `@unchecked
 /// Sendable` so its `deinit` may run off the main actor; `removeObserver` is
 /// itself thread-safe, and the tokens are only mutated on the main actor.
-private final class NotificationObserverBag: @unchecked Sendable {
+/// Holds block-based notification tokens for a screen's lifetime and drops
+/// them together when it goes.
+///
+/// ⚠️ It exists because a `deinit` cannot do this itself under Swift 6: a
+/// main-actor screen's `deinit` is nonisolated, so it may not even READ a
+/// stored `[any NSObjectProtocol]` to unregister it. A `@unchecked Sendable`
+/// box whose own deinit does the work is the way out — and shared across this
+/// package, because the second screen that wanted the wallet's change post
+/// hit the same wall on the same day.
+final class NotificationObserverBag: @unchecked Sendable {
     private var tokens: [any NSObjectProtocol] = []
     func add(_ token: any NSObjectProtocol) { tokens.append(token) }
     deinit { tokens.forEach(NotificationCenter.default.removeObserver) }

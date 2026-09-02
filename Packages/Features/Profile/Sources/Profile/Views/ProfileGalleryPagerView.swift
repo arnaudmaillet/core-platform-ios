@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -208,6 +209,12 @@ final class ProfileGalleryPagerView: UIView {
     func makeDismissStandIn(for postID: PostID) -> UIView? {
         guard pages.indices.contains(activeIndex) else { return nil }
         return pages[activeIndex].makeDismissStandIn(for: postID)
+    }
+
+    /// The any-kind floor under `textRowFrame` — see the grid's own note.
+    func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].rowFrame(for: postID, in: space)
     }
 
     func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
@@ -488,7 +495,10 @@ private extension CGFloat {
 /// if the pop recognizer declines the touch (stack root, mid-transition).
 private final class PagerScrollView: UIScrollView {
     /// Matches the system's edge-gesture strip.
-    private static let popEdgeZone: CGFloat = 20
+    /// See `PagedScreenDismissalPolicy.edgeZone` — one definition, because two
+    /// surfaces disagreeing about where the edge ends is a band where each
+    /// believes the other has the drag.
+    private static var popEdgeZone: CGFloat { PagedScreenDismissalPolicy.edgeZone }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === panGestureRecognizer {

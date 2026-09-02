@@ -83,6 +83,29 @@ public enum ZoomTransitionGeometry {
     /// a text reveal are two ANIMATIONS of one dismissal, and a hand that has
     /// learnt the resistance of one should find the other already familiar.
     public static let forwardDragLimit: CGFloat = 320
+
+    /// ⚠️ AND IT IS A CEILING, NOT THE ANSWER — the answer depends on the axis.
+    ///
+    /// 320pt was measured on the vertical axis, where a screen is ~874pt tall
+    /// and the thing in the hand still has most of itself on screen at full
+    /// throw. The horizontal axis is less than half that: on a 402pt-wide
+    /// screen the same 320 puts the whole window past the right edge while the
+    /// finger is still down — the exact motion the note above says this limit
+    /// exists to prevent, arriving on the axis nobody measured.
+    ///
+    /// Filmed on a sideways dismissal from the map and reported as the grab
+    /// being far too sensitive, with the transition window no longer visible on
+    /// screen. Taken as a fraction of the axis's OWN span it is unchanged
+    /// vertically (0.45 x 874 is past the ceiling) and firms up sideways, which
+    /// is the whole of the fix.
+    ///
+    /// Still shared between the hero and the reveal, for the reason the
+    /// constant itself is: they are two animations of one dismissal, and a hand
+    /// that has learnt the resistance of one should find the other familiar.
+    public static func forwardDragLimit(forSpan span: CGFloat) -> CGFloat {
+        guard span > 0 else { return forwardDragLimit }
+        return min(forwardDragLimit, span * 0.45)
+    }
     /// Tight against dragging backwards past the origin.
     public static let backDragLimit: CGFloat = 60
     /// Generous across the travel axis — the float — so the grab follows the

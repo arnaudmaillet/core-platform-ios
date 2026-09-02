@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 
 /// WHICH GESTURE OWNS A HORIZONTAL DRAG ON A PUSHED PROFILE.
@@ -21,13 +22,15 @@ enum ProfileDismissalPolicy {
     /// to go back to, and a full-width pop gesture there would either do
     /// nothing or, worse, tear the root off its own stack.
     static func allowsFullWidthDismissal(activeIndex: Int, isPushed: Bool) -> Bool {
-        isPushed && activeIndex == 0
+        PagedScreenDismissalPolicy.allowsFullWidthDismissal(
+            activeIndex: activeIndex, isPushed: isPushed
+        )
     }
 
     /// The edge strip always dismisses, on every tab. Stated so the rule above
     /// reads as "and also the whole surface", not "instead of the edge" — the
     /// edge is the platform contract and is never traded away.
     static func allowsEdgeDismissal(isPushed: Bool) -> Bool {
-        isPushed
+        PagedScreenDismissalPolicy.allowsEdgeDismissal(isPushed: isPushed)
     }
 }

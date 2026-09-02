@@ -26,18 +26,18 @@ enum MapHierarchyBanding {
     /// ⚠️ Calibrated against MEASURED viewport diagonals (`-maps-banding-log`
     /// prints them), not against back-of-envelope span math — MapKit fits a
     /// requested region to the portrait aspect, so the measured diagonal can
-    /// double a wide target's geographic diagonal. The four framings and the
-    /// window they leave, against the mock spans (city 17.1 / region 119.6 /
+    /// double a wide target's geographic diagonal. The framings and the
+    /// window they leave, against the mock spans (city 17.1 /
     /// country 837.4 km): Europe framed = 2884 km must keep country
     /// (multiple < 3.44) · France framed = 1399 km must dissolve it
-    /// (≥ 1.67) · Île-de-France framed = 229 km must dissolve region
-    /// (≥ 1.91) · Paris framed = 36 km must dissolve city (≥ 2.09).
-    /// 2.7 sits mid-window: thresholds country 2261 / region 323 / city 46 km.
+    /// (≥ 1.67) · Paris framed = 36 km must dissolve city (≥ 2.11).
+    /// 2.7 sits mid-window: thresholds country 2261 / city 46 km.
     static let dissolveSpanMultiple = 2.7
 
     /// Coarse-to-deep walk order: the first level that still commands a view
-    /// wider than its own cell is the one that renders.
-    private static let coarsestFirst: [MapPlace.Kind] = [.country, .region, .city]
+    /// wider than its own cell is the one that renders. (The REGION level
+    /// between these two was cut from the product on 2026-08-31.)
+    private static let coarsestFirst: [MapPlace.Kind] = [.country, .city]
 
     /// The active depth — `nil` is the LOCAL band. `spansByKind` holds each
     /// level's H3-derived span (km) where the corpus has one; when it is
@@ -60,12 +60,12 @@ enum MapHierarchyBanding {
     }
 
     /// The zoom-threshold fallback for an H3-less laddered corpus:
-    /// country ≤ 5, region 6–8, city 9–11, local 12+.
+    /// country ≤ 5, city 6–11, local 12+ (the city band absorbed the cut
+    /// region level's 6–8 window).
     static func fallbackKind(atZoomLevel zoomLevel: Int32) -> MapPlace.Kind? {
         switch zoomLevel {
         case ..<6: .country
-        case 6...8: .region
-        case 9...11: .city
+        case 6...11: .city
         default: nil
         }
     }

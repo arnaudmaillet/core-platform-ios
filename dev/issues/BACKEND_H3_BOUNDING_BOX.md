@@ -100,8 +100,9 @@ drop its own zoom tables.
     past everything, nothing has dissolved and the coarsest level renders);
   - when even the deepest level has dissolved, the hierarchy stands down:
     render individual posts / local proximity clusters.
-  In UX terms: frame Europe → countries; frame one country → its regions;
-  frame one region → its cities; frame one city → local posts.
+  In UX terms (region level cut from the product 2026-08-31, the ladder is
+  country → city): frame Europe → countries; frame one country → its cities;
+  frame one city → local posts.
   One level renders at a time (the strict-banding contract in PR #117);
   fixed zoom thresholds remain only as the fallback when no `h3_index` is
   present anywhere in the corpus.

@@ -46,6 +46,13 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     ///   - openConversation: fires the app's message-this-person destination
     ///     (the sub-filter pill menu's Send Message). Injected for the same
     ///     reason as `openProfile`.
+    /// - Parameter seedsMockPlaces: whether tile responses are decorated
+    ///   with the DEBUG place catalog (`MapMockPlaces`) — the semantic
+    ///   city/country clusters. The composition root passes its one
+    ///   `seedsMapPlaces` decision here AND to the mock backend's seeding,
+    ///   so the pins that arrive and the ladders they wear always agree;
+    ///   the false default keeps any other construction identity-clean.
+    ///   Release builds ignore it — the catalog does not exist there.
     public init(
         repository: any GeoDiscoveryProviding,
         favoritesRepository: any MapFavoritesProviding,
@@ -53,7 +60,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         videoPlayback: VideoPlaybackController,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
-        openConversation: @escaping (ProfileID) -> Void
+        openConversation: @escaping (ProfileID) -> Void,
+        seedsMockPlaces: Bool = false
     ) {
         self.repository = repository
         self.favoritesRepository = favoritesRepository
@@ -65,7 +73,20 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         self.pinService = MapProfilePinService(
             store: MapFavoritesStore(), favorites: favoritesRepository
         )
+        #if DEBUG
+        if seedsMockPlaces {
+            self.placeDecoration = { MapMockPlaces.decorate($0) }
+        } else {
+            self.placeDecoration = { $0 }
+        }
+        #else
+        self.placeDecoration = { $0 }
+        #endif
     }
+
+    /// What the view model runs over every tile response — the place
+    /// decoration in DEBUG mock mode, identity everywhere else.
+    private let placeDecoration: ([MapPin]) -> [MapPin]
 
     public func makeMapViewController() -> UIViewController {
         let feedFeature = feedFeature
@@ -73,7 +94,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         return MapsViewController(
             viewModel: MapsViewModel(
                 repository: repository,
-                followedPlaceIDs: { placeFollows.followedPlaceIDs }
+                followedPlaceIDs: { placeFollows.followedPlaceIDs },
+                decorate: placeDecoration
             ),
             favoritesRepository: favoritesRepository,
             pinService: pinService,
@@ -87,13 +109,19 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             },
             // The same feed again, opened as a window growing out of a text
             // marker's disc — what a marker with no cover to fly opens with now.
-            revealSnapFeed: { postIDs, presenter, origin in
-                feedFeature().revealSnapFeed(postIDs: postIDs, from: presenter, origin: origin)
+            // `beneath` carries the semantic cluster's place page through, so a
+            // text-faced city or country dismisses into it like a media-faced
+            // one does.
+            revealSnapFeed: { postIDs, presenter, origin, beneath in
+                feedFeature().revealSnapFeed(
+                    postIDs: postIDs, from: presenter, origin: origin, beneath: beneath
+                )
             },
-            // The place gallery a semantic cluster's feed dismisses into —
+            // The place gallery a hierarchy cluster's feed dismisses into —
             // built by the Feed feature because the grid, the flight card and
-            // the retarget wiring are all its internals.
-            makeClusterGallery: { postIDs, place, feed in
+            // the retarget wiring are all its internals. `mapReturn` rides
+            // through so the page's own dismissal can fly home to the marker.
+            makeClusterGallery: { postIDs, place, feed, mapReturn in
                 feedFeature().makeClusterGallery(
                     postIDs: postIDs,
                     title: place.galleryTitle,
@@ -105,7 +133,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                         isFollowing: { placeFollows.isFollowed(place.id) },
                         toggle: { placeFollows.toggle(place.id) }
                     ),
-                    feed: feed
+                    feed: feed,
+                    mapReturn: mapReturn
                 )
             },
             prewarm: { ids in await feedFeature().prewarmPosts(ids) },

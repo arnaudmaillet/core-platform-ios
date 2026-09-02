@@ -158,6 +158,267 @@ struct RevealRegistrationTests {
         }
     }
 
+    // MARK: - How the page meets its window
+
+    /// ⚠️ A CARRIED PAGE FILLS ITS WINDOW, always — never fitted inside it.
+    ///
+    /// Both were shipped in turn and both were filmed. Held still, the page
+    /// stayed at full size while the window shrank around it: a keyhole
+    /// panning over a photograph. Fitted inside, the media sat letterboxed
+    /// with the card's ground above and below it on the release spring, where
+    /// the window's aspect leaves the page's. Filling is the invariant every
+    /// report agreed on.
+    @Test func aCarriedPageFillsItsWindow() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+
+        for window in [
+            CGRect(x: 16, y: 300, width: 343, height: 145),   // a list row
+            CGRect(x: 300, y: 500, width: 44, height: 44),    // a marker
+            CGRect(x: 40, y: 120, width: 128, height: 170),   // a grid tile
+        ] {
+            let fit = RevealStage.pageFitting(window, from: screen, fit: .covering)
+            let drawn = CGRect(
+                x: window.midX - screen.width * fit.scale / 2,
+                y: window.midY - screen.height * fit.scale / 2,
+                width: screen.width * fit.scale,
+                height: screen.height * fit.scale
+            )
+            #expect(drawn.insetBy(dx: -0.01, dy: -0.01).contains(window),
+                    "the window showed ground: \\(drawn) does not fill \\(window)")
+        }
+    }
+
+    /// A carried page is the identity at rest, so an abandoned grab needs no
+    /// special case.
+    @Test func everyFitIsTheIdentityAtRest() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        for fit in [RevealPageFit.covering] {
+            let pose = RevealStage.pageFitting(screen, from: screen, fit: fit)
+            #expect(abs(pose.scale - 1) < 0.0001, "\(fit) moved a page that had not left")
+            #expect(abs(pose.translation.x) < 0.0001)
+            #expect(abs(pose.translation.y) < 0.0001)
+        }
+    }
+
+    /// ⚠️ A COMMITTED RELEASE NEVER RUNS ITS TWO CHANNELS AT ONCE.
+    ///
+    /// A card landing hands over during the drag, with an empty beat between
+    /// the page and the card so neither fade has text on both sides. A commit
+    /// BELOW that beat skips it — and the release used to set the fill and the
+    /// content together, raising the arrival's caption over a page still drawn
+    /// at full alpha. A short flick is enough, and a short flick is the
+    /// commonest way to leave.
+    @Test func aCommittedReleaseFinishesOneChannelBeforeStartingTheOther() {
+        for carriesPage in [true, false] {
+            let s = RevealStage.releaseHandover(carriesPage: carriesPage)
+            #expect(s.fill.delay + s.fill.duration <= s.content.delay + 0.0001,
+                    "the arrival started before the fill was done (carries=\(carriesPage))")
+            #expect(s.fill.delay >= 0)
+            #expect(s.content.delay + s.content.duration <= 1.0001,
+                    "the hand-over outlives the spring it rides")
+        }
+    }
+
+    /// A carrying fit has nothing in the first slot: its content is pinned at
+    /// 1 and only the view's alpha moves, late.
+    @Test func aCarryingReleaseSchedulesOnlyItsView() {
+        let s = RevealStage.releaseHandover(carriesPage: true)
+        #expect(s.content.duration == 0, "a carrying fit ramped its content")
+        #expect(s.fill.delay == 0, "the arrival waited, and the window was empty while it did")
+    }
+
+    // MARK: - What a held grab may do
+
+    /// ⚠️ A HELD WINDOW IS THE SCREEN — smaller and moved, and nothing else.
+    ///
+    /// Its aspect is the screen's and its corner is the screen's proportion, so
+    /// the SHAPE never changes while the viewer is still deciding. Everything
+    /// that did change under the hand was filmed and reported: a window morphing
+    /// toward its landing cut the media away or opened ground around it, a
+    /// corner swept toward the landing's made a capsule halfway through, and a
+    /// page faded out began the hand-over before there was anything to hand
+    /// over.
+    @Test func aHeldWindowKeepsTheScreensShape() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let screenRadius: CGFloat = 55
+        let aspect = screen.width / screen.height
+        let roundness = screenRadius / screen.width
+
+        for step in 0...100 {
+            let progress = CGFloat(step) / 100
+            let held = RevealStage.heldWindow(
+                screen, displacedBy: CGPoint(x: progress * 120, y: 0), at: progress
+            )
+            #expect(abs(held.width / held.height - aspect) < 0.0001,
+                    "the window changed aspect under the finger at \(progress)")
+            #expect(abs(RevealStage.heldRadius(screenRadius, at: progress) / held.width
+                - roundness) < 0.0001,
+                    "the window changed roundness under the finger at \(progress)")
+        }
+    }
+
+    /// And it may not shrink past the floor a held hero card stops at: a page
+    /// that reaches thumbnail size in the hand reads as already gone, and the
+    /// distance left belongs to the release spring.
+    @Test func aHeldWindowStopsAtTheFlightsFloor() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+
+        #expect(RevealStage.heldWindow(screen, displacedBy: .zero, at: 0) == screen,
+                "the window shrank before the finger moved")
+        let full = RevealStage.heldWindow(screen, displacedBy: .zero, at: 1)
+        #expect(abs(full.width - screen.width * ZoomFlight.minimumGrabScale) < 0.01,
+                "a held window went past the floor a held card stops at")
+
+        var previous = CGFloat.greatestFiniteMagnitude
+        for step in 0...100 {
+            let width = RevealStage
+                .heldWindow(screen, displacedBy: .zero, at: CGFloat(step) / 100).width
+            #expect(width <= previous + 0.0001, "the morph is not monotonic")
+            previous = width
+        }
+        // Past the end of the drag it holds rather than continuing.
+        #expect(RevealStage.heldWindow(screen, displacedBy: .zero, at: 4).width == full.width)
+    }
+
+    /// The displacement is the finger's, and it is the ONLY thing the position
+    /// answers to: a window at rest is the screen exactly, so an abandoned grab
+    /// has nothing to undo.
+    @Test func aHeldWindowFollowsTheFingerFromTheScreensOwnCentre() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let moved = RevealStage.heldWindow(
+            screen, displacedBy: CGPoint(x: 90, y: -20), at: 0
+        )
+        #expect(abs(moved.midX - (screen.midX + 90)) < 0.0001)
+        #expect(abs(moved.midY - (screen.midY - 20)) < 0.0001)
+        #expect(moved.size == screen.size)
+    }
+
+    /// ⚠️ AND NEITHER PROP IS EVEN INSTALLED on a fit that carries the page.
+    ///
+    /// The veil (the landing card's fill, below its caption) and the borrowed
+    /// author band are both DESTINATION scenery, and both are added as
+    /// subviews of the departing page — so they scale with it and are drawn
+    /// inside the window the finger is holding. Gating the stand-in was not
+    /// enough: these two ramped on `pose.progress` with no fit branch at all,
+    /// and a card-coloured hole opened down the miniature post with a second
+    /// author header above it while the viewer was still deciding.
+    ///
+    /// Exactly one origin ever armed them on a carrying fit — the place page's
+    /// Activity close — and every other carrying source avoided it by passing
+    /// `captionEnd: nil`. A convention four sources happened to keep is not a
+    /// rule.
+    @Test func aCarryingFitInstallsNoDestinationScenery() {
+        for fit in [RevealPageFit.covering] {
+            let box = SceneryBox()
+            installVeil(geometry: box.geometry(fit: fit), anchor: box.anchor)
+            installAuthorBand(geometry: box.geometry(fit: fit), anchor: box.anchor)
+
+            #expect(box.veilCut == nil, "\(fit) painted the landing card's fill")
+            #expect(box.bandAnchor == nil, "\(fit) borrowed the landing row's author band")
+        }
+        // The legacy landing keeps both: there the window IS a card-shaped
+        // slice of the page, and the props are the transition.
+        let legacy = SceneryBox()
+        installVeil(geometry: legacy.geometry(fit: .clipped), anchor: legacy.anchor)
+        installAuthorBand(geometry: legacy.geometry(fit: .clipped), anchor: legacy.anchor)
+        #expect(legacy.veilCut != nil, "the legacy close lost its veil")
+        #expect(legacy.bandAnchor != nil, "the legacy close lost its borrowed band")
+    }
+
+    // MARK: - The pivot is the release
+
+    /// ⚠️ EVERY FIT THAT CARRIES THE PAGE OBEYS THE SAME DRAG LAW — asking
+    /// `== .covering` is a bug that compiles, and it shipped.
+    ///
+    /// The schedule that keeps the destination off screen during a drag was
+    /// gated on `.covering` alone, so a `.contained` landing fell through to
+    /// the legacy three acts and its card appeared under the finger. Filmed on
+    /// a place page's Activity close, and reported as the same defect twice
+    /// because it WAS the same defect, reached by a fit the gate did not name.
+    @Test func everyFitThatCarriesThePageAnswersTheSameQuestion() {
+        #expect(RevealPageFit.covering.carriesPage)
+        #expect(!RevealPageFit.clipped.carriesPage, "the legacy landing must stay legacy")
+
+        // And the drag law follows from that one answer, not from the fit.
+        for fit in [RevealPageFit.covering] {
+            for step in 0...20 {
+                let progress = CGFloat(step) / 20
+                #expect(RevealStage.fill(at: progress, carriesPage: fit.carriesPage) == 0,
+                        "\(fit) showed its destination at \(progress)")
+            }
+        }
+    }
+
+
+
+    /// ⚠️ NOTHING OF THE DESTINATION IS SEEN WHILE THE FINGER IS DOWN.
+    ///
+    /// The arrival used to come up over the page during the drag, which put a
+    /// card's text on screen laid out for a width the window had not reached —
+    /// clipped at the window's edge, and filmed that way. The drag's whole job
+    /// is the page leaving; the arrival is what the release buys.
+    @Test func nothingArrivesWhileTheFingerIsDown() {
+        for step in 0...100 {
+            let progress = CGFloat(step) / 100
+            #expect(RevealStage.fill(at: progress, carriesPage: true) == 0,
+                    "the destination was on screen at \(progress)")
+        }
+        // A landing whose window IS a card-shaped slice of the page keeps the
+        // three acts — there the morph is the transition.
+        #expect(RevealStage.fill(at: 1, carriesPage: false) == 1)
+    }
+
+    /// And when it does arrive, exactly ONE alpha moves. Ramping the view and
+    /// its content together renders the glyph at alpha squared — fading faster
+    /// than the disc beneath it, which is the half-drawn overlay the blend law
+    /// forbids.
+    @Test func exactlyOneAlphaMovesWhenTheArrivalComes() {
+        for step in 0...100 {
+            #expect(RevealStage.contentOpacity(at: CGFloat(step) / 100, carriesPage: true) == 1)
+        }
+    }
+
+    /// The page is WHOLE at the landing, under an arrival that has covered it:
+    /// a source that fades meets an arrival that is rising, and the two cross at
+    /// nothing.
+    @Test func theLandingPoseHasNoPageLeft() {
+        let closed = RevealStage.closed(
+            sourceRect: CGRect(x: 300, y: 500, width: 44, height: 44),
+            radius: 22, anchor: nil, matchesAnchor: false,
+            ridingFrom: CGRect(x: 0, y: 0, width: 402, height: 874),
+            fit: .covering
+        )
+        #expect(closed.pageOpacity == 1, "the source faded, so the two cross at nothing")
+        // And an abandoned grab hands a whole page back.
+        #expect(RevealStage.open(container: UIView(
+            frame: CGRect(x: 0, y: 0, width: 402, height: 874)
+        )).pageOpacity == 1)
+    }
+
+    /// ⚠️ AND THE FORWARD LIMIT IS AN AXIS'S OWN, not one number for both.
+    ///
+    /// 320pt was measured on the vertical axis, where a screen is ~874pt and a
+    /// full throw still leaves most of the thing on screen. Applied unchanged
+    /// to a 402pt-wide screen it put the whole window past the right edge with
+    /// the finger still down — the exact motion the constant exists to
+    /// prevent, on the axis nobody measured.
+    @Test func theForwardLimitFirmsUpOnAShortAxis() {
+        let tall = ZoomTransitionGeometry.forwardDragLimit(forSpan: 874)
+        let wide = ZoomTransitionGeometry.forwardDragLimit(forSpan: 402)
+
+        #expect(tall == ZoomTransitionGeometry.forwardDragLimit,
+                "the vertical axis was retuned; it was already right")
+        #expect(wide < tall, "a short axis got a tall axis's throw")
+        // The window keeps more than half of itself on screen at full throw:
+        // at the grab floor it is 0.6 of the screen wide, and it may not
+        // travel further than its own half-width past the centre.
+        let windowHalfWidth = 402 * ZoomFlight.minimumGrabScale / 2
+        #expect(wide < 402 / 2 + windowHalfWidth,
+                "the window can still leave the screen entirely")
+        #expect(ZoomTransitionGeometry.forwardDragLimit(forSpan: 0)
+            == ZoomTransitionGeometry.forwardDragLimit, "a zero span must not zero the limit")
+    }
+
     /// And it is over before the drag is: a swap still running at the release
     /// would land a half-drawn card on the row.
     @Test func theSwapFinishesBeforeTheDragCan() {
@@ -218,3 +479,34 @@ struct RevealRegistrationTests {
         ) == .zero)
     }
 }
+
+
+/// The ordinary case: a card the page has no copy of, which needs all three
+/// acts.
+@MainActor
+private final class OrdinaryStandIn: UIView, RevealStandInShaping {
+    func setCornerRadius(_ radius: CGFloat) {}
+    func setContentOpacity(_ alpha: CGFloat) {}
+}
+
+/// Records what a geometry's destination was asked to install.
+@MainActor
+private final class SceneryBox {
+    let anchor = CGRect(x: 16, y: 300, width: 370, height: 120)
+    var veilCut: CGFloat?
+    var bandAnchor: CGRect?
+
+    func geometry(fit: RevealPageFit) -> RevealGeometry {
+        RevealGeometry(
+            sourceFrame: { _ in nil },
+            sourceCornerRadius: 12,
+            sourceFill: .white,
+            sourceCaptionEnd: 40,
+            installDestinationVeil: { [weak self] cut, _ in self?.veilCut = cut },
+            installDestinationAuthorBand: { [weak self] anchor in self?.bandAnchor = anchor },
+            sourceCaptionTop: 52,
+            pageFit: fit
+        )
+    }
+}
+

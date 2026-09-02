@@ -24,17 +24,31 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     private let dataset: MockSocialDataset
     /// Posts pinned to a shared VENUE coordinate — see `venueAssignments`.
     private let venues: [String: Venue]
+    /// Whether a deterministic THIRD of the non-venue corpus is re-anchored
+    /// across `hierarchyAnchors` — the European seed the semantic-cluster
+    /// surface stands on. INJECTED by the composition root, not read from
+    /// ProcessInfo here: the app defaults it ON in mock mode (opt out with
+    /// `-maps-mock-no-places`), while tests constructing this service
+    /// directly keep the historical Paris-only scatter their fixtures are
+    /// calibrated against.
+    private let spreadsHierarchy: Bool
 
     /// Central Paris — the map's default region centers here.
     private static let baseLat = 48.8566
     private static let baseLng = 2.3522
     /// Scatter radius in degrees (~±16 km), enough to exercise pan and clustering.
     private static let spread = 0.15
-    /// Per-response cap, standing in for the server's per-tile Top-K.
-    private static let topK = 80
+    /// Per-response cap, standing in for the server's per-tile Top-K. Loose
+    /// on purpose: the real service caps per TILE, so a wide viewport's
+    /// response spans many tiles and grows with them — a tight per-response
+    /// number here would silently hide the tail of a corpus enlarged via
+    /// `-mock-post-count` (the prefix is dataset-ordered, so everything past
+    /// it would simply never reach the map).
+    private static let topK = 200
 
-    public init(dataset: MockSocialDataset) {
+    public init(dataset: MockSocialDataset, spreadsHierarchy: Bool = false) {
         self.dataset = dataset
+        self.spreadsHierarchy = spreadsHierarchy
         self.venues = Self.venueAssignments(for: dataset.posts)
     }
 
@@ -171,7 +185,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             // A venue's members share ONE coordinate exactly, so they cluster
             // at every zoom; everything else keeps its own scattered point.
             let (lat, lng) = venues[post.postID].map { ($0.lat, $0.lng) }
-                ?? Self.coordinate(forIndex: index)
+                ?? coordinate(forIndex: index)
             guard Self.contains(viewport: viewport, lat: lat, lng: lng),
                   matches(filter: filter, post: post, lat: lat, lng: lng, viewport: viewport)
             else { return nil }
@@ -251,46 +265,52 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// so selecting the pill visibly thins the field at the default zoom.
     private static let nearbyRadius = 0.04
 
-    /// Mirrors the Maps feature's semantic-clusters launch argument (read
-    /// here the same way `-maps-force-video` is): with it, a deterministic
-    /// THIRD of the non-venue corpus is seeded across European anchors —
-    /// cities, regions and countries beyond Paris — so the H3 hierarchy has
-    /// several distinct entities per level to band, at every geographic
-    /// scale. Without the flag the scatter is exactly the historical
-    /// Paris-only fixture.
-    static let spreadsHierarchy =
-        ProcessInfo.processInfo.arguments.contains("-maps-mock-semantic-clusters")
+    // `spreadsHierarchy` (see the stored property above): when set, a
+    // deterministic THIRD of the non-venue corpus is seeded across European
+    // anchors — cities and countries beyond Paris — so the H3 hierarchy has
+    // several distinct entities per level to band, at every geographic
+    // scale. Unset, the scatter is exactly the historical Paris-only
+    // fixture.
 
     /// The European anchors the spread rotates over, matching the zone
     /// ladders in the Maps feature's `MapMockPlaces` (the spec's mock-parity
-    /// contract ties the two files): three cities, two region scatters, two
-    /// country scatters.
+    /// contract ties the two files): seven cities at tight jitter (0.10 —
+    /// inside their 0.15° city circles, so every pin carries the city
+    /// ladder) and three country-level countryside scatters (wide jitter,
+    /// outside any circle → country-only ladders, hidden at the city band).
+    /// Madrid and Berlin were promoted from countryside to cities on
+    /// 2026-08-31 (with Rome and London added); the German countryside
+    /// anchor keeps the country-only coverage Berlin's wide ring used to
+    /// provide.
     static let hierarchyAnchors: [(lat: Double, lng: Double, jitter: Double)] = [
         (45.7640, 4.8357, 0.10),  // Lyon (city)
         (43.2965, 5.3698, 0.10),  // Marseille (city)
-        (43.9000, 6.2000, 0.30),  // Provence scatter (region)
+        (43.9000, 6.2000, 0.30),  // Provence countryside (France, country)
         (41.3874, 2.1686, 0.10),  // Barcelona (city)
-        (41.9000, 1.6000, 0.30),  // Catalonia scatter (region)
-        (40.4200, -3.7000, 0.30), // Madrid area (Spain, country)
-        (52.5200, 13.4050, 0.30), // Berlin area (Germany, country)
+        (41.9000, 1.6000, 0.30),  // Catalonia countryside (Spain, country)
+        (40.4200, -3.7000, 0.10), // Madrid (city)
+        (52.5200, 13.4050, 0.10), // Berlin (city)
+        (51.0000, 9.5000, 0.40),  // Hesse countryside (Germany, country)
+        (41.8933, 12.4829, 0.10), // Rome (city)
+        (51.5074, -0.1278, 0.10), // London (city)
     ]
 
     /// Deterministic scatter: two coprime strides over the index fan posts out
     /// across the box without randomness, so runs are reproducible. Under the
     /// hierarchy flag, every third post is re-anchored across Europe instead —
     /// same strides, so which posts travel never changes between runs.
-    private static func coordinate(forIndex index: Int) -> (lat: Double, lng: Double) {
+    private func coordinate(forIndex index: Int) -> (lat: Double, lng: Double) {
         let latFraction = Double((index * 73) % 1000) / 1000.0
         let lngFraction = Double((index * 137) % 1000) / 1000.0
         if spreadsHierarchy, index % 3 == 2 {
-            let anchor = hierarchyAnchors[(index / 3) % hierarchyAnchors.count]
+            let anchor = Self.hierarchyAnchors[(index / 3) % Self.hierarchyAnchors.count]
             return (
                 anchor.lat + (latFraction * 2 - 1) * anchor.jitter,
                 anchor.lng + (lngFraction * 2 - 1) * anchor.jitter
             )
         }
-        let lat = baseLat + (latFraction * 2 - 1) * spread
-        let lng = baseLng + (lngFraction * 2 - 1) * spread
+        let lat = Self.baseLat + (latFraction * 2 - 1) * Self.spread
+        let lng = Self.baseLng + (lngFraction * 2 - 1) * Self.spread
         return (lat, lng)
     }
 

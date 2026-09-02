@@ -87,6 +87,75 @@ public enum ScrollIntoView {
         return CGPoint(x: bounds.minX, y: clamped)
     }
 
+    /// The content offset that puts `rect` in the MIDDLE of the visible band,
+    /// or nil when it is already there.
+    ///
+    /// A different question from `offset(toReveal:)`, and the difference is the
+    /// difference between a tap and a LANDING. Revealing moves as little as it
+    /// can — an item tucked under the bottom chrome comes up until it just
+    /// clears, and no further — which is right when the viewer is reaching for
+    /// something and wrong when a window is closing onto it: the post they were
+    /// just reading arrives pinned to the bottom edge of a list, as far from
+    /// where they were looking as it can be while still being visible.
+    ///
+    /// Clamped like its sibling, so a post near either end of the content
+    /// settles as close to the middle as the content allows rather than
+    /// rubber-banding to reach it. An item taller than the band cannot be
+    /// centred meaningfully and takes the reveal's own top-alignment.
+    public static func offset(
+        toCentre rect: CGRect,
+        bounds: CGRect,
+        contentInset: UIEdgeInsets,
+        occlusion: UIEdgeInsets? = nil,
+        contentSize: CGSize,
+        padding: CGFloat = defaultPadding
+    ) -> CGPoint? {
+        guard bounds.height > 0 else { return nil }
+        let cover = occlusion ?? contentInset
+        let visibleTop = cover.top
+        let visibleHeight = bounds.height - cover.top - cover.bottom
+        guard visibleHeight > 0 else { return nil }
+        guard rect.height <= visibleHeight - padding * 2 else {
+            return offset(
+                toReveal: rect, bounds: bounds, contentInset: contentInset,
+                occlusion: occlusion, contentSize: contentSize, padding: padding
+            )
+        }
+
+        let minimumY = -contentInset.top
+        let maximumY = max(minimumY, contentSize.height + contentInset.bottom - bounds.height)
+        // Where the band's own middle sits inside the viewport, so the item
+        // lands mid-BAND rather than mid-screen — on a surface whose chrome is
+        // not symmetrical the two are several tens of points apart.
+        let targetY = rect.midY - visibleTop - visibleHeight / 2
+        let clamped = min(max(targetY, minimumY), maximumY)
+        guard abs(clamped - bounds.minY) > 0.5 else { return nil }
+        return CGPoint(x: bounds.minX, y: clamped)
+    }
+
+    /// Centres `rect` NOW — same instant contract as `revealImmediately`, and
+    /// for the same reason: a landing measures the cell's rect as it stages, so
+    /// the move has to be finished before anything asks where the cell is.
+    @discardableResult
+    public static func centreImmediately(
+        _ rect: CGRect?,
+        in scrollView: UIScrollView,
+        occlusion: UIEdgeInsets? = nil,
+        padding: CGFloat = defaultPadding
+    ) -> Bool {
+        guard let rect, let offset = offset(
+            toCentre: rect,
+            bounds: scrollView.bounds,
+            contentInset: scrollView.adjustedContentInset,
+            occlusion: occlusion,
+            contentSize: scrollView.contentSize,
+            padding: padding
+        ) else { return false }
+        scrollView.setContentOffset(offset, animated: false)
+        scrollView.layoutIfNeeded()
+        return true
+    }
+
     /// Reveals `rect` NOW — no animation, no waiting — and reports whether
     /// anything moved.
     ///

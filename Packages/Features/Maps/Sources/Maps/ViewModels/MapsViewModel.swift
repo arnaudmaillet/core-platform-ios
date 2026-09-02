@@ -18,6 +18,11 @@ public final class MapsViewModel {
     /// A closure (not the store) so tests inject a set and the view model
     /// stays storage-free.
     private let followedPlaceIDs: () -> Set<String>
+    /// Runs over every tile response before it reaches the diff — the mock
+    /// place decoration (`MapMockPlaces.decorate`), when the composition
+    /// root turned it on. Identity by default, which is what tests and the
+    /// fleet get: pins exactly as the wire sent them.
+    private let decorate: ([MapPin]) -> [MapPin]
 
     /// Authoritative id → pin state; the diff is computed against this.
     private var pins: [PostID: MapPin] = [:]
@@ -40,10 +45,12 @@ public final class MapsViewModel {
 
     public init(
         repository: any GeoDiscoveryProviding,
-        followedPlaceIDs: @escaping () -> Set<String> = { [] }
+        followedPlaceIDs: @escaping () -> Set<String> = { [] },
+        decorate: @escaping ([MapPin]) -> [MapPin] = { $0 }
     ) {
         self.repository = repository
         self.followedPlaceIDs = followedPlaceIDs
+        self.decorate = decorate
     }
 
     /// The map settled on a new viewport (debounced by the caller). Cancels any
@@ -122,13 +129,10 @@ public final class MapsViewModel {
                 return
             }
             guard !Task.isCancelled else { return }
-            #if DEBUG
-            // `-maps-mock-semantic-clusters`: stand-in place tags on the mock
-            // venues, until the wire can carry them (BACKEND_GAPS §18).
-            var pins = MapMockPlaces.decorate(result.pins)
-            #else
-            var pins = result.pins
-            #endif
+            // Stand-in place tags on the mock corpus, until the wire can
+            // carry them (BACKEND_GAPS §18) — identity unless the
+            // composition root injected the decoration.
+            var pins = self.decorate(result.pins)
             // The Favorites refinement, applied to the RESPONSE: only posts
             // whose place ladder holds a followed place. Client-side because
             // the followed set lives on the device (`MapPlaceFollowStore`) —

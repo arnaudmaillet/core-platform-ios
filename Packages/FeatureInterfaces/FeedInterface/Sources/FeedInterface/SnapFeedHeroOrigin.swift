@@ -1,3 +1,4 @@
+import CoreNavigation
 import CoreModels
 import PostGrid
 import UIKit
@@ -54,7 +55,14 @@ public struct TextRevealOrigin {
     /// page seen through a window — see `RevealGeometry.makeDismissStandIn`.
     /// `nil` keeps the page itself, which is still correct for a surface that
     /// cannot draw one.
-    public let makeDismissStandIn: () -> UIView?
+    ///
+    /// Handed the post the viewer actually STOPPED on, which after any paging
+    /// is not the post that opened the feed. A source that lands on a fixed
+    /// place — a marker, a row that must not be reordered — ignores it for the
+    /// purpose of choosing WHERE to land: the two are different questions, and
+    /// conflating them is how a list quietly re-sorted itself under the window.
+    /// `nil` means nothing has settled yet.
+    public let makeDismissStandIn: (PostID?) -> UIView?
     /// Builds what the OPENING starts as, for a source whose content the page
     /// does not repeat.
     ///
@@ -76,6 +84,9 @@ public struct TextRevealOrigin {
     /// stand-in that is covering it. Measured before this existed: `travel=448`
     /// for a 44pt disc.
     public let alignsPageToSource: Bool
+    /// How the page meets the window closing over it — see `RevealPageFit`.
+    /// `.clipped` is the transition as it always was.
+    public let pageFit: RevealPageFit
     /// The source's own rounding. `nil` means the card's, which is what every
     /// row is; a marker supplies its own, and for a disc that is half its side.
     public let cornerRadius: CGFloat?
@@ -101,7 +112,12 @@ public struct TextRevealOrigin {
     public let presentationDidEnd: (Bool) -> Void
     /// Last chance to move before the dismissal measures its landing — pinning
     /// a content inset, or scrolling the row back into view.
-    public let willStageDismissal: () -> Void
+    /// Handed the post the viewer actually stopped on, like
+    /// `makeDismissStandIn` above and for the same reason: this hook fires
+    /// BEFORE the rect and the stand-in are read, so it is the one moment a
+    /// source can decide what the close is landing on and move to meet it.
+    /// A source that lands on a fixed place ignores it.
+    public let willStageDismissal: (PostID?) -> Void
     /// The close is over, WHICHEVER WAY IT WENT: `true` committed, `false`
     /// sprang back. Both, because what it undoes is set on every dismissal.
     public let dismissalDidEnd: (Bool) -> Void
@@ -112,14 +128,15 @@ public struct TextRevealOrigin {
         depthView: @escaping () -> UIView? = { nil },
         captionTop: CGFloat = 0,
         authorBand: PostAuthorBandView.Model? = nil,
-        makeDismissStandIn: @escaping () -> UIView? = { nil },
+        makeDismissStandIn: @escaping (PostID?) -> UIView? = { _ in nil },
         makePresentStandIn: @escaping () -> UIView? = { nil },
         alignsPageToSource: Bool = true,
+        pageFit: RevealPageFit = .clipped,
         cornerRadius: CGFloat? = nil,
         fill: UIColor? = nil,
         setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
-        willStageDismissal: @escaping () -> Void = {},
+        willStageDismissal: @escaping (PostID?) -> Void = { _ in },
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in }
     ) {
         self.rowFrame = rowFrame
@@ -130,6 +147,7 @@ public struct TextRevealOrigin {
         self.makeDismissStandIn = makeDismissStandIn
         self.makePresentStandIn = makePresentStandIn
         self.alignsPageToSource = alignsPageToSource
+        self.pageFit = pageFit
         self.cornerRadius = cornerRadius
         self.fill = fill
         self.setConcealed = setConcealed
@@ -172,6 +190,7 @@ public struct TextRevealOrigin {
             makeDismissStandIn: makeDismissStandIn,
             makePresentStandIn: makePresentStandIn,
             alignsPageToSource: alignsPageToSource,
+            pageFit: pageFit,
             cornerRadius: cornerRadius,
             fill: fill,
             setConcealed: setConcealed,
@@ -242,6 +261,30 @@ public struct SnapFeedHeroOrigin {
     public let isOnScreen: () -> Bool
     /// Hide the real thing while its twin is in the air, and put it back after.
     public let setConcealed: (Bool) -> Void
+    /// ⚠️ A SURFACE ALREADY PLAYING THE TAPPED POST, for the flight to carry
+    /// into its window — the OPENING's half of the live-media story.
+    ///
+    /// Without it a card takes off wearing the post's poster and the video only
+    /// starts once the page has landed: the viewer taps a clip that is playing
+    /// under their finger and watches it become a photograph for the length of
+    /// the flight. Filmed on a place page's Activity list.
+    ///
+    /// Nil is ordinary and means "not live yet" — a row is routinely granted
+    /// its player by the very tap that opens it, so the flight asks again while
+    /// the card is in the air.
+    /// ⚠️ THE POST WAS OPENED BY ITS COMMENT COUNT, so it arrives with the
+    /// thread already up.
+    ///
+    /// Carried on the origin rather than acted on at the tap, because only the
+    /// destination knows when it is safe to spend the engagement's layout — the
+    /// same division For You's own comment chip already uses.
+    ///
+    /// Never set for a TEXT post: its page IS its thread, so it arrives there by
+    /// tapping the card at all, and a chip promising a shortcut to where the
+    /// card goes anyway would be a second control for one destination.
+    public let opensComments: Bool
+    public let donateLiveMedia: (() -> UIView?)?
+
     /// The view the depth cue recedes — the content, not the chrome around it.
     public let depthView: () -> UIView?
     /// How to open this post as a REVEAL when there is no hero to fly — see
@@ -257,6 +300,8 @@ public struct SnapFeedHeroOrigin {
         frame: @escaping (UICoordinateSpace) -> CGRect?,
         isOnScreen: @escaping () -> Bool,
         setConcealed: @escaping (Bool) -> Void,
+        donateLiveMedia: (() -> UIView?)? = nil,
+        opensComments: Bool = false,
         depthView: @escaping () -> UIView? = { nil },
         textReveal: TextRevealOrigin? = nil
     ) {
@@ -268,6 +313,8 @@ public struct SnapFeedHeroOrigin {
         self.frame = frame
         self.isOnScreen = isOnScreen
         self.setConcealed = setConcealed
+        self.donateLiveMedia = donateLiveMedia
+        self.opensComments = opensComments
         self.depthView = depthView
         self.textReveal = textReveal
     }

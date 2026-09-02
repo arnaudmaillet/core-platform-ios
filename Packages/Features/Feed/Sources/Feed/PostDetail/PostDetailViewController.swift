@@ -993,6 +993,14 @@ final class PostDetailViewController: UIViewController {
     ///
     /// Nil when the stream has no caption row at all — a post whose caption is
     /// empty, which has no anchor and wants the plain reveal.
+    /// ⚠️ READ ONCE, AT STAGING — never per event.
+    ///
+    /// `convert(_:to:)` composes ancestor transforms, and the reveal drives the
+    /// page by one. Today every caller asks before the first pose is applied,
+    /// so the answer is in untransformed space and correct. A future per-event
+    /// re-read would inherit the presenter's own depth scale as well, which has
+    /// already been measured once on this transition: a 343x145 row came back
+    /// as 325.85x137.75 mid-drag.
     func revealCaptionAnchor(in space: UICoordinateSpace) -> CGRect? {
         guard let indexPath = streamDataSource?.indexPath(for: .caption),
               let attributes = collectionView.layoutAttributesForItem(at: indexPath)

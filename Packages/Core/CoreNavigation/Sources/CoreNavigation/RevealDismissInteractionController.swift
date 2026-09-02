@@ -27,15 +27,23 @@ import UIKit
 /// (commit) or back to the whole screen (cancel), seeded with the hand's
 /// velocity, so the window is visibly caught rather than restarted.
 ///
-/// ## What the window does NOT do
+/// ## What the window does NOT do — with one exception
 ///
-/// It never scales its contents. The media grab shrinks a card and the picture
-/// inside it shrinks too, which is right for a picture; doing that to text
-/// would shrink the type on the way down and then have to restore it at the
-/// landing, against a card whose type is at 1:1 — the exact class of last-frame
-/// pop this transition spent five rounds eliminating. The window's WIDTH goes
-/// to the card's width and its HEIGHT collapses, the type stays put, and the
-/// veil covers what no longer fits. Same reason the close has always worked.
+/// It does not scale its contents when it is landing on a CARD. The media grab
+/// shrinks a card and the picture inside it shrinks too, which is right for a
+/// picture; doing that to text would shrink the type on the way down and then
+/// have to restore it at the landing, against a card whose type is at 1:1 — the
+/// exact class of last-frame pop this transition spent five rounds eliminating.
+/// The window's WIDTH goes to the card's width and its HEIGHT collapses, the
+/// type stays put, and the veil covers what no longer fits.
+///
+/// ⚠️ THE EXCEPTION IS A LANDING THAT IS NOT A CARD. A 44pt map marker draws
+/// none of the page's type, so there is no 1:1 type to pop against and the
+/// argument above has nothing to protect: what it protects instead is a
+/// keyhole, a full-size page clipped down to a disc showing one corner of
+/// itself. Such a landing sets `RevealGeometry.pageFit` and the page
+/// travels whole, scaled — see `RevealStage.pageCovering`. Everywhere there IS
+/// a card to pop against, the rule above still holds, and it is the default.
 @MainActor
 final class RevealDismissInteractionController: NSObject,
                                                 UIViewControllerInteractiveTransitioning {
@@ -94,7 +102,11 @@ final class RevealDismissInteractionController: NSObject,
         return geometry.sourceFrame(container) ?? RevealStage.centredFallback(in: container)
     }
 
-    init(geometry: RevealGeometry, returningChrome: UIView?, axis: ZoomDismissAxis) {
+    init(
+        geometry: RevealGeometry,
+        returningChrome: UIView?,
+        axis: ZoomDismissAxis
+    ) {
         self.geometry = geometry
         self.returningChrome = returningChrome
         self.axis = axis
@@ -140,10 +152,25 @@ final class RevealDismissInteractionController: NSObject,
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = 0
-            (standIn as? RevealStandInShaping)?.setContentOpacity(0)
+            standIn.alpha = RevealStage.fill(at: 0, carriesPage: geometry.pageFit.carriesPage)
+            (standIn as? RevealStandInShaping)?.setContentOpacity(
+                RevealStage.contentOpacity(at: 0, carriesPage: geometry.pageFit.carriesPage)
+            )
         }
         self.standIn = standIn
+        // ⚠️ THE LANDING GOES AWAY FOR THE WHOLE CLOSE, exactly as the opening
+        // hides the row it grew out of. The window is bigger than the cell for
+        // most of the trip, so a cell left showing is a SECOND copy of the post
+        // sitting beside the one under the finger. Only the opening leg used to
+        // do this; the close set the flag back at `finish` and never set it in
+        // the first place, so on a grid landing the tile stayed visible the
+        // whole way down. Filmed.
+        //
+        // Released in `finish(cancelled:)`, which already runs
+        // `setSourceConcealed(cancelled)` in the same transaction as the
+        // unwrap — the cell and the window are identical at the landing rect,
+        // so swapping them there is invisible.
+        geometry.setSourceConcealed(true)
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         openRect = open.mask
         openCentre = CGPoint(x: open.mask.midX, y: open.mask.midY)
@@ -193,24 +220,54 @@ final class RevealDismissInteractionController: NSObject,
         // window follows the hand but resists leaving the dismissal axis.
         let along = axis.along(translation)
         let bandedAlong = along >= 0
-            ? ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.forwardDragLimit)
+            ? ZoomTransitionGeometry.rubberBand(
+                along,
+                limit: ZoomTransitionGeometry.forwardDragLimit(
+                    forSpan: axis.span(of: view.bounds.size)
+                )
+            )
             : ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.backDragLimit)
         let bandedAcross = ZoomTransitionGeometry.rubberBand(
             axis.across(translation), limit: ZoomTransitionGeometry.crossDriftLimit
         )
         let offset = axis.offset(along: bandedAlong, across: bandedAcross)
 
-        // Morph: toward the card's own size and rounding.
+        // Morph: toward the card's own size and rounding — or, against a
+        // landing that is not a card, not at all: see the note below.
+        // A held window keeps the screen's SHAPE and its opacity, and only its
+        // size and position answer the finger — see `RevealStage.heldWindow`.
         let size = CGSize(
             width: openRect.width + (stagedLanding.width - openRect.width) * progress,
             height: openRect.height + (stagedLanding.height - openRect.height) * progress
         )
         let centre = CGPoint(x: openCentre.x + offset.x, y: openCentre.y + offset.y)
-        let rect = CGRect(
-            x: centre.x - size.width / 2, y: centre.y - size.height / 2,
-            width: size.width, height: size.height
-        )
-        let radius = screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
+        let rect = geometry.pageFit.carriesPage
+            ? RevealStage.heldWindow(openRect, displacedBy: offset, at: progress)
+            : CGRect(
+                x: centre.x - size.width / 2, y: centre.y - size.height / 2,
+                width: size.width, height: size.height
+            )
+        // The screen's own corner at the screen's own proportion — see
+        // `RevealStage.heldRadius`. The landing's arrives on the release
+        // spring, which already carries it.
+        let radius = geometry.pageFit.carriesPage
+            ? RevealStage.heldRadius(screenRadius, at: progress)
+            : screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
+        // ⚠️ THE LIVE RECT, not a progress-derived size — the same rect the
+        // window is being given, so the page cannot separate from it under a
+        // rubber-banded or back-dragged finger.
+        if geometry.pageFit.carriesPage {
+            let covering = RevealStage.pageFitting(rect, from: openRect, fit: geometry.pageFit)
+            return (
+                RevealStage.Pose(
+                    mask: rect,
+                    maskRadius: radius,
+                    pageTranslation: covering.translation,
+                    pageScale: covering.scale
+                ),
+                progress
+            )
+        }
         let staged = RevealStage.Pose(
             mask: rect,
             maskRadius: radius,
@@ -246,9 +303,14 @@ final class RevealDismissInteractionController: NSObject,
         // runs where `UIView.animate` applies without animating, and the timed
         // version this replaces lost its second half to exactly that.
         if let standIn {
-            let swap = RevealStage.swapFractions(at: staged.progress)
-            standIn.alpha = swap.fill
-            (standIn as? RevealStandInShaping)?.setContentOpacity(swap.content)
+            standIn.alpha = RevealStage.fill(
+                at: staged.progress, carriesPage: geometry.pageFit.carriesPage
+            )
+            (standIn as? RevealStandInShaping)?.setContentOpacity(
+                RevealStage.contentOpacity(
+                    at: staged.progress, carriesPage: geometry.pageFit.carriesPage
+                )
+            )
         }
 
         let pose = staged
@@ -297,7 +359,8 @@ final class RevealDismissInteractionController: NSObject,
             anchor: anchor,
             matchesAnchor: geometry.matchesAnchor,
             captionTop: geometry.sourceCaptionTop,
-            ridingFrom: standIn != nil ? openRect : nil
+            ridingFrom: standIn != nil ? openRect : nil,
+            fit: geometry.pageFit
         )
         let target = commit
             ? closed
@@ -306,6 +369,62 @@ final class RevealDismissInteractionController: NSObject,
             )
         // (An abandoned grab returns the window to the whole screen, where
         // riding and still are the same thing: zero displacement.)
+
+        // ⚠️ THE ARRIVAL WAITS FOR THE PAGE TO FINISH LEAVING.
+        //
+        // On a fit that carries the page, the release is the FIRST moment
+        // anything of the destination may be seen — that is the whole of what
+        // the drag's silence buys. Even here the two may not overlap: a card's
+        // text over a page's caption is the "two half-drawn runs" this
+        // transition has paid for four times. So the page's own fade rides the
+        // spring below and the arrival is a second, delayed block over the tail
+        // of it, on the same schedule the chevron leg uses.
+        if let standIn {
+            let span = RevealStage.springDuration * RevealStage.springVisibleFraction
+            let schedule = RevealStage.releaseHandover(
+                carriesPage: geometry.pageFit.carriesPage
+            )
+            if geometry.pageFit.carriesPage {
+                UIView.animate(
+                    withDuration: span * schedule.fill.duration,
+                    delay: span * schedule.fill.delay,
+                    options: [.curveEaseOut, .beginFromCurrentState]
+                ) {
+                    standIn.alpha = commit ? 1 : 0
+                }
+            } else if commit {
+                // ⚠️ THE CARD LANDING CROSSES TWO TEXTS TOO, and it did it in
+                // the one place nobody looked: the RELEASE.
+                //
+                // Its drag is allowed to hand over — that is what a card
+                // landing IS, and the three acts put an empty beat between the
+                // page and the card so neither fade ever has text on both
+                // sides. But a commit BELOW that beat skips it: the spring set
+                // the fill and the content together, so the arrival's caption
+                // rose over a page still drawn at full alpha. A short flick is
+                // enough, and a short flick is the commonest way to leave.
+                //
+                // The same two blocks the chevron leg already runs on this
+                // geometry, on the same clock and the same curves, so a
+                // released grab and a tap-back hand over identically.
+                // `.beginFromCurrentState` picks the drag's own fraction up
+                // rather than restarting from zero.
+                UIView.animate(
+                    withDuration: span * schedule.fill.duration,
+                    delay: span * schedule.fill.delay,
+                    options: [.curveEaseIn, .beginFromCurrentState]
+                ) {
+                    standIn.alpha = 1
+                }
+                UIView.animate(
+                    withDuration: span * schedule.content.duration,
+                    delay: span * schedule.content.delay,
+                    options: [.curveEaseOut, .beginFromCurrentState]
+                ) {
+                    (standIn as? RevealStandInShaping)?.setContentOpacity(1)
+                }
+            }
+        }
 
         let springVelocity = ZoomTransitionGeometry.springVelocity(
             of: velocity,
@@ -339,8 +458,24 @@ final class RevealDismissInteractionController: NSObject,
             // abrupt last frame: nothing set the card's opacity on a commit, so
             // it stayed at whatever the drag had reached — often zero — and the
             // card appeared only when the stand-in was retired.
-            self.standIn?.alpha = commit ? 1 : 0
-            (self.standIn as? RevealStandInShaping)?.setContentOpacity(commit ? 1 : 0)
+            // ⚠️ NOT IN THIS BLOCK on a fit that carries the page — see the
+            // scheduled fade below. The page is still leaving here, and running
+            // the arrival up on the same clock cross-fades two drawings that
+            // both have text on them, which is the one thing this transition
+            // may never do.
+            // ⚠️ THE CANCEL ONLY. A carrying fit hands over on the scheduled
+            // block above; a card landing's COMMIT does too, now, for the same
+            // reason — see it. What is left here is putting both channels back
+            // to zero when the grab is abandoned, which crosses nothing: the
+            // page is returning to full alpha underneath them.
+            if !commit, !self.geometry.pageFit.carriesPage { self.standIn?.alpha = 0 }
+            // Pinned under a carried page: only the view's alpha may move, so
+            // an abandoned grab leaves the face at 0 with its content still 1.
+            if self.geometry.pageFit.carriesPage {
+                (self.standIn as? RevealStandInShaping)?.setContentOpacity(1)
+            } else if !commit {
+                (self.standIn as? RevealStandInShaping)?.setContentOpacity(0)
+            }
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0
             self.geometry.setDestinationVeilOpacity(commit ? 1 : 0)
@@ -355,7 +490,9 @@ final class RevealDismissInteractionController: NSObject,
         }
         // Teardown follows the ANIMATION, not the wall clock — see
         // `whenViewSettles`.
-        whenViewSettles(windowMask, ceiling: viewSettleCeiling) { [weak self] in
+        whenViewSettles(
+            windowMask, settlingAt: target.mask, ceiling: viewSettleCeiling
+        ) { [weak self] in
             self?.finish(cancelled: !commit)
         }
     }

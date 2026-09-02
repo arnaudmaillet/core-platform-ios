@@ -30,6 +30,15 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// when they tapped it, and the active post is brought TO that slot rather
     /// than the grid being taken to the active post.
     private let departureID: PostID
+    /// ⚠️ WHO IS IN THE DEPARTURE SLOT RIGHT NOW, which after any adoption is
+    /// no longer `departureID`.
+    ///
+    /// `departureID` names the post that was TAPPED and never changes, which is
+    /// the right answer for "where is the landing" and the wrong one for "what
+    /// do I swap with". A cancelled grab keeps this source, so a staging can
+    /// run more than once: addressed by post, the second one adopted into the
+    /// row the tapped post had been moved to and inverted the first swap.
+    private var slotOccupantID: PostID
     /// The post the destination is showing right now, injected so this type
     /// never has to know what a feed is.
     private let activePostID: () -> PostID?
@@ -54,6 +63,24 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// player for the destination. `nil` when the tile was not playing.
     private let donateLive: (() -> VideoRenderView?)?
 
+    /// The picture of the post the viewer is actually LOOKING at, for a close
+    /// that lands somewhere else.
+    ///
+    /// ⚠️ WITHOUT THIS THE CARD TAKES OFF WEARING A PHOTOGRAPH NOBODY HAS SEEN.
+    /// The card's own cover is read from the LANDING row (`heroAppearance(for:
+    /// anchorID)`), and since a list keeps its order the landing is the row the
+    /// viewer opened — almost never the post they paged to. Filmed: a grab
+    /// leaving a harbour photograph showed a dog from its first frame, and the
+    /// reverse case, where the departure held a live surface, showed the
+    /// departure for the whole drag and then snapped to the landing in one
+    /// frame as the card was removed. Both are the same missing operand.
+    ///
+    /// This is the cut `setDeparturePicture` exists for, and every other
+    /// presenter of this feed already hands it in — `PlaceProfileViewController`
+    /// and `ExternalHeroZoomSource`. This source was the only one that never
+    /// learned what the settled page was showing.
+    private let settledCover: (() -> UIImage?)?
+
     /// Set the moment a dismissal stages, and never cleared: this source
     /// serves one push/pop pair, so every card built after staging belongs
     /// to a return flight.
@@ -66,6 +93,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         landedModel: ((PostID) -> GalleryPost?)? = nil,
         activeMediaPage: (() -> Int?)? = nil,
         depthView: UIView?,
+        settledCover: (() -> UIImage?)? = nil,
         hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)? = nil,
         poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)? = nil,
         releaseHoisted: (() -> UIView?)? = nil,
@@ -77,10 +105,12 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         self.page = page
         anchorID = tappedID
         departureID = tappedID
+        slotOccupantID = tappedID
         self.activePostID = activePostID
         self.landedModel = landedModel
         self.activeMediaPage = activeMediaPage
         self.depthView = depthView
+        self.settledCover = settledCover
         self.donateLive = donateLive
     }
 
@@ -140,6 +170,25 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// The tile's twin: the same cover pixels the viewer is looking at, in the
     /// shape that tile actually has (a mosaic brick and a timeline row's
     /// preview round differently and carry different furniture).
+    /// Whether the row this close lands on can hold a photograph.
+    ///
+    /// `heroAppearance` already answers this and says so in its own words: a
+    /// TEXT row returns nil, and that is the whole of its transition policy. It
+    /// was only ever consulted to BUILD the card, never to decide whether there
+    /// should be one — so a viewer who paged onto a photograph and dragged got
+    /// a flight whose landing was a row made of words, and watched the card
+    /// dissolve away over an empty grey rectangle.
+    ///
+    /// A mosaic always accepts: it ADOPTS whatever it lands on, so its landing
+    /// is the settled post itself, and the departure gate has already asked
+    /// about that post's kind. Only a list, which keeps its order and therefore
+    /// lands somewhere else, can be asked to receive something it cannot draw.
+    var zoomLandingAcceptsHero: Bool {
+        guard let page else { return true }
+        if page.landsByAdoption { return true }
+        return page.heroAppearance(for: anchorID) != nil
+    }
+
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let appearance = page?.heroAppearance(for: anchorID)
         let card = PostGridFlightCard(
@@ -147,6 +196,22 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             cover: appearance?.cover,
             style: appearance?.style ?? .tile
         )
+        // ⚠️ AND THE PICTURE THE VIEWER IS LEAVING, dissolved into it — the
+        // same call `PlaceProfileViewController` makes, for the same reason.
+        //
+        // DISMISSAL ONLY. On a present the card's own cover IS the departure
+        // (the tile the finger is on), so a second operand would blend a
+        // picture with itself, which `ExternalHeroZoomSource` records as a
+        // defect rather than a no-op.
+        //
+        // Compared against the RESOLVED `anchorID` rather than `departureID`:
+        // a mosaic re-points the anchor to the settled post at staging, and
+        // after that re-pointing the two ends already agree and there is again
+        // nothing to blend. On a list the anchor stays put, which is exactly
+        // the case that needs this.
+        if isStagingDismissal, let settled = activePostID(), settled != anchorID {
+            card.setDeparturePicture(settledCover?())
+        }
         #if DEBUG
         // Whether the card had a texture to show on frame 0. `heroAppearance`
         // reads the tile's `renderedCover` synchronously and the initialiser
@@ -298,21 +363,39 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // Resolved from the page when it has it, and from the feed's whole
         // corpus when it does not — the adoption inserts in that case.
         let model = landed.flatMap { page?.post(for: $0) ?? landedModel?($0) }
-        if let landed, let model, page?.canLandHero(on: model) == true,
-           page?.adoptForClose(
-               landed, intoSlotOf: departureID, orInsert: model,
-               // A flight carries the MEDIA, not the row: it conceals its own
-               // landing below, on the hero channel.
-               standingIn: false
-           ) == true {
+        // ⚠️ ADDRESSED BY SLOT, NOT BY POST — and the difference only shows on
+        // the SECOND staging.
+        //
+        // A cancelled grab keeps this source, so staging is not once-only.
+        // `departureID` names the post that was tapped, and after one adoption
+        // that post is no longer in the departure slot: the second staging
+        // therefore asked to adopt into the row the tapped post had been MOVED
+        // to, which inverted the first swap. The grid was left permanently
+        // re-ordered by a grab the viewer abandoned, and the card then landed
+        // on a tile that was no longer where the anchor said.
+        // ⚠️ AND ONLY A MOSAIC MAY MOVE ITS POSTS TO MEET THIS CARD — see
+        // `ForYouGridPage.landsByAdoption`. A list keeps its order and the card
+        // goes back to the slot the opening left from, which is the `else`
+        // branch below and is exactly where the tapped row still is.
+        if page?.landsByAdoption == true,
+           let landed, let model, page?.canLandHero(on: model) == true,
+           landed == slotOccupantID
+               || page?.adoptForClose(
+                   landed, intoSlotOf: slotOccupantID, orInsert: model,
+                   // A flight carries the MEDIA, not the row: it conceals its
+                   // own landing below, on the hero channel.
+                   standingIn: false
+               ) == true {
             // The active post now occupies the departure slot, so anchoring to
             // it lands on that tile without moving anything.
+            slotOccupantID = landed
             anchorID = landed
         } else {
             // Nothing moved: either the viewer never left the tile, or the feed
-            // settled on a post this grid no longer holds. Both land on the
-            // departure tile itself rather than on a rect that no longer exists.
-            anchorID = departureID
+            // settled on a post this grid no longer holds. Both land on what
+            // the departure slot ACTUALLY holds — which after an earlier
+            // adoption is not the post that was tapped.
+            anchorID = slotOccupantID
         }
         // ⚠️ AND ONTO THE PAGE THE VIEWER IS ACTUALLY LOOKING AT.
         //

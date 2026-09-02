@@ -61,8 +61,11 @@ enum MapClusterEngine {
 
         var isCluster: Bool { memberIDs.count > 1 }
 
-        /// A multi-post group whose members all share one place — the ONLY
-        /// marker whose tap opens the place gallery behind the feed (Case B).
+        /// A multi-post group whose members all share one place. An engine
+        /// FACT, not a routing decision: since 2026-08-31 only HIERARCHY
+        /// markers (`isHierarchyMarker` — the band's own city/country
+        /// clusters) open the place page behind their feed; a proximity
+        /// cluster that happens to share a leaf place stays a plain feed.
         var isSemanticCluster: Bool { isCluster && place != nil }
 
         /// The representative's id. Note this is NOT a stable marker identity: a
@@ -100,18 +103,17 @@ enum MapClusterEngine {
         zoomLevel: Int32? = nil, viewportDiagonalKm: Double? = nil
     ) -> [Item] {
         // SEMANTIC PRE-PASS (STRICT nested banding): the zoom selects ONE
-        // active hierarchy depth (`MapPlace.Kind.activeKind` — country,
-        // region, or city), and hierarchy members render ONLY through that
+        // active hierarchy depth (`MapHierarchyBanding.activeKind` —
+        // country or city), and hierarchy members render ONLY through that
         // depth. Every pin whose place LADDER carries an entry at the
         // active depth is absorbed into that entry's marker, however far
         // apart the members sit on screen; a pin whose ladder is non-empty
-        // but has NO rung at the active depth — a region-only post while
-        // the city band is up, a country-only post at the region band — is
-        // HIDDEN outright, never mixed in as itself or through proximity.
-        // Because a city pin's ladder also names its region and country,
-        // zooming out collapses whole cities into their parent region's
-        // marker and whole regions into their country's — the roll-up is a
-        // consequence of the ladder, not a second mechanism.
+        // but has NO rung at the active depth — a country-only post while
+        // the city band is up — is HIDDEN outright, never mixed in as
+        // itself or through proximity. Because a city pin's ladder also
+        // names its country, zooming out collapses whole cities into their
+        // country's marker — the roll-up is a consequence of the ladder,
+        // not a second mechanism.
         //
         // The band is exclusive exactly WHEN THE CORPUS IS HIERARCHICAL: if
         // any pin carries a ladder, everything without a rung at the active
@@ -194,24 +196,152 @@ enum MapClusterEngine {
                     // so spherical-centroid math would be precision theatre.
                     latitude: ordered.reduce(0) { $0 + $1.latitude } / Double(ordered.count),
                     longitude: ordered.reduce(0) { $0 + $1.longitude } / Double(ordered.count),
-                    // The marker speaks at the ACTIVE depth: a region's
-                    // group says Île-de-France even though every member's
-                    // leaf place is a city inside it.
+                    // The marker speaks at the ACTIVE depth: a country's
+                    // group says France even though every member's leaf
+                    // place is a city inside it.
                     place: group.place,
                     isHierarchyMarker: true
                 )
             }
         // Groups of one render as standalone pins — OUTSIDE the proximity
         // pool, so a level's lone post can't be merged into an unladdered
-        // neighbour's generic cluster and escape its band.
+        // neighbour's generic cluster and escape its band. (They still
+        // collide with the band's OWN markers below — same band, no escape.)
         let lone = maskedByPlace.values.filter { $0.members.count == 1 }
             .flatMap(\.members).map(Self.single)
 
         guard zoomScale > 0, cellPoints > 0 else {
             return semantic + lone + unmasked.map(Self.single)
         }
-        return semantic + lone
+        let result = collide(semantic + lone, zoomScale: zoomScale, cellPoints: cellPoints)
             + proximityCluster(unmasked, zoomScale: zoomScale, cellPoints: cellPoints)
+        #if DEBUG
+        // `-maps-banding-log` second line: the engine's OUTPUT — what merged
+        // into what. The banding decision alone can't explain a marker the
+        // collision pass produced.
+        if ProcessInfo.processInfo.arguments.contains("-maps-banding-log") {
+            let described = result
+                .map { item in
+                    "\(item.place?.id ?? "generic")×\(item.memberIDs.count)"
+                        + (item.isHierarchyMarker ? "†" : "")
+                        + String(format: "@(%.2f,%.2f)", item.latitude, item.longitude)
+                }
+                .sorted().joined(separator: " ")
+            print("[banding] out: bandItems=\(semantic.count)+\(lone.count)lone"
+                + " cell=\(String(format: "%.0f", cellPoints / zoomScale))mp → \(described)")
+        }
+        #endif
+        return result
+    }
+
+    /// The band's own collision pass. The semantic pre-pass guarantees one
+    /// marker per PLACE, but says nothing about where those markers land on
+    /// screen: zoom out far enough and France's, Spain's and Germany's
+    /// markers stack on the same few points — breaking, from the inside, the
+    /// no-overlap contract this engine exists to sustain. So the active
+    /// band's items (groups AND lone pins — the two pools are mutually
+    /// exclusive with the proximity pool, so no band escape) run the same
+    /// grid + agglomerative merge the proximity pass runs, over ITEMS
+    /// instead of pins.
+    ///
+    /// A merged group spanning places keeps NO place identity — `place`
+    /// falls to `nil`, the marker dresses neutral and its tap opens the
+    /// plain viewer: a gallery titled "France" must never open Spain's
+    /// posts. The face rule stays EXACT, not approximate: each item's face
+    /// is already its own group's most-liked/lowest-id member, so the winner
+    /// among the faces is the winner over the whole union.
+    private static func collide(
+        _ items: [Item], zoomScale: Double, cellPoints: Double
+    ) -> [Item] {
+        guard items.count > 1 else { return items }
+        let cell = cellPoints / zoomScale
+
+        // Markers being folded together; the centroid is weighted by member
+        // count so the merged marker sits where its POSTS are, not at the
+        // midpoint of two marker positions.
+        struct Node {
+            var items: [Item]
+            var sumX: Double
+            var sumY: Double
+            var weight: Double
+            var x: Double { sumX / weight }
+            var y: Double { sumY / weight }
+        }
+
+        struct GridKey: Hashable { let gx: Int; let gy: Int }
+        var buckets: [GridKey: Node] = [:]
+        for item in items {
+            let point = MKMapPoint(
+                CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)
+            )
+            let weight = Double(item.memberIDs.count)
+            let key = GridKey(
+                gx: Int((point.x / cell).rounded(.down)),
+                gy: Int((point.y / cell).rounded(.down))
+            )
+            if buckets[key] != nil {
+                buckets[key]!.items.append(item)
+                buckets[key]!.sumX += point.x * weight
+                buckets[key]!.sumY += point.y * weight
+                buckets[key]!.weight += weight
+            } else {
+                buckets[key] = Node(
+                    items: [item], sumX: point.x * weight, sumY: point.y * weight, weight: weight
+                )
+            }
+        }
+
+        // Same Chebyshev fixed-point merge as the proximity pass — the
+        // markers are squares, so the collision test is the larger axis-gap.
+        var nodes = Array(buckets.values)
+        var didMerge = true
+        while didMerge {
+            didMerge = false
+            outer: for i in 0..<nodes.count {
+                for j in (i + 1)..<nodes.count {
+                    let dx = abs(nodes[i].x - nodes[j].x)
+                    let dy = abs(nodes[i].y - nodes[j].y)
+                    if max(dx, dy) < cell {
+                        nodes[i].items.append(contentsOf: nodes[j].items)
+                        nodes[i].sumX += nodes[j].sumX
+                        nodes[i].sumY += nodes[j].sumY
+                        nodes[i].weight += nodes[j].weight
+                        nodes.remove(at: j)
+                        didMerge = true
+                        break outer
+                    }
+                }
+            }
+        }
+
+        return nodes.map { node in
+            if node.items.count == 1 { return node.items[0] }
+            // Faces ascending by id, which is what makes `representative`'s
+            // "first max wins" the lowest-id tie-break over the union too.
+            let faces = node.items.map(\.representative)
+                .sorted { $0.postID.rawValue < $1.postID.rawValue }
+            let face = representative(of: faces)
+            let center = MKMapPoint(x: node.x, y: node.y).coordinate
+            // Place survives only when EVERY folded marker already spoke for
+            // the same place — which one band cannot produce (one marker per
+            // place), so in practice a merge is generic. Kept as a rule
+            // rather than an assumption, so a future caller can't silently
+            // break "the gallery's title claims every member".
+            let place = node.items.dropFirst().reduce(node.items[0].place) { common, item in
+                common?.id == item.place?.id ? common : nil
+            }
+            return Item(
+                representative: face,
+                memberIDs: [face.postID] + node.items.lazy
+                    .flatMap(\.memberIDs)
+                    .filter { $0 != face.postID }
+                    .sorted { $0.rawValue < $1.rawValue },
+                latitude: center.latitude,
+                longitude: center.longitude,
+                place: place,
+                isHierarchyMarker: place != nil && node.items.allSatisfy(\.isHierarchyMarker)
+            )
+        }
     }
 
     /// The screen-space passes (grid + agglomerative merge), unchanged from

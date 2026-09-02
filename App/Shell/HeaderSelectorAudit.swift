@@ -1,6 +1,16 @@
 import DesignSystem
 import UIKit
 
+// ⚠️ THE WHOLE FILE, because the whole thing is a DEBUG harness.
+//
+// It runs only from `-header-audit` / `-header-audit-current`, and both of
+// those live inside `MainTabCoordinator`'s own `#if DEBUG`. It also reaches
+// for `PagedTabBar.debugSegmentCount`, which is fenced — so compiling this
+// for Release asked for a member that does not exist there. Fencing the
+// caller is the right side of that: the audit is not product code, and
+// publishing a debug affordance to satisfy it would have been.
+#if DEBUG
+
 /// `-header-audit` — checks the leading-group selector layout on every surface
 /// that wears one.
 ///
@@ -341,3 +351,4 @@ final class HeaderSelectorAudit {
         return nil
     }
 }
+#endif

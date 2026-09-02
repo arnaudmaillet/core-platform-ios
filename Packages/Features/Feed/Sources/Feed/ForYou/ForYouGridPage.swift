@@ -228,7 +228,13 @@ final class ForYouGridPage: UIView {
 
     /// The rounding this page's tiles take, paired with the layout's gutter.
     /// List pages fall back to the tile default, which they never use.
-    private var tileCornerRadius: CGFloat {
+    ///
+    /// ⚠️ NOT `private`, because a landing has to ask rather than restate it.
+    /// The chaotic slice layout rounds its bricks more than the mosaic default
+    /// does, and two reveal geometries had the default written into them: their
+    /// window sprang to a 10pt corner over a 16pt brick, a step in the one
+    /// channel the eye is most sensitive to, on the last frame of the close.
+    var tileCornerRadius: CGFloat {
         sliceLayout?.tileCornerRadius ?? PostGridTileCell.mosaicCornerRadius
     }
 
@@ -279,6 +285,16 @@ final class ForYouGridPage: UIView {
         style == .grid ? 6 : 5
     }
     private let style: Style
+
+    /// ⚠️ WHETHER A CLOSE MAY MOVE THIS PAGE'S POSTS TO MEET IT.
+    ///
+    /// A mosaic may: the swap trades two bricks in a field of bricks and the
+    /// eye does not track it. A LIST may not — the post that was under the card
+    /// is replaced by another, and a viewer reading a ranked feed sees the
+    /// ranking change under a gesture they made. The product rule is that a
+    /// close lands back on the post the OPENING left from, and a list keeps its
+    /// order.
+    var landsByAdoption: Bool { style == .grid }
     private let collectionView: UICollectionView
     /// The centred "nothing here" block, shared with every other surface that
     /// has to say it. Hidden unless the page is genuinely empty or failed.
@@ -302,7 +318,10 @@ final class ForYouGridPage: UIView {
     /// The reveal channel's equivalent, and it exists for the same reason —
     /// see `setRevealConcealed`. Weak for the same reason too: the collection
     /// view owns cells, and a recycled one is corrected at `cellForItemAt`.
-    private weak var revealConcealedCell: PostGridListRowCell?
+    /// ⚠️ ANY CELL, not just a row. Typed to the row while only list surfaces
+    /// opened windows, which quietly made every grid landing a no-op — see
+    /// `setRevealConcealed`.
+    private weak var revealConcealedCell: UICollectionViewCell?
     /// The post whose twin is in the air, concealed or not.
     ///
     /// Split from `heroHiddenPostID` because the two questions came apart: a
@@ -808,12 +827,30 @@ final class ForYouGridPage: UIView {
     /// when the first dismissal stages, so there is no viewer context to
     /// preserve and the grid is free to travel to the landing post's own
     /// tile.
+    /// ⚠️ CENTRED, not merely revealed. Revealing moves as little as it can,
+    /// which is right for a tap and wrong for a landing: a post tucked under
+    /// the bottom chrome came up until it just cleared, so the window closed
+    /// onto a row pinned to the bottom edge — the post the viewer had been
+    /// reading, delivered as far from where they were looking as it could be
+    /// while still being on screen. Filmed on the place page's first vertical
+    /// dismiss. Centring costs nothing anywhere else: this page only scrolls
+    /// like this when it is being landed on.
     func revealPost(_ postID: PostID) {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
         collectionView.layoutIfNeeded()
-        ScrollIntoView.revealImmediately(
+        // ⚠️ NO OCCLUSION, which is not the same as forgetting one. This page's
+        // top inset is LAYOUT — room reserved for a header that scrolls away —
+        // and `ScrollIntoView` defaults the band to the content inset because
+        // that is right wherever the insets exist BECAUSE of chrome. Here it
+        // pushes the band's middle hundreds of points down the screen, and the
+        // landing arrives at two thirds of the way down: measured at 607pt of
+        // 874 on the place page, from a 440pt reserved header. The inset still
+        // clamps — it is the scrollable range either way — it just no longer
+        // decides where the middle is.
+        ScrollIntoView.centreImmediately(
             collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame,
-            in: collectionView
+            in: collectionView,
+            occlusion: .zero
         )
     }
 
@@ -1324,6 +1361,70 @@ final class ForYouGridPage: UIView {
         style == .grid || post.kind != .text
     }
 
+    /// The next post in the RENDERED order after `postID` that a close can
+    /// honestly land on: one with a cover, that `canLandHero` accepts.
+    ///
+    /// ⚠️ "NEXT" IS NEXT IN `posts`, and only this page can answer it. The
+    /// snap feed a tap opens is seeded as a SUFFIX of this page's ordered ids
+    /// — `ForYouViewController.openFeed` hands it `posts[index...]` — so the
+    /// post after the anchor here is literally the one the viewer would have
+    /// reached with one more swipe. The view model's corpus is neither
+    /// ordered nor filtered the same way (`arrange` permutes it into slots and
+    /// `partitioned` groups the arrivals), so the same question asked there
+    /// answers about a different list.
+    ///
+    /// Wraps to the HEAD of the page only when nothing after the anchor
+    /// qualifies — the last post on a page still has to land somewhere, and
+    /// the alternative is nil, which is a close with no arrival.
+    ///
+    /// Two preferences decide between candidates, and the order between them
+    /// is a judgement:
+    ///
+    /// - OFF-SCREEN first. The landing swaps this post into the departure slot
+    ///   (`adoptForClose`), so a post the viewer is looking at right now
+    ///   vanishes from where it lives and reappears in the arrival cell,
+    ///   mid-landing, in front of them.
+    /// - A DECODED cover second. `isLandingPlaybackReady` holds the card until
+    ///   the arrival tile has a face, so a candidate the pipeline already holds
+    ///   lands immediately and one it does not costs the wait.
+    ///
+    /// Off-screen wins the conflict because the two failures are not the same
+    /// size: an undecoded cover is a slower close, which the readiness gate is
+    /// built to cover and the adoption's prefetch shortens, while a tile
+    /// changing under the viewer's eye is a wrong frame.
+    func nextLandableMedia(after postID: PostID) -> GalleryPost? {
+        guard let anchor = posts.firstIndex(where: { $0.id == postID }) else { return nil }
+        return bestLandableMedia(in: posts[(anchor + 1)...])
+            ?? bestLandableMedia(in: posts[..<anchor])
+    }
+
+    /// The best candidate in one run, or nil if the run holds none.
+    ///
+    /// Scanned rather than sorted, and a tie keeps the EARLIER post: order is
+    /// the whole meaning of "next", so two equally good candidates must resolve
+    /// to the nearer one.
+    private func bestLandableMedia(in run: ArraySlice<GalleryPost>) -> GalleryPost? {
+        var best: (rank: Int, post: GalleryPost)?
+        for post in run
+        where post.kind != .text && post.thumbnailURL != nil && canLandHero(on: post) {
+            let rank = (isPostVisible(post.id) ? 2 : 0) + (hasDecodedCover(post) ? 0 : 1)
+            // Off screen and already decoded: nothing further along can beat it.
+            if rank == 0 { return post }
+            if rank < (best?.rank ?? Int.max) { best = (rank, post) }
+        }
+        return best?.post
+    }
+
+    /// Whether the pipeline is already holding this post's cover.
+    ///
+    /// The CACHE, which is the only question this page can ask without
+    /// suspending — the same synchronous lookup `hasCover` makes before letting
+    /// a tile play against a blank face.
+    private func hasDecodedCover(_ post: GalleryPost) -> Bool {
+        guard let url = post.thumbnailURL else { return false }
+        return imagePipeline.cachedImage(for: url) != nil
+    }
+
     /// What the flight card should *look* like, without needing a coordinate
     /// space — the card is built before anyone knows the container, and asking
     /// for a frame there would mean inventing one.
@@ -1469,6 +1570,36 @@ final class ForYouGridPage: UIView {
             // The ROW's own height when it is realized — see the profile's
             // twin, and `RevealDismissCardView.init`.
             height: cell(for: postID)?.bounds.height
+        )
+    }
+
+    /// A free-standing tile drawn from `post`, sized and rounded like the cell
+    /// currently occupying `slotOf`'s place — what a close lands on when the
+    /// arrival shows a DIFFERENT post from the one that departed.
+    ///
+    /// The occupant decides the geometry rather than `post` itself, and it has
+    /// to: the landing swaps `post` into that slot, so the rect the window
+    /// closes onto is the SLOT's, whatever was in it a moment ago. Reading the
+    /// size off `post`'s own cell would measure wherever it happens to live
+    /// now, which is the tile the swap is about to empty.
+    ///
+    /// The stand-in loads its own cover, which is the whole reason it exists —
+    /// a `PostGridFlightCard` flies the cover it was handed, and for a post
+    /// that never departed there is none.
+    ///
+    /// Nil when nothing is realized at the slot: there is no rect to size to,
+    /// and a stand-in built at a guessed size lands at the wrong one.
+    func makeTileStandIn(for post: GalleryPost, slotOf occupantID: PostID) -> UIView? {
+        guard let size = cell(for: occupantID)?.bounds.size,
+              size.width > 0, size.height > 0
+        else { return nil }
+        return PostGridTileStandInView(
+            post: post,
+            size: size,
+            // The PAGE's rounding, not the cell default: this grid's gutter and
+            // curve are one decision — see `tileCornerRadius`.
+            cornerRadius: tileCornerRadius,
+            imagePipeline: imagePipeline
         )
     }
 
@@ -1990,18 +2121,25 @@ final class ForYouGridPage: UIView {
 
     func setRevealConcealed(_ concealed: Bool, for postID: PostID) {
         revealConcealedPostID = concealed ? postID : nil
-        let row = cell(for: postID) as? PostGridListRowCell
+        // ⚠️ WHATEVER KIND OF CELL IT IS. This resolved `as? PostGridListRowCell`
+        // and did nothing at all for anything else — so on the Discover GRID,
+        // whose cells are tiles, the landing was never hidden: the window
+        // closed onto a tile that was visible underneath it the whole way, two
+        // copies of the same post. Filmed. The hero channel beside this one has
+        // always switched on the cell (`applyHeroConcealment`); this one was
+        // written when only list surfaces opened windows and never caught up.
+        let target = cell(for: postID)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
-            // Whether the row it names is REALIZED, because a concealment
+            // Whether the cell it names is REALIZED, because a concealment
             // applied to nothing looks exactly like one that was never asked
-            // for — and the row it must hide is the one a dismissal just
-            // adopted into the departure slot.
+            // for — and the cell it must hide is the one a dismissal is landing
+            // on.
             print("[text-reveal] conceal=\(concealed) post=\(postID.rawValue)"
-                + " row=\(row == nil ? "MISSING" : "found")")
+                + " cell=\(target.map { String(describing: type(of: $0)) } ?? "MISSING")")
         }
         #endif
-        row?.setHeroConcealed(concealed)
+        Self.applyHeroConcealment(concealed, to: target)
         // ⚠️ THE INSTANCE, NOT JUST THE ID — the hero channel has kept one of
         // these since the day a lookup cleared the wrong cell, and this channel
         // never got the same treatment.
@@ -2020,9 +2158,9 @@ final class ForYouGridPage: UIView {
         // cost is a weak reference — but it has not been shown to fix anything,
         // and this note is what stops the next reader assuming it did.
         if concealed {
-            revealConcealedCell = row
+            revealConcealedCell = target
         } else {
-            revealConcealedCell?.setHeroConcealed(false)
+            Self.applyHeroConcealment(false, to: revealConcealedCell)
             revealConcealedCell = nil
         }
     }

@@ -2,6 +2,10 @@
 
 **Service:** `geo_discovery.v1` · **Status:** proposal — nothing on the wire today
 **Client:** iOS Maps tab (pin/cluster tap → feed → cluster gallery)
+**Product update 2026-08-31:** the REGION level was cut from the product — the
+client hierarchy is **country → city** only. Keep `CLUSTER_KIND_REGION = 3`
+reserved in the enum (no renumbering), but the server should not emit it and
+the client drops any kind outside city/country at the projection.
 **Related:** `dev/BACKEND_GAPS.md` §14 (no ranking RPC), §15 (`RadarPin` renditions),
 `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §C
 
@@ -38,7 +42,7 @@ catalog are deleted the day the fields below land.
    returns a display name for any geographic grouping (there is no reverse
    geocoding anywhere in the contracts).
 3. **Top-K starves aggregation.** `QueryTileResponse` caps pins per tile
-   (mock: 80). At country zoom the viewport spans many tiles and the response is
+   (mock: 200). At country zoom the viewport spans many tiles and the response is
    a sample. Client-side counting over a sample cannot say "France, 12,438
    posts" — only the server can.
 4. **No ranking for the gallery.** The gallery shows the place's

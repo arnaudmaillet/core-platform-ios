@@ -703,12 +703,13 @@ stops counting.
 
 ---
 
-## 18. No semantic geo clusters — city/country/region grouping is unexpressible
+## 18. No semantic geo clusters — city/country grouping is unexpressible
 
-**What the client wants.** Tapping a **City / Country / Region cluster** on the
+**What the client wants.** Tapping a **City or Country cluster** on the
 map opens the post viewer with a gallery of the place's popular posts behind it
 ("Paris • City Cluster"). Generic proximity clusters and single pins keep the
-plain viewer.
+plain viewer. (The REGION level was cut from the product on 2026-08-31; the
+proposal's `CLUSTER_KIND_REGION` stays reserved on the wire, unemitted.)
 
 **What `geo_discovery.v1` offers.** `RadarPin` carries no place identity, no
 name, no grouping key, and `QueryTile` is Top-K-capped per tile — so at country

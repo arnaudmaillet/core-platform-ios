@@ -33,6 +33,23 @@ public final class InteractiveSlideDismissal: NSObject {
     /// dormant `ZoomTransitionController`, when a deep link pushes the timeline
     /// above a pin-opened feed) — restored on teardown.
     private weak var savedDelegate: (any UINavigationControllerDelegate)?
+
+    #if DEBUG
+    /// Which axes this driver was armed for.
+    ///
+    /// Published because the property worth checking is not any one driver's
+    /// but the SCREEN's: every axis needs a tenant for every dismissal kind, or
+    /// a drag lands on nothing at all and the screen simply refuses to close.
+    /// That is not observable from outside without knowing who is armed where —
+    /// and it has now shipped twice, once on the map and once here.
+    public var debugArmedAxes: Set<ZoomDismissAxis> { axes }
+
+    /// Who this driver hands a pop it does not own back to. A driver that took
+    /// the slot from a FLIGHT and saved nothing is a screen whose media pages
+    /// have quietly lost their hero — visible only as a plain slide, which is
+    /// a perfectly good animation.
+    public var debugSavedDelegate: (any UINavigationControllerDelegate)? { savedDelegate }
+    #endif
     /// Whether `savedDelegate` holds the delegate from BEFORE this screen —
     /// as opposed to whatever happened to be installed during a re-assert.
     private var hasCapturedSavedDelegate = false
@@ -53,6 +70,9 @@ public final class InteractiveSlideDismissal: NSObject {
 
     /// Fired at swipe-begin, after the drive is armed and BEFORE the pop is
     /// triggered — the one moment an owner can restage the pop's landing.
+    /// Handed the live swipe's axis, because a restaging can be the axis's
+    /// whole meaning: the same screen drops an intermediate for a horizontal
+    /// escape and INSERTS one for a vertical dismissal into a place page.
     ///
     /// Exists for the cluster-gallery escape: a post opened from the place
     /// gallery swipes right past the gallery to the MAP, and UIKit's popTo
@@ -62,7 +82,7 @@ public final class InteractiveSlideDismissal: NSObject {
     /// animation, no transition running yet) and installs this driver as the
     /// stack's delegate, and the ordinary, fully cancellable single pop that
     /// follows lands one screen deeper than the stack said a moment ago.
-    public var onWillBeginPop: (() -> Void)?
+    public var onWillBeginPop: ((ZoomDismissAxis) -> Void)?
 
     /// **THE TEXT REVEAL**: swaps the slide for a clip-window
     /// reveal on BOTH legs — see `RevealGeometry`.
@@ -84,6 +104,30 @@ public final class InteractiveSlideDismissal: NSObject {
     /// owner's `onFeedPopped`, as before.
     public weak var revealReturningChrome: UIView?
 
+    /// Which axes close as a WINDOW when `revealGeometry` is set. Both by
+    /// default, and both is now the shipped case for the place page too: the
+    /// rightward close lands on the map's marker and the downward one on the
+    /// place page's own Activity card, each with its own geometry supplied by
+    /// `prepareForDismissal`.
+    ///
+    /// The narrowing survives for an owner that has NOTHING to aim the
+    /// excluded axis at — a window can only shrink onto a rect some screen is
+    /// really showing, and an axis with no such rect must ride the plain
+    /// slide instead.
+    public var revealReturnAxes: Set<ZoomDismissAxis> = [.horizontal, .vertical]
+
+    /// The axis the FALLBACK slide travels on, when it is not the axis the
+    /// finger travelled on.
+    ///
+    /// ⚠️ A DELIBERATE TRANSPOSITION, not an oversight. The vertical grab on a
+    /// cluster's feed exists because a downward flick is how this app closes a
+    /// page — but when it falls back to a plain slide, sliding the screen DOWN
+    /// reads as the page being dropped rather than left behind. The platform's
+    /// own back-direction is horizontal, and that is what the fallback should
+    /// look like whatever the hand did. Nil keeps the gesture's own axis,
+    /// which is what every other surface wants.
+    public var fallbackSlideAxis: ZoomDismissAxis?
+
     /// An extra veto the owner can impose, asked at begin-time.
     ///
     /// Exists for surfaces where a full-width swipe means something else some
@@ -104,6 +148,16 @@ public final class InteractiveSlideDismissal: NSObject {
     /// post's kind from opposite sides.
     public var arbitratesWithHeroGrab = false
 
+    /// Whether the HERO grab would accept this dismissal's landing, asked so
+    /// this driver can claim the drags the hero declines.
+    ///
+    /// Set only by a screen that arms both drivers and whose close can land on
+    /// a row of a different kind from the post being dismissed — see
+    /// `ZoomTransitionSource.zoomLandingAcceptsHero`, which is the same
+    /// question from the other side. `nil` means "no opinion", which leaves
+    /// the arbitration exactly as it was.
+    public var heroLandingAcceptsHero: (() -> Bool)?
+
     /// Whether the PUSH onto this screen is the reveal's.
     ///
     /// ⚠️ SEPARATE FROM HAVING A GEOMETRY, and the two came apart the moment
@@ -120,11 +174,19 @@ public final class InteractiveSlideDismissal: NSObject {
     /// `revealGeometry` — from a swipe claiming the screen, and from a pop
     /// with no gesture behind it at all.
     ///
+    /// Handed the axis the dismissal is travelling on, because on this screen
+    /// the two axes go to DIFFERENT places: a text-faced cluster's feed closes
+    /// rightward onto the map's marker and downward onto its place page's own
+    /// card. One geometry cannot describe both, so the owner swaps it here —
+    /// which is exactly early enough, `revealGeometry` being read three lines
+    /// below the call. A pop with no gesture is told `.horizontal`, the
+    /// platform's own direction and the one the back button means.
+    ///
     /// ⚠️ MUST BE IDEMPOTENT. A swipe reaches it twice: once when the grab
     /// claims the screen, and again when the pop it triggers asks for an
     /// animator. What it does — moving a card into the slot the dismissal
     /// flies to — undoes itself if it runs a second time.
-    public var prepareForDismissal: (() -> Void)?
+    public var prepareForDismissal: ((ZoomDismissAxis) -> Void)?
 
     /// The recognizer, so an owner can order a competing one behind it —
     /// `require(toFail:)` needs the object, and a caller that cannot see it
@@ -200,6 +262,8 @@ public final class InteractiveSlideDismissal: NSObject {
         prepareForDismissal = nil
         revealGeometry = nil
         revealPresents = false
+        revealReturnAxes = [.horizontal, .vertical]
+        fallbackSlideAxis = nil
     }
 
     public func install(on nav: UINavigationController) {
@@ -282,10 +346,10 @@ public final class InteractiveSlideDismissal: NSObject {
         // Before the geometry is read three lines down, and that ordering is
         // the whole point: `onWillBeginPop` fires after the grab exists, which
         // is too late to decide what the grab is carrying.
-        prepareForDismissal?()
+        prepareForDismissal?(activeAxis)
         // Freeze the pager so a diagonal drag can't page mid-pop.
         (feed as? any ZoomTransitionDestination)?.setContentScrollEnabled(false)
-        if let revealGeometry {
+        if let revealGeometry, revealReturnAxes.contains(activeAxis) {
             // A reveal is GRABBED, not scrubbed — the window floats free under
             // the finger the way a media hero's card does, and a percent driver
             // cannot express that.
@@ -301,7 +365,7 @@ public final class InteractiveSlideDismissal: NSObject {
         }
         // The restaging window — see `onWillBeginPop`. Before the pop, so a
         // stack edit here is a plain transaction, not a mid-transition one.
-        onWillBeginPop?()
+        onWillBeginPop?(activeAxis)
         // Triggers the pop; the delegate below vends the slide animator and
         // this driver because `interaction` is now non-nil.
         nav.popViewController(animated: true)
@@ -352,33 +416,40 @@ public final class InteractiveSlideDismissal: NSObject {
     /// would have watched the page jump instead of following. Checking
     /// `transitionCoordinator?.isInteractive` is what tells the two apart.
     @discardableResult
-    public func debugPerformSwipe(peakProgress: CGFloat) async -> Bool {
+    public func debugPerformSwipe(
+        peakProgress: CGFloat, axis: ZoomDismissAxis = .horizontal
+    ) async -> Bool {
         guard let view = feedViewController?.viewIfLoaded else { return false }
         // Honour the owner's veto, exactly as a real touch would. Calling
         // `beginSwipe` straight through made this harness answer a different
         // question from the one a thumb asks: it dismissed a profile from a
         // tab whose drag belongs to the pager, and reported success.
         guard canBeginDismissal?() != false else { return false }
+        // A real touch picks the axis in `gestureRecognizerShouldBegin`; this
+        // harness has no velocity to be matched, so it says so directly — and
+        // only for an axis the attach allowed, exactly like the begin gate.
+        guard axes.contains(axis) else { return false }
+        activeAxis = axis
         beginSwipe()
         let isDriven = feedViewController?.transitionCoordinator?.isInteractive == true
-        let peak = peakProgress * view.bounds.width
+        let peak = peakProgress * axis.span(of: view.bounds.size)
         let steps = 30
         for step in 1...steps {
             try? await Task.sleep(nanoseconds: 16_000_000)
             let t = CGFloat(step) / CGFloat(steps)
+            let translation = axis.offset(along: peak * t, across: 0)
             if let revealGrab {
-                revealGrab.update(
-                    translation: CGPoint(x: peak * t, y: 0), in: view
-                )
+                revealGrab.update(translation: translation, in: view)
             } else {
                 interaction?.update(ZoomTransitionGeometry.dismissProgress(
-                    translation: peak * t, span: view.bounds.width
+                    translation: peak * t, span: axis.span(of: view.bounds.size)
                 ))
             }
         }
         try? await Task.sleep(nanoseconds: 250_000_000)
         releaseSwipe(
-            translation: CGPoint(x: peak, y: 0), velocity: .zero, ended: true, in: view
+            translation: axis.offset(along: peak, across: 0),
+            velocity: .zero, ended: true, in: view
         )
         return isDriven
     }
@@ -418,7 +489,11 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // earliest moment anything of ours hears about it — still early enough,
         // since the animator below is built from the geometry it produces.
         // Idempotent by contract, because a swipe arrives here as well.
-        prepareForDismissal?()
+        //
+        // `.horizontal` for a pop with no gesture: the back button means the
+        // platform's own direction, and a swipe re-asks with its real axis a
+        // moment earlier in `beginSwipe`.
+        prepareForDismissal?(interaction != nil || revealGrab != nil ? activeAxis : .horizontal)
         // ⚠️ A POST THAT FLIES GOES BACK TO WHOEVER HELD THIS SLOT BEFORE US.
         //
         // This driver holds the delegate slot for the whole of the screen's
@@ -428,11 +503,45 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // asked of the POST rather than of who happens to be driving — a
         // back-button pop has no driver at all, and it must still leave as the
         // right kind.
+        //
+        // ⚠️ A DECLINED FORWARD IS NOT AN ANSWER — WHEN A GRAB IS LIVE.
+        //
+        // Forwarding used to return whatever the saved delegate said INCLUDING
+        // nil, and nil is not "no opinion": it is UIKit's own default pop,
+        // which is not interactive. A grab was created moments earlier in
+        // `beginSwipe`, so the finger then drove nothing and the screen slid
+        // away as if there had been no gesture at all. Filmed on a post opened
+        // as a REVEAL from a place page and paged onto a photograph: that
+        // screen has no flight behind it, so the delegate it displaced is the
+        // page's own return to the MAP — a controller with nothing to say
+        // about this pop, saying so, and being taken at its word.
+        //
+        // Narrowed to the live-driver case on purpose. A pop with no gesture —
+        // the back button — keeps forwarding exactly as it did, nil included,
+        // because there is nothing being driven that a decline could strand
+        // and because the animator this would fall through to is chosen from a
+        // geometry that a back-button pop never re-staged.
+        //
+        // ⚠️ AND THE LANDING HAS THE SAME VOTE HERE AS IT HAS AT THE GRAB.
+        //
+        // "Asked of the POST" was half a question. A hero close needs a post
+        // with something to fly AND a row that can receive it, and this site
+        // asked only the first — so a drag the hero had already DECLINED at
+        // `gestureRecognizerShouldBegin` was handed straight back to it here,
+        // as the animator for the very pop the reveal was driving. Both then
+        // ran: the flight hid the departing page to put its own card in front,
+        // the card was empty because the landing has no picture, and the page
+        // it hid was the one the reveal was carrying. The pop completed with
+        // the feed still drawn over the grid. Filmed.
         if (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind == .hero,
+           heroLandingAcceptsHero?() != false,
            let savedDelegate {
-            return savedDelegate.navigationController?(
+            let forwarded = savedDelegate.navigationController?(
                 navigationController, animationControllerFor: operation, from: fromVC, to: toVC
             )
+            if forwarded != nil || (revealGrab == nil && interaction == nil) {
+                return forwarded
+            }
         }
         #if DEBUG
         // `-grab-log`: which animator a pop got, and why.
@@ -451,14 +560,20 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // A live grab is the animation; anything with geometry in it would
         // stage a second flight over the same page. See `RevealGrabAnimator`.
         if revealGrab != nil { return RevealGrabAnimator() }
-        if let revealGeometry {
+        // `interaction == nil` scopes the window-shaped close to pops with no
+        // live slide behind them (the back button): a scrubbed swipe on an
+        // axis `revealReturnAxes` excludes is a SLIDE by decision, and giving
+        // it the window here would overrule the begin-time choice.
+        if let revealGeometry, interaction == nil {
             return RevealPopAnimator(
                 geometry: revealGeometry, returningChrome: revealReturningChrome
             )
         }
-        // The axis is the live swipe's; a back-button pop (no interaction)
-        // exits horizontally, the platform's own direction.
-        return TimelineSlidePopAnimator(axis: interaction != nil ? activeAxis : .horizontal)
+        // The axis is the live swipe's — unless the owner transposed it (see
+        // `fallbackSlideAxis`). A back-button pop (no interaction) exits
+        // horizontally, the platform's own direction.
+        guard interaction != nil else { return TimelineSlidePopAnimator(axis: .horizontal) }
+        return TimelineSlidePopAnimator(axis: fallbackSlideAxis ?? activeAxis)
     }
 
     public func navigationController(
@@ -572,8 +687,16 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         // with no opinion answers `.hero`, which is why this asks for `.card`
         // rather than "not hero": this driver also serves screens that fly
         // nothing at all, and they must keep claiming drags as they did.
+        //
+        // ⚠️ AND THE MIRROR OF THE HERO'S SECOND GATE. A destination that has
+        // something to fly is not enough: the hero also refuses a LANDING it
+        // cannot draw — see `ZoomTransitionSource.zoomLandingAcceptsHero` — and
+        // if this driver went on refusing there too, neither would claim the
+        // drag and the screen would leave on a plain slide. The two answers
+        // come from one predicate so they cannot drift apart.
         if arbitratesWithHeroGrab,
-           (feed as? any ZoomTransitionDestination)?.zoomDismissalKind != .card {
+           (feed as? any ZoomTransitionDestination)?.zoomDismissalKind != .card,
+           heroLandingAcceptsHero?() != false {
             return false
         }
         if let canBeginDismissal, !canBeginDismissal() { return false }

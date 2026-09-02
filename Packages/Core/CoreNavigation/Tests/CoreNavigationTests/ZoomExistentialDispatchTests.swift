@@ -44,7 +44,7 @@ struct ZoomExistentialDispatchTests {
         ])
     }
 
-    // MARK: - Destination (13 defaulted members)
+    // MARK: - Destination (14 defaulted members)
 
     @Test func everyDefaultedDestinationMemberDispatchesDynamically() {
         let spy = SpyDestination()
@@ -54,6 +54,7 @@ struct ZoomExistentialDispatchTests {
         #expect(destination.zoomDismissalKind == .card)
         #expect(destination.zoomDestinationContentIsReady == false)
         #expect(destination.zoomOwnsInteractiveDismissal == false)
+        #expect(destination.concealsAppTabBar == false)
         #expect(destination.zoomDestinationMediaIsRendering == false)
         #expect(destination.zoomVerticalDismissalPermitted(at: .zero, in: probe) == false)
         #expect(destination.zoomHorizontalDismissalPermitted(at: .zero, in: probe) == false)
@@ -68,13 +69,13 @@ struct ZoomExistentialDispatchTests {
         #expect(destination.zoomParkLiveMediaForHandoff())
 
         #expect(spy.calls == [
-            "kind", "contentReady", "ownsDismissal", "mediaRendering",
+            "kind", "contentReady", "ownsDismissal", "concealsTabBar", "mediaRendering",
             "verticalPermitted", "horizontalPermitted", "mirror", "donate",
             "reclaim", "adopt", "willBegin", "dismissState", "park",
         ])
     }
 
-    // MARK: - Flight card (9 defaulted members)
+    // MARK: - Flight card (10 defaulted members)
 
     @Test func everyDefaultedFlightCardMemberDispatchesDynamically() {
         let spy = SpyCard()
@@ -88,12 +89,13 @@ struct ZoomExistentialDispatchTests {
         card.adoptZoomLiveMedia { _ in true }
         card.adoptZoomLiveMediaView(probe)
         #expect(card.zoomLiveMediaTracksCardBounds)
+        card.setZoomContentBlend(0.5)
         card.prepareZoomLiveMediaForFlight(destinationSize: CGSize(width: 3, height: 4))
         card.applyZoomRestingShadow(to: CALayer())
 
         #expect(spy.calls == [
             "isDrawing", "debugState", "nativeSize", "surface", "adoptMirror",
-            "adoptView", "tracksBounds", "prepare", "applyShadow",
+            "adoptView", "tracksBounds", "blend", "prepare", "applyShadow",
         ])
     }
 }
@@ -144,6 +146,7 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
     var zoomDismissalKind: ZoomDismissalKind { calls.append("kind"); return .card }
     var zoomDestinationContentIsReady: Bool { calls.append("contentReady"); return false }
     var zoomOwnsInteractiveDismissal: Bool { calls.append("ownsDismissal"); return false }
+    var concealsAppTabBar: Bool { calls.append("concealsTabBar"); return false }
     var zoomDestinationMediaIsRendering: Bool { calls.append("mediaRendering"); return false }
     func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
         calls.append("verticalPermitted"); return false
@@ -177,6 +180,7 @@ private final class SpyCard: UIView, ZoomFlightCard {
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) { calls.append("adoptMirror") }
     func adoptZoomLiveMediaView(_ view: UIView) { calls.append("adoptView") }
     var zoomLiveMediaTracksCardBounds: Bool { calls.append("tracksBounds"); return true }
+    func setZoomContentBlend(_ t: CGFloat) { calls.append("blend") }
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) { calls.append("prepare") }
     func applyZoomRestingShadow(to layer: CALayer) { calls.append("applyShadow") }
 }

@@ -206,6 +206,175 @@ struct ForYouSourceSlotTests {
     }
 }
 
+/// WHICH post the arrival tile shows when a TEXT post is dismissed onto the
+/// grid.
+///
+/// A text page has no media, so there is nothing for the departing post to
+/// become — the close cannot land on its own post the way a media dismissal
+/// does. The product answer is the NEXT media post: the one the viewer would
+/// have reached with one more swipe, so the grid they come back to is the feed
+/// they were in the middle of rather than a tile they have already read past.
+///
+/// "Next" is only answerable HERE. The snap feed is seeded as a suffix of this
+/// page's ordered ids (`ForYouViewController.openFeed`), and the view model's
+/// corpus is neither ordered nor filtered the same way, so the same question
+/// asked there answers about a different list.
+@MainActor
+struct ForYouNextLandingTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    private func page(_ posts: [GalleryPost]) -> ForYouGridPage {
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid
+        )
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        page.render(.content(posts))
+        page.layoutIfNeeded()
+        return page
+    }
+
+    private func post(
+        _ id: String, kind: GalleryPost.Kind = .photo, cover: Bool = true
+    ) -> GalleryPost {
+        GalleryPost(
+            id: PostID(id), kind: kind, isRepost: false,
+            thumbnailURL: cover ? URL(string: "mock://cover/\(id)") : nil,
+            aspectRatio: 1, caption: "", publishedAtMS: 0
+        )
+    }
+
+    /// A page of media, which is the ordinary case.
+    private func media(_ count: Int) -> [GalleryPost] {
+        (0..<count).map { post("p\($0)") }
+    }
+
+    /// Below the fold nothing is realized, so neither preference can fire and
+    /// ORDER is the only thing left to decide — the next post is the very next
+    /// post, which is what "one more swipe" means.
+    @Test func theNextLandingIsTheVeryNextPostInTheRenderedOrder() {
+        let page = page(media(60))
+        let anchor = page.posts[40]
+        #expect(!page.isPostVisible(anchor.id), "the fixture put the anchor on screen")
+
+        #expect(page.nextLandableMedia(after: anchor.id)?.id == page.posts[41].id)
+    }
+
+    /// ⚠️ AND IT PASSES OVER WHAT THE VIEWER IS LOOKING AT.
+    ///
+    /// The landing swaps the chosen post into the departure slot, so choosing a
+    /// tile that is on screen makes it vanish from where it lives and reappear
+    /// in the arrival cell, mid-landing, in front of the viewer.
+    @Test func aVisibleCandidateIsPassedOverForAnOffScreenOne() {
+        let page = page(media(60))
+        let anchor = page.posts[0]
+        // The setup, asserted rather than assumed: the tiles just after the
+        // anchor are exactly the ones being looked at.
+        #expect(page.isPostVisible(page.posts[1].id), "the fixture put nothing on screen")
+
+        let landing = page.nextLandableMedia(after: anchor.id)
+
+        let expected = page.posts.dropFirst().first { !page.isPostVisible($0.id) }
+        #expect(landing?.id == expected?.id)
+        #expect(landing?.id != page.posts[1].id, "the landing took a tile off the viewer's screen")
+    }
+
+    /// A TEXT post is never a landing — it has no media, which is the whole
+    /// reason this question is being asked. `canLandHero` says so for a list and
+    /// the kind says so everywhere.
+    @Test func aTextPostIsNeverALanding() throws {
+        var corpus = (0..<30).map { post("t\($0)", kind: .text, cover: false) }
+        corpus.append(post("media"))
+        let page = page(corpus)
+        // The arrangement permutes the corpus into slots, so the anchor is
+        // found by property rather than by the index it went in at.
+        let anchor = try #require(page.posts.first { $0.kind == .text })
+
+        #expect(page.nextLandableMedia(after: anchor.id)?.id == PostID("media"))
+    }
+
+    /// Neither is a post with no cover: the arrival tile would be a coloured
+    /// square, and the readiness gate would hold the card for its whole ceiling
+    /// waiting for an image that is never coming.
+    @Test func aPostWithNoCoverIsNeverALanding() throws {
+        var corpus = (0..<30).map { post("bare\($0)", cover: false) }
+        corpus.append(post("media"))
+        let page = page(corpus)
+        let anchor = try #require(page.posts.first { $0.id != PostID("media") })
+
+        #expect(page.nextLandableMedia(after: anchor.id)?.id == PostID("media"))
+    }
+
+    /// The last post still has to land somewhere, so the search wraps to the
+    /// head of the page — the alternative is nil, which is a close with no
+    /// arrival at all.
+    @Test func theLastPostWrapsToTheHeadOfThePage() {
+        let page = page(media(60))
+        let last = page.posts[page.posts.count - 1]
+
+        let landing = page.nextLandableMedia(after: last.id)
+
+        #expect(landing != nil)
+        #expect(landing?.id != last.id)
+        // The same preference applies on the way round: the head of a page is
+        // on screen, so the wrap still skips what the viewer is looking at.
+        #expect(landing?.id == page.posts.dropLast().first { !page.isPostVisible($0.id) }?.id)
+    }
+
+    /// ⚠️ AND ONLY WHEN NOTHING FOLLOWS. Wrapping is the fallback, not a
+    /// ranking: a candidate after the anchor wins over an equally good one
+    /// before it, or "next" would mean "anywhere" and a close could land the
+    /// viewer further back in the feed than they started.
+    @Test func aCandidateAfterTheAnchorBeatsOneBeforeIt() throws {
+        let page = page(media(60))
+        let anchorIndex = 40
+        let landing = try #require(page.nextLandableMedia(after: page.posts[anchorIndex].id))
+
+        let landed = try #require(page.posts.firstIndex { $0.id == landing.id })
+        #expect(landed > anchorIndex, "the search wrapped while posts still followed")
+    }
+
+    /// A page with nothing landable on it answers nil rather than a text post:
+    /// the caller has a fallback (the departure tile), and a dishonest answer
+    /// would fly the close onto a card with no media to receive it.
+    @Test func aPageOfTextAnswersNil() {
+        let page = page((0..<20).map { post("t\($0)", kind: .text, cover: false) })
+        #expect(page.nextLandableMedia(after: page.posts[0].id) == nil)
+    }
+
+    /// An anchor this page does not hold has no "next" — the feed settled on
+    /// something the grid no longer carries.
+    @Test func anAbsentAnchorAnswersNil() {
+        let page = page(media(30))
+        #expect(page.nextLandableMedia(after: PostID("nowhere")) == nil)
+    }
+
+    /// The stand-in is sized from the SLOT, not from the post: the landing
+    /// swaps this post into the departure slot, so the rect the window closes
+    /// onto is that slot's, whatever was in it a moment ago.
+    @Test func theTileStandInIsSizedFromTheSlotItLandsIn() throws {
+        let page = page(media(60))
+        let occupant = page.posts[2].id
+        let arriving = try #require(page.nextLandableMedia(after: page.posts[0].id))
+
+        let standIn = try #require(page.makeTileStandIn(for: arriving, slotOf: occupant))
+        let scroll = try #require(page.subviews.compactMap { $0 as? UICollectionView }.first)
+        let slot = try #require(scroll.cellForItem(at: IndexPath(item: 2, section: 0)))
+
+        #expect(standIn.bounds.size == slot.bounds.size)
+    }
+
+    /// Nothing realized at the slot means no rect to size to, and a stand-in
+    /// built at a guessed size lands at the wrong one.
+    @Test func anUnrealizedSlotHasNoStandIn() {
+        let page = page(media(120))
+        let arriving = page.posts[1]
+        #expect(page.makeTileStandIn(for: arriving, slotOf: page.posts[119].id) == nil)
+        #expect(page.makeTileStandIn(for: arriving, slotOf: PostID("nowhere")) == nil)
+    }
+}
+
 /// The card is held over the landing tile until it has something to show. What
 /// counts as "something" is the whole subject: the gate used to answer only
 /// "is playback running", so a tile with neither a cover nor a rendered frame

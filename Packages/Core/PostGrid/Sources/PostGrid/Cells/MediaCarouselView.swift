@@ -112,6 +112,64 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// tracked, so a mid-flick read is never stale.
     public private(set) var currentPage = 0
 
+    /// Whether the carousel can still travel `delta` pages — the question that
+    /// decides whether a horizontal drag over it is the carousel's own or the
+    /// surrounding surface's.
+    ///
+    /// ⚠️ THE DELTA IS IN PAGES, WHICH RUN THE OPPOSITE WAY TO THE FINGER. A
+    /// rightward drag uncovers the page BEFORE this one and asks for `-1`; a
+    /// leftward drag asks for `+1`. Stated as a delta rather than as two
+    /// booleans because the callers are gesture gates that already hold a
+    /// velocity, and the sign is the whole of what they know.
+    ///
+    /// Resolved from `currentPage`, never from `contentOffset`, and the
+    /// difference is not cosmetic: `currentPage` is itself derived from the
+    /// offset on every scroll tick and clamped to the run, so it keeps
+    /// answering through a rubber-band. A raw offset does not — an overscroll
+    /// past the start is negative and past the end is beyond the maximum, and
+    /// both would report travel that does not exist, on exactly the drags this
+    /// rule exists to route.
+    ///
+    /// A delta of zero is "direction unknown", and answers the older, weaker
+    /// question: is there anywhere to go at all.
+    public func hasTravel(towardsPageDelta delta: Int) -> Bool {
+        guard delta != 0 else { return pageViews.count > 1 }
+        return pageViews.indices.contains(currentPage + delta)
+    }
+
+    /// Whether a drag of `velocity` is one this carousel DECLINES outright.
+    ///
+    /// The other half of the pass-through rule, and the half that is easy to
+    /// miss — the same half the edge strip below already had to be taught.
+    /// Telling the screen's dismissal it MAY claim a rightward drag does not
+    /// stop the carousel from claiming it too: both recognizers see the touch,
+    /// the carousel's is the inner one, and it simply spent the gesture on a
+    /// rubber-band. That is the reported symptom — a rightward drag on the first
+    /// page of a collection did nothing at all.
+    ///
+    /// ⚠️ RIGHTWARD ONLY, and the mirror is deliberately NOT written here.
+    /// Rightward is the direction that means "back" everywhere in this app: the
+    /// system's edge pop, the tab pager's previous page, and the only horizontal
+    /// direction the zoom dismissal is armed for (`ZoomDismissAxis.match`
+    /// requires `velocity.x > 0`). Leftward means "onward", and on the surfaces a
+    /// carousel actually lives on there is nobody to hand it to — the feed is
+    /// forward-only and the dismissal is not listening. A drag given up to
+    /// nobody would be worse than one that ends against a stop: the end-of-run
+    /// rubber-band is at least an answer. Where something IS waiting for it —
+    /// the tab pager, which has a next tab — that surface makes the mirror
+    /// decision for itself, in `HorizontalPagerScrollView.shouldYield`.
+    ///
+    /// Predominantly horizontal, which is the MIRROR of the dismissal's own
+    /// begin gate, so exactly one of the two claims any given drag — the same
+    /// arrangement the feed's forward-only decline makes with the vertical axis.
+    ///
+    /// Internal so the rule is unit-testable: recognition cannot be driven from
+    /// a test, and this is the decision that stands behind it.
+    func yieldsRightwardDrag(velocity: CGPoint) -> Bool {
+        velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
+            && !hasTravel(towardsPageDelta: -1)
+    }
+
     /// The image the CURRENT page is showing — what a hero flight departs with.
     /// A carousel's cover is not the post's first attachment once the viewer
     /// has moved.
@@ -320,6 +378,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     public init(style: Style = .card, frame: CGRect = .zero) {
         self.style = style
         super.init(frame: frame)
+        scrollView.carousel = self
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.alwaysBounceHorizontal = true
         // See the type note: paging by the box's width would be off by `peek`.
@@ -697,8 +756,9 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     }
 }
 
-/// The carousel's scroll view, which refuses touches that start in the screen's
-/// leading-edge strip.
+/// The carousel's scroll view, which refuses touches it has nothing to spend:
+/// those that start in the screen's leading-edge strip, and those that pull
+/// rightward when there is no page to the left.
 ///
 /// Half of a rule, and the half that is easy to miss. Telling the dismissal it
 /// MAY claim an edge drag does not stop the carousel from claiming it too: both
@@ -710,22 +770,40 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
 /// carousel borrowing it would make the one gesture that always means "back"
 /// mean something else on the screens hardest to leave.
 ///
-/// Window coordinates, not the view's: the strip is a property of the SCREEN,
-/// and a carousel inside a card sits nowhere near it — which is exactly what
-/// should keep this rule from firing there.
+/// ⚠️ The SAME missing half, a second time, is what
+/// `MediaCarouselView.yieldsRightwardDrag` is here for. The snap feed's gate had
+/// been answering "permitted" on the first page since the day it was written,
+/// and the drag still died in this scroll view's rubber-band.
+///
+/// Window coordinates for the strip, not the view's: it is a property of the
+/// SCREEN, and a carousel inside a card sits nowhere near it — which is exactly
+/// what should keep that rule from firing there.
 private final class EdgeYieldingScrollView: UIScrollView {
     /// Matched to `HorizontalPagerScrollView`'s own zone, which yields the same
     /// strip to the same gesture.
     private static let backEdgeZone: CGFloat = 20
 
+    /// The carousel this box scrolls, so the pan can ask what it has left to
+    /// travel. Weak, and set at construction — the scroll view is a subview and
+    /// never outlives its owner.
+    weak var carousel: MediaCarouselView?
+
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if let pan = gestureRecognizer as? UIPanGestureRecognizer,
-           pan === panGestureRecognizer, let window {
-            // The gesture's ORIGIN, not where the finger is now: a pan is only
-            // asked once it has travelled its slop, so reading the live location
-            // puts a drag that started on the edge tens of points inside it.
-            let x = pan.location(in: window).x - pan.translation(in: window).x
-            if x - window.bounds.minX <= Self.backEdgeZone { return false }
+        if let pan = gestureRecognizer as? UIPanGestureRecognizer, pan === panGestureRecognizer {
+            if let window {
+                // The gesture's ORIGIN, not where the finger is now: a pan is
+                // only asked once it has travelled its slop, so reading the live
+                // location puts a drag that started on the edge tens of points
+                // inside it.
+                let x = pan.location(in: window).x - pan.translation(in: window).x
+                if x - window.bounds.minX <= Self.backEdgeZone { return false }
+            }
+            // Velocity, not translation: this is asked once, at the moment the
+            // pan has earned its slop, and the direction the hand is travelling
+            // then is what the gesture means.
+            if carousel?.yieldsRightwardDrag(velocity: pan.velocity(in: self)) == true {
+                return false
+            }
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }

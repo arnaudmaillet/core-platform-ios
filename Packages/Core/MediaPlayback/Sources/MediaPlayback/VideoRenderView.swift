@@ -124,6 +124,30 @@ public final class VideoRenderView: UIView {
     /// on every re-assert, not only on the edge.
     private var hasAnnouncedPicture = false
 
+    /// ⚠️ WHAT THIS SURFACE IS SHOWING, AS A PICTURE — the decoded frame when
+    /// there is one, and the poster underneath it when there is not.
+    ///
+    /// A video page had no answer to this at all, and the nil travelled: a
+    /// transition that carries the departing page's picture so the media can
+    /// scale with its window got nothing from a video, and fell back to
+    /// clipping the live page instead. The frame is already retained (see
+    /// `VideoFrameRenderer.currentFrameBuffer`); all that was missing was a way
+    /// to ask.
+    ///
+    /// The poster is not a lesser answer, it is the correct one before the
+    /// first frame — it is what the surface is literally drawing then. It is
+    /// also the whole answer under `-avplayer-render`, which has no renderer
+    /// and therefore no retained buffer.
+    ///
+    /// Nil means there is genuinely no picture: no frame, no poster.
+    public var currentStill: UIImage? {
+        if let buffer = renderer?.currentFrameBuffer,
+           let frame = VideoStillCapture.image(from: buffer) {
+            return frame
+        }
+        return posterView.image
+    }
+
     public func setPoster(_ image: UIImage?) {
         posterView.image = image
         updatePosterVisibility(ready: isReadyForDisplay)
