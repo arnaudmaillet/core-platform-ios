@@ -441,8 +441,19 @@ final class PlaceProfileViewController: UIViewController {
         // builder constructs the destination. Widening that seam for a
         // secondary affordance is the wrong trade; a chip that opens the post
         // is honest, where a chip that did nothing would not be.
+        // ⚠️ THE COUNT OPENS THE THREAD, not just the post.
+        //
+        // It used to open the post and stop there, and the note that stood here
+        // argued the seam was not worth widening for "a secondary affordance".
+        // It is the only way to ask for a media post's thread directly — the
+        // page opens onto its photograph and the thread is a second surface —
+        // and For You's identical chip has done this all along. One control,
+        // two screens, one behaviour.
         activityPage.onItemCommentsTapped = { [weak self] index in
-            self?.openTile(at: index, in: self?.activityPage)
+            self?.openTile(at: index, in: self?.activityPage, showingComments: true)
+        }
+        page.onItemCommentsTapped = { [weak self] index in
+            self?.openTile(at: index, in: self?.page, showingComments: true)
         }
         // The card band's own "..." stays dark here: the reporting and
         // social-graph seams are not threaded into this screen, and a menu
@@ -1132,7 +1143,9 @@ final class PlaceProfileViewController: UIViewController {
 
     // MARK: - Opening a tile
 
-    private func openTile(at index: Int, in grid: ForYouGridPage?) {
+    private func openTile(
+        at index: Int, in grid: ForYouGridPage?, showingComments: Bool = false
+    ) {
         guard let grid else { return }
         let posts = grid.posts
         guard posts.indices.contains(index) else { return }
@@ -1160,6 +1173,20 @@ final class PlaceProfileViewController: UIViewController {
             setConcealed: { [weak grid] concealed in
                 grid?.setHeroHidden(concealed, for: tapped.id)
             },
+            // ⚠️ THE CARD TAKES OFF PLAYING, rather than wearing the post's
+            // poster until the page has landed.
+            //
+            // A row on these lists is already playing under the finger that
+            // taps it, and the flight used to carry the still: the clip became
+            // a photograph for the length of the opening and only resumed after
+            // the landing. Filmed on Activity. The card joins the row's own
+            // playback as an extra surface — the row keeps rendering behind it,
+            // so there is nothing to park and nothing to hand back if the
+            // flight is abandoned.
+            donateLiveMedia: { [weak grid] in grid?.liveFlightSurface(for: tapped.id) },
+            // A TEXT post's page IS its thread, so it arrives there by being
+            // tapped at all — see `SnapFeedHeroOrigin.opensComments`.
+            opensComments: showingComments && tapped.kind != .text,
             depthView: { [weak grid] in grid },
             // A row with no media has nothing to fly, and `hasHero` above is
             // already false for it — which used to mean the platform's plain

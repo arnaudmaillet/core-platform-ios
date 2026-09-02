@@ -58,7 +58,10 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     /// showing the card's own cover. Handing that back as a second operand
     /// would cross-fade a photograph with itself — invisible when it works and
     /// indistinguishable from a soft landing when it does not.
+    private var isStagingDismissal = false
+
     func zoomSourceWillStageDismissal() {
+        isStagingDismissal = true
         defer { debugLogBlend() }
         guard let settled = settle?(), let id = settled.id, id != origin.post.id else {
             departurePicture = nil
@@ -102,7 +105,24 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
             style: origin.style == .tile ? .tile : .listMedia
         )
         card.setDeparturePicture(departurePicture)
+        // ⚠️ PRESENT ONLY. A dismissal must fly the PAGE's playhead, not the
+        // row's — the two are seconds apart once the page has been playing, and
+        // the dismissal's own donation resolves by identity from the page.
+        if !isStagingDismissal, let donated = origin.donateLiveMedia?() {
+            card.adoptZoomLiveMediaView(donated)
+        }
         return card
+    }
+
+    /// Asked again while the card is already in the air.
+    ///
+    /// The build-time ask can only report what the row held AT THE TAP, and a
+    /// row is routinely granted its player by that very tap: the focus pass
+    /// starts it, the URL resolves a turn later, the first frame decodes after
+    /// that. One nil says "not yet", never "never".
+    func zoomLiveMediaSurfaceIfReady() -> UIView? {
+        guard !isStagingDismissal else { return nil }
+        return origin.donateLiveMedia?()
     }
 
     func setZoomSourceHidden(_ hidden: Bool) {

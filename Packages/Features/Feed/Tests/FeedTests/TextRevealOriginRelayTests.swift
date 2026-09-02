@@ -99,3 +99,51 @@ struct TextRevealOriginRelayTests {
         #expect(box.chrome == ["outer-present", "outer-dismiss"])
     }
 }
+
+/// What the COMMENT COUNT asks for, and the one post it may not ask it of.
+///
+/// Pressing a media card's count is the only way to reach that post's thread
+/// directly — the page opens onto its photograph and the thread is a second
+/// surface. A TEXT post's page IS its thread, so it arrives there by being
+/// tapped at all, and a chip promising a shortcut to where the card already
+/// goes would be a second control for one destination.
+@MainActor
+struct CommentCountOpeningTests {
+    private func post(kind: GalleryPost.Kind) -> GalleryPost {
+        GalleryPost(
+            id: PostID("p-\(kind)"), kind: kind, isRepost: false, thumbnailURL: nil,
+            caption: "c", publishedAtMS: 0
+        )
+    }
+
+    private func origin(kind: GalleryPost.Kind, opensComments: Bool) -> SnapFeedHeroOrigin {
+        let model = post(kind: kind)
+        return SnapFeedHeroOrigin(
+            post: model, stream: [model], hasHero: kind != .text, cover: nil,
+            style: .listMedia, frame: { _ in nil }, isOnScreen: { true },
+            setConcealed: { _ in },
+            // The rule the surface applies before it ever reaches the builder.
+            opensComments: opensComments && kind != .text
+        )
+    }
+
+    @Test func aMediaPostOpenedByItsCountArrivesOnItsThread() {
+        #expect(origin(kind: .photo, opensComments: true).opensComments)
+        #expect(origin(kind: .video, opensComments: true).opensComments)
+    }
+
+    @Test func aTextPostNeverAsksForTheThreadItAlreadyIs() {
+        #expect(!origin(kind: .text, opensComments: true).opensComments)
+    }
+
+    @Test func anOrdinaryTapAsksForNothing() {
+        #expect(!origin(kind: .photo, opensComments: false).opensComments)
+    }
+
+    /// And the live surface is opt-in: a surface that is not playing yet answers
+    /// nil, which is ordinary and means the flight asks again in the air.
+    @Test func anOriginWithNoLiveMediaIsSilentAboutIt() {
+        #expect(origin(kind: .photo, opensComments: false).donateLiveMedia == nil)
+    }
+}
+

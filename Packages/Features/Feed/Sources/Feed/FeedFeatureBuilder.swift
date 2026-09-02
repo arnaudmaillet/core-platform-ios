@@ -159,6 +159,18 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // which is why this was only ever noticed on the plain push below.
         (destination as? SnapFeedViewController)
             .map { $0.seedProjection(GalleryPostProjection.seedModels(from: origin.stream)) }
+        // ⚠️ OPENED BY ITS COMMENT COUNT — the thread comes up with the page.
+        //
+        // Handed over as a page instruction rather than acted on at the tap, so
+        // the destination spends the engagement's layout when it is ready to.
+        // The reveal point is the rect the flight is about to fly, so the
+        // thread is revealed OUT of the photograph rather than arriving over
+        // it. Same shape as For You's own chip.
+        if origin.opensComments {
+            (destination as? SnapFeedViewController)?.openComments(
+                for: origin.post.id, revealingFrom: origin.frame(presenter.view)
+            )
+        }
         // The snap feed is the only thing this builds, and it conforms — but
         // the factory is typed `UIViewController` for callers who do not care.
         //

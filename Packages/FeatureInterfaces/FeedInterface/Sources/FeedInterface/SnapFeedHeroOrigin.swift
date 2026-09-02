@@ -261,6 +261,30 @@ public struct SnapFeedHeroOrigin {
     public let isOnScreen: () -> Bool
     /// Hide the real thing while its twin is in the air, and put it back after.
     public let setConcealed: (Bool) -> Void
+    /// ⚠️ A SURFACE ALREADY PLAYING THE TAPPED POST, for the flight to carry
+    /// into its window — the OPENING's half of the live-media story.
+    ///
+    /// Without it a card takes off wearing the post's poster and the video only
+    /// starts once the page has landed: the viewer taps a clip that is playing
+    /// under their finger and watches it become a photograph for the length of
+    /// the flight. Filmed on a place page's Activity list.
+    ///
+    /// Nil is ordinary and means "not live yet" — a row is routinely granted
+    /// its player by the very tap that opens it, so the flight asks again while
+    /// the card is in the air.
+    /// ⚠️ THE POST WAS OPENED BY ITS COMMENT COUNT, so it arrives with the
+    /// thread already up.
+    ///
+    /// Carried on the origin rather than acted on at the tap, because only the
+    /// destination knows when it is safe to spend the engagement's layout — the
+    /// same division For You's own comment chip already uses.
+    ///
+    /// Never set for a TEXT post: its page IS its thread, so it arrives there by
+    /// tapping the card at all, and a chip promising a shortcut to where the
+    /// card goes anyway would be a second control for one destination.
+    public let opensComments: Bool
+    public let donateLiveMedia: (() -> UIView?)?
+
     /// The view the depth cue recedes — the content, not the chrome around it.
     public let depthView: () -> UIView?
     /// How to open this post as a REVEAL when there is no hero to fly — see
@@ -276,6 +300,8 @@ public struct SnapFeedHeroOrigin {
         frame: @escaping (UICoordinateSpace) -> CGRect?,
         isOnScreen: @escaping () -> Bool,
         setConcealed: @escaping (Bool) -> Void,
+        donateLiveMedia: (() -> UIView?)? = nil,
+        opensComments: Bool = false,
         depthView: @escaping () -> UIView? = { nil },
         textReveal: TextRevealOrigin? = nil
     ) {
@@ -287,6 +313,8 @@ public struct SnapFeedHeroOrigin {
         self.frame = frame
         self.isOnScreen = isOnScreen
         self.setConcealed = setConcealed
+        self.donateLiveMedia = donateLiveMedia
+        self.opensComments = opensComments
         self.depthView = depthView
         self.textReveal = textReveal
     }
