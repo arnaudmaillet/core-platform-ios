@@ -269,12 +269,15 @@ public enum RevealPageFit {
     /// the page — where filling is what keeps the media reading as the thing
     /// travelling.
     case covering
-    /// The page fits INSIDE the window, whole, with the card's own ground
-    /// around it. For a landing whose shape diverges from the page's early: a
-    /// 343x145 row against a 402x874 screen crops almost everything under
-    /// `covering`, because covering keys on the width, and the width is the
-    /// dimension that barely moves.
-    case contained
+    // ⚠️ THERE WAS A THIRD, `contained`, AND IT IS GONE. The page fitted INSIDE
+    // the window with the card's ground around it, on the reasoning that
+    // covering a 343x145 row from a 402x874 screen crops almost everything.
+    // True, and beside the point: on the release spring, where the window's
+    // aspect leaves the page's, it letterboxed the media instead — the same
+    // defect wearing the opposite sign, and filmed as such.
+    //
+    // What every report has agreed on is simpler than either: the media fills
+    // the transition window, always.
 
     /// ⚠️ TRUE FOR EVERY FIT THAT MOVES THE PAGE, which is the question almost
     /// every caller is actually asking — and asking it as `== .covering` is a
@@ -490,12 +493,9 @@ enum RevealStage {
     static func pageFitting(
         _ window: CGRect, from open: CGRect, fit: RevealPageFit
     ) -> (scale: CGFloat, translation: CGPoint) {
-        let horizontal = window.width / max(open.width, 1)
-        let vertical = window.height / max(open.height, 1)
-        // COVER takes the larger — the page overflows and the window crops it.
-        // CONTAIN takes the smaller — the page fits whole and the window's own
-        // ground fills what is left. `clipped` never reaches here.
-        let scale = fit == .contained ? min(horizontal, vertical) : max(horizontal, vertical)
+        // The LARGER ratio: the page overflows and the window crops it, which
+        // is what "fills the window" means. `clipped` never reaches here.
+        let scale = max(window.width / max(open.width, 1), window.height / max(open.height, 1))
         return (
             scale: scale,
             translation: CGPoint(x: window.midX - open.midX, y: window.midY - open.midY)
@@ -809,21 +809,10 @@ enum RevealStage {
 
     /// The static full-screen host and its mask. The page keeps the frame the
     /// transition context gave it; only the mask and the transform ever move.
-    /// ⚠️ `ground` IS NOT DECORATION — it is what `RevealPageFit.contained`
-    /// promises and had no way to keep.
-    ///
-    /// A contained page fits INSIDE the window "with the card's own ground
-    /// around it". Nothing painted that ground: the host was clear, so as the
-    /// window's aspect diverged from the page's on the release, the DESTINATION
-    /// showed through the sides of the closing card. Invisible during the drag,
-    /// where the window keeps the screen's aspect and the page fills it
-    /// exactly, and it opens the moment the spring starts.
     static func makeHost(
-        around page: UIView, in container: UIView, pageFrame: CGRect,
-        ground: UIColor? = nil
+        around page: UIView, in container: UIView, pageFrame: CGRect
     ) -> (host: UIView, mask: UIView) {
         let host = UIView(frame: container.bounds)
-        host.backgroundColor = ground
         container.addSubview(host)
         host.addSubview(page)
         // Cleared BEFORE the frame is assigned: `frame` is derived from bounds
@@ -1379,11 +1368,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         container.insertSubview(dim, belowSubview: fromView)
 
         let (host, mask) = RevealStage.makeHost(
-            around: fromView, in: container, pageFrame: pageFrame,
-            // The ground a contained page sits on — see `makeHost`. Only that
-            // fit promises it; a covering page fills the window by definition
-            // and a clipped one is the window.
-            ground: geometry.pageFit == .contained ? geometry.sourceFill : nil
+            around: fromView, in: container, pageFrame: pageFrame
         )
         let open = RevealStage.open(container: container)
         // The stand-in: the card, drawn fresh, above the page inside the same

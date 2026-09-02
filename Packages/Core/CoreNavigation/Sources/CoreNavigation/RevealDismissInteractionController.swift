@@ -144,11 +144,7 @@ final class RevealDismissInteractionController: NSObject,
         container.insertSubview(dim, belowSubview: fromView)
 
         let (host, mask) = RevealStage.makeHost(
-            around: fromView, in: container, pageFrame: pageFrame,
-            // The ground a contained page sits on — see `makeHost`. Only that
-            // fit promises it; a covering page fills the window by definition
-            // and a clipped one is the window.
-            ground: geometry.pageFit == .contained ? geometry.sourceFill : nil
+            around: fromView, in: container, pageFrame: pageFrame
         )
         let open = RevealStage.open(container: container)
         // See `RevealGeometry.makeDismissStandIn`: what a dismissal carries

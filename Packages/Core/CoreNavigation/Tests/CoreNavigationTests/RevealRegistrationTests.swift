@@ -160,65 +160,39 @@ struct RevealRegistrationTests {
 
     // MARK: - How the page meets its window
 
-    /// ⚠️ CONTAINED MEANS WHOLE — the window may crop none of the page.
+    /// ⚠️ A CARRIED PAGE FILLS ITS WINDOW, always — never fitted inside it.
     ///
-    /// Held still (`.clipped`) the media stayed at full size while the window
-    /// shrank around it: a keyhole panning over a photograph, filmed on a
-    /// dismissal onto a place page's Activity row.
-    @Test func aContainedPageIsNeverCroppedByItsWindow() {
+    /// Both were shipped in turn and both were filmed. Held still, the page
+    /// stayed at full size while the window shrank around it: a keyhole
+    /// panning over a photograph. Fitted inside, the media sat letterboxed
+    /// with the card's ground above and below it on the release spring, where
+    /// the window's aspect leaves the page's. Filling is the invariant every
+    /// report agreed on.
+    @Test func aCarriedPageFillsItsWindow() {
         let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
-        let row = CGRect(x: 16, y: 300, width: 343, height: 145)
 
-        let fit = RevealStage.pageFitting(row, from: screen, fit: .contained)
-        let drawn = CGRect(
-            x: row.midX - screen.width * fit.scale / 2,
-            y: row.midY - screen.height * fit.scale / 2,
-            width: screen.width * fit.scale,
-            height: screen.height * fit.scale
-        )
-        #expect(row.insetBy(dx: -0.01, dy: -0.01).contains(drawn),
-                "the window cropped the page: \(drawn) is not inside \(row)")
+        for window in [
+            CGRect(x: 16, y: 300, width: 343, height: 145),   // a list row
+            CGRect(x: 300, y: 500, width: 44, height: 44),    // a marker
+            CGRect(x: 40, y: 120, width: 128, height: 170),   // a grid tile
+        ] {
+            let fit = RevealStage.pageFitting(window, from: screen, fit: .covering)
+            let drawn = CGRect(
+                x: window.midX - screen.width * fit.scale / 2,
+                y: window.midY - screen.height * fit.scale / 2,
+                width: screen.width * fit.scale,
+                height: screen.height * fit.scale
+            )
+            #expect(drawn.insetBy(dx: -0.01, dy: -0.01).contains(window),
+                    "the window showed ground: \\(drawn) does not fill \\(window)")
+        }
     }
 
-    /// ⚠️ AND COVERING IS THE WRONG ANSWER FOR THAT SAME ROW, which is why
-    /// there are two fits and not one.
-    ///
-    /// Cover takes the LARGER ratio, and against a 343x145 row on a 402x874
-    /// screen that is the width — the dimension that barely moves. The page
-    /// would stay near full size and lose almost all of its height, which is
-    /// the truncation being fixed, arriving through the fix.
-    @Test func coveringWouldHaveCroppedThatSameRowAlmostEntirely() {
-        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
-        let row = CGRect(x: 16, y: 300, width: 343, height: 145)
-
-        let contained = RevealStage.pageFitting(row, from: screen, fit: .contained).scale
-        let covering = RevealStage.pageFitting(row, from: screen, fit: .covering).scale
-
-        #expect(covering > contained * 4, "the two fits agree, so one of them is wrong")
-        #expect(screen.height * covering > row.height * 4,
-                "covering was supposed to overflow this window, and did not")
-    }
-
-    /// And against a MARKER the two swap roles: covering fills the disc, which
-    /// is what the viewer asked for there, and containing would letterbox a
-    /// 20pt-wide post inside it.
-    @Test func theTwoFitsSwapRolesAgainstAMarker() {
-        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
-        let marker = CGRect(x: 300, y: 500, width: 44, height: 44)
-
-        let covering = RevealStage.pageFitting(marker, from: screen, fit: .covering).scale
-        let contained = RevealStage.pageFitting(marker, from: screen, fit: .contained).scale
-
-        #expect(screen.width * covering >= marker.width - 0.01, "the disc showed its own ground")
-        #expect(screen.width * contained < marker.width / 2,
-                "containing a page in a disc should letterbox it hard")
-    }
-
-    /// Both fits are the identity at rest, so an abandoned grab needs no
-    /// special case whichever one a source chose.
+    /// A carried page is the identity at rest, so an abandoned grab needs no
+    /// special case.
     @Test func everyFitIsTheIdentityAtRest() {
         let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
-        for fit in [RevealPageFit.covering, .contained] {
+        for fit in [RevealPageFit.covering] {
             let pose = RevealStage.pageFitting(screen, from: screen, fit: fit)
             #expect(abs(pose.scale - 1) < 0.0001, "\(fit) moved a page that had not left")
             #expect(abs(pose.translation.x) < 0.0001)
@@ -307,7 +281,7 @@ struct RevealRegistrationTests {
     /// `captionEnd: nil`. A convention four sources happened to keep is not a
     /// rule.
     @Test func aCarryingFitInstallsNoDestinationScenery() {
-        for fit in [RevealPageFit.covering, .contained] {
+        for fit in [RevealPageFit.covering] {
             let box = SceneryBox()
             installVeil(geometry: box.geometry(fit: fit), anchor: box.anchor)
             installAuthorBand(geometry: box.geometry(fit: fit), anchor: box.anchor)
@@ -336,11 +310,10 @@ struct RevealRegistrationTests {
     /// because it WAS the same defect, reached by a fit the gate did not name.
     @Test func everyFitThatCarriesThePageAnswersTheSameQuestion() {
         #expect(RevealPageFit.covering.carriesPage)
-        #expect(RevealPageFit.contained.carriesPage)
         #expect(!RevealPageFit.clipped.carriesPage, "the legacy landing must stay legacy")
 
         // And the drag law follows from that one answer, not from the fit.
-        for fit in [RevealPageFit.covering, .contained] {
+        for fit in [RevealPageFit.covering] {
             for step in 0...20 {
                 let progress = CGFloat(step) / 20
                 #expect(RevealStage.fill(at: progress, carriesPage: fit.carriesPage) == 0,

@@ -1255,23 +1255,20 @@ final class PlaceProfileViewController: UIViewController {
                 self?.activityPage.makeDismissStandIn(for: anchor)
             },
             alignsPageToSource: false,
-            // ⚠️ THE PAGE FITS INSIDE THE WINDOW rather than being clipped by
-            // it — see `RevealPageFit.contained`.
+            // ⚠️ THE PAGE FILLS THE WINDOW — see `RevealPageFit.covering`.
             //
-            // Held still, the media stayed at full size while the window shrank
-            // around it: a keyhole panning over a photograph, filmed and
-            // reported as the media not being anchored in the window and
-            // truncating. COVERING is the marker's answer and the wrong one
-            // here — it keys on the width, and a 343x145 row against a 402x874
-            // screen barely narrows while it collapses vertically, so the page
-            // would stay nearly full size and lose almost all of its height.
+            // Held still it stayed at full size while the window shrank around
+            // it: a keyhole panning over a photograph, filmed on this screen.
+            // It fitted INSIDE the window for a while instead, which stopped
+            // the truncation and started the other half of it — on the release
+            // spring, where the window's aspect leaves the page's, the media
+            // sat letterboxed with the card's ground above and below it.
+            // Filmed too.
             //
-            // Contained, the post shrinks whole and the card's own ground fills
-            // what is left — which is the ground the swap is bringing in anyway.
-            // Nothing else changes: the three acts stay, because this landing's
-            // card carries TEXT and the empty beat is what keeps that fade from
-            // ever having text on both sides.
-            pageFit: .contained,
+            // The invariant every report has agreed on is the simple one: the
+            // media fills the transition window, always. That is covering, and
+            // it is what the marker has used all along.
+            pageFit: .covering,
             setConcealed: { [weak self] concealed in
                 self?.activityPage.setRevealConcealed(concealed, for: anchor)
             },
@@ -1359,23 +1356,20 @@ extension PlaceProfileViewController: CardCloseLanding {
             // tile slides it most of the screen's width; the page holds still
             // and the window closes over it.
             alignsPageToSource: false,
-            // ⚠️ THE PAGE FITS INSIDE THE WINDOW rather than being clipped by
-            // it — see `RevealPageFit.contained`.
+            // ⚠️ THE PAGE FILLS THE WINDOW — see `RevealPageFit.covering`.
             //
-            // Held still, the media stayed at full size while the window shrank
-            // around it: a keyhole panning over a photograph, filmed and
-            // reported as the media not being anchored in the window and
-            // truncating. COVERING is the marker's answer and the wrong one
-            // here — it keys on the width, and a 343x145 row against a 402x874
-            // screen barely narrows while it collapses vertically, so the page
-            // would stay nearly full size and lose almost all of its height.
+            // Held still it stayed at full size while the window shrank around
+            // it: a keyhole panning over a photograph, filmed on this screen.
+            // It fitted INSIDE the window for a while instead, which stopped
+            // the truncation and started the other half of it — on the release
+            // spring, where the window's aspect leaves the page's, the media
+            // sat letterboxed with the card's ground above and below it.
+            // Filmed too.
             //
-            // Contained, the post shrinks whole and the card's own ground fills
-            // what is left — which is the ground the swap is bringing in anyway.
-            // Nothing else changes: the three acts stay, because this landing's
-            // card carries TEXT and the empty beat is what keeps that fade from
-            // ever having text on both sides.
-            pageFit: .contained,
+            // The invariant every report has agreed on is the simple one: the
+            // media fills the transition window, always. That is covering, and
+            // it is what the marker has used all along.
+            pageFit: .covering,
             cornerRadius: PostGridTileCell.mosaicCornerRadius,
             // The tile's own floor, so the beat where the window carries
             // neither picture is the colour of the brick it lands on.
@@ -1477,23 +1471,20 @@ extension PlaceProfileViewController: CardCloseLanding {
             // screen's width, and a caption measured on one post cannot align
             // a page showing another.
             alignsPageToSource: false,
-            // ⚠️ THE PAGE FITS INSIDE THE WINDOW rather than being clipped by
-            // it — see `RevealPageFit.contained`.
+            // ⚠️ THE PAGE FILLS THE WINDOW — see `RevealPageFit.covering`.
             //
-            // Held still, the media stayed at full size while the window shrank
-            // around it: a keyhole panning over a photograph, filmed and
-            // reported as the media not being anchored in the window and
-            // truncating. COVERING is the marker's answer and the wrong one
-            // here — it keys on the width, and a 343x145 row against a 402x874
-            // screen barely narrows while it collapses vertically, so the page
-            // would stay nearly full size and lose almost all of its height.
+            // Held still it stayed at full size while the window shrank around
+            // it: a keyhole panning over a photograph, filmed on this screen.
+            // It fitted INSIDE the window for a while instead, which stopped
+            // the truncation and started the other half of it — on the release
+            // spring, where the window's aspect leaves the page's, the media
+            // sat letterboxed with the card's ground above and below it.
+            // Filmed too.
             //
-            // Contained, the post shrinks whole and the card's own ground fills
-            // what is left — which is the ground the swap is bringing in anyway.
-            // Nothing else changes: the three acts stay, because this landing's
-            // card carries TEXT and the empty beat is what keeps that fade from
-            // ever having text on both sides.
-            pageFit: .contained,
+            // The invariant every report has agreed on is the simple one: the
+            // media fills the transition window, always. That is covering, and
+            // it is what the marker has used all along.
+            pageFit: .covering,
             cornerRadius: onList ? nil : PostGridTileCell.mosaicCornerRadius,
             fill: onList ? nil : PostGridTileCell.fillColor(for: post),
             setConcealed: { [weak self] concealed in
@@ -1697,23 +1688,20 @@ extension PlaceProfileViewController: ZoomTransitionSource {
             // No cornerRadius and no fill: a ROW must take the card's own
             // values (`TextRevealInstaller` reads them from PostGrid). Only a
             // map marker, which is a disc in its own tint, overrides them.
-            // ⚠️ THE PAGE FITS INSIDE THE WINDOW rather than being clipped by
-            // it — see `RevealPageFit.contained`.
+            // ⚠️ THE PAGE FILLS THE WINDOW — see `RevealPageFit.covering`.
             //
-            // Held still, the media stayed at full size while the window shrank
-            // around it: a keyhole panning over a photograph, filmed and
-            // reported as the media not being anchored in the window and
-            // truncating. COVERING is the marker's answer and the wrong one
-            // here — it keys on the width, and a 343x145 row against a 402x874
-            // screen barely narrows while it collapses vertically, so the page
-            // would stay nearly full size and lose almost all of its height.
+            // Held still it stayed at full size while the window shrank around
+            // it: a keyhole panning over a photograph, filmed on this screen.
+            // It fitted INSIDE the window for a while instead, which stopped
+            // the truncation and started the other half of it — on the release
+            // spring, where the window's aspect leaves the page's, the media
+            // sat letterboxed with the card's ground above and below it.
+            // Filmed too.
             //
-            // Contained, the post shrinks whole and the card's own ground fills
-            // what is left — which is the ground the swap is bringing in anyway.
-            // Nothing else changes: the three acts stay, because this landing's
-            // card carries TEXT and the empty beat is what keeps that fade from
-            // ever having text on both sides.
-            pageFit: .contained,
+            // The invariant every report has agreed on is the simple one: the
+            // media fills the transition window, always. That is covering, and
+            // it is what the marker has used all along.
+            pageFit: .covering,
             setConcealed: { [weak self] concealed in
                 // The reveal's OWN channel, never `setHeroHidden` — the two
                 // conceal flags are deliberately separate.
