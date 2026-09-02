@@ -354,6 +354,20 @@ enum RevealStage {
         /// `Pose(...)` literal keeps compiling and keeps meaning exactly what
         /// it meant.
         var pageScale: CGFloat = 1
+        /// ⚠️ THE DEPARTING PAGE'S OWN ALPHA, and the reason it is a pose value
+        /// rather than a channel someone sets on the side: it has to travel
+        /// with the geometry, because it is the geometry's other half.
+        ///
+        /// The window used to hand over by bringing the ARRIVAL up over the
+        /// page. That put the destination's content on screen while the finger
+        /// was still deciding — laid out for a card the window had not become
+        /// yet, so its text was clipped at the window's edge. Filmed.
+        ///
+        /// The page leaves on its own instead, and nothing arrives until the
+        /// release. What the window shows in between is where the viewer is
+        /// going, which is the honest answer to a gesture that has not
+        /// committed.
+        var pageOpacity: CGFloat = 1
     }
 
     /// The whole page, unmasked and untranslated — the landed pose, identical
@@ -387,7 +401,11 @@ enum RevealStage {
                     mask: sourceRect,
                     maskRadius: radius,
                     pageTranslation: pose.translation,
-                    pageScale: pose.scale
+                    pageScale: pose.scale,
+                    // Gone by the landing: the arrival is what the window holds
+                    // there, and two things in one window is the double image
+                    // this whole area exists to prevent.
+                    pageOpacity: 0
                 )
             }
             return Pose(
@@ -623,8 +641,25 @@ enum RevealStage {
     /// the post used to be. That hole is what a viewer, playing with the grab,
     /// described as the post fading away over its own media. The "nothing" the
     /// face fades against here is the opaque live post itself.
+    /// How much of the departing page is left, for a travel and the room the
+    /// gesture actually has.
+    ///
+    /// ⚠️ THE ROOM, NOT THE SCREEN. The finger stops at the bezel, so a grab
+    /// that starts mid-screen has half the distance of one that starts at the
+    /// edge. Measured against the screen's span, the fade would be half done
+    /// when the hand has run out of room; measured against what is left in
+    /// front of it, it finishes exactly when the viewer can push no further.
+    static func sourceFade(travel: CGFloat, maxTravel: CGFloat) -> CGFloat {
+        guard maxTravel > 0 else { return 0 }
+        return min(max(travel, 0) / maxTravel, 1)
+    }
+
     static func fill(at progress: CGFloat, covering: Bool = false) -> CGFloat {
-        if covering { return easeOut(ramp(progress, from: coveringFaceFadeStart, to: cardFadeEnd)) }
+        // ⚠️ NOTHING ARRIVES WHILE THE FINGER IS DOWN, on a fit that carries
+        // the page. The arrival's whole job is to be what the window becomes,
+        // and it becomes it on the release — see `Pose.pageOpacity`, which is
+        // the other half of the same rule.
+        if covering { return 0 }
         return swapFractions(at: progress).fill
     }
 
@@ -791,6 +826,7 @@ enum RevealStage {
         page.transform = CGAffineTransform(
             translationX: pose.pageTranslation.x, y: pose.pageTranslation.y
         ).scaledBy(x: pose.pageScale, y: pose.pageScale)
+        page.alpha = pose.pageOpacity
         standIn?.frame = pose.mask
         (standIn as? RevealStandInShaping)?.setCornerRadius(pose.maskRadius)
         // LAID OUT HERE, inside whatever block is applying the pose, and that
@@ -816,6 +852,9 @@ enum RevealStage {
     /// retires the host. Called on every outcome — committed, cancelled, or
     /// failed — because a page left inside a removed host is a blank screen.
     static func unwrap(_ page: UIView, from host: UIView, to container: UIView, frame: CGRect) {
+        // Restored with the transform: a page handed back half-faded is a
+        // screen the viewer cannot see, on every outcome including a cancel.
+        page.alpha = 1
         page.transform = .identity
         page.frame = frame
         container.addSubview(page)

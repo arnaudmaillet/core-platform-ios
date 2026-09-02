@@ -299,7 +299,12 @@ public final class InteractiveSlideDismissal: NSObject {
         case .began:
             // Direction was vetted in gestureRecognizerShouldBegin — claim
             // immediately so the screen is under the finger at frame 0.
-            beginSwipe()
+            //
+            // The touch's own position goes with it: how far this gesture CAN
+            // travel is the distance from here to the edge, and a grab that
+            // starts mid-screen has half the room of one that starts at the
+            // bezel. See `RevealDismissInteractionController.sourceFade`.
+            beginSwipe(from: gesture.location(in: view))
         case .changed:
             if let revealGrab {
                 revealGrab.update(translation: translation, in: view)
@@ -321,7 +326,7 @@ public final class InteractiveSlideDismissal: NSObject {
         }
     }
 
-    private func beginSwipe() {
+    private func beginSwipe(from origin: CGPoint = .zero) {
         guard interaction == nil, revealGrab == nil,
               let nav = navigationController,
               let feed = feedViewController, nav.topViewController === feed else { return }
@@ -346,7 +351,8 @@ public final class InteractiveSlideDismissal: NSObject {
             revealGrab = RevealDismissInteractionController(
                 geometry: revealGeometry,
                 returningChrome: revealReturningChrome,
-                axis: activeAxis
+                axis: activeAxis,
+                grabOrigin: origin
             )
         } else {
             let interaction = UIPercentDrivenInteractiveTransition()

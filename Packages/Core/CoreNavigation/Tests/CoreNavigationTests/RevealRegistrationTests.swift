@@ -254,6 +254,71 @@ struct RevealRegistrationTests {
                 "the window changed shape under the finger")
     }
 
+    // MARK: - The pivot is the release
+
+    /// ⚠️ NOTHING OF THE DESTINATION IS SEEN WHILE THE FINGER IS DOWN.
+    ///
+    /// The arrival used to come up over the page during the drag, which put a
+    /// card's text on screen laid out for a width the window had not reached —
+    /// clipped at the window's edge, and filmed that way. The drag's whole job
+    /// is the page leaving; the arrival is what the release buys.
+    @Test func nothingArrivesWhileTheFingerIsDown() {
+        for step in 0...100 {
+            let progress = CGFloat(step) / 100
+            #expect(RevealStage.fill(at: progress, covering: true) == 0,
+                    "the destination was on screen at \(progress)")
+        }
+        // A landing whose window IS a card-shaped slice of the page keeps the
+        // three acts — there the morph is the transition.
+        #expect(RevealStage.fill(at: 1, covering: false) == 1)
+    }
+
+    /// And when it does arrive, exactly ONE alpha moves. Ramping the view and
+    /// its content together renders the glyph at alpha squared — fading faster
+    /// than the disc beneath it, which is the half-drawn overlay the blend law
+    /// forbids.
+    @Test func exactlyOneAlphaMovesWhenTheArrivalComes() {
+        for step in 0...100 {
+            #expect(RevealStage.contentOpacity(at: CGFloat(step) / 100, covering: true) == 1)
+        }
+    }
+
+    /// ⚠️ THE FADE IS MEASURED AGAINST THE ROOM THE GESTURE HAS, not the
+    /// screen. A grab that starts mid-screen has half the distance of one that
+    /// starts at the bezel, and a fade keyed to the span would be half done
+    /// when the hand has run out of room.
+    @Test func theSourceLeavesExactlyAsTheFingerRunsOut() {
+        #expect(RevealStage.sourceFade(travel: 0, maxTravel: 200) == 0)
+        #expect(RevealStage.sourceFade(travel: 200, maxTravel: 200) == 1,
+                "the page was still there when the finger could go no further")
+        #expect(abs(RevealStage.sourceFade(travel: 100, maxTravel: 200) - 0.5) < 0.0001)
+        // Half the room, twice as fast — the property the screen's span cannot
+        // express.
+        #expect(RevealStage.sourceFade(travel: 100, maxTravel: 100)
+            > RevealStage.sourceFade(travel: 100, maxTravel: 200))
+        // A back-drag does not un-fade past the start, and no travel can push
+        // it past gone.
+        #expect(RevealStage.sourceFade(travel: -50, maxTravel: 200) == 0)
+        #expect(RevealStage.sourceFade(travel: 900, maxTravel: 200) == 1)
+        #expect(RevealStage.sourceFade(travel: 10, maxTravel: 0) == 0, "no room, no fade")
+    }
+
+    /// The page is gone by the landing: two things in one window is the double
+    /// image the rest of this area exists to prevent.
+    @Test func theLandingPoseHasNoPageLeft() {
+        let closed = RevealStage.closed(
+            sourceRect: CGRect(x: 300, y: 500, width: 44, height: 44),
+            radius: 22, anchor: nil, matchesAnchor: false,
+            ridingFrom: CGRect(x: 0, y: 0, width: 402, height: 874),
+            fit: .covering
+        )
+        #expect(closed.pageOpacity == 0)
+        // And an abandoned grab hands a whole page back.
+        #expect(RevealStage.open(container: UIView(
+            frame: CGRect(x: 0, y: 0, width: 402, height: 874)
+        )).pageOpacity == 1)
+    }
+
     // MARK: - What a held grab may do
 
     /// ⚠️ A HELD WINDOW IS STILL THE PAGE. It may not shrink toward its

@@ -102,10 +102,45 @@ final class RevealDismissInteractionController: NSObject,
         return geometry.sourceFrame(container) ?? RevealStage.centredFallback(in: container)
     }
 
-    init(geometry: RevealGeometry, returningChrome: UIView?, axis: ZoomDismissAxis) {
+    /// Where the touch went down, in the page's own space.
+    private let grabOrigin: CGPoint
+
+    init(
+        geometry: RevealGeometry,
+        returningChrome: UIView?,
+        axis: ZoomDismissAxis,
+        grabOrigin: CGPoint = .zero
+    ) {
         self.geometry = geometry
         self.returningChrome = returningChrome
         self.axis = axis
+        self.grabOrigin = grabOrigin
+    }
+
+    /// ⚠️ HOW FAR THIS GESTURE CAN GO, which is not how far the screen is wide.
+    ///
+    /// The finger stops at the bezel. A grab that starts mid-screen therefore
+    /// has half the room of one that starts at the edge, and a fade measured
+    /// against the screen's span would be half finished when the hand has run
+    /// out of screen. Measured against the distance actually available, it
+    /// completes exactly when the viewer can push no further.
+    private func maxTravel(in view: UIView) -> CGFloat {
+        switch axis {
+        case .horizontal: max(view.bounds.maxX - grabOrigin.x, 1)
+        case .vertical: max(view.bounds.maxY - grabOrigin.y, 1)
+        }
+    }
+
+    /// How much of the departing page is left, for a raw (un-banded) travel.
+    ///
+    /// The RAW distance, deliberately: the rubber band exists to resist the
+    /// window's travel past the point where more means nothing, and the fade is
+    /// about the hand rather than about the window. Banded, it would asymptote
+    /// and the page would never quite leave.
+    private func sourceFade(for translation: CGPoint, in view: UIView) -> CGFloat {
+        RevealStage.sourceFade(
+            travel: axis.along(translation), maxTravel: maxTravel(in: view)
+        )
     }
 
     // MARK: - UIViewControllerInteractiveTransitioning
@@ -279,7 +314,8 @@ final class RevealDismissInteractionController: NSObject,
                     mask: rect,
                     maskRadius: radius,
                     pageTranslation: covering.translation,
-                    pageScale: covering.scale
+                    pageScale: covering.scale,
+                    pageOpacity: 1 - sourceFade(for: translation, in: view)
                 ),
                 progress
             )
@@ -386,6 +422,26 @@ final class RevealDismissInteractionController: NSObject,
         // (An abandoned grab returns the window to the whole screen, where
         // riding and still are the same thing: zero displacement.)
 
+        // ⚠️ THE ARRIVAL WAITS FOR THE PAGE TO FINISH LEAVING.
+        //
+        // On a fit that carries the page, the release is the FIRST moment
+        // anything of the destination may be seen — that is the whole of what
+        // the drag's silence buys. Even here the two may not overlap: a card's
+        // text over a page's caption is the "two half-drawn runs" this
+        // transition has paid for four times. So the page's own fade rides the
+        // spring below and the arrival is a second, delayed block over the tail
+        // of it, on the same schedule the chevron leg uses.
+        if let standIn, geometry.pageFit != .clipped {
+            let span = RevealStage.springDuration * RevealStage.springVisibleFraction
+            UIView.animate(
+                withDuration: span * (1 - RevealStage.cardFadeStart),
+                delay: span * RevealStage.cardFadeStart,
+                options: [.curveEaseOut, .beginFromCurrentState]
+            ) {
+                standIn.alpha = commit ? 1 : 0
+            }
+        }
+
         let springVelocity = ZoomTransitionGeometry.springVelocity(
             of: velocity,
             from: CGPoint(x: held.pose.mask.midX, y: held.pose.mask.midY),
@@ -418,11 +474,16 @@ final class RevealDismissInteractionController: NSObject,
             // abrupt last frame: nothing set the card's opacity on a commit, so
             // it stayed at whatever the drag had reached — often zero — and the
             // card appeared only when the stand-in was retired.
-            self.standIn?.alpha = commit ? 1 : 0
-            // Pinned under a covering page: only the view's alpha may move, so
+            // ⚠️ NOT IN THIS BLOCK on a fit that carries the page — see the
+            // scheduled fade below. The page is still leaving here, and running
+            // the arrival up on the same clock cross-fades two drawings that
+            // both have text on them, which is the one thing this transition
+            // may never do.
+            if self.geometry.pageFit == .clipped { self.standIn?.alpha = commit ? 1 : 0 }
+            // Pinned under a carried page: only the view's alpha may move, so
             // an abandoned grab leaves the face at 0 with its content still 1.
             (self.standIn as? RevealStandInShaping)?.setContentOpacity(
-                self.geometry.pageFit == .covering ? 1 : (commit ? 1 : 0)
+                self.geometry.pageFit == .clipped ? (commit ? 1 : 0) : 1
             )
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0
