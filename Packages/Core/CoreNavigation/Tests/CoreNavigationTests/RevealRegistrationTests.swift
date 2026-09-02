@@ -228,58 +228,30 @@ struct RevealRegistrationTests {
 
     // MARK: - The window's shape
 
-    /// ⚠️ BOTH ENDS ARE EXACT, which is what makes the middle trustworthy.
+    /// ⚠️ A HELD WINDOW IS THE SCREEN, CORNER INCLUDED.
     ///
-    /// At rest the window IS the screen and must wear the display's own corner;
-    /// at the landing it IS the marker and must wear the marker's. Anything
-    /// that gets those two wrong is visible as a step at the moment the
-    /// transition starts or the moment it hands over.
-    @Test func theWindowsShapeIsExactAtBothEnds() {
-        let screen = CGSize(width: 402, height: 874)
-        let marker = CGSize(width: 44, height: 44)
-
-        let atRest = RevealStage.maskRadius(
-            at: 0, window: screen, from: screen, to: marker,
-            screenRadius: 55, sourceRadius: 22
-        )
-        #expect(abs(atRest - 55) < 0.01, "the window did not start as the screen")
-
-        let landed = RevealStage.maskRadius(
-            at: 1, window: marker, from: screen, to: marker,
-            screenRadius: 55, sourceRadius: 22
-        )
-        #expect(abs(landed - 22) < 0.01, "the window did not land as the marker")
-    }
-
-    /// ⚠️ AND IN BETWEEN IT IS THE SHAPE THAT TRAVELS, NOT THE NUMBER.
-    ///
-    /// Sweeping the radius itself put 22pt — the marker's, correct for a 44pt
-    /// disc — on a window still 241pt across, which reads as a hard-coded
-    /// value rather than as a window becoming a circle. Reported exactly that
-    /// way. Judged as a FRACTION of the window it is rounding, a window halfway
-    /// home is halfway to being as round as it can be.
-    @Test func aWindowHalfwayHomeIsHalfwayToACircle() {
-        let screen = CGSize(width: 402, height: 874)
-        let marker = CGSize(width: 44, height: 44)
-        let held = CGSize(width: 241, height: 524)
-
-        let radius = RevealStage.maskRadius(
-            at: 0.5, window: held, from: screen, to: marker,
-            screenRadius: 55, sourceRadius: 22
-        )
-        // The property, stated as itself: the window's ROUNDNESS — its radius
-        // over half its shorter side — is halfway between the screen's and the
-        // marker's, and the marker's is 1 because a disc is as round as a shape
-        // can be.
-        let roundness = radius / (min(held.width, held.height) / 2)
-        let screenRoundness = 55 / (min(screen.width, screen.height) / 2)
-        #expect(abs(roundness - (screenRoundness + (1 - screenRoundness) * 0.5)) < 0.001)
-        // And it is not the old law, which swept two absolute values and left a
-        // 241pt-wide window wearing a 38pt corner.
-        #expect(radius > 55 + (22 - 55) * 0.5, "the corner is still an absolute number")
-        // And it cannot exceed the shape's own limit: half the shorter side is
-        // a circle, and there is nothing rounder.
-        #expect(radius <= min(held.width, held.height) / 2 + 0.01)
+    /// Two laws were tried and both were reported. Sweeping the absolute
+    /// radius toward the landing's left a 241pt-wide window wearing a 22pt
+    /// corner — a hard number. Sweeping the radius as a FRACTION of the
+    /// window turned it into a capsule halfway through a drag that had
+    /// decided nothing — the corner arriving far too early. What the viewer
+    /// is holding is the screen, so it wears the screen's corner at the
+    /// screen's proportion, and the landing's shape is the release's business.
+    @Test func aHeldWindowWearsTheScreensCornerAtItsOwnScale() {
+        let screenRadius: CGFloat = 55
+        // At rest it is the screen exactly.
+        #expect(abs(screenRadius * RevealStage.grabMorph(at: 0) - screenRadius) < 0.01)
+        // Held, the corner shrinks WITH the window, so the shape never changes:
+        // radius over size is constant at every point of the drag.
+        let openSide: CGFloat = 402
+        var proportions: [CGFloat] = []
+        for step in 0...100 {
+            let morph = RevealStage.grabMorph(at: CGFloat(step) / 100)
+            proportions.append((screenRadius * morph) / (openSide * morph))
+        }
+        let first = proportions[0]
+        #expect(proportions.allSatisfy { abs($0 - first) < 0.0001 },
+                "the window changed shape under the finger")
     }
 
     // MARK: - What a held grab may do

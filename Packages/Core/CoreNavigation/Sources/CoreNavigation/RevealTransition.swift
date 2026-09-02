@@ -488,49 +488,18 @@ enum RevealStage {
     /// Sharing `ZoomFlight.minimumGrabScale` rather than restating it is what
     /// makes the two families feel like one gesture.
     ///
-    /// The window keeps the SCREEN's aspect while it is held, so the page
-    /// covering it neither re-crops nor letterboxes under the hand: at every
-    /// instant the viewer is holding a smaller copy of the post they were
-    /// reading.
-    /// ⚠️ THE SHAPE INTERPOLATES, NOT THE RADIUS.
+    /// ⚠️ AND THE WINDOW KEEPS THE SCREEN'S ASPECT — AND ITS CORNER
+    /// PROPORTION — while it is held, which is what makes the fit above stop
+    /// mattering under the hand.
     ///
-    /// Sweeping the radius itself from the display's corner to the landing's is
-    /// right when the two rects are a similar size — the number and the shape
-    /// then mean the same thing. Against a marker they do not: the arrival is a
-    /// 44pt disc whose radius is 22, and 22pt applied to a window still 241pt
-    /// across is a barely-rounded rectangle. Reported as the border radius
-    /// tending toward a hard-coded value halfway through, when it should be
-    /// tending toward the shape of the window it is landing IN — here a perfect
-    /// circle.
-    ///
-    /// So what travels is the radius as a FRACTION of the rect it is rounding:
-    /// the display's corner over the screen's half-width at one end, the
-    /// marker's over the marker's at the other — which for a disc is 1, the
-    /// fraction that means "as round as this can be". Applied to whatever size
-    /// the window happens to be, a window halfway home is halfway to being a
-    /// circle at its own scale rather than a big rectangle with a small corner.
-    ///
-    /// Both ends are exact by construction: at rest the window IS the screen
-    /// and this returns the display's radius; at the landing it IS the marker
-    /// and this returns the marker's.
-    static func maskRadius(
-        at progress: CGFloat,
-        window: CGSize,
-        from open: CGSize,
-        to landing: CGSize,
-        screenRadius: CGFloat,
-        sourceRadius: CGFloat
-    ) -> CGFloat {
-        func fraction(_ radius: CGFloat, in size: CGSize) -> CGFloat {
-            let half = max(min(size.width, size.height) / 2, 1)
-            return min(radius / half, 1)
-        }
-        let t = min(max(progress, 0), 1)
-        let start = fraction(screenRadius, in: open)
-        let end = fraction(sourceRadius, in: landing)
-        return (start + (end - start) * t) * max(min(window.width, window.height) / 2, 0)
-    }
-
+    /// A window morphing toward its landing's shape while the page is still
+    /// in it forces a choice nobody can win: fill it and the media is cut
+    /// away as the shape diverges, fit it and the card's ground opens up
+    /// around the media. Both were filmed and both were reported. A window
+    /// that stays a scaled SCREEN has neither problem — a page covering it is
+    /// a scaled screen, cropped nowhere and letterboxed nowhere — and the
+    /// shape morph goes where it belongs, on the release, which is when the
+    /// outcome is known.
     static func grabMorph(at progress: CGFloat) -> CGFloat {
         let clamped = min(max(progress, 0), 1)
         return 1 + (ZoomFlight.minimumGrabScale - 1) * clamped

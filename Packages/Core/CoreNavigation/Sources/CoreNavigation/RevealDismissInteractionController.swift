@@ -231,34 +231,44 @@ final class RevealDismissInteractionController: NSObject,
         // Morph: toward the card's own size and rounding — or, against a
         // landing that is not a card, only as far as `grabMorph` allows while
         // the finger is still holding it.
-        let size = geometry.pageFit == .covering
+        // ⚠️ A HELD WINDOW IS THE SCREEN, UNIFORMLY SCALED — same aspect, and
+        // (below) the same corner proportion.
+        //
+        // Interpolating toward the landing's SHAPE under the finger is what put
+        // the page in a window that was becoming card-shaped while the page was
+        // still in it: whichever fit was chosen, the two disagreed and the
+        // difference showed as ground around the media, or as media cut away.
+        // Filmed both ways. Holding the screen's own ratio makes the question
+        // disappear — a page covering a scaled screen is a scaled screen, with
+        // nothing cropped and nothing letterboxed at any point of the drag.
+        //
+        // The morph to the landing's shape belongs to the release, which is
+        // when the outcome is known. Same division as the hero's grab.
+        let morph = RevealStage.grabMorph(at: progress)
+        let size = geometry.pageFit == .clipped
             ? CGSize(
-                width: openRect.width * RevealStage.grabMorph(at: progress),
-                height: openRect.height * RevealStage.grabMorph(at: progress)
-            )
-            : CGSize(
                 width: openRect.width + (stagedLanding.width - openRect.width) * progress,
                 height: openRect.height + (stagedLanding.height - openRect.height) * progress
             )
+            : CGSize(width: openRect.width * morph, height: openRect.height * morph)
         let centre = CGPoint(x: openCentre.x + offset.x, y: openCentre.y + offset.y)
         let rect = CGRect(
             x: centre.x - size.width / 2, y: centre.y - size.height / 2,
             width: size.width, height: size.height
         )
-        // Against a landing that is not a card the SHAPE is what travels — see
-        // `RevealStage.maskRadius`. Everywhere else the two rects are a similar
-        // size, so the radius and the shape mean the same thing and the plain
-        // sweep is exact.
-        let radius = geometry.pageFit == .covering
-            ? RevealStage.maskRadius(
-                at: progress,
-                window: size,
-                from: openRect.size,
-                to: stagedLanding.size,
-                screenRadius: screenRadius,
-                sourceRadius: geometry.sourceCornerRadius
-            )
-            : screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
+        // ⚠️ AND THE CORNER IS THE SCREEN'S, SCALED WITH IT — not swept toward
+        // the landing's.
+        //
+        // Sweeping it turned the window into a capsule halfway through a drag
+        // that had decided nothing, which is the corner arriving far too early;
+        // sweeping the absolute value instead left a 241pt window wearing a
+        // 22pt corner, which is a hard number. Both were answers to the wrong
+        // question. Held at the screen's own proportion, the window is the
+        // screen at every instant of the drag — and the corner reaches the
+        // landing's on the release spring, which already carries it.
+        let radius = geometry.pageFit == .clipped
+            ? screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
+            : screenRadius * morph
         // ⚠️ THE LIVE RECT, not a progress-derived size — the same rect the
         // window is being given, so the page cannot separate from it under a
         // rubber-banded or back-dragged finger.
