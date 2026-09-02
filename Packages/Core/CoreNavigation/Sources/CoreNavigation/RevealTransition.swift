@@ -381,9 +381,15 @@ enum RevealStage {
         /// yet, so its text was clipped at the window's edge. Filmed.
         ///
         /// The page leaves on its own instead, and nothing arrives until the
-        /// release. What the window shows in between is where the viewer is
-        /// going, which is the honest answer to a gesture that has not
-        /// committed.
+        /// release.
+        ///
+        /// ⚠️ AND THEN IT STOPPED LEAVING AT ALL, which is why this is always 1.
+        /// Driving it to 0 at the landing while the arrival rose over it meant
+        /// two fades that were careful not to overlap — and two fades that do
+        /// not overlap CROSS AT NOTHING. The window was briefly a hole. Filmed.
+        /// The arrival is opaque and covers; a page that stays whole underneath
+        /// makes every intermediate frame an opaque sum of two finished
+        /// drawings.
         var pageOpacity: CGFloat = 1
     }
 
@@ -418,11 +424,7 @@ enum RevealStage {
                     mask: sourceRect,
                     maskRadius: radius,
                     pageTranslation: pose.translation,
-                    pageScale: pose.scale,
-                    // Gone by the landing: the arrival is what the window holds
-                    // there, and two things in one window is the double image
-                    // this whole area exists to prevent.
-                    pageOpacity: 0
+                    pageScale: pose.scale
                 )
             }
             return Pose(
@@ -705,9 +707,16 @@ enum RevealStage {
         carriesPage: Bool
     ) -> (fill: (duration: CGFloat, delay: CGFloat),
           content: (duration: CGFloat, delay: CGFloat)) {
+        // ⚠️ A CARRYING FIT HANDS OVER IN ONE RAMP, over the WHOLE release.
+        //
+        // It ran over the tail alone, which is what made the arrival look like
+        // it appeared at the end rather than dissolving in — and it was delayed
+        // in order not to overlap the page's own fade. The page does not fade
+        // now, so there is nothing to stay out of the way of: the arrival
+        // covers it from the first frame of the release to the last.
         let tail = (duration: 1 - cardFadeStart, delay: cardFadeStart)
         return carriesPage
-            ? (fill: tail, content: (duration: 0, delay: 1))
+            ? (fill: (duration: 1, delay: 0), content: (duration: 0, delay: 1))
             : (fill: (duration: cardFadeStart, delay: 0), content: tail)
     }
 

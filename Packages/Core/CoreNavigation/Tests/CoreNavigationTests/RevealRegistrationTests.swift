@@ -224,7 +224,7 @@ struct RevealRegistrationTests {
     @Test func aCarryingReleaseSchedulesOnlyItsView() {
         let s = RevealStage.releaseHandover(carriesPage: true)
         #expect(s.content.duration == 0, "a carrying fit ramped its content")
-        #expect(s.fill.delay == RevealStage.cardFadeStart, "the arrival came early")
+        #expect(s.fill.delay == 0, "the arrival waited, and the window was empty while it did")
     }
 
     // MARK: - What a held grab may do
@@ -378,8 +378,9 @@ struct RevealRegistrationTests {
         }
     }
 
-    /// The page is gone by the landing: two things in one window is the double
-    /// image the rest of this area exists to prevent.
+    /// The page is WHOLE at the landing, under an arrival that has covered it:
+    /// a source that fades meets an arrival that is rising, and the two cross at
+    /// nothing.
     @Test func theLandingPoseHasNoPageLeft() {
         let closed = RevealStage.closed(
             sourceRect: CGRect(x: 300, y: 500, width: 44, height: 44),
@@ -387,7 +388,7 @@ struct RevealRegistrationTests {
             ridingFrom: CGRect(x: 0, y: 0, width: 402, height: 874),
             fit: .covering
         )
-        #expect(closed.pageOpacity == 0)
+        #expect(closed.pageOpacity == 1, "the source faded, so the two cross at nothing")
         // And an abandoned grab hands a whole page back.
         #expect(RevealStage.open(container: UIView(
             frame: CGRect(x: 0, y: 0, width: 402, height: 874)
