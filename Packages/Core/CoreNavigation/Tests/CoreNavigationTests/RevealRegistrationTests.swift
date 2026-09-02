@@ -158,6 +158,61 @@ struct RevealRegistrationTests {
         }
     }
 
+    // MARK: - What a held grab may do
+
+    /// ⚠️ A HELD WINDOW IS STILL THE PAGE. It may not shrink toward its
+    /// landing under the hand.
+    ///
+    /// Morphing all the way to the landing by progress is right against a
+    /// CARD, which is large enough to leave something recognisable in the hand
+    /// at full drag. Against a 44pt marker it took the post most of the way to
+    /// a disc for a modest pull — reported as the grab being far too sensitive.
+    /// The remaining distance belongs to the release spring, which is when the
+    /// outcome is actually known.
+    @Test func aHeldWindowMayNotShrinkPastTheFlightsFloor() {
+        #expect(RevealStage.grabMorph(at: 0) == 1, "the window shrank before the finger moved")
+        #expect(RevealStage.grabMorph(at: 1) == ZoomFlight.minimumGrabScale,
+                "a held window went past the floor a held card stops at")
+        // Shared with the hero rather than restated: the two are one dismissal
+        // wearing two animations, and a hand that learnt one should find the
+        // other familiar.
+        #expect(RevealStage.grabMorph(at: 1) > 0.5, "a held post is not a thumbnail")
+
+        var previous = CGFloat(2)
+        for step in 0...100 {
+            let value = RevealStage.grabMorph(at: CGFloat(step) / 100)
+            #expect(value <= previous, "the morph is not monotonic")
+            previous = value
+        }
+        // Beyond the end of the drag it holds rather than continuing.
+        #expect(RevealStage.grabMorph(at: 4) == ZoomFlight.minimumGrabScale)
+        #expect(RevealStage.grabMorph(at: -1) == 1)
+    }
+
+    /// ⚠️ AND THE FORWARD LIMIT IS AN AXIS'S OWN, not one number for both.
+    ///
+    /// 320pt was measured on the vertical axis, where a screen is ~874pt and a
+    /// full throw still leaves most of the thing on screen. Applied unchanged
+    /// to a 402pt-wide screen it put the whole window past the right edge with
+    /// the finger still down — the exact motion the constant exists to
+    /// prevent, on the axis nobody measured.
+    @Test func theForwardLimitFirmsUpOnAShortAxis() {
+        let tall = ZoomTransitionGeometry.forwardDragLimit(forSpan: 874)
+        let wide = ZoomTransitionGeometry.forwardDragLimit(forSpan: 402)
+
+        #expect(tall == ZoomTransitionGeometry.forwardDragLimit,
+                "the vertical axis was retuned; it was already right")
+        #expect(wide < tall, "a short axis got a tall axis's throw")
+        // The window keeps more than half of itself on screen at full throw:
+        // at the grab floor it is 0.6 of the screen wide, and it may not
+        // travel further than its own half-width past the centre.
+        let windowHalfWidth = 402 * ZoomFlight.minimumGrabScale / 2
+        #expect(wide < 402 / 2 + windowHalfWidth,
+                "the window can still leave the screen entirely")
+        #expect(ZoomTransitionGeometry.forwardDragLimit(forSpan: 0)
+            == ZoomTransitionGeometry.forwardDragLimit, "a zero span must not zero the limit")
+    }
+
     /// And it is over before the drag is: a swap still running at the release
     /// would land a half-drawn card on the row.
     @Test func theSwapFinishesBeforeTheDragCan() {

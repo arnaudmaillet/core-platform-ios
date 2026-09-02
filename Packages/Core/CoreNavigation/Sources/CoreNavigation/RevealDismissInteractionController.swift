@@ -216,18 +216,30 @@ final class RevealDismissInteractionController: NSObject,
         // window follows the hand but resists leaving the dismissal axis.
         let along = axis.along(translation)
         let bandedAlong = along >= 0
-            ? ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.forwardDragLimit)
+            ? ZoomTransitionGeometry.rubberBand(
+                along,
+                limit: ZoomTransitionGeometry.forwardDragLimit(
+                    forSpan: axis.span(of: view.bounds.size)
+                )
+            )
             : ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.backDragLimit)
         let bandedAcross = ZoomTransitionGeometry.rubberBand(
             axis.across(translation), limit: ZoomTransitionGeometry.crossDriftLimit
         )
         let offset = axis.offset(along: bandedAlong, across: bandedAcross)
 
-        // Morph: toward the card's own size and rounding.
-        let size = CGSize(
-            width: openRect.width + (stagedLanding.width - openRect.width) * progress,
-            height: openRect.height + (stagedLanding.height - openRect.height) * progress
-        )
+        // Morph: toward the card's own size and rounding — or, against a
+        // landing that is not a card, only as far as `grabMorph` allows while
+        // the finger is still holding it.
+        let size = geometry.pageCoversWindow
+            ? CGSize(
+                width: openRect.width * RevealStage.grabMorph(at: progress),
+                height: openRect.height * RevealStage.grabMorph(at: progress)
+            )
+            : CGSize(
+                width: openRect.width + (stagedLanding.width - openRect.width) * progress,
+                height: openRect.height + (stagedLanding.height - openRect.height) * progress
+            )
         let centre = CGPoint(x: openCentre.x + offset.x, y: openCentre.y + offset.y)
         let rect = CGRect(
             x: centre.x - size.width / 2, y: centre.y - size.height / 2,

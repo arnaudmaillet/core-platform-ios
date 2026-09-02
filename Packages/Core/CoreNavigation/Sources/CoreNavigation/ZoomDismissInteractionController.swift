@@ -429,7 +429,12 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // can still be abandoned.
         let along = activeAxis.along(translation)
         let bandedAlong = along >= 0
-            ? ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.forwardDragLimit)
+            ? ZoomTransitionGeometry.rubberBand(
+                along,
+                limit: ZoomTransitionGeometry.forwardDragLimit(
+                    forSpan: activeAxis.span(of: view.bounds.size)
+                )
+            )
             : ZoomTransitionGeometry.rubberBand(along, limit: ZoomTransitionGeometry.backDragLimit)
         let bandedAcross = ZoomTransitionGeometry.rubberBand(
             activeAxis.across(translation), limit: ZoomTransitionGeometry.crossDriftLimit

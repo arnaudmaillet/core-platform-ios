@@ -447,6 +447,33 @@ enum RevealStage {
         )
     }
 
+    /// ⚠️ HOW FAR THE WINDOW MAY SHRINK WHILE A FINGER IS STILL HOLDING IT.
+    ///
+    /// A window that morphs all the way to its landing by progress is right for
+    /// a landing that is a CARD: the card is large, so a full drag leaves
+    /// something card-sized under the hand. Against a 44pt marker the same law
+    /// is brutal — a modest pull takes the post most of the way to a disc, and
+    /// with the page scaling too it reads as wildly over-sensitive, the post
+    /// gone long before the viewer has decided anything. Reported exactly that
+    /// way: "the grab is much too sensitive; the transition window should stay
+    /// visible on screen whatever the grab percentage".
+    ///
+    /// So it is clamped, on the flight's own floor and for the flight's own
+    /// stated reason: a held window is still the PAGE — the viewer is deciding,
+    /// not landing — and the remaining distance to the marker belongs to the
+    /// release spring, which is the moment the outcome is actually known.
+    /// Sharing `ZoomFlight.minimumGrabScale` rather than restating it is what
+    /// makes the two families feel like one gesture.
+    ///
+    /// The window keeps the SCREEN's aspect while it is held, so the page
+    /// covering it neither re-crops nor letterboxes under the hand: at every
+    /// instant the viewer is holding a smaller copy of the post they were
+    /// reading.
+    static func grabMorph(at progress: CGFloat) -> CGFloat {
+        let clamped = min(max(progress, 0), 1)
+        return 1 + (ZoomFlight.minimumGrabScale - 1) * clamped
+    }
+
     /// How far the page slides so its caption stays REGISTERED with a window
     /// that a finger is moving.
     ///
