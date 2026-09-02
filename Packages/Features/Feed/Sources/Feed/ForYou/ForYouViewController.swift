@@ -1414,16 +1414,28 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)
             #if DEBUG
-            // `-text-swipe-demo <peak>`: walks the exact begin/update/release
-            // path a finger drives. The simulator injects no touches, so this
-            // is the only way the scrub itself gets exercised — a peak below
+            // `-text-swipe-demo <peak> [delay]`: walks the exact begin/update/
+            // release path a finger drives. The simulator injects no touches, so
+            // this is the only way the scrub itself gets exercised — a peak below
             // the release threshold must spring back, above it must pop.
+            //
+            // ⚠️ THE DELAY IS NOT OPTIONAL DECORATION, and this handler ignoring
+            // it hid a whole class of defect. A run that PAGES the feed first
+            // (`-snap-fling`, which begins at +3s) cannot be scripted against a
+            // hard-coded 1.5s: the swipe fired before the paging, so the harness
+            // only ever asked about the post the feed OPENED on — which is the
+            // one case where departure and arrival agree and nothing can go
+            // wrong. Every report of a paged close came from a real thumb
+            // because of this line. Same spelling as `FeedFeatureBuilder`'s, so
+            // the two entry points read one argument the same way.
             let arguments = ProcessInfo.processInfo.arguments
             if let position = arguments.firstIndex(of: "-text-swipe-demo"),
                position + 1 < arguments.count,
                let peak = Double(arguments[position + 1]) {
+                let delay = position + 2 < arguments.count
+                    ? (Double(arguments[position + 2]) ?? 1.5) : 1.5
                 Task { @MainActor [textSlideDismissal] in
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     await textSlideDismissal.debugPerformSwipe(peakProgress: CGFloat(peak))
                 }
             }
@@ -1441,6 +1453,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             activeMediaPage: { [weak feed] in (feed as? SnapFeedViewController)?.activeMediaPage },
             // The gallery recedes; the tray and the title stay grounded.
             depthView: pager,
+            // What the viewer is looking at, for a close that lands elsewhere —
+            // see `ForYouGridZoomSource.settledCover`.
+            settledCover: { [weak feed] in
+                (feed as? any SnapFeedSettleReporting)?.settledCoverImage
+            },
             // NOT hoisted — the two dismissals share one surface flow.
             //
             // Hoisting lifted the live layer out of the card and into a host
@@ -1597,9 +1614,18 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // below the completion threshold (springs back to full screen) and past
         // it (flies home to the tile). The sim injects no pans, so this is the
         // only way to exercise the release contract here.
-        if ProcessInfo.processInfo.arguments.contains("-foryou-demo-grab") {
+        // `[delay]` for the same reason `-text-swipe-demo` grew one: a run that
+        // PAGES the feed first (`-snap-fling`, +3s) cannot be scripted against a
+        // hard-coded 1.5s. The grab fired before the paging, so every scripted
+        // hero dismiss ever measured here left from the post the feed OPENED on
+        // — the one case where departure and arrival agree.
+        if let position = ProcessInfo.processInfo.arguments
+            .firstIndex(of: "-foryou-demo-grab") {
+            let arguments = ProcessInfo.processInfo.arguments
+            let delay = position + 1 < arguments.count
+                ? (Double(arguments[position + 1]) ?? 1.5) : 1.5
             transition.onDestinationShown = { [weak transition] in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                     transition?.debugScriptedGrab()
                 }
             }
@@ -1652,7 +1678,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
             landedModel: { [weak self] id in self?.viewModel.post(for: id) },
             activeMediaPage: { [weak feed] in (feed as? SnapFeedViewController)?.activeMediaPage },
-            depthView: pager
+            depthView: pager,
+            // What the viewer is looking at, for a close that lands elsewhere —
+            // see `ForYouGridZoomSource.settledCover`.
+            settledCover: { [weak feed] in
+                (feed as? any SnapFeedSettleReporting)?.settledCoverImage
+            }
         )
         // ⚠️ `presents: false` — this one only ever CLOSES. The feed is already
         // pushed, so announcing a staging here would leave it suppressing its

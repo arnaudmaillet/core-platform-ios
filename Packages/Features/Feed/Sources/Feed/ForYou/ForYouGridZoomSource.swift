@@ -63,6 +63,24 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// player for the destination. `nil` when the tile was not playing.
     private let donateLive: (() -> VideoRenderView?)?
 
+    /// The picture of the post the viewer is actually LOOKING at, for a close
+    /// that lands somewhere else.
+    ///
+    /// ⚠️ WITHOUT THIS THE CARD TAKES OFF WEARING A PHOTOGRAPH NOBODY HAS SEEN.
+    /// The card's own cover is read from the LANDING row (`heroAppearance(for:
+    /// anchorID)`), and since a list keeps its order the landing is the row the
+    /// viewer opened — almost never the post they paged to. Filmed: a grab
+    /// leaving a harbour photograph showed a dog from its first frame, and the
+    /// reverse case, where the departure held a live surface, showed the
+    /// departure for the whole drag and then snapped to the landing in one
+    /// frame as the card was removed. Both are the same missing operand.
+    ///
+    /// This is the cut `setDeparturePicture` exists for, and every other
+    /// presenter of this feed already hands it in — `PlaceProfileViewController`
+    /// and `ExternalHeroZoomSource`. This source was the only one that never
+    /// learned what the settled page was showing.
+    private let settledCover: (() -> UIImage?)?
+
     /// Set the moment a dismissal stages, and never cleared: this source
     /// serves one push/pop pair, so every card built after staging belongs
     /// to a return flight.
@@ -75,6 +93,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         landedModel: ((PostID) -> GalleryPost?)? = nil,
         activeMediaPage: (() -> Int?)? = nil,
         depthView: UIView?,
+        settledCover: (() -> UIImage?)? = nil,
         hoistLive: ((UIView, CGRect, UICoordinateSpace, CGFloat) -> Bool)? = nil,
         poseHoisted: ((CGRect, UICoordinateSpace, CGFloat) -> Void)? = nil,
         releaseHoisted: (() -> UIView?)? = nil,
@@ -91,6 +110,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         self.landedModel = landedModel
         self.activeMediaPage = activeMediaPage
         self.depthView = depthView
+        self.settledCover = settledCover
         self.donateLive = donateLive
     }
 
@@ -157,6 +177,22 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             cover: appearance?.cover,
             style: appearance?.style ?? .tile
         )
+        // ⚠️ AND THE PICTURE THE VIEWER IS LEAVING, dissolved into it — the
+        // same call `PlaceProfileViewController` makes, for the same reason.
+        //
+        // DISMISSAL ONLY. On a present the card's own cover IS the departure
+        // (the tile the finger is on), so a second operand would blend a
+        // picture with itself, which `ExternalHeroZoomSource` records as a
+        // defect rather than a no-op.
+        //
+        // Compared against the RESOLVED `anchorID` rather than `departureID`:
+        // a mosaic re-points the anchor to the settled post at staging, and
+        // after that re-pointing the two ends already agree and there is again
+        // nothing to blend. On a list the anchor stays put, which is exactly
+        // the case that needs this.
+        if isStagingDismissal, let settled = activePostID(), settled != anchorID {
+            card.setDeparturePicture(settledCover?())
+        }
         #if DEBUG
         // Whether the card had a texture to show on frame 0. `heroAppearance`
         // reads the tile's `renderedCover` synchronously and the initialiser
