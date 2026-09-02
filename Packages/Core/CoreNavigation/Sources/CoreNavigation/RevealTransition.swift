@@ -371,20 +371,19 @@ enum RevealStage {
         /// `Pose(...)` literal keeps compiling and keeps meaning exactly what
         /// it meant.
         var pageScale: CGFloat = 1
-        /// ⚠️ THE DEPARTING PAGE DOES NOT FADE. It is always 1, and the field
-        /// stays so that the one thing every pose says about the page — where
-        /// it is, how big, how opaque — is said in one place.
+        /// ⚠️ THE DEPARTING PAGE'S OWN ALPHA, and the reason it is a pose value
+        /// rather than a channel someone sets on the side: it has to travel
+        /// with the geometry, because it is the geometry's other half.
         ///
-        /// It was driven to 0 at the landing, on the reasoning that two things
-        /// in one window is a double image. True of two HALF-drawn things, and
-        /// this was the other mistake: with the page fading out and the arrival
-        /// fading in, the two crossed at nothing and the window was briefly
-        /// EMPTY. Filmed, and reported as the transition passing through a
-        /// hole.
+        /// The window used to hand over by bringing the ARRIVAL up over the
+        /// page. That put the destination's content on screen while the finger
+        /// was still deciding — laid out for a card the window had not become
+        /// yet, so its text was clipped at the window's edge. Filmed.
         ///
-        /// The arrival is opaque, and it covers. Fading it in over a page that
-        /// stays whole means every intermediate frame is an opaque sum of two
-        /// finished drawings — never a gap, and never two transparent ones.
+        /// The page leaves on its own instead, and nothing arrives until the
+        /// release. What the window shows in between is where the viewer is
+        /// going, which is the honest answer to a gesture that has not
+        /// committed.
         var pageOpacity: CGFloat = 1
     }
 
@@ -419,7 +418,11 @@ enum RevealStage {
                     mask: sourceRect,
                     maskRadius: radius,
                     pageTranslation: pose.translation,
-                    pageScale: pose.scale
+                    pageScale: pose.scale,
+                    // Gone by the landing: the arrival is what the window holds
+                    // there, and two things in one window is the double image
+                    // this whole area exists to prevent.
+                    pageOpacity: 0
                 )
             }
             return Pose(
@@ -702,17 +705,9 @@ enum RevealStage {
         carriesPage: Bool
     ) -> (fill: (duration: CGFloat, delay: CGFloat),
           content: (duration: CGFloat, delay: CGFloat)) {
-        // ⚠️ A CARRYING FIT HANDS OVER IN ONE RAMP, over the WHOLE release.
-        //
-        // It used to run two: the page's own fade out, then the arrival in over
-        // the tail of it. Sequenced precisely so the two would not overlap —
-        // and that is what put a hole in the middle of the close, because two
-        // fades that do not overlap cross at nothing. The page does not fade at
-        // all now, so there is nothing to sequence against: the arrival simply
-        // covers it, from the first frame of the release to the last.
         let tail = (duration: 1 - cardFadeStart, delay: cardFadeStart)
         return carriesPage
-            ? (fill: (duration: 1, delay: 0), content: (duration: 0, delay: 1))
+            ? (fill: tail, content: (duration: 0, delay: 1))
             : (fill: (duration: cardFadeStart, delay: 0), content: tail)
     }
 

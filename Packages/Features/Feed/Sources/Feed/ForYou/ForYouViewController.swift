@@ -1727,16 +1727,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                     )
                 }
             }
-            // ⚠️ REBUILT FOR THE POST THAT OPENED THIS, not the one paged to.
-            //
-            // It rebuilt for `landed`, so the close went home to THAT post's
-            // row — the viewer opened Marcus Holt's card, paged to Lena
-            // Klein's, and the window landed on Lena Klein's slot. Filmed.
-            // A close lands where it left from; when the two posts differ,
-            // that difference is what the transition is FOR.
-            installTextReveal(
-                feed: feed, format: format, postID: departureID, presenting: false
-            )
+            installTextReveal(feed: feed, format: format, postID: landed, presenting: false)
             // ⚠️ AND HIDE THE ROW, which on this path nothing else has.
             //
             // A reveal normally conceals the row it departed from at the
