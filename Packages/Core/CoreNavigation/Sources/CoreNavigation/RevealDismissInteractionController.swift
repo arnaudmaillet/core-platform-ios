@@ -144,7 +144,11 @@ final class RevealDismissInteractionController: NSObject,
         container.insertSubview(dim, belowSubview: fromView)
 
         let (host, mask) = RevealStage.makeHost(
-            around: fromView, in: container, pageFrame: pageFrame
+            around: fromView, in: container, pageFrame: pageFrame,
+            // The ground a contained page sits on — see `makeHost`. Only that
+            // fit promises it; a covering page fills the window by definition
+            // and a clipped one is the window.
+            ground: geometry.pageFit == .contained ? geometry.sourceFill : nil
         )
         let open = RevealStage.open(container: container)
         // See `RevealGeometry.makeDismissStandIn`: what a dismissal carries
@@ -447,7 +451,9 @@ final class RevealDismissInteractionController: NSObject,
         }
         // Teardown follows the ANIMATION, not the wall clock — see
         // `whenViewSettles`.
-        whenViewSettles(windowMask, ceiling: viewSettleCeiling) { [weak self] in
+        whenViewSettles(
+            windowMask, settlingAt: target.mask, ceiling: viewSettleCeiling
+        ) { [weak self] in
             self?.finish(cancelled: !commit)
         }
     }

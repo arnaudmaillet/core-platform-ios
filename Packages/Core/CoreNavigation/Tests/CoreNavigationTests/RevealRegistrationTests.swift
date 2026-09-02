@@ -292,6 +292,38 @@ struct RevealRegistrationTests {
         #expect(moved.size == screen.size)
     }
 
+    /// ⚠️ AND NEITHER PROP IS EVEN INSTALLED on a fit that carries the page.
+    ///
+    /// The veil (the landing card's fill, below its caption) and the borrowed
+    /// author band are both DESTINATION scenery, and both are added as
+    /// subviews of the departing page — so they scale with it and are drawn
+    /// inside the window the finger is holding. Gating the stand-in was not
+    /// enough: these two ramped on `pose.progress` with no fit branch at all,
+    /// and a card-coloured hole opened down the miniature post with a second
+    /// author header above it while the viewer was still deciding.
+    ///
+    /// Exactly one origin ever armed them on a carrying fit — the place page's
+    /// Activity close — and every other carrying source avoided it by passing
+    /// `captionEnd: nil`. A convention four sources happened to keep is not a
+    /// rule.
+    @Test func aCarryingFitInstallsNoDestinationScenery() {
+        for fit in [RevealPageFit.covering, .contained] {
+            let box = SceneryBox()
+            installVeil(geometry: box.geometry(fit: fit), anchor: box.anchor)
+            installAuthorBand(geometry: box.geometry(fit: fit), anchor: box.anchor)
+
+            #expect(box.veilCut == nil, "\(fit) painted the landing card's fill")
+            #expect(box.bandAnchor == nil, "\(fit) borrowed the landing row's author band")
+        }
+        // The legacy landing keeps both: there the window IS a card-shaped
+        // slice of the page, and the props are the transition.
+        let legacy = SceneryBox()
+        installVeil(geometry: legacy.geometry(fit: .clipped), anchor: legacy.anchor)
+        installAuthorBand(geometry: legacy.geometry(fit: .clipped), anchor: legacy.anchor)
+        #expect(legacy.veilCut != nil, "the legacy close lost its veil")
+        #expect(legacy.bandAnchor != nil, "the legacy close lost its borrowed band")
+    }
+
     // MARK: - The pivot is the release
 
     /// ⚠️ EVERY FIT THAT CARRIES THE PAGE OBEYS THE SAME DRAG LAW — asking
@@ -455,3 +487,25 @@ private final class OrdinaryStandIn: UIView, RevealStandInShaping {
     func setCornerRadius(_ radius: CGFloat) {}
     func setContentOpacity(_ alpha: CGFloat) {}
 }
+
+/// Records what a geometry's destination was asked to install.
+@MainActor
+private final class SceneryBox {
+    let anchor = CGRect(x: 16, y: 300, width: 370, height: 120)
+    var veilCut: CGFloat?
+    var bandAnchor: CGRect?
+
+    func geometry(fit: RevealPageFit) -> RevealGeometry {
+        RevealGeometry(
+            sourceFrame: { _ in nil },
+            sourceCornerRadius: 12,
+            sourceFill: .white,
+            sourceCaptionEnd: 40,
+            installDestinationVeil: { [weak self] cut, _ in self?.veilCut = cut },
+            installDestinationAuthorBand: { [weak self] anchor in self?.bandAnchor = anchor },
+            sourceCaptionTop: 52,
+            pageFit: fit
+        )
+    }
+}
+

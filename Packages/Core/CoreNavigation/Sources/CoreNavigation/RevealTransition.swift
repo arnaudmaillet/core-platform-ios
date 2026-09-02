@@ -809,10 +809,21 @@ enum RevealStage {
 
     /// The static full-screen host and its mask. The page keeps the frame the
     /// transition context gave it; only the mask and the transform ever move.
+    /// ⚠️ `ground` IS NOT DECORATION — it is what `RevealPageFit.contained`
+    /// promises and had no way to keep.
+    ///
+    /// A contained page fits INSIDE the window "with the card's own ground
+    /// around it". Nothing painted that ground: the host was clear, so as the
+    /// window's aspect diverged from the page's on the release, the DESTINATION
+    /// showed through the sides of the closing card. Invisible during the drag,
+    /// where the window keeps the screen's aspect and the page fills it
+    /// exactly, and it opens the moment the spring starts.
     static func makeHost(
-        around page: UIView, in container: UIView, pageFrame: CGRect
+        around page: UIView, in container: UIView, pageFrame: CGRect,
+        ground: UIColor? = nil
     ) -> (host: UIView, mask: UIView) {
         let host = UIView(frame: container.bounds)
+        host.backgroundColor = ground
         container.addSubview(host)
         host.addSubview(page)
         // Cleared BEFORE the frame is assigned: `frame` is derived from bounds
@@ -917,16 +928,36 @@ enum RevealStage {
 /// gallery, and every card whose post carries no identity.
 @MainActor
 func installAuthorBand(geometry: RevealGeometry, anchor: CGRect?) {
-    guard geometry.sourceCaptionTop > 0 else {
+    guard geometry.sourceCaptionTop > 0, !geometry.pageFit.carriesPage else {
         geometry.installDestinationAuthorBand(nil)
         return
     }
     geometry.installDestinationAuthorBand(anchor)
 }
 
+/// ⚠️ NEITHER PROP EXISTS FOR A FIT THAT CARRIES THE PAGE, and the guard lives
+/// HERE rather than at the ramps that drive them.
+///
+/// Both are scenery belonging to the DESTINATION — the landing card's fill
+/// below its caption, and the landing row's author band — and both are added
+/// as subviews of the departing page, so they scale with it and are drawn
+/// inside the window the finger is holding. A carrying grab may show nothing
+/// of where it is going until the viewer lets go, and these were the last two
+/// channels still doing it: a card-coloured hole opening down the miniature
+/// post, with a second author header above it.
+///
+/// Only ONE origin ever armed them on a carrying fit — the place page's
+/// Activity close — and every other carrying source dodged it by passing
+/// `captionEnd: nil` rather than by the transition refusing it. A convention
+/// that four sources happened to keep is not a rule; this is.
+///
+/// The release leg was never implicated: a carrying fit's landing pose takes
+/// the page's opacity to zero, and both props die with it.
 @MainActor
 func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
-    guard let end = geometry.sourceCaptionEnd, let anchor else {
+    guard let end = geometry.sourceCaptionEnd, let anchor,
+          !geometry.pageFit.carriesPage
+    else {
         geometry.installDestinationVeil(nil, nil)
         return
     }
@@ -1348,7 +1379,11 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         container.insertSubview(dim, belowSubview: fromView)
 
         let (host, mask) = RevealStage.makeHost(
-            around: fromView, in: container, pageFrame: pageFrame
+            around: fromView, in: container, pageFrame: pageFrame,
+            // The ground a contained page sits on — see `makeHost`. Only that
+            // fit promises it; a covering page fills the window by definition
+            // and a clipped one is the window.
+            ground: geometry.pageFit == .contained ? geometry.sourceFill : nil
         )
         let open = RevealStage.open(container: container)
         // The stand-in: the card, drawn fresh, above the page inside the same

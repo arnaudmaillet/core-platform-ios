@@ -637,7 +637,11 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // either way (measured). So this watches the card's PRESENTATION
         // instead, which is on whatever clock the animation is actually on, and
         // keeps a wall-clock ceiling as the backstop the old timer was.
-        whenViewSettles(flight.card, ceiling: viewSettleCeiling) { [weak self] in
+        whenViewSettles(
+            flight.card,
+            settlingAt: commit ? landing : flight.pageFrame,
+            ceiling: viewSettleCeiling
+        ) { [weak self] in
             self?.finishTransition(cancelled: !commit)
         }
     }
