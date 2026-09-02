@@ -488,21 +488,56 @@ enum RevealStage {
         )
     }
 
+    /// ⚠️ HOW FAR THE WINDOW MAY SHRINK WHILE A FINGER IS STILL HOLDING IT.
+    ///
+    /// A window that morphs all the way to its landing by progress is right
+    /// against a CARD — large enough that a full drag still leaves something
+    /// recognisable in the hand — and brutal against a 44pt marker: a modest
+    /// pull took the post most of the way to a disc before the viewer had
+    /// decided anything.
+    ///
+    /// Clamped on the flight's own floor, and for the flight's own stated
+    /// reason: a held window is still the PAGE, the viewer is deciding rather
+    /// than landing, and the distance left belongs to the release spring.
+    /// Sharing `ZoomFlight.minimumGrabScale` rather than restating it is what
+    /// makes the two families feel like one gesture.
+    static func grabMorph(at progress: CGFloat) -> CGFloat {
+        let clamped = min(max(progress, 0), 1)
+        return 1 + (ZoomFlight.minimumGrabScale - 1) * clamped
+    }
+
     /// ⚠️ WHAT A HELD GRAB SHOWS, for a landing that is not a card: the
-    /// departure's own rect, displaced, and nothing else at all.
+    /// departure's own rect, uniformly scaled and displaced. The SHAPE never
+    /// changes — same aspect, same corner proportion (`heldRadius`), same
+    /// opacity — only the size and the position.
     ///
-    /// Every other channel was tried under the hand and every one was reported.
-    /// Morphing toward the landing's shape cut the media away, or opened the
-    /// card's ground around it — filmed both ways. Sweeping the corner made a
-    /// capsule halfway through a drag that had decided nothing. Fading the page
-    /// out started the hand-over before there was anything to hand over.
+    /// Everything else was tried under the hand and every one was filmed and
+    /// reported. Morphing toward the landing's shape cut the media away, or
+    /// opened the card's ground around it. Sweeping the corner toward the
+    /// landing's made a capsule halfway through a drag that had decided
+    /// nothing. Fading the page out started the hand-over before there was
+    /// anything to hand over.
     ///
-    /// They were all answers to a question the drag does not ask. A grab is the
-    /// viewer picking the screen up; whether it leaves is not known until they
-    /// let go. So the whole transition — ratio, corner, fade — belongs to the
-    /// release, and only if the dismissal commits.
-    static func heldWindow(_ open: CGRect, displacedBy offset: CGPoint) -> CGRect {
-        open.offsetBy(dx: offset.x, dy: offset.y)
+    /// What survives is the one thing a grab actually is: the viewer holding
+    /// the screen they were reading, smaller and moved. Whether it leaves is
+    /// not known until they let go, so the transition — ratio, corner, fade —
+    /// belongs to the release, and only if the dismissal commits.
+    static func heldWindow(
+        _ open: CGRect, displacedBy offset: CGPoint, at progress: CGFloat
+    ) -> CGRect {
+        let morph = grabMorph(at: progress)
+        let size = CGSize(width: open.width * morph, height: open.height * morph)
+        let centre = CGPoint(x: open.midX + offset.x, y: open.midY + offset.y)
+        return CGRect(
+            x: centre.x - size.width / 2, y: centre.y - size.height / 2,
+            width: size.width, height: size.height
+        )
+    }
+
+    /// The held window's corner: the screen's own, scaled with it, so the shape
+    /// is the screen's at every instant of the drag.
+    static func heldRadius(_ screenRadius: CGFloat, at progress: CGFloat) -> CGFloat {
+        screenRadius * grabMorph(at: progress)
     }
 
     /// How far the page slides so its caption stays REGISTERED with a window

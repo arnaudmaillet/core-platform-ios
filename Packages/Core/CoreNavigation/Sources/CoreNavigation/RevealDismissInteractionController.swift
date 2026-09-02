@@ -234,20 +234,8 @@ final class RevealDismissInteractionController: NSObject,
 
         // Morph: toward the card's own size and rounding — or, against a
         // landing that is not a card, not at all: see the note below.
-        // ⚠️ A HELD WINDOW IS TAKEN, NOT TRANSFORMED. Position is the only
-        // channel the finger owns.
-        //
-        // Everything else was tried under the hand and every one of them was
-        // reported: morphing toward the landing's shape cut the media away or
-        // opened ground around it, sweeping the corner made a capsule halfway
-        // through, fading the page out started the hand-over before anything
-        // had been decided. They were all answers to a question the drag does
-        // not ask. A grab is the viewer picking the screen up; whether it
-        // leaves is not known until they let go.
-        //
-        // So: same size, same corner, same opacity, and the whole transition —
-        // ratio, border, fade — happens on the release, and only if the
-        // dismissal commits.
+        // A held window keeps the screen's SHAPE and its opacity, and only its
+        // size and position answer the finger — see `RevealStage.heldWindow`.
         let size = CGSize(
             width: openRect.width + (stagedLanding.width - openRect.width) * progress,
             height: openRect.height + (stagedLanding.height - openRect.height) * progress
@@ -258,12 +246,13 @@ final class RevealDismissInteractionController: NSObject,
                 x: centre.x - size.width / 2, y: centre.y - size.height / 2,
                 width: size.width, height: size.height
             )
-            : RevealStage.heldWindow(openRect, displacedBy: offset)
-        // The screen's own corner, untouched — see above. The landing's arrives
-        // on the release spring, which already carries it.
+            : RevealStage.heldWindow(openRect, displacedBy: offset, at: progress)
+        // The screen's own corner at the screen's own proportion — see
+        // `RevealStage.heldRadius`. The landing's arrives on the release
+        // spring, which already carries it.
         let radius = geometry.pageFit == .clipped
             ? screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
-            : screenRadius
+            : RevealStage.heldRadius(screenRadius, at: progress)
         // ⚠️ THE LIVE RECT, not a progress-derived size — the same rect the
         // window is being given, so the page cannot separate from it under a
         // rubber-banded or back-dragged finger.

@@ -228,26 +228,68 @@ struct RevealRegistrationTests {
 
     // MARK: - What a held grab may do
 
-    /// ⚠️ A HELD WINDOW IS TAKEN, NOT TRANSFORMED. Position is the only
-    /// channel the finger owns.
+    /// ⚠️ A HELD WINDOW IS THE SCREEN — smaller and moved, and nothing else.
     ///
-    /// Size, corner and opacity all held constant, because every one of them
-    /// was tried under the hand and every one was filmed and reported. What
-    /// the viewer is holding is the screen they were reading; what it becomes
-    /// is the release's business.
-    @Test func aHeldWindowChangesNothingButItsPosition() {
+    /// Its aspect is the screen's and its corner is the screen's proportion, so
+    /// the SHAPE never changes while the viewer is still deciding. Everything
+    /// that did change under the hand was filmed and reported: a window morphing
+    /// toward its landing cut the media away or opened ground around it, a
+    /// corner swept toward the landing's made a capsule halfway through, and a
+    /// page faded out began the hand-over before there was anything to hand
+    /// over.
+    @Test func aHeldWindowKeepsTheScreensShape() {
         let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let screenRadius: CGFloat = 55
+        let aspect = screen.width / screen.height
+        let roundness = screenRadius / screen.width
 
         for step in 0...100 {
-            let offset = CGPoint(x: CGFloat(step) * 3, y: CGFloat(step))
-            let held = RevealStage.heldWindow(screen, displacedBy: offset)
-            #expect(held.size == screen.size, "the window resized under the finger")
-            #expect(abs(held.minX - (screen.minX + offset.x)) < 0.0001)
-            #expect(abs(held.minY - (screen.minY + offset.y)) < 0.0001)
+            let progress = CGFloat(step) / 100
+            let held = RevealStage.heldWindow(
+                screen, displacedBy: CGPoint(x: progress * 120, y: 0), at: progress
+            )
+            #expect(abs(held.width / held.height - aspect) < 0.0001,
+                    "the window changed aspect under the finger at \(progress)")
+            #expect(abs(RevealStage.heldRadius(screenRadius, at: progress) / held.width
+                - roundness) < 0.0001,
+                    "the window changed roundness under the finger at \(progress)")
         }
-        // At rest it is the screen exactly, so an abandoned grab has nothing to
-        // undo.
-        #expect(RevealStage.heldWindow(screen, displacedBy: .zero) == screen)
+    }
+
+    /// And it may not shrink past the floor a held hero card stops at: a page
+    /// that reaches thumbnail size in the hand reads as already gone, and the
+    /// distance left belongs to the release spring.
+    @Test func aHeldWindowStopsAtTheFlightsFloor() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+
+        #expect(RevealStage.heldWindow(screen, displacedBy: .zero, at: 0) == screen,
+                "the window shrank before the finger moved")
+        let full = RevealStage.heldWindow(screen, displacedBy: .zero, at: 1)
+        #expect(abs(full.width - screen.width * ZoomFlight.minimumGrabScale) < 0.01,
+                "a held window went past the floor a held card stops at")
+
+        var previous = CGFloat.greatestFiniteMagnitude
+        for step in 0...100 {
+            let width = RevealStage
+                .heldWindow(screen, displacedBy: .zero, at: CGFloat(step) / 100).width
+            #expect(width <= previous + 0.0001, "the morph is not monotonic")
+            previous = width
+        }
+        // Past the end of the drag it holds rather than continuing.
+        #expect(RevealStage.heldWindow(screen, displacedBy: .zero, at: 4).width == full.width)
+    }
+
+    /// The displacement is the finger's, and it is the ONLY thing the position
+    /// answers to: a window at rest is the screen exactly, so an abandoned grab
+    /// has nothing to undo.
+    @Test func aHeldWindowFollowsTheFingerFromTheScreensOwnCentre() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let moved = RevealStage.heldWindow(
+            screen, displacedBy: CGPoint(x: 90, y: -20), at: 0
+        )
+        #expect(abs(moved.midX - (screen.midX + 90)) < 0.0001)
+        #expect(abs(moved.midY - (screen.midY - 20)) < 0.0001)
+        #expect(moved.size == screen.size)
     }
 
     // MARK: - The pivot is the release
