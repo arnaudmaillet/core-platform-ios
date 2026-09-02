@@ -901,9 +901,24 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             return page?.textRowFrame(for: anchorID, in: space)
                 ?? page?.rowFrame(for: anchorID, in: space)
         }
+        // ⚠️ EACH LEG ASKS ITS OWN QUESTION, and asking the opening's on a
+        // close is why a close could have nowhere to land.
+        //
+        // An OPENING is gated on a realized TEXT row, because that is what
+        // decides a window exists at all rather than a flight (the `!revealing`
+        // fork downstream depends on it). A CLOSE is a different question: it
+        // already HAS a window in the air, and all it needs to know is whether
+        // the row it is aiming at can be found. `closingFrame` answers that for
+        // a row of any kind — it is already what the geometry's rect uses, so
+        // until now the existence check and the rect disagreed: the guard said
+        // "no such transition" about a row `closingFrame` would have found.
+        //
+        // Filmed as a text page leaving a media row with no hero at all — a
+        // plain horizontal slide — because the row it had to land on carried a
+        // photograph, and `textRowFrame` refuses those on purpose.
         guard TextRevealInstaller.isEnabled,
               let page = pager.page(for: format),
-              sourceFrame(view) != nil
+              (presenting ? sourceFrame(view) : closingFrame(view)) != nil
         else { return false }
         // The grid's inset state at each stage of a round trip. It exists
         // because a rect alone cannot say why a landing missed, and the first
@@ -1614,6 +1629,25 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // below the completion threshold (springs back to full screen) and past
         // it (flies home to the tile). The sim injects no pans, so this is the
         // only way to exercise the release contract here.
+        // `-text-swipe-demo <peak> [delay]` on the FLIGHT path too, because the
+        // close a flight-opened screen ends on is not always a flight: page onto
+        // a text post and the card close takes over (`zoomDismissalKind ==
+        // .card`), which `-foryou-demo-grab` refuses by design. Without this the
+        // only scripted dismissal here was the one the zoom grab accepts, so the
+        // card-close leg of this path had never been driven by the harness at
+        // all — and that is the leg that was filmed leaving on a plain slide.
+        if let position = ProcessInfo.processInfo.arguments
+            .firstIndex(of: "-text-swipe-demo"),
+           position + 1 < ProcessInfo.processInfo.arguments.count,
+           let peak = Double(ProcessInfo.processInfo.arguments[position + 1]) {
+            let arguments = ProcessInfo.processInfo.arguments
+            let delay = position + 2 < arguments.count
+                ? (Double(arguments[position + 2]) ?? 1.5) : 1.5
+            Task { @MainActor [textSlideDismissal] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                await textSlideDismissal.debugPerformSwipe(peakProgress: CGFloat(peak))
+            }
+        }
         // `[delay]` for the same reason `-text-swipe-demo` grew one: a run that
         // PAGES the feed first (`-snap-fling`, +3s) cannot be scripted against a
         // hard-coded 1.5s. The grab fired before the paging, so every scripted
@@ -1758,7 +1792,25 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                     )
                 }
             }
-            installTextReveal(feed: feed, format: format, postID: landed, presenting: false)
+            // ⚠️ THE ROW THE WINDOW LANDS ON, WHICH IS NOT ALWAYS THE LANDED
+            // POST — and the two are the same question `adoptPost` above just
+            // answered.
+            //
+            // A mosaic has just MOVED the landed post into the departure slot,
+            // so there the landed post is what sits under the window. A list
+            // moved nothing: its rule is that a close returns to the post the
+            // opening left from, order untouched, so the window lands on
+            // `departureID` and anchoring on `landed` aimed it at a row the
+            // viewer had never scrolled to — unrealized, therefore nil, and the
+            // whole reveal was cleared.
+            //
+            // ⚠️ AND THIS CHANGE IS ONLY SAFE WITH THE GUARD ABOVE. Pointing the
+            // anchor here without widening the guard's predicate is the exact
+            // regression this replaces, from the other direction: the departure
+            // row carries media, `textRowFrame` refuses it, and the reveal is
+            // cleared again. Filmed twice, once each way.
+            let landingID = page.landsByAdoption ? landed : departureID
+            installTextReveal(feed: feed, format: format, postID: landingID, presenting: false)
             // ⚠️ AND HIDE THE ROW, which on this path nothing else has.
             //
             // A reveal normally conceals the row it departed from at the
@@ -1772,7 +1824,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // Last, because `adoptPost` deliberately un-hides both swapped
             // cells — the hero's requirement, since a flight LANDS on one of
             // them — and this is the opposite need.
-            page.setRevealConcealed(true, for: landed)
+            page.setRevealConcealed(true, for: landingID)
         }
         // ⚠️ AND WHATEVER ANIMATED THE CLOSE, NO ROW STAYS HIDDEN.
         //
