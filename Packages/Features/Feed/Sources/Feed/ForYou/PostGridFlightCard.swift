@@ -82,6 +82,10 @@ final class PostGridFlightCard: UIView {
     /// which is a black frame at the moment the feed hands over.
     fileprivate var hasAdoptedLiveMedia = false
     private let imageView = UIImageView()
+    /// The LANDING's picture, drawn above everything the departure draws — a
+    /// donated live surface included — and faded IN. See the note where it is
+    /// added: this is the half of the blend that moves.
+    private let landingCoverView = UIImageView()
     /// The PAGE's cover — the blend's second operand, empty and hidden until a
     /// flight hands one in (`setDeparturePicture`).
     ///
@@ -166,6 +170,39 @@ final class PostGridFlightCard: UIView {
         videoRenderView.clipsToBounds = true
         videoRenderView.isHidden = true
         addSubview(videoRenderView)
+
+        // ⚠️ ABOVE THE LIVE SURFACE, and that is the whole point of it existing.
+        //
+        // The blend used to be one channel: the departure on top, fading off to
+        // reveal the card's own picture beneath. For two stills that reads as
+        // the cross-dissolve it is. It reads as NOTHING when the departure is a
+        // running video, because a donated surface sits above both operands and
+        // covers them at every instant — so the landing simply appeared, whole,
+        // in the frame the card was removed. Filmed, and predicted in writing by
+        // `setDeparturePicture`'s own caller contract before it was.
+        //
+        // `PinCardView` solves this by fading its surface with the departure.
+        // This card cannot: its surface arrives DONATED and already running,
+        // and `VideoRenderView.revealOnFirstFrame` owns that alpha — two drivers
+        // on one property is a defect this codebase has already lived through.
+        //
+        // So the moving half changes ends. The departure — cover or live
+        // surface — stays whole underneath, and the LANDING rises over it. That
+        // is also the rule stated for every transition on this screen: never
+        // fade the source, fade the destination in over it. One mechanism now
+        // serves the still case and the video case, and nothing writes the
+        // surface's alpha.
+        landingCoverView.contentMode = .scaleAspectFill
+        landingCoverView.clipsToBounds = true
+        // Opaque, and on the same ground as the other operand, so the two
+        // letterbox identically at every size the card passes through.
+        landingCoverView.backgroundColor = restingBackground
+        landingCoverView.image = cover
+        landingCoverView.isHidden = true
+        landingCoverView.alpha = 0
+        landingCoverView.frame = bounds
+        landingCoverView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(landingCoverView)
 
         restingChromeView.isUserInteractionEnabled = false
         restingChromeView.frame = bounds
@@ -267,6 +304,10 @@ final class PostGridFlightCard: UIView {
     func setDeparturePicture(_ image: UIImage?) {
         departureCoverView.image = image
         departureCoverView.isHidden = image == nil
+        // The landing operand exists only opposite a departure one. Hidden
+        // rather than merely transparent, so a card with nothing to blend has
+        // exactly the subview tree it had before this channel existed.
+        landingCoverView.isHidden = image == nil || landingCoverView.image == nil
         if image == nil { departureBaseSize = nil }
         // Autoresizing and a transform do not compose; from here the cover is
         // posed by hand — see `DepartureCoverLayout`.
@@ -349,7 +390,21 @@ final class PostGridFlightCard: UIView {
     private func applyBlend() {
         // No second operand: back to the resting value, which is the un-blended
         // card exactly as it was.
-        departureCoverView.alpha = departureCoverView.image == nil ? 1 : 1 - blend
+        guard departureCoverView.image != nil, landingCoverView.image != nil else {
+            departureCoverView.alpha = 1
+            landingCoverView.alpha = 0
+            return
+        }
+        // ⚠️ THE DEPARTURE DOES NOT MOVE. It is the picture the viewer is
+        // holding, and a transition that fades it is a transition that passes
+        // through a frame of neither picture. The landing rises over it instead
+        // — over the live surface too, since `landingCoverView` is above that.
+        //
+        // `blend` means the same thing it always did: 1 is the card's OWN
+        // content, 0 is the picture at the other end. So this is the card's own
+        // picture arriving, on both legs, by construction.
+        departureCoverView.alpha = 1
+        landingCoverView.alpha = blend
     }
 
     /// Whether the card draws anything of its own beneath the page operand.

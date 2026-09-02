@@ -16,6 +16,14 @@ import UIKit
 /// without one, that exactly one operand is ever partly drawn, that the tile's
 /// counters and badge are in neither operand, and that the alpha of a live
 /// surface belongs to the reveal machinery rather than to this fade.
+///
+/// ⚠️ THE MOVING HALF IS THE LANDING, not the departure, and that is a change of
+/// contract rather than a change of spelling. Fading the departure off works only
+/// while the departure is the topmost thing drawn — and it stops being that the
+/// moment a live surface is donated, which sits above both covers. The landing
+/// then simply appeared in the frame the card was removed. So the landing gets
+/// its own operand ABOVE the surface and rises into view, the departure never
+/// moves, and one mechanism covers the still case and the video case.
 @MainActor
 struct PostGridFlightCardBlendTests {
     private static let side: CGFloat = 130
@@ -64,22 +72,42 @@ struct PostGridFlightCardBlendTests {
 
     // MARK: - Layer order
 
-    /// The order is part of the card's contract. The departure cover sits ABOVE
-    /// the tile's cover (the blend fades whichever operand is on top) and BELOW
-    /// the live surface (on a dismissal that surface is the departing page's own
+    /// The order is part of the card's contract, and every position in it was
+    /// paid for. The departure cover sits ABOVE the tile's cover and BELOW the
+    /// live surface (on a dismissal that surface is the departing page's own
     /// moving picture and the cover is only its poster; burying it under a still
-    /// would fly a frozen frame for the whole flight). The two covers are
-    /// private, so they are addressed by their position between the ones that are
-    /// not — which pins the order as a side effect.
-    @Test func theCardStacksItsFourLayersInTheContractedOrder() {
+    /// would fly a frozen frame for the whole flight). The LANDING cover sits
+    /// above the surface, which is the only position from which it can be seen
+    /// to arrive at all. The three covers are private, so they are addressed by
+    /// their position between the ones that are not — which pins the order as a
+    /// side effect.
+    @Test func theCardStacksItsFiveLayersInTheContractedOrder() {
         let card = makeCard()
-        #expect(card.subviews.count == 4)
+        #expect(card.subviews.count == 5)
         #expect(card.subviews[2] === card.videoRenderView)
         #expect(card.subviews.last === card.zoomRestingChrome)
     }
 
+    /// ⚠️ THE POSITION THE WHOLE FIX IS, restated against a DONATED surface
+    /// rather than the placeholder one — because adoption re-inserts the surface
+    /// (`insertSubview(_:aboveSubview:)`) and an insertion that landed on top
+    /// would put the video back over the landing and restore the defect exactly.
+    @Test func theLandingOperandStaysAboveADonatedLiveSurface() {
+        let card = makeCard(.tile, kind: .video)
+        let surface = VideoRenderView()
+        card.adoptZoomLiveMediaView(surface)
+        let landing = card.subviews.firstIndex { $0 === landingCover(of: card) }
+        let donated = card.subviews.firstIndex { $0 === surface }
+        #expect(donated != nil && landing != nil)
+        #expect((donated ?? 0) < (landing ?? 0), "the landing cannot rise through the video")
+    }
+
     private func tileCover(of card: PostGridFlightCard) -> UIView { card.subviews[0] }
     private func departureCover(of card: PostGridFlightCard) -> UIView { card.subviews[1] }
+    /// Above the live surface, below the chrome — see the layer-order test.
+    private func landingCover(of card: PostGridFlightCard) -> UIView {
+        card.subviews[card.subviews.count - 2]
+    }
 
     // MARK: - The un-blended card
 
@@ -95,12 +123,14 @@ struct PostGridFlightCardBlendTests {
             card.setBlend(t)
             #expect(isAlpha(tileCover(of: card), 1))
             #expect(isAlpha(departureCover(of: card), 1))
+            #expect(isAlpha(landingCover(of: card), 0))
             #expect(isAlpha(card.videoRenderView, 1))
             #expect(isAlpha(chrome, 1))
             #expect(tileCover(of: card).isHidden == false)
             #expect(card.backgroundColor == floor)
         }
         #expect(departureCover(of: card).isHidden)
+        #expect(landingCover(of: card).isHidden)
     }
 
     /// Handing the picture back as nil puts the card back where it started. A
@@ -111,11 +141,14 @@ struct PostGridFlightCardBlendTests {
         let card = makeCard()
         card.setDeparturePicture(picture())
         card.setBlend(0.5)
-        #expect(isAlpha(departureCover(of: card), 0.5))
+        #expect(isAlpha(landingCover(of: card), 0.5))
+        #expect(isAlpha(departureCover(of: card), 1))
 
         card.setDeparturePicture(nil)
         #expect(departureCover(of: card).isHidden)
+        #expect(landingCover(of: card).isHidden)
         #expect(isAlpha(departureCover(of: card), 1))
+        #expect(isAlpha(landingCover(of: card), 0))
         #expect(isAlpha(card.videoRenderView, 1))
         #expect(tileCover(of: card).isHidden == false)
     }
@@ -135,21 +168,23 @@ struct PostGridFlightCardBlendTests {
 
     // MARK: - The blend's endpoints
 
-    /// The page operand is on top of the tile's own cover, so it is the half that
-    /// fades. The tile's cover is never touched, which is what keeps the landing
-    /// handshake pixel-identical — the fix ADDS a second operand, it does not
-    /// replace the card's picture.
-    @Test func theDeparturePictureFadesOffTheTilesCover() {
+    /// ⚠️ THE DEPARTURE NEVER MOVES. It is the picture the viewer is holding, and
+    /// the rule for every transition on this screen is that the source is not
+    /// faded — the destination is faded in over it. So the LANDING is the half
+    /// that moves, from nothing at the page end to whole at the tile end.
+    @Test func theLandingRisesOverADepartureThatNeverFades() {
         for style in [PostGridFlightCard.Style.tile, .listMedia] {
             let card = makeCard(style)
             card.setDeparturePicture(picture())
 
             card.setBlend(0)
+            #expect(isAlpha(landingCover(of: card), 0))
             #expect(isAlpha(departureCover(of: card), 1))
             #expect(isAlpha(tileCover(of: card), 1))
 
             card.setBlend(1)
-            #expect(isAlpha(departureCover(of: card), 0))
+            #expect(isAlpha(landingCover(of: card), 1))
+            #expect(isAlpha(departureCover(of: card), 1))
             #expect(isAlpha(tileCover(of: card), 1))
         }
     }
@@ -164,6 +199,7 @@ struct PostGridFlightCardBlendTests {
         for step in 0...10 {
             card.setBlend(CGFloat(step) / 10)
             #expect(isAlpha(tileCover(of: card), 1))
+            #expect(isAlpha(departureCover(of: card), 1), "the source was faded")
             #expect(tileCover(of: card).isHidden == false)
             #expect(card.backgroundColor != UIColor.clear)
         }
@@ -173,9 +209,9 @@ struct PostGridFlightCardBlendTests {
         let card = makeCard()
         card.setDeparturePicture(picture())
         card.setBlend(-0.5)
-        #expect(isAlpha(departureCover(of: card), 1))
+        #expect(isAlpha(landingCover(of: card), 0))
         card.setBlend(1.5)
-        #expect(isAlpha(departureCover(of: card), 0))
+        #expect(isAlpha(landingCover(of: card), 1))
     }
 
     /// The protocol channel is the same channel. ⚠️ Reached through the
@@ -188,9 +224,9 @@ struct PostGridFlightCardBlendTests {
         let flying: any ZoomFlightCard = card
 
         flying.setZoomContentBlend(0)
-        #expect(isAlpha(departureCover(of: card), 1))
+        #expect(isAlpha(landingCover(of: card), 0))
         flying.setZoomContentBlend(1)
-        #expect(isAlpha(departureCover(of: card), 0))
+        #expect(isAlpha(landingCover(of: card), 1))
     }
 
     // MARK: - The live surface is the page operand, and it is not in the fade
@@ -228,7 +264,8 @@ struct PostGridFlightCardBlendTests {
         card.setBlend(0.75)
 
         card.adoptZoomLiveMediaView(VideoRenderView())
-        #expect(isAlpha(departureCover(of: card), 0.25))
+        #expect(isAlpha(landingCover(of: card), 0.75))
+        #expect(isAlpha(departureCover(of: card), 1))
         #expect(tileCover(of: card).isHidden == false)
     }
 
@@ -245,7 +282,8 @@ struct PostGridFlightCardBlendTests {
 
         for step in 0...4 {
             card.setBlend(CGFloat(step) / 4)
-            #expect(isAlpha(departureCover(of: card), 1 - CGFloat(step) / 4))
+            #expect(isAlpha(landingCover(of: card), CGFloat(step) / 4))
+            #expect(isAlpha(departureCover(of: card), 1))
             #expect(tileCover(of: card).isHidden == false)
             #expect(card.backgroundColor != UIColor.clear)
         }
@@ -284,9 +322,9 @@ struct PostGridFlightCardBlendTests {
         card.setBlend(0.25)
         chrome.alpha = 0
 
-        #expect(isAlpha(departureCover(of: card), 0.75))
+        #expect(isAlpha(landingCover(of: card), 0.25))
         card.setBlend(0.75)
-        #expect(isAlpha(departureCover(of: card), 0.25))
+        #expect(isAlpha(landingCover(of: card), 0.75))
         #expect(isAlpha(chrome, 0))
     }
 
