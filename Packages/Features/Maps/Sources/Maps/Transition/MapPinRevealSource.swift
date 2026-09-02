@@ -84,7 +84,7 @@ enum MapPinRevealSource {
             // Nothing to align to. The page holds still and the window opens
             // over it — see `TextRevealOrigin.alignsPageToSource`.
             alignsPageToSource: false,
-            pageCoversWindow: true,
+            pageFit: .covering,
             cornerRadius: face.cornerRadius,
             fill: PinCardView.textRevealGround,
             setConcealed: concealMarker,

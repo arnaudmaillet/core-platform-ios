@@ -158,6 +158,74 @@ struct RevealRegistrationTests {
         }
     }
 
+    // MARK: - How the page meets its window
+
+    /// ⚠️ CONTAINED MEANS WHOLE — the window may crop none of the page.
+    ///
+    /// Held still (`.clipped`) the media stayed at full size while the window
+    /// shrank around it: a keyhole panning over a photograph, filmed on a
+    /// dismissal onto a place page's Activity row.
+    @Test func aContainedPageIsNeverCroppedByItsWindow() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let row = CGRect(x: 16, y: 300, width: 343, height: 145)
+
+        let fit = RevealStage.pageFitting(row, from: screen, fit: .contained)
+        let drawn = CGRect(
+            x: row.midX - screen.width * fit.scale / 2,
+            y: row.midY - screen.height * fit.scale / 2,
+            width: screen.width * fit.scale,
+            height: screen.height * fit.scale
+        )
+        #expect(row.insetBy(dx: -0.01, dy: -0.01).contains(drawn),
+                "the window cropped the page: \(drawn) is not inside \(row)")
+    }
+
+    /// ⚠️ AND COVERING IS THE WRONG ANSWER FOR THAT SAME ROW, which is why
+    /// there are two fits and not one.
+    ///
+    /// Cover takes the LARGER ratio, and against a 343x145 row on a 402x874
+    /// screen that is the width — the dimension that barely moves. The page
+    /// would stay near full size and lose almost all of its height, which is
+    /// the truncation being fixed, arriving through the fix.
+    @Test func coveringWouldHaveCroppedThatSameRowAlmostEntirely() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let row = CGRect(x: 16, y: 300, width: 343, height: 145)
+
+        let contained = RevealStage.pageFitting(row, from: screen, fit: .contained).scale
+        let covering = RevealStage.pageFitting(row, from: screen, fit: .covering).scale
+
+        #expect(covering > contained * 4, "the two fits agree, so one of them is wrong")
+        #expect(screen.height * covering > row.height * 4,
+                "covering was supposed to overflow this window, and did not")
+    }
+
+    /// And against a MARKER the two swap roles: covering fills the disc, which
+    /// is what the viewer asked for there, and containing would letterbox a
+    /// 20pt-wide post inside it.
+    @Test func theTwoFitsSwapRolesAgainstAMarker() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let marker = CGRect(x: 300, y: 500, width: 44, height: 44)
+
+        let covering = RevealStage.pageFitting(marker, from: screen, fit: .covering).scale
+        let contained = RevealStage.pageFitting(marker, from: screen, fit: .contained).scale
+
+        #expect(screen.width * covering >= marker.width - 0.01, "the disc showed its own ground")
+        #expect(screen.width * contained < marker.width / 2,
+                "containing a page in a disc should letterbox it hard")
+    }
+
+    /// Both fits are the identity at rest, so an abandoned grab needs no
+    /// special case whichever one a source chose.
+    @Test func everyFitIsTheIdentityAtRest() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+        for fit in [RevealPageFit.covering, .contained] {
+            let pose = RevealStage.pageFitting(screen, from: screen, fit: fit)
+            #expect(abs(pose.scale - 1) < 0.0001, "\(fit) moved a page that had not left")
+            #expect(abs(pose.translation.x) < 0.0001)
+            #expect(abs(pose.translation.y) < 0.0001)
+        }
+    }
+
     // MARK: - The window's shape
 
     /// ⚠️ BOTH ENDS ARE EXACT, which is what makes the middle trustworthy.

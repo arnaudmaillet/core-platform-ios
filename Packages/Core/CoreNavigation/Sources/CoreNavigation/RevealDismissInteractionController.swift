@@ -41,7 +41,7 @@ import UIKit
 /// none of the page's type, so there is no 1:1 type to pop against and the
 /// argument above has nothing to protect: what it protects instead is a
 /// keyhole, a full-size page clipped down to a disc showing one corner of
-/// itself. Such a landing sets `RevealGeometry.pageCoversWindow` and the page
+/// itself. Such a landing sets `RevealGeometry.pageFit` and the page
 /// travels whole, scaled — see `RevealStage.pageCovering`. Everywhere there IS
 /// a card to pop against, the rule above still holds, and it is the default.
 @MainActor
@@ -148,9 +148,9 @@ final class RevealDismissInteractionController: NSObject,
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = RevealStage.fill(at: 0, covering: geometry.pageCoversWindow)
+            standIn.alpha = RevealStage.fill(at: 0, covering: geometry.pageFit == .covering)
             (standIn as? RevealStandInShaping)?.setContentOpacity(
-                RevealStage.contentOpacity(at: 0, covering: geometry.pageCoversWindow)
+                RevealStage.contentOpacity(at: 0, covering: geometry.pageFit == .covering)
             )
         }
         self.standIn = standIn
@@ -231,7 +231,7 @@ final class RevealDismissInteractionController: NSObject,
         // Morph: toward the card's own size and rounding — or, against a
         // landing that is not a card, only as far as `grabMorph` allows while
         // the finger is still holding it.
-        let size = geometry.pageCoversWindow
+        let size = geometry.pageFit == .covering
             ? CGSize(
                 width: openRect.width * RevealStage.grabMorph(at: progress),
                 height: openRect.height * RevealStage.grabMorph(at: progress)
@@ -249,7 +249,7 @@ final class RevealDismissInteractionController: NSObject,
         // `RevealStage.maskRadius`. Everywhere else the two rects are a similar
         // size, so the radius and the shape mean the same thing and the plain
         // sweep is exact.
-        let radius = geometry.pageCoversWindow
+        let radius = geometry.pageFit == .covering
             ? RevealStage.maskRadius(
                 at: progress,
                 window: size,
@@ -262,8 +262,8 @@ final class RevealDismissInteractionController: NSObject,
         // ⚠️ THE LIVE RECT, not a progress-derived size — the same rect the
         // window is being given, so the page cannot separate from it under a
         // rubber-banded or back-dragged finger.
-        if geometry.pageCoversWindow {
-            let covering = RevealStage.pageCovering(rect, from: openRect)
+        if geometry.pageFit != .clipped {
+            let covering = RevealStage.pageFitting(rect, from: openRect, fit: geometry.pageFit)
             return (
                 RevealStage.Pose(
                     mask: rect,
@@ -310,11 +310,11 @@ final class RevealDismissInteractionController: NSObject,
         // version this replaces lost its second half to exactly that.
         if let standIn {
             standIn.alpha = RevealStage.fill(
-                at: staged.progress, covering: geometry.pageCoversWindow
+                at: staged.progress, covering: geometry.pageFit == .covering
             )
             (standIn as? RevealStandInShaping)?.setContentOpacity(
                 RevealStage.contentOpacity(
-                    at: staged.progress, covering: geometry.pageCoversWindow
+                    at: staged.progress, covering: geometry.pageFit == .covering
                 )
             )
         }
@@ -366,7 +366,7 @@ final class RevealDismissInteractionController: NSObject,
             matchesAnchor: geometry.matchesAnchor,
             captionTop: geometry.sourceCaptionTop,
             ridingFrom: standIn != nil ? openRect : nil,
-            covers: geometry.pageCoversWindow
+            fit: geometry.pageFit
         )
         let target = commit
             ? closed
@@ -412,7 +412,7 @@ final class RevealDismissInteractionController: NSObject,
             // Pinned under a covering page: only the view's alpha may move, so
             // an abandoned grab leaves the face at 0 with its content still 1.
             (self.standIn as? RevealStandInShaping)?.setContentOpacity(
-                self.geometry.pageCoversWindow ? 1 : (commit ? 1 : 0)
+                self.geometry.pageFit == .covering ? 1 : (commit ? 1 : 0)
             )
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0

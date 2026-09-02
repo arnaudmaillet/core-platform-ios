@@ -1,3 +1,4 @@
+import CoreNavigation
 import CoreModels
 import FeedInterface
 import Foundation
@@ -39,7 +40,7 @@ struct TextRevealOriginRelayTests {
                 )
             ),
             makeDismissStandIn: { _ in UIView() },
-            pageCoversWindow: true,
+            pageFit: .contained,
             setConcealed: { box.concealed.append($0) },
             presentationDidEnd: { _ in box.chrome.append("inner-present") },
             willStageDismissal: { _ in box.chrome.append("stage") },
@@ -60,8 +61,9 @@ struct TextRevealOriginRelayTests {
         )
 
         // A field `replacingChrome` forgets defaults SILENTLY, and this one
-        // decides whether the whole post travels or only a window onto it.
-        #expect(relayed.pageCoversWindow)
+        // decides whether the whole post travels or only a window onto it —
+        // `.clipped` is the default, so an omission is invisible in review.
+        #expect(relayed.pageFit == .contained)
         #expect(relayed.captionTop == 52)
         #expect(relayed.authorBand?.handle == "ada")
         #expect(relayed.makeDismissStandIn(nil) != nil)

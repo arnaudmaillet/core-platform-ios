@@ -204,15 +204,8 @@ public struct RevealGeometry {
     /// (`false`). The prototype exposes both because the choice is a matter of
     /// taste that no argument settles — see `-text-reveal-plain`.
     public let matchesAnchor: Bool
-    /// ⚠️ THE PAGE TRAVELS WHOLE, SCALED TO COVER THE WINDOW — see
-    /// `RevealStage.pageCovering`, which states why and what it costs.
-    ///
-    /// False for every landing that is a CARD, and it must stay false there:
-    /// those windows show the page at the size the card will show it, and the
-    /// hand-off at the end is 1:1. Several of them also land on a DIFFERENT
-    /// post from the one the page is showing, where flying the live page would
-    /// carry post X onto post Y's slot.
-    public let pageCoversWindow: Bool
+    /// How the page meets its window — see `RevealPageFit`.
+    public let pageFit: RevealPageFit
 
     public init(
         sourceFrame: @escaping (UICoordinateSpace) -> CGRect?,
@@ -234,7 +227,7 @@ public struct RevealGeometry {
         willStageDismissal: @escaping () -> Void = {},
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in },
         matchesAnchor: Bool = true,
-        pageCoversWindow: Bool = false
+        pageFit: RevealPageFit = .clipped
     ) {
         self.sourceFrame = sourceFrame
         self.sourceCornerRadius = sourceCornerRadius
@@ -255,8 +248,33 @@ public struct RevealGeometry {
         self.willStageDismissal = willStageDismissal
         self.dismissalDidEnd = dismissalDidEnd
         self.matchesAnchor = matchesAnchor
-        self.pageCoversWindow = pageCoversWindow
+        self.pageFit = pageFit
     }
+}
+
+/// How the departing page meets the window that is closing over it.
+///
+/// ⚠️ THE ONE THING ALL THREE ANSWER: whether the page moves at all. Two of
+/// them scale it, and the reason both exist is that "do not truncate the media"
+/// means different geometry depending on what the window is becoming.
+public enum RevealPageFit {
+    /// The page holds still and the window shows part of it. Right when the
+    /// window is a CARD-shaped slice of a page laid out the same way, which is
+    /// what makes the hand-off at the end exact — and wrong the moment the
+    /// window's shape stops resembling the page's, where it is just a keyhole
+    /// panning over a photograph.
+    case clipped
+    /// The page fills the window and is cropped by it. For a landing the window
+    /// is REPLACED by rather than resolved into — a 44pt marker draws none of
+    /// the page — where filling is what keeps the media reading as the thing
+    /// travelling.
+    case covering
+    /// The page fits INSIDE the window, whole, with the card's own ground
+    /// around it. For a landing whose shape diverges from the page's early: a
+    /// 343x145 row against a 402x874 screen crops almost everything under
+    /// `covering`, because covering keys on the width, and the width is the
+    /// dimension that barely moves.
+    case contained
 }
 
 /// A stand-in that can wear the window's rounding. Declared here so
@@ -360,11 +378,11 @@ enum RevealStage {
         matchesAnchor: Bool,
         captionTop: CGFloat = 0,
         ridingFrom open: CGRect? = nil,
-        covers: Bool = false
+        fit: RevealPageFit = .clipped
     ) -> Pose {
         if let open {
-            if covers {
-                let pose = pageCovering(sourceRect, from: open)
+            if fit != .clipped {
+                let pose = pageFitting(sourceRect, from: open, fit: fit)
                 return Pose(
                     mask: sourceRect,
                     maskRadius: radius,
@@ -437,10 +455,15 @@ enum RevealStage {
     /// ⚠️ It assumes the page's frame IS the open window — true for a pushed
     /// full-screen page, and asserted at both staging sites, because if that
     /// ever stops holding the pose silently stops reducing to `open` at rest.
-    static func pageCovering(
-        _ window: CGRect, from open: CGRect
+    static func pageFitting(
+        _ window: CGRect, from open: CGRect, fit: RevealPageFit
     ) -> (scale: CGFloat, translation: CGPoint) {
-        let scale = max(window.width / max(open.width, 1), window.height / max(open.height, 1))
+        let horizontal = window.width / max(open.width, 1)
+        let vertical = window.height / max(open.height, 1)
+        // COVER takes the larger — the page overflows and the window crops it.
+        // CONTAIN takes the smaller — the page fits whole and the window's own
+        // ground fills what is left. `clipped` never reaches here.
+        let scale = fit == .contained ? min(horizontal, vertical) : max(horizontal, vertical)
         return (
             scale: scale,
             translation: CGPoint(x: window.midX - open.midX, y: window.midY - open.midY)
@@ -1318,9 +1341,9 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = RevealStage.fill(at: 0, covering: geometry.pageCoversWindow)
+            standIn.alpha = RevealStage.fill(at: 0, covering: geometry.pageFit == .covering)
             (standIn as? RevealStandInShaping)?.setContentOpacity(
-                RevealStage.contentOpacity(at: 0, covering: geometry.pageCoversWindow)
+                RevealStage.contentOpacity(at: 0, covering: geometry.pageFit == .covering)
             )
         }
         // The same rule the grab leg states at length: the cell the window is
@@ -1335,7 +1358,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             matchesAnchor: geometry.matchesAnchor,
             captionTop: geometry.sourceCaptionTop,
             ridingFrom: standIn != nil ? open.mask : nil,
-            covers: geometry.pageCoversWindow
+            fit: geometry.pageFit
         )
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         geometry.setDestinationGround(nil)
@@ -1387,7 +1410,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // act — see `RevealStage.carryFadeEnd`. Not skipped, and not the
             // three acts either: it has to be solid before the window has
             // shrunk enough for two copies of the media to read as two.
-            if geometry.pageCoversWindow {
+            if geometry.pageFit == .covering {
                 // One dissolve, late: the post is under it and opaque until the
                 // very end. `setContentOpacity` is already 1 and stays there —
                 // see `RevealStage.contentOpacity`.
