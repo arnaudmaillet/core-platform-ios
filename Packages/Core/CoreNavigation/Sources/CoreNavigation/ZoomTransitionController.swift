@@ -106,7 +106,23 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     }
     #endif
 
-    public init(source: any ZoomTransitionSource, destination: any ZoomTransitionDestination) {
+    /// ⚠️ `presents: false` FOR A CONTROLLER THAT ONLY EVER FLIES A DISMISSAL.
+    ///
+    /// The last line of this initializer tells the destination a flight is
+    /// STAGING, so it can suppress its own playback for the duration — right,
+    /// and load-bearing, when this controller is about to present. A close-only
+    /// controller, built beside an already-pushed feed, said the same thing and
+    /// nothing ever retracted it: the feed stayed in presentation-staging for
+    /// its whole life, so its cells realized with playback deferred, the paged
+    /// -to video never played, and the grab could not be handed the live
+    /// surface it is supposed to carry home.
+    ///
+    /// Defaulted, so every presenting call site is unchanged.
+    public init(
+        source: any ZoomTransitionSource,
+        destination: any ZoomTransitionDestination,
+        presents: Bool = true
+    ) {
         self.source = source
         self.destination = destination
         self.feedViewController = destination as? UIViewController
@@ -118,7 +134,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // Before the destination is pushed, and so before it lays out and
         // activates its first page — the only point early enough for it to
         // suppress its own playback for the duration of the flight.
-        destination.zoomTransitionWillBegin()
+        if presents { destination.zoomTransitionWillBegin() }
     }
 
     /// Installs the grab-to-dismiss gesture on the pushed feed's view. Called

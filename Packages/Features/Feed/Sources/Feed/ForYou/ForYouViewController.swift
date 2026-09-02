@@ -1653,7 +1653,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             activeMediaPage: { [weak feed] in (feed as? SnapFeedViewController)?.activeMediaPage },
             depthView: pager
         )
-        let transition = ZoomTransitionController(source: source, destination: destination)
+        // ⚠️ `presents: false` — this one only ever CLOSES. The feed is already
+        // pushed, so announcing a staging here would leave it suppressing its
+        // own playback for the rest of its life, with nothing to retract it.
+        let transition = ZoomTransitionController(
+            source: source, destination: destination, presents: false
+        )
         cardPathFlight = transition
         transition.returningSourceChrome = tabBarController?.tabBar
         navigationController.delegate = transition

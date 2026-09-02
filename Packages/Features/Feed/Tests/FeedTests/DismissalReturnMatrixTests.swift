@@ -66,6 +66,54 @@ struct DismissalReturnMatrixTests {
         return page
     }
 
+    /// ⚠️ STAGING IS NOT ONCE-ONLY, and the second one used to undo the first.
+    ///
+    /// A cancelled grab keeps its source. `departureID` names the post that was
+    /// TAPPED and never moves — the right answer for "where is the landing" and
+    /// the wrong one for "what do I swap with", because after one adoption the
+    /// tapped post is no longer in the departure slot. The second staging
+    /// therefore adopted into the row the tapped post had been MOVED to and
+    /// inverted the swap: a grab the viewer abandoned left the grid permanently
+    /// re-ordered, and the next one put the card down where the anchor was not.
+    @Test func stagingTwiceLeavesTheGridWhereTheFirstStagingPutIt() {
+        let page = page(style: .grid, count: 8)
+        let tapped = page.posts[1].id
+        let landed = page.posts[5].id
+
+        let source = ForYouGridZoomSource(
+            page: page, tappedID: tapped, activePostID: { landed },
+            landedModel: { id in page.post(for: id) }, depthView: nil
+        )
+        source.zoomSourceWillStageDismissal()
+        let afterFirst = page.posts.map { $0.id }
+        #expect(afterFirst[1] == landed, "precondition: the landed post took the slot")
+
+        // The grab was abandoned; the viewer grabs again without paging.
+        source.zoomSourceWillStageDismissal()
+
+        #expect(page.posts.map { $0.id } == afterFirst,
+                "the second staging re-ordered a grid the first had already settled")
+    }
+
+    /// And a viewer who pages FURTHER after an abandoned grab adopts into the
+    /// slot as it actually is, not into the row the tapped post was moved to.
+    @Test func stagingAfterPagingFurtherAdoptsIntoTheRealSlot() {
+        let page = page(style: .grid, count: 8)
+        let tapped = page.posts[1].id
+        var landed = page.posts[5].id
+
+        let source = ForYouGridZoomSource(
+            page: page, tappedID: tapped, activePostID: { landed },
+            landedModel: { id in page.post(for: id) }, depthView: nil
+        )
+        source.zoomSourceWillStageDismissal()
+        landed = page.posts[6].id
+        source.zoomSourceWillStageDismissal()
+
+        #expect(page.posts[1].id == landed,
+                "the departure slot holds the wrong post")
+    }
+
     /// Stages a dismissal exactly as the flight does: build the source the tap
     /// builds, tell it the feed settled on `landed`, and let it re-point.
     @discardableResult

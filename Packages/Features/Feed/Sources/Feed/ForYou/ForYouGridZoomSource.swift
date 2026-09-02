@@ -30,6 +30,15 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// when they tapped it, and the active post is brought TO that slot rather
     /// than the grid being taken to the active post.
     private let departureID: PostID
+    /// ⚠️ WHO IS IN THE DEPARTURE SLOT RIGHT NOW, which after any adoption is
+    /// no longer `departureID`.
+    ///
+    /// `departureID` names the post that was TAPPED and never changes, which is
+    /// the right answer for "where is the landing" and the wrong one for "what
+    /// do I swap with". A cancelled grab keeps this source, so a staging can
+    /// run more than once: addressed by post, the second one adopted into the
+    /// row the tapped post had been moved to and inverted the first swap.
+    private var slotOccupantID: PostID
     /// The post the destination is showing right now, injected so this type
     /// never has to know what a feed is.
     private let activePostID: () -> PostID?
@@ -77,6 +86,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         self.page = page
         anchorID = tappedID
         departureID = tappedID
+        slotOccupantID = tappedID
         self.activePostID = activePostID
         self.landedModel = landedModel
         self.activeMediaPage = activeMediaPage
@@ -298,21 +308,34 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // Resolved from the page when it has it, and from the feed's whole
         // corpus when it does not — the adoption inserts in that case.
         let model = landed.flatMap { page?.post(for: $0) ?? landedModel?($0) }
+        // ⚠️ ADDRESSED BY SLOT, NOT BY POST — and the difference only shows on
+        // the SECOND staging.
+        //
+        // A cancelled grab keeps this source, so staging is not once-only.
+        // `departureID` names the post that was tapped, and after one adoption
+        // that post is no longer in the departure slot: the second staging
+        // therefore asked to adopt into the row the tapped post had been MOVED
+        // to, which inverted the first swap. The grid was left permanently
+        // re-ordered by a grab the viewer abandoned, and the card then landed
+        // on a tile that was no longer where the anchor said.
         if let landed, let model, page?.canLandHero(on: model) == true,
-           page?.adoptForClose(
-               landed, intoSlotOf: departureID, orInsert: model,
-               // A flight carries the MEDIA, not the row: it conceals its own
-               // landing below, on the hero channel.
-               standingIn: false
-           ) == true {
+           landed == slotOccupantID
+               || page?.adoptForClose(
+                   landed, intoSlotOf: slotOccupantID, orInsert: model,
+                   // A flight carries the MEDIA, not the row: it conceals its
+                   // own landing below, on the hero channel.
+                   standingIn: false
+               ) == true {
             // The active post now occupies the departure slot, so anchoring to
             // it lands on that tile without moving anything.
+            slotOccupantID = landed
             anchorID = landed
         } else {
             // Nothing moved: either the viewer never left the tile, or the feed
-            // settled on a post this grid no longer holds. Both land on the
-            // departure tile itself rather than on a rect that no longer exists.
-            anchorID = departureID
+            // settled on a post this grid no longer holds. Both land on what
+            // the departure slot ACTUALLY holds — which after an earlier
+            // adoption is not the post that was tapped.
+            anchorID = slotOccupantID
         }
         // ⚠️ AND ONTO THE PAGE THE VIEWER IS ACTUALLY LOOKING AT.
         //
