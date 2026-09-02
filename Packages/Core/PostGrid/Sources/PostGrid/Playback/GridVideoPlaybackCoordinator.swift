@@ -733,6 +733,47 @@ public final class GridVideoPlaybackCoordinator {
     /// already showing the right pixels before the card is taken away; nothing
     /// moves and there is nothing to hold across.
     @discardableResult
+    /// A second surface showing the LANDING row's own playback, for a flight
+    /// card to fade in over the departure it is carrying.
+    ///
+    /// ⚠️ RESOLVED BY IDENTITY, NEVER BY URL, and that is the whole difference
+    /// between this and `makeAttachedSurface`. `attachSurface(_:to:)` ends in
+    /// `activePlayer(playing:)`, which answers from dictionary order — and this
+    /// leg is exactly where the codebase already refuses a URL lookup: the
+    /// cold-open race can mint two players for one asset, and the grid's
+    /// playhead is seconds from the page's once the post has been open. Asking
+    /// the landing ROW for the surface it is drawing and joining alongside it
+    /// cannot pick the wrong clock, because there is only one to pick.
+    ///
+    /// Nil when the row is not drawing anything joinable, or when the joined
+    /// surface could not be primed — the same refusal `makeAttachedSurface`
+    /// makes, for the same reason: an unprimed surface is a hidden empty layer,
+    /// which is a thumbnail with extra steps.
+    public func makeLandingSurface(for id: PostID) -> VideoRenderView? {
+        guard let cell = loans[id],
+              let sibling = cell.watchedClipSurface ?? cell.loadedVideoRenderView
+        else { return nil }
+        releaseFinishedFlightSurfaces()
+        let view = VideoRenderView()
+        #if DEBUG
+        view.debugLabel = "landing"
+        view.debugTracksFlight = true
+        #endif
+        guard pool.attachSurface(view, alongsideSurface: sibling) else { return nil }
+        guard view.hasFrame else {
+            pool.detachSurface(view, reason: "unprimedLanding")
+            return nil
+        }
+        flightSurfaces.add(view)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f grid landing surface %@ -> primed",
+                         CACurrentMediaTime(), id.rawValue))
+        }
+        #endif
+        return view
+    }
+
     public func adoptAttachedSurface(for id: PostID, url: URL, cell: any GridPlaybackCell) -> Bool {
         let view = cell.makeVideoRenderViewIfNeeded()
         #if DEBUG
@@ -746,6 +787,18 @@ public final class GridVideoPlaybackCoordinator {
         // exposed one frame of an empty surface at the exact moment the flight
         // card is taken away, which is a flash at landing.
         guard pool.transferOwnership(of: url, to: view) else { return false }
+        // ⚠️ AND THE COMMENT ABOVE WAS WRONG FOR THIS EXACT CASE.
+        //
+        // "`transferOwnership` attaches the surface, which primes it" holds only
+        // when the surface is joining a renderer it did not already have.
+        // `VideoRenderView.attach` returns early when the renderer is unchanged
+        // — rightly, since re-binding a healthy playing surface would flush the
+        // frames it is about to show — and on a LIST close the landing row is
+        // the row the viewer opened, which kept its loan for the whole trip. So
+        // the one surface that most needs a frame was the one surface that got
+        // none, and what it drew instead was the poster `beginVideoPreview` had
+        // just set two lines up: the clip's thumbnail, over the clip.
+        pool.primeSurface(view)
         view.revealOnFirstFrame()
         pool.setPeakBitRate(Self.tileBitRateCap, for: url)
         loans[id] = cell

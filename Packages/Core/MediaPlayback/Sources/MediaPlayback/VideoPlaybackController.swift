@@ -1016,6 +1016,23 @@ public final class VideoPlaybackController {
     /// Reads the binding off the SURFACE (`boundPlayer`) rather than looking a
     /// URL up in the pool, because two surfaces can carry the same asset and
     /// only the one in front of the viewer may be stopped.
+    /// Puts the clip's CURRENT frame on a surface that is already attached.
+    ///
+    /// For the landing of a dismissal, where the row's surface has held the same
+    /// renderer throughout and therefore cannot be primed by attaching again —
+    /// see `VideoFrameRenderer.prime`. Without it the row draws whatever was
+    /// last enqueued, which on this path is the POSTER `beginVideoPreview` just
+    /// set: the card is taken away and the viewer sees a thumbnail of the clip
+    /// they are already watching, until the next decode is dispatched. Filmed.
+    @discardableResult
+    public func primeSurface(_ view: VideoRenderView) -> Bool {
+        guard let player = watchedPlayer(in: view),
+              let renderer = renderers[ObjectIdentifier(player)] else { return false }
+        renderer.prime(view)
+        VideoPlaybackTrace.emit("prime surface \(playingURL[ObjectIdentifier(view)]?.lastPathComponent ?? "-")")
+        return true
+    }
+
     private func watchedPlayer(in view: VideoRenderView) -> AVPlayer? {
         activePlayers[ObjectIdentifier(view)] ?? view.boundPlayer
     }

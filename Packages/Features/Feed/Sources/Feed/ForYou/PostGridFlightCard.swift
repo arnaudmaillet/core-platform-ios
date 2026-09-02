@@ -82,10 +82,16 @@ final class PostGridFlightCard: UIView {
     /// which is a black frame at the moment the feed hands over.
     fileprivate var hasAdoptedLiveMedia = false
     private let imageView = UIImageView()
-    /// The LANDING's picture, drawn above everything the departure draws — a
-    /// donated live surface included — and faded IN. See the note where it is
-    /// added: this is the half of the blend that moves.
+    /// The half of the blend that MOVES: everything the landing draws, above
+    /// everything the departure draws (a donated live surface included), faded
+    /// in as one unit. See the note where it is added.
+    private let landingPane = UIView()
+    /// The landing's still, at the bottom of the pane — the floor under a live
+    /// surface that has not produced its first frame, and the whole operand
+    /// when the landing has no clip.
     private let landingCoverView = UIImageView()
+    /// The landing's own moving picture, when one could be joined.
+    private weak var landingLiveView: UIView?
     /// The PAGE's cover — the blend's second operand, empty and hidden until a
     /// flight hands one in (`setDeparturePicture`).
     ///
@@ -192,17 +198,32 @@ final class PostGridFlightCard: UIView {
         // fade the source, fade the destination in over it. One mechanism now
         // serves the still case and the video case, and nothing writes the
         // surface's alpha.
+        // ⚠️ A PANE, not a bare image view, and the reason is the alpha.
+        //
+        // The rising operand has to be able to be a live PLAYER: a landing that
+        // is a clip deserves the clip, not a thumbnail of it. But a live
+        // surface's alpha belongs to `revealOnFirstFrame`, so the blend cannot
+        // move it. Fading a CONTAINER moves both operands as one and touches
+        // neither's own alpha — the still underneath covers the instant before
+        // the surface has a frame, and the two rise as a single opaque unit.
+        landingPane.backgroundColor = restingBackground
+        landingPane.isUserInteractionEnabled = false
+        landingPane.clipsToBounds = true
+        landingPane.isHidden = true
+        landingPane.alpha = 0
+        landingPane.frame = bounds
+        landingPane.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(landingPane)
+
         landingCoverView.contentMode = .scaleAspectFill
         landingCoverView.clipsToBounds = true
         // Opaque, and on the same ground as the other operand, so the two
         // letterbox identically at every size the card passes through.
         landingCoverView.backgroundColor = restingBackground
         landingCoverView.image = cover
-        landingCoverView.isHidden = true
-        landingCoverView.alpha = 0
-        landingCoverView.frame = bounds
+        landingCoverView.frame = landingPane.bounds
         landingCoverView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(landingCoverView)
+        landingPane.addSubview(landingCoverView)
 
         restingChromeView.isUserInteractionEnabled = false
         restingChromeView.frame = bounds
@@ -307,7 +328,8 @@ final class PostGridFlightCard: UIView {
         // The landing operand exists only opposite a departure one. Hidden
         // rather than merely transparent, so a card with nothing to blend has
         // exactly the subview tree it had before this channel existed.
-        landingCoverView.isHidden = image == nil || landingCoverView.image == nil
+        landingPane.isHidden = image == nil
+            || (landingCoverView.image == nil && landingLiveView == nil)
         if image == nil { departureBaseSize = nil }
         // Autoresizing and a transform do not compose; from here the cover is
         // posed by hand — see `DepartureCoverLayout`.
@@ -335,6 +357,17 @@ final class PostGridFlightCard: UIView {
         departureBaseSize = DepartureCoverLayout.apply(
             to: departureCoverView, in: bounds, departureBase: departureBaseSize
         )
+        // ⚠️ POSED, NOT AUTORESIZED, and the zero case is why.
+        //
+        // A card can be built before it has any bounds — the flight builds one
+        // at staging and another for the animator — and autoresizing from 0x0
+        // stays 0x0 for ever: the deltas it scales are all zero. Measured as a
+        // landing operand installed into `pane={{0,0},{0,0}}`, which draws
+        // nothing at any blend. Every pose calls this method, and `layoutSubviews`
+        // is where a resting card gets one, so both do it.
+        landingPane.frame = bounds
+        landingCoverView.frame = landingPane.bounds
+        landingLiveView?.frame = landingPane.bounds
     }
 
     /// The blend channel: `t == 0` is the page's picture, `t == 1` the tile's.
@@ -390,9 +423,11 @@ final class PostGridFlightCard: UIView {
     private func applyBlend() {
         // No second operand: back to the resting value, which is the un-blended
         // card exactly as it was.
-        guard departureCoverView.image != nil, landingCoverView.image != nil else {
+        guard departureCoverView.image != nil,
+              landingCoverView.image != nil || landingLiveView != nil
+        else {
             departureCoverView.alpha = 1
-            landingCoverView.alpha = 0
+            landingPane.alpha = 0
             return
         }
         // ⚠️ THE DEPARTURE DOES NOT MOVE. It is the picture the viewer is
@@ -404,7 +439,33 @@ final class PostGridFlightCard: UIView {
         // content, 0 is the picture at the other end. So this is the card's own
         // picture arriving, on both legs, by construction.
         departureCoverView.alpha = 1
-        landingCoverView.alpha = blend
+        landingPane.alpha = blend
+    }
+
+    /// The landing's own moving picture, installed at the TOP of the pane so it
+    /// covers the still while it draws — and its alpha left strictly alone, for
+    /// the reason `ZoomFlightCard.setZoomLandingLiveMedia` states.
+    func setZoomLandingLiveMedia(_ view: UIView) {
+        guard view !== landingLiveView else { return }
+        landingLiveView?.removeFromSuperview()
+        landingLiveView = view
+        view.frame = landingPane.bounds
+        // Autoresizing AND the explicit pose: autoresizing carries it when the
+        // pane is resized directly, the pose carries it when the card is built
+        // before it has bounds and only the flight ever gives it any.
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.clipsToBounds = true
+        landingPane.addSubview(view)
+        // Re-derived rather than assigned: the landing operand and the departure
+        // picture arrive independently, and whichever lands second decides.
+        landingPane.isHidden = departureCoverView.image == nil
+        applyBlend()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f card LANDING LIVE installed pane=%@",
+                         CACurrentMediaTime(), NSCoder.string(for: landingPane.bounds)))
+        }
+        #endif
     }
 
     /// Whether the card draws anything of its own beneath the page operand.
@@ -579,6 +640,17 @@ extension PostGridFlightCard: ZoomFlightCard {
         departureBaseSize = DepartureCoverLayout.apply(
             to: departureCoverView, in: bounds, departureBase: departureBaseSize
         )
+        // ⚠️ POSED, NOT AUTORESIZED, and the zero case is why.
+        //
+        // A card can be built before it has any bounds — the flight builds one
+        // at staging and another for the animator — and autoresizing from 0x0
+        // stays 0x0 for ever: the deltas it scales are all zero. Measured as a
+        // landing operand installed into `pane={{0,0},{0,0}}`, which draws
+        // nothing at any blend. Every pose calls this method, and `layoutSubviews`
+        // is where a resting card gets one, so both do it.
+        landingPane.frame = bounds
+        landingCoverView.frame = landingPane.bounds
+        landingLiveView?.frame = landingPane.bounds
     }
 
     /// The surface fills the card and resizes with it, so `resizeAspectFill`

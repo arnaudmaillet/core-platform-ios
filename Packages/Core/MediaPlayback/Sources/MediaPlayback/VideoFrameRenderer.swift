@@ -130,6 +130,21 @@ final class VideoFrameRenderer {
     /// ticks" rule: exactly ONE frame is retained, and one frame per renderer
     /// is bounded and small. The rule guards against unbounded retention
     /// starving the decoder's pool, which a single slot cannot do.
+    /// Primes a surface that is ALREADY attached to this renderer.
+    ///
+    /// ⚠️ `addSurface` is not reachable for it. `VideoRenderView.attach` returns
+    /// early when the renderer is unchanged — deliberately, because re-binding a
+    /// healthy playing surface would flush the frames it is about to show — so a
+    /// surface that never left this renderer never gets primed again. That is
+    /// exactly the landing of a dismissal: the row kept its loan for the whole
+    /// trip, so `transferOwnership` rebinds it to the renderer it already had,
+    /// the early return fires, and the "attaches the surface, which primes it"
+    /// the caller relies on silently does not happen.
+    func prime(_ surface: VideoRenderView) {
+        guard surfaces.contains(surface) else { return }
+        primeWithLastFrame(surface)
+    }
+
     private func primeWithLastFrame(_ surface: VideoRenderView) {
         // COLD PATH. `lastFrame` is nil until this renderer has dispatched at
         // least once, so on a cold flight — the first open of a tile whose

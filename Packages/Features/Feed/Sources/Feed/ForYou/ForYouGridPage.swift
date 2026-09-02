@@ -1166,6 +1166,33 @@ final class ForYouGridPage: UIView {
         return made
     }
 
+    /// The LANDING row's own moving picture, for the card's rising operand.
+    ///
+    /// The mirror of `liveFlightSurface`, which serves the DEPARTURE on a
+    /// present — and deliberately not the same call: that one resolves by URL,
+    /// which this leg must not do. See
+    /// `GridVideoPlaybackCoordinator.makeLandingSurface`.
+    func landingFlightSurface(for postID: PostID) -> VideoRenderView? {
+        if let made = playback?.makeLandingSurface(for: postID) { return made }
+        // Nothing to join yet. Ask for the player rather than reporting its
+        // absence — the same move `liveFlightSurface` makes for the departure,
+        // and for the same reason: this call is repeated every frame of the
+        // flight, so a start kicked here is picked up by the next ask. Without
+        // it a row that had scrolled out of the autoplay window could only ever
+        // land as a thumbnail.
+        //
+        // The CURRENT PAGE's stream where there is one: a collection whose head
+        // is a photograph has a nil `videoURL` and would otherwise never be
+        // asked for at all.
+        let row = cell(for: postID) as? PostGridListRowCell
+        guard let playback, let index = posts.firstIndex(where: { $0.id == postID }),
+              let url = row?.currentPageVideoURL ?? posts[index].videoURL,
+              let row
+        else { return nil }
+        playback.demandFlightPlayback(of: postID, url: url, in: row)
+        return nil
+    }
+
     /// Forces the landing cell through a layout pass while the card still
     /// covers it.
     ///
