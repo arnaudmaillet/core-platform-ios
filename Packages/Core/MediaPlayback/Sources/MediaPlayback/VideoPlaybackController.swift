@@ -61,6 +61,81 @@ public final class VideoPlaybackController {
     /// Where each paused player's picture was, so a resume can put it back.
     /// Keyed by PLAYER: two surfaces can share one, and they share its playhead.
     private var pausedAnchors: [ObjectIdentifier: CMTime] = [:]
+
+    /// Where a clip had got to when its player was let go, so opening the same
+    /// post again picks the picture up instead of starting it over.
+    ///
+    /// ⚠️ KEYED BY POST AND ASSET, never by asset alone — the identity rule this
+    /// file states at length for `playingScope`. Two rows carrying the same file
+    /// are two viewings with two positions, and one key for both would drag one
+    /// viewer's place onto the other's screen.
+    ///
+    /// ⚠️ AND KEYED BY NEITHER PLAYER NOR SURFACE, which is why this is not
+    /// `pausedAnchors`. That anchor lives exactly as long as one loan: `retire`
+    /// deletes it precisely because the pool hands the same player to a
+    /// different clip next. This has to OUTLIVE the loan — the whole event it
+    /// remembers is the loan ending — so it hangs off the two things that are
+    /// still true afterwards.
+    private var resumeTimes: [ResumeKey: CMTime] = [:]
+    /// Insertion order, so the memory can be capped without keeping every post
+    /// a session ever played. Small on purpose: this is "the clip you were just
+    /// watching", not a viewing history.
+    private var resumeOrder: [ResumeKey] = []
+    private static let resumeMemory = 32
+    /// Below this, resuming is indistinguishable from starting and costs a seek
+    /// on every cold start in the app.
+    private static let minimumResumeSeconds = 0.5
+
+    private struct ResumeKey: Hashable {
+        let scope: String
+        let url: URL
+    }
+
+    /// Files the playhead of a loan that is ending. Called from `detach`, and
+    /// only where the playback itself is ending rather than one of several
+    /// surfaces leaving it.
+    private func rememberResume(scope: String?, url: URL?, player: AVPlayer) {
+        guard let scope, let url, player.currentItem != nil else { return }
+        rememberResume(scope: scope, url: url, at: player.currentTime())
+    }
+
+    /// The bookkeeping half, reachable without a player.
+    ///
+    /// Split out because the rules that can rot here — the scope is part of the
+    /// key, a position is spent once, the memory is capped, a position too near
+    /// the start is not worth keeping — are all about the ledger, and a test
+    /// driving a real `AVPlayer` over a stub URL can only ever observe time
+    /// zero. Asserting them through playback would assert nothing.
+    func rememberResume(scope: String, url: URL, at time: CMTime) {
+        guard time.isValid, time.seconds.isFinite,
+              time.seconds > Self.minimumResumeSeconds else { return }
+        let key = ResumeKey(scope: scope, url: url)
+        if resumeTimes[key] == nil { resumeOrder.append(key) }
+        resumeTimes[key] = time
+        while resumeOrder.count > Self.resumeMemory {
+            resumeTimes.removeValue(forKey: resumeOrder.removeFirst())
+        }
+        VideoPlaybackTrace.emit(String(
+            format: "resume filed %@ scope=%@ at=%.2fs",
+            url.lastPathComponent, scope, time.seconds
+        ))
+    }
+
+    /// The playhead a fresh player for this post should start from, if any.
+    /// Consumed, not read: a resume answers once, and a clip the viewer has
+    /// since watched to the end must not be dragged back to a stale position by
+    /// a later start.
+    func takeResume(scope: String?, url: URL) -> CMTime? {
+        guard let scope else { return nil }
+        let key = ResumeKey(scope: scope, url: url)
+        guard let time = resumeTimes.removeValue(forKey: key) else { return nil }
+        resumeOrder.removeAll { $0 == key }
+        VideoPlaybackTrace.emit(String(
+            format: "resume applied %@ scope=%@ at=%.2fs",
+            url.lastPathComponent, scope, time.seconds
+        ))
+        return time
+    }
     /// Which POST each bound view is playing for.
     ///
     /// ⚠️ THE URL IS NOT AN IDENTITY, and treating it as one is a defect the
@@ -273,6 +348,20 @@ public final class VideoPlaybackController {
         item.preferredPeakBitRate = peakBitRate
         installLoop(for: player, item: item)
         player.replaceCurrentItem(with: item)
+        // ⚠️ AFTER the item is in and BEFORE `play`, so the first frame decoded
+        // is the one the viewer left on rather than the clip's first.
+        //
+        // Only a COLD mint reaches here. The two branches above — adopting a
+        // parked player and joining an active one — carry a live playhead
+        // already, and seeking either would drag a picture the viewer is
+        // currently watching.
+        if let resume = takeResume(scope: scope, url: mediaURL) {
+            // ⚠️ The completion handler is what picks the SYNCHRONOUS overload.
+            // This runs inside an `async` function, where the bare call resolves
+            // to `await player.seek(...)` — which would suspend this start until
+            // the seek finished, between `replaceCurrentItem` and `play`.
+            player.seek(to: resume, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+        }
         renderer(for: player)?.setItem(item)
         player.isMuted = true
         player.actionAtItemEnd = .none
@@ -954,6 +1043,10 @@ public final class VideoPlaybackController {
 
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
         view.detach(reason: "controller.stop")
+        // Read BEFORE the ledger is cleared: these two are what the playhead is
+        // filed under, and three lines down they are gone.
+        let leavingURL = playingURL[key]
+        let leavingScope = playingScope[key]
         surfaces[key] = nil
         playingURL[key] = nil
         playingScope[key] = nil
@@ -968,6 +1061,12 @@ public final class VideoPlaybackController {
         let stillInUse = activePlayers.values.contains { $0 === player }
             || parked.map { $0.player === player } ?? false
         guard !stillInUse else { return }
+        // ⚠️ THE ONE MOMENT THE PLAYHEAD IS STILL KNOWN. One line down `retire`
+        // replaces the item with nil and the position is gone for good — which
+        // is why every re-open of a post started its clip again from zero. The
+        // pool is doing exactly what it is for; nothing was writing down what it
+        // was about to discard.
+        rememberResume(scope: leavingScope, url: leavingURL, player: player)
         //
         // The loan became shareable the moment `play` started joining an active
         // player, and tearing it down here would pause the asset — and return it
