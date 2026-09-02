@@ -219,12 +219,41 @@ struct RevealRegistrationTests {
         }
     }
 
-    /// A carrying fit has nothing in the first slot: its content is pinned at
-    /// 1 and only the view's alpha moves, late.
+    /// ⚠️ AND A CARRYING RELEASE NEVER LEAVES THE WINDOW EMPTY.
+    ///
+    /// Two fades that are careful not to overlap cross at NOTHING: the page
+    /// went out, the arrival came in after it, and in between the window was a
+    /// hole. Filmed on a place page's Activity close.
+    ///
+    /// The page does not fade at all now, so there is nothing to sequence
+    /// against — the arrival covers it in one ramp over the whole release, and
+    /// every intermediate frame is an opaque sum of two finished drawings.
+    @Test func aCarryingReleaseNeverPassesThroughAHole() {
+        let s = RevealStage.releaseHandover(carriesPage: true)
+        #expect(s.fill.delay == 0, "the arrival waited, and the window was empty while it did")
+        #expect(s.fill.duration == 1, "the arrival did not cover the whole release")
+
+        // The page it covers is whole at both ends, so there is nothing behind
+        // the ramp that could thin out under it.
+        let landing = RevealStage.closed(
+            sourceRect: CGRect(x: 300, y: 500, width: 44, height: 44),
+            radius: 22, anchor: nil, matchesAnchor: false,
+            ridingFrom: CGRect(x: 0, y: 0, width: 402, height: 874),
+            fit: .covering
+        )
+        #expect(landing.pageOpacity == 1, "the source faded, so the two cross at nothing")
+    }
+
+    /// A carrying fit has nothing in the second slot: its content is pinned at
+    /// 1 and only the view's alpha moves — one ramp, one direction, over an
+    /// opaque page.
     @Test func aCarryingReleaseSchedulesOnlyItsView() {
         let s = RevealStage.releaseHandover(carriesPage: true)
         #expect(s.content.duration == 0, "a carrying fit ramped its content")
-        #expect(s.fill.delay == RevealStage.cardFadeStart, "the arrival came early")
+        // A card landing still keeps its three acts, and its arrival still
+        // waits for the fill — the two fits differ here and are meant to.
+        #expect(RevealStage.releaseHandover(carriesPage: false).content.delay
+            == RevealStage.cardFadeStart)
     }
 
     // MARK: - What a held grab may do
@@ -378,8 +407,9 @@ struct RevealRegistrationTests {
         }
     }
 
-    /// The page is gone by the landing: two things in one window is the double
-    /// image the rest of this area exists to prevent.
+    /// The page is WHOLE at the landing, under an arrival that has covered it:
+    /// a source that fades meets an arrival that is rising and the two cross at
+    /// nothing.
     @Test func theLandingPoseHasNoPageLeft() {
         let closed = RevealStage.closed(
             sourceRect: CGRect(x: 300, y: 500, width: 44, height: 44),
@@ -387,7 +417,7 @@ struct RevealRegistrationTests {
             ridingFrom: CGRect(x: 0, y: 0, width: 402, height: 874),
             fit: .covering
         )
-        #expect(closed.pageOpacity == 0)
+        #expect(closed.pageOpacity == 1, "the source may not fade — the arrival covers it")
         // And an abandoned grab hands a whole page back.
         #expect(RevealStage.open(container: UIView(
             frame: CGRect(x: 0, y: 0, width: 402, height: 874)
