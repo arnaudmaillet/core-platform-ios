@@ -1234,7 +1234,14 @@ final class ForYouGridPage: UIView {
         let cell = collectionView.cellForItem(
             at: indexPath(for: index)
         ) as? any GridPlaybackCell
-        if let playback, post.videoURL != nil,
+        // ⚠️ THE CURRENT PAGE'S STREAM, not page one's. `GalleryPost.videoURL`
+        // is `pages.first?.videoURL` for ever, so a collection resting on a clip
+        // whose HEAD is a photograph answered nil here and fell through to the
+        // still gate below — which reports ready on a COVER while the row has no
+        // moving picture at all. That is worse than having no gate: the hold is
+        // released by the very thing it exists to hold across.
+        let pageVideoURL = (cell as? PostGridListRowCell)?.currentPageVideoURL ?? post.videoURL
+        if let playback, pageVideoURL != nil,
            autoplays(post) || cell?.loadedVideoRenderView != nil {
             return playback.isSurfaceRendering(for: postID)
         }

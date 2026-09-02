@@ -962,7 +962,17 @@ public final class VideoPlaybackController {
         // taking ownership knows its own post — and inherited otherwise.
         playingScope[key] = playingScope[key] ?? previousScope
         bind(player, to: view)
-        player.play()
+        // ⚠️ THROUGH THE PAUSE'S OWN DOOR, not a bare `play()`.
+        //
+        // The player handed back here is very often one the destination PAUSED
+        // on its way out — a feed page that resigns without releasing playback
+        // pauses the shared player, which is the ROW's player. A bare `play()`
+        // resumes it and leaves everything `setPaused(false:)` does undone: the
+        // anchor filed at the pause is stranded in `pausedAnchors` for a pooled
+        // player that will be loaned to a different clip, the frames decoded
+        // before the pause are shown instead of dropped, and the drift re-pin
+        // never runs. All three exist because each was a visible defect once.
+        if !setPaused(false, in: view) { player.play() }
         return true
     }
 

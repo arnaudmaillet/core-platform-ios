@@ -936,10 +936,37 @@ public final class GridVideoPlaybackCoordinator {
         // cross-fades, so those two go true while the surface is still
         // transparent and a landing gated on them drops the flight card two
         // frames early, showing the tile's cover through it.
-        if let hosted = hostedSurfaces[id] { return hosted.isRenderingVisibly }
+        if let hosted = hostedSurfaces[id] { return isShowingItsClip(hosted) }
         guard let cell = loans[id], let view = cell.loadedVideoRenderView else { return false }
-        return view.isRenderingVisibly
+        return isShowingItsClip(view)
     }
+
+    /// ⚠️ "HAS A FRAME" AND "IS SHOWING THE RIGHT ONE" ARE DIFFERENT QUESTIONS,
+    /// and the landing hold wants the second.
+    ///
+    /// `isRenderingVisibly` answers the first honestly: an
+    /// `AVSampleBufferDisplayLayer` goes on displaying the last frame enqueued
+    /// into it, so a surface starved of dispatches — which every grid surface is
+    /// while a full-screen post covers the grid, since the renderer skips
+    /// windowless surfaces — still has a real decoded frame on screen. What it
+    /// no longer has is a CURRENT one.
+    ///
+    /// Asked of the player rather than of the view, because only the player
+    /// knows whether a stale frame is a fault or the point: a clip that is
+    /// deliberately paused is showing exactly what it should, for ever, and
+    /// gating it on recency would hold every landing on such a row for the whole
+    /// of the hold's ceiling — trading a flash for a stall. So recency is
+    /// required only while the clip is supposed to be moving.
+    private func isShowingItsClip(_ view: VideoRenderView) -> Bool {
+        guard view.isRenderingVisibly else { return false }
+        guard pool.isAdvancing(in: view) else { return true }
+        return CACurrentMediaTime() - view.lastFrameHostTime < Self.staleFrameWindow
+    }
+
+    /// Two dispatch intervals at 24fps, the slowest ladder rung this app plays.
+    /// Long enough that an ordinary gap between frames is not called stale,
+    /// short enough that a surface receiving nothing is.
+    private static let staleFrameWindow: CFTimeInterval = 2.0 / 24.0
 
     /// Retires a parked player nobody adopted — a cancelled flight, or a
     /// destination that never played it.

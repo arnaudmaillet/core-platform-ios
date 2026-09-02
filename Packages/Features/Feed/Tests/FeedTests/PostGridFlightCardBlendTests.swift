@@ -363,6 +363,33 @@ struct PostGridFlightCardBlendTests {
         #expect(landing.bounds.size == CGSize(width: Self.side, height: Self.side))
     }
 
+    /// ⚠️ POSED BY TRANSFORM, NEVER RESIZED — the rule the DEPARTURE surface
+    /// already follows, and the one this operand was breaking.
+    ///
+    /// An `AVSampleBufferDisplayLayer` does not re-render its video rect during
+    /// an animated bounds change: inside a correctly sized, correctly centred
+    /// surface the content stays drawn at its previous size, pinned to the layer
+    /// origin. Filmed as the landing media letterboxing and sliding about inside
+    /// the transition window.
+    @Test func theLandingSurfaceIsPosedByTransformRatherThanResized() {
+        let card = makeCard(.listMedia, kind: .video)
+        card.setDeparturePicture(picture())
+        let landing = VideoRenderView()
+        card.setZoomLandingLiveMedia(landing)
+
+        let flying: any ZoomFlightCard = card
+        flying.setZoomContentBlend(0)
+        let laidOut = landing.bounds.size
+        #expect(laidOut.width > 0 && laidOut.height > 0)
+
+        // A card sweeping to a very different shape, as a flight's does.
+        card.frame = CGRect(x: 0, y: 0, width: 60, height: 200)
+        flying.setZoomContentBlend(0.5)
+        #expect(landing.bounds.size == laidOut, "the video layer was resized")
+        #expect(landing.transform != .identity, "the surface was not posed at all")
+        #expect(landing.center == CGPoint(x: 30, y: 100))
+    }
+
     // MARK: - Furniture belongs to neither operand
 
     /// ⚠️ THE TILE'S COUNTERS ARE TEXT, and text is what the fade law is about.

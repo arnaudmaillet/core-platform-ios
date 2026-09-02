@@ -92,6 +92,8 @@ final class PostGridFlightCard: UIView {
     private let landingCoverView = UIImageView()
     /// The landing's own moving picture, when one could be joined.
     private weak var landingLiveView: UIView?
+    /// The size `landingLiveView` was laid out at, once — see where it is set.
+    private var landingLayoutSize: CGSize = .zero
     /// The PAGE's cover — the blend's second operand, empty and hidden until a
     /// flight hands one in (`setDeparturePicture`).
     ///
@@ -367,7 +369,7 @@ final class PostGridFlightCard: UIView {
         // is where a resting card gets one, so both do it.
         landingPane.frame = bounds
         landingCoverView.frame = landingPane.bounds
-        landingLiveView?.frame = landingPane.bounds
+        poseLandingLiveMedia()
     }
 
     /// The blend channel: `t == 0` is the page's picture, `t == 1` the tile's.
@@ -420,6 +422,28 @@ final class PostGridFlightCard: UIView {
     /// every instant of the morph, so while it draws it IS the page operand, and
     /// the cover fading underneath it is simply not on screen. The consequence is
     /// a caller's to weigh, not this method's — see `setDeparturePicture`.
+    /// The landing surface, covering the pane at whatever size the card
+    /// currently is — by transform, so the layer's own bounds never move.
+    private func poseLandingLiveMedia() {
+        guard let view = landingLiveView else { return }
+        let size = landingPane.bounds.size
+        guard size.width > 0, size.height > 0 else { return }
+        if landingLayoutSize.width <= 0 || landingLayoutSize.height <= 0 {
+            // ⚠️ ONCE, and at the first size the pane actually has. Laying the
+            // layer out again later is the bounds change this whole approach
+            // exists to avoid.
+            landingLayoutSize = ZoomTransitionGeometry.mediaLayoutSize(
+                native: (view as? VideoRenderView)?.nativeVideoSize, covering: size
+            )
+            view.bounds = CGRect(origin: .zero, size: landingLayoutSize)
+        }
+        let scale = ZoomTransitionGeometry.mediaFillScale(
+            covering: size, surface: landingLayoutSize
+        )
+        view.transform = CGAffineTransform(scaleX: scale, y: scale)
+        view.center = CGPoint(x: size.width / 2, y: size.height / 2)
+    }
+
     private func applyBlend() {
         // No second operand: back to the resting value, which is the un-blended
         // card exactly as it was.
@@ -449,13 +473,25 @@ final class PostGridFlightCard: UIView {
         guard view !== landingLiveView else { return }
         landingLiveView?.removeFromSuperview()
         landingLiveView = view
-        view.frame = landingPane.bounds
-        // Autoresizing AND the explicit pose: autoresizing carries it when the
-        // pane is resized directly, the pose carries it when the card is built
-        // before it has bounds and only the flight ever gives it any.
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // ⚠️ LAID OUT ONCE, THEN POSED BY TRANSFORM — never resized, which is the
+        // rule the DEPARTURE surface already follows
+        // (`prepareZoomLiveMediaForFlight`) and which this operand was breaking.
+        //
+        // An `AVSampleBufferDisplayLayer` does not re-render its video rect
+        // during an animated bounds change: inside a correctly sized, correctly
+        // centred surface the content stays drawn at its previous size, pinned
+        // to the layer origin. Filmed as the landing media letterboxing and
+        // sliding about inside the window — "as if it were badly attached to
+        // it", which is exactly what it was.
+        view.transform = .identity
+        view.autoresizingMask = []
+        // Sized by the pose, not here: a card can be built before it has any
+        // bounds, and a layout size taken from a zero pane would pin the surface
+        // at zero for the whole flight.
+        landingLayoutSize = .zero
         view.clipsToBounds = true
         landingPane.addSubview(view)
+        poseLandingLiveMedia()
         // Re-derived rather than assigned: the landing operand and the departure
         // picture arrive independently, and whichever lands second decides.
         landingPane.isHidden = departureCoverView.image == nil
@@ -650,7 +686,7 @@ extension PostGridFlightCard: ZoomFlightCard {
         // is where a resting card gets one, so both do it.
         landingPane.frame = bounds
         landingCoverView.frame = landingPane.bounds
-        landingLiveView?.frame = landingPane.bounds
+        poseLandingLiveMedia()
     }
 
     /// The surface fills the card and resizes with it, so `resizeAspectFill`
