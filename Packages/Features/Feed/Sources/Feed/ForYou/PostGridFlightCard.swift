@@ -411,8 +411,22 @@ extension PostGridFlightCard: ZoomFlightCard {
         hasAdoptedLiveMedia ? videoRenderView.isRenderingVisibly : true
     }
 
+    /// ⚠️ THE REQUIREMENT IS PRODUCTION, THE DETAIL IS NOT.
+    ///
+    /// `ZoomFlightCard.zoomLiveMediaDebugState` is an unconditional protocol
+    /// requirement — pinned by `ZoomExistentialDispatchTests`, because a
+    /// diagnostic that answers the DEFAULT for every real card is a diagnostic
+    /// that lies. So this must exist in every configuration. What must not is
+    /// `VideoRenderView.debugSurfaceState`, which is a debug affordance and
+    /// stays behind its own fence; Release keeps the half of the answer that
+    /// costs nothing.
     var zoomLiveMediaDebugState: String {
-        hasAdoptedLiveMedia ? videoRenderView.debugSurfaceState : "no live media"
+        guard hasAdoptedLiveMedia else { return "no live media" }
+        #if DEBUG
+        return videoRenderView.debugSurfaceState
+        #else
+        return "live media"
+        #endif
     }
 
     /// A grid tile never previews live, so this only ever fires on the dismiss

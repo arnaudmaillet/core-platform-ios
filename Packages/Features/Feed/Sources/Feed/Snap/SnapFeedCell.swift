@@ -2553,6 +2553,81 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private var wantedPreviewFraction: Double?
     private var isFetchingPreview = false
 
+    // MARK: - Paging and chrome, for the transitions
+
+    // ⚠️ OUTSIDE THE FENCE BELOW, and they were inside it by accident.
+    //
+    // The `#if DEBUG` was added around a run of test affordances, and it
+    // landed in the middle of one member's doc comment — orphaning that doc
+    // and swallowing four members that a transition calls on every ordinary
+    // dismissal. Nothing caught it because CI builds Debug only, so the app
+    // simply did not compile for Release.
+    //
+    // The convention the fence already follows is the check: everything that
+    // belongs in it is named `debug…`. These four are not.
+
+    /// Holds the page's own chrome back while a flight's REPLICA stands in for
+    /// it, then brings it in.
+    ///
+    /// ⚠️ The replica exists precisely so the real chrome need not be visible in
+    /// the air. It was anyway — nothing ever hid it — so the card simply lifted
+    /// off a fully drawn page, and at the landing the replica vanished and the
+    /// real thing was revealed on one frame. That is the pop: not something
+    /// appearing, but something that had been there all along stopping being
+    /// covered.
+    func setChromeHeldForFlight(_ held: Bool) {
+        if held {
+            chrome.alpha = 0
+            return
+        }
+        guard chrome.alpha < 1 else { return }
+        // ⚠️ NOT WHEN THE COMMENTS ALREADY OWN THE CHROME.
+        //
+        // `chrome` is one of the engagement's own fade layers: engaged, it is
+        // deliberately at zero. This restore is unconditional — it exists to
+        // undo the HOLD, and it wrote the same property — so a post opened
+        // straight into its thread landed wearing both interfaces at once, the
+        // ticker and the caption and the page dots sitting under a comment
+        // stream.
+        //
+        // The hold's opposite is not "visible", it is "whatever the page was
+        // doing before it was covered".
+        guard !isCommentsEngaged else { return }
+        UIView.animate(
+            withDuration: 0.26, delay: 0.02,
+            usingSpringWithDamping: 0.85, initialSpringVelocity: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.chrome.alpha = 1
+        }
+    }
+
+    /// The page indicator's scrub, so the screen can make its dismissal yield.
+    var mediaScrubGesture: UIGestureRecognizer { chrome.mediaScrubGesture }
+
+    /// Moves an ALREADY CONFIGURED page's collection to `page`.
+    ///
+    /// The twin of `configure(initialMediaPage:)`, for the case that has no
+    /// configure to ride: this screen is reused, so a post opened a second time
+    /// arrives at a cell that is already built and already sitting on the page
+    /// the viewer left it on. See `SnapFeedViewController.openMediaPage`.
+    func showMediaPage(_ page: Int) {
+        mediaCard.setPage(page, animated: false)
+    }
+
+    /// Which page a DISMISSAL is leaving from, or nil when this post is not a
+    /// collection at all.
+    ///
+    /// The mirror of `showMediaPage`, and it exists for the same reason that
+    /// one does: the card a close flies carries the page the viewer is looking
+    /// at, so the row it lands on has to be showing that page and not the first
+    /// one. Nil rather than zero — "this post has no pages" and "this post is
+    /// on its first page" are different answers, and only one of them means
+    /// "leave the row alone".
+    var currentMediaPage: Int? {
+        mediaCard.showsCollection ? mediaCard.currentPage : nil
+    }
+
     #if DEBUG
     private var lastPlayheadTrace: CFTimeInterval = 0
     #endif
@@ -2622,45 +2697,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     #if DEBUG
     /// The page's playback surface, for a test that needs to ask the pool about
     /// it. Playback ownership is the pool's, so a test has to name the surface.
-    /// Holds the page's own chrome back while a flight's REPLICA stands in for
-    /// it, then brings it in.
-    ///
-    /// ⚠️ The replica exists precisely so the real chrome need not be visible in
-    /// the air. It was anyway — nothing ever hid it — so the card simply lifted
-    /// off a fully drawn page, and at the landing the replica vanished and the
-    /// real thing was revealed on one frame. That is the pop: not something
-    /// appearing, but something that had been there all along stopping being
-    /// covered.
-    func setChromeHeldForFlight(_ held: Bool) {
-        if held {
-            chrome.alpha = 0
-            return
-        }
-        guard chrome.alpha < 1 else { return }
-        // ⚠️ NOT WHEN THE COMMENTS ALREADY OWN THE CHROME.
-        //
-        // `chrome` is one of the engagement's own fade layers: engaged, it is
-        // deliberately at zero. This restore is unconditional — it exists to
-        // undo the HOLD, and it wrote the same property — so a post opened
-        // straight into its thread landed wearing both interfaces at once, the
-        // ticker and the caption and the page dots sitting under a comment
-        // stream.
-        //
-        // The hold's opposite is not "visible", it is "whatever the page was
-        // doing before it was covered".
-        guard !isCommentsEngaged else { return }
-        UIView.animate(
-            withDuration: 0.26, delay: 0.02,
-            usingSpringWithDamping: 0.85, initialSpringVelocity: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.chrome.alpha = 1
-        }
-    }
-
-    /// The page indicator's scrub, so the screen can make its dismissal yield.
-    var mediaScrubGesture: UIGestureRecognizer { chrome.mediaScrubGesture }
-
     var debugRenderSurface: VideoRenderView { mediaCard.renderView }
 
     /// Whether the centred glyph is up — the page's own account of "the viewer
@@ -2709,32 +2745,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.setPage(index, animated: false)
     }
 
-    /// Moves an ALREADY CONFIGURED page's collection to `page`.
-    ///
-    /// The twin of `configure(initialMediaPage:)`, for the case that has no
-    /// configure to ride: this screen is reused, so a post opened a second time
-    /// arrives at a cell that is already built and already sitting on the page
-    /// the viewer left it on. See `SnapFeedViewController.openMediaPage`.
-    func showMediaPage(_ page: Int) {
-        mediaCard.setPage(page, animated: false)
-    }
-
     /// The page this post's collection is actually showing, so a test can ask
     /// the CARD rather than trusting the instruction that was sent to it.
     var debugCurrentMediaPage: Int { mediaCard.currentPage }
-
-    /// Which page a DISMISSAL is leaving from, or nil when this post is not a
-    /// collection at all.
-    ///
-    /// The mirror of `showMediaPage`, and it exists for the same reason that
-    /// one does: the card a close flies carries the page the viewer is looking
-    /// at, so the row it lands on has to be showing that page and not the first
-    /// one. Nil rather than zero — "this post has no pages" and "this post is
-    /// on its first page" are different answers, and only one of them means
-    /// "leave the row alone".
-    var currentMediaPage: Int? {
-        mediaCard.showsCollection ? mediaCard.currentPage : nil
-    }
 
     /// Which pages are holding a playback surface — the retention window's
     /// footprint, which is otherwise invisible from outside.
