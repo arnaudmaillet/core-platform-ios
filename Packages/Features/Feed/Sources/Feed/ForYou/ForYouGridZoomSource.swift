@@ -170,6 +170,25 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// The tile's twin: the same cover pixels the viewer is looking at, in the
     /// shape that tile actually has (a mosaic brick and a timeline row's
     /// preview round differently and carry different furniture).
+    /// Whether the row this close lands on can hold a photograph.
+    ///
+    /// `heroAppearance` already answers this and says so in its own words: a
+    /// TEXT row returns nil, and that is the whole of its transition policy. It
+    /// was only ever consulted to BUILD the card, never to decide whether there
+    /// should be one — so a viewer who paged onto a photograph and dragged got
+    /// a flight whose landing was a row made of words, and watched the card
+    /// dissolve away over an empty grey rectangle.
+    ///
+    /// A mosaic always accepts: it ADOPTS whatever it lands on, so its landing
+    /// is the settled post itself, and the departure gate has already asked
+    /// about that post's kind. Only a list, which keeps its order and therefore
+    /// lands somewhere else, can be asked to receive something it cannot draw.
+    var zoomLandingAcceptsHero: Bool {
+        guard let page else { return true }
+        if page.landsByAdoption { return true }
+        return page.heroAppearance(for: anchorID) != nil
+    }
+
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let appearance = page?.heroAppearance(for: anchorID)
         let card = PostGridFlightCard(

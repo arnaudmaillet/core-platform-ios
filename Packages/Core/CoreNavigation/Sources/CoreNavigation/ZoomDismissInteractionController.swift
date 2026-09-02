@@ -761,6 +761,25 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         peakProgress: CGFloat, verticalDrift: CGFloat = 0, axis: ZoomDismissAxis = .horizontal
     ) async {
         guard let view = pannedView else { return }
+        // ⚠️ THE SAME TWO AUTHORITIES A FINGER PASSES, or this script reports on
+        // a transition the app would never have run.
+        //
+        // `gestureRecognizerShouldBegin` cannot be called here — it needs a real
+        // recognizer with a velocity — so the two gates that decide whether this
+        // driver claims a drag AT ALL are restated. Everything else in that
+        // method is about touches and timing; these two are about the post.
+        //
+        // Without them the harness drove a hero over a landing the hero refuses,
+        // filmed it, and called the result the product's behaviour. The card
+        // close is what a finger gets there, and it was never once measured.
+        guard destination?.zoomDismissalKind != .card,
+              source?.zoomLandingAcceptsHero != false
+        else {
+            print("[zoom-live] scripted grab DECLINED"
+                + " kind=\(String(describing: destination?.zoomDismissalKind))"
+                + " landingAcceptsHero=\(String(describing: source?.zoomLandingAcceptsHero))")
+            return
+        }
         activeAxis = axis
         beginGrab()
         let peak = axis.offset(
@@ -803,6 +822,16 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         // exactly one of them claims any given grab.
         guard destination?.zoomDismissalKind != .card
         else { return grabLog("post wants a card, not a hero", false) }
+        // ⚠️ AND ONLY WHERE THERE IS SOMETHING TO FLY IT ONTO — see
+        // `ZoomTransitionSource.zoomLandingAcceptsHero`.
+        //
+        // The gate above asks the DEPARTURE's half of the question. A close
+        // that lands on the post it left from needs no second half, and one
+        // that does not — a list keeps its order under a pager — can be
+        // carrying a photograph home to a row made of words. Refusing leaves
+        // the drag to the card close, exactly as the kind gate does.
+        guard source?.zoomLandingAcceptsHero != false
+        else { return grabLog("landing cannot receive a hero", false) }
         // `context == nil` only covers OUR transitions. A pop of a screen
         // pushed above the feed (profile, comments) can still be settling —
         // the feed is already `topViewController` then, and beginning a grab

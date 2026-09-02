@@ -1426,6 +1426,20 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 attachFlightAlongsideCardClose(feed: feed, page: page, tappedID: tapped.id)
             }
             textSlideDismissal.arbitratesWithHeroGrab = true
+            // ⚠️ AND CLAIM THE DRAGS THE HERO DECLINES — the mirror of
+            // `ForYouGridZoomSource.zoomLandingAcceptsHero`, asked of the same
+            // page about the same row.
+            //
+            // This screen opened as a WINDOW on a text row, so its landing IS
+            // that text row, whatever the viewer has since paged to. The hero
+            // attached alongside refuses a landing it cannot draw; without this
+            // line the refusals are symmetric and NEITHER driver claims the
+            // drag, which is a plain slide — the failure this whole pairing
+            // exists to prevent.
+            textSlideDismissal.heroLandingAcceptsHero = { [weak self] in
+                guard let page = self?.pager.page(for: format) else { return true }
+                return page.landsByAdoption || page.heroAppearance(for: tapped.id) != nil
+            }
             textSlideDismissal.install(on: navigationController)
             navigationController.pushViewController(feed, animated: true)
             #if DEBUG
@@ -1728,6 +1742,23 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         cardPathFlight = transition
         transition.returningSourceChrome = tabBarController?.tabBar
         navigationController.delegate = transition
+        #if DEBUG
+        // `-foryou-demo-grab [delay]` on the WINDOW path too. This flight is the
+        // one a text-opened screen ends on once the viewer pages onto a post
+        // with media, and it had no scripted driver at all: `-text-swipe-demo`
+        // drives the card close instead, which is a different dismissal that
+        // happens to look similar. Every measurement taken here was therefore of
+        // the wrong one.
+        if let position = ProcessInfo.processInfo.arguments
+            .firstIndex(of: "-foryou-demo-grab") {
+            let arguments = ProcessInfo.processInfo.arguments
+            let delay = position + 1 < arguments.count
+                ? (Double(arguments[position + 1]) ?? 1.5) : 1.5
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak transition] in
+                transition?.debugScriptedGrab()
+            }
+        }
+        #endif
         transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
             // The same bar choreography the flight path states at length: back
             // at alpha 0 before the pop, so the drag fades it in.

@@ -148,6 +148,16 @@ public final class InteractiveSlideDismissal: NSObject {
     /// post's kind from opposite sides.
     public var arbitratesWithHeroGrab = false
 
+    /// Whether the HERO grab would accept this dismissal's landing, asked so
+    /// this driver can claim the drags the hero declines.
+    ///
+    /// Set only by a screen that arms both drivers and whose close can land on
+    /// a row of a different kind from the post being dismissed — see
+    /// `ZoomTransitionSource.zoomLandingAcceptsHero`, which is the same
+    /// question from the other side. `nil` means "no opinion", which leaves
+    /// the arbitration exactly as it was.
+    public var heroLandingAcceptsHero: (() -> Bool)?
+
     /// Whether the PUSH onto this screen is the reveal's.
     ///
     /// ⚠️ SEPARATE FROM HAVING A GEOMETRY, and the two came apart the moment
@@ -511,7 +521,20 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
         // because there is nothing being driven that a decline could strand
         // and because the animator this would fall through to is chosen from a
         // geometry that a back-button pop never re-staged.
+        //
+        // ⚠️ AND THE LANDING HAS THE SAME VOTE HERE AS IT HAS AT THE GRAB.
+        //
+        // "Asked of the POST" was half a question. A hero close needs a post
+        // with something to fly AND a row that can receive it, and this site
+        // asked only the first — so a drag the hero had already DECLINED at
+        // `gestureRecognizerShouldBegin` was handed straight back to it here,
+        // as the animator for the very pop the reveal was driving. Both then
+        // ran: the flight hid the departing page to put its own card in front,
+        // the card was empty because the landing has no picture, and the page
+        // it hid was the one the reveal was carrying. The pop completed with
+        // the feed still drawn over the grid. Filmed.
         if (fromVC as? any ZoomTransitionDestination)?.zoomDismissalKind == .hero,
+           heroLandingAcceptsHero?() != false,
            let savedDelegate {
             let forwarded = savedDelegate.navigationController?(
                 navigationController, animationControllerFor: operation, from: fromVC, to: toVC
@@ -664,8 +687,16 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
         // with no opinion answers `.hero`, which is why this asks for `.card`
         // rather than "not hero": this driver also serves screens that fly
         // nothing at all, and they must keep claiming drags as they did.
+        //
+        // ⚠️ AND THE MIRROR OF THE HERO'S SECOND GATE. A destination that has
+        // something to fly is not enough: the hero also refuses a LANDING it
+        // cannot draw — see `ZoomTransitionSource.zoomLandingAcceptsHero` — and
+        // if this driver went on refusing there too, neither would claim the
+        // drag and the screen would leave on a plain slide. The two answers
+        // come from one predicate so they cannot drift apart.
         if arbitratesWithHeroGrab,
-           (feed as? any ZoomTransitionDestination)?.zoomDismissalKind != .card {
+           (feed as? any ZoomTransitionDestination)?.zoomDismissalKind != .card,
+           heroLandingAcceptsHero?() != false {
             return false
         }
         if let canBeginDismissal, !canBeginDismissal() { return false }

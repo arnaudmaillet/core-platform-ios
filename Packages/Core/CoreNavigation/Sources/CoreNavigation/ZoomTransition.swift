@@ -136,6 +136,28 @@ public protocol ZoomTransitionSource: AnyObject {
     /// hosted, drawing at the grid cell's rect over the feed that just came
     /// back. `nil` when nothing is hosted.
     func zoomReleaseHoistedMedia() -> UIView?
+
+    /// Whether the row this dismissal would land on can RECEIVE a flight.
+    ///
+    /// ⚠️ THE OTHER HALF OF A QUESTION THAT WAS ONLY EVER ASKED OF THE
+    /// DEPARTURE. `ZoomTransitionDestination.zoomDismissalKind` says whether the
+    /// post on screen has something to fly, and both grabs gate on it from
+    /// opposite sides so exactly one claims a drag. That is sufficient only
+    /// while a close lands on the post it left from.
+    ///
+    /// It no longer does. A list keeps its order, so a viewer who pages ends up
+    /// dismissing a photograph onto whatever row they opened — and that row may
+    /// be TEXT, which no card can draw: a flight's two operands are pictures,
+    /// and a row's words are not one (blending two runs of text draws both,
+    /// which is the law the blend channel is built around). Filmed as a card
+    /// dissolving away over an EMPTY grey row, the words snapping in five
+    /// frames later.
+    ///
+    /// Answering `false` hands the drag to the driver that carries a whole page
+    /// instead, which is the mechanism that can land anything on anything.
+    /// Default `true`: a source whose landing is always a picture — a map's
+    /// marker, a mosaic that adopts what it lands on — has nothing to decline.
+    var zoomLandingAcceptsHero: Bool { get }
 }
 
 public extension ZoomTransitionSource {
@@ -153,6 +175,7 @@ public extension ZoomTransitionSource {
     func zoomHoistLiveMedia(_ view: UIView, at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) -> Bool { false }
     func zoomPoseHoistedMedia(at rect: CGRect, in space: UICoordinateSpace, cornerRadius: CGFloat) {}
     func zoomReleaseHoistedMedia() -> UIView? { nil }
+    var zoomLandingAcceptsHero: Bool { true }
 }
 
 /// **WHERE A DISMISSING FLIGHT IS**, in one value.
