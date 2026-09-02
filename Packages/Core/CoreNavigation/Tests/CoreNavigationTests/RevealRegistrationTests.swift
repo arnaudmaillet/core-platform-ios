@@ -294,6 +294,31 @@ struct RevealRegistrationTests {
 
     // MARK: - The pivot is the release
 
+    /// ⚠️ EVERY FIT THAT CARRIES THE PAGE OBEYS THE SAME DRAG LAW — asking
+    /// `== .covering` is a bug that compiles, and it shipped.
+    ///
+    /// The schedule that keeps the destination off screen during a drag was
+    /// gated on `.covering` alone, so a `.contained` landing fell through to
+    /// the legacy three acts and its card appeared under the finger. Filmed on
+    /// a place page's Activity close, and reported as the same defect twice
+    /// because it WAS the same defect, reached by a fit the gate did not name.
+    @Test func everyFitThatCarriesThePageAnswersTheSameQuestion() {
+        #expect(RevealPageFit.covering.carriesPage)
+        #expect(RevealPageFit.contained.carriesPage)
+        #expect(!RevealPageFit.clipped.carriesPage, "the legacy landing must stay legacy")
+
+        // And the drag law follows from that one answer, not from the fit.
+        for fit in [RevealPageFit.covering, .contained] {
+            for step in 0...20 {
+                let progress = CGFloat(step) / 20
+                #expect(RevealStage.fill(at: progress, carriesPage: fit.carriesPage) == 0,
+                        "\(fit) showed its destination at \(progress)")
+            }
+        }
+    }
+
+
+
     /// ⚠️ NOTHING OF THE DESTINATION IS SEEN WHILE THE FINGER IS DOWN.
     ///
     /// The arrival used to come up over the page during the drag, which put a
@@ -303,12 +328,12 @@ struct RevealRegistrationTests {
     @Test func nothingArrivesWhileTheFingerIsDown() {
         for step in 0...100 {
             let progress = CGFloat(step) / 100
-            #expect(RevealStage.fill(at: progress, covering: true) == 0,
+            #expect(RevealStage.fill(at: progress, carriesPage: true) == 0,
                     "the destination was on screen at \(progress)")
         }
         // A landing whose window IS a card-shaped slice of the page keeps the
         // three acts — there the morph is the transition.
-        #expect(RevealStage.fill(at: 1, covering: false) == 1)
+        #expect(RevealStage.fill(at: 1, carriesPage: false) == 1)
     }
 
     /// And when it does arrive, exactly ONE alpha moves. Ramping the view and
@@ -317,7 +342,7 @@ struct RevealRegistrationTests {
     /// forbids.
     @Test func exactlyOneAlphaMovesWhenTheArrivalComes() {
         for step in 0...100 {
-            #expect(RevealStage.contentOpacity(at: CGFloat(step) / 100, covering: true) == 1)
+            #expect(RevealStage.contentOpacity(at: CGFloat(step) / 100, carriesPage: true) == 1)
         }
     }
 

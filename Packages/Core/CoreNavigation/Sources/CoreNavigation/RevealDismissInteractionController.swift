@@ -152,9 +152,9 @@ final class RevealDismissInteractionController: NSObject,
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = RevealStage.fill(at: 0, covering: geometry.pageFit == .covering)
+            standIn.alpha = RevealStage.fill(at: 0, carriesPage: geometry.pageFit.carriesPage)
             (standIn as? RevealStandInShaping)?.setContentOpacity(
-                RevealStage.contentOpacity(at: 0, covering: geometry.pageFit == .covering)
+                RevealStage.contentOpacity(at: 0, carriesPage: geometry.pageFit.carriesPage)
             )
         }
         self.standIn = standIn
@@ -241,22 +241,22 @@ final class RevealDismissInteractionController: NSObject,
             height: openRect.height + (stagedLanding.height - openRect.height) * progress
         )
         let centre = CGPoint(x: openCentre.x + offset.x, y: openCentre.y + offset.y)
-        let rect = geometry.pageFit == .clipped
-            ? CGRect(
+        let rect = geometry.pageFit.carriesPage
+            ? RevealStage.heldWindow(openRect, displacedBy: offset, at: progress)
+            : CGRect(
                 x: centre.x - size.width / 2, y: centre.y - size.height / 2,
                 width: size.width, height: size.height
             )
-            : RevealStage.heldWindow(openRect, displacedBy: offset, at: progress)
         // The screen's own corner at the screen's own proportion — see
         // `RevealStage.heldRadius`. The landing's arrives on the release
         // spring, which already carries it.
-        let radius = geometry.pageFit == .clipped
-            ? screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
-            : RevealStage.heldRadius(screenRadius, at: progress)
+        let radius = geometry.pageFit.carriesPage
+            ? RevealStage.heldRadius(screenRadius, at: progress)
+            : screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
         // ⚠️ THE LIVE RECT, not a progress-derived size — the same rect the
         // window is being given, so the page cannot separate from it under a
         // rubber-banded or back-dragged finger.
-        if geometry.pageFit != .clipped {
+        if geometry.pageFit.carriesPage {
             let covering = RevealStage.pageFitting(rect, from: openRect, fit: geometry.pageFit)
             return (
                 RevealStage.Pose(
@@ -304,11 +304,11 @@ final class RevealDismissInteractionController: NSObject,
         // version this replaces lost its second half to exactly that.
         if let standIn {
             standIn.alpha = RevealStage.fill(
-                at: staged.progress, covering: geometry.pageFit == .covering
+                at: staged.progress, carriesPage: geometry.pageFit.carriesPage
             )
             (standIn as? RevealStandInShaping)?.setContentOpacity(
                 RevealStage.contentOpacity(
-                    at: staged.progress, covering: geometry.pageFit == .covering
+                    at: staged.progress, carriesPage: geometry.pageFit.carriesPage
                 )
             )
         }
@@ -379,7 +379,7 @@ final class RevealDismissInteractionController: NSObject,
         // transition has paid for four times. So the page's own fade rides the
         // spring below and the arrival is a second, delayed block over the tail
         // of it, on the same schedule the chevron leg uses.
-        if let standIn, geometry.pageFit != .clipped {
+        if let standIn, geometry.pageFit.carriesPage {
             let span = RevealStage.springDuration * RevealStage.springVisibleFraction
             UIView.animate(
                 withDuration: span * (1 - RevealStage.cardFadeStart),
@@ -427,11 +427,11 @@ final class RevealDismissInteractionController: NSObject,
             // the arrival up on the same clock cross-fades two drawings that
             // both have text on them, which is the one thing this transition
             // may never do.
-            if self.geometry.pageFit == .clipped { self.standIn?.alpha = commit ? 1 : 0 }
+            if !self.geometry.pageFit.carriesPage { self.standIn?.alpha = commit ? 1 : 0 }
             // Pinned under a carried page: only the view's alpha may move, so
             // an abandoned grab leaves the face at 0 with its content still 1.
             (self.standIn as? RevealStandInShaping)?.setContentOpacity(
-                self.geometry.pageFit == .clipped ? (commit ? 1 : 0) : 1
+                self.geometry.pageFit.carriesPage ? 1 : (commit ? 1 : 0)
             )
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0

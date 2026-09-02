@@ -275,6 +275,20 @@ public enum RevealPageFit {
     /// `covering`, because covering keys on the width, and the width is the
     /// dimension that barely moves.
     case contained
+
+    /// ⚠️ TRUE FOR EVERY FIT THAT MOVES THE PAGE, which is the question almost
+    /// every caller is actually asking — and asking it as `== .covering` is a
+    /// bug that compiles.
+    ///
+    /// It shipped: the schedule that keeps the destination off screen during a
+    /// drag was gated on `.covering` alone, so a `.contained` landing fell back
+    /// to the three acts and its card appeared under the finger. Filmed on a
+    /// place page's Activity close, and reported as the same defect twice
+    /// because it WAS the same defect, reached by a fit the gate did not name.
+    ///
+    /// Named once here so the two questions cannot be confused: which fit, and
+    /// whether the page travels at all.
+    public var carriesPage: Bool { self != .clipped }
 }
 
 /// A stand-in that can wear the window's rounding. Declared here so
@@ -658,12 +672,12 @@ enum RevealStage {
     /// the post used to be. That hole is what a viewer, playing with the grab,
     /// described as the post fading away over its own media. The "nothing" the
     /// face fades against here is the opaque live post itself.
-    static func fill(at progress: CGFloat, covering: Bool = false) -> CGFloat {
+    static func fill(at progress: CGFloat, carriesPage: Bool = false) -> CGFloat {
         // ⚠️ NOTHING ARRIVES WHILE THE FINGER IS DOWN, on a fit that carries
         // the page. The arrival's whole job is to be what the window becomes,
         // and it becomes it on the release — see `Pose.pageOpacity`, which is
         // the other half of the same rule.
-        if covering { return 0 }
+        if carriesPage { return 0 }
         return swapFractions(at: progress).fill
     }
 
@@ -675,8 +689,8 @@ enum RevealStage {
     /// glyph renders at alpha squared: it fades faster than the disc beneath
     /// it, and the frame in the middle is the half-drawn overlay the blend law
     /// forbids.
-    static func contentOpacity(at progress: CGFloat, covering: Bool) -> CGFloat {
-        covering ? 1 : swapFractions(at: progress).content
+    static func contentOpacity(at progress: CGFloat, carriesPage: Bool) -> CGFloat {
+        carriesPage ? 1 : swapFractions(at: progress).content
     }
 
     private static func ramp(_ value: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
@@ -1353,9 +1367,9 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = RevealStage.fill(at: 0, covering: geometry.pageFit == .covering)
+            standIn.alpha = RevealStage.fill(at: 0, carriesPage: geometry.pageFit.carriesPage)
             (standIn as? RevealStandInShaping)?.setContentOpacity(
-                RevealStage.contentOpacity(at: 0, covering: geometry.pageFit == .covering)
+                RevealStage.contentOpacity(at: 0, carriesPage: geometry.pageFit.carriesPage)
             )
         }
         // The same rule the grab leg states at length: the cell the window is
@@ -1422,7 +1436,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // act — see `RevealStage.carryFadeEnd`. Not skipped, and not the
             // three acts either: it has to be solid before the window has
             // shrunk enough for two copies of the media to read as two.
-            if geometry.pageFit == .covering {
+            if geometry.pageFit.carriesPage {
                 // One dissolve, late: the post is under it and opaque until the
                 // very end. `setContentOpacity` is already 1 and stays there —
                 // see `RevealStage.contentOpacity`.
