@@ -379,14 +379,50 @@ final class RevealDismissInteractionController: NSObject,
         // transition has paid for four times. So the page's own fade rides the
         // spring below and the arrival is a second, delayed block over the tail
         // of it, on the same schedule the chevron leg uses.
-        if let standIn, geometry.pageFit.carriesPage {
+        if let standIn {
             let span = RevealStage.springDuration * RevealStage.springVisibleFraction
-            UIView.animate(
-                withDuration: span * (1 - RevealStage.cardFadeStart),
-                delay: span * RevealStage.cardFadeStart,
-                options: [.curveEaseOut, .beginFromCurrentState]
-            ) {
-                standIn.alpha = commit ? 1 : 0
+            let schedule = RevealStage.releaseHandover(
+                carriesPage: geometry.pageFit.carriesPage
+            )
+            if geometry.pageFit.carriesPage {
+                UIView.animate(
+                    withDuration: span * schedule.fill.duration,
+                    delay: span * schedule.fill.delay,
+                    options: [.curveEaseOut, .beginFromCurrentState]
+                ) {
+                    standIn.alpha = commit ? 1 : 0
+                }
+            } else if commit {
+                // ⚠️ THE CARD LANDING CROSSES TWO TEXTS TOO, and it did it in
+                // the one place nobody looked: the RELEASE.
+                //
+                // Its drag is allowed to hand over — that is what a card
+                // landing IS, and the three acts put an empty beat between the
+                // page and the card so neither fade ever has text on both
+                // sides. But a commit BELOW that beat skips it: the spring set
+                // the fill and the content together, so the arrival's caption
+                // rose over a page still drawn at full alpha. A short flick is
+                // enough, and a short flick is the commonest way to leave.
+                //
+                // The same two blocks the chevron leg already runs on this
+                // geometry, on the same clock and the same curves, so a
+                // released grab and a tap-back hand over identically.
+                // `.beginFromCurrentState` picks the drag's own fraction up
+                // rather than restarting from zero.
+                UIView.animate(
+                    withDuration: span * schedule.fill.duration,
+                    delay: span * schedule.fill.delay,
+                    options: [.curveEaseIn, .beginFromCurrentState]
+                ) {
+                    standIn.alpha = 1
+                }
+                UIView.animate(
+                    withDuration: span * schedule.content.duration,
+                    delay: span * schedule.content.delay,
+                    options: [.curveEaseOut, .beginFromCurrentState]
+                ) {
+                    (standIn as? RevealStandInShaping)?.setContentOpacity(1)
+                }
             }
         }
 
@@ -427,12 +463,19 @@ final class RevealDismissInteractionController: NSObject,
             // the arrival up on the same clock cross-fades two drawings that
             // both have text on them, which is the one thing this transition
             // may never do.
-            if !self.geometry.pageFit.carriesPage { self.standIn?.alpha = commit ? 1 : 0 }
+            // ⚠️ THE CANCEL ONLY. A carrying fit hands over on the scheduled
+            // block above; a card landing's COMMIT does too, now, for the same
+            // reason — see it. What is left here is putting both channels back
+            // to zero when the grab is abandoned, which crosses nothing: the
+            // page is returning to full alpha underneath them.
+            if !commit, !self.geometry.pageFit.carriesPage { self.standIn?.alpha = 0 }
             // Pinned under a carried page: only the view's alpha may move, so
             // an abandoned grab leaves the face at 0 with its content still 1.
-            (self.standIn as? RevealStandInShaping)?.setContentOpacity(
-                self.geometry.pageFit.carriesPage ? 1 : (commit ? 1 : 0)
-            )
+            if self.geometry.pageFit.carriesPage {
+                (self.standIn as? RevealStandInShaping)?.setContentOpacity(1)
+            } else if !commit {
+                (self.standIn as? RevealStandInShaping)?.setContentOpacity(0)
+            }
             dim?.alpha = commit ? 0 : 1
             chrome?.alpha = commit ? 1 : 0
             self.geometry.setDestinationVeilOpacity(commit ? 1 : 0)

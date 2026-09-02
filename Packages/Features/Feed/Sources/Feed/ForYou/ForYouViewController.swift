@@ -854,8 +854,17 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // reveal over a flight's opening.
         textSlideDismissal.revealGeometry = nil
         textSlideDismissal.revealPresents = false
-        #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
+        // ⚠️ NOT `#if DEBUG`, AND IT WAS — which meant this whole reveal did
+        // not exist in a shipping build.
+        //
+        // The fence was here for the tracing twenty lines down, and it took the
+        // geometry with it: outside Debug `installTextReveal` returned false,
+        // so every text-post close from this grid was a plain slide onto a
+        // concealed row. A Release BUILD passes either way, which is why it
+        // survived — only the behaviour differed, and nothing builds Release
+        // and then watches it.
+        //
+        // The fence now sits on the tracing that needed it.
         // ⚠️ THE POST THE CLOSE FLIES TO IS NOT ALWAYS THE ONE THAT OPENED.
         //
         // The feed is a pager: open a post, swipe to the next, and the card the
@@ -899,10 +908,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // The grid's inset state at each stage of a round trip. It exists
         // because a rect alone cannot say why a landing missed, and the first
         // run's did: departure y=741, landing y=625.
-        let trace = arguments.contains("-text-reveal-log")
+        #if DEBUG
+        let trace = ProcessInfo.processInfo.arguments.contains("-text-reveal-log")
+        #else
+        let trace = false
+        #endif
         func log(_ stage: String) {
+            #if DEBUG
             guard trace else { return }
             print("[text-reveal] \(stage) \(page.debugInsetState)")
+            #endif
         }
         log("atTap        ")
         if trace, let rect = sourceFrame(view) {
@@ -910,7 +925,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // the animator's `source=`, this says whether the grid moved
             // between the tap and the opening — which is what a pre-opening
             // jump would be.
+            #if DEBUG
             print("[text-reveal] atTap  row=\(NSCoder.string(for: rect))")
+            #endif
         }
         // THE LANDING SETTLES BEFORE THE POP DOES, and the first run without
         // this is why the line exists: the close measured its landing at
@@ -1051,9 +1068,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             pipeline: page.bandImagePipeline
         )
         return true
-        #else
-        return false
-        #endif
     }
 
     // MARK: - The row's "..."

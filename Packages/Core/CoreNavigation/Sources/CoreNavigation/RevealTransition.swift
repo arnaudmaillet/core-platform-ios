@@ -681,6 +681,36 @@ enum RevealStage {
         return swapFractions(at: progress).fill
     }
 
+    /// The two blocks a COMMITTED release runs, as fractions of the spring's
+    /// visible window: when the stand-in's fill comes up, and when its content
+    /// follows.
+    ///
+    /// ⚠️ THE SECOND NEVER STARTS BEFORE THE FIRST HAS FINISHED, and that is
+    /// the whole reason this is a function rather than four numbers at a call
+    /// site.
+    ///
+    /// A card landing is allowed to hand over during the drag — that is what a
+    /// card landing IS — and the three acts put an empty beat between the page
+    /// and the card so neither fade ever has text on both sides. But a commit
+    /// BELOW that beat skips it, and the release used to set both channels at
+    /// once: the arrival's caption rose over a page still drawn at full alpha,
+    /// which is the "two half-drawn runs" this transition has paid for
+    /// repeatedly. A short flick is enough, and a short flick is the commonest
+    /// way to leave.
+    ///
+    /// A carrying fit has nothing to schedule in the first slot: its content is
+    /// pinned at 1 and only the view's alpha moves, late — see
+    /// `contentOpacity`. It gets the same tail and an empty head.
+    static func releaseHandover(
+        carriesPage: Bool
+    ) -> (fill: (duration: CGFloat, delay: CGFloat),
+          content: (duration: CGFloat, delay: CGFloat)) {
+        let tail = (duration: 1 - cardFadeStart, delay: cardFadeStart)
+        return carriesPage
+            ? (fill: tail, content: (duration: 0, delay: 1))
+            : (fill: (duration: cardFadeStart, delay: 0), content: tail)
+    }
+
     /// ⚠️ EXACTLY ONE ALPHA MOVES over a covering page, and it is the view's.
     ///
     /// The stand-in's own alpha fades the marker in as ONE opaque unit — disc

@@ -200,6 +200,33 @@ struct RevealRegistrationTests {
         }
     }
 
+    /// ⚠️ A COMMITTED RELEASE NEVER RUNS ITS TWO CHANNELS AT ONCE.
+    ///
+    /// A card landing hands over during the drag, with an empty beat between
+    /// the page and the card so neither fade has text on both sides. A commit
+    /// BELOW that beat skips it — and the release used to set the fill and the
+    /// content together, raising the arrival's caption over a page still drawn
+    /// at full alpha. A short flick is enough, and a short flick is the
+    /// commonest way to leave.
+    @Test func aCommittedReleaseFinishesOneChannelBeforeStartingTheOther() {
+        for carriesPage in [true, false] {
+            let s = RevealStage.releaseHandover(carriesPage: carriesPage)
+            #expect(s.fill.delay + s.fill.duration <= s.content.delay + 0.0001,
+                    "the arrival started before the fill was done (carries=\(carriesPage))")
+            #expect(s.fill.delay >= 0)
+            #expect(s.content.delay + s.content.duration <= 1.0001,
+                    "the hand-over outlives the spring it rides")
+        }
+    }
+
+    /// A carrying fit has nothing in the first slot: its content is pinned at
+    /// 1 and only the view's alpha moves, late.
+    @Test func aCarryingReleaseSchedulesOnlyItsView() {
+        let s = RevealStage.releaseHandover(carriesPage: true)
+        #expect(s.content.duration == 0, "a carrying fit ramped its content")
+        #expect(s.fill.delay == RevealStage.cardFadeStart, "the arrival came early")
+    }
+
     // MARK: - What a held grab may do
 
     /// ⚠️ A HELD WINDOW IS THE SCREEN — smaller and moved, and nothing else.
