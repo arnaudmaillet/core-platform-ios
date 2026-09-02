@@ -1,6 +1,7 @@
 import MediaCore
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import CoreStorage
 import ProfileInterface
 import CoreNavigation
@@ -348,12 +349,40 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // (`PlaceProfileViewController.ranked`).
                 let provider = FixedPostsFeedProvider(base: base, ids: postIDs)
                 var members = try await ForYouRepository(feed: provider).firstPage().posts
-                // The timeline read hydrates likes only; the place's VIEWS
-                // metric needs counter.v1's view projection, batched here
-                // and fail-open — a missing read leaves the aggregate to
-                // count what it has.
-                if let engagement,
-                   let views = try? await engagement.viewCounts(for: members.map(\.id)) {
+                // ⚠️ THE TIMELINE READ HYDRATES LIKES ONLY, and a count this
+                // page never asked for is a control this page never draws.
+                //
+                // The place's VIEWS aggregate needed one projection, so this
+                // used to batch that alone — and the COMMENT count stayed
+                // absent, which `PostMetricLabel.set(nil)` renders as a hidden
+                // chip. The row therefore wore a likes pill and no comment
+                // pill, and the shortcut to a media post's thread did not exist
+                // on this screen at all. Filmed.
+                //
+                // One batched read of all three instead, through the same
+                // `PostCounterReader` For You and the profile gallery use — the
+                // counter is the number the rest of the app reads, so three
+                // surfaces asking three different ways is how they come to
+                // disagree. Fail-open: a missing read leaves every count as the
+                // timeline gave it.
+                if let counterClient {
+                    let byPostID = await PostCounterReader.counters(
+                        forPostIDs: members.map(\.id.rawValue), using: counterClient
+                    )
+                    if !byPostID.isEmpty {
+                        members = members.map { post in
+                            guard let counts = byPostID[post.id.rawValue] else { return post }
+                            var decorated = post
+                            decorated.reactionCount = counts.likes ?? post.reactionCount
+                            decorated.commentCount = counts.comments
+                            decorated.viewCount = counts.views ?? post.viewCount
+                            return decorated
+                        }
+                    }
+                } else if let engagement,
+                          let views = try? await engagement.viewCounts(for: members.map(\.id)) {
+                    // No counter service wired: keep the view projection this
+                    // page's aggregate depends on rather than losing it too.
                     members = members.map { post in
                         var decorated = post
                         decorated.viewCount = views[post.id] ?? post.viewCount
