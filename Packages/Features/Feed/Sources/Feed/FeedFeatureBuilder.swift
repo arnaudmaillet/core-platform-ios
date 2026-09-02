@@ -528,7 +528,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // Nil origin — no card to land on — leaves the geometry nil,
                 // which is exactly how the driver selects the plain slide.
                 dismissal.revealGeometry = (landing as? PlaceProfileViewController)?
-                    .activityCardRevealOrigin(sizedTo: nav.view.bounds)
+                    .activityCardRevealOrigin(
+                        sizedTo: nav.view.bounds,
+                        // The post the viewer is on, so the landing can put it
+                        // at the head of the list — see the origin's own note.
+                        // Read HERE because this closure runs before the driver
+                        // takes the geometry, which is the last moment the list
+                        // can still be arranged.
+                        settled: (destination as? SnapFeedViewController)?.activePostID
+                    )
                     .map {
                         TextRevealInstaller.geometry(
                             feed: destination, origin: $0, pipeline: imagePipeline

@@ -981,6 +981,18 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // still lands on the card they came from — see
                 // `RevealDismissCardView`.
                 makeDismissStandIn: { [weak page] _ in page?.makeDismissStandIn(for: anchorID) },
+                // ⚠️ THE DEPARTING PAGE TRAVELS TO THE ARRIVAL ROW — see
+                // `RevealPageFit.covering`.
+                //
+                // The legacy `.clipped` swap hands the destination over DURING
+                // the drag, which is right when the window is a card-shaped
+                // slice of the same post and wrong the moment it is not: after
+                // paging, the veil and the borrowed author band are the TAPPED
+                // post's, drawn over the post being read. A carrying fit
+                // refuses both by construction and the whole transition moves
+                // to the release, which is what the viewer asked for and what
+                // the marker and the place page already do.
+                pageFit: .covering,
                 // The reveal's OWN concealment slot, not the hero's — see
                 // `ForYouGridPage.revealConcealedPostID`. Applied on every
                 // dequeue too, so a row that recycles mid-flight comes back
@@ -1003,20 +1015,25 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 willStageDismissal: { [weak self, weak page, weak feed] _ in
                     log("freeze    pre")
                     page?.beginHeroFreeze()
-                    // ⚠️ THE CARD THE VIEWER ENDED ON TAKES THE DEPARTURE SLOT,
-                    // before anything measures where the close is going.
+                    // ⚠️ ONLY A MOSAIC MAY DO THIS — see
+                    // `ForYouGridPage.landsByAdoption`.
                     //
-                    // The slot is where they left from and is still exactly
-                    // where they left it, so the swap costs no scrolling and
-                    // the card flies home to the frame it launched from. The
-                    // alternative — flying to wherever the landed post happens
-                    // to sit — moves the whole grid under a viewer who is
-                    // holding it.
+                    // On a grid the swap trades two bricks in a field of bricks
+                    // and costs no scrolling: the card flies home to the frame
+                    // it launched from. On a LIST it replaces the post that was
+                    // under the card with another one, which is the ranking
+                    // changing under a gesture the viewer made — and the
+                    // product rule for a list is that a close lands back on the
+                    // post the OPENING left from, with the order untouched.
+                    // A list therefore leaves `anchorID` alone: the tapped row
+                    // is still exactly where it was, already concealed by the
+                    // opening, and the window simply returns to it.
                     //
                     // Ordered first: `anchorID` is what the rect, the stand-in
                     // and the concealment all resolve through, and every one of
                     // them is read after this.
-                    if let landed = (feed as? SnapFeedViewController)?.activePostID,
+                    if page?.landsByAdoption == true,
+                       let landed = (feed as? SnapFeedViewController)?.activePostID,
                        landed != anchorID,
                        page?.adoptForClose(
                            landed, intoSlotOf: anchorID,
@@ -1292,39 +1309,23 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // post. See `resetForNewPresentation`.
         textSlideDismissal.resetForNewPresentation()
         let revealing = installTextReveal(feed: feed, format: format, postID: tapped.id)
-        // ⚠️ AND REBUILT FOR THE POST THE VIEWER ENDS ON, which three of this
-        // geometry's fields could not follow any other way.
+        // ⚠️ NOT REBUILT FOR THE POST THE VIEWER ENDS ON, and NOT adopted into
+        // the tapped post's slot. The list keeps its order; the window travels
+        // to wherever the arrival row actually is.
         //
-        // `willStageDismissal` already moves the ANCHOR after paging, and the
-        // rect, the stand-in and the concealment follow it. `captionEnd`,
-        // `captionTop` and `authorBand` cannot: they are VALUES on
-        // `TextRevealOrigin`, read off the row at tap. So the window kept the
-        // tapped card's cut and borrowed the tapped author's band while landing
-        // on a different row — a veil hung at the wrong line, over a header
-        // naming somebody else.
+        // A rebuild was tried and is the regression it replaced: the geometry's
+        // guard is `textRowFrame`, which REFUSES a row carrying media on
+        // purpose, so rebuilding for a landed photo or video returned false and
+        // cleared the reveal outright — the page then slid out as a strip while
+        // a stray card floated over the list. Filmed. And an adoption re-orders
+        // the very list this close is landing in.
         //
-        // Rebuilding the whole geometry is the only thing that moves all three,
-        // and it is exactly what the FLIGHT-opened sibling already does below;
-        // this path simply never had the hook. `prepareForDismissal` is where
-        // it goes, because it fires before the driver captures the geometry —
-        // `willStageDismissal` is already too late, the controller holding it
-        // as a `let` by then.
-        if revealing {
-            var hasPrepared = false
-            textSlideDismissal.prepareForDismissal = { [weak self, weak feed] _ in
-                guard !hasPrepared, let self, let feed,
-                      let landed = (feed as? SnapFeedViewController)?.activePostID,
-                      landed != tapped.id
-                else { return }
-                hasPrepared = true
-                // The row has to be in the departure slot BEFORE the rebuild:
-                // the cut, the band and the stand-in are all read off it.
-                pager.page(for: format)?.adoptPost(
-                    landed, intoSlotOf: tapped.id, orInsert: self.viewModel.post(for: landed)
-                )
-                installTextReveal(feed: feed, format: format, postID: landed, presenting: false)
-            }
-        }
+        // What moves instead is the ANCHOR: `willStageDismissal` re-points it,
+        // `closingFrame` finds that row whatever kind it turned out to be, and
+        // `pageFit: .covering` carries the departing page into it — which is
+        // also what stops the veil and the borrowed band, both of them the
+        // TAPPED post's, from being drawn over a landing that is somebody
+        // else's.
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
             // Which driver opened the screen, said once. Everything downstream
@@ -1717,9 +1718,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             else { return }
             hasPrepared = true
             if landed != departureID {
-                page.adoptPost(
-                    landed, intoSlotOf: departureID, orInsert: self.viewModel.post(for: landed)
-                )
+                // Only a mosaic moves its posts to meet a close — see
+                // `ForYouGridPage.landsByAdoption`. A list lands back on the
+                // post the opening left from, with its order untouched.
+                if page.landsByAdoption {
+                    page.adoptPost(
+                        landed, intoSlotOf: departureID, orInsert: self.viewModel.post(for: landed)
+                    )
+                }
             }
             installTextReveal(feed: feed, format: format, postID: landed, presenting: false)
             // ⚠️ AND HIDE THE ROW, which on this path nothing else has.

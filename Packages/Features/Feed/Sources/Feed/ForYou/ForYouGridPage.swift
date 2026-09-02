@@ -285,6 +285,16 @@ final class ForYouGridPage: UIView {
         style == .grid ? 6 : 5
     }
     private let style: Style
+
+    /// ⚠️ WHETHER A CLOSE MAY MOVE THIS PAGE'S POSTS TO MEET IT.
+    ///
+    /// A mosaic may: the swap trades two bricks in a field of bricks and the
+    /// eye does not track it. A LIST may not — the post that was under the card
+    /// is replaced by another, and a viewer reading a ranked feed sees the
+    /// ranking change under a gesture they made. The product rule is that a
+    /// close lands back on the post the OPENING left from, and a list keeps its
+    /// order.
+    var landsByAdoption: Bool { style == .grid }
     private let collectionView: UICollectionView
     /// The centred "nothing here" block, shared with every other surface that
     /// has to say it. Hidden unless the page is genuinely empty or failed.

@@ -664,6 +664,18 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// who scrolled the comments has already broken that. Same view For You
     /// flies, because a viewer opening the same post from either screen is
     /// looking at one screen and must get one transition.
+    /// ⚠️ THE ANY-KIND FLOOR under `textRowFrame`, which refuses a row carrying
+    /// media on purpose.
+    ///
+    /// A close whose anchor turned out to be a photograph asked for a rect, was
+    /// told nil, and landed on a 96pt square in the middle of the screen — a
+    /// white card floating over the list, unaligned with anything. Filmed. For
+    /// You added this floor for the same reason and this list never got it.
+    func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let cell = cell(for: postID) else { return nil }
+        return cell.convert(cell.bounds, to: space)
+    }
+
     func makeDismissStandIn(for postID: PostID) -> UIView? {
         guard let post = posts.first(where: { $0.id == postID }) else { return nil }
         // The realized row's width when there is one, the list's own otherwise:
@@ -777,19 +789,6 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
 
     /// Brings the last-tapped tile clear of the chrome, now that the post is
     /// covering this page. Unanimated: nobody is watching, and the dismissal
-    /// ⚠️ RE-POINTS THE ROW A RETURN WILL BRING CLEAR — because the post the
-    /// viewer leaves on is not always the one they tapped.
-    ///
-    /// The tap records its own row (`didSelectItemAt`), which is right until
-    /// the feed pages. After that the row this gallery has to settle, land on
-    /// and conceal is the one the viewer ENDED on, and it may be off screen.
-    /// Nothing else can ask for that: the tap has long since happened.
-    func setPendingReveal(_ postID: PostID) {
-        guard posts.contains(where: { $0.id == postID }) else { return }
-        pendingRevealPostID = postID
-        applyPendingReveal()
-    }
-
     /// reads the tile's rect when it starts.
     func applyPendingReveal() {
         guard let id = pendingRevealPostID else { return }

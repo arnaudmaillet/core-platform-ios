@@ -1646,7 +1646,9 @@ extension PlaceProfileViewController: ZoomTransitionSource {
     /// one of those numbers would be zero. `sizedTo` is the bar the caller
     /// measures in; giving the view that size and laying it out is what makes
     /// the row real enough to describe.
-    func activityCardRevealOrigin(sizedTo bounds: CGRect) -> TextRevealOrigin? {
+    func activityCardRevealOrigin(
+        sizedTo bounds: CGRect, settled: PostID? = nil
+    ) -> TextRevealOrigin? {
         // ⚠️ THE FIRST ROW, whatever the viewer paged to — the same product
         // rule the flight and the Discover close beside it now follow, and for
         // the same reason: this list arrived from a MARKER, the viewer has
@@ -1659,10 +1661,28 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         //
         // ⚠️ Settled BEFORE anything is measured, because every caption field
         // below is read as a VALUE off this row.
-        let anchor = activityPage.posts.first?.id ?? anchorID
+        // ⚠️ THE POST THE VIEWER IS ON BECOMES THE FIRST ONE, and the close
+        // lands there.
+        //
+        // This is the ONE landing that is allowed to move a list, and it is a
+        // product rule rather than a transition one: a post opened from the MAP
+        // has no row to go back to — the place page it lands in was never on
+        // screen — so the close puts what they were reading at the top of the
+        // list and returns it there. Everywhere else a close lands on the post
+        // that opened it and the order is untouched.
+        //
+        // Swapped when the list already holds it, inserted at the head when it
+        // does not. Either way the anchor is slot zero afterwards.
+        var anchor = activityPage.posts.first?.id ?? anchorID
         guard activityPage.post(for: anchor) != nil else {
             debugLogLanding("no post for \(anchor.rawValue)")
             return nil
+        }
+        if let settled, settled != anchor,
+           activityPage.adoptPost(
+               settled, intoSlotOf: anchor, orInsert: activityPage.post(for: settled)
+           ) {
+            anchor = settled
         }
         stageActivityLanding(for: anchor, sizedTo: bounds)
         // Nothing to describe — no cell for this post even after staging.

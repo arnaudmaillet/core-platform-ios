@@ -318,7 +318,12 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // to, which inverted the first swap. The grid was left permanently
         // re-ordered by a grab the viewer abandoned, and the card then landed
         // on a tile that was no longer where the anchor said.
-        if let landed, let model, page?.canLandHero(on: model) == true,
+        // ⚠️ AND ONLY A MOSAIC MAY MOVE ITS POSTS TO MEET THIS CARD — see
+        // `ForYouGridPage.landsByAdoption`. A list keeps its order and the card
+        // goes back to the slot the opening left from, which is the `else`
+        // branch below and is exactly where the tapped row still is.
+        if page?.landsByAdoption == true,
+           let landed, let model, page?.canLandHero(on: model) == true,
            landed == slotOccupantID
                || page?.adoptForClose(
                    landed, intoSlotOf: slotOccupantID, orInsert: model,

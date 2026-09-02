@@ -211,6 +211,12 @@ final class ProfileGalleryPagerView: UIView {
         return pages[activeIndex].makeDismissStandIn(for: postID)
     }
 
+    /// The any-kind floor under `textRowFrame` — see the grid's own note.
+    func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].rowFrame(for: postID, in: space)
+    }
+
     func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
         guard pages.indices.contains(activeIndex) else { return nil }
         return pages[activeIndex].textRowAuthorBand(for: postID)
@@ -224,12 +230,6 @@ final class ProfileGalleryPagerView: UIView {
 
     var heroCoordinateSpace: UICoordinateSpace? {
         pages.indices.contains(activeIndex) ? pages[activeIndex].heroCoordinateSpace : nil
-    }
-
-    /// Re-points the row a return will bring clear — see the grid's own note.
-    /// Asked of every page; only the one that holds the post acts.
-    func setPendingReveal(_ postID: PostID) {
-        pages.forEach { $0.setPendingReveal(postID) }
     }
 
     /// Settles a tapped tile clear of the chrome while the post covers this
