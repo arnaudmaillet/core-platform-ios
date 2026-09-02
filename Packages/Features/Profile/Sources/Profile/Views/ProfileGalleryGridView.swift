@@ -777,6 +777,19 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
 
     /// Brings the last-tapped tile clear of the chrome, now that the post is
     /// covering this page. Unanimated: nobody is watching, and the dismissal
+    /// ⚠️ RE-POINTS THE ROW A RETURN WILL BRING CLEAR — because the post the
+    /// viewer leaves on is not always the one they tapped.
+    ///
+    /// The tap records its own row (`didSelectItemAt`), which is right until
+    /// the feed pages. After that the row this gallery has to settle, land on
+    /// and conceal is the one the viewer ENDED on, and it may be off screen.
+    /// Nothing else can ask for that: the tap has long since happened.
+    func setPendingReveal(_ postID: PostID) {
+        guard posts.contains(where: { $0.id == postID }) else { return }
+        pendingRevealPostID = postID
+        applyPendingReveal()
+    }
+
     /// reads the tile's rect when it starts.
     func applyPendingReveal() {
         guard let id = pendingRevealPostID else { return }

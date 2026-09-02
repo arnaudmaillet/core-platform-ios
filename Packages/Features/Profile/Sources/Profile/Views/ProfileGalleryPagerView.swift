@@ -226,6 +226,12 @@ final class ProfileGalleryPagerView: UIView {
         pages.indices.contains(activeIndex) ? pages[activeIndex].heroCoordinateSpace : nil
     }
 
+    /// Re-points the row a return will bring clear — see the grid's own note.
+    /// Asked of every page; only the one that holds the post acts.
+    func setPendingReveal(_ postID: PostID) {
+        pages.forEach { $0.setPendingReveal(postID) }
+    }
+
     /// Settles a tapped tile clear of the chrome while the post covers this
     /// screen. Asked of every page; only the one holding a pending reveal acts.
     func applyPendingReveal() {

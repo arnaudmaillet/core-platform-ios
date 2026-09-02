@@ -1292,6 +1292,39 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // post. See `resetForNewPresentation`.
         textSlideDismissal.resetForNewPresentation()
         let revealing = installTextReveal(feed: feed, format: format, postID: tapped.id)
+        // ⚠️ AND REBUILT FOR THE POST THE VIEWER ENDS ON, which three of this
+        // geometry's fields could not follow any other way.
+        //
+        // `willStageDismissal` already moves the ANCHOR after paging, and the
+        // rect, the stand-in and the concealment follow it. `captionEnd`,
+        // `captionTop` and `authorBand` cannot: they are VALUES on
+        // `TextRevealOrigin`, read off the row at tap. So the window kept the
+        // tapped card's cut and borrowed the tapped author's band while landing
+        // on a different row — a veil hung at the wrong line, over a header
+        // naming somebody else.
+        //
+        // Rebuilding the whole geometry is the only thing that moves all three,
+        // and it is exactly what the FLIGHT-opened sibling already does below;
+        // this path simply never had the hook. `prepareForDismissal` is where
+        // it goes, because it fires before the driver captures the geometry —
+        // `willStageDismissal` is already too late, the controller holding it
+        // as a `let` by then.
+        if revealing {
+            var hasPrepared = false
+            textSlideDismissal.prepareForDismissal = { [weak self, weak feed] _ in
+                guard !hasPrepared, let self, let feed,
+                      let landed = (feed as? SnapFeedViewController)?.activePostID,
+                      landed != tapped.id
+                else { return }
+                hasPrepared = true
+                // The row has to be in the departure slot BEFORE the rebuild:
+                // the cut, the band and the stand-in are all read off it.
+                pager.page(for: format)?.adoptPost(
+                    landed, intoSlotOf: tapped.id, orInsert: self.viewModel.post(for: landed)
+                )
+                installTextReveal(feed: feed, format: format, postID: landed, presenting: false)
+            }
+        }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
             // Which driver opened the screen, said once. Everything downstream

@@ -228,7 +228,13 @@ final class ForYouGridPage: UIView {
 
     /// The rounding this page's tiles take, paired with the layout's gutter.
     /// List pages fall back to the tile default, which they never use.
-    private var tileCornerRadius: CGFloat {
+    ///
+    /// ⚠️ NOT `private`, because a landing has to ask rather than restate it.
+    /// The chaotic slice layout rounds its bricks more than the mosaic default
+    /// does, and two reveal geometries had the default written into them: their
+    /// window sprang to a 10pt corner over a 16pt brick, a step in the one
+    /// channel the eye is most sensitive to, on the last frame of the close.
+    var tileCornerRadius: CGFloat {
         sliceLayout?.tileCornerRadius ?? PostGridTileCell.mosaicCornerRadius
     }
 

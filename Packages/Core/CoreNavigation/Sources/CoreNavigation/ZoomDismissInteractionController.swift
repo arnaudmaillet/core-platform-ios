@@ -347,18 +347,32 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// which is the very jump this replaces. Winding the duration down to the
     /// deadline makes the animation vanish into a direct set exactly when the
     /// window closes, so there is nothing left to discharge.
-    /// The card's corner for a drag progress: the display's at the page, the
-    /// source's own at the landing. One curve, so the card and anything drawing
-    /// beside it can never be rounded differently.
-    private static func grabCornerRadius(
-        at progress: CGFloat, screen: CGFloat, flight: ZoomFlight
-    ) -> CGFloat {
-        screen + (flight.card.zoomRestingCornerRadius - screen) * min(max(progress, 0), 1)
+    /// The card's corner for a drag progress: the display's own, scaled with
+    /// the card. One curve, so the card and anything drawing beside it can
+    /// never be rounded differently.
+    ///
+    /// ⚠️ IT USED TO SWEEP TOWARD THE LANDING'S, and the note that asked for
+    /// that is kept here because it was solving a real problem the wrong way.
+    /// It read: the card "held the display's radius for the whole drag and
+    /// jumped to the source's on release, which is a step in the one channel
+    /// the eye is most sensitive to". True of a radius that was CONSTANT while
+    /// the card shrank — the shape drifting further from the screen's the
+    /// smaller it got — and the answer was to start arriving early instead.
+    ///
+    /// Scaled with the card, there is no drift to compensate and no step to
+    /// avoid: radius over size is the screen's at every instant of the drag,
+    /// and the release's spring carries the corner to the landing's along with
+    /// the frame (`poseAtSource` sets it from inside the animation block). The
+    /// reveal reached the same rule from the other end — see
+    /// `RevealStage.heldRadius` — after a viewer reported its window turning
+    /// into a capsule halfway through a drag that had decided nothing.
+    private static func grabCornerRadius(at progress: CGFloat, screen: CGFloat) -> CGFloat {
+        screen * grabScale(at: progress)
     }
 
     private func springDetach(_ flight: ZoomFlight, to scale: CGFloat, progress: CGFloat) {
         let remaining = max(detachDeadline - CACurrentMediaTime(), 0)
-        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius, flight: flight)
+        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius)
         UIView.animate(
             withDuration: remaining, delay: 0, usingSpringWithDamping: 0.8,
             initialSpringVelocity: 0.4, options: [.allowUserInteraction, .beginFromCurrentState]
@@ -466,7 +480,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // the release inherits the shape the drag already had, and a
         // destination that draws alongside the card can be told the same
         // number instead of guessing it.
-        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius, flight: flight)
+        let radius = Self.grabCornerRadius(at: progress, screen: screenRadius)
         if isDetachSettling {
             springDetach(flight, to: scale, progress: progress)
         } else {

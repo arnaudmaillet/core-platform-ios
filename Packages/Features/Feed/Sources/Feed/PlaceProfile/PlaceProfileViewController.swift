@@ -1370,7 +1370,9 @@ extension PlaceProfileViewController: CardCloseLanding {
             // media fills the transition window, always. That is covering, and
             // it is what the marker has used all along.
             pageFit: .covering,
-            cornerRadius: PostGridTileCell.mosaicCornerRadius,
+            // Asked, not restated — see `ForYouGridPage.tileCornerRadius`. The
+            // same page the stand-in is built from answers it.
+            cornerRadius: page.tileCornerRadius,
             // The tile's own floor, so the beat where the window carries
             // neither picture is the colour of the brick it lands on.
             fill: PostGridTileCell.fillColor(for: substitute),
@@ -1485,7 +1487,9 @@ extension PlaceProfileViewController: CardCloseLanding {
             // media fills the transition window, always. That is covering, and
             // it is what the marker has used all along.
             pageFit: .covering,
-            cornerRadius: onList ? nil : PostGridTileCell.mosaicCornerRadius,
+            // A ROW takes the card's own rounding (nil lets the installer use
+            // it); a tile takes the grid's, asked rather than restated.
+            cornerRadius: onList ? nil : page.tileCornerRadius,
             fill: onList ? nil : PostGridTileCell.fillColor(for: post),
             setConcealed: { [weak self] concealed in
                 guard let self else { return }

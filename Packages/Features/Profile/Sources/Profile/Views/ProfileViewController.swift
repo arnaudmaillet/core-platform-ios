@@ -462,6 +462,27 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // away". The closures below re-ask the transient question for as
             // long as the flight needs it.
             let geometry = galleryPager.heroGeometry(for: post.id)
+            // ⚠️ THE POST THE CLOSE LANDS ON IS NOT ALWAYS THE ONE THAT OPENED.
+            //
+            // This gallery opens a WINDOW of posts, so the feed is a pager. Every
+            // hook below used to be bound to the id captured at the tap, which
+            // meant a dismissal after any paging landed on a foreign row — and
+            // worse than a wrong rect: on a card landing the transition hands
+            // over DURING the drag, so the viewer watched another post's card
+            // fill, veil and author band wash over the post they were reading.
+            //
+            // The same shape For You's grid already has. A captured `var`,
+            // because the hooks are escaping closures that must all see one
+            // answer, and the answer is decided between them.
+            var anchorID = post.id
+            // Concealment is the exception: it must be UNDONE for whatever was
+            // hidden, and the opening hid the tapped row before the anchor
+            // moved. Both are released, which costs nothing when they are the
+            // same row and is the whole of the fix when they are not.
+            let releaseConcealment: (ProfileGalleryPagerView?) -> Void = { pager in
+                pager?.setHeroConcealed(false, for: post.id)
+                pager?.setHeroConcealed(false, for: anchorID)
+            }
             let origin = SnapFeedHeroOrigin(
                 post: post,
                 stream: window,
@@ -504,7 +525,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 // row answers nil from `textRowFrame` anyway.
                 textReveal: TextRevealOrigin(
                     rowFrame: { [weak self] space in
-                        self?.galleryPager.textRowFrame(for: post.id, in: space)
+                        self?.galleryPager.textRowFrame(for: anchorID, in: space)
                     },
                     // Read ONCE, at tap, for the reason the geometry above is:
                     // the viewer just touched this cell, so it is realized by
@@ -527,13 +548,33 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                     // one flew the live page home and gained its header in a
                     // single frame.
                     makeDismissStandIn: { [weak self] _ in
-                        self?.galleryPager.makeDismissStandIn(for: post.id)
+                        self?.galleryPager.makeDismissStandIn(for: anchorID)
                     },
                     // The gallery's own concealment, which the media hero
                     // beside this already drives — one mechanism, two kinds of
                     // flight.
                     setConcealed: { [weak self] concealed in
-                        self?.galleryPager.setHeroConcealed(concealed, for: post.id)
+                        guard concealed else { return releaseConcealment(self?.galleryPager) }
+                        self?.galleryPager.setHeroConcealed(true, for: anchorID)
+                    },
+                    // ⚠️ RUNS BEFORE ANYTHING IS MEASURED — the driver asks this
+                    // ahead of the rect, the stand-in and the concealment, which
+                    // is the only window in which the anchor can still move.
+                    //
+                    // The row is settled clear here too: after paging it can be
+                    // anywhere in the grid, including off screen, and a landing
+                    // measured against a row nobody has scrolled to is a landing
+                    // off the bottom of the page.
+                    willStageDismissal: { [weak self] settled in
+                        guard let settled, settled != anchorID,
+                              let pager = self?.galleryPager
+                        else { return }
+                        anchorID = settled
+                        // Refused by the grid if it does not hold the post,
+                        // which leaves the anchor pointing at a row that
+                        // answers nil — the honest "scrolled away" the rect
+                        // hooks are already written for.
+                        pager.setPendingReveal(settled)
                     },
                     // No inset to pin, unlike For You's grid: these pages run
                     // `contentInsetAdjustmentBehavior = .never` for their whole
