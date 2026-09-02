@@ -32,6 +32,25 @@ struct PlaybackScopeTests {
         return view
     }
 
+    /// ⚠️ THE POST IDENTITY SURVIVES THE HAND-BACK, and for a long time it did
+    /// not. `transferOwnership` moved the player, the URL and the surface and
+    /// left `playingScope` behind — so the tile that ended a dismissal owning
+    /// the asset owned it under no post at all, and the next present could not
+    /// match it. Minting beside a player already running the asset is exactly
+    /// the "one asset, two clocks" this suite exists for, so it is asserted the
+    /// same way: by counting players.
+    @Test func ownershipHandedBackKeepsThePostIdentity() async {
+        let pool = VideoPlaybackController(source: StubSource(), poolSize: 4, capacity: 4)
+        let clip = URL(string: "mock://video/trailer")!
+        let page = surface(), tile = surface(), reopened = surface()
+
+        await pool.play(clip, in: page, scope: "post-a")
+        pool.transferOwnership(of: clip, to: tile)
+        await pool.play(clip, in: reopened, scope: "post-a")
+
+        #expect(pool.playerCountByURL[clip] == 1)
+    }
+
     @Test func twoPostsSharingAFileDoNotShareAPlayer() async {
         let pool = VideoPlaybackController(source: StubSource(), poolSize: 4, capacity: 4)
         let shared = URL(string: "mock://video/trailer")!

@@ -922,6 +922,20 @@ public final class VideoPlaybackController {
             return false
         }
         VideoPlaybackTrace.emit("transferOwnership \(mediaURL.lastPathComponent)")
+        // ⚠️ THE SCOPE MOVES WITH THE LOAN, and for a long time it did not.
+        //
+        // This function moved `activePlayers`, `playingURL` and `surfaces` and
+        // left `playingScope` where it was — so the surface that ended a
+        // dismissal owning the asset owned it under NO post identity, while the
+        // key that had handed it over kept a scope entry naming a loan it no
+        // longer held. Two consequences, both silent: the next present's
+        // scope-gated join (`sharedActivePlayer(playing:scope:)`) cannot match,
+        // so it mints beside a player already running the asset — the very
+        // "one asset, two clocks" this file is built to prevent — and the
+        // playhead ledger, which is keyed by the post, has nothing to file
+        // under when that loan ends.
+        let previousScope = playingURL.first(where: { $0.value == mediaURL })
+            .flatMap { playingScope[$0.key] }
         if let previous = playingURL.first(where: { $0.value == mediaURL })?.key,
            previous != ObjectIdentifier(view) {
             // Clear the old owner's registration WITHOUT `detach` — detaching
@@ -929,6 +943,7 @@ public final class VideoPlaybackController {
             // the teardown this exists to get ahead of.
             activePlayers[previous] = nil
             playingURL[previous] = nil
+            playingScope[previous] = nil
         }
         // Claimed from the park — but only when the park holds THIS asset.
         // Clearing unconditionally orphaned a parked player of a DIFFERENT
@@ -943,6 +958,9 @@ public final class VideoPlaybackController {
         activePlayers[key] = player
         surfaces[key] = WeakSurface(view: view)
         playingURL[key] = mediaURL
+        // Kept if the new owner already had one — a caller that joined before
+        // taking ownership knows its own post — and inherited otherwise.
+        playingScope[key] = playingScope[key] ?? previousScope
         bind(player, to: view)
         player.play()
         return true
