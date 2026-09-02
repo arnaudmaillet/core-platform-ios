@@ -102,45 +102,14 @@ final class RevealDismissInteractionController: NSObject,
         return geometry.sourceFrame(container) ?? RevealStage.centredFallback(in: container)
     }
 
-    /// Where the touch went down, in the page's own space.
-    private let grabOrigin: CGPoint
-
     init(
         geometry: RevealGeometry,
         returningChrome: UIView?,
-        axis: ZoomDismissAxis,
-        grabOrigin: CGPoint = .zero
+        axis: ZoomDismissAxis
     ) {
         self.geometry = geometry
         self.returningChrome = returningChrome
         self.axis = axis
-        self.grabOrigin = grabOrigin
-    }
-
-    /// ⚠️ HOW FAR THIS GESTURE CAN GO, which is not how far the screen is wide.
-    ///
-    /// The finger stops at the bezel. A grab that starts mid-screen therefore
-    /// has half the room of one that starts at the edge, and a fade measured
-    /// against the screen's span would be half finished when the hand has run
-    /// out of screen. Measured against the distance actually available, it
-    /// completes exactly when the viewer can push no further.
-    private func maxTravel(in view: UIView) -> CGFloat {
-        switch axis {
-        case .horizontal: max(view.bounds.maxX - grabOrigin.x, 1)
-        case .vertical: max(view.bounds.maxY - grabOrigin.y, 1)
-        }
-    }
-
-    /// How much of the departing page is left, for a raw (un-banded) travel.
-    ///
-    /// The RAW distance, deliberately: the rubber band exists to resist the
-    /// window's travel past the point where more means nothing, and the fade is
-    /// about the hand rather than about the window. Banded, it would asymptote
-    /// and the page would never quite leave.
-    private func sourceFade(for translation: CGPoint, in view: UIView) -> CGFloat {
-        RevealStage.sourceFade(
-            travel: axis.along(translation), maxTravel: maxTravel(in: view)
-        )
     }
 
     // MARK: - UIViewControllerInteractiveTransitioning
@@ -264,46 +233,37 @@ final class RevealDismissInteractionController: NSObject,
         let offset = axis.offset(along: bandedAlong, across: bandedAcross)
 
         // Morph: toward the card's own size and rounding — or, against a
-        // landing that is not a card, only as far as `grabMorph` allows while
-        // the finger is still holding it.
-        // ⚠️ A HELD WINDOW IS THE SCREEN, UNIFORMLY SCALED — same aspect, and
-        // (below) the same corner proportion.
+        // landing that is not a card, not at all: see the note below.
+        // ⚠️ A HELD WINDOW IS TAKEN, NOT TRANSFORMED. Position is the only
+        // channel the finger owns.
         //
-        // Interpolating toward the landing's SHAPE under the finger is what put
-        // the page in a window that was becoming card-shaped while the page was
-        // still in it: whichever fit was chosen, the two disagreed and the
-        // difference showed as ground around the media, or as media cut away.
-        // Filmed both ways. Holding the screen's own ratio makes the question
-        // disappear — a page covering a scaled screen is a scaled screen, with
-        // nothing cropped and nothing letterboxed at any point of the drag.
+        // Everything else was tried under the hand and every one of them was
+        // reported: morphing toward the landing's shape cut the media away or
+        // opened ground around it, sweeping the corner made a capsule halfway
+        // through, fading the page out started the hand-over before anything
+        // had been decided. They were all answers to a question the drag does
+        // not ask. A grab is the viewer picking the screen up; whether it
+        // leaves is not known until they let go.
         //
-        // The morph to the landing's shape belongs to the release, which is
-        // when the outcome is known. Same division as the hero's grab.
-        let morph = RevealStage.grabMorph(at: progress)
-        let size = geometry.pageFit == .clipped
-            ? CGSize(
-                width: openRect.width + (stagedLanding.width - openRect.width) * progress,
-                height: openRect.height + (stagedLanding.height - openRect.height) * progress
-            )
-            : CGSize(width: openRect.width * morph, height: openRect.height * morph)
-        let centre = CGPoint(x: openCentre.x + offset.x, y: openCentre.y + offset.y)
-        let rect = CGRect(
-            x: centre.x - size.width / 2, y: centre.y - size.height / 2,
-            width: size.width, height: size.height
+        // So: same size, same corner, same opacity, and the whole transition —
+        // ratio, border, fade — happens on the release, and only if the
+        // dismissal commits.
+        let size = CGSize(
+            width: openRect.width + (stagedLanding.width - openRect.width) * progress,
+            height: openRect.height + (stagedLanding.height - openRect.height) * progress
         )
-        // ⚠️ AND THE CORNER IS THE SCREEN'S, SCALED WITH IT — not swept toward
-        // the landing's.
-        //
-        // Sweeping it turned the window into a capsule halfway through a drag
-        // that had decided nothing, which is the corner arriving far too early;
-        // sweeping the absolute value instead left a 241pt window wearing a
-        // 22pt corner, which is a hard number. Both were answers to the wrong
-        // question. Held at the screen's own proportion, the window is the
-        // screen at every instant of the drag — and the corner reaches the
-        // landing's on the release spring, which already carries it.
+        let centre = CGPoint(x: openCentre.x + offset.x, y: openCentre.y + offset.y)
+        let rect = geometry.pageFit == .clipped
+            ? CGRect(
+                x: centre.x - size.width / 2, y: centre.y - size.height / 2,
+                width: size.width, height: size.height
+            )
+            : RevealStage.heldWindow(openRect, displacedBy: offset)
+        // The screen's own corner, untouched — see above. The landing's arrives
+        // on the release spring, which already carries it.
         let radius = geometry.pageFit == .clipped
             ? screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
-            : screenRadius * morph
+            : screenRadius
         // ⚠️ THE LIVE RECT, not a progress-derived size — the same rect the
         // window is being given, so the page cannot separate from it under a
         // rubber-banded or back-dragged finger.
@@ -314,8 +274,7 @@ final class RevealDismissInteractionController: NSObject,
                     mask: rect,
                     maskRadius: radius,
                     pageTranslation: covering.translation,
-                    pageScale: covering.scale,
-                    pageOpacity: 1 - sourceFade(for: translation, in: view)
+                    pageScale: covering.scale
                 ),
                 progress
             )

@@ -488,39 +488,21 @@ enum RevealStage {
         )
     }
 
-    /// ⚠️ HOW FAR THE WINDOW MAY SHRINK WHILE A FINGER IS STILL HOLDING IT.
+    /// ⚠️ WHAT A HELD GRAB SHOWS, for a landing that is not a card: the
+    /// departure's own rect, displaced, and nothing else at all.
     ///
-    /// A window that morphs all the way to its landing by progress is right for
-    /// a landing that is a CARD: the card is large, so a full drag leaves
-    /// something card-sized under the hand. Against a 44pt marker the same law
-    /// is brutal — a modest pull takes the post most of the way to a disc, and
-    /// with the page scaling too it reads as wildly over-sensitive, the post
-    /// gone long before the viewer has decided anything. Reported exactly that
-    /// way: "the grab is much too sensitive; the transition window should stay
-    /// visible on screen whatever the grab percentage".
+    /// Every other channel was tried under the hand and every one was reported.
+    /// Morphing toward the landing's shape cut the media away, or opened the
+    /// card's ground around it — filmed both ways. Sweeping the corner made a
+    /// capsule halfway through a drag that had decided nothing. Fading the page
+    /// out started the hand-over before there was anything to hand over.
     ///
-    /// So it is clamped, on the flight's own floor and for the flight's own
-    /// stated reason: a held window is still the PAGE — the viewer is deciding,
-    /// not landing — and the remaining distance to the marker belongs to the
-    /// release spring, which is the moment the outcome is actually known.
-    /// Sharing `ZoomFlight.minimumGrabScale` rather than restating it is what
-    /// makes the two families feel like one gesture.
-    ///
-    /// ⚠️ AND THE WINDOW KEEPS THE SCREEN'S ASPECT — AND ITS CORNER
-    /// PROPORTION — while it is held, which is what makes the fit above stop
-    /// mattering under the hand.
-    ///
-    /// A window morphing toward its landing's shape while the page is still
-    /// in it forces a choice nobody can win: fill it and the media is cut
-    /// away as the shape diverges, fit it and the card's ground opens up
-    /// around the media. Both were filmed and both were reported. A window
-    /// that stays a scaled SCREEN has neither problem — a page covering it is
-    /// a scaled screen, cropped nowhere and letterboxed nowhere — and the
-    /// shape morph goes where it belongs, on the release, which is when the
-    /// outcome is known.
-    static func grabMorph(at progress: CGFloat) -> CGFloat {
-        let clamped = min(max(progress, 0), 1)
-        return 1 + (ZoomFlight.minimumGrabScale - 1) * clamped
+    /// They were all answers to a question the drag does not ask. A grab is the
+    /// viewer picking the screen up; whether it leaves is not known until they
+    /// let go. So the whole transition — ratio, corner, fade — belongs to the
+    /// release, and only if the dismissal commits.
+    static func heldWindow(_ open: CGRect, displacedBy offset: CGPoint) -> CGRect {
+        open.offsetBy(dx: offset.x, dy: offset.y)
     }
 
     /// How far the page slides so its caption stays REGISTERED with a window
@@ -641,19 +623,6 @@ enum RevealStage {
     /// the post used to be. That hole is what a viewer, playing with the grab,
     /// described as the post fading away over its own media. The "nothing" the
     /// face fades against here is the opaque live post itself.
-    /// How much of the departing page is left, for a travel and the room the
-    /// gesture actually has.
-    ///
-    /// ⚠️ THE ROOM, NOT THE SCREEN. The finger stops at the bezel, so a grab
-    /// that starts mid-screen has half the distance of one that starts at the
-    /// edge. Measured against the screen's span, the fade would be half done
-    /// when the hand has run out of room; measured against what is left in
-    /// front of it, it finishes exactly when the viewer can push no further.
-    static func sourceFade(travel: CGFloat, maxTravel: CGFloat) -> CGFloat {
-        guard maxTravel > 0 else { return 0 }
-        return min(max(travel, 0) / maxTravel, 1)
-    }
-
     static func fill(at progress: CGFloat, covering: Bool = false) -> CGFloat {
         // ⚠️ NOTHING ARRIVES WHILE THE FINGER IS DOWN, on a fit that carries
         // the page. The arrival's whole job is to be what the window becomes,

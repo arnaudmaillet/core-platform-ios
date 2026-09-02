@@ -226,32 +226,28 @@ struct RevealRegistrationTests {
         }
     }
 
-    // MARK: - The window's shape
+    // MARK: - What a held grab may do
 
-    /// ⚠️ A HELD WINDOW IS THE SCREEN, CORNER INCLUDED.
+    /// ⚠️ A HELD WINDOW IS TAKEN, NOT TRANSFORMED. Position is the only
+    /// channel the finger owns.
     ///
-    /// Two laws were tried and both were reported. Sweeping the absolute
-    /// radius toward the landing's left a 241pt-wide window wearing a 22pt
-    /// corner — a hard number. Sweeping the radius as a FRACTION of the
-    /// window turned it into a capsule halfway through a drag that had
-    /// decided nothing — the corner arriving far too early. What the viewer
-    /// is holding is the screen, so it wears the screen's corner at the
-    /// screen's proportion, and the landing's shape is the release's business.
-    @Test func aHeldWindowWearsTheScreensCornerAtItsOwnScale() {
-        let screenRadius: CGFloat = 55
-        // At rest it is the screen exactly.
-        #expect(abs(screenRadius * RevealStage.grabMorph(at: 0) - screenRadius) < 0.01)
-        // Held, the corner shrinks WITH the window, so the shape never changes:
-        // radius over size is constant at every point of the drag.
-        let openSide: CGFloat = 402
-        var proportions: [CGFloat] = []
+    /// Size, corner and opacity all held constant, because every one of them
+    /// was tried under the hand and every one was filmed and reported. What
+    /// the viewer is holding is the screen they were reading; what it becomes
+    /// is the release's business.
+    @Test func aHeldWindowChangesNothingButItsPosition() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+
         for step in 0...100 {
-            let morph = RevealStage.grabMorph(at: CGFloat(step) / 100)
-            proportions.append((screenRadius * morph) / (openSide * morph))
+            let offset = CGPoint(x: CGFloat(step) * 3, y: CGFloat(step))
+            let held = RevealStage.heldWindow(screen, displacedBy: offset)
+            #expect(held.size == screen.size, "the window resized under the finger")
+            #expect(abs(held.minX - (screen.minX + offset.x)) < 0.0001)
+            #expect(abs(held.minY - (screen.minY + offset.y)) < 0.0001)
         }
-        let first = proportions[0]
-        #expect(proportions.allSatisfy { abs($0 - first) < 0.0001 },
-                "the window changed shape under the finger")
+        // At rest it is the screen exactly, so an abandoned grab has nothing to
+        // undo.
+        #expect(RevealStage.heldWindow(screen, displacedBy: .zero) == screen)
     }
 
     // MARK: - The pivot is the release
@@ -283,26 +279,6 @@ struct RevealRegistrationTests {
         }
     }
 
-    /// ⚠️ THE FADE IS MEASURED AGAINST THE ROOM THE GESTURE HAS, not the
-    /// screen. A grab that starts mid-screen has half the distance of one that
-    /// starts at the bezel, and a fade keyed to the span would be half done
-    /// when the hand has run out of room.
-    @Test func theSourceLeavesExactlyAsTheFingerRunsOut() {
-        #expect(RevealStage.sourceFade(travel: 0, maxTravel: 200) == 0)
-        #expect(RevealStage.sourceFade(travel: 200, maxTravel: 200) == 1,
-                "the page was still there when the finger could go no further")
-        #expect(abs(RevealStage.sourceFade(travel: 100, maxTravel: 200) - 0.5) < 0.0001)
-        // Half the room, twice as fast — the property the screen's span cannot
-        // express.
-        #expect(RevealStage.sourceFade(travel: 100, maxTravel: 100)
-            > RevealStage.sourceFade(travel: 100, maxTravel: 200))
-        // A back-drag does not un-fade past the start, and no travel can push
-        // it past gone.
-        #expect(RevealStage.sourceFade(travel: -50, maxTravel: 200) == 0)
-        #expect(RevealStage.sourceFade(travel: 900, maxTravel: 200) == 1)
-        #expect(RevealStage.sourceFade(travel: 10, maxTravel: 0) == 0, "no room, no fade")
-    }
-
     /// The page is gone by the landing: two things in one window is the double
     /// image the rest of this area exists to prevent.
     @Test func theLandingPoseHasNoPageLeft() {
@@ -317,37 +293,6 @@ struct RevealRegistrationTests {
         #expect(RevealStage.open(container: UIView(
             frame: CGRect(x: 0, y: 0, width: 402, height: 874)
         )).pageOpacity == 1)
-    }
-
-    // MARK: - What a held grab may do
-
-    /// ⚠️ A HELD WINDOW IS STILL THE PAGE. It may not shrink toward its
-    /// landing under the hand.
-    ///
-    /// Morphing all the way to the landing by progress is right against a
-    /// CARD, which is large enough to leave something recognisable in the hand
-    /// at full drag. Against a 44pt marker it took the post most of the way to
-    /// a disc for a modest pull — reported as the grab being far too sensitive.
-    /// The remaining distance belongs to the release spring, which is when the
-    /// outcome is actually known.
-    @Test func aHeldWindowMayNotShrinkPastTheFlightsFloor() {
-        #expect(RevealStage.grabMorph(at: 0) == 1, "the window shrank before the finger moved")
-        #expect(RevealStage.grabMorph(at: 1) == ZoomFlight.minimumGrabScale,
-                "a held window went past the floor a held card stops at")
-        // Shared with the hero rather than restated: the two are one dismissal
-        // wearing two animations, and a hand that learnt one should find the
-        // other familiar.
-        #expect(RevealStage.grabMorph(at: 1) > 0.5, "a held post is not a thumbnail")
-
-        var previous = CGFloat(2)
-        for step in 0...100 {
-            let value = RevealStage.grabMorph(at: CGFloat(step) / 100)
-            #expect(value <= previous, "the morph is not monotonic")
-            previous = value
-        }
-        // Beyond the end of the drag it holds rather than continuing.
-        #expect(RevealStage.grabMorph(at: 4) == ZoomFlight.minimumGrabScale)
-        #expect(RevealStage.grabMorph(at: -1) == 1)
     }
 
     /// ⚠️ AND THE FORWARD LIMIT IS AN AXIS'S OWN, not one number for both.
