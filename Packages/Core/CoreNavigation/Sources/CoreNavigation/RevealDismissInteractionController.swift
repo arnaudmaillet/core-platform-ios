@@ -245,7 +245,20 @@ final class RevealDismissInteractionController: NSObject,
             x: centre.x - size.width / 2, y: centre.y - size.height / 2,
             width: size.width, height: size.height
         )
-        let radius = screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
+        // Against a landing that is not a card the SHAPE is what travels — see
+        // `RevealStage.maskRadius`. Everywhere else the two rects are a similar
+        // size, so the radius and the shape mean the same thing and the plain
+        // sweep is exact.
+        let radius = geometry.pageCoversWindow
+            ? RevealStage.maskRadius(
+                at: progress,
+                window: size,
+                from: openRect.size,
+                to: stagedLanding.size,
+                screenRadius: screenRadius,
+                sourceRadius: geometry.sourceCornerRadius
+            )
+            : screenRadius + (geometry.sourceCornerRadius - screenRadius) * progress
         // ⚠️ THE LIVE RECT, not a progress-derived size — the same rect the
         // window is being given, so the page cannot separate from it under a
         // rubber-banded or back-dragged finger.
