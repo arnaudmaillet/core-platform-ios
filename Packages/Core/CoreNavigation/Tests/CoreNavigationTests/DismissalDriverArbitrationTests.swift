@@ -436,6 +436,8 @@ struct DismissalGrabArbitrationTests {
     }
 
     private final class StubSource: NSObject, ZoomTransitionSource {
+        var landingAcceptsHero = true
+        var zoomLandingAcceptsHero: Bool { landingAcceptsHero }
         func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect { .zero }
         var zoomSourceIsOnScreen: Bool { true }
         func makeZoomFlightCard() -> any ZoomFlightCard { StubCard() }
@@ -476,6 +478,49 @@ struct DismissalGrabArbitrationTests {
         slide.arbitratesWithHeroGrab = arbitrates
         slide.install(on: nav)
         return Rig(feed: feed, hero: hero, slide: slide, source: source, nav: nav)
+    }
+
+    /// ⚠️ EXACTLY ONE DRIVER CLAIMS ANY DRAG — the invariant the whole pair
+    /// exists to hold, and it has now been broken in BOTH directions.
+    ///
+    /// Both refusing: the hero declines a landing it cannot draw and the slide
+    /// was never told, so it reads "no opinion" as "the hero is taking it".
+    /// Nothing begins, no interactive pop is started, and the screen leaves on
+    /// UIKit's own edge-swipe animation.
+    ///
+    /// Both claiming: a landing predicate left over from a PREVIOUS
+    /// presentation answers false about a post two screens ago, so the slide
+    /// contests a drag the hero is also taking. Whichever recognizer begins
+    /// first pops, and if it is the slide the geometry is nil and the close is
+    /// a plain slide.
+    ///
+    /// Swept rather than written out case by case: the two answers are
+    /// independent and the failures were both in a corner nobody enumerated.
+    @Test func exactlyOneDriverClaimsEveryCombination() {
+        for kind in [ZoomDismissalKind.hero, .card] {
+            for landingAccepts in [true, false] {
+                let rig = rig(kind: kind)
+                rig.source.landingAcceptsHero = landingAccepts
+                rig.slide.heroLandingAcceptsHero = { landingAccepts }
+                let pan = FakePan()
+
+                let hero = rig.hero.gestureRecognizerShouldBegin(pan)
+                let slide = rig.slide.gestureRecognizerShouldBegin(pan)
+                #expect(hero != slide,
+                        "kind=\(kind) landingAccepts=\(landingAccepts) hero=\(hero) slide=\(slide)")
+            }
+        }
+    }
+
+    /// ⚠️ AND A NEW PRESENTATION FORGETS THE LAST ONE'S ANSWER. This driver is
+    /// one retained instance for the screen's life, so a predicate left behind
+    /// is asked again about a post that is no longer on screen — which is how
+    /// "both claiming" above is reached in the app.
+    @Test func aNewPresentationForgetsThePreviousLandingPredicate() {
+        let slide = InteractiveSlideDismissal()
+        slide.heroLandingAcceptsHero = { false }
+        slide.resetForNewPresentation()
+        #expect(slide.heroLandingAcceptsHero == nil)
     }
 
     /// ⚠️ A POST WITH MEDIA IS THE HERO GRAB'S, AND THE SLIDE STANDS DOWN.
