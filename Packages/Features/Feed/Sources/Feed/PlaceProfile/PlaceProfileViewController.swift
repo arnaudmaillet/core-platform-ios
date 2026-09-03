@@ -94,8 +94,14 @@ final class PlaceProfileViewController: UIViewController {
     /// selector docks, a name up there is competing with the one control the
     /// chrome exists to hold.
     private let placeName: String
-    /// The banner's hero identity: the place kind whispered above the name.
-    private let heroKindLabel = UILabel()
+    /// The banner's hero identity: the place's name, and nothing else.
+    ///
+    /// ⚠️ THE KIND LINE WAS DELETED, not hidden. "CITY CLUSTER" whispered above
+    /// the name was a taxonomy label competing with the identity — and the map
+    /// the viewer just came from had already said which kind of cluster this
+    /// is. The SPLITTER stays: `placeName` still arrives as the gallery's
+    /// "Paris • City Cluster", so stripping the kind is the only way to draw
+    /// the name alone.
     private let heroNameLabel = UILabel()
     /// The two pages under their hosted-header contract, pager order.
     private var hostedPages: [any PlaceProfileHostedPage] = []
@@ -402,7 +408,7 @@ final class PlaceProfileViewController: UIViewController {
     private static let seedWindow = 40
     /// How much of the screen the banner claims. The place leads with its
     /// picture, so the picture is most of the first screen.
-    private static let bannerHeightFraction: CGFloat = 0.6
+    private static let bannerHeightFraction: CGFloat = 0.7
     /// The floor a headless or not-yet-laid-out view falls back to, so a
     /// constraint built before the first layout pass is never zero.
     private static let bannerHeightFloor: CGFloat = 220
@@ -472,6 +478,15 @@ final class PlaceProfileViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         configureHeader()
+        // ⚠️ CGColors DO NOT TRACK TRAITS, and every halo on this banner is
+        // one. Without this a light↔dark flip leaves light ink wearing a light
+        // edge — invisible until someone actually flips appearance mid-screen.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (self: PlaceProfileViewController, _) in
+            self.applyHeroLegibility()
+            self.reactionsMetric.applyBannerLegibility()
+            self.viewsMetric.applyBannerLegibility()
+        }
         configureTabs()
         page.render(.loading)
         activityPage.render(.loading)
@@ -593,47 +608,67 @@ final class PlaceProfileViewController: UIViewController {
         bannerScrim.translatesAutoresizingMaskIntoConstraints = false
         bannerBox.addSubview(bannerScrim)
 
-        // The HERO TITLE: the place's name at the banner's foot, over the
-        // legibility scrim — the identity leads the page, not the chrome.
-        // `.label` over the background-tinted scrim keeps contrast in both
-        // appearances; the soft shadow covers the strip where the scrim is
-        // still mostly image.
-        let (heroName, heroKind) = Self.heroTitleComponents(of: placeName)
-        heroKindLabel.text = heroKind?.uppercased()
-        heroKindLabel.font = .preferredFont(forTextStyle: .caption1)
-        heroKindLabel.textColor = .secondaryLabel
-        heroKindLabel.isHidden = heroKind == nil
-        heroNameLabel.text = heroName
-        heroNameLabel.font = UIFont.systemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .title1).pointSize, weight: .bold
+        // THE HERO TITLE: the place's name at the banner's foot, over the
+        // legibility plate — the identity leads the page, not the chrome.
+        //
+        // ⚠️ THE INK AND THE GROUND ARE OPPOSITES BY CONSTRUCTION, which is
+        // the whole reason this works on an arbitrary photograph. The plate is
+        // `.systemBackground` and the type is `.label`, so they can never
+        // disagree in either appearance — and the failure mode self-corrects:
+        // a white veil under black ink only fails on a DARK photograph, and
+        // the veil lightens dark photographs. Exactly inverted in dark mode.
+        //
+        // A fixed white-on-black hero was considered and refused. Every
+        // over-media white ink in this app sits on a surface that FORCES an
+        // interface style; this page does not, and a black wash dissolving
+        // into `systemBackground` passes through mid-grey in light mode
+        // precisely where the selector now stands.
+        heroNameLabel.text = Self.heroTitleComponents(of: placeName).name
+        // ⚠️ 34 LITERAL, not read back from `preferredFont(forTextStyle:).pointSize`.
+        //
+        // That value ALREADY reflects the current content-size category, so
+        // feeding it to `UIFontMetrics.scaledFont` scales it a second time —
+        // the frozen `.title1.pointSize` this replaces had the same shape of
+        // bug in reverse: it sampled the category once, at construction, and
+        // never grew again. 34 is `largeTitle` at `.large`, which is exactly
+        // the base `scaledFont` expects to be handed.
+        //
+        // Up from 28: the banner grew by 17% and 28 was sized for the old one,
+        // so holding it would have made the identity proportionally SMALLER
+        // inside a larger picture.
+        heroNameLabel.font = UIFontMetrics(forTextStyle: .largeTitle).scaledFont(
+            for: .systemFont(ofSize: 34, weight: .bold), maximumPointSize: 40
         )
+        heroNameLabel.adjustsFontForContentSizeCategory = true
+        heroNameLabel.accessibilityTraits = .header
         heroNameLabel.textColor = .label
         heroNameLabel.adjustsFontSizeToFitWidth = true
         heroNameLabel.minimumScaleFactor = 0.6
         // Centred: the name is the banner's caption, not a list header.
-        heroKindLabel.textAlignment = .center
         heroNameLabel.textAlignment = .center
-        for label in [heroKindLabel, heroNameLabel] {
-            label.layer.shadowColor = UIColor.systemBackground.cgColor
-            label.layer.shadowOpacity = 0.8
-            label.layer.shadowRadius = 6
-            label.layer.shadowOffset = .zero
-        }
-        let heroTitle = UIStackView(arrangedSubviews: [heroKindLabel, heroNameLabel])
-        heroTitle.axis = .vertical
-        heroTitle.spacing = 2
-        heroTitle.alignment = .center
-        heroTitle.translatesAutoresizingMaskIntoConstraints = false
-        bannerBox.addSubview(heroTitle)
+        applyHeroLegibility()
+        heroNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        bannerBox.addSubview(heroNameLabel)
 
         let metrics = UIStackView(arrangedSubviews: [reactionsMetric, viewsMetric])
         metrics.distribution = .fillEqually
+        // ⚠️ SET, not defaulted — and it never was. The stack shipped with no
+        // spacing at all, so two hugging `.fillEqually` columns sat edge to
+        // edge: about 124pt of clump in the middle of a 402pt screen. That is
+        // the mechanical cause of "ça ne respire pas", and no amount of
+        // retyping the fonts would have fixed it.
+        metrics.spacing = Spacing.xxl
+        metrics.alignment = .top
         metrics.translatesAutoresizingMaskIntoConstraints = false
         // ⚠️ INSIDE THE BANNER, under the name. The counters are part of the
         // place's identity, so they sit on its picture rather than in a band
         // below it — which also means the banner's bottom edge is the last
-        // thing on the header before the selector, with nothing between the
-        // gradient and the page to draw a line.
+        // thing on the header, with nothing between the gradient and the page
+        // to draw a line.
+        //
+        // And they now clear a 44pt capsule that stands INSIDE that same
+        // rectangle, which is why their bottom is derived from the bar's own
+        // height rather than typed as a constant.
         bannerBox.addSubview(metrics)
         for label in metrics.arrangedSubviews.compactMap({ $0 as? PlaceMetricView }) {
             label.applyBannerLegibility()
@@ -701,25 +736,48 @@ final class PlaceProfileViewController: UIViewController {
             // stretch note above), so a pull-down stretches the image behind
             // it while the name holds its seat over the scrim. Centred, with
             // the counters directly beneath it and both over the picture.
-            heroTitle.centerXAnchor.constraint(equalTo: bannerBox.centerXAnchor),
-            heroTitle.leadingAnchor.constraint(
-                greaterThanOrEqualTo: bannerBox.leadingAnchor, constant: 16
+            heroNameLabel.centerXAnchor.constraint(equalTo: bannerBox.centerXAnchor),
+            heroNameLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: bannerBox.leadingAnchor, constant: Spacing.xl
             ),
-            heroTitle.trailingAnchor.constraint(
-                lessThanOrEqualTo: bannerBox.trailingAnchor, constant: -16
+            heroNameLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: bannerBox.trailingAnchor, constant: -Spacing.xl
             ),
-            metrics.topAnchor.constraint(equalTo: heroTitle.bottomAnchor, constant: 10),
+            metrics.topAnchor.constraint(
+                equalTo: heroNameLabel.bottomAnchor, constant: Spacing.xl
+            ),
             metrics.centerXAnchor.constraint(equalTo: bannerBox.centerXAnchor),
             metrics.widthAnchor.constraint(
-                lessThanOrEqualTo: bannerBox.widthAnchor, constant: -32
+                lessThanOrEqualTo: bannerBox.widthAnchor, constant: -(2 * Spacing.xl)
             ),
-            metrics.bottomAnchor.constraint(equalTo: bannerBox.bottomAnchor, constant: -18),
+            // ⚠️ DERIVED FROM THE BAR, not typed. The selector now stands
+            // INSIDE the banner's own rectangle, so the identity's foot has to
+            // clear a capsule rather than the picture's edge: the old -18 put
+            // the counters straight behind the glass the moment the bar moved
+            // up. Deriving it means a change to the bar's height cannot leave
+            // type drawn underneath it.
+            metrics.bottomAnchor.constraint(
+                equalTo: bannerBox.bottomAnchor, constant: -Self.identityClearance
+            ),
             // ⚠️ A SLOT WITH A STATED HEIGHT, not the selector itself. The
             // inline bar fades out at the dock, and a header whose height
             // followed it would shrink under every number derived from it
             // (`headerHeight`, and through it the pages' inset and the dock
             // line) at the exact moment the dock is being decided.
-            inlineBarSlot.topAnchor.constraint(equalTo: bannerBox.bottomAnchor, constant: 8),
+            // ⚠️ THE SLOT IS PINNED, NOT THE BAR — and the bar's own bottom
+            // lands on the banner's because the slot's footer is exactly the
+            // air below it. Anchoring the BAR here instead would make
+            // `headerHost`'s fitting height depend on a control that FADES at
+            // the dock, which is the coupling the note below exists to forbid.
+            //
+            // The slot stays a SIBLING of `bannerBox` rather than moving
+            // inside it: the box clips, it fades with `bannerBox.alpha` at the
+            // dock (taking the leaving crossfade copy with it), and the slot's
+            // bottom is the only constraint giving `headerHost` a height.
+            // Z-order already works — the box is added first.
+            inlineBarSlot.bottomAnchor.constraint(
+                equalTo: bannerBox.bottomAnchor, constant: Self.selectorSlotFooter
+            ),
             inlineBarSlot.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
             inlineBarSlot.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
             inlineBarSlot.bottomAnchor.constraint(equalTo: headerHost.bottomAnchor),
@@ -741,6 +799,15 @@ final class PlaceProfileViewController: UIViewController {
     /// The inline selector's seat: the bar's own height plus the gap that
     /// separates it from the first row of content.
     private static let selectorSlotHeight = PagedTabBar.Style.navigationTitle.height + 16
+    /// The air the slot keeps BELOW the selector, now that the bar itself sits
+    /// on the banner's last 44pt. Derived, so the two cannot drift apart.
+    private static let selectorSlotFooter =
+        selectorSlotHeight - PagedTabBar.Style.navigationTitle.height
+    /// How far the identity's foot must clear the banner's bottom edge: the
+    /// selector's own band, plus real air. Derived from the bar for the reason
+    /// the constraint states — type must never be drawn behind the capsule.
+    private static let identityClearance =
+        PagedTabBar.Style.navigationTitle.height + Spacing.xl
     /// The crossfade's length and the size the leaving copy shrinks to —
     /// the profile screen's measured pair, shared so the two screens that
     /// perform the same hand-over cannot drift apart.
@@ -824,8 +891,32 @@ final class PlaceProfileViewController: UIViewController {
     /// softly the two are blended just above it. Given a third of the banner
     /// the gradient has room to land on the page's own colour before it gets
     /// there, so there is no edge left to see.
+    /// ⚠️ AND IT IS A LADDER, not one ramp. Each row of type is placed at the
+    /// ground density its own size needs — the name high up where the picture
+    /// is still mostly itself, the captions low down where the plate is nearly
+    /// solid — and the last stop lands FLAT well above the selector's band,
+    /// because a glass capsule resolving its own luminance over a tonal
+    /// gradient is the per-luminance flip `PostMetaPillView` measured and
+    /// rejected. See `GradientScrimView.applyColors`.
     static func scrimHeight(forBanner height: CGFloat) -> CGFloat {
-        max(120, height * 0.34)
+        max(160, height * 0.46)
+    }
+
+    /// ⚠️ A COUNTER-TONE EDGE, not a glow — and re-resolved, because it is a
+    /// CGColor.
+    ///
+    /// `.systemBackground` under `.label` IS the opposite side in both
+    /// appearances, which is what the app's over-media ink law actually asks
+    /// for. What was wrong was the SHAPE — 0.8 at radius 6 is a haze that
+    /// fattens the glyphs rather than edging them — and the LIFETIME: a
+    /// CGColor does not track traits, so a light↔dark flip left light ink
+    /// wearing a light halo.
+    private func applyHeroLegibility() {
+        heroNameLabel.layer.shadowColor = UIColor.systemBackground
+            .resolvedColor(with: traitCollection).cgColor
+        heroNameLabel.layer.shadowOpacity = 0.9
+        heroNameLabel.layer.shadowRadius = 3
+        heroNameLabel.layer.shadowOffset = .zero
     }
 
     /// Slides the image within its viewport so it lags the scroll.
@@ -2074,7 +2165,17 @@ extension PlaceProfileViewController {
         (reactionsMetric.debugValue, viewsMetric.debugValue)
     }
     var debugHeroName: String? { heroNameLabel.text }
-    var debugHeroKind: String? { heroKindLabel.isHidden ? nil : heroKindLabel.text }
+    /// The selector's bottom against the banner's, both in the header's space —
+    /// the ask stated literally, so a later constraint edit cannot quietly push
+    /// the bar back below the picture.
+    var debugSelectorBottomVsBanner: CGFloat {
+        headerHost.convert(inlineBar.bounds, from: inlineBar).maxY - bannerBox.frame.maxY
+    }
+    /// How far the identity's foot clears the banner's edge — the invariant the
+    /// old -18 constant broke the moment the selector moved onto the banner.
+    var debugIdentityClearance: CGFloat {
+        bannerBox.bounds.height - (metricsBand?.frame.maxY ?? 0)
+    }
     /// The selector hand-over, as the two copies actually stand: the inline
     /// one owns the un-scrolled state, the docked one the scrolled state.
     var debugIsBarDocked: Bool { isBarDocked }
@@ -2117,16 +2218,32 @@ private final class PlaceMetricView: UIView {
 
     init(title: String) {
         super.init(frame: .zero)
-        valueLabel.font = .preferredFont(forTextStyle: .title2).withBoldTrait()
+        // ⚠️ 20 AND 13 LITERAL, for the reason the hero name states: a point
+        // size read back from `preferredFont` already carries the current
+        // category, and re-scaling it scales it twice.
+        //
+        // DOWN from title2-bold (22). The name went 28 → 34, so the pair goes
+        // from 28:22 — two bolds arguing about which is the headline — to
+        // 34:20, which reads as a title and a measurement.
+        valueLabel.font = UIFontMetrics(forTextStyle: .title3).scaledFont(
+            for: .systemFont(ofSize: 20, weight: .semibold), maximumPointSize: 26
+        )
+        valueLabel.adjustsFontForContentSizeCategory = true
+        valueLabel.textColor = .label
         valueLabel.textAlignment = .center
         valueLabel.text = "—"
-        titleLabel.font = .preferredFont(forTextStyle: .caption1)
+        // footnote, not caption1: the profile's counters are caption1 because
+        // FOUR of them share one cell. Two on a full banner can afford a step.
+        titleLabel.font = UIFontMetrics(forTextStyle: .footnote).scaledFont(
+            for: .systemFont(ofSize: 13, weight: .regular), maximumPointSize: 17
+        )
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = .secondaryLabel
         titleLabel.textAlignment = .center
         titleLabel.text = title
         let column = UIStackView(arrangedSubviews: [valueLabel, titleLabel])
         column.axis = .vertical
-        column.spacing = 2
+        column.spacing = Spacing.xs
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
         NSLayoutConstraint.activate([
@@ -2143,9 +2260,10 @@ private final class PlaceMetricView: UIView {
     /// now sit ON the picture, and the scrim under them is still mostly image.
     func applyBannerLegibility() {
         for label in [valueLabel, titleLabel] {
-            label.layer.shadowColor = UIColor.systemBackground.cgColor
-            label.layer.shadowOpacity = 0.8
-            label.layer.shadowRadius = 6
+            label.layer.shadowColor = UIColor.systemBackground
+                .resolvedColor(with: traitCollection).cgColor
+            label.layer.shadowOpacity = 0.9
+            label.layer.shadowRadius = 3
             label.layer.shadowOffset = .zero
         }
     }
@@ -2182,15 +2300,15 @@ private final class GradientScrimView: UIView {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         applyColors()
+        // Replaces a `traitCollectionDidChange` override, which is deprecated —
+        // and matches the four registrations already in this app.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+            self.applyColors()
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
-        super.traitCollectionDidChange(previous)
-        applyColors()
-    }
 
     private func applyColors() {
         guard let gradient = layer as? CAGradientLayer else { return }
@@ -2202,27 +2320,33 @@ private final class GradientScrimView: UIView {
         // own background before the edge means there is no boundary left to
         // draw. The middle stop keeps the fade slow where the name sits and
         // quick underneath it, so the type never floats on a grey slab.
-        gradient.colors = [
-            UIColor.systemBackground.withAlphaComponent(0).cgColor,
-            UIColor.systemBackground.withAlphaComponent(0.35).cgColor,
-            UIColor.systemBackground.withAlphaComponent(0.88).cgColor,
-            UIColor.systemBackground.cgColor,
-        ]
+        // ⚠️ AND THE DENSITIES ARE THE DESIGN, not an accident of the curve.
+        //
+        // Each row of type is placed against the ground its own size needs:
+        // the 34pt name at ~0.34-0.53, where the photograph is still plainly
+        // itself; the counter values at ~0.66; their 13pt captions at ~0.93,
+        // because that is the size that loses first; and the selector on a
+        // FLAT 1.00. Four stops could not say that — the old middle pair
+        // handed the name and its captions almost the same ground, which is
+        // why the block read as pasted onto a slab.
+        gradient.colors = [0, 0.14, 0.50, 0.86, 1.0, 1.0].map {
+            UIColor.systemBackground.withAlphaComponent($0).cgColor
+        }
         // ⚠️ OPAQUE WELL BEFORE THE EDGE, not at it. Reaching full only in the
         // last few points left the photograph still legible where it was cut,
         // and an image ending in mid-detail against a flat colour is the line
         // this is here to remove — the fade has to be FINISHED with room to
         // spare, so what meets the page is the page's own colour.
-        gradient.locations = [0, 0.42, 0.78, 0.88]
+        //
+        // The flat tail is FIXED at 0.80 rather than computed from the bar:
+        // 0.80 of a plate that is itself 0.46 of the banner outlasts the
+        // selector's 44pt on every real device (612pt banner → 56pt of flat
+        // tail, iPhone SE 3 → 43, the 220 floor → 32), so there is no runtime
+        // mechanism to get wrong.
+        gradient.locations = [0, 0.22, 0.50, 0.72, 0.80, 1.0]
     }
 }
 
-private extension UIFont {
-    func withBoldTrait() -> UIFont {
-        guard let descriptor = fontDescriptor.withSymbolicTraits(.traitBold) else { return self }
-        return UIFont(descriptor: descriptor, size: pointSize)
-    }
-}
 
 // MARK: - The map return flight's destination half
 //
