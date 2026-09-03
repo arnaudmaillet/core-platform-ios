@@ -58,6 +58,20 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     /// its DEBUG launch argument.
     public let places: [MapPlace]
 
+    /// The author's avatar, which is what a TEXT marker wears instead of a
+    /// glyph — a text post has no cover, and an anonymous symbol says only
+    /// "not a photograph" where the product wants "whose".
+    ///
+    /// ⚠️ ALWAYS `nil` IN PRODUCTION. `RadarPin` carries no author at all
+    /// (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`): the avatar exists on the wire,
+    /// but on `MapPostCard`, which only `GetGeoTimeline` returns — the
+    /// after-a-tap enrichment whose own contract says the pan path
+    /// deliberately avoids it. Populated in DEBUG mock mode by the same
+    /// decorator seam `places` uses, so the marker and its fallback are both
+    /// built and testable today and the day the field lands only
+    /// `GeoDiscoveryRepository` changes.
+    public let authorAvatarURL: URL?
+
     /// The most specific place — what a proximity cluster's members must
     /// share to make it SEMANTIC (Case B); everything else is generic.
     public var place: MapPlace? { places.first }
@@ -73,7 +87,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         kind: Kind,
         previewVideoURL: URL? = nil,
         likeCount: Int64 = 0,
-        places: [MapPlace] = []
+        places: [MapPlace] = [],
+        authorAvatarURL: URL? = nil
     ) {
         self.postID = postID
         self.latitude = latitude
@@ -83,6 +98,7 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         self.previewVideoURL = previewVideoURL
         self.likeCount = likeCount
         self.places = places
+        self.authorAvatarURL = authorAvatarURL
     }
 
     /// The same pin, tagged with its place ladder — the decoration seam
@@ -97,7 +113,25 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             kind: kind,
             previewVideoURL: previewVideoURL,
             likeCount: likeCount,
-            places: places
+            places: places,
+            authorAvatarURL: authorAvatarURL
+        )
+    }
+
+    /// The same pin wearing its author's face — the seam the DEBUG mock
+    /// decorator amends through, and the one line `GeoDiscoveryRepository`
+    /// will call the day `RadarPin` carries an avatar.
+    public func wearing(_ authorAvatarURL: URL?) -> MapPin {
+        MapPin(
+            postID: postID,
+            latitude: latitude,
+            longitude: longitude,
+            thumbnailURL: thumbnailURL,
+            kind: kind,
+            previewVideoURL: previewVideoURL,
+            likeCount: likeCount,
+            places: places,
+            authorAvatarURL: authorAvatarURL
         )
     }
 
@@ -113,7 +147,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             kind: kind,
             previewVideoURL: previewVideoURL,
             likeCount: likeCount,
-            places: places
+            places: places,
+            authorAvatarURL: authorAvatarURL
         )
     }
 }

@@ -79,8 +79,18 @@ enum MapPinRevealSource {
             // so nothing can disagree with the original. The stand-in goes back
             // to being what it always was on the opening leg — the marker's
             // face, and only that.
-            makeDismissStandIn: { _ in marker(face: face, ringKind: ringKind) },
-            makePresentStandIn: { marker(face: face, ringKind: ringKind) },
+            // ⚠️ THE FACE IS READ AT ASK TIME, like the rect above it. The
+            // marker's avatar may still have been loading when this origin was
+            // built, and a stand-in that captured the answer then would fly the
+            // FALLBACK GLYPH while the map behind it shows the author — which
+            // is exactly what was filmed: a transition carrying an icon the
+            // viewer never saw on the pin.
+            makeDismissStandIn: { [weak mapView] _ in
+                marker(face: face, ringKind: ringKind, avatar: mapView?.wornAvatar(for: annotation))
+            },
+            makePresentStandIn: { [weak mapView] in
+                marker(face: face, ringKind: ringKind, avatar: mapView?.wornAvatar(for: annotation))
+            },
             // Nothing to align to. The page holds still and the window opens
             // over it — see `TextRevealOrigin.alignsPageToSource`.
             alignsPageToSource: false,
@@ -100,13 +110,32 @@ enum MapPinRevealSource {
     /// The card fades its whole face — disc AND glyph, one opaque unit — in over
     /// it, which keeps this a dissolve between two finished drawings rather than
     /// two half-drawn ones.
-    private static func marker(face: PinCardView.Face, ringKind: MapPlace.Kind?) -> UIView {
+    private static func marker(
+        face: PinCardView.Face, ringKind: MapPlace.Kind?, avatar: UIImage? = nil
+    ) -> UIView {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
         card.setFace(face)
+        card.setTextAvatar(avatar)
         card.setRing(
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
         )
         card.isUserInteractionEnabled = false
         return card
+    }
+}
+
+extension MKMapView {
+    /// The author face the marker for `annotation` is currently wearing.
+    ///
+    /// Asked of the VIEW rather than of the model, and asked late, because that
+    /// is the picture on screen: the pin loads its avatar asynchronously, so the
+    /// model can know a URL while the marker is still showing the fallback, and
+    /// a transition must carry whichever of the two the viewer is looking at.
+    func wornAvatar(for annotation: any MKAnnotation) -> UIImage? {
+        switch view(for: annotation) {
+        case let pin as MapAnnotationView: pin.card.textAvatar
+        case let cluster as MapClusterAnnotationView: cluster.card.textAvatar
+        default: nil
+        }
     }
 }

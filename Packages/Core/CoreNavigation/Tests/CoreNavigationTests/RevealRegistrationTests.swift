@@ -508,5 +508,50 @@ private final class SceneryBox {
             pageFit: fit
         )
     }
-}
 
+    /// ⚠️ AN OPENING CLEARS ITS MARKER IN THE FIRST HALF OF THE WINDOW.
+    ///
+    /// The face is the DEPARTURE on the way in, over a page that is opaque and
+    /// covering from frame 0, so the only thing that has ever gated when the
+    /// destination is SEEN is the face's own alpha. Scheduled as the three acts
+    /// reversed it was still solid past 85% of the window's visible travel, and
+    /// the post resolved in the last frames. Filmed on a map text pin.
+    ///
+    /// Written as ordering plus one ceiling rather than against the literals,
+    /// so retuning the shared fractions does not cost a rewrite — and the
+    /// close's own schedule is asserted here too, because "the close is
+    /// untouched" belongs in a test rather than in a commit message.
+    @Test func aCarryingOpeningClearsItsFaceInTheFirstHalfOfTheWindow() {
+        let opening = RevealStage.presentHandover(carriesPage: true)
+
+        // One ramp, and it is the view's — see `RevealStage.contentOpacity`.
+        #expect(opening.content.duration == 0, "a carrying opening ramped its content")
+        // Opaque on frame 0: the window is sitting exactly on the marker, and a
+        // translucent face there breaks the handshake in the very first frame.
+        #expect(opening.fill.delay > 0, "the face was already leaving on frame 0")
+        // THE COMPLAINT, AS A NUMBER. It used to end at 0.90 of the travel.
+        #expect(opening.fill.delay + opening.fill.duration <= 0.55 + 0.0001,
+                "the departure outlives the first half of the window")
+
+        // The two legs are one schedule reflected: this is the animated pop's
+        // carrying act mirrored in time.
+        #expect(abs(opening.fill.delay - (1 - RevealStage.cardFadeEnd)) < 0.0001)
+        #expect(abs(opening.fill.duration
+                    - (RevealStage.cardFadeEnd - RevealStage.coveringFaceFadeStart)) < 0.0001)
+
+        // A non-carrying opening is byte for byte what it was: two disjoint
+        // acts, content first, then the fill it sat on.
+        let plain = RevealStage.presentHandover(carriesPage: false)
+        #expect(plain.content.delay + plain.content.duration <= plain.fill.delay + 0.0001,
+                "the two fades overlapped, and neither may have text on both sides")
+        #expect(plain.fill.delay + plain.fill.duration <= 1.0001,
+                "the hand-over outlives the spring it rides")
+        #expect(abs(plain.fill.delay - (1 - RevealStage.pageFadeEnd)) < 0.0001)
+        #expect(abs(plain.content.delay - (1 - RevealStage.cardFadeEnd)) < 0.0001)
+
+        // …and the close is provably where it was.
+        let release = RevealStage.releaseHandover(carriesPage: true)
+        #expect(release.fill.duration == 1 && release.fill.delay == 0)
+        #expect(release.content.duration == 0 && release.content.delay == 1)
+    }
+}

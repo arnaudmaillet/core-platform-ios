@@ -110,3 +110,64 @@ struct PinMarkerGeometryTests {
         #expect(view.bounds.height == PinCardView.Face.media.side)
     }
 }
+
+/// A text marker wears its AUTHOR, not a symbol.
+///
+/// A text post has no cover, so its marker was a glyph — which says "not a
+/// photograph" and nothing else, leaving the map's text posts anonymous
+/// between its photographs. The face is now the author's avatar when the pin
+/// knows one.
+///
+/// ⚠️ AND IT KNOWS ONE ONLY IN MOCK MODE. `RadarPin` carries no author at all
+/// (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`): the avatar exists on the wire but
+/// on `MapPostCard`, which only the after-a-tap `GetGeoTimeline` returns. So
+/// `nil` is the production answer and the glyph is what it falls back to —
+/// which is why the fallback is pinned here beside the face itself.
+@MainActor
+struct PinTextFaceAvatarTests {
+    private func textPin(avatar: URL?) -> MapPin {
+        MapPin(
+            postID: PostID("p-text"),
+            latitude: 48.8566,
+            longitude: 2.3522,
+            thumbnailURL: nil,
+            kind: .text,
+            authorAvatarURL: avatar
+        )
+    }
+
+    private func face(of card: PinCardView) -> UIView? {
+        card.subviews.first { String(describing: type(of: $0)).contains("TextFace") }
+    }
+
+    /// The avatar view is above the glyph and hides it — the author replaces
+    /// the symbol rather than decorating it.
+    @Test func anAvatarReplacesTheGlyph() throws {
+        let card = PinCardView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        card.setFace(.text)
+        let textFace = try #require(face(of: card))
+        let images = textFace.subviews.compactMap { $0 as? UIImageView }
+        #expect(images.count == 2, "a glyph and a face")
+
+        card.setTextAvatar(UIImage(systemName: "person.crop.circle"))
+        #expect(images.last?.isHidden == false, "the author is not showing")
+        #expect(images.first?.isHidden == true, "the glyph stayed under the author")
+
+        card.setTextAvatar(nil)
+        #expect(images.last?.isHidden == true)
+        #expect(images.first?.isHidden == false, "the glyph is the fallback and did not come back")
+    }
+
+    /// The pin keeps its own shape: wearing a face does not make a text marker
+    /// a media one.
+    @Test func anAvatarDoesNotChangeTheMarkersShape() {
+        let view = MapAnnotationView(annotation: nil, reuseIdentifier: nil)
+        view.configure(with: textPin(avatar: URL(string: "mock://avatar/1")), imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        #expect(view.bounds.width == PinCardView.Face.text.side)
+    }
+
+    /// Production's answer, and it must stay drawable.
+    @Test func aPinWithNoAuthorKeepsTheGlyph() {
+        #expect(textPin(avatar: nil).authorAvatarURL == nil)
+    }
+}

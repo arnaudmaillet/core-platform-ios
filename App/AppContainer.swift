@@ -297,8 +297,23 @@ final class AppContainer {
         },
         // Mock mode only: fleet pins are real posts and must never wear the
         // stand-in place catalog, however the flag reads.
-        seedsMockPlaces: environment == .mock && Self.seedsMapPlaces
+        seedsMockPlaces: environment == .mock && Self.seedsMapPlaces,
+        // Same rule, same reason: a text marker wears its author's face, and
+        // the wire has no author to give it
+        // (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`). The mock knows the
+        // authorship `RadarPin` omits, so it can answer here; on the fleet this
+        // is empty and the marker keeps the glyph.
+        mockAuthorAvatars: environment == .mock ? Self.mockAuthorAvatars(in: mockBackend) : [:]
     )
+
+    /// Each mock post's author avatar, keyed by post id — the stand-in for the
+    /// author `RadarPin` does not carry.
+    private static func mockAuthorAvatars(in backend: MockBackend) -> [PostID: URL] {
+        backend.dataset.authorAvatarURLsByPostID().reduce(into: [:]) { result, entry in
+            guard let url = URL(string: entry.value) else { return }
+            result[PostID(entry.key)] = url
+        }
+    }
 
     // MARK: - Profile
 

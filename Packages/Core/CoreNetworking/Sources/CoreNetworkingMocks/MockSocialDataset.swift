@@ -485,6 +485,23 @@ public struct MockSocialDataset: Sendable {
     public let authors: [Author]
     public let posts: [PostRecord]
 
+    /// Each post's author avatar, by post id.
+    ///
+    /// For the map: `RadarPin` carries no author, so a text marker has no face
+    /// to wear on the wire (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`). The mock
+    /// knows the authorship the wire omits — the same thing that already lets
+    /// the map's Friends/Following filters work here and nowhere else — so it
+    /// can answer, and the whole marker is built and testable before the field
+    /// exists.
+    public func authorAvatarURLsByPostID() -> [String: String] {
+        let avatars = Dictionary(
+            authors.map { ($0.profileID, $0.avatarURL) }, uniquingKeysWith: { first, _ in first }
+        )
+        return posts.reduce(into: [:]) { result, post in
+            result[post.postID] = avatars[post.authorProfileID]
+        }
+    }
+
     /// The viewer's social graph, shared by the social-graph and geo-discovery
     /// mocks so the map's "Friends"/"Following" filters and the following list
     /// agree on one truth. The viewer follows the first four authors; the
