@@ -196,6 +196,13 @@ final class PlaceProfileViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         assertAppTabBar()
+        // ⚠️ THE ONE INSTANT THE BAR IS BOTH PRESENT AND LAID OUT on this
+        // screen: `assertAppTabBar` has just restored it synchronously. The
+        // layout pass is forced for the measurement's sake — `ForYouViewController`
+        // forces one in the same place, for the same read.
+        view.layoutIfNeeded()
+        restingBarCover = floatingBarCover
+        applyLandingOcclusion()
         // ⚠️ THE BELT FOR A CONCEALED ROW, and it has to live here.
         //
         // A window opened from a row hides that row for as long as it is in
@@ -549,15 +556,41 @@ final class PlaceProfileViewController: UIViewController {
         // `ForYouGridZoomSource`), came home to it. Filmed: a card cut off at
         // the foot, opened, closed, and cut off in exactly the same way.
         //
-        // With the foot cover measured below, the reveal now clears the bar the
-        // viewer can actually see rather than the safe area's smaller idea of
-        // it.
+        // ⚠️ THE COVER IS ALREADY ON THE PAGE, and it has to be. This used to
+        // hand over `floatingBarCover` here — but the bar was taken down before
+        // the push, so what it measured was the safe area's 34 against a bar
+        // covering 83, and the top was left to the content inset, which on this
+        // page is the header's whole reserved range rather than anything
+        // covering the list. The page is told both, from `viewDidAppear`, while
+        // the bar is still up.
+        //
+        // The MOMENT stays. It is where For You and the profile spend the same
+        // reveal: hidden behind the covering post, settled before the
+        // dismissal reads the cell's rect, and — unlike a pre-grab hook — it
+        // still runs when the viewer leaves by the chevron or a system pop
+        // rather than by a drag that may never come.
         for hosted in hostedPages {
             guard let page = hosted as? ForYouGridPage else { continue }
-            page.footChromeCover = floatingBarCover
             page.applyPendingReveal()
         }
     }
+
+    /// The bar's cover as measured while it was still on screen.
+    ///
+    /// ⚠️ THE ONE MOMENT THIS NUMBER IS NEEDED IS THE ONE MOMENT IT CANNOT BE
+    /// READ. `presentSnapFeedHero` takes the tab bar down BEFORE it pushes, and
+    /// it is only restored when the source returns — so every reveal on this
+    /// screen, the departure reveal and all four landing reveals alike, runs
+    /// while the bar is gone and `floatingBarCover` degrades to the safe area's
+    /// 34 against a bar that really covers 83. A card "revealed" against 34 is
+    /// a card left 37pt behind the bar, which is one of the three filmed
+    /// reports. For You caches the same number in its own `viewDidAppear`, for
+    /// the same reason, in the same words.
+    private var restingBarCover: CGFloat = 0
+
+    /// `max` rather than the cache alone, so a landing staged on a page that
+    /// has never appeared still gets the best number available.
+    private var barCover: CGFloat { max(restingBarCover, floatingBarCover) }
 
     /// How much of this screen's foot the tab bar actually covers — measured,
     /// because it floats over the pages rather than insetting them. Same
@@ -947,7 +980,9 @@ final class PlaceProfileViewController: UIViewController {
     /// Taking the larger of the two means a landing clears whichever is really
     /// in the way.
     private var landingOcclusion: UIEdgeInsets {
-        let bottom = floatingBarCover
+        // Measured AT REST (see `restingBarCover`), because at the instant any
+        // reveal on this screen asks, the bar has already been taken down.
+        let bottom = barCover
         // ⚠️ THE DOCKED BAND, NOT THE HEADER WHERE IT HAPPENS TO BE STANDING.
         //
         // The header is not a permanent occluder: the list scrolls UNDER it and
@@ -965,6 +1000,18 @@ final class PlaceProfileViewController: UIViewController {
             top: max(view.safeAreaInsets.top, docked),
             left: 0, bottom: bottom, right: 0
         )
+    }
+
+    /// Hands both tabs what actually covers them.
+    ///
+    /// ⚠️ BOTH, not just Activity. The Discover grid has the identical defect —
+    /// a 268pt portrait brick also overruns a 163pt band — so fixing the list
+    /// alone would leave the grid parking its tapped tile off the screen.
+    private func applyLandingOcclusion() {
+        let cover = landingOcclusion
+        for hosted in hostedPages {
+            (hosted as? ForYouGridPage)?.setChromeOcclusion(cover)
+        }
     }
 
     /// The height the header takes at rest — what the pages are inset by so
@@ -1004,6 +1051,11 @@ final class PlaceProfileViewController: UIViewController {
             // switch moves the chrome by nothing.
             hosted.setMinimumScrollTravel(contentFloor)
         }
+        // Derived from the safe area and the banner's fraction, so a rotation
+        // or a size change is a different answer. Idempotent — a plain
+        // assignment — and deliberately NOT re-measuring `restingBarCover`,
+        // which runs during the push when the bar is already down.
+        applyLandingOcclusion()
         applyHeaderOffset(hostedPages.indices.contains(activeIndex)
             ? hostedPages[activeIndex].verticalOffset : 0)
     }

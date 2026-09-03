@@ -449,3 +449,92 @@ struct ScrollIntoViewCentringTests {
         #expect(centred == revealed)
     }
 }
+
+/// THE THREE FILMED CASES ON THE PLACE PAGE, as arithmetic.
+///
+/// ⚠️ A HOSTED PAGE'S TOP INSET IS NOT ITS COVER. The place page insets its
+/// lists by the header's whole height (627.8) because that is the range the
+/// content scrolls THROUGH — nothing is behind the banner. Handed to
+/// `ScrollIntoView` as a cover it leaves a 163.2pt band, every Activity card
+/// (310-549pt) reads as taller than it, and the reveal parks whatever was
+/// tapped at screen y 639.8 — below the fold on an 874pt screen.
+///
+/// The destination is the defect, NOT the clamp: the last test here pins the
+/// law, so a future "fix" that only adjusts clamping fails.
+///
+/// Real numbers, iPhone 17 Pro: 402x874, safe top 59, selector slot 60, tab bar
+/// covering 83 while the safe area reports 34.
+@MainActor struct PlaceProfileRevealArithmetic {
+    private let bounds = CGRect(x: 0, y: 0, width: 402, height: 874)
+    /// Reserved range, not chrome.
+    private let contentInset = UIEdgeInsets(top: 627.8, left: 0, bottom: 34, right: 0)
+    /// What the reveal was handed: the inset, with only the foot repaired.
+    private let headerCover = UIEdgeInsets(top: 627.8, left: 0, bottom: 83, right: 0)
+    /// What actually covers the list: the docked band, and the real bar.
+    private let landingCover = UIEdgeInsets(top: 119, left: 0, bottom: 83, right: 0)
+    /// The half fix — the right top, the bar measured after it had gone.
+    private let halfCover = UIEdgeInsets(top: 119, left: 0, bottom: 34, right: 0)
+    private let contentSize = CGSize(width: 402, height: 1370)
+    private let card = CGRect(x: 0, y: 0, width: 370, height: 450)
+
+    private func offset(_ rect: CGRect, at offsetY: CGFloat, cover: UIEdgeInsets) -> CGPoint? {
+        ScrollIntoView.offset(
+            toReveal: rect,
+            bounds: CGRect(x: 0, y: offsetY, width: bounds.width, height: bounds.height),
+            contentInset: contentInset, occlusion: cover, contentSize: contentSize
+        )
+    }
+
+    /// v1 — the card was cut off at the FOOT, and nothing moved.
+    ///
+    /// And the half fix is not enough: with the bar measured after it had been
+    /// taken down (34, not 83) the card's foot lands at 828, behind a bar that
+    /// starts at 791. Both the cover AND the cached bar height are load-bearing.
+    @Test func aCardCutOffAtTheFootComesUpJustClearOfTheBar() throws {
+        #expect(offset(card, at: -627.8, cover: headerCover) == nil)
+
+        let fixed = try #require(offset(card, at: -627.8, cover: landingCover))
+        // Bottom-aligned: 450 + 83 + 12 - 874.
+        #expect(abs(fixed.y - -329) < 0.01)
+        // On screen at 329…779, twelve points clear of a bar starting at 791.
+        #expect(card.maxY - fixed.y == 779)
+
+        let half = try #require(offset(card, at: -627.8, cover: halfCover))
+        #expect(card.maxY - half.y == 828, "a bar measured after it left is 37pt of card")
+    }
+
+    /// v2 — the card was WHOLE on screen, and the list jumped to the top.
+    @Test func aCardAlreadyWholeOnScreenIsLeftWhereItIs() {
+        // Travel 400: the card sits at screen 227.8 … 677.8, clear at both ends.
+        #expect(offset(card, at: -227.8, cover: headerCover) == CGPoint(x: 0, y: -627.8))
+        #expect(offset(card, at: -227.8, cover: landingCover) == nil)
+        // And at the boundary — head exactly one padding below the band.
+        #expect(offset(card, at: -131, cover: landingCover) == nil)
+    }
+
+    /// v3 — the card was cut off at the HEAD, and the list jumped to the top.
+    @Test func aCardCutOffAtTheHeadComesDownJustBelowTheChrome() throws {
+        // Travel 600: the card sits at screen 27.8 … 477.8, its head 91.2pt
+        // behind the docked band.
+        #expect(offset(card, at: -27.8, cover: headerCover) == CGPoint(x: 0, y: -627.8))
+
+        let fixed = try #require(offset(card, at: -27.8, cover: landingCover))
+        // Top-aligned: 0 - 119 - 12.
+        #expect(abs(fixed.y - -131) < 0.01)
+        // On screen at 131…581: head one padding below the chrome, foot well
+        // clear of the bar. A 103.2pt move — "slightly", as asked.
+        #expect(card.minY - fixed.y == 131)
+    }
+
+    /// ⚠️ THE LAW, NOT THE CLAMP. Under the wrong cover every card is parked
+    /// with its head at screen 639.8 wherever it started; "it jumped to the
+    /// top" is only that law's value for a row near the content's own top.
+    /// Pinned so a fix aimed at the clamp cannot pass.
+    @Test func theWrongCoverParksEveryCardBelowTheFold() throws {
+        for top in [CGFloat(460), 920] {
+            let rect = CGRect(x: 0, y: top, width: 370, height: 450)
+            let result = try #require(offset(rect, at: -627.8, cover: headerCover))
+            #expect(abs((rect.minY - result.y) - 639.8) < 0.01)
+        }
+    }
+}

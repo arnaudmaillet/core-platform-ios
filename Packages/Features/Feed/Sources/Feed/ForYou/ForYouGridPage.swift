@@ -814,21 +814,41 @@ final class ForYouGridPage: UIView {
         guard let id = pendingRevealPostID else { return }
         pendingRevealPostID = nil
         guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
-        // ⚠️ THE INSET IS RIGHT AT THE TOP AND SHORT AT THE FOOT.
+        // ⚠️ THE INSET IS THE COVER ONLY WHERE THE INSET IS CHROME.
         //
         // `ScrollIntoView` defaults the cover to the content inset, which is
-        // correct wherever the insets exist BECAUSE of chrome — and on this
-        // surface the top genuinely does. The bottom does not: the tab bar
-        // FLOATS, drawing over this grid without insetting it, and
-        // `ForYouViewController` measured the gap years ago in its own words —
-        // "bar at y 791 height 83, while the grid reserves 34". So a tile whose
-        // foot is within those 49pt was "revealed" while still behind the bar.
+        // correct on a page whose insets exist BECAUSE of chrome — For You,
+        // where the top inset IS the navigation bar. The bottom is short even
+        // there: the tab bar FLOATS, drawing over the grid without insetting
+        // it, and `ForYouViewController` measured the gap years ago in its own
+        // words — "bar at y 791 height 83, while the grid reserves 34" — so a
+        // tile whose foot is within those 49pt was "revealed" while still
+        // behind the bar. That is what `footChromeCover` repairs.
+        //
+        // ⚠️ AND ON A HOSTED PAGE THE TOP IS NOT CHROME AT ALL. A host with a
+        // header that scrolls away insets this page by the header's WHOLE
+        // height as scrollable range — reserved room the content travels into,
+        // not something covering it. Handed over as a cover it collapsed the
+        // visible band to a sliver: on the place page, 874 - 628 - 83 = 163pt
+        // against cards 310-549pt tall, so every card read as "taller than the
+        // gap", every reveal took the align-to-the-top branch, and the list
+        // parked whatever was tapped at screen y 640 — off the bottom of the
+        // screen. Filmed three times: a card left cut off, a card already whole
+        // dragged to the top, a card cut off at the head dragged to the top.
+        //
+        // So a host whose insets are LAYOUT must say what actually covers this
+        // page. `ProfileGalleryGridView` reached the same conclusion first and
+        // states it in the same words; `nil` keeps For You on the inset.
         //
         // It matters more here than anywhere: this page deliberately does not
         // scroll at the LANDING (see `ForYouGridZoomSource`), so where the
         // departure reveal leaves a tile is where the card comes back to.
-        var cover = collectionView.adjustedContentInset
+        var cover = hostChromeOcclusion ?? collectionView.adjustedContentInset
         cover.bottom = max(cover.bottom, footChromeCover)
+        // The tab-bar hide that precedes the push invalidates the layout, and
+        // this reads attributes out of it — `revealPost` forces the pass for
+        // exactly this reason and this path never did.
+        collectionView.layoutIfNeeded()
         ScrollIntoView.revealImmediately(
             collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame,
             in: collectionView,
@@ -841,6 +861,26 @@ final class ForYouGridPage: UIView {
     /// Zero means "the inset is the whole story", which is the honest default
     /// for a page with nothing floating over it.
     var footChromeCover: CGFloat = 0
+
+    /// What COVERS this page, told by the host — for a host whose content
+    /// insets are LAYOUT rather than chrome.
+    ///
+    /// `nil` means "the insets are the whole story", which is the honest
+    /// answer for a page inset by its own navigation bar, and keeps For You on
+    /// the path it has always taken. A hosted page under a header that scrolls
+    /// away must say otherwise; see the note in `applyPendingReveal`.
+    private var hostChromeOcclusion: UIEdgeInsets?
+
+    func setChromeOcclusion(_ occlusion: UIEdgeInsets?) {
+        hostChromeOcclusion = occlusion
+    }
+
+    #if DEBUG
+    /// The cover the reveal actually READS, as distinct from the one the host
+    /// computes. The place page asserted the latter and shipped a reveal that
+    /// never received it.
+    var debugChromeOcclusion: UIEdgeInsets? { hostChromeOcclusion }
+    #endif
 
     /// Brings `postID`'s tile into the unobstructed viewport NOW, layout
     /// settled — the cluster gallery's landing rule. Unlike the For You
