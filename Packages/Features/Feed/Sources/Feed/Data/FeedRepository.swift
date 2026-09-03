@@ -173,6 +173,16 @@ public actor FeedRepository: FeedProviding {
     /// The actual network hydration (post + author + like count), unchanged from
     /// the pre-cache path. Isolated so `loadPost` can wrap it with the cache.
     private func hydratePost(_ id: PostID) async throws -> FeedEntry {
+        #if DEBUG
+        // `-feed-cold-open [ms]` — see `FeedFeatureBuilder.isColdOpenForced`.
+        // On the FETCH, deliberately, and not on the transport: the map's tile
+        // query has to stay fast or the pin under test never appears.
+        if let position = ProcessInfo.processInfo.arguments.firstIndex(of: "-feed-cold-open") {
+            let ms = ProcessInfo.processInfo.arguments.dropFirst(position + 1)
+                .first.flatMap(Int.init) ?? 800
+            try? await Task.sleep(for: .milliseconds(ms))
+        }
+        #endif
         var request = Post_V1_GetPostRequest()
         request.postID = id.rawValue
         let response = await postClient.getPost(request: request, headers: [:])

@@ -80,10 +80,30 @@ enum TextRevealInstaller {
 
     /// The geometry both legs read — forwards on the push, backwards on the
     /// pop. One rect calculation, so the two can never disagree.
+    /// The tone of the thing the viewer tapped — one decision, two consumers.
+    ///
+    /// A marker gives its disc's tint, a list row the card's fill, a tile its
+    /// own (dark for a video). Written once here for the reason the file
+    /// already gives about the fill: three copies of one colour is how two
+    /// surfaces stop matching.
+    static func sourceFill(for origin: TextRevealOrigin) -> UIColor {
+        origin.fill ?? PostGridListRowCell.cardFillColor
+    }
+
     static func geometry(
         feed: UIViewController, origin: TextRevealOrigin, pipeline: ImagePipeline?
     ) -> RevealGeometry {
-        RevealGeometry(
+        // ⚠️ THE GROUND THE FILL IMPLIES, handed over before the window opens.
+        //
+        // The reveal lends this tone to the page through `setRevealGroundTint`,
+        // which lands on the ACTIVE CELL — and a feed pushed before its corpus
+        // arrives has none, so on a cold open the loan is dropped and the
+        // window opens onto black. This is the same decision, made where it
+        // cannot be dropped: the screen's own pre-data ground. All three reveal
+        // surfaces funnel through here, so it is one line for the map, For You
+        // and the place page alike.
+        (feed as? SnapFeedViewController)?.setEmptyGround(sourceFill(for: origin))
+        return RevealGeometry(
             sourceFrame: origin.rowFrame,
             // The CARD's shape unless the source says otherwise, which is every
             // row and is why these are defaults rather than arguments. A map's
@@ -93,7 +113,7 @@ enum TextRevealInstaller {
             // for the same reason the insets are: three copies of one colour is
             // how two surfaces stop matching.
             sourceCornerRadius: origin.cornerRadius ?? PostGridListRowCell.cardCornerRadius,
-            sourceFill: origin.fill ?? PostGridListRowCell.cardFillColor,
+            sourceFill: sourceFill(for: origin),
             sourceCaptionEnd: origin.captionEnd,
             installDestinationVeil: { [weak feed] cut, tint in
                 (feed as? SnapFeedViewController)?.installRevealVeil(below: cut, tint: tint)

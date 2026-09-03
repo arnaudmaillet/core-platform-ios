@@ -101,6 +101,29 @@ final class SnapFeedViewController: UIViewController {
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     /// id → display model; lookups only, never measurement.
+    /// The colour this screen wears while it has NO PAGES.
+    ///
+    /// ⚠️ A PROPERTY OF THE SCREEN, not a loan from the transition — and that
+    /// distinction is the whole fix. A reveal already lends the page the tone
+    /// of the card it opened from (`setRevealGroundTint`), but that loan is
+    /// routed to `activeSnapCell?`, and on a cold open there IS no cell: a feed
+    /// whose corpus missed the synchronous seed is pushed with zero items, so
+    /// the write goes nowhere and the window opens onto the two literal blacks
+    /// this screen used to paint at construction. Filmed from a map text pin as
+    /// a black flash between the marker's face and the post, on the FIRST open
+    /// of a pin and never on the second — because the first is what populates
+    /// the cache the seed reads.
+    ///
+    /// And re-routing the loan would not have been enough: the transition hands
+    /// the ground BACK (`setDestinationGround(nil)`) from inside the opening
+    /// spring, so a borrowed colour is returned mid-window. What `nil` resolves
+    /// to has to be right on its own, and with no data there is no format to
+    /// derive it from. Hence a stored default, set from the route that opened
+    /// this screen, before anything is known about what it will show.
+    ///
+    /// `.black` by default, so every route that does not lend one is byte for
+    /// byte what it was.
+    private var emptyGround: UIColor = .black
     private var modelsByID: [PostID: FeedItemDisplayModel] = [:]
     private var orderedIDs: [PostID] = []
 
@@ -272,7 +295,10 @@ final class SnapFeedViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Timeline"
-        view.backgroundColor = .black
+        // The stored value, not a literal: `setEmptyGround` may legitimately
+        // arrive BEFORE this runs — the map route loads this view while it
+        // builds the dismissal, ahead of the reveal geometry.
+        view.backgroundColor = emptyGround
         configureCollectionView()
         configureNavigationItem()
         configureToolbarItems()
@@ -762,7 +788,7 @@ final class SnapFeedViewController: UIViewController {
 
     private func configureCollectionView() {
         collectionView = SnapFeedCollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
-        collectionView.backgroundColor = .black
+        collectionView.backgroundColor = emptyGround
         collectionView.isPagingEnabled = true
         collectionView.allowsSelection = false // taps toggle playback, not selection
         collectionView.showsVerticalScrollIndicator = false
@@ -1537,7 +1563,11 @@ final class SnapFeedViewController: UIViewController {
 
     private func configureStatusLabel() {
         statusLabel.font = .preferredFont(forTextStyle: .body)
-        statusLabel.textColor = UIColor.white.withAlphaComponent(0.8)
+        // ⚠️ NOT WHITE. It was, for a screen that was always black; a feed
+        // whose corpus resolves to nothing now shows this over the tone of the
+        // card that was tapped, and white on `.secondarySystemBackground` is
+        // invisible. `.secondaryLabel` reads on both and follows the trait.
+        statusLabel.textColor = .secondaryLabel
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
         statusLabel.isHidden = true
@@ -1624,8 +1654,9 @@ final class SnapFeedViewController: UIViewController {
             // `reconfigured` is the half that is otherwise unobservable: a
             // second render with the same ids looks identical from outside, and
             // whether it redrew anything is exactly the question.
-            print(String(format: "[media] %.3f feed render items=%d reconfigured=%d",
-                         CACurrentMediaTime(), orderedIDs.count, changed.count))
+            print(String(format: "[media] %.3f feed render items=%d reconfigured=%d ground=%@",
+                         CACurrentMediaTime(), orderedIDs.count, changed.count,
+                         resolvedGround() == .black ? "black" : "\(resolvedGround())"))
         }
         #endif
         var snapshot = NSDiffableDataSourceSnapshot<Section, PostID>()
@@ -1635,6 +1666,11 @@ final class SnapFeedViewController: UIViewController {
         if !changed.isEmpty { snapshot.reconfigureItems(changed) }
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
             guard let self else { return }
+            // ⚠️ HERE, not only at a settle. This is what takes a LENT ground
+            // back: a feed opened from a marker wears the marker's tone with no
+            // pages, and the first render carrying a media model must return it
+            // to black without waiting for a settle that may be a frame away.
+            applyGrounds()
             updateActiveItem()
             // ⚠️ **The bars are not in the cell**, and `updateActiveItem` only
             // speaks when the active INDEX moves.
@@ -2569,9 +2605,9 @@ final class SnapFeedViewController: UIViewController {
         // The floors are restored where the flight ends (`zoomTransitionDidEnd`,
         // `endEngagedDismissalIfNeeded`), which is also the moment this rule
         // becomes true again.
-        if !isMaskedRevealActive, !isEngagedDismissalActive {
-            collectionView.backgroundColor = activeIsText ? .systemBackground : .black
-        }
+        // Through the resolver, so the ROOT view follows the same rule the
+        // pager already did and the two can no longer disagree.
+        applyGrounds()
         // ⚠️ AND THE LOCK FOLLOWS THE SETTLED PAGE, not the engagement.
         //
         // A text page disables the pager because its own scroll view would
@@ -4024,6 +4060,41 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         activeSnapCell?.setRevealGroundTint(color)
     }
 
+    /// The tone to wear before there is anything to show — the fill of the
+    /// thing the viewer just tapped. See `emptyGround`.
+    public func setEmptyGround(_ color: UIColor) {
+        loadViewIfNeeded()
+        emptyGround = color
+        applyGrounds()
+    }
+
+    /// What both floors should be right now: the lent tone while there are no
+    /// pages, and afterwards the settled page's own ground.
+    ///
+    /// One resolver, because the two floors disagreed. The pager followed the
+    /// format at every settle while the root view was assigned a literal black
+    /// in four places, so a text page sat on a light pager over a black root.
+    private func resolvedGround() -> UIColor {
+        guard !orderedIDs.isEmpty else { return emptyGround }
+        let activeID = activeSnapCell.flatMap { cell in
+            collectionView.indexPath(for: cell).map { orderedIDs[$0.item] }
+        } ?? orderedIDs.first
+        return activeID.flatMap { modelsByID[$0]?.mediaURL == nil } == true
+            ? .systemBackground : .black
+    }
+
+    /// ⚠️ GUARDED, because a flight needs both floors CLEAR. A masked reveal
+    /// and an engaged dismissal draw the card over this screen, and an opaque
+    /// ground between the two shuts the card out — the defect the note in
+    /// `reconcileRestingInterface` records. Those two paths restore the floors
+    /// themselves, through here, once their flag is down.
+    private func applyGrounds() {
+        guard !isMaskedRevealActive, !isEngagedDismissalActive else { return }
+        let ground = resolvedGround()
+        view.backgroundColor = ground
+        collectionView.backgroundColor = ground
+    }
+
     public var zoomDestinationContentIsReady: Bool { !orderedIDs.isEmpty }
 
 
@@ -4249,8 +4320,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         isEngagedDismissalActive = false
         navigationController?.navigationBar.alpha = 1
         activeSnapCell?.endEngagedDismissal()
-        view.backgroundColor = .black
-        collectionView.backgroundColor = .black
+        // Through the resolver: this used to hand back a literal black, which
+        // re-blacked a TEXT page even with its data present.
+        applyGrounds()
     }
 
     /// A presenting flight is staging. The active page must not start its own
@@ -4389,8 +4461,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         if isMaskedRevealActive {
             isMaskedRevealActive = false
             activeSnapCell?.endMaskedRevealForFlight()
-            view.backgroundColor = .black
-            collectionView.backgroundColor = .black
+            // Format-blind literals before this; see `resolvedGround`.
+            applyGrounds()
         }
         endEngagedDismissalIfNeeded()
     }

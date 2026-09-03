@@ -100,8 +100,34 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     public func prewarmPosts(_ ids: [PostID]) async {
+        #if DEBUG
+        // See `isColdOpenForced`: a warmed corpus seeds synchronously and the
+        // cold path is unreachable, which is why it could only be filmed by
+        // accident on a slow machine.
+        guard !Self.isColdOpenForced else { return }
+        #endif
         await repository.prewarm(ids)
     }
+
+    #if DEBUG
+    /// `-feed-cold-open [ms]`: forces the path a FIRST open takes, and holds it
+    /// open long enough to film.
+    ///
+    /// ⚠️ THE COLD PATH IS NORMALLY UNREACHABLE ON DEMAND, and that is the
+    /// point of this. `prewarmVisiblePosts` warms up to 16 posts on every
+    /// viewport settle, seconds before any tap, and the seed below is
+    /// all-or-nothing — so whether a given pin opens cold depends on a Set's
+    /// iteration order and on which sweep was cancelled by the next. A defect
+    /// reachable only by luck is a defect nobody can prove fixed.
+    ///
+    /// It suppresses the prewarm, forbids the synchronous seed, and delays the
+    /// hydration by `ms` (default 800). The delay sits on the POST fetch alone,
+    /// not the transport, so the map's own markers stay fast and the window
+    /// under test is the only slow thing.
+    static var isColdOpenForced: Bool {
+        ProcessInfo.processInfo.arguments.contains("-feed-cold-open")
+    }
+    #endif
 
     private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
 
@@ -879,7 +905,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // landing after one is ignored.
         if let snapFeed = feed as? SnapFeedViewController {
             let cached = postIDs.compactMap { repository.peekPost($0) }
-            if cached.count == postIDs.count, !cached.isEmpty {
+            #if DEBUG
+            let maySeed = !Self.isColdOpenForced
+            #else
+            let maySeed = true
+            #endif
+            if maySeed, cached.count == postIDs.count, !cached.isEmpty {
                 // ALL answered — the normal pin case, since pins prewarm on
                 // viewport settle.
                 snapFeed.seedProjection(
