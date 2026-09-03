@@ -110,7 +110,7 @@ enum TextRevealInstaller {
         // before the push, so the panel exists before the animator lays the
         // destination out and its build is paid outside the flight.
         (feed as? SnapFeedViewController)?.presentLoadingPage()
-        return RevealGeometry(
+        var geometry = RevealGeometry(
             sourceFrame: origin.rowFrame,
             // The CARD's shape unless the source says otherwise, which is every
             // row and is why these are defaults rather than arguments. A map's
@@ -185,5 +185,9 @@ enum TextRevealInstaller {
             matchesAnchor: matchesAnchor && origin.alignsPageToSource,
             pageFit: origin.pageFit
         )
+        // Carried, not decided here: whether the arrival can come up under the
+        // finger is a fact about what the arrival IS, and only the origin knows.
+        geometry.arrivalRisesUnderFinger = origin.arrivalRisesUnderFinger
+        return geometry
     }
 }
