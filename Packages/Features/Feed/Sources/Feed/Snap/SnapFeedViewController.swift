@@ -397,7 +397,19 @@ final class SnapFeedViewController: UIViewController {
     /// Leaves the feed the way it arrived: pop when pushed (runs the
     /// interactive-capable zoom-out on the map's stack), dismiss when
     /// presented.
+    /// The chevron is about to close this screen.
+    ///
+    /// ⚠️ A TAP HAS NO "BEGIN". A dragged close announces itself through the
+    /// dismissal's `onWillBeginPop`, and owners use that moment to put chrome
+    /// back while nothing is in flight — the one point at which a tab bar
+    /// restored this way actually paints. That hook has a single caller,
+    /// `beginSwipe`, so the chevron reached none of it and the same work
+    /// landed inside the transition instead, where it does not take. This is
+    /// the tap's equivalent, and it runs at the same point in the story.
+    var onWillCloseFeed: (() -> Void)?
+
     private func closeFeed() {
+        onWillCloseFeed?()
         if let nav = navigationController, nav.viewControllers.first !== self {
             nav.popViewController(animated: true)
         } else {

@@ -542,9 +542,22 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // grid's layout while nothing is in flight. Inside the transition
             // instead, the bar comes back as a row of empty glass capsules that
             // never paint.
-            dismissal.onWillBeginPop = { [weak nav] _ in
+            // ⚠️ ONE RESTORE, TWO WAYS OF LEAVING. The drag announces itself
+            // at `onWillBeginPop`; a tapped chevron has no begin at all, and
+            // announcing itself is exactly what `onWillCloseFeed` is for. Both
+            // land here, outside any transition, which is the whole condition
+            // this work has: done inside one, the bar comes back as a state
+            // that reads visible on a view that never painted and whose safe
+            // area never returns — measured on the map's reveal route as a
+            // dock that was "shown" by every API and drawn by none, with the
+            // filter pills left 49pt low behind it.
+            let restoreDockOffstage: (UINavigationController?) -> Void = { nav in
                 nav?.tabBarController?.setTabBarHidden(false, animated: false)
                 nav?.tabBarController?.tabBar.alpha = 0
+            }
+            dismissal.onWillBeginPop = { [weak nav] _ in restoreDockOffstage(nav) }
+            (destination as? SnapFeedViewController)?.onWillCloseFeed = { [weak nav] in
+                restoreDockOffstage(nav)
             }
             // The OPENING is this reveal's, and it has to say so: a geometry
             // alone no longer means the push is one, now that a media post
@@ -866,17 +879,37 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     private static func restoreTabBar(on nav: UINavigationController?) {
-        guard let nav,
+        #if DEBUG
+        // `-grab-log`: the bar's TWO states at the one moment it is supposed
+        // to be back. `hidden=false viewHidden=true` is the whole of the defect
+        // below — a bar every API reports as shown and nothing draws — and it
+        // is invisible from anywhere else.
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[pop] restoreTabBar top="
+                + (nav?.topViewController.map { String(describing: type(of: $0)) } ?? "nil")
+                + " hidden=\(String(describing: nav?.tabBarController?.isTabBarHidden))"
+                + " alpha=\(String(describing: nav?.tabBarController?.tabBar.alpha))"
+                + " viewHidden=\(String(describing: nav?.tabBarController?.tabBar.isHidden))")
+        }
+        #endif
+        guard let nav, let tabs = nav.tabBarController,
               (nav.topViewController as? any ZoomTransitionDestination)?.concealsAppTabBar != true
         else { return }
-        nav.tabBarController?.tabBar.alpha = 1
+        tabs.tabBar.alpha = 1
         // Idempotent, because the screen underneath may have got there first:
         // a tab ROOT asserts its own dock on the far side of a committed scrub
         // (`ProfileViewController.revealDock`), and the two orders are not
         // guaranteed. Whichever arrives first animates; the second finds the bar
-        // already down and does nothing.
-        guard nav.tabBarController?.isTabBarHidden == true else { return }
-        nav.tabBarController?.setTabBarHidden(false, animated: true)
+        // already down and re-asserts it without a second animation.
+        // ⚠️ AND IT ONLY EVER ANIMATES A BAR THAT IS ACTUALLY HIDDEN. When
+        // the state already reads visible there is nothing here to repair —
+        // and repairing it here is the wrong place anyway: a bar restored
+        // while a transition is running comes back as a state nothing draws,
+        // with its safe-area contribution never returning. The cure is to
+        // restore it BEFORE the pop, which is what `onWillCloseFeed` and
+        // `onWillBeginPop` are both for.
+        guard tabs.isTabBarHidden else { return }
+        tabs.setTabBarHidden(false, animated: true)
     }
 
     public func makeSnapFeedViewController(
