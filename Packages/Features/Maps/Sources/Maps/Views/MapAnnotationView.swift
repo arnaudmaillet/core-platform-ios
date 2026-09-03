@@ -137,7 +137,23 @@ final class MapAnnotationView: MKAnnotationView {
 
         imageTask?.cancel()
         card.imageView.image = nil
-        // A text pin has no cover to fetch; its face is already showing.
+        // ⚠️ CLEARED ON EVERY CONFIGURE, like the cover above it: this view is
+        // recycled, and a text marker dequeuing a view that last wore somebody
+        // else's face would show that face until its own arrived.
+        card.setTextAvatar(nil)
+        // A text pin has no cover to fetch — it wears its AUTHOR instead, when
+        // the pin knows one. Nil is the ordinary answer in production until
+        // `RadarPin` carries an author (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`),
+        // and the glyph is what the face shows without it.
+        if pin.isText, let avatar = pin.authorAvatarURL {
+            let id = pin.postID
+            imageTask = Task { [weak self] in
+                guard let image = try? await imagePipeline.image(for: avatar) else { return }
+                guard let self, self.representedID == id else { return }
+                self.card.setTextAvatar(image)
+            }
+            return
+        }
         guard !pin.isText, let url = pin.thumbnailURL else { return }
         let id = pin.postID
         imageTask = Task { [weak self] in

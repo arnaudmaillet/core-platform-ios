@@ -61,7 +61,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void,
-        seedsMockPlaces: Bool = false
+        seedsMockPlaces: Bool = false,
+        mockAuthorAvatars: [PostID: URL] = [:]
     ) {
         self.repository = repository
         self.favoritesRepository = favoritesRepository
@@ -74,8 +75,22 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             store: MapFavoritesStore(), favorites: favoritesRepository
         )
         #if DEBUG
-        if seedsMockPlaces {
-            self.placeDecoration = { MapMockPlaces.decorate($0) }
+        // ⚠️ ONE DECORATION, TWO STAND-INS, and both are the same shape of
+        // absence: `RadarPin` carries neither a place (`BACKEND_GAPS` §18) nor
+        // an author (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`), so mock mode
+        // supplies each from what the mock dataset knows and production leaves
+        // both nil. Folded into one closure so a pin is decorated once.
+        let places = seedsMockPlaces
+        let avatars = mockAuthorAvatars
+        if places || !avatars.isEmpty {
+            self.placeDecoration = { pins in
+                let tagged = places ? MapMockPlaces.decorate(pins) : pins
+                guard !avatars.isEmpty else { return tagged }
+                return tagged.map { pin in
+                    guard pin.isText, let avatar = avatars[pin.postID] else { return pin }
+                    return pin.wearing(avatar)
+                }
+            }
         } else {
             self.placeDecoration = { $0 }
         }

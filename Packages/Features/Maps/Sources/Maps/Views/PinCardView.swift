@@ -192,6 +192,12 @@ final class PinCardView: UIView {
     /// Idempotence is the CALLER's business (an annotation view re-configures
     /// every surviving marker on each reconcile), but this is safe to call
     /// repeatedly — it only sets state.
+    /// The author's face for a TEXT marker — see `PinTextFaceView.setAvatar`.
+    /// A no-op on a media face, which has a cover of its own.
+    func setTextAvatar(_ image: UIImage?) {
+        textFaceView.setAvatar(image)
+    }
+
     func setFace(_ face: Face) {
         self.face = face
         textFaceView.isHidden = face != .text
@@ -385,6 +391,7 @@ private final class PinTextFaceView: UIView {
     /// tint — it was a translucent accent wash, and the name outlived it.
     private let disc = UIView()
     private let glyph = UIImageView()
+    private let avatar = UIImageView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -417,6 +424,28 @@ private final class PinTextFaceView: UIView {
         glyph.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         glyph.isUserInteractionEnabled = false
         addSubview(glyph)
+
+        // ABOVE the glyph, because it replaces it rather than decorating it: a
+        // text post wearing its author's face says whose it is, and the symbol
+        // is what is left when there is no face to show.
+        avatar.contentMode = .scaleAspectFill
+        avatar.clipsToBounds = true
+        avatar.frame = bounds
+        avatar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        avatar.isUserInteractionEnabled = false
+        avatar.isHidden = true
+        addSubview(avatar)
+    }
+
+    /// The author's face, or nil to fall back to the glyph.
+    ///
+    /// Nil is an ordinary answer and always will be in production until
+    /// `RadarPin` carries an author (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`) —
+    /// and it stays one afterwards, for an author who has no avatar.
+    func setAvatar(_ image: UIImage?) {
+        avatar.image = image
+        avatar.isHidden = image == nil
+        glyph.isHidden = image != nil
     }
 
     @available(*, unavailable)
