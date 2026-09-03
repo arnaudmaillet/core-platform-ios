@@ -2122,10 +2122,16 @@ private final class GradientScrimView: UIView {
         // quick underneath it, so the type never floats on a grey slab.
         gradient.colors = [
             UIColor.systemBackground.withAlphaComponent(0).cgColor,
-            UIColor.systemBackground.withAlphaComponent(0.55).cgColor,
+            UIColor.systemBackground.withAlphaComponent(0.35).cgColor,
+            UIColor.systemBackground.withAlphaComponent(0.88).cgColor,
             UIColor.systemBackground.cgColor,
         ]
-        gradient.locations = [0, 0.62, 0.94]
+        // ⚠️ OPAQUE WELL BEFORE THE EDGE, not at it. Reaching full only in the
+        // last few points left the photograph still legible where it was cut,
+        // and an image ending in mid-detail against a flat colour is the line
+        // this is here to remove — the fade has to be FINISHED with room to
+        // spare, so what meets the page is the page's own colour.
+        gradient.locations = [0, 0.42, 0.78, 0.88]
     }
 }
 
