@@ -473,6 +473,29 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
+    /// The reveal's geometry for a CLOSE, built without pushing anything.
+    ///
+    /// ⚠️ SAFE ON A LOADED FEED, unlike the push — which runs on an empty one
+    /// and relies on it. `TextRevealInstaller.geometry` also arms the loading
+    /// page, and both of its side effects decline here by construction:
+    /// `presentLoadingPage` returns immediately once `orderedIDs` is non-empty,
+    /// and the empty ground it sets only ever feeds the resolver's empty
+    /// branch.
+    ///
+    /// Deliberately NOT wrapped in `withDockChoreography`: a caller that owns
+    /// its own bottom chrome (the map does) restores it itself, and two owners
+    /// would fight over one bar.
+    public func makeRevealGeometry(
+        dismissing feed: UIViewController,
+        origin: TextRevealOrigin,
+        onWillClose: (() -> Void)?
+    ) -> RevealGeometry {
+        (feed as? SnapFeedViewController)?.onWillCloseFeed = onWillClose
+        return TextRevealInstaller.geometry(
+            feed: feed, origin: origin, pipeline: imagePipeline
+        )
+    }
+
     /// Pushes the feed with no flight, and gives it a way back by hand.
     ///
     /// The presentation a post with nothing to fly gets: a native push, plus a

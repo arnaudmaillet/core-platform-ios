@@ -132,6 +132,14 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                     postIDs: postIDs, from: presenter, origin: origin, beneath: beneath
                 )
             },
+            // The same window asked for at CLOSE time: a feed opened by a hero
+            // whose viewer paged onto a post with no media has nothing left to
+            // fly, and the honest close is the marker's own window.
+            makeRevealGeometry: { feed, origin, onWillClose in
+                feedFeature().makeRevealGeometry(
+                    dismissing: feed, origin: origin, onWillClose: onWillClose
+                )
+            },
             // The place gallery a hierarchy cluster's feed dismisses into —
             // built by the Feed feature because the grid, the flight card and
             // the retarget wiring are all its internals. `mapReturn` rides

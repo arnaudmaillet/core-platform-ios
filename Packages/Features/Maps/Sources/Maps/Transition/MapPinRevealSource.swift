@@ -42,7 +42,18 @@ enum MapPinRevealSource {
         let side = face.side
         return TextRevealOrigin(
             rowFrame: { [weak mapView] space in
+                // ⚠️ STILL HELD, not merely still in the viewport. A reconcile
+                // that ran while the feed was open can remove this annotation
+                // and leave its COORDINATE exactly where it was — the rect test
+                // alone then reports a marker that is not there, and the window
+                // closes onto empty map while the concealment silently no-ops
+                // on a view that no longer exists. `MapPinZoomSource` states
+                // the same rule for the same reason. Nil sends the close to the
+                // centred fallback, which is honest.
                 guard let mapView,
+                      mapView.annotations.contains(where: {
+                          ($0 as AnyObject) === (annotation as AnyObject)
+                      }),
                       mapView.visibleMapRect.contains(MKMapPoint(annotation.coordinate))
                 else { return nil }
                 let point = mapView.convert(annotation.coordinate, toPointTo: mapView)
