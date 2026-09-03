@@ -40,7 +40,7 @@ enum MapPinRevealSource {
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in }
     ) -> TextRevealOrigin {
         let side = face.side
-        var origin = TextRevealOrigin(
+        return TextRevealOrigin(
             rowFrame: { [weak mapView] space in
                 // ⚠️ STILL HELD, not merely still in the viewport. A reconcile
                 // that ran while the feed was open can remove this annotation
@@ -119,17 +119,6 @@ enum MapPinRevealSource {
             setConcealed: concealMarker,
             dismissalDidEnd: dismissalDidEnd
         )
-        // ⚠️ A MARKER'S ARRIVAL IS A PICTURE, so it comes up while the finger
-        // is still down.
-        //
-        // The default holds it back until the release, and that default was
-        // measured on a CARD arrival: text laid out for a width the window had
-        // not reached, clipped at its edge. A disc has no layout to be wrong
-        // about — and held back it meant the window carried the page all the
-        // way down and the face turned up once the flight was over. Filmed as
-        // "the destination is not in the transition window".
-        origin.arrivalRisesUnderFinger = true
-        return origin
     }
 
     /// The marker, drawn fresh — the same component the map itself renders, so
