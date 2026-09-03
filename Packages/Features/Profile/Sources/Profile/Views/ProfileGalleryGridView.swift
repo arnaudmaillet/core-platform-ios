@@ -737,18 +737,25 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     }
 
 
-    /// Hides just what the flight is carrying: a tile goes whole, a row loses
-    /// only its preview. Same invariant the For You grid keeps.
-    func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
+    /// Hides just what the transition is carrying: a tile goes whole, and a row
+    /// gives up its preview to a FLIGHT and its whole card to a WINDOW. Same
+    /// invariant the For You grid keeps, and `carrying` is how the caller says
+    /// which — see `PostGridListRowCell.HeroCarry`.
+    func setHeroConcealed(
+        _ concealed: Bool,
+        for postID: PostID,
+        carrying carry: PostGridListRowCell.HeroCarry = .media
+    ) {
         heroFlyingPostID = concealed ? postID : nil
         if !concealed { reconcileAutoplay() }
         guard let index = posts.firstIndex(where: { $0.id == postID }),
               let cell = collectionView.cellForItem(at: IndexPath(item: index, section: 0))
         else { return }
         if let row = cell as? PostGridListRowCell {
-            // The ROW decides what its flight carries — a preview for a media
-            // row, the whole card for a text one. Same rule as For You's.
-            row.setHeroConcealed(concealed)
+            // The CALLER says what it carried; the row hides that much. Reading
+            // the row's own kind instead is what left a media row's words on
+            // screen under a window that was drawing them too.
+            row.setHeroConcealed(concealed, carrying: carry)
         } else {
             cell.isHidden = concealed
         }

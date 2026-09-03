@@ -554,8 +554,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                     // The gallery's own concealment, which the media hero
                     // beside this already drives — one mechanism, two kinds of
                     // flight.
+                    //
+                    // ⚠️ AND THIS ONE CARRIES THE CARD. A window takes the whole
+                    // row, so the whole row is what must go; the hero beside it
+                    // takes only the picture and says so by omission. Today this
+                    // anchor is never re-pointed, so the landing is always the
+                    // text post that opened it and both answers agree — stated
+                    // anyway, because the day the anchor moves is the day a
+                    // window lands on a photograph and leaves its caption
+                    // showing underneath, which is what For You was filmed
+                    // doing.
                     setConcealed: { [weak self] concealed in
-                        self?.galleryPager.setHeroConcealed(concealed, for: anchorID)
+                        self?.galleryPager.setHeroConcealed(
+                            concealed, for: anchorID, carrying: .card
+                        )
                     },
                     // No inset to pin, unlike For You's grid: these pages run
                     // `contentInsetAdjustmentBehavior = .never` for their whole
