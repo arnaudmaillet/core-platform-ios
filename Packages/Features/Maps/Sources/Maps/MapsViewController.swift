@@ -1901,6 +1901,32 @@ extension MapsViewController: MKMapViewDelegate {
         }
     }
 
+    /// Where a place page goes when a vertical dismissal commits: beneath the
+    /// feed it is landing from.
+    ///
+    /// Pure, and separate from the navigation call for the same reason
+    /// `postIDs(of:)` is: the rule needs no live `MKMapView`, and a wrong
+    /// answer here is invisible on screen until someone presses back.
+    /// Nil means "nothing to do" — already inserted, or no feed to insert under.
+    static func stack(
+        _ current: [UIViewController], inserting landing: UIViewController,
+        beneath feed: UIViewController
+    ) -> [UIViewController]? {
+        guard !current.contains(landing),
+              let index = current.firstIndex(of: feed) else { return nil }
+        var next = current
+        next.insert(landing, at: index)
+        return next
+    }
+
+    /// …and back out again when that dismissal is abandoned.
+    static func stack(
+        _ current: [UIViewController], removing landing: UIViewController
+    ) -> [UIViewController]? {
+        guard current.contains(landing) else { return nil }
+        return current.filter { $0 !== landing }
+    }
+
     /// The face the tapped marker is wearing, so the flight card takes off as
     /// its twin — a symbol pin must not fly as an empty square.
     private static func face(of annotation: any MKAnnotation) -> PinCardView.Face {
@@ -1977,7 +2003,21 @@ extension MapsViewController: MKMapViewDelegate {
                 transition.setDismissSource(gallerySource, for: built)
                 transition.attachInteractiveDismissal(
                     to: feedVC.view, axes: [.vertical], towards: gallerySource
-                ) { [weak self, weak nav] in
+                ) { [weak self, built, weak nav, weak feedVC] in
+                    // ⚠️ THE PAGE JOINS THE STACK HERE, at the last moment
+                    // before the pop that lands on it — the mirror of the
+                    // reveal route's own splice. `built` is captured STRONGLY:
+                    // the dismiss target holds it weakly, so until this runs
+                    // this closure chain is the page's only owner.
+                    //
+                    // A plain stack transaction with nothing transitioning,
+                    // which is the one condition under which it is reliable.
+                    if let nav, let feedVC,
+                       let plan = Self.stack(
+                           nav.viewControllers, inserting: built, beneath: feedVC
+                       ) {
+                        nav.setViewControllers(plan, animated: false)
+                    }
                     // Same grab-begin contract as the pin return: the tab
                     // bar's hidden STATE goes back outside the transition
                     // (at alpha 0, for the drag to fade in); the filter bars
@@ -2051,52 +2091,46 @@ extension MapsViewController: MKMapViewDelegate {
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
             self?.barsStack.alpha = 0
-            // An abandoned ESCAPE grab already dropped the gallery from the
-            // stack (the reorder half of the recipe below); put it back
-            // beneath the feed, invisibly, so the vertical grab keeps its
-            // landing. `gallery` is captured STRONGLY on purpose: between the
-            // reorder and this cancel, this closure is the only thing keeping
-            // the dropped screen alive to reinsert.
+            // ⚠️ THE UNDO IS NOW A REMOVAL, and it used to be an insertion.
+            //
+            // With the page off the stack at rest, an abandoned VERTICAL grab
+            // is a page that was spliced in and never landed on — so this takes
+            // it back out, and the back button and the horizontal close keep
+            // their map landing. `gallery` is captured STRONGLY on purpose:
+            // between the splice and this cancel, this closure chain is the
+            // only thing keeping it alive.
             //
             // Deferred one runloop turn, and that hop is load-bearing: this
             // callback fires inside `completeTransition(false)`'s own call
             // stack, and a `setViewControllers` issued there is silently
-            // swallowed by UIKit's post-cancel bookkeeping — measured in-sim
-            // as the next vertical grab landing on the MAP because the stack
-            // was still [map, feed]. Same transaction-sharing rule the spike
-            // suite records for the reorder half.
-            DispatchQueue.main.async { [weak nav, weak feedVC] in
-                guard let nav, let gallery, let feedVC,
-                      !nav.viewControllers.contains(gallery),
-                      let feedIndex = nav.viewControllers.firstIndex(of: feedVC)
+            // swallowed by UIKit's post-cancel bookkeeping — measured in-sim.
+            DispatchQueue.main.async { [weak nav] in
+                guard let nav, let gallery,
+                      let plan = Self.stack(nav.viewControllers, removing: gallery)
                 else { return }
-                var stack = nav.viewControllers
-                stack.insert(gallery, at: feedIndex)
-                nav.setViewControllers(stack, animated: false)
+                nav.setViewControllers(plan, animated: false)
             }
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
         if let clusterGallery = gallery {
-            // Case B's HORIZONTAL escape: straight back to the map, skipping
-            // the gallery. Never a scrubbed multi-pop — UIKit commits a
-            // popTo's stack mutation at begin and a cancel does not restore
-            // it (see `InteractivePopToStackTests`) — so the recipe is: drop
-            // the gallery invisibly while the feed is top and nothing is
-            // transitioning, then run the ordinary, fully cancellable single
-            // pop the pin grab has always been. The pop's landing is the map,
-            // so the default (pin) source flies the card home. Axes stay
-            // disjoint with the gallery driver above: exactly one of the two
-            // ever claims a drag.
+            // Case B's HORIZONTAL escape: straight back to the map.
+            //
+            // ⚠️ IT NO LONGER DROPS ANYTHING, because there is nothing on the
+            // stack to drop — the page is spliced in by the vertical grab
+            // alone. This used to reorder the stack first (a scrubbed multi-pop
+            // is not an option: UIKit commits a popTo's mutation at begin and a
+            // cancel does not restore it, see `InteractivePopToStackTests`), and
+            // keeping a now-redundant removal would hide a regression of the
+            // new invariant rather than expose it. What is left is the
+            // ordinary, fully cancellable single pop the pin grab has always
+            // been, landing on the map so the default (pin) source flies the
+            // card home. Axes stay disjoint with the gallery driver above:
+            // exactly one of the two ever claims a drag.
+            _ = clusterGallery
             transition.attachInteractiveDismissal(to: feedVC.view, axes: [.horizontal]) {
                 [weak self, weak nav] in
-                guard let nav else { return }
-                if let index = nav.viewControllers.firstIndex(of: clusterGallery) {
-                    var stack = nav.viewControllers
-                    stack.remove(at: index)
-                    nav.setViewControllers(stack, animated: false)
-                }
                 self?.restoreBottomChromeForReturn(alpha: 0)
-                nav.popViewController(animated: true)
+                nav?.popViewController(animated: true)
             }
         } else {
             // Case A (single pin / generic cluster): both axes fly home to
@@ -2125,16 +2159,25 @@ extension MapsViewController: MKMapViewDelegate {
         tabBarController?.setTabBarHidden(true, animated: true)
         setFilterBar(hidden: true)
         nav.delegate = transition
+        // ⚠️ AN ORDINARY PUSH, WHATEVER CASE THIS IS — and the place page is
+        // NOT in it.
+        //
+        // It used to join the stack in the same transaction as the feed, on the
+        // reasoning that the gallery is never SEEN. True, and beside the point:
+        // a stack is not only what is drawn, it is what BACK means. With the
+        // page sitting under the feed, the chevron's single pop landed on a
+        // place page the viewer had never asked for and had no way to predict
+        // — filmed twice, from a country marker and from a city one.
+        //
+        // The reveal route reached this conclusion first and states it in its
+        // own words (`FeedFeatureBuilder.pushWithoutFlight`): the page is
+        // INSERTED for a committed vertical dismissal and taken out again if
+        // that dismissal is abandoned, "so the back button and the horizontal
+        // close keep their map landing". Two routes, one rule, and only one of
+        // them had it.
+        nav.pushViewController(feedVC, animated: true)
         if let gallery {
-            // One transaction: the gallery slides in BENEATH the feed. UIKit
-            // runs the same map→feed hero this delegate already vends (the
-            // pair check is on the top controllers) and the gallery is never
-            // seen — its view is not even loaded (pinned by the spike suite,
-            // `InteractivePopToStackTests`).
-            nav.setViewControllers(nav.viewControllers + [gallery, feedVC], animated: true)
             attachCardCloseAlongsideFlight(feed: feedVC, gallery: gallery, on: nav)
-        } else {
-            nav.pushViewController(feedVC, animated: true)
         }
     }
 
@@ -2166,8 +2209,31 @@ extension MapsViewController: MKMapViewDelegate {
         // again when the pop it triggers asks for an animator — and the
         // adoption below is a MOVE, so a second one would put the two tiles
         // back where they started.
+        // ⚠️ THE SAME AXIS RULE THE FEED'S OWN DRIVER HAS. Without it the
+        // chevron on a paged-to TEXT post staged a card landing on a page that
+        // is not the pop's destination, and the platform's back-direction is
+        // the honest look for a close that could not stage its card.
+        slide.revealReturnAxes = [.vertical]
+        slide.fallbackSlideAxis = .horizontal
+        slide.onWillBeginPop = { [weak nav, weak feed, gallery] axis in
+            guard axis == .vertical, let nav, let feed,
+                  let plan = Self.stack(
+                      nav.viewControllers, inserting: gallery, beneath: feed
+                  )
+            else { return }
+            nav.setViewControllers(plan, animated: false)
+        }
         var hasPrepared = false
-        slide.prepareForDismissal = { [weak feed, weak landing] _ in
+        slide.prepareForDismissal = { [weak feed, weak landing] axis in
+            // ⚠️ AND NOT ON ANY OTHER AXIS. A geometry staged for a back-button
+            // pop aims a card animator at a tile on a screen the pop is not
+            // going to; nil is how the driver selects the plain slide. The
+            // latch is deliberately NOT set here, so a later vertical grab can
+            // still stage properly.
+            guard axis == .vertical else {
+                slide.revealGeometry = nil
+                return
+            }
             guard !hasPrepared, let feed, let landing else { return }
             // ⚠️ ONLY FOR A CLOSE THAT CARRIES A CARD. This runs for every
             // dismissal including a hero's, and the staging below CONCEALS a
@@ -2183,8 +2249,14 @@ extension MapsViewController: MKMapViewDelegate {
         // staging above conceals one, and only the reveal's own completion
         // pays that back — a pop finished by anything else would leave a hole
         // in the mosaic for good.
-        slide.onFeedPopped = { [weak self, weak landing] _ in
+        slide.onFeedPopped = { [weak self, weak landing, weak nav, gallery] _ in
             landing?.clearLandingConcealment()
+            // Idempotent: a card close that was armed and then abandoned leaves
+            // the page spliced in, and the back button must still find the map.
+            if let nav, let plan = Self.stack(nav.viewControllers, removing: gallery),
+               nav.topViewController !== gallery {
+                nav.setViewControllers(plan, animated: false)
+            }
             self?.cardClose = nil
         }
         // AFTER the push, so the flight controller is what `install` captures

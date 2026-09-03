@@ -63,10 +63,36 @@ struct PlaceProfileTests {
     /// ⚠️ A FRACTION OF THE VIEWPORT, not a constant. The place leads with its
     /// picture, and a fixed 220pt banner is a different share of the screen on
     /// every device.
-    @Test func theBannerTakesSixtyPercentOfTheViewport() {
+    @Test func theBannerTakesSeventyPercentOfTheViewport() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(abs(profile.debugBannerHeight - 874 * 0.6) < 0.5)
+        #expect(abs(profile.debugBannerHeight - 874 * 0.7) < 0.5)
+    }
+
+    /// ⚠️ THE SELECTOR IS ON THE BANNER, NOT UNDER IT — bottoms level.
+    ///
+    /// And the SLOT is what is pinned there, not the bar: `headerHost` takes
+    /// its whole height from `slot.bottom == host.bottom`, so anchoring the BAR
+    /// to the picture would make every number derived from the header — the
+    /// pages' inset, the dock line, the content floor — hostage to a control
+    /// that fades out at the dock.
+    @Test func theSelectorSitsOnTheBannersFootRatherThanBelowIt() {
+        let profile = makeProfile()
+        laidOut(profile)
+        #expect(abs(profile.debugSelectorBottomVsBanner) < 0.5)
+        // The header is the banner plus the slot's footer alone — which is what
+        // "on rehausse le reste du contenu" amounts to in numbers: 52pt less
+        // than the same banner with the selector stacked below it.
+        #expect(abs(profile.debugHeaderBottom - (profile.debugBannerHeight + 16)) < 0.5)
+    }
+
+    /// ⚠️ THE COUNTERS MUST CLEAR THE CAPSULE THAT NOW OVERLAPS THEM. The old
+    /// -18 was measured against the picture's edge, and the moment the selector
+    /// moved onto the banner that edge stopped being the last thing in the way.
+    @Test func theIdentityClearsTheSelectorItNowSharesTheBannerWith() {
+        let profile = makeProfile()
+        laidOut(profile)
+        #expect(profile.debugIdentityClearance >= PagedTabBar.Style.navigationTitle.height)
     }
 
     /// ⚠️ WHAT COVERS THE LIST IS NOT WHAT THE LIST IS INSET BY. This page
@@ -105,6 +131,13 @@ struct PlaceProfileTests {
         #expect(PlaceProfileViewController.scrimHeight(forBanner: 612) > 200)
         // And never vanishes on a short banner, where the floor applies.
         #expect(PlaceProfileViewController.scrimHeight(forBanner: 220) >= 120)
+        // ⚠️ AND IT MUST LAND FLAT BEFORE THE SELECTOR, which now stands on the
+        // banner's last 44pt. The gradient's final stop is at 0.80 of the
+        // plate, so the flat tail is 20% of it — a glass capsule resolving its
+        // own luminance over a still-changing gradient is the per-luminance
+        // flip this app has measured and rejected once already.
+        let tail = PlaceProfileViewController.scrimHeight(forBanner: 612) * 0.20
+        #expect(tail > PagedTabBar.Style.navigationTitle.height)
     }
 
     /// The image lags the scroll and is cut taller than its viewport, so the
@@ -480,8 +513,14 @@ struct PlaceProfileTests {
 
     // MARK: - The hero title and its crossfade
 
-    /// The gallery title's "Name • Kind" shape splits into the hero's two
-    /// lines; a separatorless title is all name.
+    /// The gallery title's "Name • Kind" shape splits; a separatorless title is
+    /// all name.
+    ///
+    /// ⚠️ THE SPLITTER OUTLIVED THE LINE IT FED. The hero no longer draws the
+    /// kind at all, but `placeName` still arrives as `MapPlace.galleryTitle` —
+    /// "Paris • City Cluster" — so this is the only thing that yields "Paris".
+    /// Delete it and the banner draws the separator and the exact words the
+    /// kind line was removed for.
     @Test func heroTitleSplitsNameFromKind() {
         let paris = PlaceProfileViewController.heroTitleComponents(of: "Paris • City Cluster")
         #expect(paris.name == "Paris")
@@ -491,7 +530,10 @@ struct PlaceProfileTests {
         #expect(bare.kind == nil)
     }
 
-    /// The name lives on the banner and ONLY there.
+    /// The name lives on the banner and ONLY there — and it is the whole of
+    /// the hero: the "CITY CLUSTER" line above it was deleted, because the map
+    /// the viewer just came from had already said which kind of cluster this
+    /// is, and repeating it was a taxonomy label competing with an identity.
     ///
     /// ⚠️ It does not dock, and that is a consequence rather than a taste:
     /// `installLeadingSelector` must overwrite `titleView` with a zero-sized
@@ -503,7 +545,6 @@ struct PlaceProfileTests {
         let profile = makeProfile()
         profile.loadViewIfNeeded()
         #expect(profile.debugHeroName == "Paris")
-        #expect(profile.debugHeroKind == "CITY CLUSTER")
         #expect(profile.navigationItem.title == nil,
                 "nothing may draw the name at full strength in the bar")
     }
