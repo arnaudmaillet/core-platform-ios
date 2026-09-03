@@ -132,6 +132,27 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     ///
     /// A delta of zero is "direction unknown", and answers the older, weaker
     /// question: is there anywhere to go at all.
+    /// Freezes the pages under the finger, for the length of a dismissal.
+    ///
+    /// ⚠️ A DISMISS GRAB AND THIS CAROUSEL WANT THE SAME DRAG. The grab is
+    /// horizontal and so is this, and this scroll view is directly under the
+    /// finger on any post whose media has more than one page — so a drag that
+    /// begins a dismissal also pages the media, and the two share a gesture
+    /// neither can finish. Filmed as the close tearing in half: the page frozen
+    /// part-way across with the grid showing beside it, the percent driver
+    /// having stopped receiving a gesture the scroll view had taken over.
+    ///
+    /// Deceleration is stopped as well as scrolling disabled: a carousel already
+    /// gliding when the dismissal stages would otherwise coast through it and
+    /// change the page under a flight that has already read which one it is.
+    public func setScrollEnabled(_ enabled: Bool) {
+        guard scrollView.isScrollEnabled != enabled else { return }
+        if !enabled, scrollView.isDecelerating || scrollView.isDragging {
+            scrollView.setContentOffset(scrollView.contentOffset, animated: false)
+        }
+        scrollView.isScrollEnabled = enabled
+    }
+
     public func hasTravel(towardsPageDelta delta: Int) -> Bool {
         guard delta != 0 else { return pageViews.count > 1 }
         return pageViews.indices.contains(currentPage + delta)

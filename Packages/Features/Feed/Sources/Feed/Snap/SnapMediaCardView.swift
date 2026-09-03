@@ -355,6 +355,12 @@ final class SnapMediaCardView: UIView {
     /// Whether a collection is what this card is drawing.
     var showsCollection: Bool { !(carousel?.isHidden ?? true) }
 
+    /// Freezes the media pages for the length of a dismissal — see
+    /// `MediaCarouselView.setScrollEnabled`.
+    func setCarouselScrollEnabled(_ enabled: Bool) {
+        carousel?.setScrollEnabled(enabled)
+    }
+
     /// The picture the current page is showing — a page's cover, which for a
     /// clip is its poster.
     ///
