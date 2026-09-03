@@ -189,7 +189,18 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     var zoomLandingAcceptsHero: Bool {
         guard let page else { return true }
         if page.landsByAdoption { return true }
-        return page.heroAppearance(for: anchorID) != nil
+        let accepts = page.heroAppearance(for: anchorID) != nil
+        #if DEBUG
+        // Said out loud because a refusal here hands the drag to the OTHER
+        // driver, and if that one refuses too the screen leaves on UIKit's own
+        // slide with nothing naming the handover that never happened.
+        if !accepts, ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f landing REFUSES hero post=%@"
+                         + " (row not realized or has no cover)",
+                         CACurrentMediaTime(), anchorID.rawValue))
+        }
+        #endif
+        return accepts
     }
 
     func makeZoomFlightCard() -> any ZoomFlightCard {
