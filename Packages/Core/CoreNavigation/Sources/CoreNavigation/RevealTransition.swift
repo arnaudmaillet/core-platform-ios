@@ -720,6 +720,46 @@ enum RevealStage {
             : (fill: (duration: cardFadeStart, delay: 0), content: tail)
     }
 
+    /// The two blocks the OPENING leg runs, as fractions of the spring's
+    /// visible window.
+    ///
+    /// ⚠️ A CARRYING FIT LEAVES IN ONE RAMP, EARLY. The three acts were derived
+    /// for a `.clipped` landing, where the window is a card-shaped slice of a
+    /// page laid out the same way. A marker is not a card: the page under it is
+    /// whole, opaque and covering from frame 0 — `Pose.pageOpacity` is always
+    /// 1 — so the face has nothing to stay out of the way of, and the only
+    /// thing that has ever gated when the destination is SEEN is the face's own
+    /// alpha. Run as the three acts reversed, that alpha was still 1 past 85%
+    /// of the window's visible travel and the post resolved in the last frames.
+    /// Filmed on a map text pin and reported.
+    ///
+    /// The window is the time-mirror of the ANIMATED POP's carrying act —
+    /// `[coveringFaceFadeStart, cardFadeEnd]`, inlined in `RevealPopAnimator`
+    /// beside its own `carriesPage` branch — so the two legs are one schedule
+    /// read in opposite directions rather than two sets of numbers somebody has
+    /// to keep in agreement. Deliberately NOT `releaseHandover`: that one is
+    /// the GRAB's, driven by a finger rather than by a clock.
+    ///
+    /// The content slot is EMPTY on a carrying fit, for the reason
+    /// `contentOpacity` states: exactly one alpha moves over a covering page
+    /// and it is the view's. The face goes as one opaque unit — disc, glyph or
+    /// avatar, and ring together. That also retires a channel which was doing
+    /// nothing visible here anyway: a marker wearing an author's face HIDES its
+    /// glyph, and the glyph is all `PinTextFaceView.setContentOpacity` moves.
+    ///
+    /// The non-carrying branch is today's numbers, unchanged.
+    static func presentHandover(
+        carriesPage: Bool
+    ) -> (fill: (duration: CGFloat, delay: CGFloat),
+          content: (duration: CGFloat, delay: CGFloat)) {
+        carriesPage
+            ? (fill: (duration: cardFadeEnd - coveringFaceFadeStart,
+                      delay: 1 - cardFadeEnd),
+               content: (duration: 0, delay: 1))
+            : (fill: (duration: pageFadeEnd - pageFadeStart, delay: 1 - pageFadeEnd),
+               content: (duration: cardFadeEnd - cardFadeStart, delay: 1 - cardFadeEnd))
+    }
+
     /// ⚠️ EXACTLY ONE ALPHA MOVES over a covering page, and it is the view's.
     ///
     /// The stand-in's own alpha fades the marker in as ONE opaque unit — disc
@@ -1086,20 +1126,42 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         let (host, mask) = RevealStage.makeHost(
             around: toView, in: container, pageFrame: pageFrame
         )
+        let open = RevealStage.open(container: container)
+        // The window opens AS THE SOURCE when the source's content is not the
+        // page's — a marker's face, which the page has nowhere. Added above the
+        // masked page and posed on the same closed pose. Nil for a row, whose
+        // caption is the page's caption.
+        //
+        // ⚠️ BUILT BEFORE THE POSE, because whether there is one decides what
+        // that pose says — the same order, and the same reason, as the pop.
+        let standIn = geometry.makePresentStandIn()
+        let carries = standIn != nil && geometry.pageFit.carriesPage
         let closed = RevealStage.closed(
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
             matchesAnchor: geometry.matchesAnchor,
-            captionTop: geometry.sourceCaptionTop
+            captionTop: geometry.sourceCaptionTop,
+            // ⚠️ THE OPENING GETS THE POSE THE CLOSE ALREADY HAS, and it never
+            // had it. `MapPinRevealSource` records that the page travels WHOLE,
+            // scaled to cover the window — its THIRD answer, after a keyhole
+            // onto one corner of a full-size page was filmed and rejected. The
+            // pop implements it; this leg passed neither `ridingFrom` nor
+            // `fit`, and has been running the rejected first answer ever since.
+            // Invisible only because the face stayed opaque until the window
+            // was nearly the screen — and that opacity is exactly what the
+            // schedule below takes away, so the pose has to come with it.
+            //
+            // `pageFrame`, not `container.bounds`: `pageFitting` reduces to the
+            // identity at rest only if the rect it rides from IS the page's.
+            //
+            // Gated on `carriesPage` as well as on the stand-in, because
+            // `closed` tests `ridingFrom` BEFORE `fit` — a non-nil one under
+            // `.clipped` selects `pageRiding`, which is a different transition
+            // for a caller that asked for neither.
+            ridingFrom: carries ? pageFrame : nil,
+            fit: geometry.pageFit
         )
-        let open = RevealStage.open(container: container)
-        // The window opens AS THE SOURCE when the source's content is not the
-        // page's — a marker's glyph, which the page has nowhere. Added above
-        // the masked page, posed on the same closed pose, and handed over in
-        // the dismissal's order reversed: content first, then the fill under
-        // it. Nil for a row, whose caption is the page's caption.
-        let standIn = geometry.makePresentStandIn()
         if let standIn {
             container.addSubview(standIn)
             standIn.alpha = 1
@@ -1121,7 +1183,12 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         #if DEBUG
         RevealStage.log("present", "source=\(NSCoder.string(for: sourceRect))"
             + " anchor=\(anchor.map(NSCoder.string(for:)) ?? "nil")"
-            + " travel=\(Int(closed.pageTranslation.y)) matched=\(geometry.matchesAnchor)")
+            + " travel=\(Int(closed.pageTranslation.y)) matched=\(geometry.matchesAnchor)"
+            // The one value that told a keyhole from a covering pose, and it
+            // was not printed: `travel` and `matched` are both zero/false on a
+            // marker route, so the two poses read identically in the console.
+            // That is how the asymmetry with the pop survived.
+            + " scale=\(String(format: "%.3f", closed.pageScale))")
         #endif
 
         // The grid recedes behind the opening mask — the same depth cue a hero
@@ -1157,32 +1224,42 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             RevealStage.log("present", "chrome faded to \(chrome?.alpha ?? -1)")
             #endif
         }
-        // THE HAND-OFF, which is the dismissal's run backwards.
+        // THE HAND-OFF, which for a CARD-SHAPED source is the dismissal's run
+        // backwards.
         //
         // The dismissal fades the page into the card's fill and then raises the
-        // card inside it; an opening that starts as its source has to undo
+        // card inside it; an opening that starts as such a source has to undo
         // exactly that, in the same order and on the same fractions — content
         // out first, then the fill it sat on, revealing the page that was
         // underneath from frame 0. The curves invert with the direction: a rise
         // that accelerated away from transparent is a fall that decelerates
         // into it.
+        //
+        // ⚠️ A CARRYING FIT DOES NOT RUN THAT, and the fractions are not the
+        // only difference — it runs ONE ramp, over the head of the window, with
+        // its content pinned. See `RevealStage.presentHandover` for why, and
+        // `RevealStage.contentOpacity` for the law it is obeying.
         if let standIn {
             let shaping = standIn as? RevealStandInShaping
             // Against the spring's visible window for the same reason the pop
             // is — see `RevealStage.springVisibleFraction`.
             let span = duration * RevealStage.springVisibleFraction
-            let contentOut = 1 - RevealStage.cardFadeEnd
-            let fillOut = 1 - RevealStage.pageFadeEnd
-            UIView.animate(
-                withDuration: span * (RevealStage.cardFadeEnd - RevealStage.cardFadeStart),
-                delay: span * contentOut,
-                options: [.curveEaseOut]
-            ) {
-                shaping?.setContentOpacity(0)
+            let schedule = RevealStage.presentHandover(carriesPage: carries)
+            // ⚠️ NOT RUN AT ALL on a carrying fit, rather than run to the same
+            // value: `setContentOpacity(1)` above is where it stays, and the
+            // face leaves as one unit on the view's own alpha.
+            if schedule.content.duration > 0 {
+                UIView.animate(
+                    withDuration: span * schedule.content.duration,
+                    delay: span * schedule.content.delay,
+                    options: [.curveEaseOut]
+                ) {
+                    shaping?.setContentOpacity(0)
+                }
             }
             UIView.animate(
-                withDuration: span * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
-                delay: span * fillOut,
+                withDuration: span * schedule.fill.duration,
+                delay: span * schedule.fill.delay,
                 options: [.curveEaseIn]
             ) {
                 standIn.alpha = 0
