@@ -815,8 +815,21 @@ final class PlaceProfileViewController: UIViewController {
             let inPage = view.convert(bar.frame, from: host)
             bottom = max(bottom, view.bounds.maxY - inPage.minY)
         }
+        // ⚠️ THE DOCKED BAND, NOT THE HEADER WHERE IT HAPPENS TO BE STANDING.
+        //
+        // The header is not a permanent occluder: the list scrolls UNDER it and
+        // it climbs away, so the room a landing can actually reach is the room
+        // left once it has docked. Measured at rest instead — its full height,
+        // some 520pt of a 874pt screen — the visible band came out at ~270pt,
+        // every Activity card was "taller than the gap", and `offset(toReveal:)`
+        // took its align-to-the-top branch and moved nothing. Which is exactly
+        // the report: a card left cut off by the tab bar with no scroll at all.
+        //
+        // The docked band is the navigation bar plus the selector that lands in
+        // it. That is what still covers the list after the header has gone.
+        let docked = view.safeAreaInsets.top + Self.selectorSlotHeight
         return UIEdgeInsets(
-            top: max(view.safeAreaInsets.top, headerHost.frame.maxY),
+            top: max(view.safeAreaInsets.top, docked),
             left: 0, bottom: bottom, right: 0
         )
     }

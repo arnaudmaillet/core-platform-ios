@@ -80,9 +80,13 @@ struct PlaceProfileTests {
         laidOut(profile)
         let occlusion = profile.debugLandingOcclusion
         #expect(occlusion.top >= profile.view.safeAreaInsets.top)
-        // At rest the header IS the cover, so the two agree — and the cover is
-        // strictly less than the whole reserved inset, which is the distinction.
-        #expect(abs(occlusion.top - profile.debugHeaderBottom) < 0.5)
+        // ⚠️ AND STRICTLY LESS THAN THE HEADER AT REST. The list scrolls UNDER
+        // the header, so the room a landing can reach is what is left once it
+        // has docked — not where it is standing at the moment of the ask.
+        // Measuring the header instead made the band ~270pt on an 874pt screen,
+        // every card "taller than the gap", and the landing moved nothing.
+        #expect(occlusion.top < profile.debugHeaderBottom)
+        #expect(occlusion.top < profile.view.bounds.height / 4)
     }
 
     /// The name and the counters are the place's identity, so they sit ON the
