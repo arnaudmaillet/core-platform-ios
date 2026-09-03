@@ -193,19 +193,44 @@ jobs:
           fi
           echo "Using scheme: $SCHEME"
 
+          # CoreSimulator enumerates its devices lazily, and asking too early
+          # gets an answer with the "Any iOS Simulator Device" placeholder and
+          # nothing else. The old single-job workflow never saw this: it asked
+          # once, after a full app build, by which point the runner was warm.
+          # A package lane asks within seconds of a cold boot. It is a race and
+          # not a property of any package — in run 33816841427, MediaPlayback
+          # ran twice on the same scheme, once green and once red. So warm the
+          # device list first, then retry.
+          xcrun simctl list devices available >/dev/null 2>&1 || true
+
           # A concrete iPhone simulator from xcodebuild's own destination list
           # for THIS scheme (guaranteed valid) — a simctl UDID is not
           # guaranteed to be in the scheme's destination list.
-          DEST_ID=$(xcodebuild -scheme "$SCHEME" -showdestinations \
-            -clonedSourcePackagesDirPath "$SPM" 2>/dev/null \
-            | grep 'platform:iOS Simulator' | grep -iE 'name:iPhone' \
-            | grep -oE 'id:[0-9A-Fa-f-]+' | head -1 | cut -d: -f2)
+          #
+          # Note the `|| true` on the assignment: the shell is `bash -e` and
+          # this script sets pipefail, so a grep that matches nothing would
+          # abort the lane HERE, before the diagnostic below ever runs — which
+          # is exactly how the first attempt failed silently.
+          DEST_ID=""
+          for attempt in 1 2 3 4 5 6; do
+            DESTS=$(xcodebuild -scheme "$SCHEME" -showdestinations \
+              -clonedSourcePackagesDirPath "$SPM" 2>&1) || true
+            DEST_ID=$(printf '%s\n' "$DESTS" \
+              | grep 'platform:iOS Simulator' | grep -iE 'name:iPhone' \
+              | grep -oE 'id:[0-9A-Fa-f-]+' | head -1 | cut -d: -f2) || true
+            if [ -n "$DEST_ID" ]; then
+              break
+            fi
+            echo "attempt $attempt: no iPhone destination yet, retrying"
+            printf '%s\n' "$DESTS" | tail -20
+            sleep 10
+          done
           if [ -z "$DEST_ID" ]; then
-            echo "No iPhone simulator destination found for scheme $SCHEME" >&2
+            echo "::error::No iPhone simulator destination for scheme $SCHEME after 6 attempts"
             xcrun simctl list runtimes | grep -i ios >&2 || true
             exit 1
           fi
-          echo "Using simulator id=$DEST_ID"
+          echo "Using simulator id=$DEST_ID (attempt $attempt)"
 
           xcodebuild test -scheme "$SCHEME" -destination "id=$DEST_ID" \
             -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation
