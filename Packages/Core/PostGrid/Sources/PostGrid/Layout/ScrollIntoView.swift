@@ -90,13 +90,23 @@ public enum ScrollIntoView {
     /// The content offset that puts `rect` in the MIDDLE of the visible band,
     /// or nil when it is already there.
     ///
-    /// A different question from `offset(toReveal:)`, and the difference is the
-    /// difference between a tap and a LANDING. Revealing moves as little as it
-    /// can — an item tucked under the bottom chrome comes up until it just
-    /// clears, and no further — which is right when the viewer is reaching for
-    /// something and wrong when a window is closing onto it: the post they were
-    /// just reading arrives pinned to the bottom edge of a list, as far from
-    /// where they were looking as it can be while still being visible.
+    /// A different question from `offset(toReveal:)`: where revealing moves as
+    /// little as it can, this puts the item mid-band whether it needed moving
+    /// or not.
+    ///
+    /// ⚠️ NOTHING USES IT, AND A LANDING SHOULD NOT. It was written for
+    /// landings, on the reading that "just clears the chrome" delivers the post
+    /// the viewer was reading pinned to the bottom edge of the list. That was
+    /// right about the symptom and wrong about the cause: the row looked pinned
+    /// because the caller was passing a cover that UNDER-MEASURED the floating
+    /// tab bar, so "just clear" left it half behind the bar. Measured properly,
+    /// the minimum move clears the real bar with `defaultPadding` to spare —
+    /// and moving a card the viewer can already see whole is a list that shifts
+    /// under them for no reason they can name.
+    ///
+    /// Kept rather than deleted because the arithmetic is sound and a surface
+    /// may yet want it; do not reach for it on a landing without reading the
+    /// note on `ForYouGridPage.revealPost` first.
     ///
     /// Clamped like its sibling, so a post near either end of the content
     /// settles as close to the middle as the content allows rather than

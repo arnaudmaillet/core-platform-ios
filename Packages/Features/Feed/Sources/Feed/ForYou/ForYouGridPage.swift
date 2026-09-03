@@ -827,14 +827,6 @@ final class ForYouGridPage: UIView {
     /// when the first dismissal stages, so there is no viewer context to
     /// preserve and the grid is free to travel to the landing post's own
     /// tile.
-    /// ⚠️ CENTRED, not merely revealed. Revealing moves as little as it can,
-    /// which is right for a tap and wrong for a landing: a post tucked under
-    /// the bottom chrome came up until it just cleared, so the window closed
-    /// onto a row pinned to the bottom edge — the post the viewer had been
-    /// reading, delivered as far from where they were looking as it could be
-    /// while still being on screen. Filmed on the place page's first vertical
-    /// dismiss. Centring costs nothing anywhere else: this page only scrolls
-    /// like this when it is being landed on.
     /// Brings the landing row fully into sight — and ONLY if it is not already.
     ///
     /// ⚠️ IT USED TO CENTRE, and centring is the wrong question for a landing.
@@ -850,6 +842,18 @@ final class ForYouGridPage: UIView {
     /// scrollable RANGE and is mostly reserved layout. `ScrollIntoView` keeps
     /// the two apart for exactly this reason; the caller measures the cover
     /// because only the host knows where its chrome currently is.
+    ///
+    /// ⚠️ AND THE COVER IS WHY CENTRING WAS TRIED FIRST. This centred once, for
+    /// a filmed reason worth keeping: a post tucked under the bottom chrome
+    /// came up until it "just cleared" and the window closed onto a row pinned
+    /// to the bottom edge — as far from where the viewer was looking as it
+    /// could be while still being on screen. That reading was right about the
+    /// symptom and wrong about the cause. The row looked pinned because the
+    /// cover was UNDER-MEASURED: the tab bar floats, and `safeAreaInsets.bottom`
+    /// reports 34 where the bar is 83, so "just clear" left it half behind the
+    /// bar. Measured properly, the minimum move clears the real bar with the
+    /// helper's own padding, and the answer to a card that is already whole on
+    /// screen is to leave it alone.
     func revealPost(_ postID: PostID, clearing occlusion: UIEdgeInsets = .zero) {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
         collectionView.layoutIfNeeded()
