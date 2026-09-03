@@ -68,6 +68,41 @@ struct RowConcealmentChannelTests {
         #expect(cardAlpha(of: cell) == 1)
     }
 
+    /// ⚠️ WHAT IS HIDDEN IS WHAT THE TRANSITION TOOK, not what the row holds.
+    ///
+    /// A media row concealed for a HERO hides its picture and keeps its words:
+    /// the flight lifted the photograph out and the card stayed. The same row
+    /// concealed for a WINDOW must go entirely, because the window carries the
+    /// whole card — and a close that starts on a text post and lands here is
+    /// exactly that. Inferring from the row's own kind hid only the picture and
+    /// left the author line, caption and metrics drawn under a window that was
+    /// drawing them too.
+    @Test func aMediaRowHidesItsPictureForAFlightAndItsWholeCardForAWindow() {
+        let flying = row(.photo)
+        flying.setHeroConcealed(true, carrying: .media)
+        #expect(flying.isHeroMediaConcealed)
+        #expect(cardAlpha(of: flying) == 1, "a flight took only the picture")
+
+        let framed = row(.photo)
+        framed.setHeroConcealed(true, carrying: .card)
+        #expect(cardAlpha(of: framed) == 0, "a window took the whole card")
+
+        framed.setHeroConcealed(false)
+        #expect(cardAlpha(of: framed) == 1)
+        #expect(framed.isHeroMediaConcealed == false)
+    }
+
+    /// A text row has nothing smaller than itself to hide, so both carries
+    /// agree — which is why reading the row's kind looked right for as long as
+    /// only text rows opened windows.
+    @Test func aTextRowAnswersTheSameToBothCarries() {
+        for carry in [PostGridListRowCell.HeroCarry.media, .card] {
+            let cell = row(.text)
+            cell.setHeroConcealed(true, carrying: carry)
+            #expect(cardAlpha(of: cell) == 0, "carry=\(carry)")
+        }
+    }
+
     /// ⚠️ THE DEFECT: concealed as TEXT, restored as MEDIA.
     ///
     /// The row is reconfigured mid-flight — which is ordinary, since a

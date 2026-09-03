@@ -2090,7 +2090,14 @@ final class ForYouGridPage: UIView {
     /// Internal, not private, so the routing itself is testable: the defect
     /// was not in either cell, it was in one call site treating a row like a
     /// tile.
-    static func applyHeroConcealment(_ concealed: Bool, to cell: UICollectionViewCell?) {
+    /// `carry` says what the transition is taking away — see
+    /// `PostGridListRowCell.HeroCarry`. Defaults to the flight's answer, so the
+    /// hero channel reads exactly as it did; the reveal channel says `.card`.
+    static func applyHeroConcealment(
+        _ concealed: Bool,
+        to cell: UICollectionViewCell?,
+        carrying carry: PostGridListRowCell.HeroCarry = .media
+    ) {
         switch cell {
         // A row keeps everything the flight is not carrying — and which part
         // that is depends on the row, so the row is asked. It used to be
@@ -2098,7 +2105,7 @@ final class ForYouGridPage: UIView {
         // A text row flies too now, and what it carries away is the whole card.
         case let row as PostGridListRowCell:
             row.isHidden = false
-            row.setHeroConcealed(concealed)
+            row.setHeroConcealed(concealed, carrying: carry)
         case let other?:
             other.isHidden = concealed
         case nil:
@@ -2173,7 +2180,16 @@ final class ForYouGridPage: UIView {
                 + " cell=\(target.map { String(describing: type(of: $0)) } ?? "MISSING")")
         }
         #endif
-        Self.applyHeroConcealment(concealed, to: target)
+        // ⚠️ THE WHOLE CARD, because that is what a window carries.
+        //
+        // This shares its machinery with the hero's channel, and the hero takes
+        // only the picture out of a media row. Sharing the DEFAULT as well meant
+        // a window landing on a media row hid that row's picture and left its
+        // author line, caption and metrics drawn underneath the window that was
+        // already drawing them — the same card twice. It only shows on a close
+        // whose two ends differ in kind, which is why it outlived the fix that
+        // made this switch on the cell at all.
+        Self.applyHeroConcealment(concealed, to: target, carrying: .card)
         // ⚠️ THE INSTANCE, NOT JUST THE ID — the hero channel has kept one of
         // these since the day a lookup cleared the wrong cell, and this channel
         // never got the same treatment.
