@@ -28,7 +28,15 @@ final class PinCardView: UIView {
     /// The glyph a text-only post's marker shows in place of a cover. Product
     /// vocabulary for a text post elsewhere in the app is "Short"
     /// (`GalleryFilter.short`).
-    static let textSymbolName = "text.alignleft"
+    /// The FALLBACK face for a text post, and only that.
+    ///
+    /// It was `text.alignleft` — a description of the post's kind, which is
+    /// what the marker used to be about. A text marker now wears its author
+    /// (`MapPin.authorAvatarURL`), so the symbol is what stands in while that
+    /// face is loading, or for an author who has none: an account glyph, so the
+    /// stand-in is the same KIND of thing as what replaces it rather than a
+    /// different statement about the post.
+    static let textSymbolName = "person.crop.circle.fill"
     /// Point size of that glyph inside the 44pt circle — ~40% of the diameter,
     /// which reads at pin size while leaving a ring of the neutral ground
     /// visible as its own signal.
@@ -197,6 +205,11 @@ final class PinCardView: UIView {
     func setTextAvatar(_ image: UIImage?) {
         textFaceView.setAvatar(image)
     }
+
+    /// The author face this card is wearing, so a transition can carry it —
+    /// see `MapPinRevealSource.marker`. Reading it back rather than being told
+    /// again is what keeps the flying card and the marker the same picture.
+    var textAvatar: UIImage? { textFaceView.avatarImage }
 
     func setFace(_ face: Face) {
         self.face = face
@@ -442,6 +455,8 @@ private final class PinTextFaceView: UIView {
     /// Nil is an ordinary answer and always will be in production until
     /// `RadarPin` carries an author (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`) —
     /// and it stays one afterwards, for an author who has no avatar.
+    var avatarImage: UIImage? { avatar.image }
+
     func setAvatar(_ image: UIImage?) {
         avatar.image = image
         avatar.isHidden = image == nil

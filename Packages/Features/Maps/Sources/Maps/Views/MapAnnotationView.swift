@@ -25,7 +25,7 @@ final class MapAnnotationView: MKAnnotationView {
     static let side: CGFloat = PinCardView.Face.media.side
 
     /// The pin's face; also the exact blueprint of the flying card.
-    private let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
+    let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
     private let playBadge = UIImageView()
     private var imageTask: Task<Void, Never>?
     /// Guards against a slow image load landing on a recycled view.

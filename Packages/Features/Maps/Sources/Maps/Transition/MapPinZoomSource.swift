@@ -132,6 +132,12 @@ final class MapPinZoomSource: ZoomTransitionSource {
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
         )
         card.imageView.image = thumbnail
+        // ⚠️ READ NOW, NOT AT INIT. A text marker wears its author, and that
+        // face arrives asynchronously — a card built from an answer captured
+        // when the source was constructed flies the fallback glyph while the
+        // pin behind it shows the avatar. Same reason `zoomHeroFrame` re-reads
+        // the annotation's rect instead of remembering one.
+        card.setTextAvatar(mapView?.wornAvatar(for: annotation))
         // The other end of the flight, when it is not this marker. Nil on every
         // present and on every dismissal that lands where it took off, which
         // leaves the card's blend channel inert.

@@ -20,7 +20,7 @@ final class MapClusterAnnotationView: MKAnnotationView {
     private static let side = MapAnnotationView.side
 
     /// The cluster's face; also the exact blueprint of the flying card.
-    private let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
+    let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
     private var imageTask: Task<Void, Never>?
     /// Guards a slow load against reuse (clusters have no stable id, so key on
     /// the URL being shown).
