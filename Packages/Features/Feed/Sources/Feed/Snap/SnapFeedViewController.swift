@@ -124,6 +124,29 @@ final class SnapFeedViewController: UIViewController {
     /// `.black` by default, so every route that does not lend one is byte for
     /// byte what it was.
     private var emptyGround: UIColor = .black
+    /// The arrival screen's own LOADING state, drawn while the corpus is in
+    /// flight — a SUBVIEW, never a ground.
+    ///
+    /// A feed pushed before its posts arrive has no cells, so the window used
+    /// to open onto whatever colour the floors were. `emptyGround` made that
+    /// colour the tapped card's; this puts the screen it is opening onto on top
+    /// of it, in the state it is actually in. Filmed as ~930ms of empty grey on
+    /// the FIRST selection of a pin and none on the second, because the first is
+    /// what fills the cache the synchronous seed reads.
+    ///
+    /// ⚠️ IT IS THE REAL PANEL, not a drawing of one. Built from the same
+    /// factory the resting page uses and handed to the cell when the post lands,
+    /// so what the viewer watches load is the thing that finishes loading —
+    /// and so nothing here can invent an author or a caption, because a PostID
+    /// is the only thing it is given.
+    private var loadingPageID: PostID?
+    private var loadingPage: UIViewController?
+    private var loadingPageFrost: ProgressiveFrostView?
+    /// Parked in the prewarm slot, awaiting a cell's adoption.
+    private var handedOverLoadingPage: UIViewController?
+    /// Set on a COMPLETED disappearance: the builder's seed Task is never
+    /// cancelled, so a render can still land on a screen that has gone.
+    private var loadingPageDisarmed = false
     private var modelsByID: [PostID: FeedItemDisplayModel] = [:]
     private var orderedIDs: [PostID] = []
 
@@ -327,6 +350,13 @@ final class SnapFeedViewController: UIViewController {
     private var didStartLoading = false
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        // A material arrives through `effect` and cannot be built without a
+        // window. This pass runs inside the present animator's own
+        // `layoutIfNeeded`, which is the first moment there is one — and still
+        // before the opening pose is applied.
+        if let frost = loadingPageFrost, frost.effect == nil, view.window != nil {
+            frost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
+        }
         if !didStartLoading, view.bounds.width > 0 {
             didStartLoading = true
             viewModel.viewDidLoad()
@@ -709,6 +739,20 @@ final class SnapFeedViewController: UIViewController {
         settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
+        // ⚠️ HERE, NOT IN `viewWillDisappear`. A cancelled drag-back fires that
+        // one, and on a cold open a grab is possible for the whole wait — so
+        // tearing down there would strip the skeletons and leave the viewer
+        // looking at empty ground, which is the defect this exists to remove.
+        // The going-versus-gone distinction the note below draws is the same.
+        if isBeingDismissed || isMovingFromParent {
+            loadingPageDisarmed = true
+            if let panel = loadingPage {
+                loadingPage = nil
+                loadingPageID = nil
+                fadeOutLoadingPage(panel, animated: false)
+            }
+            handedOverLoadingPage = nil
+        }
         // ⚠️ GOING versus GONE, and the resign above cannot tell them apart.
         //
         // `refreshVisibility` resigns the active page WITHOUT releasing its
@@ -777,6 +821,18 @@ final class SnapFeedViewController: UIViewController {
 
     /// Re-places the mounted comment panel against the CURRENT safe area.
     private func reapplyEngagedInsets() {
+        // The loading page is staged BEFORE the push, when the insets are still
+        // zero — the same problem this method already solves for the
+        // hero-staged panel, and the same answer: told the CURRENT insets.
+        if let panel = loadingPage {
+            let top = SnapCommentsLayout.commentsTopInset(topInset: view.safeAreaInsets.top)
+            loadingPageFrost?.frame = CGRect(
+                x: 0, y: 0, width: view.bounds.width, height: top
+            )
+            (panel as? PostDetailViewController)?.setEngagedInsets(
+                top: top, bottomInset: view.safeAreaInsets.bottom
+            )
+        }
         guard let detail = commentsContentVC as? PostDetailViewController,
               let cell = engagedCell()
         else { return }
@@ -1631,6 +1687,10 @@ final class SnapFeedViewController: UIViewController {
             !notInterestedIDs.contains($0) || $0 == activePostID
         }
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
+        // ⚠️ BEFORE `dataSource.apply`. `willDisplay` fires inside the apply's
+        // own layout pass and asks for a resting panel, so the parked one has
+        // to already be in the slot by then.
+        retireLoadingPage()
 
         // ⚠️ **A stable id is not an unchanged page** — see
         // `SeededPageReconciliation` for the whole rule and why it is a value.
@@ -1671,6 +1731,7 @@ final class SnapFeedViewController: UIViewController {
             // pages, and the first render carrying a media model must return it
             // to black without waiting for a settle that may be a frame away.
             applyGrounds()
+            finishLoadingPageHandover()
             updateActiveItem()
             // ⚠️ **The bars are not in the cell**, and `updateActiveItem` only
             // speaks when the active INDEX moves.
@@ -2180,6 +2241,83 @@ final class SnapFeedViewController: UIViewController {
 
     /// One at a time: the pager moves on and the page two ahead is not worth a
     /// second view controller's memory.
+    /// The exit: a HANDOVER when there is a text page to hand it to, a fade
+    /// otherwise.
+    ///
+    /// ⚠️ KEYED ON ANY RENDER, not on the first one carrying items. `.empty`
+    /// and `.failed` both render with zero items, so "wait for content" would
+    /// leave this sitting over the status label for ever.
+    private func retireLoadingPage() {
+        guard let panel = loadingPage else { return }
+        let head = orderedIDs.first
+        let handsOver = head != nil && head == loadingPageID
+            && modelsByID[head!]?.mediaURL == nil
+            && commentsEngagedID == nil && commentsContentVC == nil
+            && prewarmedRestingID == nil
+        loadingPage = nil
+        loadingPageID = nil
+        guard handsOver, let head else { return fadeOutLoadingPage(panel, animated: true) }
+        // ⚠️ THE VIEW STAYS WHERE IT IS. Only the child relationship drops;
+        // the cell re-parents the SAME view in the SAME layout pass, so there
+        // is never a frame of neither — which is the whole point of building
+        // the real panel rather than a picture of one.
+        panel.willMove(toParent: nil)
+        panel.removeFromParent()
+        panel.view.isUserInteractionEnabled = true
+        loadingPageFrost?.removeFromSuperview()
+        loadingPageFrost = nil
+        prewarmedRestingID = head
+        prewarmedRestingVC = panel
+        handedOverLoadingPage = panel
+        #if DEBUG
+        debugPrewarmedRestingID = head
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media] %.3f loading-page retire handover=yes",
+                         CACurrentMediaTime()))
+        }
+        #endif
+    }
+
+    /// The belt. The apply's completion does not guarantee realized cells, so
+    /// force the pass and check whether anything actually adopted the panel —
+    /// an unadopted one sits on `view` as a lid over the feed.
+    private func finishLoadingPageHandover() {
+        guard let panel = handedOverLoadingPage else { return }
+        collectionView.layoutIfNeeded()
+        handedOverLoadingPage = nil
+        guard panel.view.superview === view else { return }
+        if prewarmedRestingVC === panel { discardPrewarmedResting() }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media] %.3f loading-page adopted=no — faded",
+                         CACurrentMediaTime()))
+        }
+        #endif
+        fadeOutLoadingPage(panel, animated: true)
+    }
+
+    /// 0.15s — this file's length for late content.
+    private func fadeOutLoadingPage(_ panel: UIViewController, animated: Bool) {
+        let frost = loadingPageFrost
+        loadingPageFrost = nil
+        let strip = {
+            panel.willMove(toParent: nil)
+            panel.view.removeFromSuperview()
+            panel.removeFromParent()
+            frost?.removeFromSuperview()
+        }
+        guard animated, view.window != nil else { return strip() }
+        UIView.animate(withDuration: 0.15, animations: {
+            panel.view.alpha = 0
+            frost?.alpha = 0
+        }, completion: { _ in strip() })
+    }
+
+    #if DEBUG
+    var debugLoadingPanel: UIViewController? { loadingPage }
+    var debugShowsLoadingPage: Bool { loadingPage != nil }
+    #endif
+
     private func discardPrewarmedResting() {
         prewarmedRestingVC = nil
         prewarmedRestingID = nil
@@ -4060,6 +4198,61 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         activeSnapCell?.setRevealGroundTint(color)
     }
 
+    /// The post whose loading state stands in until the corpus arrives.
+    /// Recorded only — `presentLoadingPage` is what draws, so a hero route that
+    /// never reaches the text-reveal installer is never given comment bones.
+    public func armLoadingPage(for id: PostID) { loadingPageID = id }
+
+    /// Draws the arrival screen's loading state on this screen's own view — the
+    /// host `installRevealVeil` uses, and for the same reason: it has to cover
+    /// the whole page, and the page has no cell yet.
+    public func presentLoadingPage() {
+        loadViewIfNeeded()
+        guard !loadingPageDisarmed, loadingPage == nil, orderedIDs.isEmpty,
+              commentsEngagedID == nil, commentsContentVC == nil,
+              let id = loadingPageID, let makeCommentsPanelContent,
+              view.bounds.width > 0, view.bounds.height > 0
+        else { return }
+
+        let panel = makeCommentsPanelContent(id)
+        // Transparent, so the lent ground is still what is on screen — and so a
+        // flight that clears both floors is not lidded by this.
+        panel.view.backgroundColor = .clear
+        panel.overrideUserInterfaceStyle = .unspecified
+        panel.view.isUserInteractionEnabled = false
+        addChild(panel)
+        panel.view.frame = view.bounds
+        panel.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.insertSubview(panel.view, aboveSubview: collectionView)
+        panel.didMove(toParent: self)
+
+        // The band the CELL owns at rest. The panel brings its own footer and
+        // composer; only the header band has to be stood in for.
+        let frost = ProgressiveFrostView(
+            maskColors: SnapCommentsLayout.headerFrostMaskColors,
+            maskLocations: SnapCommentsLayout.headerFrostMaskLocations
+        )
+        frost.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: false))
+        frost.autoresizingMask = [.flexibleWidth]
+        view.insertSubview(frost, aboveSubview: panel.view)
+
+        loadingPage = panel
+        loadingPageFrost = frost
+        (panel as? PostDetailViewController)?.setComposerEntranceState(offstage: false)
+        (panel as? PostDetailViewController)?.setComposerTracksKeyboard(false)
+        // ⚠️ THE INSETS ARE ZERO HERE — this runs before the push. The geometry
+        // is placed by `reapplyEngagedInsets`, which runs again once the
+        // transition container resolves the real safe area.
+        reapplyEngagedInsets()
+
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[media] %.3f loading-page install id=%@ h=%.0f",
+                         CACurrentMediaTime(), id.rawValue, view.bounds.height))
+        }
+        #endif
+    }
+
     /// The tone to wear before there is anything to show — the fill of the
     /// thing the viewer just tapped. See `emptyGround`.
     public func setEmptyGround(_ color: UIColor) {
@@ -4170,6 +4363,16 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // …including whatever that teardown just re-warmed for the OLD active
         // page, which is about to stop existing.
         discardPrewarmedComments()
+        // A repoint is a SECOND cold window: it resets the items and goes back
+        // to `.loading` without emitting. Drop the old page and re-arm for the
+        // next one — the next `TextRevealInstaller.geometry` is what draws.
+        if let panel = loadingPage {
+            loadingPage = nil
+            fadeOutLoadingPage(panel, animated: false)
+        }
+        handedOverLoadingPage = nil
+        loadingPageID = ids.first
+        loadingPageDisarmed = false
 
         // Flight state, in case a flight ended anywhere other than its
         // landing — a cancelled push leaves these set, and a reused

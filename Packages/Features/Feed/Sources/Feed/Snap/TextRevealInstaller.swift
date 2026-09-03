@@ -103,6 +103,13 @@ enum TextRevealInstaller {
         // surfaces funnel through here, so it is one line for the map, For You
         // and the place page alike.
         (feed as? SnapFeedViewController)?.setEmptyGround(sourceFill(for: origin))
+        // …and what is DRAWN on it. The line above says what colour the window
+        // is; this puts the screen it is opening onto on top, in the state it
+        // is actually in. Reached only by the text-reveal branch, so a
+        // photograph is never promised comment bones — and run synchronously
+        // before the push, so the panel exists before the animator lays the
+        // destination out and its build is paid outside the flight.
+        (feed as? SnapFeedViewController)?.presentLoadingPage()
         return RevealGeometry(
             sourceFrame: origin.rowFrame,
             // The CARD's shape unless the source says otherwise, which is every

@@ -921,6 +921,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // second seed is ignored by contract), so a cold or
                 // half-warm set takes the whole async path — late, but no
                 // later than the old behaviour.
+                // A feed pushed before its corpus has nothing to draw for as
+                // long as this Task takes. Arm the ARRIVAL screen's own loading
+                // state; the text-reveal installer is what draws it. For a
+                // cluster this is the representative, which leads `memberIDs` —
+                // one skeleton page, never N.
+                if let head = postIDs.first { snapFeed.armLoadingPage(for: head) }
                 let repository = repository
                 Task { @MainActor [weak snapFeed] in
                     var entries: [FeedEntry] = []
