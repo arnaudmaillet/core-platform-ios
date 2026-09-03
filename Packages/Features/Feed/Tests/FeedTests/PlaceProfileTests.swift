@@ -48,6 +48,60 @@ struct PlaceProfileTests {
         )
     }
 
+    // MARK: - The banner
+
+    /// Laid out at a real viewport, so the fraction has something to be a
+    /// fraction OF: a headless `loadViewIfNeeded` leaves the view at zero and
+    /// every derived number with it.
+    private func laidOut(_ profile: PlaceProfileViewController) {
+        profile.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        profile.loadViewIfNeeded()
+        profile.view.layoutIfNeeded()
+        profile.viewDidLayoutSubviews()
+    }
+
+    /// ⚠️ A FRACTION OF THE VIEWPORT, not a constant. The place leads with its
+    /// picture, and a fixed 220pt banner is a different share of the screen on
+    /// every device.
+    @Test func theBannerTakesSeventyPercentOfTheViewport() {
+        let profile = makeProfile()
+        laidOut(profile)
+        #expect(abs(profile.debugBannerHeight - 874 * 0.7) < 0.5)
+    }
+
+    /// The name and the counters are the place's identity, so they sit ON the
+    /// picture — centred, one under the other — rather than in a band beneath
+    /// it.
+    @Test func theNameAndCountersRideTheBannerCentred() {
+        let profile = makeProfile()
+        laidOut(profile)
+        #expect(profile.debugIdentityRidesTheBanner)
+    }
+
+    /// ⚠️ THE FADE HAS TO OUTLAST THE PICTURE. A short scrim leaves the image
+    /// meeting the page at a definite boundary, which reads as a rule however
+    /// gently the two are blended above it.
+    @Test func theScrimIsDeepEnoughToSwallowTheBannersEdge() {
+        #expect(PlaceProfileViewController.scrimHeight(forBanner: 612) > 200)
+        // And never vanishes on a short banner, where the floor applies.
+        #expect(PlaceProfileViewController.scrimHeight(forBanner: 220) >= 120)
+    }
+
+    /// The image lags the scroll and is cut taller than its viewport, so the
+    /// lag can never expose an edge: at the furthest the header travels, the
+    /// image's top is still at or above the box's.
+    @Test func theBannerImageLagsTheScrollWithoutExposingAnEdge() {
+        let profile = makeProfile()
+        laidOut(profile)
+        let atRest = profile.debugBannerImageTop
+        #expect(atRest < 0, "the image is cut taller than its viewport")
+
+        profile.debugApplyHeaderOffset(2_000)
+        let scrolled = profile.debugBannerImageTop
+        #expect(scrolled > atRest, "the image did not lag the scroll")
+        #expect(scrolled <= 0, "the lag exposed the image's top edge")
+    }
+
     /// A defaults suite of this test's own: `WalletStore` persists there, and
     /// a shared one would let two runs read each other's balance.
     private static func makeWalletDefaults() -> UserDefaults {
