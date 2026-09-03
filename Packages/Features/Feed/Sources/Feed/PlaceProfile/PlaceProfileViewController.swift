@@ -390,7 +390,7 @@ final class PlaceProfileViewController: UIViewController {
     private static let seedWindow = 40
     /// How much of the screen the banner claims. The place leads with its
     /// picture, so the picture is most of the first screen.
-    private static let bannerHeightFraction: CGFloat = 0.7
+    private static let bannerHeightFraction: CGFloat = 0.6
     /// The floor a headless or not-yet-laid-out view falls back to, so a
     /// constraint built before the first layout pass is never zero.
     private static let bannerHeightFloor: CGFloat = 220
@@ -794,6 +794,31 @@ final class PlaceProfileViewController: UIViewController {
         bannerImageHeight?.constant = overshoot * 2
         let clamped = min(max(travelled, 0), headerTravel)
         bannerImageTop?.constant = -overshoot + clamped * Self.bannerParallaxFraction
+    }
+
+    /// What actually COVERS the hosted list right now, top and bottom.
+    ///
+    /// Not the content inset: this page reserves the header's whole height as
+    /// scrollable range, and most of that is room the content scrolls INTO
+    /// rather than chrome it hides behind. What genuinely hides a row is the
+    /// header band wherever it currently sits — its own height at rest, the
+    /// docked selector once it has climbed — and the tab bar at the foot.
+    ///
+    /// ⚠️ THE TAB BAR IS MEASURED, NOT ASSUMED. It floats: it draws over the
+    /// content without insetting it, so `safeAreaInsets.bottom` understates it
+    /// by the height of the bar itself (34 against 83 on an iPhone 17 Pro).
+    /// Taking the larger of the two means a landing clears whichever is really
+    /// in the way.
+    private var landingOcclusion: UIEdgeInsets {
+        var bottom = view.safeAreaInsets.bottom
+        if let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview {
+            let inPage = view.convert(bar.frame, from: host)
+            bottom = max(bottom, view.bounds.maxY - inPage.minY)
+        }
+        return UIEdgeInsets(
+            top: max(view.safeAreaInsets.top, headerHost.frame.maxY),
+            left: 0, bottom: bottom, right: 0
+        )
     }
 
     /// The height the header takes at rest — what the pages are inset by so
@@ -1414,7 +1439,7 @@ final class PlaceProfileViewController: UIViewController {
                 guard let self else { return }
                 view.layoutIfNeeded()
                 activityPage.beginHeroFreeze()
-                activityPage.revealPost(anchor)
+                activityPage.revealPost(anchor, clearing: landingOcclusion)
                 view.layoutIfNeeded()
             },
             dismissalDidEnd: { [weak self] committed in
@@ -1732,7 +1757,7 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         debugLogLanding("flight from \(activePostID?()?.rawValue ?? "nil")"
             + " to FIRST tile \(anchorID.rawValue)"
             + " blend=\(activePostID?() != anchorID && activeCover?() != nil)")
-        page.revealPost(anchorID)
+        page.revealPost(anchorID, clearing: landingOcclusion)
         // Visible for the whole return: the card is landing ON this tile.
         page.setHeroHidden(true, for: anchorID, conceals: false)
     }
@@ -1926,7 +1951,7 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         // slide every time.
         view.layoutIfNeeded()
         activityPage.beginHeroFreeze()
-        activityPage.revealPost(anchor)
+        activityPage.revealPost(anchor, clearing: landingOcclusion)
         // And again: cells at the landed offset are realized by the pass
         // AFTER it is set, never by the one that set it.
         view.layoutIfNeeded()
@@ -1947,7 +1972,7 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         mirrorSelection(to: 0)
         pager.setActivePage(0, animated: false)
         page.beginHeroFreeze()
-        page.revealPost(anchor)
+        page.revealPost(anchor, clearing: landingOcclusion)
         view.layoutIfNeeded()
     }
 
@@ -1972,6 +1997,8 @@ extension PlaceProfileViewController {
     var debugIdentityAlpha: CGFloat { bannerBox.alpha }
     var debugBannerHeight: CGFloat { bannerHeightConstraint?.constant ?? 0 }
     var debugScrimHeight: CGFloat { bannerScrimHeightConstraint?.constant ?? 0 }
+    var debugLandingOcclusion: UIEdgeInsets { landingOcclusion }
+    var debugHeaderBottom: CGFloat { headerHost.frame.maxY }
     var debugBannerImageTop: CGFloat { bannerImageTop?.constant ?? 0 }
     /// Drives the header the way a scroll does, which the simulator cannot.
     func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffset(travelled) }

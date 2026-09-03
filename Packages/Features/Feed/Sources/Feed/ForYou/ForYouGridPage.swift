@@ -835,22 +835,28 @@ final class ForYouGridPage: UIView {
     /// while still being on screen. Filmed on the place page's first vertical
     /// dismiss. Centring costs nothing anywhere else: this page only scrolls
     /// like this when it is being landed on.
-    func revealPost(_ postID: PostID) {
+    /// Brings the landing row fully into sight — and ONLY if it is not already.
+    ///
+    /// ⚠️ IT USED TO CENTRE, and centring is the wrong question for a landing.
+    /// A card the viewer can already see whole was dragged to the middle of the
+    /// band anyway, so closing a post moved the list under them for no reason
+    /// they could name. What a landing owes them is that the card they are
+    /// returning to is not half under the chrome — nothing more. So this moves
+    /// as little as it can, in whichever direction is short, and not at all
+    /// when there is nothing to fix.
+    ///
+    /// `occlusion` is what COVERS the list — the header band above and the tab
+    /// bar below — as distinct from the content inset, which is this page's
+    /// scrollable RANGE and is mostly reserved layout. `ScrollIntoView` keeps
+    /// the two apart for exactly this reason; the caller measures the cover
+    /// because only the host knows where its chrome currently is.
+    func revealPost(_ postID: PostID, clearing occlusion: UIEdgeInsets = .zero) {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
         collectionView.layoutIfNeeded()
-        // ⚠️ NO OCCLUSION, which is not the same as forgetting one. This page's
-        // top inset is LAYOUT — room reserved for a header that scrolls away —
-        // and `ScrollIntoView` defaults the band to the content inset because
-        // that is right wherever the insets exist BECAUSE of chrome. Here it
-        // pushes the band's middle hundreds of points down the screen, and the
-        // landing arrives at two thirds of the way down: measured at 607pt of
-        // 874 on the place page, from a 440pt reserved header. The inset still
-        // clamps — it is the scrollable range either way — it just no longer
-        // decides where the middle is.
-        ScrollIntoView.centreImmediately(
+        ScrollIntoView.revealImmediately(
             collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame,
             in: collectionView,
-            occlusion: .zero
+            occlusion: occlusion
         )
     }
 

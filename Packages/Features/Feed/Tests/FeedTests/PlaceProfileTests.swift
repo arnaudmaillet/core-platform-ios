@@ -63,10 +63,26 @@ struct PlaceProfileTests {
     /// ⚠️ A FRACTION OF THE VIEWPORT, not a constant. The place leads with its
     /// picture, and a fixed 220pt banner is a different share of the screen on
     /// every device.
-    @Test func theBannerTakesSeventyPercentOfTheViewport() {
+    @Test func theBannerTakesSixtyPercentOfTheViewport() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(abs(profile.debugBannerHeight - 874 * 0.7) < 0.5)
+        #expect(abs(profile.debugBannerHeight - 874 * 0.6) < 0.5)
+    }
+
+    /// ⚠️ WHAT COVERS THE LIST IS NOT WHAT THE LIST IS INSET BY. This page
+    /// reserves the header's whole height as scrollable RANGE, and most of that
+    /// is room the content scrolls into rather than chrome it hides behind. A
+    /// landing that took the inset for the cover would think the visible band
+    /// was a sliver at the foot of the screen and haul the list about to reach
+    /// it.
+    @Test func theLandingClearsTheHeaderBandRatherThanTheContentInset() {
+        let profile = makeProfile()
+        laidOut(profile)
+        let occlusion = profile.debugLandingOcclusion
+        #expect(occlusion.top >= profile.view.safeAreaInsets.top)
+        // At rest the header IS the cover, so the two agree — and the cover is
+        // strictly less than the whole reserved inset, which is the distinction.
+        #expect(abs(occlusion.top - profile.debugHeaderBottom) < 0.5)
     }
 
     /// The name and the counters are the place's identity, so they sit ON the
