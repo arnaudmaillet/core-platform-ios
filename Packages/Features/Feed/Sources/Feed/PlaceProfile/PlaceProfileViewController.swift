@@ -346,7 +346,19 @@ final class PlaceProfileViewController: UIViewController {
                     + " post=\(post?.id.rawValue ?? "nil")"
                     + " hero=\(post.flatMap { grid?.heroAppearance(for: $0.id) } != nil)"
                     + " window=\(window != nil)")
-                openTile(at: index, in: grid)
+                // ⚠️ THROUGH THE DELEGATE, NOT THE HOST'S OWN METHOD. Calling
+                // `openTile` directly skips `didSelectItemAt` and therefore
+                // `ForYouGridPage.open(at:)`, which is where a tap REMEMBERS
+                // the row to settle clear of the chrome. So the one thing this
+                // hook exists to exercise — where a dismissal comes back to —
+                // was the one thing it could not reach, and a run showed a card
+                // returning still half behind the tab bar whether the code was
+                // right or wrong. `ForYouGridPage.debugSelectItem` carries the
+                // same warning about `-foryou-open`, which made this mistake
+                // first.
+                if grid?.debugSelectItem(at: index) != true {
+                    openTile(at: index, in: grid)
+                }
             }
         }
         // `-maps-place-tile-dismiss <seconds>`: grabs the feed that tile just
@@ -506,6 +518,40 @@ final class PlaceProfileViewController: UIViewController {
         // Off screen, this page holds no claim on the shared player pool —
         // the feed pushed above it is about to want every loan.
         for hosted in hostedPages { (hosted as? ForYouGridPage)?.setAutoplayActive(false) }
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // ⚠️ THE REVEAL THIS PAGE ARMED AND NEVER APPLIED.
+        //
+        // `ForYouGridPage.open(at:)` remembers the tapped post on EVERY tap, on
+        // every host, so that the row can be settled clear of the chrome once
+        // the post is covering the grid — where the move costs nothing to look
+        // at. For You and the profile both spend it from their own
+        // `viewDidDisappear`. This page never did, so a card tapped while it
+        // was half behind the tab bar departed from that rect and, because a
+        // flight's landing deliberately does not scroll (see
+        // `ForYouGridZoomSource`), came home to it. Filmed: a card cut off at
+        // the foot, opened, closed, and cut off in exactly the same way.
+        //
+        // With the foot cover measured below, the reveal now clears the bar the
+        // viewer can actually see rather than the safe area's smaller idea of
+        // it.
+        for hosted in hostedPages {
+            guard let page = hosted as? ForYouGridPage else { continue }
+            page.footChromeCover = floatingBarCover
+            page.applyPendingReveal()
+        }
+    }
+
+    /// How much of this screen's foot the tab bar actually covers — measured,
+    /// because it floats over the pages rather than insetting them. Same
+    /// quantity `landingOcclusion` takes for its bottom, asked of the bar.
+    private var floatingBarCover: CGFloat {
+        guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
+        else { return view.safeAreaInsets.bottom }
+        let inPage = view.convert(bar.frame, from: host)
+        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
     }
 
     /// Exactly one page may drive playback: two grids competing for one pool
@@ -810,11 +856,7 @@ final class PlaceProfileViewController: UIViewController {
     /// Taking the larger of the two means a landing clears whichever is really
     /// in the way.
     private var landingOcclusion: UIEdgeInsets {
-        var bottom = view.safeAreaInsets.bottom
-        if let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview {
-            let inPage = view.convert(bar.frame, from: host)
-            bottom = max(bottom, view.bounds.maxY - inPage.minY)
-        }
+        let bottom = floatingBarCover
         // ⚠️ THE DOCKED BAND, NOT THE HEADER WHERE IT HAPPENS TO BE STANDING.
         //
         // The header is not a permanent occluder: the list scrolls UNDER it and

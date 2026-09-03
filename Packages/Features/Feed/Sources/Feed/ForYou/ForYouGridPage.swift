@@ -814,11 +814,33 @@ final class ForYouGridPage: UIView {
         guard let id = pendingRevealPostID else { return }
         pendingRevealPostID = nil
         guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
+        // ⚠️ THE INSET IS RIGHT AT THE TOP AND SHORT AT THE FOOT.
+        //
+        // `ScrollIntoView` defaults the cover to the content inset, which is
+        // correct wherever the insets exist BECAUSE of chrome — and on this
+        // surface the top genuinely does. The bottom does not: the tab bar
+        // FLOATS, drawing over this grid without insetting it, and
+        // `ForYouViewController` measured the gap years ago in its own words —
+        // "bar at y 791 height 83, while the grid reserves 34". So a tile whose
+        // foot is within those 49pt was "revealed" while still behind the bar.
+        //
+        // It matters more here than anywhere: this page deliberately does not
+        // scroll at the LANDING (see `ForYouGridZoomSource`), so where the
+        // departure reveal leaves a tile is where the card comes back to.
+        var cover = collectionView.adjustedContentInset
+        cover.bottom = max(cover.bottom, footChromeCover)
         ScrollIntoView.revealImmediately(
             collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame,
-            in: collectionView
+            in: collectionView,
+            occlusion: cover
         )
     }
+
+    /// What covers this page's FOOT and its content inset does not — the
+    /// floating tab bar, measured by the host because only it can see the bar.
+    /// Zero means "the inset is the whole story", which is the honest default
+    /// for a page with nothing floating over it.
+    var footChromeCover: CGFloat = 0
 
     /// Brings `postID`'s tile into the unobstructed viewport NOW, layout
     /// settled — the cluster gallery's landing rule. Unlike the For You

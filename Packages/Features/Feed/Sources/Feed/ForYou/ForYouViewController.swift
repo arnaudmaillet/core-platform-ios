@@ -1976,6 +1976,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // ⚠️ MEASURED WHILE THE BAR IS UP, and cached, because the one moment
+        // the reveal needs the number is the one moment it cannot read it: a
+        // push takes the bar down, and `applyPendingReveal` runs on the way
+        // out. Taken here, when the screen is at rest and the bar is where the
+        // viewer sees it.
+        pager.setFootChromeCover(floatingBarCover)
         sweepAbandonedTransition()
         // ⚠️ NOTHING ON THIS SCREEN MAY BE INVISIBLE ONCE IT IS BACK.
         //
@@ -2174,6 +2180,20 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// what the viewer reads and belongs on the gesture's clock. Splitting them
     /// is what lets the bar be geometrically present and visually absent for the
     /// length of a drag.
+    /// How much of this screen's foot the tab bar actually covers.
+    ///
+    /// The bar FLOATS — it draws over the grid without insetting it — so the
+    /// safe area understates it by the bar's own height. This file has carried
+    /// that measurement in prose for a long time ("bar at y 791 height 83,
+    /// while the grid reserves 34"); this is the same fact, asked of the bar
+    /// rather than restated as a number that can go stale on the next device.
+    private var floatingBarCover: CGFloat {
+        guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
+        else { return view.safeAreaInsets.bottom }
+        let inPage = view.convert(bar.frame, from: host)
+        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
+    }
+
     private func showTabBar(alpha: CGFloat) {
         guard let tabBarController else { return }
         tabBarController.tabBar.alpha = alpha

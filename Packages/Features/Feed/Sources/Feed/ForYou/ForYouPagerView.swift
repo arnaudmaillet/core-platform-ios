@@ -171,6 +171,12 @@ final class ForYouPagerView: UIView {
         pages.forEach { $0.applyPendingReveal() }
     }
 
+    /// Hands every page what floats over its foot — see
+    /// `ForYouGridPage.footChromeCover`.
+    func setFootChromeCover(_ cover: CGFloat) {
+        pages.forEach { $0.footChromeCover = cover }
+    }
+
     func endRefreshing() {
         pages.forEach { $0.endRefreshing() }
     }
