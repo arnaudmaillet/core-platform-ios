@@ -30,6 +30,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// with the stream reading over it. Text posts leave it empty
     /// (surfaces hidden), so the black contentView shows through.
     private let mediaCard = SnapMediaCardView()
+
+    /// Freezes this cell's media pages for the length of a dismissal — see
+    /// `MediaCarouselView.setScrollEnabled`.
+    func setCarouselScrollEnabled(_ enabled: Bool) {
+        mediaCard.setCarouselScrollEnabled(enabled)
+    }
+
+    /// Whether this cell has pages a dismissal has to freeze — diagnostics.
+    var hasMediaCarousel: Bool { mediaCard.showsCollection }
     /// The engaged screen's readability layer, directly over the media and
     /// directly under the stream: a plain black wash — no blur — so
     /// comments stay legible over live content while the post stays

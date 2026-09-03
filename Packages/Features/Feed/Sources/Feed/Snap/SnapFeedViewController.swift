@@ -4625,6 +4625,25 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // also catch the composer's text view and whatever a cell hosts next.
         let stream = commentsContentVC as? PostDetailViewController
         stream?.setStreamScrollEnabled(enabled)
+        // ⚠️ AND THE MEDIA CAROUSEL, which is the third one and the one directly
+        // under the finger.
+        //
+        // The note above says the pager is "the only thing under the finger" on
+        // a media post. That is true only while the media is one page. A
+        // COLLECTION puts a horizontal scroll view exactly where a horizontal
+        // dismiss grab begins, so the drag drives both and neither finishes —
+        // filmed as the close tearing in half, the page stopped part-way across
+        // with the grid beside it.
+        //
+        // Every realized cell, not just the active one: a neighbour a fling
+        // brought within reach can be under the finger by the time the grab
+        // begins, and a frozen carousel that is never thawed is a post whose
+        // media cannot be paged for the rest of its life.
+        var carousels = 0
+        for case let cell as SnapFeedCell in collectionView.visibleCells {
+            cell.setCarouselScrollEnabled(enabled)
+            if cell.hasMediaCarousel { carousels += 1 }
+        }
         #if DEBUG
         // `-dismiss-lock-log`: whether the freeze actually REACHED a stream.
         //
@@ -4636,7 +4655,11 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         if ProcessInfo.processInfo.arguments.contains("-dismiss-lock-log") {
             print("[dismiss-lock] contentScroll=\(enabled ? "on" : "OFF") "
                   + "stream=\(stream == nil ? "nil" : "engaged") "
-                  + "pager=\(collectionView.isScrollEnabled ? "SCROLLABLE" : "frozen")")
+                  + "pager=\(collectionView.isScrollEnabled ? "SCROLLABLE" : "frozen") "
+                  // Whether the freeze reached a CAROUSEL — zero here on a post
+                  // whose media is a collection means the lock is a no-op
+                  // exactly where the tear was filmed.
+                  + "carousels=\(carousels)")
         }
         #endif
     }

@@ -223,9 +223,13 @@ final class ProfileGalleryPagerView: UIView {
     }
 
 
-    func setHeroConcealed(_ concealed: Bool, for postID: PostID) {
+    func setHeroConcealed(
+        _ concealed: Bool,
+        for postID: PostID,
+        carrying carry: PostGridListRowCell.HeroCarry = .media
+    ) {
         guard pages.indices.contains(activeIndex) else { return }
-        pages[activeIndex].setHeroConcealed(concealed, for: postID)
+        pages[activeIndex].setHeroConcealed(concealed, for: postID, carrying: carry)
     }
 
     var heroCoordinateSpace: UICoordinateSpace? {

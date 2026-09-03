@@ -25,6 +25,30 @@ public enum ZoomTransitionGeometry {
     /// the dismissal's host poses it after the surface is hoisted out. When
     /// those two disagreed about the fill rule the media stopped covering
     /// mid-flight, so the rule lives in exactly one place.
+    /// The size to lay a video layer out at ONCE, so that driving it with
+    /// `mediaFillScale` covers `bounds` at every step without ever resizing it.
+    ///
+    /// ⚠️ A LAYER'S BOUNDS ARE NOT AN ANIMATABLE CHANNEL FOR VIDEO. An
+    /// `AVSampleBufferDisplayLayer` does not re-render its video rect during an
+    /// animated bounds change: inside a correctly sized, correctly centred
+    /// surface the content stays drawn at its previous size, pinned to the
+    /// layer origin — which on screen is the media sliding and letterboxing
+    /// rather than zooming. So a flying surface is laid out here and posed by
+    /// transform, and this is the size that makes the two agree.
+    ///
+    /// Sized to just cover the destination rather than at raw pixel dimensions,
+    /// so that end sits at scale ~1 and the surface is never resampled up from
+    /// something smaller than the screen. `nil` native, or a degenerate one,
+    /// answers `bounds` — the honest fallback for a surface whose track
+    /// dimensions are not known yet.
+    public static func mediaLayoutSize(native: CGSize?, covering bounds: CGSize) -> CGSize {
+        guard let native, native.width > 0, native.height > 0,
+              bounds.width > 0, bounds.height > 0
+        else { return bounds }
+        let cover = max(bounds.width / native.width, bounds.height / native.height)
+        return CGSize(width: native.width * cover, height: native.height * cover)
+    }
+
     public static func mediaFillScale(covering size: CGSize, surface: CGSize) -> CGFloat {
         guard surface.width > 0, surface.height > 0 else { return 1 }
         return max(size.width / surface.width, size.height / surface.height)

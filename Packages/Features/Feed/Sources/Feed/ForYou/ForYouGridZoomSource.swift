@@ -86,6 +86,9 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// to a return flight.
     private var isStagingDismissal = false
 
+    /// Held only so the display link outlives this method; it stops itself.
+    private var landingRetry: LandingLiveMediaRetry?
+
     init(
         page: ForYouGridPage,
         tappedID: PostID,
@@ -186,7 +189,18 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     var zoomLandingAcceptsHero: Bool {
         guard let page else { return true }
         if page.landsByAdoption { return true }
-        return page.heroAppearance(for: anchorID) != nil
+        let accepts = page.heroAppearance(for: anchorID) != nil
+        #if DEBUG
+        // Said out loud because a refusal here hands the drag to the OTHER
+        // driver, and if that one refuses too the screen leaves on UIKit's own
+        // slide with nothing naming the handover that never happened.
+        if !accepts, ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f landing REFUSES hero post=%@"
+                         + " (row not realized or has no cover)",
+                         CACurrentMediaTime(), anchorID.rawValue))
+        }
+        #endif
+        return accepts
     }
 
     func makeZoomFlightCard() -> any ZoomFlightCard {
@@ -211,6 +225,25 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // the case that needs this.
         if isStagingDismissal, let settled = activePostID(), settled != anchorID {
             card.setDeparturePicture(settledCover?())
+            // ⚠️ AND THE LANDING'S OWN MOVING PICTURE WHERE THERE IS ONE.
+            //
+            // The still above is the operand's FLOOR, not the operand: for a
+            // landing that is a clip, fading up its thumbnail is precisely the
+            // "destination arrives as a thumbnail" this pair exists to remove.
+            // Joined by identity to the row's own surface — never by URL, which
+            // is the lookup this leg already refuses everywhere else.
+            //
+            // Nil is an ordinary answer: a landing that is a photograph, or a
+            // row whose renderer has never dispatched, keeps the still and the
+            // card behaves exactly as it did.
+            // Asked for as long as the flight is in the air, because the row may
+            // be drawing nothing at take-off — it scrolled out of the autoplay
+            // window while the post was open, or never entered one. The first
+            // refusal demands a player rather than accepting the still.
+            let landingID = anchorID
+            landingRetry = LandingLiveMediaRetry.arm(card: card) { [weak page] in
+                page?.landingFlightSurface(for: landingID)
+            }
         }
         #if DEBUG
         // Whether the card had a texture to show on frame 0. `heroAppearance`

@@ -814,11 +814,33 @@ final class ForYouGridPage: UIView {
         guard let id = pendingRevealPostID else { return }
         pendingRevealPostID = nil
         guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
+        // ⚠️ THE INSET IS RIGHT AT THE TOP AND SHORT AT THE FOOT.
+        //
+        // `ScrollIntoView` defaults the cover to the content inset, which is
+        // correct wherever the insets exist BECAUSE of chrome — and on this
+        // surface the top genuinely does. The bottom does not: the tab bar
+        // FLOATS, drawing over this grid without insetting it, and
+        // `ForYouViewController` measured the gap years ago in its own words —
+        // "bar at y 791 height 83, while the grid reserves 34". So a tile whose
+        // foot is within those 49pt was "revealed" while still behind the bar.
+        //
+        // It matters more here than anywhere: this page deliberately does not
+        // scroll at the LANDING (see `ForYouGridZoomSource`), so where the
+        // departure reveal leaves a tile is where the card comes back to.
+        var cover = collectionView.adjustedContentInset
+        cover.bottom = max(cover.bottom, footChromeCover)
         ScrollIntoView.revealImmediately(
             collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame,
-            in: collectionView
+            in: collectionView,
+            occlusion: cover
         )
     }
+
+    /// What covers this page's FOOT and its content inset does not — the
+    /// floating tab bar, measured by the host because only it can see the bar.
+    /// Zero means "the inset is the whole story", which is the honest default
+    /// for a page with nothing floating over it.
+    var footChromeCover: CGFloat = 0
 
     /// Brings `postID`'s tile into the unobstructed viewport NOW, layout
     /// settled — the cluster gallery's landing rule. Unlike the For You
@@ -827,30 +849,40 @@ final class ForYouGridPage: UIView {
     /// when the first dismissal stages, so there is no viewer context to
     /// preserve and the grid is free to travel to the landing post's own
     /// tile.
-    /// ⚠️ CENTRED, not merely revealed. Revealing moves as little as it can,
-    /// which is right for a tap and wrong for a landing: a post tucked under
-    /// the bottom chrome came up until it just cleared, so the window closed
-    /// onto a row pinned to the bottom edge — the post the viewer had been
-    /// reading, delivered as far from where they were looking as it could be
-    /// while still being on screen. Filmed on the place page's first vertical
-    /// dismiss. Centring costs nothing anywhere else: this page only scrolls
-    /// like this when it is being landed on.
-    func revealPost(_ postID: PostID) {
+    /// Brings the landing row fully into sight — and ONLY if it is not already.
+    ///
+    /// ⚠️ IT USED TO CENTRE, and centring is the wrong question for a landing.
+    /// A card the viewer can already see whole was dragged to the middle of the
+    /// band anyway, so closing a post moved the list under them for no reason
+    /// they could name. What a landing owes them is that the card they are
+    /// returning to is not half under the chrome — nothing more. So this moves
+    /// as little as it can, in whichever direction is short, and not at all
+    /// when there is nothing to fix.
+    ///
+    /// `occlusion` is what COVERS the list — the header band above and the tab
+    /// bar below — as distinct from the content inset, which is this page's
+    /// scrollable RANGE and is mostly reserved layout. `ScrollIntoView` keeps
+    /// the two apart for exactly this reason; the caller measures the cover
+    /// because only the host knows where its chrome currently is.
+    ///
+    /// ⚠️ AND THE COVER IS WHY CENTRING WAS TRIED FIRST. This centred once, for
+    /// a filmed reason worth keeping: a post tucked under the bottom chrome
+    /// came up until it "just cleared" and the window closed onto a row pinned
+    /// to the bottom edge — as far from where the viewer was looking as it
+    /// could be while still being on screen. That reading was right about the
+    /// symptom and wrong about the cause. The row looked pinned because the
+    /// cover was UNDER-MEASURED: the tab bar floats, and `safeAreaInsets.bottom`
+    /// reports 34 where the bar is 83, so "just clear" left it half behind the
+    /// bar. Measured properly, the minimum move clears the real bar with the
+    /// helper's own padding, and the answer to a card that is already whole on
+    /// screen is to leave it alone.
+    func revealPost(_ postID: PostID, clearing occlusion: UIEdgeInsets = .zero) {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return }
         collectionView.layoutIfNeeded()
-        // ⚠️ NO OCCLUSION, which is not the same as forgetting one. This page's
-        // top inset is LAYOUT — room reserved for a header that scrolls away —
-        // and `ScrollIntoView` defaults the band to the content inset because
-        // that is right wherever the insets exist BECAUSE of chrome. Here it
-        // pushes the band's middle hundreds of points down the screen, and the
-        // landing arrives at two thirds of the way down: measured at 607pt of
-        // 874 on the place page, from a 440pt reserved header. The inset still
-        // clamps — it is the scrollable range either way — it just no longer
-        // decides where the middle is.
-        ScrollIntoView.centreImmediately(
+        ScrollIntoView.revealImmediately(
             collectionView.layoutAttributesForItem(at: indexPath(for: index))?.frame,
             in: collectionView,
-            occlusion: .zero
+            occlusion: occlusion
         )
     }
 
@@ -1166,6 +1198,33 @@ final class ForYouGridPage: UIView {
         return made
     }
 
+    /// The LANDING row's own moving picture, for the card's rising operand.
+    ///
+    /// The mirror of `liveFlightSurface`, which serves the DEPARTURE on a
+    /// present — and deliberately not the same call: that one resolves by URL,
+    /// which this leg must not do. See
+    /// `GridVideoPlaybackCoordinator.makeLandingSurface`.
+    func landingFlightSurface(for postID: PostID) -> VideoRenderView? {
+        if let made = playback?.makeLandingSurface(for: postID) { return made }
+        // Nothing to join yet. Ask for the player rather than reporting its
+        // absence — the same move `liveFlightSurface` makes for the departure,
+        // and for the same reason: this call is repeated every frame of the
+        // flight, so a start kicked here is picked up by the next ask. Without
+        // it a row that had scrolled out of the autoplay window could only ever
+        // land as a thumbnail.
+        //
+        // The CURRENT PAGE's stream where there is one: a collection whose head
+        // is a photograph has a nil `videoURL` and would otherwise never be
+        // asked for at all.
+        let row = cell(for: postID) as? PostGridListRowCell
+        guard let playback, let index = posts.firstIndex(where: { $0.id == postID }),
+              let url = row?.currentPageVideoURL ?? posts[index].videoURL,
+              let row
+        else { return nil }
+        playback.demandFlightPlayback(of: postID, url: url, in: row)
+        return nil
+    }
+
     /// Forces the landing cell through a layout pass while the card still
     /// covers it.
     ///
@@ -1207,7 +1266,14 @@ final class ForYouGridPage: UIView {
         let cell = collectionView.cellForItem(
             at: indexPath(for: index)
         ) as? any GridPlaybackCell
-        if let playback, post.videoURL != nil,
+        // ⚠️ THE CURRENT PAGE'S STREAM, not page one's. `GalleryPost.videoURL`
+        // is `pages.first?.videoURL` for ever, so a collection resting on a clip
+        // whose HEAD is a photograph answered nil here and fell through to the
+        // still gate below — which reports ready on a COVER while the row has no
+        // moving picture at all. That is worse than having no gate: the hold is
+        // released by the very thing it exists to hold across.
+        let pageVideoURL = (cell as? PostGridListRowCell)?.currentPageVideoURL ?? post.videoURL
+        if let playback, pageVideoURL != nil,
            autoplays(post) || cell?.loadedVideoRenderView != nil {
             return playback.isSurfaceRendering(for: postID)
         }
@@ -2056,7 +2122,14 @@ final class ForYouGridPage: UIView {
     /// Internal, not private, so the routing itself is testable: the defect
     /// was not in either cell, it was in one call site treating a row like a
     /// tile.
-    static func applyHeroConcealment(_ concealed: Bool, to cell: UICollectionViewCell?) {
+    /// `carry` says what the transition is taking away — see
+    /// `PostGridListRowCell.HeroCarry`. Defaults to the flight's answer, so the
+    /// hero channel reads exactly as it did; the reveal channel says `.card`.
+    static func applyHeroConcealment(
+        _ concealed: Bool,
+        to cell: UICollectionViewCell?,
+        carrying carry: PostGridListRowCell.HeroCarry = .media
+    ) {
         switch cell {
         // A row keeps everything the flight is not carrying — and which part
         // that is depends on the row, so the row is asked. It used to be
@@ -2064,7 +2137,7 @@ final class ForYouGridPage: UIView {
         // A text row flies too now, and what it carries away is the whole card.
         case let row as PostGridListRowCell:
             row.isHidden = false
-            row.setHeroConcealed(concealed)
+            row.setHeroConcealed(concealed, carrying: carry)
         case let other?:
             other.isHidden = concealed
         case nil:
@@ -2139,7 +2212,16 @@ final class ForYouGridPage: UIView {
                 + " cell=\(target.map { String(describing: type(of: $0)) } ?? "MISSING")")
         }
         #endif
-        Self.applyHeroConcealment(concealed, to: target)
+        // ⚠️ THE WHOLE CARD, because that is what a window carries.
+        //
+        // This shares its machinery with the hero's channel, and the hero takes
+        // only the picture out of a media row. Sharing the DEFAULT as well meant
+        // a window landing on a media row hid that row's picture and left its
+        // author line, caption and metrics drawn underneath the window that was
+        // already drawing them — the same card twice. It only shows on a close
+        // whose two ends differ in kind, which is why it outlived the fix that
+        // made this switch on the cell at all.
+        Self.applyHeroConcealment(concealed, to: target, carrying: .card)
         // ⚠️ THE INSTANCE, NOT JUST THE ID — the hero channel has kept one of
         // these since the day a lookup cleared the wrong cell, and this channel
         // never got the same treatment.

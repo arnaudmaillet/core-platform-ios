@@ -554,8 +554,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                     // The gallery's own concealment, which the media hero
                     // beside this already drives — one mechanism, two kinds of
                     // flight.
+                    //
+                    // ⚠️ AND THIS ONE CARRIES THE CARD. A window takes the whole
+                    // row, so the whole row is what must go; the hero beside it
+                    // takes only the picture and says so by omission. Today this
+                    // anchor is never re-pointed, so the landing is always the
+                    // text post that opened it and both answers agree — stated
+                    // anyway, because the day the anchor moves is the day a
+                    // window lands on a photograph and leaves its caption
+                    // showing underneath, which is what For You was filmed
+                    // doing.
                     setConcealed: { [weak self] concealed in
-                        self?.galleryPager.setHeroConcealed(concealed, for: anchorID)
+                        self?.galleryPager.setHeroConcealed(
+                            concealed, for: anchorID, carrying: .card
+                        )
                     },
                     // No inset to pin, unlike For You's grid: these pages run
                     // `contentInsetAdjustmentBehavior = .never` for their whole
@@ -1107,6 +1119,18 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         headerView.chromeTopInset = view.safeAreaInsets.top
     }
 
+    /// How much of this screen's foot the tab bar actually covers.
+    ///
+    /// The bar floats over these pages rather than insetting them, so the safe
+    /// area understates it by the bar's own height. Asked of the bar rather
+    /// than written down as a number, which goes stale on the next device.
+    private var floatingBarCover: CGFloat {
+        guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
+        else { return view.safeAreaInsets.bottom }
+        let inPage = view.convert(bar.frame, from: host)
+        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         // The scroll view opts out of automatic inset adjustment (the banner
@@ -1120,7 +1144,18 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         let trayClearance = trayPlacement == .aboveBottomSafeArea && viewModel.hasGallery
             ? Metrics.inlineTrayHeight + Metrics.inlineTraySpacing
             : 0
-        let bottom = view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0) + trayClearance
+        // ⚠️ AND NEVER LESS THAN THE BAR ACTUALLY COVERS. The tab bar FLOATS —
+        // it draws over these pages without insetting them — so
+        // `safeAreaInsets.bottom` understates it by the bar's own height. The
+        // tray clearance happened to bridge most of that gap when a tray was
+        // inline, which is why nothing was ever reported; with no tray it did
+        // not, and a tile revealed at the foot stayed part-way behind the bar.
+        // Since the landing on this surface deliberately does not scroll, where
+        // the departure reveal leaves a tile is where the card comes back to.
+        let bottom = max(
+            floatingBarCover,
+            view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0) + trayClearance
+        )
         galleryPager.setContentBottomInset(bottom)
         // The pages are inset by the header floating over them, so their content
         // starts below it rather than behind it. Applied here because the

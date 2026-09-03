@@ -1092,13 +1092,33 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// Asymmetric on purpose: hiding the wrong thing shows the post twice mid
     /// flight, so the conceal has to be exact. Putting back something that was
     /// never taken costs nothing.
-    public func setHeroConcealed(_ concealed: Bool) {
+    /// What the transition is carrying away from this row, which is the only
+    /// thing that decides what has to be hidden underneath it.
+    ///
+    /// ⚠️ NOT THE ROW'S OWN KIND, which is what this used to infer it from. A
+    /// hero flight lifts the MEDIA out of a media row, so the media is what
+    /// goes and the card's words stay. A reveal's window carries the WHOLE
+    /// CARD, whatever the row happens to contain — so a close that starts on a
+    /// text post and lands on a media row hid only that row's picture and left
+    /// its author line, caption and metrics on screen under a window that was
+    /// drawing them too. Filmed.
+    public enum HeroCarry {
+        /// The flight took the picture; the card around it stays.
+        case media
+        /// The window took the whole card.
+        case card
+    }
+
+    public func setHeroConcealed(_ concealed: Bool, carrying carry: HeroCarry = .media) {
         guard concealed else {
             card.alpha = 1
             setHeroMediaConcealed(false)
             return
         }
-        if mediaView.isHidden {
+        // A row with no media has nothing smaller to hide than itself, so both
+        // carries agree there — which is why inferring from the kind looked
+        // right for as long as only text rows opened windows.
+        if carry == .card || mediaView.isHidden {
             card.alpha = 0
         } else {
             setHeroMediaConcealed(true)

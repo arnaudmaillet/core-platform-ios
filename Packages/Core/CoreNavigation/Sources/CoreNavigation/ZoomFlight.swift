@@ -383,11 +383,7 @@ struct ZoomFlight {
     /// page end sits at scale ~1 and the surface is never resampled up from
     /// something smaller than the screen.
     static func liveMediaLayoutSize(native: CGSize?, page: CGSize) -> CGSize {
-        guard let native, native.width > 0, native.height > 0,
-              page.width > 0, page.height > 0
-        else { return page }
-        let cover = max(page.width / native.width, page.height / native.height)
-        return CGSize(width: native.width * cover, height: native.height * cover)
+        ZoomTransitionGeometry.mediaLayoutSize(native: native, covering: page)
     }
 
     /// The uniform scale that makes a `surface`-sized video layer cover a

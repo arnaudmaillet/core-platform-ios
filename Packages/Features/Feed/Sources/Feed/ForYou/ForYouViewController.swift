@@ -916,10 +916,28 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // Filmed as a text page leaving a media row with no hero at all — a
         // plain horizontal slide — because the row it had to land on carried a
         // photograph, and `textRowFrame` refuses those on purpose.
+        // ⚠️ A REFUSAL IS INVISIBLE, and that is what makes a missing hero hard
+        // to read from a recording: this returns false, the geometry it just
+        // cleared stays nil, and the close leaves on the plain slide with
+        // nothing anywhere saying why. Each reason is named instead.
+        let frame = presenting ? sourceFrame(view) : closingFrame(view)
         guard TextRevealInstaller.isEnabled,
               let page = pager.page(for: format),
-              (presenting ? sourceFrame(view) : closingFrame(view)) != nil
-        else { return false }
+              frame != nil
+        else {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-text-reveal-log") {
+                let why: String
+                if !TextRevealInstaller.isEnabled { why = "disabled" }
+                else if pager.page(for: format) == nil { why = "no page" }
+                else { why = presenting ? "no text row (sourceFrame nil)"
+                                        : "no landing row (closingFrame nil)" }
+                print("[text-reveal] install REFUSED post=\(postID.rawValue)"
+                    + " presenting=\(presenting) why=\(why)")
+            }
+            #endif
+            return false
+        }
         // The grid's inset state at each stage of a round trip. It exists
         // because a rect alone cannot say why a landing missed, and the first
         // run's did: departure y=741, landing y=625.
@@ -1783,6 +1801,26 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // `resetForNewPresentation`.
         textSlideDismissal.resetForNewPresentation()
         textSlideDismissal.arbitratesWithHeroGrab = true
+        // ⚠️ THE MIRROR, ON THIS PATH TOO — and it was set on only one of the
+        // two, which is a plain slide.
+        //
+        // The hero refuses a landing it cannot draw
+        // (`ForYouGridZoomSource.zoomLandingAcceptsHero`, false for a row the
+        // list has not realized). Left `nil` here, this driver's own gate reads
+        // `nil != false` as "the hero is taking it" and refuses as well — so
+        // NEITHER claims the drag, no interactive pop is ever started, and the
+        // screen leaves on UIKit's own edge-swipe animation. Filmed as the last
+        // close of a run having no hero at all.
+        //
+        // The landing is the same one the reveal anchors on: the departure row,
+        // unless a mosaic has adopted the settled post into its slot.
+        textSlideDismissal.heroLandingAcceptsHero = { [weak self] in
+            guard let page = self?.pager.page(for: format) else { return true }
+            let landing = page.landsByAdoption
+                ? ((feed as? SnapFeedViewController)?.activePostID ?? departureID)
+                : departureID
+            return page.heroAppearance(for: landing) != nil
+        }
         textSlideDismissal.attach(to: feed, axes: [.horizontal, .vertical])
         // ⚠️ ADOPT FIRST, BUILD SECOND, and the order is not stylistic.
         //
@@ -1938,6 +1976,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // ⚠️ MEASURED WHILE THE BAR IS UP, and cached, because the one moment
+        // the reveal needs the number is the one moment it cannot read it: a
+        // push takes the bar down, and `applyPendingReveal` runs on the way
+        // out. Taken here, when the screen is at rest and the bar is where the
+        // viewer sees it.
+        pager.setFootChromeCover(floatingBarCover)
         sweepAbandonedTransition()
         // ⚠️ NOTHING ON THIS SCREEN MAY BE INVISIBLE ONCE IT IS BACK.
         //
@@ -2136,6 +2180,20 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// what the viewer reads and belongs on the gesture's clock. Splitting them
     /// is what lets the bar be geometrically present and visually absent for the
     /// length of a drag.
+    /// How much of this screen's foot the tab bar actually covers.
+    ///
+    /// The bar FLOATS — it draws over the grid without insetting it — so the
+    /// safe area understates it by the bar's own height. This file has carried
+    /// that measurement in prose for a long time ("bar at y 791 height 83,
+    /// while the grid reserves 34"); this is the same fact, asked of the bar
+    /// rather than restated as a number that can go stale on the next device.
+    private var floatingBarCover: CGFloat {
+        guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
+        else { return view.safeAreaInsets.bottom }
+        let inPage = view.convert(bar.frame, from: host)
+        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
+    }
+
     private func showTabBar(alpha: CGFloat) {
         guard let tabBarController else { return }
         tabBarController.tabBar.alpha = alpha

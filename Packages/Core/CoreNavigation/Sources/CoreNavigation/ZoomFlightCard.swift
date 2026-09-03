@@ -142,6 +142,25 @@ public protocol ZoomFlightCard: UIView {
     /// Defaults to nothing: a card with one picture has nothing to blend.
     func setZoomContentBlend(_ t: CGFloat)
 
+    /// Installs the LANDING's own moving picture as the blend's rising operand.
+    ///
+    /// The blend's two operands are pictures, and for a landing that is a CLIP
+    /// the picture it deserves is the clip. Given only a still, the card fades
+    /// up a thumbnail of the very video the row is about to play — which is what
+    /// "the destination appears as a thumbnail" is.
+    ///
+    /// ⚠️ A REQUIREMENT, not an extension-only member, for the reason
+    /// `setZoomContentBlend` states above it: a defaulted member with no
+    /// requirement behind it dispatches STATICALLY through the existential the
+    /// flight holds, so the card's override is never called.
+    ///
+    /// ⚠️ AND THE CARD MUST NEVER WRITE THIS VIEW'S OWN ALPHA. A live surface's
+    /// alpha belongs to `revealOnFirstFrame`, whose whole job is to hold it at 0
+    /// until a frame exists; two drivers on one layer property is a defect this
+    /// codebase has already lived through. The card fades the CONTAINER it puts
+    /// this in instead.
+    func setZoomLandingLiveMedia(_ view: UIView)
+
     /// Re-anchors the live surface for a flight. An `AVPlayerLayer` whose
     /// *bounds* animate does not track the animation smoothly — its video rect
     /// snaps — so the surface is laid out once at destination size and driven
@@ -165,6 +184,7 @@ public extension ZoomFlightCard {
     func adoptZoomLiveMediaView(_ view: UIView) {}
     var zoomLiveMediaTracksCardBounds: Bool { false }
     func setZoomContentBlend(_ t: CGFloat) {}
+    func setZoomLandingLiveMedia(_ view: UIView) {}
     func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {}
     func applyZoomRestingShadow(to layer: CALayer) {}
 }

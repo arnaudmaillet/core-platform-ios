@@ -264,6 +264,21 @@ public final class InteractiveSlideDismissal: NSObject {
         revealPresents = false
         revealReturnAxes = [.horizontal, .vertical]
         fallbackSlideAxis = nil
+        // ⚠️ AND THIS ONE, which outlived its presentation and answered about a
+        // post that was two screens ago.
+        //
+        // This driver is ONE retained instance for the screen's life, so a
+        // closure left here is asked again on the next push — capturing the
+        // previous opening's post id, which on a list answers `false` for ever
+        // once that post was a text row. The hero then takes a drag the slide
+        // has been told to contest, both claim it, and whichever recognizer
+        // begins first pops: if it is the slide, the geometry this method just
+        // cleared is still nil and the close leaves on the plain animator.
+        //
+        // Cleared to "no opinion" rather than to `true`: an owner that never
+        // sets it must get the arbitration it had before this channel existed,
+        // and `true` is a claim rather than the absence of one.
+        heroLandingAcceptsHero = nil
     }
 
     public func install(on nav: UINavigationController) {

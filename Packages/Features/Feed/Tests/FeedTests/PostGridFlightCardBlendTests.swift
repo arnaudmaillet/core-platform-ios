@@ -105,6 +105,9 @@ struct PostGridFlightCardBlendTests {
     private func tileCover(of card: PostGridFlightCard) -> UIView { card.subviews[0] }
     private func departureCover(of card: PostGridFlightCard) -> UIView { card.subviews[1] }
     /// Above the live surface, below the chrome — see the layer-order test.
+    ///
+    /// This is the PANE, which is what the blend moves. Its own subviews are the
+    /// landing's still and, when one could be joined, the landing's live surface.
     private func landingCover(of card: PostGridFlightCard) -> UIView {
         card.subviews[card.subviews.count - 2]
     }
@@ -287,6 +290,104 @@ struct PostGridFlightCardBlendTests {
             #expect(tileCover(of: card).isHidden == false)
             #expect(card.backgroundColor != UIColor.clear)
         }
+    }
+
+    // MARK: - The landing operand can be a PLAYER
+
+    /// ⚠️ THE POINT OF THE PANE. A landing that is a clip deserves the clip:
+    /// fading up its thumbnail is precisely "the destination arrives as a
+    /// thumbnail". The live view goes ABOVE the still, so the still is only ever
+    /// the floor for the instant before the surface has a frame.
+    @Test func theLandingsLiveSurfaceSitsAboveItsStillInsideThePane() {
+        let card = makeCard(.listMedia, kind: .video)
+        card.setDeparturePicture(picture())
+        let landing = VideoRenderView()
+        card.setZoomLandingLiveMedia(landing)
+
+        let pane = landingCover(of: card)
+        #expect(pane.subviews.count == 2)
+        #expect(pane.subviews.last === landing)
+    }
+
+    /// ⚠️ AND THE CARD NEVER WRITES ITS ALPHA — the same law the departure
+    /// surface is held to, for the same reason: `revealOnFirstFrame` owns it.
+    /// The PANE is what moves, so both operands ride one alpha that is nobody
+    /// else's.
+    @Test func theBlendNeverWritesTheLandingSurfacesAlpha() {
+        let card = makeCard(.listMedia, kind: .video)
+        card.setDeparturePicture(picture())
+        let landing = VideoRenderView()
+        card.setZoomLandingLiveMedia(landing)
+        let owned = landing.alpha
+
+        for step in 0...4 {
+            card.setBlend(CGFloat(step) / 4)
+            #expect(isAlpha(landing, owned), "the blend wrote an alpha the reveal owns")
+            #expect(isAlpha(landingCover(of: card), CGFloat(step) / 4))
+        }
+    }
+
+    /// A landing operand with no still behind it is still an operand — a row
+    /// whose cover has not loaded must not lose its clip as well.
+    @Test func aLiveLandingIsEnoughOnItsOwn() {
+        let card = PostGridFlightCard(post: post(kind: .video), cover: nil, style: .listMedia)
+        card.frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
+        card.layoutIfNeeded()
+        card.setDeparturePicture(picture())
+        card.setZoomLandingLiveMedia(VideoRenderView())
+
+        card.setBlend(1)
+        #expect(isAlpha(landingCover(of: card), 1))
+        #expect(landingCover(of: card).isHidden == false)
+    }
+
+    /// ⚠️ POSED, NOT AUTORESIZED. The flight builds a card at staging and
+    /// another for the animator, and one of them can be built before it has any
+    /// bounds — autoresizing from 0x0 stays 0x0 for ever, because every delta it
+    /// scales is zero. Measured as a landing operand installed into a pane of
+    /// `{{0,0},{0,0}}`, which draws nothing at any blend.
+    @Test func theLandingPaneTakesTheCardsSizeEvenWhenBuiltAtZero() {
+        let card = PostGridFlightCard(post: post(kind: .video), cover: picture(), style: .listMedia)
+        card.setDeparturePicture(picture())
+        let landing = VideoRenderView()
+        card.setZoomLandingLiveMedia(landing)
+        #expect(landing.bounds.width == 0)
+
+        card.frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
+        // Through the PROTOCOL channel, which is the one every pose runs and
+        // therefore the one that carries the layout — `setBlend` alone moves the
+        // alpha and nothing else.
+        let flying: any ZoomFlightCard = card
+        flying.setZoomContentBlend(0.5)
+        #expect(landingCover(of: card).bounds.size == CGSize(width: Self.side, height: Self.side))
+        #expect(landing.bounds.size == CGSize(width: Self.side, height: Self.side))
+    }
+
+    /// ⚠️ POSED BY TRANSFORM, NEVER RESIZED — the rule the DEPARTURE surface
+    /// already follows, and the one this operand was breaking.
+    ///
+    /// An `AVSampleBufferDisplayLayer` does not re-render its video rect during
+    /// an animated bounds change: inside a correctly sized, correctly centred
+    /// surface the content stays drawn at its previous size, pinned to the layer
+    /// origin. Filmed as the landing media letterboxing and sliding about inside
+    /// the transition window.
+    @Test func theLandingSurfaceIsPosedByTransformRatherThanResized() {
+        let card = makeCard(.listMedia, kind: .video)
+        card.setDeparturePicture(picture())
+        let landing = VideoRenderView()
+        card.setZoomLandingLiveMedia(landing)
+
+        let flying: any ZoomFlightCard = card
+        flying.setZoomContentBlend(0)
+        let laidOut = landing.bounds.size
+        #expect(laidOut.width > 0 && laidOut.height > 0)
+
+        // A card sweeping to a very different shape, as a flight's does.
+        card.frame = CGRect(x: 0, y: 0, width: 60, height: 200)
+        flying.setZoomContentBlend(0.5)
+        #expect(landing.bounds.size == laidOut, "the video layer was resized")
+        #expect(landing.transform != .identity, "the surface was not posed at all")
+        #expect(landing.center == CGPoint(x: 30, y: 100))
     }
 
     // MARK: - Furniture belongs to neither operand

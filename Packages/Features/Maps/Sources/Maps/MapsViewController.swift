@@ -1703,14 +1703,35 @@ extension MapsViewController: MKMapViewDelegate {
         guard !didDebugOpenPin,
               wantsText || wantsMedia || arguments.contains("-maps-open-first-cluster")
         else { return }
+        // `-maps-open-place` only has an answer on a HIERARCHY marker: a city or
+        // a country is a place before it is a photograph, and only those carry a
+        // place page beneath their feed. Asking for the biggest cluster of any
+        // kind picked a proximity one, whose `placePage` is nil — and the flag
+        // then did nothing at all, silently.
+        // `-maps-open-hierarchy-cluster` asks for the same marker WITHOUT the
+        // direct push, so a run can take the real route: tap a city, get the
+        // feed, and dismiss vertically onto the place page beneath. That
+        // dismissal is the one landing this page has that nothing else
+        // exercises — and a vertical drag on a TEXT post opens its comments
+        // instead, which is why the media filter matters here too.
+        let wantsPlace = arguments.contains("-maps-open-place")
+            || arguments.contains("-maps-open-hierarchy-cluster")
         let clusters = views.compactMap { $0.annotation as? MapComputedCluster }
             .filter {
                 $0.memberIDs.count > 1
                     && (!wantsText || $0.representative.isText)
                     && (!wantsMedia || !$0.representative.isText)
+                    && (!wantsPlace || $0.isHierarchyMarker)
             }
         guard let cluster = clusters.max(by: { $0.memberIDs.count < $1.memberIDs.count })
-        else { return }
+        else {
+            if wantsPlace {
+                print("[maps] -maps-open-place found NO hierarchy marker on screen"
+                    + " — pass -maps-mock-semantic-clusters, and a region wide"
+                    + " enough for a city or country to form")
+            }
+            return
+        }
         didDebugOpenPin = true
         let ids = Self.postIDs(of: cluster)
         let kind = cluster.representative.isText ? "text" : "media"
@@ -1783,6 +1804,26 @@ extension MapsViewController: MKMapViewDelegate {
                     makeClusterGallery(postIDs, place, feed, mapReturn)
                 }
             }
+            #if DEBUG
+            // `-maps-open-place`: pushes the place page ON ITS OWN.
+            //
+            // ⚠️ THIS SCREEN HAD NO SCRIPTED ROUTE AT ALL. It is inserted under
+            // the cluster feed and uncovered by a vertical dismissal — a gesture
+            // no harness can inject, and the nearest arguments all land
+            // somewhere else (`-snap-auto-dismiss` pops past it to the map, the
+            // vertical grab opens the comments). So its layout could only ever
+            // be judged by hand, and a change to it could only be verified by
+            // asking someone to go and look.
+            //
+            // Pushed directly here it is the same controller with the same
+            // content; what it does NOT exercise is the dismissal that normally
+            // uncovers it, which keeps its own arguments.
+            if ProcessInfo.processInfo.arguments.contains("-maps-open-place"),
+               let placePage {
+                navigationController?.pushViewController(placePage(UIViewController()), animated: true)
+                return
+            }
+            #endif
             revealSnapFeed(
                 postIDs,
                 self,
@@ -1970,8 +2011,17 @@ extension MapsViewController: MKMapViewDelegate {
             didLand = true
             self?.videoCoordinator.stopAll()
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-maps-demo-grab") {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            // `[delay]`, for the reason its two siblings grew one: a run that
+            // PAGES the feed first cannot be scripted against a hard-coded
+            // 1.5s, and the vertical dismissal onto a place page is only
+            // interesting once the viewer has moved off the post the cluster
+            // opened on.
+            if let position = ProcessInfo.processInfo.arguments
+                .firstIndex(of: "-maps-demo-grab") {
+                let arguments = ProcessInfo.processInfo.arguments
+                let delay = position + 1 < arguments.count
+                    ? (Double(arguments[position + 1]) ?? 1.5) : 1.5
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                     transition?.debugScriptedGrab()
                 }
             }

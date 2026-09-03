@@ -44,6 +44,10 @@ final class PlaceProfileViewController: UIViewController {
     /// same cards here.
     private let activityPage: ForYouGridPage
 
+    /// The banner's viewport. The IMAGE lives inside it and is taller than it
+    /// is, so it can lag behind the scroll without ever showing an edge — see
+    /// `applyBannerParallax`.
+    private let bannerBox = UIView()
     private let bannerView = UIImageView()
     private let bannerScrim = GradientScrimView()
     private let reactionsMetric = PlaceMetricView(title: "Reactions")
@@ -342,7 +346,19 @@ final class PlaceProfileViewController: UIViewController {
                     + " post=\(post?.id.rawValue ?? "nil")"
                     + " hero=\(post.flatMap { grid?.heroAppearance(for: $0.id) } != nil)"
                     + " window=\(window != nil)")
-                openTile(at: index, in: grid)
+                // ⚠️ THROUGH THE DELEGATE, NOT THE HOST'S OWN METHOD. Calling
+                // `openTile` directly skips `didSelectItemAt` and therefore
+                // `ForYouGridPage.open(at:)`, which is where a tap REMEMBERS
+                // the row to settle clear of the chrome. So the one thing this
+                // hook exists to exercise — where a dismissal comes back to —
+                // was the one thing it could not reach, and a run showed a card
+                // returning still half behind the tab bar whether the code was
+                // right or wrong. `ForYouGridPage.debugSelectItem` carries the
+                // same warning about `-foryou-open`, which made this mistake
+                // first.
+                if grid?.debugSelectItem(at: index) != true {
+                    openTile(at: index, in: grid)
+                }
             }
         }
         // `-maps-place-tile-dismiss <seconds>`: grabs the feed that tile just
@@ -384,7 +400,36 @@ final class PlaceProfileViewController: UIViewController {
     /// How many posts seed a feed opened from a tile — the same window (and
     /// the same reason) as For You's.
     private static let seedWindow = 40
-    private static let bannerHeight: CGFloat = 220
+    /// How much of the screen the banner claims. The place leads with its
+    /// picture, so the picture is most of the first screen.
+    private static let bannerHeightFraction: CGFloat = 0.6
+    /// The floor a headless or not-yet-laid-out view falls back to, so a
+    /// constraint built before the first layout pass is never zero.
+    private static let bannerHeightFloor: CGFloat = 220
+    /// How far the image lags the scroll, as a fraction of the header's travel.
+    /// Enough to read as depth, little enough that the crop stays honest.
+    private static let bannerParallaxFraction: CGFloat = 0.25
+
+    /// The banner's height for the CURRENT viewport — 70% of it.
+    private var bannerHeight: CGFloat {
+        let available = view.bounds.height > 0
+            ? view.bounds.height
+            : (view.window?.windowScene?.screen.bounds.height ?? 0)
+        guard available > 0 else { return Self.bannerHeightFloor }
+        return max(Self.bannerHeightFloor, available * Self.bannerHeightFraction)
+    }
+
+    /// How much taller than its viewport the image is cut. The parallax slides
+    /// the image by at most this, so the overshoot is what guarantees no edge
+    /// is ever exposed.
+    private var bannerOvershoot: CGFloat {
+        max(1, headerTravel * Self.bannerParallaxFraction)
+    }
+
+    private var bannerHeightConstraint: NSLayoutConstraint?
+    private var bannerScrimHeightConstraint: NSLayoutConstraint?
+    private var bannerImageTop: NSLayoutConstraint?
+    private var bannerImageHeight: NSLayoutConstraint?
 
     init(
         postIDs: [PostID],
@@ -475,6 +520,40 @@ final class PlaceProfileViewController: UIViewController {
         for hosted in hostedPages { (hosted as? ForYouGridPage)?.setAutoplayActive(false) }
     }
 
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // ⚠️ THE REVEAL THIS PAGE ARMED AND NEVER APPLIED.
+        //
+        // `ForYouGridPage.open(at:)` remembers the tapped post on EVERY tap, on
+        // every host, so that the row can be settled clear of the chrome once
+        // the post is covering the grid — where the move costs nothing to look
+        // at. For You and the profile both spend it from their own
+        // `viewDidDisappear`. This page never did, so a card tapped while it
+        // was half behind the tab bar departed from that rect and, because a
+        // flight's landing deliberately does not scroll (see
+        // `ForYouGridZoomSource`), came home to it. Filmed: a card cut off at
+        // the foot, opened, closed, and cut off in exactly the same way.
+        //
+        // With the foot cover measured below, the reveal now clears the bar the
+        // viewer can actually see rather than the safe area's smaller idea of
+        // it.
+        for hosted in hostedPages {
+            guard let page = hosted as? ForYouGridPage else { continue }
+            page.footChromeCover = floatingBarCover
+            page.applyPendingReveal()
+        }
+    }
+
+    /// How much of this screen's foot the tab bar actually covers — measured,
+    /// because it floats over the pages rather than insetting them. Same
+    /// quantity `landingOcclusion` takes for its bottom, asked of the bar.
+    private var floatingBarCover: CGFloat {
+        guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
+        else { return view.safeAreaInsets.bottom }
+        let inPage = view.convert(bar.frame, from: host)
+        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
+    }
+
     /// Exactly one page may drive playback: two grids competing for one pool
     /// is how a working set of six turns into a queue nobody wins. For You's
     /// pager makes the same call from the same three places (settle, tab tap,
@@ -501,13 +580,18 @@ final class PlaceProfileViewController: UIViewController {
         let top = headerHost.topAnchor.constraint(equalTo: view.topAnchor)
         headerTopConstraint = top
 
+        bannerBox.clipsToBounds = true
+        bannerBox.backgroundColor = .secondarySystemBackground
+        bannerBox.translatesAutoresizingMaskIntoConstraints = false
+        headerHost.addSubview(bannerBox)
+
         bannerView.contentMode = .scaleAspectFill
         bannerView.clipsToBounds = true
-        bannerView.backgroundColor = .secondarySystemBackground
         bannerView.translatesAutoresizingMaskIntoConstraints = false
-        headerHost.addSubview(bannerView)
+        bannerBox.addSubview(bannerView)
+
         bannerScrim.translatesAutoresizingMaskIntoConstraints = false
-        bannerView.addSubview(bannerScrim)
+        bannerBox.addSubview(bannerScrim)
 
         // The HERO TITLE: the place's name at the banner's foot, over the
         // legibility scrim — the identity leads the page, not the chrome.
@@ -526,6 +610,9 @@ final class PlaceProfileViewController: UIViewController {
         heroNameLabel.textColor = .label
         heroNameLabel.adjustsFontSizeToFitWidth = true
         heroNameLabel.minimumScaleFactor = 0.6
+        // Centred: the name is the banner's caption, not a list header.
+        heroKindLabel.textAlignment = .center
+        heroNameLabel.textAlignment = .center
         for label in [heroKindLabel, heroNameLabel] {
             label.layer.shadowColor = UIColor.systemBackground.cgColor
             label.layer.shadowOpacity = 0.8
@@ -535,13 +622,22 @@ final class PlaceProfileViewController: UIViewController {
         let heroTitle = UIStackView(arrangedSubviews: [heroKindLabel, heroNameLabel])
         heroTitle.axis = .vertical
         heroTitle.spacing = 2
+        heroTitle.alignment = .center
         heroTitle.translatesAutoresizingMaskIntoConstraints = false
-        bannerView.addSubview(heroTitle)
+        bannerBox.addSubview(heroTitle)
 
         let metrics = UIStackView(arrangedSubviews: [reactionsMetric, viewsMetric])
         metrics.distribution = .fillEqually
         metrics.translatesAutoresizingMaskIntoConstraints = false
-        headerHost.addSubview(metrics)
+        // ⚠️ INSIDE THE BANNER, under the name. The counters are part of the
+        // place's identity, so they sit on its picture rather than in a band
+        // below it — which also means the banner's bottom edge is the last
+        // thing on the header before the selector, with nothing between the
+        // gradient and the page to draw a line.
+        bannerBox.addSubview(metrics)
+        for label in metrics.arrangedSubviews.compactMap({ $0 as? PlaceMetricView }) {
+            label.applyBannerLegibility()
+        }
         self.metricsBand = metrics
 
         inlineBarSlot.translatesAutoresizingMaskIntoConstraints = false
@@ -565,44 +661,65 @@ final class PlaceProfileViewController: UIViewController {
         // pull-down (the host travelling below rest) stretches the banner
         // from the viewport's top edge instead of dragging it away and
         // exposing the background behind.
-        let bannerRestingTop = bannerView.topAnchor.constraint(equalTo: headerHost.topAnchor)
+        let bannerRestingTop = bannerBox.topAnchor.constraint(equalTo: headerHost.topAnchor)
         bannerRestingTop.priority = .defaultHigh
+        let bannerBottom = bannerBox.bottomAnchor.constraint(
+            equalTo: headerHost.topAnchor, constant: bannerHeight
+        )
+        bannerHeightConstraint = bannerBottom
+        let scrimHeight = bannerScrim.heightAnchor.constraint(
+            equalToConstant: Self.scrimHeight(forBanner: bannerHeight)
+        )
+        bannerScrimHeightConstraint = scrimHeight
+        // The image is cut TALLER than its viewport and slid within it — see
+        // `applyBannerParallax`. Both constants are re-derived on every layout,
+        // because both depend on how far the header can travel.
+        let imageTop = bannerView.topAnchor.constraint(equalTo: bannerBox.topAnchor)
+        bannerImageTop = imageTop
+        let imageHeight = bannerView.heightAnchor.constraint(equalTo: bannerBox.heightAnchor)
+        bannerImageHeight = imageHeight
         NSLayoutConstraint.activate([
             top,
             headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             headerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bannerRestingTop,
-            bannerView.topAnchor.constraint(lessThanOrEqualTo: view.topAnchor),
-            bannerView.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
-            bannerView.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
+            bannerBox.topAnchor.constraint(lessThanOrEqualTo: view.topAnchor),
+            bannerBox.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
+            bannerBox.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
             // The BOTTOM is the fixed edge (host.top + bannerHeight), so a
-            // stretched banner grows upward while the metrics hold still.
-            bannerView.bottomAnchor.constraint(
-                equalTo: headerHost.topAnchor, constant: Self.bannerHeight
-            ),
-            bannerScrim.leadingAnchor.constraint(equalTo: bannerView.leadingAnchor),
-            bannerScrim.trailingAnchor.constraint(equalTo: bannerView.trailingAnchor),
-            bannerScrim.bottomAnchor.constraint(equalTo: bannerView.bottomAnchor),
-            bannerScrim.heightAnchor.constraint(equalToConstant: 80),
+            // stretched banner grows upward while the title holds still.
+            bannerBottom,
+            imageTop,
+            imageHeight,
+            bannerView.leadingAnchor.constraint(equalTo: bannerBox.leadingAnchor),
+            bannerView.trailingAnchor.constraint(equalTo: bannerBox.trailingAnchor),
+            bannerScrim.leadingAnchor.constraint(equalTo: bannerBox.leadingAnchor),
+            bannerScrim.trailingAnchor.constraint(equalTo: bannerBox.trailingAnchor),
+            bannerScrim.bottomAnchor.constraint(equalTo: bannerBox.bottomAnchor),
+            scrimHeight,
             // The hero title rides the banner's FIXED bottom edge (see the
             // stretch note above), so a pull-down stretches the image behind
-            // it while the name holds its seat over the scrim.
-            heroTitle.leadingAnchor.constraint(equalTo: bannerView.leadingAnchor, constant: 16),
+            // it while the name holds its seat over the scrim. Centred, with
+            // the counters directly beneath it and both over the picture.
+            heroTitle.centerXAnchor.constraint(equalTo: bannerBox.centerXAnchor),
+            heroTitle.leadingAnchor.constraint(
+                greaterThanOrEqualTo: bannerBox.leadingAnchor, constant: 16
+            ),
             heroTitle.trailingAnchor.constraint(
-                lessThanOrEqualTo: bannerView.trailingAnchor, constant: -16
+                lessThanOrEqualTo: bannerBox.trailingAnchor, constant: -16
             ),
-            heroTitle.bottomAnchor.constraint(equalTo: bannerView.bottomAnchor, constant: -10),
-            metrics.topAnchor.constraint(
-                equalTo: headerHost.topAnchor, constant: Self.bannerHeight + 12
+            metrics.topAnchor.constraint(equalTo: heroTitle.bottomAnchor, constant: 10),
+            metrics.centerXAnchor.constraint(equalTo: bannerBox.centerXAnchor),
+            metrics.widthAnchor.constraint(
+                lessThanOrEqualTo: bannerBox.widthAnchor, constant: -32
             ),
-            metrics.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor, constant: 16),
-            metrics.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor, constant: -16),
+            metrics.bottomAnchor.constraint(equalTo: bannerBox.bottomAnchor, constant: -18),
             // ⚠️ A SLOT WITH A STATED HEIGHT, not the selector itself. The
             // inline bar fades out at the dock, and a header whose height
             // followed it would shrink under every number derived from it
             // (`headerHeight`, and through it the pages' inset and the dock
             // line) at the exact moment the dock is being decided.
-            inlineBarSlot.topAnchor.constraint(equalTo: metrics.bottomAnchor, constant: 8),
+            inlineBarSlot.topAnchor.constraint(equalTo: bannerBox.bottomAnchor, constant: 8),
             inlineBarSlot.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
             inlineBarSlot.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
             inlineBarSlot.bottomAnchor.constraint(equalTo: headerHost.bottomAnchor),
@@ -698,6 +815,67 @@ final class PlaceProfileViewController: UIViewController {
 
     // MARK: - The scroll coordinator (the profile page's arithmetic)
 
+    /// How tall the fade under the banner is.
+    ///
+    /// ⚠️ IT HAS TO REACH THE BOTTOM EDGE OPAQUE, which is what removes the
+    /// horizontal line the banner used to end on. A short scrim leaves the
+    /// image meeting the page background at a definite boundary — and a
+    /// boundary between a photograph and a flat colour reads as a rule, however
+    /// softly the two are blended just above it. Given a third of the banner
+    /// the gradient has room to land on the page's own colour before it gets
+    /// there, so there is no edge left to see.
+    static func scrimHeight(forBanner height: CGFloat) -> CGFloat {
+        max(120, height * 0.34)
+    }
+
+    /// Slides the image within its viewport so it lags the scroll.
+    ///
+    /// The header itself is moved by its top constraint, so the picture would
+    /// travel with it exactly 1:1 and read as flat. Moving the image DOWN
+    /// inside the box by a fraction of that travel makes it fall behind, which
+    /// is the whole of the effect. The image is cut taller than the box by at
+    /// least the largest offset this can produce, so no edge is ever exposed.
+    private func applyBannerParallax(travelled: CGFloat) {
+        let overshoot = bannerOvershoot
+        bannerImageHeight?.constant = overshoot * 2
+        let clamped = min(max(travelled, 0), headerTravel)
+        bannerImageTop?.constant = -overshoot + clamped * Self.bannerParallaxFraction
+    }
+
+    /// What actually COVERS the hosted list right now, top and bottom.
+    ///
+    /// Not the content inset: this page reserves the header's whole height as
+    /// scrollable range, and most of that is room the content scrolls INTO
+    /// rather than chrome it hides behind. What genuinely hides a row is the
+    /// header band wherever it currently sits — its own height at rest, the
+    /// docked selector once it has climbed — and the tab bar at the foot.
+    ///
+    /// ⚠️ THE TAB BAR IS MEASURED, NOT ASSUMED. It floats: it draws over the
+    /// content without insetting it, so `safeAreaInsets.bottom` understates it
+    /// by the height of the bar itself (34 against 83 on an iPhone 17 Pro).
+    /// Taking the larger of the two means a landing clears whichever is really
+    /// in the way.
+    private var landingOcclusion: UIEdgeInsets {
+        let bottom = floatingBarCover
+        // ⚠️ THE DOCKED BAND, NOT THE HEADER WHERE IT HAPPENS TO BE STANDING.
+        //
+        // The header is not a permanent occluder: the list scrolls UNDER it and
+        // it climbs away, so the room a landing can actually reach is the room
+        // left once it has docked. Measured at rest instead — its full height,
+        // some 520pt of a 874pt screen — the visible band came out at ~270pt,
+        // every Activity card was "taller than the gap", and `offset(toReveal:)`
+        // took its align-to-the-top branch and moved nothing. Which is exactly
+        // the report: a card left cut off by the tab bar with no scroll at all.
+        //
+        // The docked band is the navigation bar plus the selector that lands in
+        // it. That is what still covers the list after the header has gone.
+        let docked = view.safeAreaInsets.top + Self.selectorSlotHeight
+        return UIEdgeInsets(
+            top: max(view.safeAreaInsets.top, docked),
+            left: 0, bottom: bottom, right: 0
+        )
+    }
+
     /// The height the header takes at rest — what the pages are inset by so
     /// their content starts below it rather than behind it.
     private var headerHeight: CGFloat {
@@ -724,6 +902,10 @@ final class PlaceProfileViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         // Idempotent per value — the pages guard their own writes.
+        // The banner is a fraction of the viewport, so it is re-derived rather
+        // than fixed — a rotation or a different device is a different height.
+        bannerHeightConstraint?.constant = bannerHeight
+        bannerScrimHeightConstraint?.constant = Self.scrimHeight(forBanner: bannerHeight)
         let header = headerHeight
         for hosted in hostedPages {
             hosted.setHostedInsets(top: header, bottom: view.safeAreaInsets.bottom)
@@ -744,9 +926,12 @@ final class PlaceProfileViewController: UIViewController {
     /// the banner's viewport-top pin turns that travel into stretch.
     private func applyHeaderOffset(_ travelled: CGFloat) {
         headerTopConstraint?.constant = -min(travelled, headerTravel)
+        applyBannerParallax(travelled: travelled)
         let alpha = Self.identityAlpha(travelled: travelled, dockLine: headerTravel)
-        bannerView.alpha = alpha
-        metricsBand?.alpha = alpha
+        // The BOX, so the picture, its scrim, the name and the counters fade as
+        // one identity rather than the image sliding out from under its own
+        // caption.
+        bannerBox.alpha = alpha
         updateBarDocking(travelled: travelled)
     }
 
@@ -1309,7 +1494,7 @@ final class PlaceProfileViewController: UIViewController {
                 guard let self else { return }
                 view.layoutIfNeeded()
                 activityPage.beginHeroFreeze()
-                activityPage.revealPost(anchor)
+                activityPage.revealPost(anchor, clearing: landingOcclusion)
                 view.layoutIfNeeded()
             },
             dismissalDidEnd: { [weak self] committed in
@@ -1627,7 +1812,7 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         debugLogLanding("flight from \(activePostID?()?.rawValue ?? "nil")"
             + " to FIRST tile \(anchorID.rawValue)"
             + " blend=\(activePostID?() != anchorID && activeCover?() != nil)")
-        page.revealPost(anchorID)
+        page.revealPost(anchorID, clearing: landingOcclusion)
         // Visible for the whole return: the card is landing ON this tile.
         page.setHeroHidden(true, for: anchorID, conceals: false)
     }
@@ -1821,7 +2006,7 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         // slide every time.
         view.layoutIfNeeded()
         activityPage.beginHeroFreeze()
-        activityPage.revealPost(anchor)
+        activityPage.revealPost(anchor, clearing: landingOcclusion)
         // And again: cells at the landed offset are realized by the pass
         // AFTER it is set, never by the one that set it.
         view.layoutIfNeeded()
@@ -1842,7 +2027,7 @@ extension PlaceProfileViewController: ZoomTransitionSource {
         mirrorSelection(to: 0)
         pager.setActivePage(0, animated: false)
         page.beginHeroFreeze()
-        page.revealPost(anchor)
+        page.revealPost(anchor, clearing: landingOcclusion)
         view.layoutIfNeeded()
     }
 
@@ -1864,7 +2049,20 @@ extension PlaceProfileViewController {
     var debugHeaderConstant: CGFloat { headerTopConstraint?.constant ?? 0 }
     /// The dock line, as the coordinator computed it for this layout.
     var debugHeaderTravel: CGFloat { headerTravel }
-    var debugIdentityAlpha: CGFloat { bannerView.alpha }
+    var debugIdentityAlpha: CGFloat { bannerBox.alpha }
+    var debugBannerHeight: CGFloat { bannerHeightConstraint?.constant ?? 0 }
+    var debugScrimHeight: CGFloat { bannerScrimHeightConstraint?.constant ?? 0 }
+    var debugLandingOcclusion: UIEdgeInsets { landingOcclusion }
+    var debugHeaderBottom: CGFloat { headerHost.frame.maxY }
+    var debugBannerImageTop: CGFloat { bannerImageTop?.constant ?? 0 }
+    /// Drives the header the way a scroll does, which the simulator cannot.
+    func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffset(travelled) }
+    /// Whether the name and the counters are drawn ON the banner, centred.
+    var debugIdentityRidesTheBanner: Bool {
+        heroNameLabel.textAlignment == .center
+            && heroNameLabel.isDescendant(of: bannerBox)
+            && (metricsBand.map { $0.isDescendant(of: bannerBox) } ?? false)
+    }
     /// The band's two numbers as rendered — the place's own totals, which are
     /// deliberately NOT the gallery's (see `render`).
     /// Which post a dismissal from the MAP is currently aimed at. The rule it
@@ -1941,6 +2139,17 @@ private final class PlaceMetricView: UIView {
         accessibilityLabel = title
     }
 
+    /// The same soft shadow the hero title wears, for the same reason: these
+    /// now sit ON the picture, and the scrim under them is still mostly image.
+    func applyBannerLegibility() {
+        for label in [valueLabel, titleLabel] {
+            label.layer.shadowColor = UIColor.systemBackground.cgColor
+            label.layer.shadowOpacity = 0.8
+            label.layer.shadowRadius = 6
+            label.layer.shadowOffset = .zero
+        }
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
@@ -1985,10 +2194,26 @@ private final class GradientScrimView: UIView {
 
     private func applyColors() {
         guard let gradient = layer as? CAGradientLayer else { return }
+        // ⚠️ ENDS FULLY OPAQUE, and one stop short of the edge.
+        //
+        // Stopping at 0.85 left the last pixels of the photograph showing where
+        // the banner met the page, and a photograph meeting a flat colour is a
+        // line however gently they were blended above it. Landing on the page's
+        // own background before the edge means there is no boundary left to
+        // draw. The middle stop keeps the fade slow where the name sits and
+        // quick underneath it, so the type never floats on a grey slab.
         gradient.colors = [
             UIColor.systemBackground.withAlphaComponent(0).cgColor,
-            UIColor.systemBackground.withAlphaComponent(0.85).cgColor,
+            UIColor.systemBackground.withAlphaComponent(0.35).cgColor,
+            UIColor.systemBackground.withAlphaComponent(0.88).cgColor,
+            UIColor.systemBackground.cgColor,
         ]
+        // ⚠️ OPAQUE WELL BEFORE THE EDGE, not at it. Reaching full only in the
+        // last few points left the photograph still legible where it was cut,
+        // and an image ending in mid-detail against a flat colour is the line
+        // this is here to remove — the fade has to be FINISHED with room to
+        // spare, so what meets the page is the page's own colour.
+        gradient.locations = [0, 0.42, 0.78, 0.88]
     }
 }
 
