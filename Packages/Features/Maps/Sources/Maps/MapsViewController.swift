@@ -51,6 +51,12 @@ final class MapsViewController: UIViewController {
         [PostID], UIViewController, TextRevealOrigin,
         ((UIViewController) -> UIViewController)?
     ) -> Void
+    /// The same window built for a CLOSE, pushing nothing — what a feed opened
+    /// by a hero uses when the viewer has paged onto a post it cannot fly.
+    /// Injected like its push-shaped sibling: Maps depends on FeedInterface and
+    /// never on Feed.
+    private let makeRevealGeometry:
+        (UIViewController, TextRevealOrigin, (() -> Void)?) -> RevealGeometry
     /// Builds the place gallery a HIERARCHY cluster's feed dismisses into
     /// (`FeedFeatureBuilding.makeClusterGallery`): (member ids, the place
     /// itself, the feed about to cover it, the map-return flight source) →
@@ -201,6 +207,8 @@ final class MapsViewController: UIViewController {
             [PostID], UIViewController, TextRevealOrigin,
             ((UIViewController) -> UIViewController)?
         ) -> Void,
+        makeRevealGeometry: @escaping
+            (UIViewController, TextRevealOrigin, (() -> Void)?) -> RevealGeometry,
         makeClusterGallery: @escaping (
             [PostID], MapPlace, UIViewController,
         @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
@@ -217,6 +225,7 @@ final class MapsViewController: UIViewController {
         self.makeSnapFeed = makeSnapFeed
         self.pushPlainSnapFeed = pushPlainSnapFeed
         self.revealSnapFeed = revealSnapFeed
+        self.makeRevealGeometry = makeRevealGeometry
         self.makeClusterGallery = makeClusterGallery
         self.prewarm = prewarm
         self.openProfile = openProfile
@@ -1288,9 +1297,26 @@ final class MapsViewController: UIViewController {
     /// Top-K set shifts and keying off it would fade a settled cluster out and a
     /// near-identical one back in.
     private func reconcileClusters() {
+        // ⚠️ A ZERO SCALE IS NOT A ZOOM, IT IS A NOT-YET. The engine's own
+        // degenerate path ships EVERY pin as an unclustered single, and this
+        // runs from `regionDidChangeAnimated`, which fires when the map is
+        // re-attached — so one reconcile against a rect that has not resolved
+        // exploded the whole map to member coordinates and re-collapsed a frame
+        // later. Deferred instead: `layoutPending` is what the next real
+        // layout drains.
+        guard currentZoomScale > 0 else {
+            layoutPending = true
+            return
+        }
         let items = MapClusterEngine.cluster(
-            Array(pins.values),
-            zoomScale: currentZoomScale,
+            // ⚠️ SORTED, because the merge downstream is order-dependent (see
+            // `collide`). A dictionary's values re-order whenever it is
+            // mutated, and every return to this screen re-queries — so the
+            // markers moved on a map nobody had panned.
+            pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue },
+            // Snapped, so an epsilon in the viewport cannot move every grid
+            // line at once — see `MapClusterEngine.snapZoom`.
+            zoomScale: MapClusterEngine.snapZoom(currentZoomScale),
             cellPoints: Double(Self.clusterCellPoints),
             // The semantic pre-pass's two banding inputs: the zoom level is
             // the FALLBACK for an H3-less corpus; the viewport diagonal
@@ -1336,6 +1362,11 @@ final class MapsViewController: UIViewController {
             candidates.append(.init(key: key, members: Set(cluster.memberIDs)))
             candidateIsDeparting[key] = true
         }
+        // ⚠️ SORTED BEFORE THE ASSIGN. `MapClusterTracker.assign` documents a
+        // tie-break on the CANDIDATE INDEX — which is only deterministic if
+        // the caller supplies a defined one, and both loops above walk
+        // dictionaries.
+        candidates.sort { $0.key < $1.key }
 
         let matches = MapClusterTracker.assign(
             incoming: clusterItems.map { Set($0.memberIDs) }, candidates: candidates
@@ -1901,6 +1932,49 @@ extension MapsViewController: MKMapViewDelegate {
         }
     }
 
+    /// The MARKER's window, asked for at close time.
+    ///
+    /// Identical to the arguments the text-pin route already passes, so the two
+    /// routes' windows are the same window — a marker opened as a hero and a
+    /// marker opened as a reveal close the same way. The extra `dismissalDidEnd`
+    /// is the close-out the hero's own `onSourceReturned` performs and a card
+    /// close never reaches; the concealment is paid back by the animator.
+    private func markerRevealOrigin(for annotation: any MKAnnotation) -> TextRevealOrigin {
+        MapPinRevealSource.origin(
+            mapView: mapView,
+            annotation: annotation,
+            face: Self.face(of: annotation),
+            ringKind: (annotation as? MapComputedCluster).flatMap {
+                $0.isHierarchyMarker ? $0.place?.kind : nil
+            },
+            concealMarker: { [weak mapView] concealed in
+                mapView?.view(for: annotation)?.isHidden = concealed
+            },
+            depthView: { [weak self] in self?.view },
+            dismissalDidEnd: { [weak self] committed in
+                guard committed, let self else { return }
+                restoreBottomChromeForReturn(alpha: 1)
+                activeTransition = nil
+                videoCoordinator.setSurfaceVisible(true)
+                refreshVideoPlayback()
+            }
+        )
+    }
+
+    /// Which screen a card close is aiming at.
+    ///
+    /// ⚠️ THE POP'S DESTINATION DECIDES, not the post. A vertical grab lands on
+    /// the place page and closes onto its tile; everything else — the chevron,
+    /// a horizontal grab, and both axes when there is no place page at all —
+    /// lands on the MAP, so it closes onto the marker whatever post the viewer
+    /// paged to. Aiming a card at a screen the pop is not going to is how a
+    /// close ends up with no animation at all.
+    enum MapCardCloseTarget: Equatable { case marker, placeCard }
+
+    static func closeTarget(axis: ZoomDismissAxis, hasLanding: Bool) -> MapCardCloseTarget {
+        axis == .vertical && hasLanding ? .placeCard : .marker
+    }
+
     /// Where a place page goes when a vertical dismissal commits: beneath the
     /// feed it is landing from.
     ///
@@ -2176,9 +2250,16 @@ extension MapsViewController: MKMapViewDelegate {
         // close keep their map landing". Two routes, one rule, and only one of
         // them had it.
         nav.pushViewController(feedVC, animated: true)
-        if let gallery {
-            attachCardCloseAlongsideFlight(feed: feedVC, gallery: gallery, on: nav)
-        }
+        // ⚠️ UNCONDITIONALLY, INCLUDING CASE A. A single pin had no slide
+        // driver at all, so its chevron fell through to UIKit's native pop —
+        // the hero declines a `.card` close outright, and nothing else was
+        // listening. `arbitratesWithHeroGrab` keeps the two grabs disjoint and
+        // the `.hero` forward happens before any geometry is read, so a media
+        // post's close is still the flight.
+        attachCardCloseAlongsideFlight(
+            feed: feedVC, gallery: gallery,
+            markerOrigin: markerRevealOrigin(for: annotation), on: nav
+        )
     }
 
     /// A dismissal for the posts this flight cannot carry.
@@ -2197,9 +2278,12 @@ extension MapsViewController: MKMapViewDelegate {
     /// equivalent. `arbitratesWithHeroGrab` is what divides the work: each
     /// side refuses the other's kind, so exactly one claims any grab.
     private func attachCardCloseAlongsideFlight(
-        feed: UIViewController, gallery: UIViewController, on nav: UINavigationController
+        feed: UIViewController, gallery: UIViewController?,
+        markerOrigin: TextRevealOrigin, on nav: UINavigationController
     ) {
-        guard let landing = gallery as? any CardCloseLanding else { return }
+        // Optional now: the MARKER landing needs no place page, so the driver
+        // must exist even when there is none to land on.
+        let landing = gallery as? any CardCloseLanding
         let slide = InteractiveSlideDismissal()
         cardClose = slide
         slide.resetForNewPresentation()
@@ -2209,32 +2293,54 @@ extension MapsViewController: MKMapViewDelegate {
         // again when the pop it triggers asks for an animator — and the
         // adoption below is a MOVE, so a second one would put the two tiles
         // back where they started.
-        // ⚠️ THE SAME AXIS RULE THE FEED'S OWN DRIVER HAS. Without it the
-        // chevron on a paged-to TEXT post staged a card landing on a page that
-        // is not the pop's destination, and the platform's back-direction is
-        // the honest look for a close that could not stage its card.
-        slide.revealReturnAxes = [.vertical]
+        // ⚠️ THE DEFAULT AXES, deliberately restored. Restricting the window
+        // to `[.vertical]` made a horizontal grab a percent-driven SLIDE, and
+        // the chevron a plain one — which is the fallback that was filmed. Both
+        // now close as a window onto the marker; `fallbackSlideAxis` stays as
+        // the floor for the case where no geometry could be staged at all.
         slide.fallbackSlideAxis = .horizontal
-        slide.onWillBeginPop = { [weak nav, weak feed, gallery] axis in
-            guard axis == .vertical, let nav, let feed,
+        // Revealed by the closing window, exactly as the hero's own return and
+        // the reveal route's do.
+        slide.revealReturningChrome = tabBarController?.tabBar
+        slide.onWillBeginPop = { [weak self, weak nav, weak feed, gallery] axis in
+            guard axis == .vertical, let gallery, let nav, let feed,
                   let plan = Self.stack(
                       nav.viewControllers, inserting: gallery, beneath: feed
                   )
-            else { return }
+            else {
+                // Every other axis lands on the MAP, so the dock's hidden state
+                // goes back here — outside the transition, the one point at
+                // which it paints.
+                self?.restoreBottomChromeForReturn(alpha: 0)
+                return
+            }
             nav.setViewControllers(plan, animated: false)
         }
         var hasPrepared = false
-        slide.prepareForDismissal = { [weak feed, weak landing] axis in
-            // ⚠️ AND NOT ON ANY OTHER AXIS. A geometry staged for a back-button
-            // pop aims a card animator at a tile on a screen the pop is not
-            // going to; nil is how the driver selects the plain slide. The
-            // latch is deliberately NOT set here, so a later vertical grab can
-            // still stage properly.
-            guard axis == .vertical else {
+        slide.prepareForDismissal = { [weak self, weak feed, weak landing] axis in
+            guard let self, let feed else { return }
+            // ⚠️ A HERO'S POP IS FORWARDED BEFORE ANY OF THIS IS READ, so
+            // staging here for a media post would only conceal a marker the
+            // flight is about to land on.
+            guard (feed as? any ZoomTransitionDestination)?.zoomDismissalKind == .card
+            else {
                 slide.revealGeometry = nil
                 return
             }
-            guard !hasPrepared, let feed, let landing else { return }
+            switch Self.closeTarget(axis: axis, hasLanding: landing != nil) {
+            case .marker:
+                // ⚠️ NOT LATCHED, unlike the card below. The origin re-derives
+                // the marker's rect at ask time, so rebuilding is both free and
+                // more correct than remembering one — the map may have moved.
+                slide.revealGeometry = self.makeRevealGeometry(
+                    feed, markerOrigin,
+                    { [weak self] in self?.restoreBottomChromeForReturn(alpha: 0) }
+                )
+                return
+            case .placeCard:
+                break
+            }
+            guard !hasPrepared, let landing else { return }
             // ⚠️ ONLY FOR A CLOSE THAT CARRIES A CARD. This runs for every
             // dismissal including a hero's, and the staging below CONCEALS a
             // tile — a flight landing on a hidden tile reads as no animation
@@ -2251,9 +2357,11 @@ extension MapsViewController: MKMapViewDelegate {
         // in the mosaic for good.
         slide.onFeedPopped = { [weak self, weak landing, weak nav, gallery] _ in
             landing?.clearLandingConcealment()
-            // Idempotent: a card close that was armed and then abandoned leaves
-            // the page spliced in, and the back button must still find the map.
-            if let nav, let plan = Self.stack(nav.viewControllers, removing: gallery),
+            // Idempotent, and only where there is a page: a card close that was
+            // armed and then abandoned leaves it spliced in, and the back
+            // button must still find the map. Case A never had one.
+            if let gallery, let nav,
+               let plan = Self.stack(nav.viewControllers, removing: gallery),
                nav.topViewController !== gallery {
                 nav.setViewControllers(plan, animated: false)
             }

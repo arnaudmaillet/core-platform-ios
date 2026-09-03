@@ -175,6 +175,21 @@ public protocol FeedFeatureBuilding {
         origin: TextRevealOrigin,
         beneath: ((UIViewController) -> UIViewController)?
     )
+    /// The same window, built for the CLOSE and pushing nothing.
+    ///
+    /// Asked at dismissal staging, for a pop whose destination is the surface
+    /// that owns `origin` — so a screen opened by a hero can still close as a
+    /// window onto the thing it came from, which is what a post with no media
+    /// left to fly needs.
+    ///
+    /// `onWillClose` is the tap's equivalent of a drag's `onWillBeginPop`: a
+    /// chevron has no "begin", and chrome restored for the return only paints
+    /// when it is restored OUTSIDE the transition.
+    func makeRevealGeometry(
+        dismissing feed: UIViewController,
+        origin: TextRevealOrigin,
+        onWillClose: (() -> Void)?
+    ) -> RevealGeometry
     /// Best-effort, cancellable warming of these posts into the shared cache, so
     /// a subsequent `makeSnapFeedViewController` hydrates from memory rather than
     /// the network — used by Maps to prefetch the visible pins on viewport

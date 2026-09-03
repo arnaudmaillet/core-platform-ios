@@ -40,9 +40,20 @@ enum MapPinRevealSource {
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in }
     ) -> TextRevealOrigin {
         let side = face.side
-        return TextRevealOrigin(
+        var origin = TextRevealOrigin(
             rowFrame: { [weak mapView] space in
+                // ⚠️ STILL HELD, not merely still in the viewport. A reconcile
+                // that ran while the feed was open can remove this annotation
+                // and leave its COORDINATE exactly where it was — the rect test
+                // alone then reports a marker that is not there, and the window
+                // closes onto empty map while the concealment silently no-ops
+                // on a view that no longer exists. `MapPinZoomSource` states
+                // the same rule for the same reason. Nil sends the close to the
+                // centred fallback, which is honest.
                 guard let mapView,
+                      mapView.annotations.contains(where: {
+                          ($0 as AnyObject) === (annotation as AnyObject)
+                      }),
                       mapView.visibleMapRect.contains(MKMapPoint(annotation.coordinate))
                 else { return nil }
                 let point = mapView.convert(annotation.coordinate, toPointTo: mapView)
@@ -86,10 +97,18 @@ enum MapPinRevealSource {
             // is exactly what was filmed: a transition carrying an icon the
             // viewer never saw on the pin.
             makeDismissStandIn: { [weak mapView] _ in
-                marker(face: face, ringKind: ringKind, avatar: mapView?.wornAvatar(for: annotation))
+                marker(
+                    face: face, ringKind: ringKind,
+                    avatar: mapView?.wornAvatar(for: annotation),
+                    cover: mapView?.wornCover(for: annotation)
+                )
             },
             makePresentStandIn: { [weak mapView] in
-                marker(face: face, ringKind: ringKind, avatar: mapView?.wornAvatar(for: annotation))
+                marker(
+                    face: face, ringKind: ringKind,
+                    avatar: mapView?.wornAvatar(for: annotation),
+                    cover: mapView?.wornCover(for: annotation)
+                )
             },
             // Nothing to align to. The page holds still and the window opens
             // over it — see `TextRevealOrigin.alignsPageToSource`.
@@ -100,6 +119,17 @@ enum MapPinRevealSource {
             setConcealed: concealMarker,
             dismissalDidEnd: dismissalDidEnd
         )
+        // ⚠️ A MARKER'S ARRIVAL IS A PICTURE, so it comes up while the finger
+        // is still down.
+        //
+        // The default holds it back until the release, and that default was
+        // measured on a CARD arrival: text laid out for a width the window had
+        // not reached, clipped at its edge. A disc has no layout to be wrong
+        // about — and held back it meant the window carried the page all the
+        // way down and the face turned up once the flight was over. Filmed as
+        // "the destination is not in the transition window".
+        origin.arrivalRisesUnderFinger = true
+        return origin
     }
 
     /// The marker, drawn fresh — the same component the map itself renders, so
@@ -110,12 +140,23 @@ enum MapPinRevealSource {
     /// The card fades its whole face — disc AND glyph, one opaque unit — in over
     /// it, which keeps this a dissolve between two finished drawings rather than
     /// two half-drawn ones.
+    /// The stand-in the window becomes: the marker, drawn fresh, wearing
+    /// whatever the real one is wearing right now.
+    ///
+    /// ⚠️ BOTH FACES, and for a while only one of them was carried. A text
+    /// marker got its author; a MEDIA marker got a card with no picture in it,
+    /// so a close from a text post onto a photo marker was a blank light
+    /// rectangle shrinking across the map. It went unseen because the same
+    /// marker closed correctly from a MEDIA post — that leg is the hero, and
+    /// the hero's own card has always been handed the thumbnail.
     private static func marker(
-        face: PinCardView.Face, ringKind: MapPlace.Kind?, avatar: UIImage? = nil
+        face: PinCardView.Face, ringKind: MapPlace.Kind?,
+        avatar: UIImage? = nil, cover: UIImage? = nil
     ) -> UIView {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
         card.setFace(face)
         card.setTextAvatar(avatar)
+        card.imageView.image = cover
         card.setRing(
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
         )
@@ -135,6 +176,18 @@ extension MKMapView {
         switch view(for: annotation) {
         case let pin as MapAnnotationView: pin.card.textAvatar
         case let cluster as MapClusterAnnotationView: cluster.card.textAvatar
+        default: nil
+        }
+    }
+
+    /// The marker's own picture — a media face's cover — read the same way and
+    /// at the same moment as its author, and for the same reason: it arrives
+    /// asynchronously, so an answer captured when the source was built is a
+    /// guess about an image that had not loaded.
+    func wornCover(for annotation: any MKAnnotation) -> UIImage? {
+        switch view(for: annotation) {
+        case let pin as MapAnnotationView: pin.card.imageView.image
+        case let cluster as MapClusterAnnotationView: cluster.card.imageView.image
         default: nil
         }
     }

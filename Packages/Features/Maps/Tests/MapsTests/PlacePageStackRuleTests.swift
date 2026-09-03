@@ -95,3 +95,40 @@ struct PlacePageStackRuleTests {
         #expect(zip(undone, stack).allSatisfy { $0 === $1 })
     }
 }
+
+/// **THE POP'S DESTINATION DECIDES WHAT THE CLOSE FLIES TO.**
+///
+/// A marker's feed is a pager, and the presentation was chosen at the tap: a
+/// media-faced marker opens with a hero, and a viewer who swipes onto a TEXT
+/// post leaves that hero with nothing to fly. Filmed at 30fps: the page slid
+/// horizontally off the screen — the platform's fallback, no window at all.
+///
+/// The cure is not to give the card close a wider licence but to aim it at the
+/// screen the pop is actually going to. A vertical grab lands on the place page
+/// and closes onto its tile; the chevron and a horizontal grab land on the MAP,
+/// so they close onto the MARKER — whatever post the viewer paged to, and even
+/// when there is no place page at all.
+@MainActor
+struct MapCardCloseTargetTests {
+    /// The vertical grab, which is the only case that has ever had a card to
+    /// land on.
+    @Test func aVerticalGrabWithAPlacePageClosesOntoItsCard() {
+        #expect(
+            MapsViewController.closeTarget(axis: .vertical, hasLanding: true) == .placeCard
+        )
+    }
+
+    /// ⚠️ THE FILMED CASE. The chevron and a horizontal grab both land on the
+    /// map, so both close onto the marker.
+    @Test func everyOtherAxisClosesOntoTheMarker() {
+        #expect(MapsViewController.closeTarget(axis: .horizontal, hasLanding: true) == .marker)
+    }
+
+    /// ⚠️ AND WITH NO PLACE PAGE THERE IS NOTHING ELSE IT COULD BE. A single
+    /// pin never had a close driver at all, so its chevron fell through to
+    /// UIKit's native pop — visually the same slide, reached a different way.
+    @Test func withoutAPlacePageBothAxesCloseOntoTheMarker() {
+        #expect(MapsViewController.closeTarget(axis: .vertical, hasLanding: false) == .marker)
+        #expect(MapsViewController.closeTarget(axis: .horizontal, hasLanding: false) == .marker)
+    }
+}

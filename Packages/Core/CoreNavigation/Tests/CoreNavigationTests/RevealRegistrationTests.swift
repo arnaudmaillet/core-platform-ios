@@ -330,23 +330,56 @@ struct RevealRegistrationTests {
     /// ⚠️ EVERY FIT THAT CARRIES THE PAGE OBEYS THE SAME DRAG LAW — asking
     /// `== .covering` is a bug that compiles, and it shipped.
     ///
-    /// The schedule that keeps the destination off screen during a drag was
-    /// gated on `.covering` alone, so a `.contained` landing fell through to
-    /// the legacy three acts and its card appeared under the finger. Filmed on
-    /// a place page's Activity close, and reported as the same defect twice
-    /// because it WAS the same defect, reached by a fit the gate did not name.
+    /// The schedule was gated on `.covering` alone, so a `.contained` landing
+    /// fell through to the legacy three acts. Filmed on a place page's Activity
+    /// close, and reported as the same defect twice because it WAS the same
+    /// defect, reached by a fit the gate did not name. That invariant is what
+    /// this pins, and it is unchanged.
+    ///
+    /// ⚠️ THE LAW ITSELF CHANGED, and this test is where that is recorded. It
+    /// used to be "nothing arrives while the finger is down" — `fill` returned
+    /// 0 for a carrying fit at every progress. Filmed dragging a post closed
+    /// onto a map marker: the window carried the PAGE all the way down, held it
+    /// there for the length of the drag, and the marker's face appeared once
+    /// the flight was over. The arrival now RISES under the finger, on the same
+    /// fractions the timed leg uses.
     @Test func everyFitThatCarriesThePageAnswersTheSameQuestion() {
         #expect(RevealPageFit.covering.carriesPage)
         #expect(!RevealPageFit.clipped.carriesPage, "the legacy landing must stay legacy")
 
-        // And the drag law follows from that one answer, not from the fit.
+        // The law follows from that one answer, not from the fit.
+        let schedule = RevealStage.closeHandover(carriesPage: true)
         for fit in [RevealPageFit.covering] {
+            _ = fit
+            var previous: CGFloat = -1
             for step in 0...20 {
                 let progress = CGFloat(step) / 20
-                #expect(RevealStage.fill(at: progress, carriesPage: fit.carriesPage) == 0,
-                        "\(fit) showed its destination at \(progress)")
+                let fill = RevealStage.fill(
+                    at: progress, carriesPage: fit.carriesPage, risesUnderFinger: true
+                )
+                // Monotonic: an arrival that is still rising must never dip.
+                #expect(fill >= previous, "\(fit) went backwards at \(progress)")
+                previous = fill
+                // Nothing before the schedule says so — the window is sitting
+                // on the page at the start of a drag, and a face over it there
+                // is a second picture with nowhere to have come from.
+                if progress < schedule.delay {
+                    #expect(fill == 0, "\(fit) arrived early at \(progress)")
+                }
+                // …and solid once it has run, which is the half the report was
+                // about: it must be the marker, not the page, that the window
+                // finally becomes.
+                if progress >= schedule.delay + schedule.duration {
+                    #expect(fill == 1, "\(fit) never finished arriving by \(progress)")
+                }
             }
         }
+        // THE COMPLAINT, AS A NUMBER: solid by the middle of the drag, where it
+        // used to be absent for all of it.
+        #expect(RevealStage.fill(at: 0.55, carriesPage: true, risesUnderFinger: true) == 1)
+        #expect(RevealStage.fill(at: 0.10, carriesPage: true, risesUnderFinger: true) == 0)
+        // …and a card arrival is untouched by any of it.
+        #expect(RevealStage.fill(at: 0.55, carriesPage: true) == 0)
     }
 
 
@@ -363,6 +396,9 @@ struct RevealRegistrationTests {
             #expect(RevealStage.fill(at: progress, carriesPage: true) == 0,
                     "the destination was on screen at \(progress)")
         }
+        // ⚠️ AND THAT IS THE DEFAULT, not the only answer. The reason above is
+        // a fact about TEXT; an arrival that is a picture says so and comes up
+        // under the finger — see `aPictureArrivalRisesUnderTheFinger`.
         // A landing whose window IS a card-shaped slice of the page keeps the
         // three acts — there the morph is the transition.
         #expect(RevealStage.fill(at: 1, carriesPage: false) == 1)

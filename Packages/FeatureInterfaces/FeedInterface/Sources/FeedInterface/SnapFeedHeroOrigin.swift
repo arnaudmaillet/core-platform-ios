@@ -74,6 +74,10 @@ public struct TextRevealOrigin {
     ///
     /// `nil` is the row's answer and stays the default.
     public let makePresentStandIn: () -> UIView?
+    /// Whether this origin's arrival may come up while the finger is still
+    /// down — see `RevealGeometry.arrivalRisesUnderFinger`. A picture may; a
+    /// card with text may not.
+    public var arrivalRisesUnderFinger = false
     /// Whether the page counter-translates so its caption lands where the
     /// SOURCE's caption is.
     ///
