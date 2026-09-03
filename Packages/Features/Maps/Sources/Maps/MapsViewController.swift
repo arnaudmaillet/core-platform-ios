@@ -1288,9 +1288,26 @@ final class MapsViewController: UIViewController {
     /// Top-K set shifts and keying off it would fade a settled cluster out and a
     /// near-identical one back in.
     private func reconcileClusters() {
+        // ⚠️ A ZERO SCALE IS NOT A ZOOM, IT IS A NOT-YET. The engine's own
+        // degenerate path ships EVERY pin as an unclustered single, and this
+        // runs from `regionDidChangeAnimated`, which fires when the map is
+        // re-attached — so one reconcile against a rect that has not resolved
+        // exploded the whole map to member coordinates and re-collapsed a frame
+        // later. Deferred instead: `layoutPending` is what the next real
+        // layout drains.
+        guard currentZoomScale > 0 else {
+            layoutPending = true
+            return
+        }
         let items = MapClusterEngine.cluster(
-            Array(pins.values),
-            zoomScale: currentZoomScale,
+            // ⚠️ SORTED, because the merge downstream is order-dependent (see
+            // `collide`). A dictionary's values re-order whenever it is
+            // mutated, and every return to this screen re-queries — so the
+            // markers moved on a map nobody had panned.
+            pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue },
+            // Snapped, so an epsilon in the viewport cannot move every grid
+            // line at once — see `MapClusterEngine.snapZoom`.
+            zoomScale: MapClusterEngine.snapZoom(currentZoomScale),
             cellPoints: Double(Self.clusterCellPoints),
             // The semantic pre-pass's two banding inputs: the zoom level is
             // the FALLBACK for an H3-less corpus; the viewport diagonal
@@ -1336,6 +1353,11 @@ final class MapsViewController: UIViewController {
             candidates.append(.init(key: key, members: Set(cluster.memberIDs)))
             candidateIsDeparting[key] = true
         }
+        // ⚠️ SORTED BEFORE THE ASSIGN. `MapClusterTracker.assign` documents a
+        // tie-break on the CANDIDATE INDEX — which is only deterministic if
+        // the caller supplies a defined one, and both loops above walk
+        // dictionaries.
+        candidates.sort { $0.key < $1.key }
 
         let matches = MapClusterTracker.assign(
             incoming: clusterItems.map { Set($0.memberIDs) }, candidates: candidates
