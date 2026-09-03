@@ -37,10 +37,20 @@ final class PinCardView: UIView {
     /// stand-in is the same KIND of thing as what replaces it rather than a
     /// different statement about the post.
     static let textSymbolName = "person.crop.circle.fill"
-    /// Point size of that glyph inside the 44pt circle — ~40% of the diameter,
-    /// which reads at pin size while leaving a ring of the neutral ground
-    /// visible as its own signal.
-    static let textSymbolPointSize: CGFloat = 18
+    /// ⚠️ RENDERED LARGE AND SCALED TO FILL, because the fallback stands in
+    /// for a PICTURE.
+    ///
+    /// It used to be 18pt centred in the 44pt disc — about 40% of the diameter,
+    /// leaving a ring of neutral ground around it. That reads as an icon
+    /// sitting on a marker, and what it replaces is an author's face, which
+    /// fills the marker edge to edge. A stand-in that occupies less than the
+    /// thing it stands in for makes the marker change SIZE when the avatar
+    /// arrives.
+    ///
+    /// The size here is only the raster's: the image view scales it to the
+    /// bounds, so this is chosen for crispness on the largest thing the face
+    /// ever becomes — a full-screen flight card — not for the 44pt pin.
+    static let textSymbolPointSize: CGFloat = 96
 
     /// The post's cover image, full-bleed aspect-fill. During a frame-animated
     /// flight the crop *morphs* between the pin's square and the page's
@@ -432,7 +442,10 @@ private final class PinTextFaceView: UIView {
                 pointSize: PinCardView.textSymbolPointSize, weight: .semibold
             ))
         glyph.tintColor = .tintColor
-        glyph.contentMode = .center
+        // Fills the disc exactly as `avatar` does, so the two are the same
+        // shape and the swap is a change of picture rather than of layout.
+        glyph.contentMode = .scaleAspectFill
+        glyph.clipsToBounds = true
         glyph.frame = bounds
         glyph.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         glyph.isUserInteractionEnabled = false

@@ -158,6 +158,28 @@ struct PinTextFaceAvatarTests {
         #expect(images.first?.isHidden == false, "the glyph is the fallback and did not come back")
     }
 
+    /// ⚠️ THE FALLBACK FILLS THE MARKER, because it stands in for a PICTURE.
+    ///
+    /// It was an 18pt symbol centred in a 44pt disc — about 40% of the
+    /// diameter, with a ring of neutral ground around it — so the marker
+    /// visibly changed size the moment an author's face arrived. A stand-in
+    /// occupies exactly what it stands in for: same frame, same content mode,
+    /// so the swap is a change of picture and nothing else.
+    @Test func theFallbackGlyphFillsTheFaceExactlyAsAnAvatarDoes() throws {
+        let card = PinCardView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        card.setFace(.text)
+        card.layoutIfNeeded()
+        let textFace = try #require(face(of: card))
+        let images = textFace.subviews.compactMap { $0 as? UIImageView }
+        let glyph = try #require(images.first)
+        let avatar = try #require(images.last)
+
+        #expect(glyph.contentMode == avatar.contentMode, "the two are not the same shape")
+        #expect(glyph.contentMode == .scaleAspectFill)
+        #expect(glyph.frame == textFace.bounds, "the glyph does not fill the face")
+        #expect(avatar.frame == textFace.bounds, "the avatar does not fill the face")
+    }
+
     /// The pin keeps its own shape: wearing a face does not make a text marker
     /// a media one.
     @Test func anAvatarDoesNotChangeTheMarkersShape() {
