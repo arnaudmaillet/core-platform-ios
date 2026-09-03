@@ -180,6 +180,24 @@ struct PinTextFaceAvatarTests {
         #expect(avatar.frame == textFace.bounds, "the avatar does not fill the face")
     }
 
+    /// ⚠️ A MEDIA MARKER'S STAND-IN CARRIES ITS PICTURE TOO.
+    ///
+    /// The builder set the face, the ring and the author, and nothing else —
+    /// so a marker wearing a PHOTO was stood in for by a card with no image at
+    /// all, and a close from a text post onto a photo marker was a blank light
+    /// rectangle shrinking across the map. It went unseen because the same
+    /// marker closes correctly from a MEDIA post: that leg is the hero, and
+    /// the hero's own card has always been handed the thumbnail.
+    @Test func aMediaFacedCardCarriesTheCoverItWasHanded() {
+        let card = PinCardView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
+        card.setFace(.media)
+        #expect(card.imageView.image == nil, "a fresh card should carry nothing")
+
+        let cover = UIImage(systemName: "photo")
+        card.imageView.image = cover
+        #expect(card.imageView.image === cover)
+    }
+
     /// The pin keeps its own shape: wearing a face does not make a text marker
     /// a media one.
     @Test func anAvatarDoesNotChangeTheMarkersShape() {

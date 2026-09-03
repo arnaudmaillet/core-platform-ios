@@ -97,10 +97,18 @@ enum MapPinRevealSource {
             // is exactly what was filmed: a transition carrying an icon the
             // viewer never saw on the pin.
             makeDismissStandIn: { [weak mapView] _ in
-                marker(face: face, ringKind: ringKind, avatar: mapView?.wornAvatar(for: annotation))
+                marker(
+                    face: face, ringKind: ringKind,
+                    avatar: mapView?.wornAvatar(for: annotation),
+                    cover: mapView?.wornCover(for: annotation)
+                )
             },
             makePresentStandIn: { [weak mapView] in
-                marker(face: face, ringKind: ringKind, avatar: mapView?.wornAvatar(for: annotation))
+                marker(
+                    face: face, ringKind: ringKind,
+                    avatar: mapView?.wornAvatar(for: annotation),
+                    cover: mapView?.wornCover(for: annotation)
+                )
             },
             // Nothing to align to. The page holds still and the window opens
             // over it — see `TextRevealOrigin.alignsPageToSource`.
@@ -132,12 +140,23 @@ enum MapPinRevealSource {
     /// The card fades its whole face — disc AND glyph, one opaque unit — in over
     /// it, which keeps this a dissolve between two finished drawings rather than
     /// two half-drawn ones.
+    /// The stand-in the window becomes: the marker, drawn fresh, wearing
+    /// whatever the real one is wearing right now.
+    ///
+    /// ⚠️ BOTH FACES, and for a while only one of them was carried. A text
+    /// marker got its author; a MEDIA marker got a card with no picture in it,
+    /// so a close from a text post onto a photo marker was a blank light
+    /// rectangle shrinking across the map. It went unseen because the same
+    /// marker closed correctly from a MEDIA post — that leg is the hero, and
+    /// the hero's own card has always been handed the thumbnail.
     private static func marker(
-        face: PinCardView.Face, ringKind: MapPlace.Kind?, avatar: UIImage? = nil
+        face: PinCardView.Face, ringKind: MapPlace.Kind?,
+        avatar: UIImage? = nil, cover: UIImage? = nil
     ) -> UIView {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
         card.setFace(face)
         card.setTextAvatar(avatar)
+        card.imageView.image = cover
         card.setRing(
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
         )
@@ -157,6 +176,18 @@ extension MKMapView {
         switch view(for: annotation) {
         case let pin as MapAnnotationView: pin.card.textAvatar
         case let cluster as MapClusterAnnotationView: cluster.card.textAvatar
+        default: nil
+        }
+    }
+
+    /// The marker's own picture — a media face's cover — read the same way and
+    /// at the same moment as its author, and for the same reason: it arrives
+    /// asynchronously, so an answer captured when the source was built is a
+    /// guess about an image that had not loaded.
+    func wornCover(for annotation: any MKAnnotation) -> UIImage? {
+        switch view(for: annotation) {
+        case let pin as MapAnnotationView: pin.card.imageView.image
+        case let cluster as MapClusterAnnotationView: cluster.card.imageView.image
         default: nil
         }
     }
