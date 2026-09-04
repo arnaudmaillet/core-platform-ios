@@ -278,9 +278,40 @@ that is half decomposed and half sheeted is fine and expected — the client
 handles both and reports the mix — but a track that does not reproduce its
 artwork is a defect nothing downstream can detect.
 
-If the source is Lottie, this is close to free: a transform-only composition IS
-this message, and reducing it at publish time is a few lines against the
-document's transform properties. If it is not transform-only, emit a sheet.
+If the source is Lottie, the reduction itself is close to free: a transform-only
+composition IS this message, and extracting it at publish time is a walk over the
+document's `ks` and `tr` objects. `Scripts/lottie-decomposability.py` does exactly
+that walk and prints the verdict per file.
+
+### ⚠️ But do not expect existing Lottie artwork to qualify
+
+Run against the twelve real dotLottie files already shipping in this app (the
+chat sticker strip), that script returns:
+
+    1 / 12 decomposable
+
+Not because the motion is exotic — the affine property count dwarfs the raster
+one in almost every file (Book: 334 affine against 51 raster) — but because a
+handful of **animated gradient endpoints, stroke widths and colours** are
+sprinkled through each one, and a single raster property forces the whole icon
+onto a sheet. Three files are within *six* such properties of qualifying
+(Weather: 2, Cars: 5, NoEntry: 6), and six of the twelve are within ten.
+
+Two conclusions, and they point the same way:
+
+1. **Ask C is a constraint on how icons are AUTHORED, not a property to hope
+   for.** "No animated gradients, no animated stroke widths, no animated fill
+   colours — move it, scale it, rotate it, fade it" belongs in the icon design
+   guide. That one rule is worth the 24x.
+2. **The pipeline must check rather than assume.** A file that looks affine and
+   is not produces an icon that does not match its artwork, and nothing
+   downstream can detect that.
+
+Caveat on the sample: those twelve are 200px hand-drawn chat stickers, which are
+a different artwork class from a 44pt map mark. They are evidence about what
+designer-authored Lottie looks like by default, not a prediction of the map
+catalog's rate. But "by default" is the point — the rate is a decision, and
+somebody has to take it before the artwork is commissioned.
 
 ## 4. Ask D — the fallback asset format: a sprite sheet, not a GIF
 
