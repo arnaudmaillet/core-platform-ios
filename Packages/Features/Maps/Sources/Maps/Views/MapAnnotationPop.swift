@@ -98,6 +98,20 @@ final class MapAnnotationPopChoreographer {
 
     /// Pops a freshly added batch of views in, staggered in the order MapKit
     /// handed them over.
+    /// Puts views MapKit merely re-realized straight into their resting state.
+    ///
+    /// ⚠️ EXPLICIT, not assumed. A recycled view can arrive still carrying a
+    /// cancelled pop's alpha and transform — the animator that was setting them
+    /// is stopped here rather than left to finish onto the wrong pin — so
+    /// "leave it alone" would leave some markers invisible.
+    func settle(_ views: [MKAnnotationView]) {
+        for view in views {
+            arrivals.removeValue(forKey: ObjectIdentifier(view))?.stopAnimation(true)
+            view.alpha = 1
+            view.transform = .identity
+        }
+    }
+
     func popIn(_ views: [MKAnnotationView]) {
         for (index, view) in views.enumerated() {
             let key = ObjectIdentifier(view)

@@ -187,6 +187,14 @@ final class MapsViewController: UIViewController {
     /// A diff folded into the model during a transition still owes a layout;
     /// this asks the settle to run one.
     private var layoutPending = false
+    /// The annotations THIS reconcile put on the map, awaiting their views.
+    ///
+    /// ⚠️ `didAdd` IS NOT "SOMETHING NEW HAPPENED". MapKit calls it for every
+    /// view it realizes — including the whole visible set when the map comes
+    /// back from a push — so popping in whatever it hands over meant the entire
+    /// map scale-and-faded in again on every return, with nothing having
+    /// changed. Only what this screen actually added is an arrival.
+    private var pendingPopIn: Set<ObjectIdentifier> = []
 
     /// A sensible default until location permission / deep-linking lands: central
     /// Paris at neighbourhood zoom (also where the mock dataset seeds its pins).
@@ -1396,13 +1404,45 @@ final class MapsViewController: UIViewController {
         // `displayed` now — the choreographer is their sole owner until then.
         let departing = displayed.filter { !target.contains($0.key) }
         for id in departing.keys { displayed[id] = nil }
+        // A marker that leaves before its view was ever realized is no longer
+        // an arrival, and its identifier would otherwise sit in the set for the
+        // life of the screen.
+        for annotation in departing.values {
+            pendingPopIn.remove(ObjectIdentifier(annotation as AnyObject))
+        }
         popChoreographer.popOut(departing.map { (id: $0.key, annotation: $0.value) })
 
-        if !toAdd.isEmpty { mapView.addAnnotations(toAdd) }
+        if !toAdd.isEmpty {
+            pendingPopIn.formUnion(toAdd.map { ObjectIdentifier($0 as AnyObject) })
+            mapView.addAnnotations(toAdd)
+        }
         refreshVideoPlayback()
     }
 
     private static func singleIdentity(_ postID: PostID) -> String { "p:" + postID.rawValue }
+
+    /// Splits a batch of realized views into the ones that are ARRIVING and the
+    /// ones that are merely being drawn again.
+    ///
+    /// Pure and static for the same reason `stack(_:inserting:beneath:)` is:
+    /// the rule needs no live `MKMapView`, and getting it wrong is invisible in
+    /// a screenshot — it only shows up as a map that re-lands every time the
+    /// viewer comes back to it.
+    static func popPartition<View>(
+        _ views: [View], pending: Set<ObjectIdentifier>,
+        identity: (View) -> ObjectIdentifier?
+    ) -> (arriving: [View], settled: [View]) {
+        var arriving: [View] = []
+        var settled: [View] = []
+        for view in views {
+            if let id = identity(view), pending.contains(id) {
+                arriving.append(view)
+            } else {
+                settled.append(view)
+            }
+        }
+        return (arriving, settled)
+    }
 
     /// The place page's way home: a closure producing a FRESH flight source
     /// for `annotation`'s marker, resolved when the page stages its own
@@ -1648,11 +1688,24 @@ extension MapsViewController: MKMapViewDelegate {
     }
 
     func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
-        // Land them: scale-and-fade in, staggered across the batch. This fires
-        // for pins panning into the rendered region too, not only for a fresh
-        // query — which is what makes the map feel populated rather than
-        // stamped.
-        popChoreographer.popIn(views)
+        // Land the ARRIVALS: scale-and-fade in, staggered across the batch.
+        // This still fires for pins panning into the rendered region, not only
+        // for a fresh query — which is what makes the map feel populated rather
+        // than stamped.
+        //
+        // ⚠️ BUT NOT FOR EVERY VIEW MapKit HANDS OVER. It realizes the whole
+        // visible set when the map comes back from a push, so popping the batch
+        // meant the entire map re-landed on every return with nothing having
+        // changed. The others are settled instead — explicitly, because a
+        // recycled view can still be carrying a cancelled pop's alpha.
+        let batch = Self.popPartition(views, pending: pendingPopIn) { view in
+            view.annotation.map { ObjectIdentifier($0 as AnyObject) }
+        }
+        for view in batch.arriving {
+            view.annotation.map { pendingPopIn.remove(ObjectIdentifier($0 as AnyObject)) }
+        }
+        popChoreographer.popIn(batch.arriving)
+        popChoreographer.settle(batch.settled)
         // Annotation views now exist (clustering is current) → bind autoplay and
         // warm the visible posts so a tap opens instantly.
         refreshVideoPlayback()
