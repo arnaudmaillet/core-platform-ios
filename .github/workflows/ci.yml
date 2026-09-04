@@ -11,14 +11,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test:
-    name: build-test
+  # ── Which packages have tests ────────────────────────────────────────────
+  # Ubuntu, not macOS: this is a `find` over the working tree, and macOS
+  # runners are the scarce resource (5 concurrent on the free plan for public
+  # repos). Emits the matrix the test job fans out over.
+  discover:
+    name: discover packages
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List packages under test
+        id: list
+        run: |
+          set -euo pipefail
+
+          entries=()
+
+          # Every local package that has a test target (a Tests/ dir with sources).
+          for manifest in $(find Packages -name Package.swift -not -path '*/.build/*' | sort); do
+            dir=$(dirname "$manifest")
+            ls "$dir"/Tests/*/*.swift >/dev/null 2>&1 || continue
+            name=$(grep -m1 -E 'name:[[:space:]]*"' "$dir/Package.swift" | sed -E 's/.*name:[[:space:]]*"([^"]+)".*/\1/')
+            entries+=("{\"label\":\"$name\",\"name\":\"$name\",\"dir\":\"$dir\",\"scheme\":\"\",\"avsbdl\":\"\"}")
+          done
+
+          # MediaPlayback's AVSampleBufferDisplayLayer backing is the process
+          # default, and layerClass resolves once per process — so the entry
+          # above only ever covers the new path. This second entry forwards
+          # AVSBDL_RENDER=0 to the test runner to cover the legacy
+          # AVPlayerLayer backing; the suite prints which backing it actually
+          # got ("[avsbdl-test] backing = ..."), so a forwarding regression is
+          # visible in the log rather than a silent double-run of one path.
+          # It pins the product scheme deliberately: the -Package scheme would
+          # drag in siblings this pass does not need.
+          entries+=('{"label":"MediaPlayback (legacy AVPlayerLayer)","name":"MediaPlayback","dir":"Packages/Core/MediaPlayback","scheme":"MediaPlayback","avsbdl":"0"}')
+
+          matrix=$(printf '%s\n' "${entries[@]}" | paste -sd, - )
+          matrix="[$matrix]"
+          echo "$matrix" | python3 -m json.tool > /dev/null   # fail loudly on malformed JSON
+          echo "Packages under test:"
+          echo "$matrix" | python3 -c 'import json,sys; [print(" -", e["label"]) for e in json.load(sys.stdin)]'
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  # ── The app itself ───────────────────────────────────────────────────────
+  # Off the critical path: this runs alongside the test lanes.
+  build-app:
+    name: build app
     runs-on: macos-latest
-    # 90, not 60: the sequential per-package test loop rebuilds the shared
-    # dependency graph each iteration, and a PR touching a bottom-of-graph
-    # package (CoreNetworking et al.) invalidates it for EVERY package — a
-    # green run was timeout-cancelled at exactly 60:00 mid-loop (PR #49).
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -84,91 +127,138 @@ jobs:
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Pick simulator
-        id: sim
+  # ── One lane per package ─────────────────────────────────────────────────
+  # Was a sequential loop in a single job: 18 invocations, 45 min, of which
+  # ~5 min was test execution. The rest was the shared dependency graph
+  # (SwiftProtobuf, Connect, CoreModels, DesignSystem) recompiled once per
+  # package, because each package gets its own DerivedData tree. Parallelism,
+  # not sharing DerivedData, is the fix: a shared tree would put every module
+  # on every target's search path and hide exactly the missing-dependency bug
+  # this CI exists to catch (PR #127).
+  test:
+    name: test ${{ matrix.pkg.label }}
+    needs: discover
+    runs-on: macos-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false      # one red package must not hide the others
+      # The free plan allows 5 concurrent macOS jobs across the account.
+      # 4 leaves a slot so a second PR's run is not starved behind this one;
+      # raise it if the concurrency ceiling ever does.
+      max-parallel: 4
+      matrix:
+        pkg: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then
+            echo "No Xcode 26.x found on this runner" >&2
+            ls -d /Applications/Xcode_*.app 2>/dev/null >&2 || true
+            exit 1
+          fi
+          echo "Selecting $XC"
+          sudo xcode-select -s "$XC/Contents/Developer"
+
+      - name: Test ${{ matrix.pkg.label }}
+        working-directory: ${{ matrix.pkg.dir }}
+        env:
+          # Empty for every lane but the legacy-backing one. VideoRenderFlags
+          # only reacts to the literal "0", so an empty value is the default
+          # path — no conditional needed.
+          TEST_RUNNER_AVSBDL_RENDER: ${{ matrix.pkg.avsbdl }}
         run: |
           set -o pipefail
+          SPM="$GITHUB_WORKSPACE/.spm"
+          NAME='${{ matrix.pkg.name }}'
+
+          # On a fresh runner xcodebuild reports "Supported platforms for the
+          # buildables is empty" and falls back to My Mac unless the package
+          # resolves first.
+          xcodebuild -resolvePackageDependencies -scheme "$NAME" -clonedSourcePackagesDirPath "$SPM"
+
+          # Multi-product packages (e.g. CoreNetworking + CoreNetworkingMocks)
+          # put the test action on the auto-generated "<name>-Package" scheme,
+          # not the product scheme; single-product packages only have "<name>".
+          # Prefer -Package when it exists, unless the matrix pinned a scheme.
+          SCHEME='${{ matrix.pkg.scheme }}'
+          if [ -z "$SCHEME" ]; then
+            SCHEME="$NAME"
+            if xcodebuild -list -clonedSourcePackagesDirPath "$SPM" 2>/dev/null \
+                 | grep -qE "^[[:space:]]+${NAME}-Package$"; then
+              SCHEME="${NAME}-Package"
+            fi
+          fi
+          echo "Using scheme: $SCHEME"
+
+          # CoreSimulator enumerates its devices lazily, and asking too early
+          # gets an answer with the "Any iOS Simulator Device" placeholder and
+          # nothing else. The old single-job workflow never saw this: it asked
+          # once, after a full app build, by which point the runner was warm.
+          # A package lane asks within seconds of a cold boot. It is a race and
+          # not a property of any package — in run 33816841427, MediaPlayback
+          # ran twice on the same scheme, once green and once red. So warm the
+          # device list first, then retry.
+          xcrun simctl list devices available >/dev/null 2>&1 || true
+
           # A concrete iPhone simulator from xcodebuild's own destination list
-          # (guaranteed valid), reused for every package's tests since they all
-          # target the same platform.
-          DEST_ID=$(xcodebuild -project core-platform-ios.xcodeproj -scheme core-platform-ios \
-            -showdestinations -clonedSourcePackagesDirPath .spm 2>/dev/null \
-            | grep 'platform:iOS Simulator' | grep -iE 'name:iPhone' \
-            | grep -oE 'id:[0-9A-Fa-f-]+' | head -1 | cut -d: -f2)
+          # for THIS scheme (guaranteed valid) — a simctl UDID is not
+          # guaranteed to be in the scheme's destination list.
+          #
+          # Note the `|| true` on the assignment: the shell is `bash -e` and
+          # this script sets pipefail, so a grep that matches nothing would
+          # abort the lane HERE, before the diagnostic below ever runs — which
+          # is exactly how the first attempt failed silently.
+          DEST_ID=""
+          for attempt in 1 2 3 4 5 6; do
+            DESTS=$(xcodebuild -scheme "$SCHEME" -showdestinations \
+              -clonedSourcePackagesDirPath "$SPM" 2>&1) || true
+            DEST_ID=$(printf '%s\n' "$DESTS" \
+              | grep 'platform:iOS Simulator' | grep -iE 'name:iPhone' \
+              | grep -oE 'id:[0-9A-Fa-f-]+' | head -1 | cut -d: -f2) || true
+            if [ -n "$DEST_ID" ]; then
+              break
+            fi
+            echo "attempt $attempt: no iPhone destination yet, retrying"
+            printf '%s\n' "$DESTS" | tail -20
+            sleep 10
+          done
           if [ -z "$DEST_ID" ]; then
-            echo "No iPhone simulator destination found" >&2
+            echo "::error::No iPhone simulator destination for scheme $SCHEME after 6 attempts"
+            xcrun simctl list runtimes | grep -i ios >&2 || true
             exit 1
           fi
-          echo "Using simulator id=$DEST_ID"
-          echo "id=$DEST_ID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator id=$DEST_ID (attempt $attempt)"
 
-      - name: Test all packages
+          xcodebuild test -scheme "$SCHEME" -destination "id=$DEST_ID" \
+            -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation
+
+  # ── The required check ───────────────────────────────────────────────────
+  # `develop`'s branch protection requires a status check literally named
+  # "build-test". Keep this job's name in sync with it, or merges stop being
+  # gated on anything.
+  build-test:
+    name: build-test
+    needs: [discover, build-app, test]
+    # !cancelled(), not always(): with always() a cancelled run would still
+    # report a red required check instead of no check at all.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect results
         run: |
           set -uo pipefail
-          SPM="$GITHUB_WORKSPACE/.spm"           # shared checkouts, resolved once above
-          DEST="id=${{ steps.sim.outputs.id }}"
+          echo "discover:  ${{ needs.discover.result }}"
+          echo "build-app: ${{ needs.build-app.result }}"
+          echo "test:      ${{ needs.test.result }}"   # aggregate of every lane
           FAILED=()
-
-          # Runs a single package's tests. Multi-product packages (e.g.
-          # CoreNetworking + CoreNetworkingMocks) put the test action on the
-          # auto-generated "<name>-Package" scheme, not the product scheme;
-          # single-product packages only have "<name>". Prefer -Package when it
-          # exists.
-          test_package() {
-            local dir="$1" name="$2"
-            cd "$dir" || return 1
-            xcodebuild -resolvePackageDependencies -scheme "$name" -clonedSourcePackagesDirPath "$SPM" || return 1
-            local scheme="$name"
-            if xcodebuild -list -clonedSourcePackagesDirPath "$SPM" 2>/dev/null \
-                 | grep -qE "^[[:space:]]+${name}-Package$"; then
-              scheme="${name}-Package"
-            fi
-            echo "Using scheme: $scheme"
-            xcodebuild test -scheme "$scheme" -destination "$DEST" \
-              -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation
-          }
-
-          # Every local package that has a test target (a Tests/ dir with sources).
-          PKG_DIRS=$(for manifest in $(find Packages -name Package.swift -not -path '*/.build/*'); do
-            dir=$(dirname "$manifest")
-            if ls "$dir"/Tests/*/*.swift >/dev/null 2>&1; then echo "$dir"; fi
-          done | sort)
-
-          echo "Packages under test:"; echo "$PKG_DIRS"
-
-          for dir in $PKG_DIRS; do
-            name=$(grep -m1 -E 'name:[[:space:]]*"' "$dir/Package.swift" | sed -E 's/.*name:[[:space:]]*"([^"]+)".*/\1/')
-            echo "::group::Test $name ($dir)"
-            if ( test_package "$dir" "$name" ); then
-              echo "PASS $name"
-            else
-              echo "FAIL $name"
-              FAILED+=("$name")
-            fi
-            echo "::endgroup::"
-          done
-
-          # MediaPlayback's AVSampleBufferDisplayLayer backing is the process
-          # default, and layerClass resolves once per process — so the loop
-          # above only ever covered the new path. This second run forwards
-          # AVSBDL_RENDER=0 to the test runner to cover the legacy
-          # AVPlayerLayer backing; the suite prints which backing it actually
-          # got ("[avsbdl-test] backing = ..."), so a forwarding regression is
-          # visible in the log rather than a silent double-run of one path.
-          echo "::group::Test MediaPlayback (legacy AVPlayerLayer backing)"
-          if ( cd "$GITHUB_WORKSPACE/Packages/Core/MediaPlayback" && \
-               env TEST_RUNNER_AVSBDL_RENDER=0 \
-                 xcodebuild test -scheme MediaPlayback -destination "$DEST" \
-                 -clonedSourcePackagesDirPath "$SPM" -skipMacroValidation ); then
-            echo "PASS MediaPlayback (legacy backing)"
-          else
-            echo "FAIL MediaPlayback (legacy backing)"
-            FAILED+=("MediaPlayback-legacy-backing")
-          fi
-          echo "::endgroup::"
-
+          [ "${{ needs.discover.result }}"  = "success" ] || FAILED+=("discover")
+          [ "${{ needs.build-app.result }}" = "success" ] || FAILED+=("build-app")
+          [ "${{ needs.test.result }}"      = "success" ] || FAILED+=("test")
           if [ ${#FAILED[@]} -ne 0 ]; then
-            echo "::error::Failed package tests: ${FAILED[*]}"
+            echo "::error::Failed: ${FAILED[*]} — open the job list above for the failing lane"
             exit 1
           fi
-          echo "All package tests passed."
+          echo "App builds (Debug + Release) and all package tests passed."
