@@ -1,0 +1,423 @@
+# Backend: animated icons for text-only posts — map markers and chat emotes
+
+**Service:** `geo_discovery.v1` (+ a new catalog RPC; `chat.v1` optional)
+· **Status:** proposal — no field exists yet, so the wire shape is still ours to choose
+**Client:** iOS Maps tab (every text marker, every zoom, every pan) and the chat transcript
+**Related:** `dev/BACKEND_GAPS.md` §15 (`RadarPin` renditions), §18 (semantic
+clusters), `dev/issues/BACKEND_MAP_PIN_AUTHOR.md` (same marker slot),
+`dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` (§C, and a client guarantee
+this proposal voids), `dev/issues/BACKEND_H3_BOUNDING_BOX.md` (field-number
+collision)
+
+## Summary
+
+A text-only post has no cover, so its marker wears a glyph — or, once
+`BACKEND_MAP_PIN_AUTHOR` lands, the author's avatar. The product wants a third
+option above both: an **animated icon** attached to the post, drawn on the
+marker in place of the avatar.
+
+The requirement is unqualified: **every marker wearing an icon animates, all
+the time.** Not the selected one, not the three most central — every one.
+
+That single word "every" is what makes this a contract question rather than a
+client one. The client can render it; what the client cannot do is survive the
+shape of payload this feature would naturally be given.
+
+## Why this is not just another URL field
+
+The map's clustering engine guarantees that no two markers are closer than
+64pt on screen (`MapClusterEngine`, collision cell = marker footprint + 8pt).
+That bounds the viewport to a packed lattice:
+
+| Device | Lattice | Simultaneous markers |
+|---|---|---|
+| 440×956pt (17 Pro Max class) | 8 × 16 | **128** |
+| 375×667pt (iPhone SE 3) | 7 × 12 | **84** |
+
+Two properties make this the *realistic* number rather than a pathological one:
+
+- **The lattice saturates.** For any corpus denser than a viewport's worth,
+  clustering does not thin the markers below the lattice — it fills it. In any
+  populated city, at any zoom, the count is the maximum.
+- **The whole screen can be text.** `MapClusterEngine.representative(of:)` is
+  kind-neutral by deliberate design ("Popularity is a POST judgement, not a
+  format one" — an earlier media-preferring rule was reverted). A cluster whose
+  most-liked member is a text post wears the text face, and therefore the icon.
+  On top of that, the client classifies **any pin with an empty
+  `thumbnail_url`** as text — including a media post whose thumbnail the
+  pipeline never generated.
+
+So the design target is 128 concurrently animating icons, not a handful.
+
+**The consequence for the wire.** On iOS, memory is a function of the number of
+**distinct images** resident, not the number of things drawing them: layers
+sharing one image share its backing store. So the marker count is nearly free
+and the *variety* count is not:
+
+Measured at the client's real geometry — a 136px cell, 12 frames, RGBA — one
+resident atlas is **867 KB**:
+
+| Wire shape | Distinct images on screen | Resident texture |
+|---|---|---|
+| Enumerated catalog id (typical screen, ~20 distinct) | 20 | **~17 MB** |
+| Enumerated catalog id (pathological, 64 distinct) | 64 | ~56 MB |
+| Free-form per-post asset URL, 12 frames | 128 | **108 MB** — measured |
+| Free-form per-post asset URL, 24 frames (the cap) | 128 | **~217 MB** — jetsam |
+
+And the sharing guarantee is precisely what makes the free-form branch
+unrecoverable rather than merely expensive: an image assigned to a live layer is
+retained by the render tree, so a cache can evict only what is already off
+screen. There is no client-side mitigation, and no third-party rendering
+library changes it — they all decode into per-instance surfaces, which is worse.
+
+**Hence the shape of this ask: an enumerated id on the pan path, and free-form
+assets only where the on-screen count is one.**
+
+## What already exists, and why it does not answer
+
+- `RadarPin` is `post_id / lat / lng / thumbnail_url`. Nothing else.
+- **Do not overload `thumbnail_url`** with a scheme (`icon://sparkles`,
+  `emote:42`). Recorded here so it is not proposed later: the client classifies
+  any non-empty `thumbnail_url` as a media post, and every deployed client
+  would both mis-render the marker as a photo *and* fire an HTTP fetch at a
+  non-HTTP URL. This is a breaking change disguised as an additive one.
+- `MapPostCard` (the `GetGeoTimeline` Focus path) is the right home for a
+  free-form asset, but it is reachable only **after a tap** — the cold read the
+  Radar pan path deliberately avoids. It cannot serve the marker.
+
+---
+
+## 0. BLOCKING: reconcile the `RadarPin` field-number ledger first
+
+Three in-flight proposals already collide on `RadarPin`, before this one adds
+anything:
+
+| Field | Claimed by | Source |
+|---|---|---|
+| 5 | `media.v1.MediaKind media_kind` | `BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §C |
+| 5 | `string author_avatar_url` | `BACKEND_MAP_PIN_AUTHOR.md` — **collision** |
+| 6 | `string preview_url` | `BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §C |
+| 6 | `string author_id` | `BACKEND_MAP_PIN_AUTHOR.md` — **collision** |
+| 6 | `int64 h3_index` | `BACKEND_H3_BOUNDING_BOX.md` §A — **collision** |
+| 7, 8 | `uint32 width`, `uint32 height` | `BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §C |
+
+`BACKEND_H3_BOUNDING_BOX.md` already flags part of this in its own text
+(⚠️ *"field 5 is RESERVED for media_kind"*) but then takes 6, which the
+renditions proposal had also taken. None of the four proposals can land until
+one ledger is adopted **as a whole**.
+
+Proposed reconciliation — seniority order, oldest proposal keeps its numbers:
+
+```proto
+message RadarPin {
+  string             post_id           = 1;   // shipped
+  double             lat               = 2;   // shipped
+  double             lng               = 3;   // shipped
+  string             thumbnail_url     = 4;   // shipped; empty => text-only post
+
+  media.v1.MediaKind media_kind        = 5;   // MEDIA_PREVIEW_RENDITIONS §C
+  string             preview_url       = 6;   // MEDIA_PREVIEW_RENDITIONS §C
+  uint32             width             = 7;   // MEDIA_PREVIEW_RENDITIONS §C
+  uint32             height            = 8;   // MEDIA_PREVIEW_RENDITIONS §C
+
+  int64              h3_index          = 9;   // H3_BOUNDING_BOX §A   (was 6)
+  string             author_avatar_url = 10;  // MAP_PIN_AUTHOR       (was 5)
+  string             author_id         = 11;  // MAP_PIN_AUTHOR       (was 6)
+
+  uint32             icon_id           = 12;  // ← THIS PROPOSAL
+}
+```
+
+No field here is shipped beyond 4, so the renumbering costs nothing today and
+costs a migration the moment any one of them ships alone.
+
+---
+
+## 1. Ask A — `RadarPin.icon_id`
+
+```proto
+// The animated face a TEXT-ONLY post wears in place of the author avatar.
+// 0 or absent = no icon; the marker keeps the avatar/glyph it draws today.
+uint32 icon_id = 12;
+```
+
+Invariants requested as server guarantees (the client enforces them defensively
+either way):
+
+- Range `1 .. 1024`. An id outside the range, or absent from the catalog
+  version the client holds, **falls back to the avatar/glyph** — never an
+  error, never a fetch, never a blank marker.
+- Set **only when `thumbnail_url` is empty**. A pin carrying both a cover and an
+  icon is a server bug; the client ignores `icon_id` when a cover is present.
+- Denormalized into the Redis pin projection **at index time**, like the
+  renditions fields. The pan path must not hydrate to resolve it.
+
+**Why an enum and not a URL, in bandwidth terms** (the memory argument above is
+the primary one): a `uint32` varint at these ids is ≤3 bytes with its tag; a CDN
+URL is ~60–80. At a 200-pin Top-K response that is **~600 B versus ~14 KB per
+pan**, on the highest-frequency path in the product.
+
+## 2. Ask B — the icon catalog
+
+A new message, served once and cached on disk by the client, keyed by version.
+
+```proto
+message AnimatedIcon {
+  uint32 id          = 1;  // matches RadarPin.icon_id; 1..1024
+  string slug        = 2;  // "sparkles" — ALSO the chat shortcode. [a-z0-9_]{1,24}
+  string sheet_url   = 3;  // ONE sprite sheet, PNG or HEIC, alpha required
+  uint32 frame_count = 4;  // 1..24
+  uint32 columns     = 5;  // grid width; rows = ceil(frame_count / columns)
+  uint32 cell_px     = 6;  // MUST be 136 (see §3)
+  uint32 frame_ms    = 7;  // one of {33, 50, 66, 83, 100}; 33 preferred (§3)
+  string label       = 8;  // VoiceOver text, localizable
+}
+
+message AnimatedIconCatalog {
+  uint32                version = 1;  // bumped on ANY change
+  repeated AnimatedIcon icons   = 2;  // <= 1024
+}
+```
+
+Delivery can be an RPC (`GetAnimatedIconCatalog(version) -> catalog | not-modified`)
+or a versioned static JSON/protobuf on the CDN. The client only needs: fetch
+once, cache on disk, re-fetch when a served `icon_id` is unknown or on a version
+bump. A stale catalog is safe — unknown ids fall back — but it means a newly
+published icon is invisible to clients until they re-fetch, so a cheap version
+probe on app launch is worth having.
+
+## 3. Ask C — the asset format: a sprite sheet, not a GIF
+
+This is the unusual part of the ask, so here is the reasoning in full.
+
+**Serve each icon as ONE still image containing every frame in a grid**, plus
+the geometry in the catalog above — **HEIC preferred over PNG**. Not a GIF, not
+an APNG, not a Lottie JSON.
+
+Two arguments that are commonly made for this and that we are NOT making, because
+they were tested and they do not hold:
+
+- ~~"The client has no animated-image decoder."~~ **It does.** iOS 26 decodes
+  GIF, APNG, animated WebP, HEICS and animated AVIF natively through ImageIO
+  (`CGImageSourceCopyTypeIdentifiers()` returns 59 UTIs; a 30-frame decode runs
+  correctly on a background queue). There is no decoder to add.
+- ~~"A sheet is smaller on the wire."~~ **It depends on frame count and it is a
+  wash at our operating point.** At 30 frames/132px a HEIC sheet is 118 KB
+  against animated WebP's 137 KB; at 12 frames/136px, HEICS is 34.1 KB against
+  the sheet's 42.1 KB — the animated container wins by 20%. Do not argue size in
+  either direction.
+
+The real reasons, all of which survive:
+
+- **One sheet is one texture, and it is one decode.** 128 markers wearing the
+  same icon share one resident image; the animation is a per-layer window
+  sliding over it. This is the entire cost model, and it is what makes 128
+  concurrent icons affordable at all.
+- **It moves the bake off the device.** Every animated container has to be
+  unpacked to frames before it can be played this way, and that cost is real:
+  128 distinct HEICS icons measured **10.8 s to bake** (8 cores, simulator),
+  against one still decode for a sheet. A pan *is* first sighting — it reveals a
+  dozen new markers at once — so a client-side bake lands on exactly the wrong
+  moment.
+- **It removes a whole class of silent failure.** The client's current decoder,
+  handed a GIF, returns **frame zero with no error**. An "animated icons"
+  release would ship as a "static icons" release and pass every existing test.
+- **GIF specifically is disqualified** — on the format spec, not on speed (GIF is
+  in fact the fastest thing here to decode). GIF89a provides a single
+  *Transparent Color Index*: transparency is binary on/off, with no partial
+  alpha, and the palette is 256 colours. On a 44pt disc over live map tiles that
+  is an aliased cut-out rim on all 128 markers, plus banding on any gradient.
+
+Asset invariants requested of the pipeline:
+
+| Invariant | Why |
+|---|---|
+| Square cells, row-major, `frame_count` ≤ 24 | The client precomputes one unit-space rect per frame. |
+| `cell_px = 136` | 132px is the marker disc at @3x; **plus a 2px fully transparent gutter**. |
+| The 2px gutter is mandatory | The same sheet is minified to ~66px for a chat emote and ~88px on a @2x device. Without a transparent gutter, bilinear sampling bleeds the neighbouring frame into the icon's rim. This is a silent, ugly, hard-to-attribute defect. |
+| **Circular alpha pre-baked** into every frame | The marker is a 44pt disc. If the asset is already round, the client sets no mask — and a mask on an animating layer costs an offscreen render pass *per marker per frame*, which at 128 markers is the single largest cost in the feature. Pre-baking the circle on the server removes it entirely. |
+| `frame_ms` from a fixed set: **33, 50, 66, 83, 100** (30, 20, 15, 12, 10 fps), **33 preferred**. The set deliberately excludes **24 fps**. | One rate per icon — see below. |
+| ≤ 512 KB encoded per sheet | Bounds the catalog's download and disk footprint. |
+| **HEIC preferred over PNG** for `sheet_url` | At 30 frames, 118 KB against PNG's 260 KB, with alpha preserved (241 → 256 distinct levels, alpha RMSE 0.24%). One still decode, and HEVC hardware decode is universal on device. |
+| Sheets are immutable per `id` + `version` | Lets the client cache aggressively with a long `Cache-Control`. |
+
+### Why those frame rates, and why not 24
+
+Three independent reasons, in descending order of how well they are sourced:
+
+1. **Apple's own guidance for this exact content class.** The ProMotion
+   documentation's frame-rate table gives "small, low-speed animations (clock
+   ticking, progress bars)" a range of **8–48 Hz**, and says verbatim that
+   "smaller movements — like an icon that rotates in-place — may look just fine
+   at a lower rate", with the instruction to "choose the lowest frame rate that
+   achieve's your desired visual flow" [sic]. A 44pt disc animating in place is
+   literally the documented example.
+2. **Texture budget.** Frame count is the one cost that scales linearly and
+   certainly. At 132×132 RGBA a frame is ~68 KB; a 60 fps set is roughly **1.8×
+   over** the client's 48 MB atlas cache, which converts a memory cost into a
+   recurring evict-and-re-fetch cost. 30 fps is marginal; 15 fps fits
+   comfortably.
+3. **24 fps is the worst available choice for a mixed fleet.** It is a native
+   ProMotion step (120/5) but it is **not a divisor of 60**, so on every
+   non-ProMotion iPhone it plays 3:2 and judders visibly. 12, 15, 20 and 30
+   divide both 60 and 120 exactly. 24 is the number film instinct reaches for
+   and it is the one to exclude.
+
+**One rate per icon, and it should be 30 — the halving is the client's job, not
+the contract's.**
+
+An earlier draft of this document asked for two rates: 15 fps for map markers and
+30 for chat emotes. That was wrong on its own terms, for a reason worth recording
+so it is not reintroduced: **an icon is ONE sprite sheet, shared by both
+surfaces.** A sheet has one frame count and one authored rate. A contract cannot
+express two.
+
+30 fps is the right number to author at, for two reasons that agree:
+
+- It is what the closest shipped precedent presents for dense small animated
+  elements. Telegram's Lottie animation cache hardcodes a frame skip of 2 against
+  its own 60 fps authoring spec, unconditionally, on every device — so its inline
+  custom emoji, reactions and emoji keyboard all present 30.
+- Perception favours the higher rate on the *map*, not the chat, which is the
+  opposite of what the earlier draft assumed. Judder tracks per-frame
+  displacement in screen pixels, and a marker is a 44pt disc against a ~22pt
+  inline emote — roughly twice the displacement for the same motion. If anything
+  the map is the more demanding surface.
+
+**Where the halving belongs.** There is one genuine reason to run markers slower,
+and it is narrow: a map that is open and *stationary* is the only state in which
+the display would otherwise idle toward its 10 Hz floor, so the markers become
+the only thing setting the refresh rate (WWDC22, *Power down*: "the display's
+refresh rate is determined by the animation with the highest frame rate in your
+app"). In a live chat the screen is already being driven by arriving messages and
+scrolling, so emotes are not what sets the rate.
+
+That is a battery argument about one state, not a rendering-quality argument, and
+it is **currently an estimate rather than a measurement**. It therefore belongs on
+the client, where it costs nothing to implement and nothing to reverse: playing
+every other rect of a 30 fps sheet yields 15 fps from the same asset — Telegram's
+`frameSkip`, applied at playback instead of at cache-build. The client can even
+scope it to the state that motivates it (decimate once the map has been still for
+a few seconds, run full rate while the viewer is interacting), which no contract
+value could express.
+
+**What the backend must not do** is bake the decision in by shipping 15 fps
+sheets: that would cap the chat surface too, and it cannot be undone client-side.
+
+**⚠️ And playback decimation buys nothing for MEMORY — `frame_count` is the only
+lever there.** Halving the presented rate leaves the whole sheet resident, so at
+30 fps the frame cap is doing all the work: at 12 frames a 136px sheet is ~867 KB
+and the client's 48 MB atlas cache holds ~56 distinct icons; at 24 frames it is
+~1.7 MB and the cache holds ~28. That is why `frame_count ≤ 24` is a hard
+invariant and not a style note — and why a 30 fps icon must be a *short* loop
+(24 frames at 33 ms is 0.8 s), not a long one.
+
+### If the pipeline cannot bake sheets — the fallback ladder, in order
+
+1. **Server-baked sheets.** The ask above.
+2. **Serve dotLottie (or HEICS) and let the client bake once, cached to disk.**
+   This is genuinely viable and is not a consolation prize: a vector re-renders at
+   any `cell_px`, so a future @4x or a different surface costs no re-bake, where a
+   sheet is pixels at one scale. Measured price for the vector route: **one remote
+   package in a module that has none today** (ThorVG — MIT, SPM, no transitive
+   dependencies, 1.7 MB, pure C API), and **757 ms single-threaded / 225 ms on
+   four threads** to bake 128 distinct 12-frame icons off the main thread.
+   Note the incumbent library cannot do this job: lottie-ios took **14.6 s of
+   *main* thread** for the same work and crashed 3/3 attempts off-main.
+   ⚠️ And it does **not** remove the need for a server-side Lottie parser: ThorVG's
+   *parse* is super-linear (5.1 ms at 302 shapes → 145.9 ms at 2 416), so a
+   heavy-file guard cannot live on the client — by the time it can measure, it has
+   already paid. The budget must be enforced at publish.
+3. **Client-bundled catalog**, backend serves only `icon_id`. What the client
+   does while this is in flight (§8) — but icons can then only be added in an app
+   release, which defeats the point of a server-driven catalog.
+
+For a *raster* wire the trade is worse than for a vector one, not better: the
+client bake is cheaper to add (ImageIO, no package) but buys nothing, because the
+server already produced pixels either way. **If the backend can emit an animated
+raster container, it can emit a grid.**
+
+## 4. Ask D — the escape hatch for arbitrary per-post assets
+
+The bounded catalog is a constraint on *variety*, and the product may
+legitimately want "attach any animation you like to your post". That is safe —
+after a tap, where exactly one is on screen:
+
+```proto
+message MapPostCard {
+  // ... existing ...
+  string animated_icon_url = N;  // free-form sheet or APNG; Focus path ONLY
+}
+```
+
+The split is the point: **enumerated on Radar (128 on screen), free-form on
+Focus (1 on screen).** The same post can carry both — a catalog id for its
+marker and a bespoke asset for its detail card.
+
+## 5. Ask E — chat emotes (optional; the client can ship without this)
+
+The same catalog serves Twitch-style emotes in conversations, and **`chat.v1`
+already carries everything required**: `SendMessageRequest` and `MessageView`
+both have `content_type` and `media_ref`, and the client has never used either
+(it hardcodes `content_type = TEXT`).
+
+The client will ship emotes on the existing contract: `body` carries `:slug:`
+shortcodes and is the **source of truth**, so old clients degrade to readable
+`:LUL:` text rather than breaking.
+
+The only ask here is an additive enum value, as an optimisation:
+
+```proto
+enum ContentType {
+  CONTENT_TYPE_TEXT   = 0;
+  CONTENT_TYPE_MEDIA  = 1;
+  CONTENT_TYPE_SYSTEM = 2;
+  CONTENT_TYPE_EMOTE  = 3;  // ← additive
+}
+```
+
+with `media_ref` carrying the resolved ids (comma-separated, ≤12 per message),
+so the server has a machine-readable signal for push previews, moderation and
+analytics without parsing message text. **Not a blocker for the client.**
+
+## 6. Payload cost
+
+`icon_id` is ~3 bytes per pin — at a 200-pin Top-K viewport, **~600 bytes per
+pan response**, against a `thumbnail_url` already carried on every media pin.
+It is the cheapest field proposed for `RadarPin` by an order of magnitude, and
+deliberately so: it is on the highest-frequency path in the app.
+
+The catalog is fetched once per version. A 200-icon catalog at ≤512 KB per
+sheet is ≤100 MB of CDN objects, downloaded lazily and per-icon — the client
+only fetches sheets for ids it actually sees.
+
+## 7. Amendment required to an existing client guarantee
+
+`dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md`, under **"Client contract
+(what we guarantee)"**, currently states:
+
+> At most 3 pins animate concurrently
+> (`MapVideoPlaybackCoordinator(maxConcurrent: 3)`); the rest render the still
+> `thumbnail_url`.
+
+128 always-animating icons void that sentence in a document already handed to
+the backend team. It must be amended in the same change, to say explicitly that
+the 3-concurrent cap continues to govern **video previews** — which decode per
+frame, hold a hardware decode session each, and are a genuinely different cost
+class — while **icons are uncapped, because every instance shares one resident
+texture and costs a rect change**.
+
+## 8. Until it ships
+
+The client carries `MapPin.animatedIconID`, `nil` in production, populated in
+DEBUG mock mode by the same decorator seam `MapPin.authorAvatarURL` and
+`MapPlace` already use (`MapsFeatureBuilder`, gated on `pin.isText`). Sprite
+sheets are baked from the app's existing bundled animation assets. The
+production build is unchanged, and the day `icon_id` lands the only change is a
+field mapping in `GeoDiscoveryRepository`.
+
+This mirrors exactly how `author_avatar_url` and semantic places are already
+handled, so the marker, its fallback and the hero transition are all built and
+testable before the backend moves.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)

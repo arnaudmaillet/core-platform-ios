@@ -31,6 +31,19 @@ final class AppCoordinator: Coordinator {
     }
 
     func start() {
+        #if DEBUG
+        // `-icon-bench` opens the animated-icon instrument INSTEAD of the app:
+        // the map's worst case (a saturated 64pt marker lattice) with every
+        // optimisation switchable, measured before any of it is built for real.
+        // It stands ahead of auth on purpose — it needs no account, no fleet and
+        // no mock BFF, so it can be run on a device in one step.
+        if ProcessInfo.processInfo.arguments.contains("-icon-bench") {
+            window.rootViewController = AnimatedIconBenchViewController()
+            window.makeKeyAndVisible()
+            return
+        }
+        #endif
+
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
 
