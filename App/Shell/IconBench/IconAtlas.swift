@@ -209,6 +209,21 @@ final class IconAtlasStore {
     /// animation; there is no affine track that reproduces them. Selecting it
     /// gives sheets no matter what, and the report counts them as fallbacks
     /// rather than averaging two designs into one number.
+    ///
+    /// What the container rungs cost on the saturated lattice, 128 distinct
+    /// (17 Pro Max simulator) — and note it is the PEAK that indicts them, not
+    /// the resident figure, which merely reflects the cache evicting:
+    ///
+    ///     still     9.0 MB projected    90.8 MB peak   1 clock   30 fps
+    ///     sheet   216.8 MB projected   117.2 MB peak   1 clock   30 fps
+    ///     realGIF 145.4 MB projected  *427.6 MB peak*  3 clocks  10 fps
+    ///     gif     216.8 MB projected  *546.4 MB peak*  1 clock   30 fps
+    ///
+    /// The peak is 128 concurrent ImageIO decodes holding full-size frame
+    /// buffers, and a pan IS first sighting. The `3 clocks` is worse than it
+    /// looks: real files carry per-frame delays that vary INSIDE one file, so
+    /// the markers stop changing on a common grid and the composite-rate
+    /// argument for a quantised tick goes with it.
     enum WireFormat: String, CaseIterable { case still, sheet, gif, apng, realGIF }
 
     init(memoryBudgetMB: Int = 48) {

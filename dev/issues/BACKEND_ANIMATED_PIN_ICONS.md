@@ -437,6 +437,44 @@ client bake is cheaper to add (ImageIO, no package) but buys nothing, because th
 server already produced pixels either way. **If the backend can emit an animated
 raster container, it can emit a grid.**
 
+### Measured: what a GIF/APNG wire actually costs on the marker field
+
+Playback is unaffected — a container is baked to an atlas at ingest and then
+plays through exactly the same `contentsRect` animation, with the same shared
+epoch and the same zero per-frame app CPU. **The wire format changes only the
+bake.** What it changes about the bake is not small (128 markers, saturated
+lattice, 17 Pro Max simulator):
+
+| wire | projected @128 distinct | **peak footprint** | distinct clocks | presented |
+|---|---|---|---|---|
+| still + track (Ask C) | **9.0 MB** | **90.8 MB** | 1 | 30 fps |
+| server-baked sheet (Ask D) | 216.8 MB | 117.2 MB | 1 | 30 fps |
+| real GIFs, client-decoded | 145.4 MB | **427.6 MB** | **3** | **10 fps** |
+| 24-frame GIF, client-decoded | 216.8 MB | **546.4 MB** | 1 | 30 fps |
+
+Three things that only show up on the real files:
+
+1. **The peak, not the resident, is the danger.** Resident caps at the client's
+   48 MB budget because the cache evicts; the peak is 128 concurrent ImageIO
+   decodes each holding full-size frame buffers. And **a pan IS first sighting** —
+   it reveals a dozen new markers at once — so the peak lands on the most common
+   interaction on the screen. (Throttling bake concurrency trades this peak for
+   dress time; not yet measured.)
+2. **The shared clock breaks.** `distinct clocks = 3`: every file carries its own
+   per-frame delays, and they vary *inside a single file* (0.2 s, 1.2 s and 2.5 s
+   in the same GIF). Markers stop changing on a common grid, so the whole
+   composite-rate argument for a quantised tick — and its battery win —
+   evaporates. Note the presented rate: **10 fps for 30 asked.** The files impose
+   their cadence, not us.
+3. **GIF specifically** adds the format defects already listed above: binary
+   alpha (an aliased rim on all 128 discs, rescuable at bake time by compositing
+   onto our own antialiased disc — 55 alpha levels -> 2 -> 42) and a 256-colour
+   palette. Loop lengths from 0.18 s to 56 s also mean the 24-frame cap compresses
+   time hard.
+
+**Conclusion: an animated container is fine as the escape hatch (§5), where one
+asset is on screen after a tap. It is not viable as the marker field's wire.**
+
 ## 5. Ask E — the escape hatch for arbitrary per-post assets
 
 The bounded catalog is a constraint on *variety*, and the product may
@@ -453,6 +491,11 @@ message MapPostCard {
 The split is the point: **enumerated on Radar (128 on screen), free-form on
 Focus (1 on screen).** The same post can carry both — a catalog id for its
 marker and a bespoke asset for its detail card.
+
+This is also where a GIF or APNG belongs. At one asset on screen the peak
+footprint measured in §4 is a non-event, the file's own frame delays are the
+only clock that has to be honoured, and the client already decodes every
+animated container natively.
 
 ## 6. Ask F — chat emotes (optional; the client can ship without this)
 
