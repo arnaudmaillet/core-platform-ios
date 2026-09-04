@@ -98,6 +98,25 @@ enum MapClusterEngine {
     ///   - viewportDiagonalKm: the camera viewport's diagonal, driving the
     ///     DYNAMIC banding against the ladder's H3 cell spans
     ///     (`MapHierarchyBanding`).
+    /// The zoom the grid is actually computed at — quarter-octave steps,
+    /// rounded DOWN.
+    ///
+    /// ⚠️ THE GRID HAD NO HYSTERESIS AT ALL. `cell = cellPoints / zoomScale`
+    /// with buckets at absolute map-point origins means one ulp of
+    /// `visibleMapRect` moves every grid line AND the merge threshold at once
+    /// — and MapKit's region↔rect round-trip is lossy, so the first read after
+    /// the map is re-attached need not be bit-identical to the last one before
+    /// it. That is enough to re-partition a corpus nothing has changed.
+    ///
+    /// DOWNWARD on purpose: the cell only ever grows, by at most 2^0.25 ≈ 19%,
+    /// so the merge threshold never shrinks and the no-overlap contract the
+    /// suite pins cannot be broken by the snap. A real pinch crosses several
+    /// steps in a fraction of a gesture; an epsilon crosses none.
+    static func snapZoom(_ zoomScale: Double) -> Double {
+        guard zoomScale > 0, zoomScale.isFinite else { return 0 }
+        return exp2((log2(zoomScale) * 4).rounded(.down) / 4)
+    }
+
     static func cluster(
         _ pins: [MapPin], zoomScale: Double, cellPoints: Double,
         zoomLevel: Int32? = nil, viewportDiagonalKm: Double? = nil
@@ -207,8 +226,15 @@ enum MapClusterEngine {
         // pool, so a level's lone post can't be merged into an unladdered
         // neighbour's generic cluster and escape its band. (They still
         // collide with the band's OWN markers below — same band, no escape.)
+        // ⚠️ SORTED, like `semantic` above and for its stated reason. This fed
+        // the order-dependent merge below straight from a dictionary's values,
+        // so a corpus that only gained or lost one pin re-partitioned the rest
+        // — markers moving on a map nothing had panned. It was the one input
+        // this function left to chance.
         let lone = maskedByPlace.values.filter { $0.members.count == 1 }
-            .flatMap(\.members).map(Self.single)
+            .flatMap(\.members)
+            .sorted { $0.postID.rawValue < $1.postID.rawValue }
+            .map(Self.single)
 
         guard zoomScale > 0, cellPoints > 0 else {
             return semantic + lone + unmasked.map(Self.single)
@@ -293,7 +319,16 @@ enum MapClusterEngine {
 
         // Same Chebyshev fixed-point merge as the proximity pass — the
         // markers are squares, so the collision test is the larger axis-gap.
-        var nodes = Array(buckets.values)
+        // ⚠️ ORDER IS LOAD-BEARING HERE, not incidental. This is a
+        // centroid-updating single-linkage fixed point: `nodes[i]` absorbs
+        // `nodes[j]` and the centroid MOVES, so whether a third node still
+        // falls within a cell depends on which pair merged first. Taken from a
+        // dictionary's values it changed whenever the dictionary was mutated,
+        // which is every query — so returning to the map re-partitioned pins
+        // that had not moved. Keyed traversal makes the answer a function of
+        // the input alone.
+        var nodes = buckets.keys.sorted { ($0.gx, $0.gy) < ($1.gx, $1.gy) }
+            .map { buckets[$0]! }
         var didMerge = true
         while didMerge {
             didMerge = false
@@ -389,7 +424,16 @@ enum MapClusterEngine {
         // at cell/√2 ≈ 0.7·cell, well inside the marker). Requiring the larger
         // axis-gap to reach a cell guarantees a real on-screen gap. Node counts
         // here are small (one per occupied cell), so the O(n²) scan is cheap.
-        var nodes = Array(buckets.values)
+        // ⚠️ ORDER IS LOAD-BEARING HERE, not incidental. This is a
+        // centroid-updating single-linkage fixed point: `nodes[i]` absorbs
+        // `nodes[j]` and the centroid MOVES, so whether a third node still
+        // falls within a cell depends on which pair merged first. Taken from a
+        // dictionary's values it changed whenever the dictionary was mutated,
+        // which is every query — so returning to the map re-partitioned pins
+        // that had not moved. Keyed traversal makes the answer a function of
+        // the input alone.
+        var nodes = buckets.keys.sorted { ($0.gx, $0.gy) < ($1.gx, $1.gy) }
+            .map { buckets[$0]! }
         var didMerge = true
         while didMerge {
             didMerge = false

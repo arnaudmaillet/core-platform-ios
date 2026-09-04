@@ -123,6 +123,13 @@ public struct RevealGeometry {
     /// Matched mode aligns this with the source rect at t=0; `nil` (or plain
     /// mode) leaves the page unmoved and the window simply opens over it.
     public let anchorFrame: (UICoordinateSpace) -> CGRect?
+    /// Whether this close's ARRIVAL may come up while the finger is still down.
+    ///
+    /// False for a card-shaped arrival, whose text would be laid out for a
+    /// width the window has not reached — see `RevealStage.fill`. True for a
+    /// picture, which has no layout to be wrong about and which the viewer
+    /// should see the window becoming rather than meet at the end of it.
+    public var arrivalRisesUnderFinger = false
     /// Builds the stand-in a DISMISSAL carries home — the card itself, drawn
     /// fresh, rather than the page seen through a window.
     ///
@@ -674,13 +681,33 @@ enum RevealStage {
     /// the post used to be. That hole is what a viewer, playing with the grab,
     /// described as the post fading away over its own media. The "nothing" the
     /// face fades against here is the opaque live post itself.
-    static func fill(at progress: CGFloat, carriesPage: Bool = false) -> CGFloat {
-        // ⚠️ NOTHING ARRIVES WHILE THE FINGER IS DOWN, on a fit that carries
-        // the page. The arrival's whole job is to be what the window becomes,
-        // and it becomes it on the release — see `Pose.pageOpacity`, which is
-        // the other half of the same rule.
-        if carriesPage { return 0 }
-        return swapFractions(at: progress).fill
+    /// ⚠️ AND WHETHER IT RISES UNDER THE FINGER IS THE ARRIVAL'S PROPERTY,
+    /// not the fit's.
+    ///
+    /// "Nothing arrives while the finger is down" was measured, and its reason
+    /// is specific: an arrival that came up during the drag put a CARD'S TEXT
+    /// on screen laid out for a width the window had not reached, clipped at
+    /// the window's edge. That is a fact about text, and a marker's face is a
+    /// picture — it has no layout to be wrong about, and holding it back means
+    /// the window carries the PAGE all the way down and the face turns up once
+    /// the flight is over. Filmed both ways, on two different arrivals, and the
+    /// rule that satisfies both is not one law but the right question.
+    ///
+    /// So: a card-shaped arrival keeps the pivot at the release; a picture
+    /// rises on the close's own fractions (`closeHandover`), read on the drag's
+    /// progress, so a close scrubbed by hand and one driven by a chevron are
+    /// the same animation at two speeds. `Pose.pageOpacity` stays pinned at 1
+    /// either way — the page never fades, so a rising opaque arrival is an
+    /// opaque sum at every instant rather than the hole two crossing fades make.
+    static func fill(
+        at progress: CGFloat, carriesPage: Bool = false, risesUnderFinger: Bool = false
+    ) -> CGFloat {
+        guard carriesPage else { return swapFractions(at: progress).fill }
+        guard risesUnderFinger else { return 0 }
+        let arrival = closeHandover(carriesPage: true)
+        return easeOut(
+            ramp(progress, from: arrival.delay, to: arrival.delay + arrival.duration)
+        )
     }
 
     /// The two blocks a COMMITTED release runs, as fractions of the spring's
@@ -748,6 +775,33 @@ enum RevealStage {
     /// glyph, and the glyph is all `PinTextFaceView.setContentOpacity` moves.
     ///
     /// The non-carrying branch is today's numbers, unchanged.
+    /// The CLOSING leg's carrying schedule — the time-mirror of
+    /// `presentHandover`'s.
+    ///
+    /// ⚠️ THE ARRIVAL RISES OVER THE HEAD OF THE WINDOW, not its tail. It used
+    /// to run `[coveringFaceFadeStart, cardFadeEnd]` = [0.45, 0.80] with the
+    /// stated reason that the post underneath should stay opaque "until the
+    /// very end", so two copies of the media could not read as two. That is a
+    /// real risk and it is why the ramp is not moved all the way to zero — but
+    /// at 0.45 the marker's face is not arriving IN the window at all, it is
+    /// appearing after it. Filmed on a close onto a map marker: the card
+    /// carried the page's own content the whole way down and the face turned up
+    /// once the flight was over, which is not a hand-over, it is a cut.
+    ///
+    /// Same LENGTH, earlier START: `[1 - cardFadeEnd, 1 - coveringFaceFadeStart]`
+    /// = [0.20, 0.55]. The face is solid for the last 45% of the travel — still
+    /// well before the window has shrunk to the marker — and the overlap it
+    /// buys is what makes the swap a dissolve rather than a swap. Written as
+    /// the opening's fractions reflected so the two legs cannot drift into
+    /// being two schedules.
+    static func closeHandover(
+        carriesPage: Bool
+    ) -> (duration: CGFloat, delay: CGFloat) {
+        carriesPage
+            ? (duration: cardFadeEnd - coveringFaceFadeStart, delay: 1 - cardFadeEnd)
+            : (duration: pageFadeEnd - pageFadeStart, delay: pageFadeStart)
+    }
+
     static func presentHandover(
         carriesPage: Bool
     ) -> (fill: (duration: CGFloat, delay: CGFloat),
@@ -1503,7 +1557,10 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         let standIn = geometry.makeDismissStandIn()
         if let standIn {
             host.addSubview(standIn)
-            standIn.alpha = RevealStage.fill(at: 0, carriesPage: geometry.pageFit.carriesPage)
+            standIn.alpha = RevealStage.fill(
+                at: 0, carriesPage: geometry.pageFit.carriesPage,
+                risesUnderFinger: geometry.arrivalRisesUnderFinger
+            )
             (standIn as? RevealStandInShaping)?.setContentOpacity(
                 RevealStage.contentOpacity(at: 0, carriesPage: geometry.pageFit.carriesPage)
             )
@@ -1572,26 +1629,17 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             // act — see `RevealStage.carryFadeEnd`. Not skipped, and not the
             // three acts either: it has to be solid before the window has
             // shrunk enough for two copies of the media to read as two.
-            if geometry.pageFit.carriesPage {
-                // One dissolve, late: the post is under it and opaque until the
-                // very end. `setContentOpacity` is already 1 and stays there —
-                // see `RevealStage.contentOpacity`.
-                UIView.animate(
-                    withDuration: total * (RevealStage.cardFadeEnd
-                        - RevealStage.coveringFaceFadeStart),
-                    delay: total * RevealStage.coveringFaceFadeStart,
-                    options: [.curveEaseOut]
-                ) {
-                    standIn.alpha = 1
-                }
-            } else {
-                UIView.animate(
-                    withDuration: total * (RevealStage.pageFadeEnd - RevealStage.pageFadeStart),
-                    delay: total * RevealStage.pageFadeStart,
-                    options: [.curveEaseIn]
-                ) {
-                    standIn.alpha = 1
-                }
+            // One dissolve on a carrying fit, over the HEAD of the window —
+            // see `RevealStage.closeHandover`, which is the opening's own
+            // schedule reflected. `setContentOpacity` is already 1 and stays
+            // there; see `RevealStage.contentOpacity`.
+            let arrival = RevealStage.closeHandover(carriesPage: geometry.pageFit.carriesPage)
+            UIView.animate(
+                withDuration: total * arrival.duration,
+                delay: total * arrival.delay,
+                options: geometry.pageFit.carriesPage ? [.curveEaseOut] : [.curveEaseIn]
+            ) {
+                standIn.alpha = 1
             }
             UIView.animate(
                 withDuration: total * (RevealStage.cardFadeEnd - RevealStage.cardFadeStart),
