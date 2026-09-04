@@ -23,6 +23,14 @@ That single word "every" is what makes this a contract question rather than a
 client one. The client can render it; what the client cannot do is survive the
 shape of payload this feature would naturally be given.
 
+**The one ask that matters most is §3 (Ask C):** where an icon's motion is a
+rigid mark being scaled, rotated or faded, send ONE picture and three curves
+instead of a strip of frames. Measured on the worst case — 128 markers on the
+saturated lattice — that is **9.0 MB against 216.8 MB**, and it is the
+difference between the feature fitting in the client's icon budget and evicting
+mid-pan. Everything else in this document is the fallback for artwork that
+cannot be expressed that way.
+
 ## Why this is not just another URL field
 
 The map's clustering engine guarantees that no two markers are closer than
@@ -168,8 +176,8 @@ message AnimatedIcon {
   string sheet_url   = 3;  // ONE sprite sheet, PNG or HEIC, alpha required
   uint32 frame_count = 4;  // 1..24
   uint32 columns     = 5;  // grid width; rows = ceil(frame_count / columns)
-  uint32 cell_px     = 6;  // MUST be 136 (see §3)
-  uint32 frame_ms    = 7;  // one of {33, 50, 66, 83, 100}; 33 preferred (§3)
+  uint32 cell_px     = 6;  // MUST be 136 (see §4)
+  uint32 frame_ms    = 7;  // one of {33, 50, 66, 83, 100}; 33 preferred (§4)
   string label       = 8;  // VoiceOver text, localizable
 }
 
@@ -186,9 +194,99 @@ bump. A stale catalog is safe — unknown ids fall back — but it means a newly
 published icon is invisible to clients until they re-fetch, so a cheap version
 probe on app launch is worth having.
 
-## 3. Ask C — the asset format: a sprite sheet, not a GIF
+## 3. Ask C — the preferred asset: one still plus a motion track
 
-This is the unusual part of the ask, so here is the reasoning in full.
+**Where an icon's motion is a rigid mark being scaled, rotated, translated or
+faded, do not ship frames at all. Ship one picture and three curves.**
+
+This is the single highest-leverage line in this document. It is worth 24x the
+memory of everything else here combined, and it costs the pipeline less work
+than the sheet does, not more.
+
+```protobuf
+message AnimatedIcon {
+  // ... fields from Ask B ...
+
+  // Present when the icon's motion is affine. The client then needs NO frames.
+  MotionTrack motion = 10;
+}
+
+message MotionTrack {
+  // Samples over one loop, evenly spaced. 8-24 is plenty; these are keyframes
+  // of a curve, not frames of a film.
+  repeated float scale    = 1;   // 1.0 = authored size
+  repeated float rotation = 2;   // radians, may exceed 2pi for a full spin
+  repeated float opacity  = 3;   // 0.0-1.0
+  uint32 frame_ms         = 4;   // as in Ask B
+  // Optional; omit a channel that never moves. The client installs one
+  // animation per MOVING channel, so a constant channel costs nothing.
+}
+```
+
+The still itself is one cell obeying every invariant in Ask D (136px, 2px
+gutter, circular alpha pre-baked, HEIC preferred).
+
+### Why this matters more than any other decision in this document
+
+A sprite sheet is a **cache of a computation the compositor performs anyway**.
+Core Animation applies scale, rotation and opacity to a layer for free, on the
+render server, out of our process. Recording 24 pre-transformed copies of the
+same picture buys nothing and costs 24x.
+
+Measured on the instrument (`-icon-bench`, iPhone 17 Pro Max simulator, 128
+markers on the saturated 64pt lattice, 136px cells, 24 frames):
+
+| | resident, 16 distinct | projected, 128 distinct | cold dress |
+|---|---|---|---|
+| Sheet (Ask D) | 27.1 MB | **216.8 MB** | 1.04 s |
+| Still + track (Ask C) | **1.1 MB** | **9.0 MB** | 0.49 s |
+
+**24x, and it is the difference between shippable and not.** At 128 distinct
+the sheet path does not merely cost more — it does not fit: the client's 48 MB
+icon budget evicts and re-bakes mid-pan, where the whole decomposed catalog is
+resident in 9 MB with room to spare.
+
+The two are the same picture. Verified pixel by pixel against the sheet the
+same pipeline would have produced: **worst mean error 0.51/255 across all 16
+catalogue icons, and exactly 0.0000 on every frame whose pose is identity.** The
+residual is antialiasing on the disc rim.
+
+### The second win: smoothness stops costing memory
+
+On a sheet, fluidity is bytes — 60 fps means 60 cells. On a track it is
+keyframes of a curve, so the client can interpolate and the price moves entirely
+onto composite rate, which is a per-surface battery decision rather than a bake
+decision taken once for everybody:
+
+| | 30 fps | 60 fps |
+|---|---|---|
+| Sheet, 128 distinct | 216.8 MB | **541.9 MB** |
+| Still + track, 128 distinct | 9.0 MB | **9.0 MB** |
+
+So the answer to "can the icons be genuinely fluid" is **yes, and for free in
+memory** — measured at 60 presented fps with the field still at 9.0 MB.
+
+### What decides which ask applies
+
+Ask C where the motion is a rigid mark under an affine transform: spins, pulses,
+heartbeats, bobs, flickers, drifts. Ask D where the pixels themselves change: a
+face blinking, a flame licking, anything hand-animated frame by frame.
+
+**Please mark this per icon in the catalog rather than guessing globally**, and
+please do not synthesise a track for artwork that does not have one. A field
+that is half decomposed and half sheeted is fine and expected — the client
+handles both and reports the mix — but a track that does not reproduce its
+artwork is a defect nothing downstream can detect.
+
+If the source is Lottie, this is close to free: a transform-only composition IS
+this message, and reducing it at publish time is a few lines against the
+document's transform properties. If it is not transform-only, emit a sheet.
+
+## 4. Ask D — the fallback asset format: a sprite sheet, not a GIF
+
+For artwork Ask C cannot express — anything whose PIXELS change rather than its
+position — this is the format. It is still the second-best answer, and here is
+the reasoning in full.
 
 **Serve each icon as ONE still image containing every frame in a grid**, plus
 the geometry in the catalog above — **HEIC preferred over PNG**. Not a GIF, not
@@ -314,6 +412,8 @@ invariant and not a style note — and why a 30 fps icon must be a *short* loop
 
 ### If the pipeline cannot bake sheets — the fallback ladder, in order
 
+0. **A still plus a motion track (Ask C)** wherever the artwork allows it.
+   Cheaper for the pipeline than any rung below, and 24x cheaper for the client.
 1. **Server-baked sheets.** The ask above.
 2. **Serve dotLottie (or HEICS) and let the client bake once, cached to disk.**
    This is genuinely viable and is not a consolation prize: a vector re-renders at
@@ -329,7 +429,7 @@ invariant and not a style note — and why a 30 fps icon must be a *short* loop
    heavy-file guard cannot live on the client — by the time it can measure, it has
    already paid. The budget must be enforced at publish.
 3. **Client-bundled catalog**, backend serves only `icon_id`. What the client
-   does while this is in flight (§8) — but icons can then only be added in an app
+   does while this is in flight (§9) — but icons can then only be added in an app
    release, which defeats the point of a server-driven catalog.
 
 For a *raster* wire the trade is worse than for a vector one, not better: the
@@ -337,7 +437,7 @@ client bake is cheaper to add (ImageIO, no package) but buys nothing, because th
 server already produced pixels either way. **If the backend can emit an animated
 raster container, it can emit a grid.**
 
-## 4. Ask D — the escape hatch for arbitrary per-post assets
+## 5. Ask E — the escape hatch for arbitrary per-post assets
 
 The bounded catalog is a constraint on *variety*, and the product may
 legitimately want "attach any animation you like to your post". That is safe —
@@ -354,7 +454,7 @@ The split is the point: **enumerated on Radar (128 on screen), free-form on
 Focus (1 on screen).** The same post can carry both — a catalog id for its
 marker and a bespoke asset for its detail card.
 
-## 5. Ask E — chat emotes (optional; the client can ship without this)
+## 6. Ask F — chat emotes (optional; the client can ship without this)
 
 The same catalog serves Twitch-style emotes in conversations, and **`chat.v1`
 already carries everything required**: `SendMessageRequest` and `MessageView`
@@ -380,7 +480,7 @@ with `media_ref` carrying the resolved ids (comma-separated, ≤12 per message),
 so the server has a machine-readable signal for push previews, moderation and
 analytics without parsing message text. **Not a blocker for the client.**
 
-## 6. Payload cost
+## 7. Payload cost
 
 `icon_id` is ~3 bytes per pin — at a 200-pin Top-K viewport, **~600 bytes per
 pan response**, against a `thumbnail_url` already carried on every media pin.
@@ -391,7 +491,7 @@ The catalog is fetched once per version. A 200-icon catalog at ≤512 KB per
 sheet is ≤100 MB of CDN objects, downloaded lazily and per-icon — the client
 only fetches sheets for ids it actually sees.
 
-## 7. Amendment required to an existing client guarantee
+## 8. Amendment required to an existing client guarantee
 
 `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md`, under **"Client contract
 (what we guarantee)"**, currently states:
@@ -407,7 +507,7 @@ frame, hold a hardware decode session each, and are a genuinely different cost
 class — while **icons are uncapped, because every instance shares one resident
 texture and costs a rect change**.
 
-## 8. Until it ships
+## 9. Until it ships
 
 The client carries `MapPin.animatedIconID`, `nil` in production, populated in
 DEBUG mock mode by the same decorator seam `MapPin.authorAvatarURL` and

@@ -55,31 +55,68 @@ final class BenchMarkerView: MKAnnotationView {
     /// The card: the real component's outer, non-clipping shadow host.
     private let card = UIView()
     private let glyph = UIImageView()
-    /// The icon's own layer. A bare `CALayer`, not a view — nothing here needs
-    /// touch handling, Auto Layout or a responder, and 128 of those are not free.
+    /// The icon's own layer on the SHEET path. A bare `CALayer`, not a view —
+    /// nothing here needs touch handling, Auto Layout or a responder, and 128 of
+    /// those are not free.
     private let iconLayer = CALayer()
+
+    /// The DECOMPOSED path's two layers.
+    ///
+    /// Two, not one, and the split is forced by the artwork: in the sheet the
+    /// plate is fixed and only the mark moves inside it, so a single layer
+    /// carrying the transform would pulse and spin the plate as well. The mark
+    /// therefore gets its own layer above a plate that never moves.
+    ///
+    /// The honest cost of that: 256 composited quads instead of 128. On a TBDR
+    /// GPU, at 44pt, that is noise — but it is not literally nothing, and it is
+    /// the one place this path is more expensive than the sheet.
+    ///
+    /// The plate holds NO texture. A `backgroundColor` with a circular
+    /// `cornerRadius` costs zero bytes of backing store, needs no mask and no
+    /// offscreen pass, where the sheet re-records the same disc in full colour
+    /// in every one of its 24 cells.
+    private let plateLayer = CALayer()
+    private let glyphLayer = CALayer()
+    /// Cell fraction the plate is inset by, so the layer geometry reproduces the
+    /// sheet's gutter exactly rather than approximately.
+    private var plateInsetFraction: Double = 0
 
     private var iconID: Int?
     /// The frame this marker starts on. A pure function of its identity, so the
     /// hero flight card can reproduce it exactly by copying one `Int`.
     private var phase: Int = 0
-    private var atlas: IconAtlas?
+    private var art: IconArt?
     private var loadTask: Task<Void, Never>?
 
     weak var store: IconAtlasStore?
     var mode: IconPlayback.Mode = .quantised
+    var sampling: IconPlayback.Sampling = .stepped
 
-    /// The frame the RENDER SERVER is currently presenting, or `nil` if nothing
-    /// is animating.
+    /// A fingerprint of what the RENDER SERVER is presenting right now, or `nil`
+    /// if nothing is animating.
     ///
     /// Read from `presentation()`, not from the model layer — the model layer
     /// keeps its resting value for the whole animation, so probing it would
     /// report a frozen icon as a running one. This is how the screen answers
     /// "what rate are you ACTUALLY showing", which is a different question from
     /// "what rate did we ask for" and the only one worth trusting.
-    var presentedFrame: CGRect? {
-        guard iconLayer.animation(forKey: IconPlayback.animationKey) != nil else { return nil }
-        return iconLayer.presentation()?.contentsRect
+    ///
+    /// It has to be a fingerprint rather than a `contentsRect` now that the
+    /// recommended path does not touch `contentsRect` at all: probing that one
+    /// property would have reported the decomposed field as motionless, which
+    /// reads exactly like a broken animation and would have been believed.
+    /// `m11`/`m12` carry scale and rotation, `opacity` the third channel, so one
+    /// number covers every motion in the catalogue.
+    var presentedTick: Double? {
+        if iconLayer.animation(forKey: IconPlayback.animationKey) != nil {
+            guard let rect = iconLayer.presentation()?.contentsRect else { return nil }
+            return Double(rect.origin.x) * 4096 + Double(rect.origin.y)
+        }
+        guard IconPlayback.decomposedKeys.contains(where: { glyphLayer.animation(forKey: $0) != nil }),
+              let presentation = glyphLayer.presentation()
+        else { return nil }
+        let transform = presentation.transform
+        return Double(transform.m11) * 1e6 + Double(transform.m12) * 1e3 + Double(presentation.opacity)
     }
 
     /// Fired once per marker when its sheet lands, so the screen can report how
@@ -119,6 +156,17 @@ final class BenchMarkerView: MKAnnotationView {
         iconLayer.isHidden = true
         card.layer.addSublayer(iconLayer)
 
+        // SIBLINGS, not parent and child. Nesting the mark inside the plate
+        // would scale it by the gutter fraction and make the decomposed glyph
+        // 3% smaller than the sheet's — a difference small enough to look like
+        // nothing and big enough to be a rendering defect.
+        for layer in [plateLayer, glyphLayer] {
+            layer.frame = card.bounds
+            layer.contentsScale = UIScreen.main.scale
+            layer.isHidden = true
+            card.layer.addSublayer(layer)
+        }
+
         applyChrome()
     }
 
@@ -146,6 +194,10 @@ final class BenchMarkerView: MKAnnotationView {
     override func layoutSubviews() {
         super.layoutSubviews()
         iconLayer.frame = card.bounds
+        glyphLayer.frame = card.bounds
+        let inset = card.bounds.width * plateInsetFraction
+        plateLayer.frame = card.bounds.insetBy(dx: inset, dy: inset)
+        plateLayer.cornerRadius = plateLayer.bounds.width / 2
         applyChrome()
     }
 
@@ -164,9 +216,8 @@ final class BenchMarkerView: MKAnnotationView {
         guard self.iconID != iconID || self.phase != phase else { return }
         loadTask?.cancel()
         loadTask = nil
-        atlas = nil
-        IconPlayback.remove(from: iconLayer)
-        iconLayer.isHidden = true
+        art = nil
+        undress()
 
         self.iconID = iconID
         self.phase = phase
@@ -180,6 +231,7 @@ final class BenchMarkerView: MKAnnotationView {
             loadTask?.cancel()
             loadTask = nil
             IconPlayback.remove(from: iconLayer)
+            IconPlayback.removeDecomposed(plate: plateLayer, glyph: glyphLayer)
         } else {
             startIfNeeded()
         }
@@ -190,11 +242,23 @@ final class BenchMarkerView: MKAnnotationView {
         loadTask?.cancel()
         loadTask = nil
         iconID = nil
-        atlas = nil
-        IconPlayback.remove(from: iconLayer)
-        iconLayer.isHidden = true
+        art = nil
+        undress()
         alpha = 1
         transform = .identity
+    }
+
+    /// Puts every icon layer back to "nothing here", whichever path last dressed
+    /// it.
+    ///
+    /// One call rather than a branch, because a reused marker does not remember
+    /// which path dressed it — and a leftover `contents` under a decomposed
+    /// dressing is a stale sheet showing through the plate, which looks like a
+    /// texture-sharing bug and is not one.
+    private func undress() {
+        IconPlayback.remove(from: iconLayer)
+        IconPlayback.removeDecomposed(plate: plateLayer, glyph: glyphLayer)
+        [iconLayer, plateLayer, glyphLayer].forEach { $0.isHidden = true }
     }
 
     private func startIfNeeded() {
@@ -212,7 +276,7 @@ final class BenchMarkerView: MKAnnotationView {
         let wanted = iconID
         loadTask = Task { [weak self] in
             guard let self else { return }
-            let resolved = try? await store.atlas(for: wanted)
+            let resolved = try? await store.art(for: wanted)
             // The identity guard. A slow load must never land on a view MapKit
             // has since recycled onto a different marker — the same reason
             // `MapAnnotationView` keeps `representedID`.
@@ -222,33 +286,67 @@ final class BenchMarkerView: MKAnnotationView {
         }
     }
 
-    private func apply(_ atlas: IconAtlas) {
-        self.atlas = atlas
-        iconLayer.isHidden = false
+    private func apply(_ art: IconArt) {
+        self.art = art
         loadTask = nil
-        guard IconPlayback.motionAllowed else {
-            // Static, not blank: the marker looks identical, it simply does not
-            // move. Reduce Motion must not cost the viewer the icon.
-            iconLayer.contents = atlas.sheet.cgImage
-            iconLayer.contentsRect = atlas.frameRects[phase % atlas.frameCount]
-            return
+
+        switch art {
+        case .sheet(let atlas):
+            plateLayer.isHidden = true
+            glyphLayer.isHidden = true
+            iconLayer.isHidden = false
+            guard IconPlayback.motionAllowed else {
+                // Static, not blank: the marker looks identical, it simply does
+                // not move. Reduce Motion must not cost the viewer the icon.
+                iconLayer.contents = atlas.sheet.cgImage
+                iconLayer.contentsRect = atlas.frameRects[phase % atlas.frameCount]
+                return
+            }
+            IconPlayback.install(atlas, phase: phase, mode: mode, on: iconLayer)
+
+        case .decomposed(let still):
+            iconLayer.isHidden = true
+            plateInsetFraction = still.plateInsetFraction
+            setNeedsLayout()
+            layoutIfNeeded()
+            plateLayer.isHidden = false
+            glyphLayer.isHidden = false
+            IconPlayback.install(
+                still, phase: phase, mode: mode, sampling: sampling,
+                plate: plateLayer, glyph: glyphLayer
+            )
+            guard !IconPlayback.motionAllowed else { return }
+            // `install` already parked the model layer on the resting pose, so
+            // stripping the animations here leaves the icon posed and static
+            // rather than snapped to identity.
+            IconPlayback.decomposedKeys.forEach { glyphLayer.removeAnimation(forKey: $0) }
         }
-        IconPlayback.install(atlas, phase: phase, mode: mode, on: iconLayer)
     }
 
     /// Re-installs after a foreground transition, which strips animations.
     func reinstallIfNeeded() {
-        guard window != nil, let atlas else { return }
-        guard iconLayer.animation(forKey: IconPlayback.animationKey) == nil else { return }
-        apply(atlas)
+        guard window != nil, let art else { return }
+        switch art {
+        case .sheet:
+            guard iconLayer.animation(forKey: IconPlayback.animationKey) == nil else { return }
+        case .decomposed:
+            let running = IconPlayback.decomposedKeys.contains {
+                glyphLayer.animation(forKey: $0) != nil
+            }
+            guard !running else { return }
+        }
+        apply(art)
     }
 
     func setFrozen(_ frozen: Bool) {
-        guard let atlas else { return }
-        if frozen {
+        guard let art else { return }
+        switch (art, frozen) {
+        case (.sheet, true):
             IconPlayback.freeze(iconLayer)
-        } else if iconLayer.animation(forKey: IconPlayback.animationKey) == nil {
-            IconPlayback.install(atlas, phase: phase, mode: mode, on: iconLayer)
+        case (.decomposed, true):
+            IconPlayback.freezeDecomposed(glyph: glyphLayer)
+        case (_, false):
+            reinstallIfNeeded()
         }
     }
 }

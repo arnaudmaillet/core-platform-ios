@@ -125,9 +125,16 @@ extension AnimatedIconBenchViewController {
             self?.rebuildLattice()
         }
         let wires = IconAtlasStore.WireFormat.allCases
-        addSegment("wire format (what the server sends)", wires.map(\.rawValue),
+        addSegment("wire format (still = 1 picture + a motion track)", wires.map(\.rawValue),
                    selected: wires.firstIndex(of: config.wireFormat) ?? 0) { [weak self] index in
             self?.config.wireFormat = wires[index]
+            self?.rebuildLattice()
+        }
+        let samplings = IconPlayback.Sampling.allCases
+        addSegment("sampling (still only — free in memory, paid in composites)",
+                   samplings.map(\.rawValue),
+                   selected: samplings.firstIndex(of: config.sampling) ?? 0) { [weak self] index in
+            self?.config.sampling = samplings[index]
             self?.rebuildLattice()
         }
         let latencies: [TimeInterval] = [0, 0.35, 1.5]

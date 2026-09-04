@@ -128,14 +128,25 @@ nonisolated enum IconAtlasBaker {
                 cg.fill(box)
 
                 // The glyph, posed.
+                //
+                // ⚠️ The alpha goes through `draw(in:blendMode:alpha:)`, NOT
+                // through `cg.setAlpha`. `UIImage.draw(in:)` does not honour the
+                // context's global alpha — it draws at full strength — so the
+                // `.flicker` motion's entire opacity channel was silently
+                // missing from every sheet this baker has ever produced. The
+                // icons still animated (they scale too), nothing errored, and no
+                // performance number moved, which is exactly why it survived:
+                // it was found by diffing the sheet against the decomposed path
+                // pixel by pixel, and only after the diff image showed the
+                // disagreement filling the glyph's INTERIOR rather than tracing
+                // its outline.
                 cg.translateBy(x: box.midX, y: box.midY)
                 cg.rotate(by: pose.rotation)
                 cg.scaleBy(x: pose.scale, y: pose.scale)
-                cg.setAlpha(pose.alpha)
                 glyph.draw(in: CGRect(
                     x: -glyph.size.width / 2, y: -glyph.size.height / 2,
                     width: glyph.size.width, height: glyph.size.height
-                ))
+                ), blendMode: .normal, alpha: CGFloat(pose.alpha))
 
                 cg.restoreGState()
             }
@@ -169,13 +180,60 @@ nonisolated enum IconAtlasBaker {
                 cg.translateBy(x: CGFloat(side) / 2, y: CGFloat(side) / 2)
                 cg.rotate(by: pose.rotation)
                 cg.scaleBy(x: pose.scale, y: pose.scale)
-                cg.setAlpha(pose.alpha)
+                // Same `setAlpha` trap as `bake` above — and this one also fed
+                // the GIF and APNG paths, so their alpha channel was missing
+                // too.
                 glyph.draw(in: CGRect(
                     x: -glyph.size.width / 2, y: -glyph.size.height / 2,
                     width: glyph.size.width, height: glyph.size.height
-                ))
+                ), blendMode: .normal, alpha: CGFloat(pose.alpha))
             }.cgImage
         }
+    }
+
+    /// The motion descriptor for an icon — the whole of what the decomposed
+    /// path needs beyond one picture.
+    ///
+    /// In production this is a handful of bytes on the wire next to the still
+    /// (or, equivalently, a transform-only Lottie the CI baker reduces to it).
+    /// It is the artwork property that makes `IconStill` possible, so it is
+    /// exposed here rather than buried in `catalogue`.
+    nonisolated static func motion(index: Int) -> Motion { catalogue[index % catalogue.count].motion }
+
+    /// Bakes the ONE still a decomposed icon needs: the glyph, alone, at rest.
+    ///
+    /// Note what is NOT in it — the plate. The plate is a colour the layer tree
+    /// draws for free, so the only texture this icon owns is the mark itself.
+    ///
+    /// Identity pose, deliberately: the track carries ABSOLUTE scale, rotation
+    /// and alpha, so baking `pose(at: 0)` into the picture would apply the first
+    /// keyframe twice and leave `.pulse` permanently 9% small.
+    ///
+    /// The canvas is the FULL cell, gutter included, because that is what
+    /// `contentsRect` selects on the sheet path. Cropping to the art box here
+    /// would make the decomposed glyph 3% larger than the sheet's and the two
+    /// paths would no longer be comparable — a difference small enough to look
+    /// like nothing and big enough to be a rendering defect.
+    nonisolated static func bakeStill(index: Int, cellPixels: Int, gutterPixels: Int = 2) -> Data? {
+        let entry = catalogue[index % catalogue.count]
+        let art = cellPixels - gutterPixels * 2
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        format.preferredRange = .standard
+
+        let symbolConfig = UIImage.SymbolConfiguration(pointSize: CGFloat(art) * 0.52, weight: .semibold)
+        guard let glyph = UIImage(systemName: entry.symbol, withConfiguration: symbolConfig)?
+            .withTintColor(.white, renderingMode: .alwaysOriginal) else { return nil }
+
+        let side = CGFloat(cellPixels)
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            glyph.draw(in: CGRect(
+                x: (side - glyph.size.width) / 2, y: (side - glyph.size.height) / 2,
+                width: glyph.size.width, height: glyph.size.height
+            ))
+        }.pngData()
     }
 
     /// The real GIFs bundled in `App/Resources/BenchIcons`, discovered at runtime.

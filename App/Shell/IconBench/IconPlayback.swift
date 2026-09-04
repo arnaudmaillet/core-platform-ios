@@ -40,7 +40,28 @@ enum IconPlayback {
         case freeRunning
     }
 
+    /// How a decomposed track is sampled — the choice a sprite sheet does not
+    /// get to make.
+    ///
+    /// On a sheet, smoothness costs MEMORY: 60fps means 60 cells. Decomposed,
+    /// the samples are keyframes of a curve, so the same choice costs nothing in
+    /// bytes and everything in COMPOSITE RATE — which is a battery decision the
+    /// product can take per surface rather than a bake decision the CDN takes
+    /// once for everybody.
+    enum Sampling: String, CaseIterable {
+        /// The same quantised grid the sheet plays on. Identical motion, so the
+        /// A/B against `.sheet` compares representations and not animations.
+        case stepped
+        /// Real interpolation between keyframes. Genuinely fluid, and the honest
+        /// price is that every marker now changes on every display refresh.
+        case continuous
+    }
+
     static let animationKey = "iconbench.play"
+    static let scaleKey = "iconbench.play.scale"
+    static let rotationKey = "iconbench.play.rotation"
+    static let alphaKey = "iconbench.play.alpha"
+    static let decomposedKeys = [scaleKey, rotationKey, alphaKey]
 
     /// One fixed instant in the shared timebase. Every icon in the process
     /// hangs off it, so they are coherent by construction rather than by
@@ -132,6 +153,155 @@ enum IconPlayback {
     static func remove(from layer: CALayer) {
         layer.removeAnimation(forKey: animationKey)
         layer.contents = nil
+    }
+
+    // MARK: - The decomposed path
+
+    /// Installs the same motion as three (usually one) property animations on a
+    /// glyph that never leaves memory more than once.
+    ///
+    /// The plate is set here rather than baked: a `backgroundColor` and a
+    /// circular `cornerRadius` cost zero bytes of backing store, where the
+    /// sheet re-records the disc in full colour in all 24 cells.
+    ///
+    /// ⚠️ `.circular`, not `.continuous`. At radius = half the side a continuous
+    /// curve is a superellipse, not a circle — a subtly squarish plate that no
+    /// number on this screen would ever flag.
+    static func install(
+        _ still: IconStill,
+        phase: Int,
+        mode: Mode,
+        sampling: Sampling,
+        plate: CALayer,
+        glyph: CALayer
+    ) {
+        decomposedKeys.forEach { glyph.removeAnimation(forKey: $0) }
+
+        plate.backgroundColor = still.plate.cgColor
+        plate.cornerRadius = plate.bounds.width / 2
+        plate.cornerCurve = .circular
+        glyph.contents = still.glyph.cgImage
+        glyph.contentsGravity = .resize
+        glyph.magnificationFilter = .trilinear
+        glyph.minificationFilter = .trilinear
+
+        let track = still.track(phase: phase)
+
+        // The resting pose, on the MODEL layer. A marker whose animation is
+        // later suppressed by the motion policy — or stripped by a background
+        // transition — must still show the icon, posed, rather than snapping to
+        // identity. A marker never goes blank and never jumps.
+        glyph.transform = CATransform3DConcat(
+            CATransform3DMakeScale(track.scales[0], track.scales[0], 1),
+            CATransform3DMakeRotation(track.rotations[0], 0, 0, 1)
+        )
+        glyph.opacity = Float(track.alphas[0])
+
+        guard track.frameCount > 1 else { return }
+
+        // Only the channels that MOVE. `.spin` and `.pulse` install one
+        // animation each; `.flicker` two. Installing three unconditionally would
+        // put 384 animations on the render server where 154 will do, and would
+        // make this path look more expensive than the sheet's single
+        // `contentsRect` animation for no reason at all.
+        if track.movesScale {
+            glyph.add(animation(track.scales, track: track, mode: mode, sampling: sampling,
+                                keyPath: "transform.scale", phase: phase), forKey: scaleKey)
+        }
+        if track.movesRotation {
+            glyph.add(animation(track.rotations, track: track, mode: mode, sampling: sampling,
+                                keyPath: "transform.rotation.z", phase: phase), forKey: rotationKey)
+        }
+        if track.movesAlpha {
+            glyph.add(animation(track.alphas, track: track, mode: mode, sampling: sampling,
+                                keyPath: "opacity", phase: phase), forKey: alphaKey)
+        }
+    }
+
+    private static func animation(
+        _ channel: [Double],
+        track: IconMotionTrack,
+        mode: Mode,
+        sampling: Sampling,
+        keyPath: String,
+        phase: Int
+    ) -> CAKeyframeAnimation {
+        let animation = CAKeyframeAnimation(keyPath: keyPath)
+        animation.duration = track.loopDuration
+        animation.repeatCount = .infinity
+        animation.isRemovedOnCompletion = false
+
+        switch sampling {
+        case .stepped:
+            // DROP the closing sample. `.discrete` divides the duration by
+            // `values.count`, so keeping it would stretch the loop by one frame
+            // and put this path on a different clock from the sheet's — which
+            // would silently invalidate the very comparison the toggle exists
+            // for.
+            animation.calculationMode = .discrete
+            animation.values = Array(channel.dropLast())
+        case .continuous:
+            animation.calculationMode = .linear
+            animation.values = channel
+        }
+
+        // The track is ALREADY phased by sampling from a rotated grid, exactly
+        // as the sheet phases by rotating its `values`. So `beginTime` stays on
+        // the shared epoch and every marker still changes on one clock.
+        switch mode {
+        case .quantised:
+            animation.beginTime = epoch
+        case .freeRunning:
+            let scatter = (Double(phase) * 0.6180339887).truncatingRemainder(dividingBy: 1)
+            animation.beginTime = epoch - scatter * track.loopDuration
+        }
+
+        switch sampling {
+        case .stepped:
+            // ⚠️ OBSERVED, and unresolved: with this range the render server
+            // sometimes settles at ~16 Hz for a 30 Hz stepped track (measured
+            // `presented_fps=15.8` on iPhone SE 3, 84 markers, and once on
+            // 17 Pro Max at 128). That is the range being honoured, not a
+            // defect — but on a `.discrete` animation a lower presented rate
+            // means DROPPED STEPS, where on `.continuous` it would only mean
+            // coarser interpolation. Whether a stepped track should therefore
+            // declare `minimum == maximum` and give up the idle-down battery
+            // win is a device question: it needs Instruments (Core Animation +
+            // Energy) on hardware, not a decision taken from a simulator.
+            let ceiling = Float(1.0 / track.step)
+            animation.preferredFrameRateRange = CAFrameRateRange(
+                minimum: min(8, ceiling), maximum: ceiling, preferred: 0
+            )
+        case .continuous:
+            // No ceiling to declare: an interpolated curve genuinely changes on
+            // every refresh. Asking for less would quantise it back into the
+            // stepped case while still paying for the extra keyframes.
+            let panel = Float(UIScreen.main.maximumFramesPerSecond)
+            animation.preferredFrameRateRange = CAFrameRateRange(
+                minimum: min(30, panel), maximum: panel, preferred: 0
+            )
+        }
+        return animation
+    }
+
+    static func freezeDecomposed(glyph: CALayer) {
+        guard let presentation = glyph.presentation() else {
+            decomposedKeys.forEach { glyph.removeAnimation(forKey: $0) }
+            return
+        }
+        let transform = presentation.transform
+        let opacity = presentation.opacity
+        decomposedKeys.forEach { glyph.removeAnimation(forKey: $0) }
+        glyph.transform = transform
+        glyph.opacity = opacity
+    }
+
+    static func removeDecomposed(plate: CALayer, glyph: CALayer) {
+        decomposedKeys.forEach { glyph.removeAnimation(forKey: $0) }
+        glyph.contents = nil
+        glyph.transform = CATransform3DIdentity
+        glyph.opacity = 1
+        plate.backgroundColor = nil
     }
 
     /// The gates that do not exist anywhere in this app today.

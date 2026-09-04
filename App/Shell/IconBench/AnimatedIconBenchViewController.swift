@@ -65,7 +65,9 @@ final class AnimatedIconBenchViewController: UIViewController {
         var usesShadowPath = true
         var masksOnCard = false
         var sharesTexture = true
-        var wireFormat: IconAtlasStore.WireFormat = .sheet
+        var wireFormat: IconAtlasStore.WireFormat = .still
+        var sampling: IconPlayback.Sampling = .stepped
+        var verifies = false
         var latency: TimeInterval = 0.35
         var showsMap = true
         var autoPans = false
@@ -93,6 +95,10 @@ final class AnimatedIconBenchViewController: UIViewController {
             if let raw = value("-icon-bench-wire"), let wire = IconAtlasStore.WireFormat(rawValue: raw) {
                 config.wireFormat = wire
             }
+            if let raw = value("-icon-bench-sampling"), let sampling = IconPlayback.Sampling(rawValue: raw) {
+                config.sampling = sampling
+            }
+            config.verifies = arguments.contains("-icon-bench-verify")
             if let raw = value("-icon-bench-latency"), let latency = TimeInterval(raw) { config.latency = latency }
             if let raw = value("-icon-bench-ground") { config.showsMap = raw != "plain" }
             config.autoPans = arguments.contains("-icon-bench-pan")
@@ -174,7 +180,7 @@ final class AnimatedIconBenchViewController: UIViewController {
     ///
     /// Sampled on the display link, so it can observe at most the display's own
     /// rate: honest for 8/12/24, and aliased at 60 on a 60Hz panel.
-    private var probedFrame: CGRect?
+    private var probedTick: Double?
     private var iconChangeTimestamps: [CFTimeInterval] = []
     private var presentedFPS: Double {
         guard let first = iconChangeTimestamps.first, iconChangeTimestamps.count > 1,
@@ -215,6 +221,7 @@ final class AnimatedIconBenchViewController: UIViewController {
 
         setUpHUD()
         setUpControls()
+        if config.verifies { runDecompositionAudit() }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(reinstallAnimations),
@@ -359,9 +366,9 @@ final class AnimatedIconBenchViewController: UIViewController {
     private func probePresentedFrameRate(at now: CFTimeInterval) {
         guard let annotation = mapView.annotations.first,
               let marker = mapView.view(for: annotation) as? BenchMarkerView,
-              let frame = marker.presentedFrame else { return }
-        if let previous = probedFrame, previous == frame { return }
-        probedFrame = frame
+              let tick = marker.presentedTick else { return }
+        if let previous = probedTick, previous == tick { return }
+        probedTick = tick
         iconChangeTimestamps.append(now)
         // A rolling three seconds, so the readout tracks the live configuration
         // rather than averaging over every setting tried since launch.
@@ -408,6 +415,8 @@ final class AnimatedIconBenchViewController: UIViewController {
             "mask=\(config.masksOnCard ? "clip" : "baked")",
             "texture=\(config.sharesTexture ? "shared" : "distinct")",
             "wire=\(config.wireFormat.rawValue)",
+            "sampling=\(config.sampling.rawValue)",
+            "decomposed=\(store.residentProfile(ids: 0..<effectiveVariety).decomposed)/\(effectiveVariety)",
             "ground=\(config.showsMap ? "map" : "plain")",
             "pan=\(config.autoPans)",
             String(format: "frame_mean=%.2f", meanFrame),
@@ -416,6 +425,7 @@ final class AnimatedIconBenchViewController: UIViewController {
             String(format: "cpu=%.1f", meanCPU),
             String(format: "footprint_mb=%.1f", Double(peakFootprint) / 1024 / 1024),
             String(format: "atlas_mb=%.1f", Double(residentAtlasBytes) / 1024 / 1024),
+            String(format: "projected128_mb=%.1f", projectedWorstCaseMB),
             String(format: "dress_s=%.2f", dressCompletedIn ?? -1)
         ].joined(separator: " ")
 
@@ -426,8 +436,28 @@ final class AnimatedIconBenchViewController: UIViewController {
         }
     }
 
+    /// What the SAME configuration would cost with a fully distinct field —
+    /// the memory worst case, extrapolated from what is actually resident.
+    ///
+    /// Extrapolated rather than measured because the 48 MB cache evicts long
+    /// before 128 sheets are resident, so the sheet path's true peak can never
+    /// appear on this screen: it would report a number the eviction produced and
+    /// call it the cost. Per-icon bytes times 128 is the honest form of the
+    /// question, and it is the number the two paths differ on by 24x.
+    private var projectedWorstCaseMB: Double {
+        let resident = (0..<effectiveVariety).compactMap { store.cached($0) }
+        guard !resident.isEmpty else { return 0 }
+        let mean = Double(resident.reduce(0) { $0 + $1.byteCost }) / Double(resident.count)
+        return mean * 128 / 1024 / 1024
+    }
+
     private func updateHUD() {
         let footprint = Double(MemoryFootprint.current()) / 1024 / 1024
+        let profile = store.residentProfile(ids: 0..<effectiveVariety)
+        // Named out loud, because a partly-decomposed field reports the average
+        // of two designs and looks like one.
+        let fallbackNote = config.wireFormat == .still && profile.decomposed < effectiveVariety
+            && profile.decomposed + profile.frames.count > 0 ? "  ⚠︎ FELL BACK" : ""
         let dress = dressCompletedIn.map { String(format: "%.2fs", $0) } ?? "\(resolvedIcons)/\(markerCount)…"
         let stageLabel = switch stage {
         case .dressing: "warming"
@@ -439,17 +469,77 @@ final class AnimatedIconBenchViewController: UIViewController {
         MARKERS \(markerCount) (\(latticeColumns)x\(latticeRows) @64pt)  variety \(effectiveVariety)  [\(stageLabel)]
         clock \(config.mode == .quantised ? "quantised" : "free")  \
         \(Int(config.framesPerSecond))fps asked / \(String(format: "%.1f", presentedFPS)) presented  \
-        \(residentFrames) frames\(store.isTimeCompressed ? " CAPPED" : "")  \
-        \(store.residentProfile(ids: 0..<effectiveVariety).distinctSteps) distinct steps  \
+        \(residentFrames) \(profile.decomposed > 0 ? "keys" : "frames")\(store.isTimeCompressed ? " CAPPED" : "")  \
+        \(profile.distinctSteps) distinct steps  \
         shadow \(config.usesShadowPath ? "path" : "NONE")  mask \(config.masksOnCard ? "CLIP" : "baked")  \
-        tex \(config.sharesTexture ? "shared" : "DISTINCT")  wire \(config.wireFormat.rawValue)
+        tex \(config.sharesTexture ? "shared" : "DISTINCT")
+        wire \(config.wireFormat.rawValue)  sampling \(config.sampling.rawValue)  \
+        decomposed \(profile.decomposed)/\(effectiveVariety)\(fallbackNote)
         main-thread frame  mean \(String(format: "%.2f", meanFrame))ms  p95 \(String(format: "%.2f", p95Frame))ms
         hitches \(hitchCount)   app CPU \(String(format: "%.0f", meanCPU))%
         footprint \(String(format: "%.1f", footprint)) MB   \
-        atlases \(String(format: "%.1f", Double(residentAtlasBytes) / 1024 / 1024)) MB
+        textures \(String(format: "%.1f", Double(residentAtlasBytes) / 1024 / 1024)) MB  \
+        (\(String(format: "%.1f", projectedWorstCaseMB)) MB at 128 distinct)
         cold dress \(dress)   motion \(IconPlayback.motionAllowed ? "on" : "GATED")
         ⚠︎ render-server cost is invisible here — Instruments, on a device
         """
+    }
+
+    // MARK: - Verification
+
+    /// Proves the decomposed field is the SAME PICTURE as the sheet field.
+    ///
+    /// Reached with `-icon-bench-verify`. This is the only check on this screen
+    /// that can fail on correctness rather than on cost, and it is here because
+    /// every performance number above would stay green through a 3%-too-small
+    /// glyph, a squircle plate or an anchor-point slip. The same reasoning
+    /// caught a vertical flip in the container path, which was invisible because
+    /// the disc and half the glyphs are symmetric.
+    private func runDecompositionAudit() {
+        var worst = 0.0
+        var worstResult: DecompositionAudit.Result?
+        var lines: [String] = []
+        for index in 0..<IconAtlasBaker.catalogue.count {
+            guard let result = DecompositionAudit.compare(
+                index: index, frameCount: store.frameCount,
+                cellPixels: store.cellPixels, columns: store.columns
+            ) else { continue }
+            if result.mae > worst { worstResult = result }
+            worst = max(worst, result.mae)
+            lines.append(String(
+                format: "ICONBENCH-VERIFY icon=%d symbol=%@ mae=%.4f peak=%.0f over8=%.4f%% frames=%d skipped=%d",
+                result.index, result.symbol, result.mae, result.peak,
+                result.disagreeingFraction * 100, result.comparedFrames, result.skippedFrames
+            ))
+        }
+        lines.append(String(
+            format: "ICONBENCH-VERIFY worst_mae=%.4f frames=%d layer_blend=%.0f context_blend=%.0f match=%@",
+            worst, store.frameCount,
+            DecompositionAudit.opacityBlend.layerBlend,
+            DecompositionAudit.opacityBlend.contextBlend,
+            DecompositionAudit.opacityBlendsMatch ? "yes" : "no"
+        ))
+        // The breakdown for the worst icon. One number cannot say WHY two
+        // pictures differ; this says whether the error follows alpha, follows
+        // scale, or follows neither.
+        if let worstResult {
+            for (frame, sample) in worstResult.byFrame.enumerated() {
+                lines.append(String(
+                    format: "ICONBENCH-VERIFY-FRAME icon=%d f=%02d mae=%.4f scale=%.4f alpha=%.4f",
+                    worstResult.index, frame, sample.mae, sample.scale, sample.alpha
+                ))
+            }
+        }
+        if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            lines.append("ICONBENCH-VERIFY " + DecompositionAudit.dump(
+                index: 9, frame: 0, frameCount: store.frameCount,
+                cellPixels: store.cellPixels, columns: store.columns, to: directory
+            ))
+        }
+        for line in lines {
+            print(line)
+            logger.notice("\(line, privacy: .public)")
+        }
     }
 
 }
@@ -465,6 +555,7 @@ extension AnimatedIconBenchViewController: MKMapViewDelegate {
         ) as! BenchMarkerView
         view.store = store
         view.mode = config.mode
+        view.sampling = config.sampling
         view.onIconResolved = { [weak self] in
             guard let self, self.stage == .dressing else { return }
             self.resolvedIcons += 1

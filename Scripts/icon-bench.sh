@@ -42,14 +42,26 @@ xcrun simctl install "$DEVICE" "$BUILD_DIR/$SCHEME.app"
 # design; every other row disables exactly ONE thing, so a difference is
 # attributable to that thing and nothing else.
 MATRIX=(
-  ""                                              # recommended: quantised, 12fps, shadowPath, baked mask, shared
+  ""                                              # recommended: still + track, quantised, 30fps, shadowPath, baked mask, shared
+  #
+  # THE HEADLINE PAIR. Read `projected128_mb` on these two lines and nothing
+  # else, if you read nothing else: 9.0 against 216.8. Same picture (verified at
+  # 0.51/255 worst by -icon-bench-verify), 24x the memory.
+  "-icon-bench-wire still -icon-bench-variety all"
+  "-icon-bench-wire sheet -icon-bench-variety all"
+  # What 60fps costs on each representation. On a sheet it is bytes; on a track
+  # it is nothing at all.
+  "-icon-bench-wire still -icon-bench-fps 60 -icon-bench-max-frames 60"
+  "-icon-bench-wire sheet -icon-bench-fps 60 -icon-bench-max-frames 60"
+  # Real interpolation: 60 presented fps at the same memory as 12.
+  "-icon-bench-sampling continuous -icon-bench-variety all"
+  #
   "-icon-bench-clock free"                        # the staggered-beginTime version
-  "-icon-bench-fps 60"                            # what 60fps icons cost
   "-icon-bench-shadow none"                       # the pathless shadow shipping today
   "-icon-bench-mask clip"                         # the card mask a pre-rounded asset removes
   "-icon-bench-texture distinct"                  # the shared-texture assumption, inverted
   "-icon-bench-variety 1"                         # maximal sharing
-  "-icon-bench-variety all"                       # free-form per-post asset: every marker distinct
+  "-icon-bench-wire realGIF"                      # per-pixel artwork: cannot decompose, falls back to sheets
   "-icon-bench-ground plain"                      # how much of the cost is MapKit's
   "-icon-bench-pan"                               # the recycling storm
 )
@@ -66,5 +78,13 @@ for extra in "${MATRIX[@]}"; do
 done
 
 xcrun simctl terminate "$DEVICE" "$BUNDLE_ID" 2>/dev/null || true
+echo
+echo "▸ correctness check (decomposition against the sheet, pixel by pixel):"
+xcrun simctl terminate "$DEVICE" "$BUNDLE_ID" 2>/dev/null || true
+xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE_ID" \
+  -icon-bench -icon-bench-verify -icon-bench-latency 0 2>/dev/null \
+  | grep --line-buffered -m 1 "^ICONBENCH-VERIFY worst" || echo "VERIFY FAILED"
+xcrun simctl terminate "$DEVICE" "$BUNDLE_ID" 2>/dev/null || true
+
 echo
 echo "▸ done. Frame numbers above are SIMULATOR numbers — see the header."

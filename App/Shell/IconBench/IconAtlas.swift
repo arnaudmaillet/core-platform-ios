@@ -16,9 +16,22 @@ import UniformTypeIdentifiers
 /// the maximum, not an outlier — so "worst case" and "Tuesday" are the same
 /// number. This screen draws exactly that.
 ///
-/// When the design is settled, `IconAtlas` / `IconAtlasStore` / `IconPlayback`
-/// move to `MediaCore` as real types. They are here, under `#if DEBUG`, so the
-/// experiment costs the shipping app nothing.
+/// ## What it concluded
+///
+/// The sprite sheet below was the starting proposal and it is now the FALLBACK.
+/// The recommendation is `IconStill` — one picture plus three curves, played by
+/// Core Animation itself — because the sheet turned out to be a cache of a
+/// transform the compositor applies anyway. Measured here, 128 distinct icons
+/// on the saturated lattice: **9.0 MB against 216.8 MB, same picture**. See
+/// `IconMotionTrack`.
+///
+/// The sheet is still needed, and not as a courtesy: artwork whose PIXELS
+/// change cannot be decomposed, and `.realGIF` on this screen is exactly that
+/// case.
+///
+/// When the design is settled, `IconAtlas` / `IconStill` / `IconAtlasStore` /
+/// `IconPlayback` move to `MediaCore` as real types. They are here, under
+/// `#if DEBUG`, so the experiment costs the shipping app nothing.
 ///
 /// See `dev/issues/BACKEND_ANIMATED_PIN_ICONS.md` for the contract this
 /// prototypes.
@@ -111,15 +124,15 @@ nonisolated struct IconAtlas {
 @MainActor
 final class IconAtlasStore {
 
-    /// Wraps `IconAtlas` for `NSCache`, which is an Objective-C class and cannot
-    /// hold a struct.
+    /// Wraps `IconArt` for `NSCache`, which is an Objective-C class and cannot
+    /// hold an enum.
     private final class Box {
-        let atlas: IconAtlas
-        init(_ atlas: IconAtlas) { self.atlas = atlas }
+        let art: IconArt
+        init(_ art: IconArt) { self.art = art }
     }
 
     private let cache = NSCache<NSNumber, Box>()
-    private var inflight: [Int: Task<IconAtlas, Error>] = [:]
+    private var inflight: [Int: Task<IconArt, Error>] = [:]
 
     /// Stands in for the network. 0 means "already on disk".
     var simulatedLatency: TimeInterval = 0.35
@@ -132,8 +145,13 @@ final class IconAtlasStore {
 
     /// The contract's cap (`frame_count <= 24`), and the reason it exists: at a
     /// 136px cell a frame is 72 KiB, so 24 frames is 1.7 MiB resident per icon
-    /// and the 48 MB cache holds ~28 distinct ones. Frame count is the memory
-    /// lever; nothing else moves that number.
+    /// and the 48 MB cache holds ~28 distinct ones.
+    ///
+    /// On the SHEET path this is the memory lever and nothing else moves that
+    /// number. On the `.still` path it moves nothing at all — the samples are
+    /// keyframes of a curve, so the cap becomes a fidelity knob and 60 fps costs
+    /// exactly what 12 fps costs. That difference is the whole argument for
+    /// Ask C in the backend document.
     var maxFrames = 24
 
     /// Frames actually baked — DERIVED, never set.
@@ -163,24 +181,41 @@ final class IconAtlasStore {
 
     /// What arrives on the wire.
     ///
-    /// `.sheet` is the proposal: the server already packed the grid, so the
-    /// client does one still decode. `.gif` and `.apng` are the fallback rung —
-    /// an animated container the client unpacks itself, through ImageIO, with no
-    /// dependency. Switching between them changes ONLY the bake; playback is the
-    /// same atlas either way, which is the entire point of baking.
-    var wireFormat: WireFormat = .sheet
+    /// `.still` is the RECOMMENDATION and the default: one picture plus a
+    /// three-channel motion descriptor, played by Core Animation itself. It is
+    /// the only rung on this ladder whose memory does not scale with frame
+    /// count, and it costs 1/24th of the next one down. See `IconMotionTrack`.
+    ///
+    /// `.sheet` is the fallback for artwork whose motion is NOT affine: the
+    /// server packed the grid, so the client does one still decode. `.gif` and
+    /// `.apng` are the rung below that — an animated container the client
+    /// unpacks itself, through ImageIO, with no dependency.
+    ///
+    /// Everything from `.sheet` down produces the same atlas and the same
+    /// playback; only the bake differs, which is the entire point of baking.
+    /// `.still` is the one that changes the SHAPE of the answer, which is why it
+    /// is a wire format rather than a client-side toggle: in production the
+    /// client renders what arrived, and a mode that could disagree with the
+    /// asset is a mode that will.
+    var wireFormat: WireFormat = .still
 
-    /// `sheet` / `gif` / `apng` package the instrument's own synthetic artwork.
-    /// `realGIF` uses the GIFs actually bundled in `Resources/BenchIcons` —
-    /// downloaded from Wikimedia Commons, freely licensed, and chosen for how
-    /// UNLIKE the synthetic set they are. See `IconAtlasBaker.bundledGIFs`.
-    enum WireFormat: String, CaseIterable { case sheet, gif, apng, realGIF }
+    /// `still` / `sheet` / `gif` / `apng` package the instrument's own synthetic
+    /// artwork. `realGIF` uses the GIFs actually bundled in
+    /// `Resources/BenchIcons` — downloaded from Wikimedia Commons, freely
+    /// licensed, and chosen for how UNLIKE the synthetic set they are.
+    /// See `IconAtlasBaker.bundledGIFNames`.
+    ///
+    /// ⚠️ `realGIF` is deliberately NOT decomposable. Those files are per-pixel
+    /// animation; there is no affine track that reproduces them. Selecting it
+    /// gives sheets no matter what, and the report counts them as fallbacks
+    /// rather than averaging two designs into one number.
+    enum WireFormat: String, CaseIterable { case still, sheet, gif, apng, realGIF }
 
     init(memoryBudgetMB: Int = 48) {
         cache.totalCostLimit = memoryBudgetMB * 1024 * 1024
     }
 
-    func cached(_ id: Int) -> IconAtlas? { cache.object(forKey: NSNumber(value: id))?.atlas }
+    func cached(_ id: Int) -> IconArt? { cache.object(forKey: NSNumber(value: id))?.art }
 
     /// What the RESIDENT atlases actually look like, as opposed to what the
     /// config asked for.
@@ -191,10 +226,10 @@ final class IconAtlasStore {
     /// and a different step in every file. `distinctSteps > 1` means the shared
     /// clock is BROKEN — icons no longer change on a common grid, and the
     /// composite-rate argument for a quantised tick evaporates.
-    func residentProfile(ids: Range<Int>) -> (frames: [Int], distinctSteps: Int) {
-        let atlases = ids.compactMap { cached($0) }
-        let steps = Set(atlases.map { (($0.frameDuration * 1000).rounded()) })
-        return (atlases.map(\.frameCount).sorted(), steps.count)
+    func residentProfile(ids: Range<Int>) -> (frames: [Int], distinctSteps: Int, decomposed: Int) {
+        let resident = ids.compactMap { cached($0) }
+        let steps = Set(resident.map { (($0.frameDuration * 1000).rounded()) })
+        return (resident.map(\.frameCount).sorted(), steps.count, resident.count { $0.isDecomposed })
     }
 
     func purge() {
@@ -209,7 +244,7 @@ final class IconAtlasStore {
     /// a saturated lattice 128 markers realize at once; if they each start their
     /// own load for the twenty distinct icons among them, that is 128 bakes
     /// instead of 20.
-    func atlas(for id: Int) async throws -> IconAtlas {
+    func art(for id: Int) async throws -> IconArt {
         // The control case for the whole memory argument: no cache AND no
         // coalescing, so each caller really does get its own `CGImage`.
         //
@@ -227,12 +262,12 @@ final class IconAtlasStore {
         inflight[id] = task
         defer { inflight[id] = nil }
 
-        let atlas = try await task.value
-        cache.setObject(Box(atlas), forKey: NSNumber(value: id), cost: atlas.byteCost)
-        return atlas
+        let art = try await task.value
+        cache.setObject(Box(art), forKey: NSNumber(value: id), cost: art.byteCost)
+        return art
     }
 
-    private func bake(_ id: Int) -> Task<IconAtlas, Error> {
+    private func bake(_ id: Int) -> Task<IconArt, Error> {
         let frames = frameCount
         return Task { [frames, columns, cellPixels, framesPerSecond, simulatedLatency, wireFormat] in
             if simulatedLatency > 0 {
@@ -240,30 +275,63 @@ final class IconAtlasStore {
             }
             // Bake and decode OFF the main actor: this is the CPU work the real
             // implementation does on a URLSession callback queue.
-            return try await Task.detached(priority: .utility) { () -> IconAtlas in
+            return try await Task.detached(priority: .utility) { () -> IconArt in
                 switch wireFormat {
+                case .still:
+                    return .decomposed(try Self.bakeStill(
+                        id: id, frameCount: frames, cellPixels: cellPixels,
+                        step: 1.0 / framesPerSecond
+                    ))
                 case .sheet:
                     guard let png = IconAtlasBaker.bake(
                         index: id, frameCount: frames, columns: columns, cellPixels: cellPixels
                     ) else { throw URLError(.cannotDecodeContentData) }
-                    return IconAtlas(
+                    return .sheet(IconAtlas(
                         sheet: try Self.decodeFullSize(png),
                         frameCount: frames, columns: columns, cellPixels: cellPixels,
                         frameDuration: 1.0 / framesPerSecond
-                    )
+                    ))
                 case .gif, .apng:
-                    return try Self.bakeFromContainer(
+                    return .sheet(try Self.bakeFromContainer(
                         id: id, kind: wireFormat == .gif ? .gif : .apng,
                         maxFrames: frames, columns: columns, cellPixels: cellPixels,
                         authoredStep: 1.0 / framesPerSecond
-                    )
+                    ))
                 case .realGIF:
-                    return try Self.bakeFromBundledGIF(
+                    return .sheet(try Self.bakeFromBundledGIF(
                         id: id, maxFrames: frames, columns: columns, cellPixels: cellPixels
-                    )
+                    ))
                 }
             }.value
         }
+    }
+
+    /// The decomposed path: one picture in, one picture out.
+    ///
+    /// Note how little happens here compared with every other bake below — no
+    /// grid, no geometry, no canvas, no per-frame compositing loop. That absence
+    /// IS the result: the 24 cells the other paths spend their time building are
+    /// a recording of a transform the compositor applies anyway.
+    ///
+    /// The PNG round-trip is kept deliberately. It is the same
+    /// `CGImageSourceCreateThumbnailAtIndex` decode the app already ships, so
+    /// the decomposed path is measured through the real decoder rather than
+    /// handed a convenient in-memory bitmap the other paths never get.
+    private nonisolated static func bakeStill(
+        id: Int, frameCount: Int, cellPixels: Int, step: CFTimeInterval
+    ) throws -> IconStill {
+        let gutter = 2
+        guard let png = IconAtlasBaker.bakeStill(index: id, cellPixels: cellPixels, gutterPixels: gutter) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        return IconStill(
+            glyph: try decodeFullSize(png),
+            plate: IconAtlasBaker.plate(index: id),
+            motion: IconAtlasBaker.motion(index: id),
+            frameCount: frameCount,
+            frameDuration: step,
+            plateInsetFraction: Double(gutter) / Double(cellPixels)
+        )
     }
 
     /// The production path, end to end: an animated container arrives, ImageIO
