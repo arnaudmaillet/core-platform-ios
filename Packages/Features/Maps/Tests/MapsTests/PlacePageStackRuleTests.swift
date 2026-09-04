@@ -132,3 +132,70 @@ struct MapCardCloseTargetTests {
         #expect(MapsViewController.closeTarget(axis: .horizontal, hasLanding: false) == .marker)
     }
 }
+
+/// **`didAdd` IS NOT "SOMETHING NEW HAPPENED".**
+///
+/// MapKit calls it for every view it realizes — including the whole visible set
+/// when the map comes back from a push — so popping in whatever it hands over
+/// meant the entire map scale-and-faded in again on every return, with nothing
+/// having changed. Filmed as markers re-landing after every post.
+///
+/// Only what this screen actually ADDED is an arrival. The rest are settled
+/// explicitly rather than left alone: a recycled view can still be carrying a
+/// cancelled pop's alpha, so "do nothing" would leave some markers invisible.
+@MainActor
+struct MapMarkerPopPartitionTests {
+    private final class Marker {}
+
+    private func partition(
+        _ views: [Marker], pending: [Marker]
+    ) -> (arriving: [Marker], settled: [Marker]) {
+        MapsViewController.popPartition(
+            views, pending: Set(pending.map(ObjectIdentifier.init))
+        ) { ObjectIdentifier($0) }
+    }
+
+    /// The defect, stated: a batch nobody added animates nothing.
+    @Test func aBatchWithNoArrivalsPopsNothing() {
+        let views = [Marker(), Marker(), Marker()]
+        let batch = partition(views, pending: [])
+
+        #expect(batch.arriving.isEmpty)
+        #expect(batch.settled.count == 3)
+    }
+
+    /// …and a genuine arrival still lands, which is what keeps the map feeling
+    /// populated rather than stamped.
+    @Test func onlyTheMarkersThisReconcileAddedArrive() {
+        let old = [Marker(), Marker()]
+        let fresh = Marker()
+        let batch = partition(old + [fresh], pending: [fresh])
+
+        #expect(batch.arriving.count == 1)
+        #expect(batch.arriving.first === fresh)
+        #expect(batch.settled.count == 2)
+    }
+
+    /// A view MapKit hands over with no annotation at all is settled, never
+    /// popped — the alternative is animating something that has no identity.
+    @Test func aViewWithNoIdentityIsSettled() {
+        let orphan = Marker()
+        let batch = MapsViewController.popPartition(
+            [orphan], pending: [ObjectIdentifier(orphan)]
+        ) { _ in nil }
+
+        #expect(batch.arriving.isEmpty)
+        #expect(batch.settled.count == 1)
+    }
+
+    /// Every view is accounted for exactly once — the two lists are a partition,
+    /// not a filter and a guess.
+    @Test func everyViewLandsInExactlyOneList() {
+        let views = (0..<6).map { _ in Marker() }
+        let batch = partition(views, pending: [views[1], views[4]])
+
+        #expect(batch.arriving.count + batch.settled.count == views.count)
+        let seen = Set((batch.arriving + batch.settled).map(ObjectIdentifier.init))
+        #expect(seen.count == views.count)
+    }
+}
