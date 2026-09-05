@@ -268,6 +268,16 @@ enum IconPlayback {
         glyph.magnificationFilter = .trilinear
         glyph.minificationFilter = .trilinear
 
+        // ⚠️ `.reduced` FORCES stepped, whatever the caller asked for.
+        //
+        // Measured: `continuous` + `reduced` still presented 60.0 fps. Halving
+        // the keys does nothing when Core Animation interpolates between the
+        // survivors — it changes on every refresh either way — and halving
+        // `preferredFrameRateRange` does nothing either, because that hint is a
+        // ceiling request and not a throttle. The only lever that actually
+        // removes change instants is discrete steps, so Low Power gives up
+        // interpolation rather than pretending to.
+        let sampling = policy == .reduced ? .stepped : sampling
         let track = still.track(phase: phase)
 
         // The resting pose, on the MODEL layer. A marker whose animation is
@@ -328,9 +338,17 @@ enum IconPlayback {
             // Decimate the KEYS, then re-close the loop: dropping the closing
             // sample here would make `.linear` interpolate from the last key
             // back to the first over one key-interval instead of arriving on it.
-            var keys = decimated(Array(channel.dropLast()))
-            keys.append(channel[channel.count - 1])
-            animation.values = keys
+            // ⚠️ Decimating an ODD number of keys leaves the final interval
+            // spanning one original sample where every other spans two, and
+            // `.linear` with no `keyTimes` distributes them evenly — a timing
+            // warp at the loop seam that reads as a hitch once per turn. Explicit
+            // `keyTimes` from the ORIGINAL positions makes the seam correct for
+            // any key count instead of only for even ones.
+            let body = Array(channel.dropLast())
+            let kept = Swift.stride(from: 0, to: body.count, by: policy.stride).map { $0 }
+            animation.values = kept.map { body[$0] } + [channel[channel.count - 1]]
+            animation.keyTimes = (kept.map { NSNumber(value: Double($0) / Double(body.count)) })
+                + [NSNumber(value: 1.0)]
         }
 
         // The track is ALREADY phased by sampling from a rotated grid, exactly

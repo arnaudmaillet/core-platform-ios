@@ -257,25 +257,39 @@ final class AnimatedIconBenchViewController: UIViewController {
             self, selector: #selector(reinstallAnimations),
             name: UIApplication.willEnterForegroundNotification, object: nil
         )
-        // The policy is read at INSTALL time, so the field has to be told when
-        // the device changes its answer. Without this, a screen dressed before
-        // the user enabled Low Power keeps animating at full rate for the rest
-        // of the session — the exact failure the setting exists to prevent.
-        policyObservers = IconPlayback.observePolicyChanges { [weak self] in
-            self?.rebuildLattice()
-        }
+    }
+
+    /// Block-based observers are NOT removed by the automatic teardown that
+    /// covers selector-based ones: they leak their token and keep firing into a
+    /// dead closure.
+    ///
+    /// Torn down in `viewDidDisappear` rather than `deinit` because under Swift
+    /// 6 a `nonisolated deinit` cannot touch a `MainActor` property holding a
+    /// non-Sendable array — and reaching for `assumeIsolated` there would be
+    /// exactly the kind of unchecked escape the isolation is warning about. The
+    /// repo's settled answer is `NotificationObserverBag`
+    /// (`SnapFeedViewController`); this mirrors it by hand.
+    private func releasePolicyObservers() {
+        policyObservers.forEach(NotificationCenter.default.removeObserver)
+        policyObservers.removeAll()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if markerCount == 0 { rebuildLattice() }
         startDisplayLink()
+        if policyObservers.isEmpty {
+            policyObservers = IconPlayback.observePolicyChanges { [weak self] in
+                self?.rebuildLattice()
+            }
+        }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         displayLink?.invalidate()
         displayLink = nil
+        releasePolicyObservers()
     }
 
     private func applyConfig() {

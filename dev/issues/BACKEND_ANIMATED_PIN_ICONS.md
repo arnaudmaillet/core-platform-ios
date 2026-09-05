@@ -290,21 +290,48 @@ serious thermal pressure — posed and static, never blank).
 It holds on the DECOMPOSED path, on both surfaces, and the frame rate is very
 nearly free:
 
-| surface | 15 fps | 30 fps | 60 fps | textures |
+| surface | 15 fps | 30 fps | 60 fps | resident |
 |---|---|---|---|---|
-| map, 128 markers | — | 6.7% CPU | 7.1% CPU | 1.1 MB at every rate |
-| chat, 684 emotes | 10.7% CPU | 11.4% CPU | 12.0% CPU | 1.1 MB at every rate |
+| map, 128 markers | — | 6.1% CPU | 6.3% CPU | 1.2 MB at every rate |
+| chat, 684 emotes | 10.7% CPU | 11.4% CPU | 12.0% CPU | 1.2 MB at every rate |
 
-Quadrupling the rate costs **1.3 points of app CPU and zero bytes.** The three
-policy states measured end to end: 60.0 / 30.0 / 0.0 fps presented, 1.1 MB in
-all three — the picture never changes, only how often it moves.
+Quadrupling the rate costs **1.3 points of app CPU and 0.0 MB.** The three policy
+states measured end to end: 60.0 / 30.0 / 0.0 fps presented, 1.2 MB in all three
+— the picture never changes, only how often it moves.
+
+The resident figure now includes the track arrays, not just the texture. It had
+to: counting only the texture made "frame rate costs no memory" true by
+construction of the metric, since the texture is the one thing frame rate does
+not scale. At 120 keys the samples are 2.9 KB per icon, ~368 KB across 128 — 4%
+of the total. Small is a result; zero was a bookkeeping error.
+
+⚠️ Two things the measurement forced, both counter-intuitive:
+
+- **Low Power must give up interpolation, not just ask for less.** Halving
+  `preferredFrameRateRange` changed nothing — measured 60.0 fps presented under
+  a 30 Hz ceiling — because that hint is a *ceiling request*, not a throttle.
+  Decimating keys changed nothing either while the client was interpolating
+  between the survivors. The only lever that removes change instants is discrete
+  steps, so the reduced state forces them.
+- **684 is a stress ceiling, not a product number.** It is a uniform
+  full-screen lattice at 26pt pitch. The real transcript cannot produce it: at
+  the shipped cell geometry the maxima are ~170 for one-line spam, ~276 for
+  four-line walls, ~382 for one pathological message. Bench against 684, quote
+  ~400.
 
 ⚠️ **The policy does NOT hold on the sheet path, and that is the whole reason
 §3 matters.** Same request, same screen:
 
+⚠️ And note what "a sheet at 60 fps" required: **lifting the contract's own
+`frame_count ≤ 24`**. Under the cap the sheet does not get expensive, it gets
+WRONG — `frameCount` clamps to 24, the step stays at the requested 16.67 ms, and
+a one-second loop plays in 0.4 s. Asking a sheet for 60 fps buys 2.5x the speed,
+not 2x the smoothness. Both outcomes are bad; only one of them is visible in a
+memory graph.
+
 | at 60 fps, 128 distinct | textures | peak footprint |
 |---|---|---|
-| still + track (§3) | **1.1 MB** | 99 MB |
+| still + track (§3) | **1.2 MB** | 99 MB |
 | sprite sheet (§4) | 46.6 MB resident, **541.9 MB projected** | 200.6 MB |
 | GIF, client-decoded | 45.2 MB resident, 361.2 MB projected | **839.1 MB** |
 

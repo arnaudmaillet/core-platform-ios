@@ -62,6 +62,15 @@ MATRIX=(
   "-icon-bench-texture distinct"                  # the shared-texture assumption, inverted
   "-icon-bench-variety 1"                         # maximal sharing
   "-icon-bench-wire realGIF"                      # per-pixel artwork: cannot decompose, falls back to sheets
+  #
+  # The two axes the matrix never exercised. `-icon-bench-emote` is the CHAT
+  # worst case, which is a different geometry from the map's rather than a
+  # smaller one (684 against 128); `-icon-bench-policy` is the three-state
+  # motion policy, whose middle state no simulator can produce on its own.
+  "-icon-bench-emote -icon-bench-wire baked -icon-bench-variety 16"
+  "-icon-bench-policy reduced -icon-bench-wire baked -icon-bench-variety 16"
+  "-icon-bench-policy still -icon-bench-wire baked -icon-bench-variety 16"
+  #
   "-icon-bench-ground plain"                      # how much of the cost is MapKit's
   "-icon-bench-pan"                               # the recycling storm
 )

@@ -205,9 +205,19 @@ nonisolated struct IconStill {
 
     var loopDuration: CFTimeInterval { frameDuration * CFTimeInterval(frameCount) }
 
+    /// Texture PLUS track.
+    ///
+    /// ⚠️ This counted only the texture, which made the headline finding true by
+    /// construction of its own metric: of course frame rate costs no memory if
+    /// the thing frame rate scales is excluded from the measurement. At 120 keys
+    /// the samples are 3 channels x 8 bytes x 120 = 2.9 KB per icon, ~368 KB
+    /// across 128. Small — 4% of the 9 MB — but small is a result and zero is a
+    /// bookkeeping error, and only one of them survives being checked.
     var byteCost: Int {
-        guard let cg = glyph.cgImage else { return 0 }
-        return cg.bytesPerRow * cg.height
+        let texture = glyph.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        guard case .sampled(let scale, let rotation, let opacity) = motion else { return texture }
+        return texture
+            + (scale.count + rotation.count + opacity.count) * MemoryLayout<Double>.size
     }
 
     var isBaked: Bool { if case .sampled = motion { return true }; return false }

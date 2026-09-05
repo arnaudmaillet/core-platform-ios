@@ -38,10 +38,20 @@ final class BenchMarkerView: MKAnnotationView {
     /// smaller version of the same one.
     ///
     /// A map marker is 44pt and the cluster engine guarantees 64pt spacing, so
-    /// the field saturates at 128. A chat emote is ~22pt inline in text with no
-    /// spacing guarantee at all, so the same screen holds FIVE TIMES as many.
-    /// Measuring the map case and assuming chat is easier gets the harder of the
-    /// two surfaces wrong.
+    /// the field saturates at 128. A chat emote is ~22pt with no spacing
+    /// guarantee at all, so the same screen packs 684 — 5.3x. Measuring the map
+    /// case and assuming chat is easier gets the harder of the two surfaces
+    /// wrong.
+    ///
+    /// ⚠️ 684 is a STRESS CEILING, not a product number, and the difference
+    /// matters if anyone quotes it. It is a uniform full-screen lattice, which
+    /// the real transcript cannot produce: at `MessageCell`'s geometry (23.0pt
+    /// emoji advance, 20.3pt line, 288pt text width, bubbles capped at 0.75 of
+    /// the row plus 16pt padding per message) the true maxima are ~170 for
+    /// one-line spam, ~276 for four-line walls, and ~382 for a single
+    /// pathological message. So this benches 1.7-4x heavier than chat can be.
+    /// What transfers exactly is areal density: 467pt² per emote against
+    /// 4096pt² per marker, which is the overdraw argument.
     static var side: CGFloat = 44
 
     /// Explicit `shadowPath` versus the pathless shadow shipping today.
