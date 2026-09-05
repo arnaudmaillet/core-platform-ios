@@ -114,14 +114,22 @@ final class PinCardView: UIView {
         // every size the card passes through.
         departureCoverView.backgroundColor = .secondarySystemBackground
         departureCoverView.isHidden = true
-        departureCoverView.frame = bounds
-        departureCoverView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(departureCoverView)
-
+        // ⚠️ ABOVE the arrival cover and BELOW the departure one, which is the
+        // only position the blend law allows.
+        //
+        // Placed above the departure cover it stayed opaque while that cover
+        // faded, hiding the blend completely — the flight would have handed over
+        // to a picture nobody could see. It is the marker's OWN content, so it
+        // belongs in the arrival stack: the departure picture fades over it,
+        // exactly as it fades over the cover.
         previewSheetView.frame = bounds
         previewSheetView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         previewSheetView.isHidden = true
         addSubview(previewSheetView)
+
+        departureCoverView.frame = bounds
+        departureCoverView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(departureCoverView)
 
         videoRenderView.frame = bounds
         videoRenderView.autoresizingMask = [.flexibleWidth, .flexibleHeight]

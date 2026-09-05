@@ -52,20 +52,30 @@ struct PinCardBlendTests {
     /// middle layers are private, so they are addressed by their position
     /// between the ones that are not — which pins the order as a side effect.
     ///
-    /// Six since the animated-icon face landed: it sits above the text face and
-    /// below the ring, for the same reason the text face sits above the cover —
-    /// it REPLACES what is beneath it rather than decorating it.
-    @Test func theCardStacksItsSixLayersInTheContractedOrder() {
+    /// Seven since the animated icon and the baked media preview landed.
+    ///
+    /// ⚠️ The preview sits ABOVE the arrival cover and BELOW the departure one,
+    /// and that position is load-bearing rather than aesthetic: above the
+    /// departure cover it stays opaque while that cover fades, which hides the
+    /// blend completely and hands the flight over to a picture nobody can see.
+    /// It is the marker's OWN content, so it belongs in the arrival stack.
+    @Test func theCardStacksItsSevenLayersInTheContractedOrder() {
         let card = makeCard()
-        #expect(card.subviews.count == 6)
+        #expect(card.subviews.count == 7)
         #expect(card.subviews.first === card.imageView)
         #expect(card.subviews.last === card.ringView)
+        // The preview is BENEATH the departure operand, or the blend cannot be
+        // seen. This is the assertion that would have caught it.
+        let previewIndex = card.subviews.firstIndex(of: previewSheet(of: card)) ?? .max
+        let departureIndex = card.subviews.firstIndex(of: departureCover(of: card)) ?? -1
+        #expect(previewIndex < departureIndex)
     }
 
-    private func departureCover(of card: PinCardView) -> UIView { card.subviews[1] }
-    private func liveSurface(of card: PinCardView) -> UIView { card.subviews[2] }
-    private func textFace(of card: PinCardView) -> UIView { card.subviews[3] }
-    private func iconFace(of card: PinCardView) -> UIView { card.subviews[4] }
+    private func previewSheet(of card: PinCardView) -> UIView { card.subviews[1] }
+    private func departureCover(of card: PinCardView) -> UIView { card.subviews[2] }
+    private func liveSurface(of card: PinCardView) -> UIView { card.subviews[3] }
+    private func textFace(of card: PinCardView) -> UIView { card.subviews[4] }
+    private func iconFace(of card: PinCardView) -> UIView { card.subviews[5] }
 
     // MARK: - The icon face
 
