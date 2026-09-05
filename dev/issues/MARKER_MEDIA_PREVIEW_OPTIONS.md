@@ -113,6 +113,60 @@ measured against a MAC's decoder, not a phone's. Eight concurrent decoders
 running cleanly here is evidence about the app's own cost and no evidence at all
 about how many a device will admit. That number needs hardware.
 
+## 0d. "Wouldn't a light GIF be cheaper?" — measured, and no
+
+Same source clip, same 2 seconds, same 132px marker crop, encoded three ways:
+
+| | 12 fps | 24 fps |
+|---|---|---|
+| **MP4 (H.264, CRF 23)** | **19.3 KB** | **26.9 KB** |
+| GIF (palette-optimised, `stats_mode=diff`, Bayer dither) | 226 KB — **11.7x** | 328 KB — **12.2x** |
+| HEIC sprite sheet | 167 KB — 8.7x | 336 KB — 12.5x |
+
+**A GIF of this preview is twelve times the bytes of the video it replaces**, and
+at 24 fps it is 328 KB — already over the 300 KB ceiling the preview-loop
+contract negotiates for the whole asset.
+
+And the palette costs more than bytes. Counted on one frame of the same clip:
+
+    H.264 frame:  12,608 distinct RGB values
+    GIF frame:       255 distinct RGB values
+
+**A 49x reduction in colour resolution, on photographic content** — which is the
+worst case for a 256-entry palette and exactly what a post's media is. Banding
+on a 44pt marker is less visible than at full size, but it is not free, and it
+is permanent: the palette is baked at publish.
+
+Three more properties, none of them recoverable by encoding harder:
+
+- **GIF cannot express 30 or 60 fps.** Delays are stored in CENTISECONDS, so the
+  representable rates are exactly 100/k — 100, 50, 33.3, 25, 20 … neither 30 nor
+  60 is among them.
+- **No hardware decode path.** H.264/HEVC decode on dedicated silicon; a GIF is
+  unpacked by ImageIO on the CPU.
+- **Decoding one per marker is the animated-container path already ruled out** —
+  N concurrent ImageIO decodes holding full-size frame buffers, measured at
+  63-81 MB peak for 19 markers and 428-546 MB for 128, peaking on a PAN because a
+  pan is first sighting.
+
+### But the instinct behind the question is right
+
+What "a light GIF" is reaching for is a representation that needs **no decode
+session** — and that is real, it is just not the GIF. It is the sprite sheet:
+one still image, played by `CAKeyframeAnimation` on `contentsRect`, zero decode
+sessions and zero per-frame app CPU, with the machinery already shipped in
+`AnimatedIconSheet`.
+
+The sheet costs about the same on the wire as the GIF (167-336 KB) without the
+palette, the frame-rate limit or the CPU decode. Its price is elsewhere and it is
+the one that matters: **2.65 MB resident per clip** at 56pt/@3x/24 frames, so
+19 markers is 50.4 MB against a 24 MB cache.
+
+**So the axis is not "video versus GIF". It is a decode session per playing
+marker, or resident texture for every marker.** Video is cheap in memory and
+bounded in count; the sheet is unbounded in count and expensive in memory. The
+GIF is the worst of both — palette-limited, CPU-decoded, and 12x the bytes.
+
 ## 1. Options, ruled out by mechanism
 
 | # | option | why it lives or dies |
