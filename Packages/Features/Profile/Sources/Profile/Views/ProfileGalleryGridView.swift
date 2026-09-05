@@ -534,11 +534,17 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         // `-grid-playback-log`: why the gate answered what it did. An empty
         // candidate list has half a dozen possible causes and they all look
         // identical from outside.
-        if ProcessInfo.processInfo.arguments.contains("-grid-playback-log"), candidates.isEmpty {
+        // ⚠️ ALSO when the list is NOT empty but the surface is not visible.
+        // Those candidates are discarded inside `update`, so without this arm
+        // the silenced case prints nothing and is indistinguishable from a
+        // gallery that simply holds no video.
+        if ProcessInfo.processInfo.arguments.contains("-grid-playback-log"),
+           candidates.isEmpty || !playback.debugIsSurfaceVisible {
             let visible = collectionView.indexPathsForVisibleItems
             let videos = posts.filter(\.hasPlayableVideo).count
             let realized = visible.filter { collectionView.cellForItem(at: $0) != nil }.count
             print("[profile-autoplay] none: posts=\(posts.count) videos=\(videos) "
+                  + "candidates=\(candidates.count) surfaceVisible=\(playback.debugIsSurfaceVisible) "
                   + "skeleton=\(showsSkeleton) visible=\(visible.count) realized=\(realized) "
                   + "style=\(style == .grid ? "grid" : "list") "
                   + "viewport=\(Int(viewport.minY))…\(Int(viewport.maxY)) "
