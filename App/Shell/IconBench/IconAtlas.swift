@@ -256,6 +256,10 @@ final class IconAtlasStore {
         let scale: [Double]?
         let rotation: [Double]?
         let opacity: [Double]?
+        /// Fractional step, present only when the baker was forced off the
+        /// contract's integer ladder — the only way to express 60 fps, since
+        /// 1/60 s is 16.67 ms and `frame_ms` is a `uint32`.
+        let stepMS: Double?
         let plate: String?
     }
 
@@ -286,7 +290,7 @@ final class IconAtlasStore {
         // assets encoded as PNG went through that same call in 0.13 s.
         // Unverified on device; see the note in the backend document.
         guard let image = UIImage(data: data) else { throw URLError(.cannotDecodeContentData) }
-        let step = CFTimeInterval(entry.frameMS) / 1000
+        let step = CFTimeInterval(entry.stepMS ?? Double(entry.frameMS)) / 1000
 
         if entry.kind == "still", let scale = entry.scale,
            let rotation = entry.rotation, let opacity = entry.opacity {

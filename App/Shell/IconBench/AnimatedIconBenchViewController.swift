@@ -415,6 +415,21 @@ final class AnimatedIconBenchViewController: UIViewController {
         return low == high ? "\(low)" : "\(low)-\(high)"
     }
 
+    /// The rate the RESIDENT assets actually carry, which is not the config's
+    /// on every path.
+    ///
+    /// `wire=baked` assets bring their own step from the manifest, so the
+    /// config's `framesPerSecond` describes nothing — and the HUD printed it
+    /// anyway, reading "30fps asked / 60.0 presented" for a field where nothing
+    /// asked for 30 and the assets were authored at 60. A readout that names
+    /// the wrong source for a number is worse than one that omits it.
+    private var residentRates: String {
+        let rates = Set((0..<effectiveVariety).compactMap { store.cached($0) }
+            .map { Int((1 / $0.frameDuration).rounded()) }).sorted()
+        guard let low = rates.first, let high = rates.last else { return "-" }
+        return low == high ? "\(low)" : "\(low)-\(high)"
+    }
+
     private var meanFrame: Double { frameSamples.isEmpty ? 0 : frameSamples.reduce(0, +) / Double(frameSamples.count) }
     private var p95Frame: Double {
         let sorted = frameSamples.sorted()
@@ -436,7 +451,7 @@ final class AnimatedIconBenchViewController: UIViewController {
             "variety=\(effectiveVariety)",
             "clock=\(config.mode == .quantised ? "quantised" : "free")",
             "fps=\(Int(config.framesPerSecond))",
-            "frames_asked=\(store.frameCount)",
+            config.wireFormat == .baked ? "asset_fps=\(residentRates)" : "frames_asked=\(store.frameCount)",
             "frames_real=\(residentFrames)",
             "steps=\(store.residentProfile(ids: 0..<effectiveVariety).distinctSteps)",
             "compressed=\(store.isTimeCompressed)",
@@ -498,8 +513,10 @@ final class AnimatedIconBenchViewController: UIViewController {
         hud.text = """
         MARKERS \(markerCount) (\(latticeColumns)x\(latticeRows) @64pt)  variety \(effectiveVariety)  [\(stageLabel)]
         clock \(config.mode == .quantised ? "quantised" : "free")  \
-        \(Int(config.framesPerSecond))fps asked / \(String(format: "%.1f", presentedFPS)) presented  \
-        \(residentFrames) \(profile.decomposed > 0 ? "keys" : "frames")\(store.isTimeCompressed ? " CAPPED" : "")  \
+        \(config.wireFormat == .baked ? "\(residentRates)fps in assets" : "\(Int(config.framesPerSecond))fps asked") \
+        / \(String(format: "%.1f", presentedFPS)) presented  \
+        \(residentFrames) \(profile.decomposed > 0 ? "keys" : "frames")\
+        \(config.wireFormat != .baked && store.isTimeCompressed ? " CAPPED" : "")  \
         \(profile.distinctSteps) distinct steps\(profile.distinctSteps > 1 ? " ⚠︎ fps is icon 0's only" : "")  \
         shadow \(config.usesShadowPath ? "path" : "NONE")  mask \(config.masksOnCard ? "CLIP" : "baked")  \
         tex \(config.sharesTexture ? "shared" : "DISTINCT")

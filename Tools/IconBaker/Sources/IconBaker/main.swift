@@ -38,7 +38,18 @@ struct IconBaker {
         /// smoothness. It did exactly that: a two-second loop came out as 24
         /// keys, an 83 ms step, and icons visibly stepping at 12 fps on a
         /// screen asking for 30. The cap was right, applied to the wrong thing.
-        var maxKeys = 120
+        var maxKeys = 240
+        /// Off-ladder track rate, for experiments the contract does not allow.
+        ///
+        /// ⚠️ `frame_ms` is a `uint32` and the ladder is {33, 50, 66, 83, 100},
+        /// so the contract CANNOT express 60 fps: 1/60 s is 16.67 ms and no
+        /// integer rounds to it. 16 ms is 62.5 fps and 17 ms is 58.8 fps, and a
+        /// stepped animation whose step is not the refresh interval beats
+        /// against the display instead of landing on it. Setting this writes a
+        /// fractional `stepMS` alongside `frameMS`, which is deliberately a
+        /// SEPARATE field: the manifest stays contract-shaped, and anything
+        /// reading the fractional one knows it is off-contract.
+        var trackFPS: Double?
         var heic = true
         var plate: CGColor?
         var plateHex: String?
@@ -60,7 +71,8 @@ struct IconBaker {
             case "--out": options.output = URL(fileURLWithPath: try next())
             case "--cell": options.cellPixels = Int(try next()) ?? 136
             case "--max-frames": options.maxFrames = Int(try next()) ?? 24
-            case "--max-keys": options.maxKeys = Int(try next()) ?? 120
+            case "--max-keys": options.maxKeys = Int(try next()) ?? 240
+            case "--fps": options.trackFPS = Double(try next())
             case "--manifest": options.manifest = try next()
             case "--png": options.heic = false
             case "--fill": options.fit = .fill
@@ -102,6 +114,9 @@ struct IconBaker {
         let opacity: [Double]?
         let bytes: Int
         let note: String
+        /// Fractional step in milliseconds. Present only when `--fps` forced a
+        /// rate the integer ladder cannot express; the client prefers it.
+        let stepMS: Double?
         /// Set on `still` entries only. The plate is a COLOUR here rather than
         /// pixels, deliberately: the still is the thing the client transforms,
         /// so a plate baked into it would spin and pulse along with the mark.
@@ -124,6 +139,11 @@ struct IconBaker {
         // by construction. Same ladder, opposite priority, because the two are
         // limited by different things.
         func trackSampling() -> (keys: Int, stepMS: Int) {
+            if let fps = options.trackFPS, fps > 0 {
+                let exact = 1000 / fps
+                return (min(options.maxKeys, max(2, Int((sourceMS / exact).rounded()))),
+                        Int(exact.rounded()))
+            }
             for rung in AtlasWriter.ladderMS {
                 let keys = max(2, Int((sourceMS / Double(rung)).rounded()))
                 if keys <= options.maxKeys { return (keys, rung) }
@@ -180,6 +200,7 @@ struct IconBaker {
                     scale: track.scale, rotation: track.rotation, opacity: track.opacity,
                     bytes: size(of: file),
                     note: "\(profile.affine) affine properties, 1 animated layer",
+                    stepMS: options.trackFPS.map { 1000 / $0 },
                     plate: options.plateHex
                 )
             case .failure(let refusal):
@@ -237,7 +258,7 @@ struct IconBaker {
             id: document.name, kind: "sheet", asset: asset,
             frameCount: frameCount, frameMS: frameMS, cellPX: cell, columns: columns,
             scale: nil, rotation: nil, opacity: nil,
-            bytes: size(of: file), note: note, plate: nil
+            bytes: size(of: file), note: note, stepMS: nil, plate: nil
         )
     }
 
@@ -252,7 +273,8 @@ struct IconBaker {
             let options = try parse(Array(CommandLine.arguments.dropFirst()))
             guard !options.inputs.isEmpty else {
                 print("usage: IconBaker <file.lottie|file.json>… --out <dir> "
-                      + "[--cell 136] [--max-frames 24] [--png] [--fill] [--plate #RRGGBB]")
+                      + "[--cell 136] [--max-frames 24] [--max-keys 240] [--fps N] "
+                      + "[--png] [--fill] [--plate #RRGGBB] [--manifest name.json]")
                 exit(2)
             }
             var entries: [Entry] = []
