@@ -50,9 +50,26 @@ struct GridVideoPlaybackCoordinatorTests {
     /// succeed, and the guard still refuses because no frame exists. The
     /// released-when-windowless sweep needs a real decoded frame and is
     /// exercised in the simulator instead.
+    /// A coordinator that has been told it is on screen.
+    ///
+    /// ⚠️ Construction alone no longer permits playback: `isSurfaceVisible` is
+    /// FALSE at birth, so a coordinator nobody has told about takes no loans on
+    /// the shared pool. Every test below is about what a VISIBLE grid does, so
+    /// they all go through here; the gated cases assert `false` explicitly
+    /// afterwards, which now reads as the state change it is.
+    private func makeVisibleCoordinator(
+        pool: VideoPlaybackController, maxConcurrent: Int? = nil
+    ) -> GridVideoPlaybackCoordinator {
+        let coordinator = maxConcurrent.map {
+            GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: $0)
+        } ?? GridVideoPlaybackCoordinator(pool: pool)
+        coordinator.setSurfaceVisible(true)
+        return coordinator
+    }
+
     @Test func noFlightSurfaceUntilThePlaybackHasDecodedAFrame() async {
         let pool = makePool()
-        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 3)
         let candidate = makeCandidate(0, distance: 0)
         coordinator.update(candidates: [candidate])
         await coordinator.debugAwaitStarts()
@@ -68,7 +85,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// A tile that is not playing has nothing to join, and must not mint a
     /// surface that would sit attached to nothing.
     @Test func noFlightSurfaceForATileThatIsNotPlaying() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         let candidate = makeCandidate(0, distance: 0)
         #expect(coordinator.makeAttachedSurface(for: candidate.id, url: candidate.url) == nil)
     }
@@ -78,14 +95,49 @@ struct GridVideoPlaybackCoordinatorTests {
     /// The cap is the whole reason the grid is affordable: a mosaic can show a
     /// dozen video bricks, and only a few may hold players.
     @Test func playsAtMostMaxConcurrentTiles() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         coordinator.update(candidates: (0..<8).map { makeCandidate($0, distance: CGFloat($0)) })
         #expect(coordinator.playingIDs.count == 3)
     }
 
     @Test func defaultsToSixConcurrentPlayers() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(poolSize: 6))
+        let coordinator = makeVisibleCoordinator(pool: makePool(poolSize: 6))
         coordinator.update(candidates: (0..<12).map { makeCandidate($0, distance: CGFloat($0)) })
+        #expect(coordinator.playingIDs.count == 6)
+    }
+
+    // MARK: - The birth state
+
+    /// A coordinator nobody has told about takes NO loans.
+    ///
+    /// This is the whole bug in one assertion. The default used to be
+    /// "visible", so merely constructing a grid could start players — and the
+    /// Profile gallery is constructed at launch on a tab nobody selects, then
+    /// forces a layout off-window and reconciles. Its only release is a
+    /// `viewWillDisappear` that never fires for a tab never entered, so the
+    /// loans were unreclaimable for the life of the process. Measured on
+    /// develop: four players held at rest with no grid ever on screen.
+    ///
+    /// ⚠️ Do NOT route this through `makeVisibleCoordinator` — the point is the
+    /// state before anyone speaks.
+    @Test func aCoordinatorNobodyHasToldAboutTakesNoLoans() async {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 6)
+        coordinator.update(candidates: (0..<8).map { makeCandidate($0, distance: CGFloat($0)) })
+        await coordinator.debugAwaitStarts()
+        #expect(coordinator.playingIDs.isEmpty)
+    }
+
+    /// ...and starts as soon as it is told, so the fix cannot pass by refusing
+    /// to ever play. A guard that is always closed satisfies the test above.
+    @Test func andPlaysOnceItIsToldItIsOnScreen() async {
+        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 6)
+        coordinator.update(candidates: (0..<8).map { makeCandidate($0, distance: CGFloat($0)) })
+        await coordinator.debugAwaitStarts()
+        #expect(coordinator.playingIDs.isEmpty)
+
+        coordinator.setSurfaceVisible(true)
+        coordinator.update(candidates: (0..<8).map { makeCandidate($0, distance: CGFloat($0)) })
+        await coordinator.debugAwaitStarts()
         #expect(coordinator.playingIDs.count == 6)
     }
 
@@ -94,7 +146,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// During a hard fling nothing new starts — anything started is off screen
     /// before its first frame.
     @Test func noStartsWhileGated() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 6)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 6)
         coordinator.update(
             candidates: [makeCandidate(0, distance: 10)], allowingStarts: false
         )
@@ -104,7 +156,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// Stopping is never gated: a tile that left must give its player back
     /// whatever the scroll is doing, or the pool starves mid-fling.
     @Test func stopsStillHappenWhileGated() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 6)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 6)
         let candidate = makeCandidate(0, distance: 10)
         coordinator.update(candidates: [candidate])
         #expect(coordinator.playingIDs.count == 1)
@@ -114,7 +166,7 @@ struct GridVideoPlaybackCoordinatorTests {
     }
 
     @Test func startsResumeOnceUngated() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 6)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 6)
         let candidates = [makeCandidate(0, distance: 10)]
         coordinator.update(candidates: candidates, allowingStarts: false)
         #expect(coordinator.playingIDs.isEmpty)
@@ -125,7 +177,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// Closest to the viewport centre wins, regardless of the order the caller
     /// happened to enumerate visible cells in.
     @Test func choosesTheTilesNearestTheViewportCentre() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 2)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 2)
         coordinator.update(candidates: [
             makeCandidate(0, distance: 400),
             makeCandidate(1, distance: 10),
@@ -136,7 +188,7 @@ struct GridVideoPlaybackCoordinatorTests {
     }
 
     @Test func tilesThatLoseTheirSlotStopPlaying() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 1)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 1)
         let near = makeCandidate(0, distance: 10)
         let far = makeCandidate(1, distance: 900)
         coordinator.update(candidates: [near, far])
@@ -151,7 +203,7 @@ struct GridVideoPlaybackCoordinatorTests {
     }
 
     @Test func reconcilingWithTheSameSetIsIdempotent() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 2)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 2)
         let candidates = [makeCandidate(0, distance: 10), makeCandidate(1, distance: 20)]
         coordinator.update(candidates: candidates)
         let first = coordinator.playingIDs
@@ -160,7 +212,7 @@ struct GridVideoPlaybackCoordinatorTests {
     }
 
     @Test func anEmptyCandidateSetStopsEverything() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         coordinator.update(candidates: [makeCandidate(0, distance: 10)])
         coordinator.update(candidates: [])
         #expect(coordinator.playingIDs.isEmpty)
@@ -169,14 +221,14 @@ struct GridVideoPlaybackCoordinatorTests {
     // MARK: - Visibility
 
     @Test func anInvisibleSurfacePlaysNothing() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         coordinator.setSurfaceVisible(false)
         coordinator.update(candidates: [makeCandidate(0, distance: 10)])
         #expect(coordinator.playingIDs.isEmpty)
     }
 
     @Test func hidingTheSurfaceStopsPlayingTiles() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         coordinator.update(candidates: [makeCandidate(0, distance: 10)])
         #expect(!coordinator.playingIDs.isEmpty)
         coordinator.setSurfaceVisible(false)
@@ -186,7 +238,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// The tapped tile is exempt: its player is the one the hero flight carries,
     /// and stopping it mid-flight is exactly the restart the handoff prevents.
     @Test func hidingTheSurfaceKeepsTheFlightsTile() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         coordinator.update(candidates: [
             makeCandidate(0, distance: 10), makeCandidate(1, distance: 20)
         ])
@@ -199,7 +251,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// A recycled cell that kept its player would render the previous post's
     /// video under the new post's still.
     @Test func recyclingACellReturnsItsPlayer() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         let candidate = makeCandidate(0, distance: 10)
         coordinator.update(candidates: [candidate])
         #expect(!coordinator.playingIDs.isEmpty)
@@ -209,7 +261,7 @@ struct GridVideoPlaybackCoordinatorTests {
     }
 
     @Test func stoppingAnUnknownCellIsANoOp() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         coordinator.update(candidates: [makeCandidate(0, distance: 10)])
         coordinator.stop(cell: PostGridTileCell(frame: .zero))
         #expect(coordinator.playingIDs.count == 1)
@@ -218,7 +270,7 @@ struct GridVideoPlaybackCoordinatorTests {
     // MARK: - Handoff
 
     @Test func parkingForHandoffReleasesTheTile() async {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         let candidate = makeCandidate(0, distance: 10)
         coordinator.update(candidates: [candidate])
         // The pool attaches asynchronously (the URL is resolved first), so wait
@@ -232,7 +284,7 @@ struct GridVideoPlaybackCoordinatorTests {
     }
 
     @Test func parkingATileThatIsNotPlayingReportsFalse() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         #expect(coordinator.parkForHandoff(PostID("post-nope")) == false)
     }
 
@@ -257,7 +309,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// is where the ordinary rule would put a tap that landed on the edge of a
     /// wide row, and it is exactly the case that flew a thumbnail.
     @Test func theFocusedPostPlaysFromOutsideTheBudget() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         let candidates = (0..<8).map { makeCandidate($0, distance: CGFloat($0)) }
 
         coordinator.focus(PostID("post-7"))
@@ -279,7 +331,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// Both halves asserted together — a focus that started everything would
     /// pass a test that only looked at the focused post.
     @Test func aFlingStillStartsTheFocusedPost() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         let candidates = (0..<4).map { makeCandidate($0, distance: CGFloat($0)) }
 
         coordinator.focus(PostID("post-2"))
@@ -296,7 +348,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// Stopping it there kills the player mid-flight, which is the thumbnail
     /// appearing PART WAY through a transition rather than at its start.
     @Test func theFocusedPostSurvivesLeavingTheViewport() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         let candidates = (0..<4).map { makeCandidate($0, distance: CGFloat($0)) }
         coordinator.focus(PostID("post-0"))
         coordinator.update(candidates: candidates)
@@ -312,7 +364,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// The release is what makes the claim affordable: it is held for the
     /// length of a transition, not the length of a screen.
     @Test func releasingTheFocusReturnsThePlayer() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         let candidates = (0..<4).map { makeCandidate($0, distance: CGFloat($0)) }
         coordinator.focus(PostID("post-3"))
         coordinator.update(candidates: candidates)
@@ -333,7 +385,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// exists for, a tile that reached the flight holding nothing. Asked
     /// through `update`, it would wait forever; asked directly, it plays.
     @Test func aFlightCanDemandAPlayerAfterTheHandoffShutTheDoors() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 3)
         let candidate = makeCandidate(0, distance: 0)
         coordinator.beginHandoff(candidate.id)
 
@@ -356,7 +408,7 @@ struct GridVideoPlaybackCoordinatorTests {
     /// begin the video again from zero, repeatedly, for the whole transition.
     @Test func demandingAPlayerEveryFrameStartsItOnce() async {
         let pool = makePool()
-        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 3)
         let candidate = makeCandidate(0, distance: 0)
         coordinator.beginHandoff(candidate.id)
 
