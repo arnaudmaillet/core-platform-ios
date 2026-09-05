@@ -124,7 +124,15 @@ struct IconBaker {
         let plate: String?
     }
 
+    /// Containers the client can already decode, and that this tool packs to
+    /// sheets rather than passing through. See `RasterDocument` for why the
+    /// pass-through is not an option on the marker field.
+    static let rasterExtensions: Set<String> = ["gif", "apng", "webp", "heics", "png"]
+
     static func bake(_ url: URL, options: Options) throws -> Entry {
+        if rasterExtensions.contains(url.pathExtension.lowercased()) {
+            return try bakeRaster(url, options: options)
+        }
         let document = try LottieDocument.load(url)
         let profile = document.survey()
 
@@ -224,6 +232,79 @@ struct IconBaker {
         return try bakeSheet(
             document, options: options,
             frameCount: &frameCount, frameMS: &frameMS, note: why
+        )
+    }
+
+    /// A GIF (or APNG, or animated WebP) onto the catalogue's clock.
+    ///
+    /// Nothing here tries to decompose: a container is per-pixel animation and
+    /// there is no affine track that reproduces it. What it CAN be given is the
+    /// same step as everything else, which is the difference between a mixed
+    /// catalogue that composites on one grid and one that fragments into as many
+    /// grids as it has source files.
+    static func bakeRaster(_ url: URL, options: Options) throws -> Entry {
+        let document = try RasterDocument.load(url)
+        let loopMS = max(1, document.loopSeconds * 1000)
+
+        // A HARMONIC step: an integer multiple of the catalogue's base.
+        //
+        // The naive choice is the base step itself, and it is wrong in a way
+        // that is obvious once you look at the assets rather than the numbers.
+        // Real GIF loops in this repo run from 0.18 s to 56 s; forcing the 56 s
+        // one onto 24 cells at 33 ms plays it in 0.79 s — SEVENTY TIMES too
+        // fast, a strobe rather than an animation. The `TIME-COMPRESSED` flag
+        // said so and I nearly shipped it anyway.
+        //
+        // The alternative usually reached for — let slow assets keep their own
+        // step — fragments the clock, and the whole battery argument for a
+        // quantised tick is that every icon changes on ONE grid.
+        //
+        // Neither is necessary. If every step is k x base for integer k, every
+        // change instant still lands on the base grid: the composite rate stays
+        // bounded by 30 Hz and a slow icon simply changes on fewer of those
+        // ticks. Duration is preserved exactly, the cap is respected, and the
+        // grid is intact. Pick the smallest k that fits the frame budget.
+        let base = options.trackFPS.map { 1000 / $0 }
+            ?? Double(AtlasWriter.ladderMS.first ?? 33)
+        let multiple = max(1, Int(ceil(loopMS / (base * Double(options.maxFrames)))))
+        let stepMS = base * Double(multiple)
+        let frameCount = max(2, min(options.maxFrames, Int((loopMS / stepMS).rounded())))
+        let compressed = false
+
+        let columns = 4
+        let rows = Int(ceil(Double(frameCount) / Double(columns)))
+        let cell = options.cellPixels
+        guard let canvas = AtlasWriter.canvas(width: cell * columns, height: cell * rows) else {
+            throw BakeError("\(document.name): cannot allocate sheet")
+        }
+        // Sampled across the SOURCE's whole loop, so a capped frame count
+        // compresses time evenly instead of truncating the animation.
+        for frame in 0..<frameCount {
+            let t = document.loopSeconds * Double(frame) / Double(frameCount)
+            AtlasWriter.drawCell(
+                document.frame(at: t), into: canvas,
+                at: CGPoint(x: (frame % columns) * cell, y: (frame / columns) * cell),
+                cellPixels: cell, plate: options.plate
+            )
+        }
+        guard let sheet = canvas.makeImage() else {
+            throw BakeError("\(document.name): cannot flatten sheet")
+        }
+        let asset = "\(document.name).\(options.heic ? "heic" : "png")"
+        let file = options.output.appendingPathComponent(asset)
+        try AtlasWriter.write(sheet, to: file, heic: options.heic)
+
+        let steps = Set(document.durations.map { ($0 * 1000).rounded() }).count
+        return Entry(
+            id: document.name, kind: "sheet", asset: asset,
+            frameCount: frameCount, frameMS: Int(stepMS.rounded()), cellPX: cell,
+            columns: columns, scale: nil, rotation: nil, opacity: nil,
+            bytes: size(of: file),
+            note: "raster: \(document.frameCount) src frames, \(steps) src step(s), "
+                + String(format: "%.2fs loop", document.loopSeconds)
+                + (multiple > 1 ? ", step = \(multiple)x base (on-grid)" : ", step = base")
+                + (compressed ? " — TIME-COMPRESSED" : ""),
+            stepMS: stepMS, plate: nil
         )
     }
 

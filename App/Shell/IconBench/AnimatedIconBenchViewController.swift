@@ -461,10 +461,18 @@ final class AnimatedIconBenchViewController: UIViewController {
     /// asked for 30 and the assets were authored at 60. A readout that names
     /// the wrong source for a number is worse than one that omits it.
     private var residentRates: String {
-        let rates = Set((0..<effectiveVariety).compactMap { store.cached($0) }
-            .map { Int((1 / $0.frameDuration).rounded()) }).sorted()
-        guard let low = rates.first, let high = rates.last else { return "-" }
-        return low == high ? "\(low)" : "\(low)-\(high)"
+        // Reported as STEPS, not rates.
+        //
+        // ⚠️ As rates it read "0-30fps in assets" on the mixed catalogue, because
+        // a harmonic 2333 ms step is 0.43 fps and rounds to zero. "0 fps" for a
+        // field that is visibly animating is the worst kind of wrong readout —
+        // it names a defect that is not there. Milliseconds also make the
+        // harmonic relationship legible: 33/67/700/2333 reads as one grid, where
+        // 30/15/1/0 fps reads as chaos.
+        let steps = Set((0..<effectiveVariety).compactMap { store.cached($0) }
+            .map { Int(($0.frameDuration * 1000).rounded()) }).sorted()
+        guard let low = steps.first, let high = steps.last else { return "-" }
+        return low == high ? "\(low)ms" : "\(low)-\(high)ms"
     }
 
     private var meanFrame: Double { frameSamples.isEmpty ? 0 : frameSamples.reduce(0, +) / Double(frameSamples.count) }
@@ -489,9 +497,10 @@ final class AnimatedIconBenchViewController: UIViewController {
             "variety=\(effectiveVariety)",
             "clock=\(config.mode == .quantised ? "quantised" : "free")",
             "fps=\(Int(config.framesPerSecond))",
-            config.wireFormat == .baked ? "asset_fps=\(residentRates)" : "frames_asked=\(store.frameCount)",
+            config.wireFormat == .baked ? "asset_steps=\(residentRates)" : "frames_asked=\(store.frameCount)",
             "frames_real=\(residentFrames)",
             "steps=\(store.residentProfile(ids: 0..<effectiveVariety).distinctSteps)",
+            "harmonic=\(store.residentProfile(ids: 0..<effectiveVariety).harmonic)",
             "compressed=\(store.isTimeCompressed)",
             String(format: "presented_fps=%.1f", presentedFPS),
             "shadow=\(config.usesShadowPath ? "path" : "none")",
@@ -552,11 +561,11 @@ final class AnimatedIconBenchViewController: UIViewController {
         hud.text = """
         MARKERS \(markerCount) (\(latticeColumns)x\(latticeRows) @\(Int(config.emoteDensity ? 26 : 64))pt \(config.emoteDensity ? "EMOTES" : "map"))  variety \(effectiveVariety)  [\(stageLabel)]
         clock \(config.mode == .quantised ? "quantised" : "free")  \
-        \(config.wireFormat == .baked ? "\(residentRates)fps in assets" : "\(Int(config.framesPerSecond))fps asked") \
+        \(config.wireFormat == .baked ? "\(residentRates) steps in assets" : "\(Int(config.framesPerSecond))fps asked") \
         / \(String(format: "%.1f", presentedFPS)) presented  \
         \(residentFrames) \(profile.decomposed > 0 ? "keys" : "frames")\
         \(config.wireFormat != .baked && store.isTimeCompressed ? " CAPPED" : "")  \
-        \(profile.distinctSteps) distinct steps\(profile.distinctSteps > 1 ? " ⚠︎ fps is icon 0's only" : "")  \
+        \(profile.distinctSteps) steps \(profile.distinctSteps <= 1 ? "" : (profile.harmonic ? "HARMONIC (one grid)" : "⚠︎ FRAGMENTED"))  \
         shadow \(config.usesShadowPath ? "path" : "NONE")  mask \(config.masksOnCard ? "CLIP" : "baked")  \
         tex \(config.sharesTexture ? "shared" : "DISTINCT")
         wire \(config.wireFormat.rawValue)(\(IconAtlasStore.bakedCatalog.count) baked)  \

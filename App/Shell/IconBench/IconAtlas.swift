@@ -323,10 +323,42 @@ final class IconAtlasStore {
     /// and a different step in every file. `distinctSteps > 1` means the shared
     /// clock is BROKEN — icons no longer change on a common grid, and the
     /// composite-rate argument for a quantised tick evaporates.
-    func residentProfile(ids: Range<Int>) -> (frames: [Int], distinctSteps: Int, decomposed: Int) {
+    func residentProfile(
+        ids: Range<Int>
+    ) -> (frames: [Int], distinctSteps: Int, decomposed: Int, harmonic: Bool) {
         let resident = ids.compactMap { cached($0) }
-        let steps = Set(resident.map { (($0.frameDuration * 1000).rounded()) })
-        return (resident.map(\.frameCount).sorted(), steps.count, resident.count { $0.isDecomposed })
+        // ⚠️ The harmonic test runs on the UNROUNDED steps. Rounding first
+        // destroys exactly the property being tested: a 30 fps base is
+        // 33.3333 ms, its 21st multiple is 700, and 700 / 33 is 21.2 — so a
+        // catalogue that IS on one grid reports as fragmented, which is the
+        // verdict that would have sent the whole mixed-format design back.
+        // The display set stays rounded; only the arithmetic does not.
+        let exact = Set(resident.map { $0.frameDuration * 1000 })
+        let shown = Set(exact.map { $0.rounded() })
+        return (
+            resident.map(\.frameCount).sorted(), shown.count,
+            resident.count { $0.isDecomposed },
+            Self.areHarmonic(exact)
+        )
+    }
+
+    /// Are all these steps integer multiples of the smallest?
+    ///
+    /// This is the distinction that decides whether a MIXED catalogue is
+    /// affordable, and counting distinct steps cannot make it. A field with
+    /// steps of 33, 67, 700 and 2333 ms looks like four clocks and is one: every
+    /// change instant lands on the same 30 Hz grid, so the composite rate stays
+    /// bounded and a slow icon simply changes on fewer ticks. A field with steps
+    /// of 33 and 50 ms also looks like two and IS two — their instants
+    /// interleave, the screen composites at their least common multiple, and the
+    /// battery argument for a quantised tick is gone.
+    ///
+    /// Same `distinctSteps` count, opposite verdicts. The tolerance is half a
+    /// millisecond of accumulated drift, which is what a manifest carrying a
+    /// rounded integer next to a fractional one can legitimately produce.
+    nonisolated static func areHarmonic(_ steps: Set<Double>) -> Bool {
+        guard let base = steps.min(), base > 0 else { return true }
+        return steps.allSatisfy { abs($0 / base - ($0 / base).rounded()) * base <= 0.5 }
     }
 
     func purge() {
