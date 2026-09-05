@@ -261,6 +261,14 @@ final class PinCardView: UIView {
         self.face = face
         textFaceView.isHidden = face != .text
         iconFaceView.isHidden = face != .icon
+        // ⚠️ THE GREY BOX. `imageView` is the cover host and it is never
+        // hidden — it carries an opaque `.secondarySystemBackground` ground so
+        // a letterboxed photograph reads as framed. Under the TEXT face that
+        // ground is invisible because the disc above it is opaque; under an
+        // icon, whose alpha IS its shape, it shows through as a grey square
+        // exactly the size of the marker. An icon pin is a text post and has no
+        // cover to host, so the whole layer goes away.
+        imageView.isHidden = face == .icon
         // The media ground is black so a letterboxed cover reads as framed; a
         // text card's ground is the face's own tint, and the black would show
         // through its corner curve. An icon has NO ground at all — its alpha is
@@ -295,6 +303,10 @@ final class PinCardView: UIView {
     func reinstallIconPlayback() {
         iconFaceView.reinstall()
     }
+
+    #if DEBUG
+    var presentedIconTick: Double? { iconFaceView.presentedTick }
+    #endif
 
     // MARK: - Departure blend
 

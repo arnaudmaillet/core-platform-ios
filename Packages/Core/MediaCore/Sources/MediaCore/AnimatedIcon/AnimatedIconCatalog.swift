@@ -9,7 +9,7 @@ import UIKit
 /// and this type is the seam that will not change when the URL arrives — only
 /// `loadAsset` will.
 @MainActor
-public final class AnimatedIconCatalog {
+public final class AnimatedIconCatalog: NSObject {
 
     /// One manifest entry. Mirrors `IconBaker`'s output field for field: this is
     /// a contract between a build step and a client, and the day the two drift
@@ -43,6 +43,18 @@ public final class AnimatedIconCatalog {
     private let cache = NSCache<NSString, Box>()
     private var inflight: [String: Task<AnimatedIconArt, Error>] = [:]
 
+    /// What is resident right now, and what it costs.
+    ///
+    /// Tracked here because `NSCache` will not say: it exposes no count, no
+    /// contents and no total. Eviction is observed through
+    /// `NSCacheDelegate` rather than inferred, so the figure follows the cache
+    /// down as well as up — a resident total that only ever grows is the kind
+    /// of readout that makes a memory problem look like a memory success.
+    public private(set) var residentBytes = 0
+    public private(set) var residentCount = 0
+    /// How many of the resident icons took the cheap path.
+    public private(set) var residentDecomposed = 0
+
     /// ⚠️ A BYTE budget, not a count.
     ///
     /// `ImagePipeline` caps by `countLimit`, which is right for photographs and
@@ -57,10 +69,13 @@ public final class AnimatedIconCatalog {
         else {
             self.entries = [:]
             self.ids = []
+            super.init()
             return
         }
         self.entries = Dictionary(decoded.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.ids = decoded.map(\.id)
+        super.init()
+        cache.delegate = self
     }
 
     public var isEmpty: Bool { entries.isEmpty }
@@ -86,6 +101,9 @@ public final class AnimatedIconCatalog {
 
         let art = try await task.value
         cache.setObject(Box(art), forKey: id as NSString, cost: art.byteCost)
+        residentBytes += art.byteCost
+        residentCount += 1
+        if art.isDecomposed { residentDecomposed += 1 }
         return art
     }
 
@@ -144,5 +162,23 @@ public final class AnimatedIconCatalog {
                 columns: entry.columns ?? 4, frameDuration: step
             ))
         }.value
+    }
+}
+
+extension AnimatedIconCatalog: NSCacheDelegate {
+    /// ⚠️ Called on whatever thread evicted, which is why the accounting hops
+    /// back to the main actor rather than mutating from here. `NSCache` also
+    /// evicts on memory PRESSURE, not only over budget, so this is the only
+    /// place the resident figure can learn it went down.
+    public nonisolated func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
+        guard let box = obj as? Box else { return }
+        let cost = box.art.byteCost
+        let decomposed = box.art.isDecomposed
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.residentBytes = max(0, self.residentBytes - cost)
+            self.residentCount = max(0, self.residentCount - 1)
+            if decomposed { self.residentDecomposed = max(0, self.residentDecomposed - 1) }
+        }
     }
 }

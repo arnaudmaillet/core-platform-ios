@@ -162,6 +162,10 @@ final class MapClusterAnnotationView: MKAnnotationView {
         }
     }
 
+    #if DEBUG
+    var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+    #endif
+
     /// See `MapAnnotationView.redressIcon`.
     func redressIcon() {
         card.reinstallIconPlayback()

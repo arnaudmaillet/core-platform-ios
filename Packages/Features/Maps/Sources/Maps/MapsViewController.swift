@@ -49,6 +49,9 @@ final class MapsViewController: UIViewController {
     /// prevent. And it must RE-DRESS rather than "reinstall if not running",
     /// which can only promote a marker and never demote one.
     private let iconPolicyBag = MapNotificationBag()
+    #if DEBUG
+    private var iconDebugHUD: MapIconDebugHUD?
+    #endif
     /// Builds the snap feed a pin/cluster tap expands into (reuses the Feed
     /// feature via `FeedFeatureBuilding.makeSnapFeedViewController`).
     private let makeSnapFeed: ([PostID]) -> UIViewController
@@ -266,6 +269,9 @@ final class MapsViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         installIconPolicyObserver()
+        #if DEBUG
+        installIconDebugHUD()
+        #endif
         // No title, deliberately: the map is the tab's whole surface and
         // names itself; the header band belongs to its controls — the
         // compose "+", the wallet badge, the bell. (The tab bar still says
@@ -489,6 +495,13 @@ final class MapsViewController: UIViewController {
     }
 
     override func viewDidLayoutSubviews() {
+        #if DEBUG
+        // ⚠️ Every pass, not once. `viewDidLoad` adds the map and its chrome
+        // AFTER this HUD, so a single `addSubview` puts the instrument
+        // underneath the thing it is instrumenting — and the failure looks like
+        // the flag not working rather than like a z-order.
+        if let iconDebugHUD { view.bringSubviewToFront(iconDebugHUD) }
+        #endif
         super.viewDidLayoutSubviews()
         syncBarsPosition()
     }
@@ -2467,6 +2480,37 @@ extension MapsViewController: MKMapViewDelegate {
         #endif
     }
 }
+
+#if DEBUG
+extension MapsViewController {
+    /// The animated-icon instrument, over the real map — `-map-icon-hud`.
+    ///
+    /// It replaces the standalone bench screen, and the swap is the point: a
+    /// synthetic lattice could not tell you what MapKit, clustering, tile
+    /// loading and the app's own working set cost around the feature. Only the
+    /// shipping screen can.
+    fileprivate func installIconDebugHUD() {
+        guard ProcessInfo.processInfo.arguments.contains("-map-icon-hud") else { return }
+        let hud = MapIconDebugHUD(mapView: mapView, catalog: iconCatalog)
+        hud.translatesAutoresizingMaskIntoConstraints = false
+        hud.onPolicyChange = { [weak self] in
+            guard let self else { return }
+            for annotation in self.mapView.annotations {
+                (self.mapView.view(for: annotation) as? MapAnnotationView)?.redressIcon()
+                (self.mapView.view(for: annotation) as? MapClusterAnnotationView)?.redressIcon()
+            }
+        }
+        view.addSubview(hud)
+        NSLayoutConstraint.activate([
+            hud.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
+            hud.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            hud.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8)
+        ])
+        iconDebugHUD = hud
+        hud.start()
+    }
+}
+#endif
 
 extension MapsViewController {
     /// Re-dresses every icon-bearing marker when the device changes its motion

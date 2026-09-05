@@ -163,6 +163,25 @@ public final class AnimatedIconView: UIView {
         setArt(art, phase: phase)
     }
 
+    /// A fingerprint of what the render server is presenting right now, or nil
+    /// when nothing is animating.
+    ///
+    /// It has to be a fingerprint rather than one property: the sheet path
+    /// moves `contentsRect` and the decomposed path moves a transform, so
+    /// probing either one alone would report the other as motionless — which
+    /// reads exactly like a broken animation and would be believed.
+    public var presentedTick: Double? {
+        if sheetView.layer.animation(forKey: Self.sheetKey) != nil {
+            guard let rect = sheetView.layer.presentation()?.contentsRect else { return nil }
+            return Double(rect.origin.x) * 4096 + Double(rect.origin.y)
+        }
+        guard Self.markKeys.contains(where: { markView.layer.animation(forKey: $0) != nil }),
+              let presentation = markView.layer.presentation() else { return nil }
+        let transform = presentation.transform
+        return Double(transform.m11) * 1e6 + Double(transform.m12) * 1e3
+            + Double(presentation.opacity)
+    }
+
     public var isAnimating: Bool {
         sheetView.layer.animation(forKey: Self.sheetKey) != nil
             || Self.markKeys.contains { markView.layer.animation(forKey: $0) != nil }

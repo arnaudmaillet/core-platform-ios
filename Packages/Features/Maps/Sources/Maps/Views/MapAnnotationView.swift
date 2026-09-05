@@ -200,6 +200,18 @@ final class MapAnnotationView: MKAnnotationView {
         }
     }
 
+    #if DEBUG
+    /// Whether this marker is currently wearing baked artwork.
+    var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+
+    /// A fingerprint of what the RENDER SERVER is presenting for this icon.
+    ///
+    /// Read from `presentation()`, never the model layer: the model keeps its
+    /// resting value for the whole animation, so probing it would report a
+    /// frozen icon as a running one.
+    var presentedIconTick: Double? { card.presentedIconTick }
+    #endif
+
     /// Re-installs this marker's icon playback under the current motion policy.
     ///
     /// Unconditional: the policy can move in either direction, and a guard that
