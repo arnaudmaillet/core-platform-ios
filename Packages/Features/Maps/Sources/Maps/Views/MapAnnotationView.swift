@@ -137,6 +137,9 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
         // Idempotent: a reconcile re-configures every surviving marker, so a
         // marker already showing this post must be left exactly as it is —
         // blanking and re-fetching an unchanged thumbnail is what flashes it.
+        #if DEBUG
+        if representedID == pin.postID { MapChurnCounters.skipped += 1 } else { MapChurnCounters.bound += 1 }
+        #endif
         guard representedID != pin.postID else { return }
         representedID = pin.postID
         playBadge.isHidden = pin.kind != .video

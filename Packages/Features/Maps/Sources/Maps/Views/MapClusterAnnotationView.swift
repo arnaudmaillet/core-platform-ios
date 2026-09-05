@@ -125,6 +125,15 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
         // and the id is part of the key for the same reason the icon and the
         // avatar are: two groups led by different clips are not the same face.
         let preview = cluster.representative.previewSheetID
+        #if DEBUG
+        if representedURL == url && representedFace == face
+            && representedAvatar == avatar && representedIcon == icon
+            && representedPreview == preview {
+            MapChurnCounters.skipped += 1
+        } else {
+            MapChurnCounters.bound += 1
+        }
+        #endif
         guard representedURL != url || representedFace != face
             || representedAvatar != avatar || representedIcon != icon
             || representedPreview != preview

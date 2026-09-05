@@ -266,6 +266,7 @@ final class MapIconDebugHUD: UIView {
             "distinct_urls=\(pool?.playerCountByURL.count ?? 0)",
             "sheets=\(playingSheets)",
             "sheets_advancing=\(advancingSheets)",
+            churnLine(),
             "sheets_resident=\(previews?.residentCount ?? 0)",
             String(format: "sheets_mb=%.2f", Double(previews?.residentBytes ?? 0) / 1024 / 1024)
         ].joined(separator: " ")
@@ -284,6 +285,30 @@ final class MapIconDebugHUD: UIView {
             return (view as? MapAnnotationView)?.videoRenderView
                 ?? (view as? MapClusterAnnotationView)?.videoRenderView
         }.count { pool.isAdvancing(in: $0) }
+    }
+
+    /// What the region changes actually did to the annotation set since the
+    /// last emit — the one thing every earlier instrument could not see.
+    ///
+    /// `bound` counts configures that passed the idempotence guard; `skipped`
+    /// counts the ones that returned on the guard and cost nothing. Reporting
+    /// their sum would have said "hundreds of rebinds" about a path that mostly
+    /// does nothing, which is how `sheets=N` lied about assignment-vs-motion.
+    private func churnLine() -> String {
+        // ⚠️ Read the timing BEFORE draining — `drain()` zeroes it.
+        let totalMs = Double(MapChurnCounters.reconcileMicros) / 1000
+        let worstMs = Double(MapChurnCounters.reconcileWorstMicros) / 1000
+        let c = MapChurnCounters.drain()
+        return [
+            "reconciles=\(c.reconciles)",
+            "churn_add=\(c.added)",
+            "churn_out=\(c.departed)",
+            "churn_viewfor=\(c.viewFor)",
+            "churn_bound=\(c.bound)",
+            "churn_skipped=\(c.skipped)",
+            String(format: "reconcile_ms=%.2f", totalMs),
+            String(format: "reconcile_worst_ms=%.2f", worstMs)
+        ].joined(separator: " ")
     }
 
     /// Sheets whose presentation layer actually MOVED since the previous emit.

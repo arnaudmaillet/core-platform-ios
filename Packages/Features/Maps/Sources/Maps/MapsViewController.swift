@@ -1354,6 +1354,15 @@ final class MapsViewController: UIViewController {
     /// Top-K set shifts and keying off it would fade a settled cluster out and a
     /// near-identical one back in.
     private func reconcileClusters() {
+        #if DEBUG
+        MapChurnCounters.reconciles += 1
+        let reconcileStart = DispatchTime.now().uptimeNanoseconds
+        defer {
+            MapChurnCounters.recordReconcile(
+                micros: Int((DispatchTime.now().uptimeNanoseconds - reconcileStart) / 1_000)
+            )
+        }
+        #endif
         // ⚠️ A ZERO SCALE IS NOT A ZOOM, IT IS A NOT-YET. The engine's own
         // degenerate path ships EVERY pin as an unclustered single, and this
         // runs from `regionDidChangeAnimated`, which fires when the map is
@@ -1493,6 +1502,10 @@ final class MapsViewController: UIViewController {
         }
         popChoreographer.popOut(departing.map { (id: $0.key, annotation: $0.value) })
 
+        #if DEBUG
+        MapChurnCounters.added += toAdd.count
+        MapChurnCounters.departed += departing.count
+        #endif
         if !toAdd.isEmpty {
             pendingPopIn.formUnion(toAdd.map { ObjectIdentifier($0 as AnyObject) })
             mapView.addAnnotations(toAdd)
@@ -1938,6 +1951,9 @@ extension MapsViewController: MKMapViewDelegate {
     #endif
 
     func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
+        #if DEBUG
+        MapChurnCounters.viewFor += 1
+        #endif
         if let cluster = annotation as? MapComputedCluster {
             let view = mapView.dequeueReusableAnnotationView(
                 withIdentifier: MapClusterAnnotationView.reuseIdentifier,
