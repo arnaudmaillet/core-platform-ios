@@ -19,7 +19,7 @@ final class MapVideoPlaybackCoordinator {
     }
 
     private let pool: VideoPlaybackController
-    private let maxConcurrent: Int
+    private var maxConcurrent: Int
     /// Currently-playing pins → the view their player is bound to.
     private var playing: [PostID: MapAnnotationView] = [:]
     /// AND of the facts that gate playback (tab frontmost, no feed presented,
@@ -28,6 +28,17 @@ final class MapVideoPlaybackCoordinator {
 
     init(pool: VideoPlaybackController, maxConcurrent: Int = 3) {
         self.pool = pool
+        #if DEBUG
+        // `-map-video-concurrency <n>` raises the cap for measurement. The
+        // shipped default stays 3; this exists because "can we play more?" is a
+        // question no amount of reading answers.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-map-video-concurrency"),
+           index + 1 < arguments.count, let value = Int(arguments[index + 1]) {
+            self.maxConcurrent = max(1, value)
+            return
+        }
+        #endif
         self.maxConcurrent = maxConcurrent
     }
 
@@ -92,7 +103,24 @@ final class MapVideoPlaybackCoordinator {
         let url = candidate.url
         // Return the player to the pool for this view if the pin scrolls off.
         candidate.view.onReuse = { [weak self] in self?.stop(view) }
-        Task { await pool.play(url, in: view) }
+        // ⚠️ `scope:` IS NOT OPTIONAL HERE, and passing nil was a real defect.
+        //
+        // The pool shares one player between two surfaces when the asset AND
+        // the scope match — and `nil == nil` matches. Every map marker passed
+        // nil while the mock gave every video pin the same fixture URL, so what
+        // would have looked like three concurrent players was ONE player fanned
+        // out to three surfaces: three views drawing one decoder on one clock.
+        // Any "three videos are fine" reading taken before this line would have
+        // been a measurement of one video.
+        //
+        // The post id is the right scope: two surfaces showing the SAME post — a
+        // marker and the flight card it hands off to — should share, and two
+        // different posts that happen to carry the same file (a repost) must not.
+        //
+        // `peakBitRate` mirrors the grid's cap. A preview loop is contracted at
+        // <=300 KB so this never binds on a well-formed asset; it bounds the
+        // damage when a pin is pointed at something else.
+        Task { await pool.play(url, in: view, peakBitRate: 600_000, scope: candidate.id.rawValue) }
     }
 
     private func stop(id: PostID, view: MapAnnotationView) {

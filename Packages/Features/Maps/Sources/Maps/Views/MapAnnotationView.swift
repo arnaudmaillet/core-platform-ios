@@ -204,6 +204,9 @@ final class MapAnnotationView: MKAnnotationView {
     /// Whether this marker is currently wearing baked artwork.
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
 
+    /// The live-preview surface, for the debug readout.
+    var videoSurface: VideoRenderView { card.videoRenderView }
+
     /// A fingerprint of what the RENDER SERVER is presenting for this icon.
     ///
     /// Read from `presentation()`, never the model layer: the model keeps its

@@ -48,6 +48,37 @@ proven is taking an unmeasured risk.
 
 ---
 
+## 0b. Measured 2026-09-05, after repairing the fixture
+
+**The fixture was wrong in two independent ways and the path had never once run.**
+
+- The mock gave every video pin the SAME url, and `MapVideoPlaybackCoordinator`
+  passed **no `scope:`**. The pool shares one player when the asset AND the scope
+  match — and `nil == nil` matches — so N surfaces would have drawn ONE decoder
+  on one clock. Fixed: distinct urls per pin, `scope: postID`, `peakBitRate`.
+- `-maps-force-video` only forced posts whose media was ALREADY a video (a third
+  of the corpus), and after clustering none of those survived as a LONE pin. A
+  cluster never plays, because `Candidate.view` is typed `MapAnnotationView`.
+  So the flag produced **zero** playing videos. Fixed: under the force flag every
+  covered pin becomes a video pin.
+
+With both repaired, on iPhone 17 Pro Max, 8 markers, mock corpus:
+
+| concurrent decoders | app CPU | footprint | frame_mean | hitches |
+|---|---|---|---|---|
+| 0 (video off) | 11.3% | 113 MB | 16.67 ms | 0 |
+| 1 | 16.6% | 103 MB | 16.67 ms | 0 |
+| **3** (`players=3 advancing=3 urls=3`) | **22.2%** | 110 MB | **16.67 ms** | **0** |
+
+≈ **3.6 points of app CPU per decoder**, frame time locked, zero hitches. Three
+genuinely distinct decoders on three distinct urls, all advancing — verified
+through the pool's own `activePlayerCount` and `isAdvancing`, not by looking.
+
+⚠️ **Could not measure past 3, and the cap is not why.** Raising it to 5 and to
+12 both still yielded 3: only 3 lone video pins exist on screen, because
+everything else clusters and clusters never play. The binding constraint is
+geography and the cluster gap, not `maxConcurrent`.
+
 ## 1. Options, ruled out by mechanism
 
 | # | option | why it lives or dies |
@@ -132,6 +163,56 @@ real clip at 170px/24 frames, load 19 through `AnimatedIconCatalog`, read
 the product owner, and it settles the sheet option before anyone writes a bake.
 
 ---
+
+## 4b. Is 3 a ceiling? No — it is an unenforced integer
+
+- **No provenance.** `maxConcurrent: Int = 3` has no comment saying where it came
+  from. The nearest reasoning sits on a DIFFERENT constant and argues for **6**.
+  The rest of the family is 6 (grid), 6/5 (For You — whose own test file calls it
+  *"a judgement rather than a derivation"*), 6/5 (Profile, copied). **3 is the
+  smallest number in the family and the only one with no stated reasoning.**
+- **Nothing below the coordinator enforces it.** `VideoPlaybackController.play`
+  ends in `idlePlayers.popLast() ?? AVPlayer()` — it mints on demand. `poolSize`
+  bounds the idle CACHE, not the working set. `prefix(maxConcurrent)` is the
+  whole mechanism.
+- **The contract doc is drifting.** It states `VideoPlaybackController(poolSize: 3)`
+  twice; shipped code defaults to `poolSize: 6, capacity: 6`.
+- **There are TWO independent pools** (`AppContainer.swift:135` and `:283`), each
+  6/6, which never arbitrate. The map's 3 is ADDITIVE to the feed's 6.
+
+### The real ceilings, and they are two
+
+**A — VideoToolbox session admission.** Measured on M2 / macOS 26.6: session
+creation succeeds **62 times**, #63 fails `-12913 kVTVideoDecoderNotAvailableNowErr`.
+Global, not per-process. **Admission control, not eviction.**
+
+**B — AVFoundation playback arbitration**, which is the one this repo hits since
+it uses `AVPlayer`. The counted resource is the item↔player ASSOCIATION, not the
+object: `player = nil` does not release it, clearing `currentItem` does. Failure
+is `-11839 AVErrorDecoderTemporarilyUnavailable`.
+
+A and B are separate budgets: with 30 `AVPlayer`s actively playing, the direct-VT
+ceiling was still exactly 62 — playback consumes zero VT slots and decodes in
+`mediaserverd` against its own allocation.
+
+⚠️ **Apple documents the error codes and no number, on any chip, for either
+ceiling.** There is no API to ask for remaining capacity. Anything else is
+folklore.
+
+### Resolution does not buy concurrency — measured
+
+132×132, 1080p, 4K and HEVC all failed at the same session #62. **A session is a
+session.** Resolution buys throughput (~13× per-frame cost between 132px and
+1080p), memory (92 MB vs 577 MB) and bandwidth — real headroom against thermals,
+bandwidth and the mask, and **zero** against the session ceiling. The 132px
+preview rendition is the right asset and it does not buy one extra concurrent pin.
+
+### So what would "every marker plays" need?
+
+Not more decoders. Every marker moving means dropping video as the primitive for
+the non-central pins — the sheet path, which has **no decode session at all** —
+and keeping real video for the few in focus. That is the §1 option 2 fallback,
+with the memory arithmetic that comes with it.
 
 ## 5. Open questions
 

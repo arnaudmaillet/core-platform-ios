@@ -1,6 +1,7 @@
 #if DEBUG
 import MapKit
 import MediaCore
+import MediaPlayback
 import QuartzCore
 import UIKit
 
@@ -77,11 +78,22 @@ final class MapIconDebugHUD: UIView {
 
     private weak var mapView: MKMapView?
     private weak var catalog: AnimatedIconCatalog?
+    /// The video pool, so the readout can say how many DECODERS are running as
+    /// distinct from how many surfaces are drawing.
+    ///
+    /// ⚠️ Those are different numbers and the difference has already misled
+    /// this project once: the pool shares one player between surfaces whose
+    /// asset AND scope match, the map passed no scope, and the mock gave every
+    /// video pin the same url — so three "concurrent videos" were one decoder
+    /// fanned out three ways. A readout that counts surfaces would have agreed
+    /// with the mistake.
+    private weak var pool: VideoPlaybackController?
     var onPolicyChange: (() -> Void)?
 
-    init(mapView: MKMapView, catalog: AnimatedIconCatalog?) {
+    init(mapView: MKMapView, catalog: AnimatedIconCatalog?, pool: VideoPlaybackController? = nil) {
         self.mapView = mapView
         self.catalog = catalog
+        self.pool = pool
         super.init(frame: .zero)
         isUserInteractionEnabled = true
 
@@ -243,9 +255,19 @@ final class MapIconDebugHUD: UIView {
             String(format: "cpu=%.1f", meanCPU),
             String(format: "textures_mb=%.2f", Double(catalog?.residentBytes ?? 0) / 1024 / 1024),
             String(format: "footprint_mb=%.0f", Double(MemoryFootprint.current()) / 1024 / 1024),
-            String(format: "span=%.4f", mapView.region.span.latitudeDelta)
+            String(format: "span=%.4f", mapView.region.span.latitudeDelta),
+            "players=\(pool?.activePlayerCount ?? 0)",
+            "advancing=\(advancingSurfaces)",
+            "distinct_urls=\(pool?.playerCountByURL.count ?? 0)"
         ].joined(separator: " ")
         print(line)
+    }
+
+    /// Surfaces the pool reports as genuinely moving — not merely bound.
+    private var advancingSurfaces: Int {
+        guard let mapView, let pool else { return 0 }
+        return mapView.annotations.compactMap { mapView.view(for: $0) as? MapAnnotationView }
+            .count { pool.isAdvancing(in: $0.videoSurface) }
     }
 
     private func refresh() {
@@ -270,6 +292,8 @@ final class MapIconDebugHUD: UIView {
         presented \(String(format: "%.1f", presentedFPS))fps
         main-thread frame  mean \(String(format: "%.2f", meanFrame))ms  \
         p95 \(String(format: "%.2f", p95Frame))ms   hitches \(hitchCount)
+        video \(pool?.activePlayerCount ?? 0) players / \(advancingSurfaces) advancing / \
+        \(pool?.playerCountByURL.count ?? 0) urls
         app CPU \(String(format: "%.0f", meanCPU))%   \
         textures \(String(format: "%.2f", textures)) MB   \
         peak footprint \(String(format: "%.0f", footprint)) MB

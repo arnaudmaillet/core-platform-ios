@@ -50,6 +50,10 @@ final class MapsViewController: UIViewController {
     /// which can only promote a marker and never demote one.
     private let iconPolicyBag = MapNotificationBag()
     #if DEBUG
+    /// Kept only so the debug readout can distinguish DECODERS from surfaces.
+    private var videoPool: VideoPlaybackController?
+    #endif
+    #if DEBUG
     private var iconDebugHUD: MapIconDebugHUD?
     #endif
     /// Builds the snap feed a pin/cluster tap expands into (reuses the Feed
@@ -252,6 +256,9 @@ final class MapsViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.iconCatalog = iconCatalog
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
+        #if DEBUG
+        self.videoPool = videoPlayback
+        #endif
         self.makeSnapFeed = makeSnapFeed
         self.pushPlainSnapFeed = pushPlainSnapFeed
         self.revealSnapFeed = revealSnapFeed
@@ -1666,6 +1673,15 @@ final class MapsViewController: UIViewController {
             scored.append((Self.squaredDistance(single.coordinate, center), candidate))
         }
         let ranked = scored.sorted { $0.distance < $1.distance }.map(\.candidate)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-map-icon-hud-log") {
+            let lone = displayed.values.compactMap { $0 as? MapAnnotation }
+            let videoKind = lone.count { $0.pin.kind == .video }
+            let withURL = lone.count { $0.pin.previewVideoURL != nil }
+            print("MAPVIDEO lone=\(lone.count) kindVideo=\(videoKind) withURL=\(withURL) "
+                  + "onScreen=\(scored.count) chosen=\(ranked.count)")
+        }
+        #endif
         videoCoordinator.update(candidates: ranked)
     }
 
@@ -2502,7 +2518,7 @@ extension MapsViewController {
             AnimatedIconView.forcedPolicy = policy
         }
         guard ProcessInfo.processInfo.arguments.contains("-map-icon-hud") else { return }
-        let hud = MapIconDebugHUD(mapView: mapView, catalog: iconCatalog)
+        let hud = MapIconDebugHUD(mapView: mapView, catalog: iconCatalog, pool: videoPool)
         hud.translatesAutoresizingMaskIntoConstraints = false
         hud.onPolicyChange = { [weak self] in
             guard let self else { return }

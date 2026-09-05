@@ -151,10 +151,37 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     ///   which is the whole point of the contract ask. Its `mock-kind=video`
     ///   marker is what `GeoDiscoveryRepository.kind(for:)` matches on.
     static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
-        guard catalog == .realAssets, MockMediaFixtures.isVideoURL(url) else { return url }
-        return forcesMapVideo
-            ? MockMediaFixtures.mapPreviewLoop.url
-            : MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
+        guard catalog == .realAssets else { return url }
+        // ⚠️ Under the FORCE flag, every covered pin becomes a video pin.
+        //
+        // It used to force only posts whose media was already a video, which is
+        // one third of the corpus — and after clustering, none of those survived
+        // as a LONE pin in the default viewport, so the playback path had
+        // literally never run. A flag named `-maps-force-video` that produces
+        // zero playing videos is a flag that measures nothing.
+        //
+        // Outside the flag the old rule stands: a real video post gets a still,
+        // because handing the raw video URL to an image view renders a blank pin.
+        guard MockMediaFixtures.isVideoURL(url) || forcesMapVideo else { return url }
+        guard forcesMapVideo else {
+            return MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
+        }
+        // ⚠️ ONE FIXTURE, DISTINCT URLS — and the distinctness is the fixture's
+        // whole job now.
+        //
+        // Every video pin used to get the identical `mapPreviewLoop` url. The
+        // pool shares one player when the asset AND the scope match, the map
+        // passed no scope, so `nil == nil` and three markers joined ONE player:
+        // three surfaces drawing one decoder on one clock. Any reading of
+        // "three concurrent videos" taken against that fixture was a reading of
+        // one video, and the cap it justified was never exercised.
+        //
+        // The discriminator is a query item the origin ignores (verified 206),
+        // so this is the SAME 320x176 clip decoded N times — which is what a
+        // concurrency test needs. Rotating real files instead would vary
+        // resolution and bitrate and measure those rather than concurrency.
+        let discriminator = url.reduce(into: UInt64(5381)) { $0 = $0 &* 33 &+ UInt64($1.asciiValue ?? 0) }
+        return "\(MockMediaFixtures.mapPreviewLoop.url)&pin=\(discriminator % 9973)"
     }
 
     /// Mirrors the Maps feature's own DEBUG launch argument. Read here so the
@@ -176,6 +203,15 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// mock surface — like counts, venues, arrivals — along with it. Position
     /// is derived from the post id and the copy index, so a run is
     /// reproducible.
+    /// `-maps-mock-pitch <points>` — see `replicated`.
+    static let pitchOverride: Double? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-maps-mock-pitch"),
+              index + 1 < arguments.count, let value = Double(arguments[index + 1])
+        else { return nil }
+        return max(64, value)
+    }()
+
     static let density: Int = {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "-maps-mock-density"),
@@ -288,9 +324,18 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // The map fits the region to the view, so the binding axis is whichever
         // needs the smaller scale.
         let pointsPerMetre = min(screen.width / max(metresLng, 1), screen.height / max(metresLat, 1))
-        // Just ABOVE the 64pt merge threshold: at exactly 64 the engine is
-        // entitled to fold the pair, and one point under it certainly does.
-        let pitch = 70.0
+        // Just ABOVE the 64pt merge threshold by default: at exactly 64 the
+        // engine is entitled to fold the pair, and one point under it certainly
+        // does.
+        //
+        // ⚠️ `-maps-mock-pitch <points>` widens it, and the reason is not
+        // cosmetic. At 70pt the engine's CHAINING merge still folds the field
+        // into a handful of clusters — and a cluster never plays video, because
+        // `MapVideoPlaybackCoordinator.Candidate.view` is typed
+        // `MapAnnotationView`. So a video-playback experiment run at the default
+        // pitch measures nothing: every video pin lands inside a cluster and the
+        // path never runs. Widening the pitch is what produces LONE pins.
+        let pitch = Self.pitchOverride ?? 70.0
         let columns = max(1, Int((metresLng * pointsPerMetre / pitch).rounded(.down)))
         let rows = max(1, Int((metresLat * pointsPerMetre / pitch).rounded(.down)))
         let slots = columns * rows
