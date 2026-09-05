@@ -380,8 +380,21 @@ final class AnimatedIconBenchViewController: UIViewController {
 
     /// Watches ONE marker — every icon shares a single `beginTime` epoch, so one
     /// is representative by construction.
+    ///
+    /// ⚠️ "By construction" holds only while `steps == 1`. On a MIXED field —
+    /// `wire=baked`, where tracks run at 33 ms and sheets at 100 ms — there is
+    /// no single rate to report, and this used to read `mapView.annotations`
+    /// FIRST, whose order MapKit does not define. It picked a sheet and printed
+    /// 10 fps for a field whose decomposed icons were running at 30, which reads
+    /// exactly like the tracks being slow and is how a 12 fps baker bug nearly
+    /// got attributed to the renderer. Now it probes the lowest icon id, always
+    /// the same marker across runs, and the HUD says so when the field
+    /// disagrees with itself.
     private func probePresentedFrameRate(at now: CFTimeInterval) {
-        guard let annotation = mapView.annotations.first,
+        let probed = mapView.annotations
+            .compactMap { $0 as? BenchAnnotation }
+            .min { $0.iconID < $1.iconID }
+        guard let annotation = probed,
               let marker = mapView.view(for: annotation) as? BenchMarkerView,
               let tick = marker.presentedTick else { return }
         if let previous = probedTick, previous == tick { return }
@@ -487,7 +500,7 @@ final class AnimatedIconBenchViewController: UIViewController {
         clock \(config.mode == .quantised ? "quantised" : "free")  \
         \(Int(config.framesPerSecond))fps asked / \(String(format: "%.1f", presentedFPS)) presented  \
         \(residentFrames) \(profile.decomposed > 0 ? "keys" : "frames")\(store.isTimeCompressed ? " CAPPED" : "")  \
-        \(profile.distinctSteps) distinct steps  \
+        \(profile.distinctSteps) distinct steps\(profile.distinctSteps > 1 ? " ⚠︎ fps is icon 0's only" : "")  \
         shadow \(config.usesShadowPath ? "path" : "NONE")  mask \(config.masksOnCard ? "CLIP" : "baked")  \
         tex \(config.sharesTexture ? "shared" : "DISTINCT")
         wire \(config.wireFormat.rawValue)(\(IconAtlasStore.bakedCatalog.count) baked)  \

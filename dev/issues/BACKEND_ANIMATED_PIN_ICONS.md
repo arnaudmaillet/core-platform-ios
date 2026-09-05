@@ -212,8 +212,14 @@ message AnimatedIcon {
 }
 
 message MotionTrack {
-  // Samples over one loop, evenly spaced. 8-24 is plenty; these are keyframes
-  // of a curve, not frames of a film.
+  // Samples over one loop, evenly spaced.
+  //
+  // ⚠️ NOT bounded by `frame_count <= 24`. That cap is Ask D's, and it exists
+  // because a frame is 72 KiB of texture; a sample here is three floats. Sample
+  // at the fastest rung the loop allows (33 ms) and cap around 120. Applying the
+  // sheet's cap to a track is a category error that costs smoothness for
+  // nothing: a two-second loop capped at 24 came out as an 83 ms step, and the
+  // icons visibly stepped at 12 fps on a screen asking for 30.
   repeated float scale    = 1;   // 1.0 = authored size
   repeated float rotation = 2;   // radians, may exceed 2pi for a full spin
   repeated float opacity  = 3;   // 0.0-1.0
@@ -264,7 +270,23 @@ decision taken once for everybody:
 | Still + track, 128 distinct | 9.0 MB | **9.0 MB** |
 
 So the answer to "can the icons be genuinely fluid" is **yes, and for free in
-memory** — measured at 60 presented fps with the field still at 9.0 MB.
+memory**. Measured on the worst case, 128 markers, with assets the baker really
+produced:
+
+| playback | presented | textures | app CPU | hitches |
+|---|---|---|---|---|
+| stepped, 61 keys @ 33 ms | 29.7 fps | 1.1 MB | 5.7% | 0 |
+| continuous, same keys | **59.3 fps** | **1.1 MB** | 5.7% | 0 |
+
+The two memory figures are the same number, not similar ones — interpolating
+between keyframes allocates nothing.
+
+⚠️ **Free in memory and CPU is not free in battery.** Continuous playback means
+every marker changes on every display refresh, so the whole screen composites at
+60 Hz — precisely what the shared-epoch quantisation exists to avoid, and Apple
+prices halving that at up to 20% of battery drain (WWDC22, *Power down*). The
+instrument cannot see render-server cost, so which surface gets `continuous` is
+a decision for Instruments on a device, not for this table.
 
 ### What decides which ask applies
 

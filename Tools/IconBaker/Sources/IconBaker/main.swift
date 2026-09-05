@@ -30,6 +30,15 @@ struct IconBaker {
         var output = URL(fileURLWithPath: "build/icons")
         var cellPixels = 136
         var maxFrames = 24
+        /// Keys are not frames.
+        ///
+        /// ⚠️ The 24 above is the SHEET's cap and it exists because a frame is
+        /// 72 KiB of texture. A track's sample is three floats — about 12 bytes
+        /// — so applying the same cap to a track buys nothing and costs
+        /// smoothness. It did exactly that: a two-second loop came out as 24
+        /// keys, an 83 ms step, and icons visibly stepping at 12 fps on a
+        /// screen asking for 30. The cap was right, applied to the wrong thing.
+        var maxKeys = 120
         var heic = true
         var plate: CGColor?
         var plateHex: String?
@@ -51,6 +60,7 @@ struct IconBaker {
             case "--out": options.output = URL(fileURLWithPath: try next())
             case "--cell": options.cellPixels = Int(try next()) ?? 136
             case "--max-frames": options.maxFrames = Int(try next()) ?? 24
+            case "--max-keys": options.maxKeys = Int(try next()) ?? 120
             case "--manifest": options.manifest = try next()
             case "--png": options.heic = false
             case "--fill": options.fit = .fill
@@ -109,12 +119,32 @@ struct IconBaker {
         var frameCount = min(options.maxFrames, max(2, Int((sourceMS / 33).rounded())))
         var frameMS = AtlasWriter.snapToLadder(sourceMS / Double(frameCount))
 
+        // A TRACK is sampled at the contract's fastest rung and only coarsened
+        // if the key budget bites — where a sheet is capped first and coarsened
+        // by construction. Same ladder, opposite priority, because the two are
+        // limited by different things.
+        func trackSampling() -> (keys: Int, stepMS: Int) {
+            for rung in AtlasWriter.ladderMS {
+                let keys = max(2, Int((sourceMS / Double(rung)).rounded()))
+                if keys <= options.maxKeys { return (keys, rung) }
+            }
+            let rung = AtlasWriter.ladderMS.last ?? 100
+            return (min(options.maxKeys, max(2, Int((sourceMS / Double(rung)).rounded()))), rung)
+        }
+
         try FileManager.default.createDirectory(
             at: options.output, withIntermediateDirectories: true
         )
 
         // The cheap path.
         if document.isSingleLayerAffine {
+            // Kept, because the sheet fallback below needs them back: a track's
+            // key count can legitimately exceed `maxFrames`, and handing that to
+            // `bakeSheet` would ask for a 61-cell grid the contract forbids.
+            let sheetFrameCount = frameCount, sheetFrameMS = frameMS
+            let sampling = trackSampling()
+            frameCount = sampling.keys
+            frameMS = sampling.stepMS
             switch TransformTrack.extract(from: document, samples: frameCount) {
             case .success(let track):
                 // Rasterised from the NEUTRALISED composition, not from this
@@ -155,6 +185,8 @@ struct IconBaker {
             case .failure(let refusal):
                 // Affine but not reducible by THIS tool. Sheeted, and said so —
                 // silently sheeting it would hide a fixable authoring problem.
+                frameCount = sheetFrameCount
+                frameMS = sheetFrameMS
                 return try bakeSheet(
                     document, options: options,
                     frameCount: &frameCount, frameMS: &frameMS,
