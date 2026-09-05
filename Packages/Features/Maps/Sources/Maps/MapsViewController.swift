@@ -1662,23 +1662,42 @@ final class MapsViewController: UIViewController {
         let visibleRect = mapView.visibleMapRect
         var scored: [(distance: Double, candidate: MapVideoPlaybackCoordinator.Candidate)] = []
         for annotation in displayed.values {
-            guard let single = annotation as? MapAnnotation,
-                  single.pin.kind == .video,
-                  let url = single.pin.previewVideoURL,
-                  visibleRect.contains(MKMapPoint(single.coordinate)),
-                  let view = mapView.view(for: single) as? MapAnnotationView else { continue }
+            // The pin a marker SPEAKS FOR: itself when it is a lone pin, its
+            // representative when it is a cluster.
+            //
+            // A cluster's face is one of its members' posts and representatives
+            // are kind-neutral, so a video post leading a group is ordinary. It
+            // could never play before, because the candidate's view was typed
+            // to the lone-pin class — and on the mock corpus that meant nothing
+            // ever played at all: every video pin in the default viewport was
+            // inside a cluster.
+            var spokenPin: MapPin?
+            var host: (any MapVideoHost)?
+            if let single = annotation as? MapAnnotation {
+                spokenPin = single.pin
+                host = mapView.view(for: single) as? MapAnnotationView
+            } else if let group = annotation as? MapComputedCluster {
+                spokenPin = group.representative
+                host = mapView.view(for: group) as? MapClusterAnnotationView
+            }
+            guard let pin = spokenPin, let host,
+                  pin.kind == .video,
+                  let url = pin.previewVideoURL,
+                  visibleRect.contains(MKMapPoint(annotation.coordinate))
+            else { continue }
             let candidate = MapVideoPlaybackCoordinator.Candidate(
-                id: single.pin.postID, url: url, view: view
+                id: pin.postID, url: url, host: host
             )
-            scored.append((Self.squaredDistance(single.coordinate, center), candidate))
+            scored.append((Self.squaredDistance(annotation.coordinate, center), candidate))
         }
         let ranked = scored.sorted { $0.distance < $1.distance }.map(\.candidate)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-map-icon-hud-log") {
             let lone = displayed.values.compactMap { $0 as? MapAnnotation }
-            let videoKind = lone.count { $0.pin.kind == .video }
-            let withURL = lone.count { $0.pin.previewVideoURL != nil }
-            print("MAPVIDEO lone=\(lone.count) kindVideo=\(videoKind) withURL=\(withURL) "
+            let groups = displayed.values.compactMap { $0 as? MapComputedCluster }
+            print("MAPVIDEO lone=\(lone.count) clusters=\(groups.count) "
+                  + "loneVideo=\(lone.count { $0.pin.kind == .video }) "
+                  + "clusterVideo=\(groups.count { $0.representative.kind == .video }) "
                   + "onScreen=\(scored.count) chosen=\(ranked.count)")
         }
         #endif

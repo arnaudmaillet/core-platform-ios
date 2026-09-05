@@ -15,13 +15,20 @@ final class MapVideoPlaybackCoordinator {
     struct Candidate {
         let id: PostID
         let url: URL
-        let view: MapAnnotationView
+        /// ⚠️ ANY host, not `MapAnnotationView`.
+        ///
+        /// Typing this as the lone-pin view excluded every cluster, and on the
+        /// mock corpus that meant the path never ran at all: all three video
+        /// pins in the default viewport were inside clusters. A cluster's face
+        /// is one of its members' posts, and representatives are kind-neutral,
+        /// so a video post leading a group is ordinary rather than exotic.
+        let host: any MapVideoHost
     }
 
     private let pool: VideoPlaybackController
     private var maxConcurrent: Int
     /// Currently-playing pins → the view their player is bound to.
-    private var playing: [PostID: MapAnnotationView] = [:]
+    private var playing: [PostID: any MapVideoHost] = [:]
     /// AND of the facts that gate playback (tab frontmost, no feed presented,
     /// app foregrounded).
     private var isSurfaceVisible = true
@@ -86,8 +93,8 @@ final class MapVideoPlaybackCoordinator {
     /// frame-synced, instead of a frozen copy. Returns whether a live preview
     /// was actually mirrored.
     func mirrorLivePreview(of id: PostID, to view: VideoRenderView) -> Bool {
-        guard let pinView = playing[id] else { return false }
-        return pool.mirror(from: pinView.videoRenderView, to: view)
+        guard let host = playing[id] else { return false }
+        return pool.mirror(from: host.videoRenderView, to: view)
     }
 
     func stopAll() {
@@ -97,12 +104,12 @@ final class MapVideoPlaybackCoordinator {
     // MARK: - Internals
 
     private func start(_ candidate: Candidate) {
-        playing[candidate.id] = candidate.view
-        candidate.view.beginVideoPreview()
-        let view = candidate.view.videoRenderView
+        playing[candidate.id] = candidate.host
+        candidate.host.beginVideoPreview()
+        let view = candidate.host.videoRenderView
         let url = candidate.url
         // Return the player to the pool for this view if the pin scrolls off.
-        candidate.view.onReuse = { [weak self] in self?.stop(view) }
+        candidate.host.onReuse = { [weak self] in self?.stop(view) }
         // ⚠️ `scope:` IS NOT OPTIONAL HERE, and passing nil was a real defect.
         //
         // The pool shares one player between two surfaces when the asset AND
@@ -123,7 +130,7 @@ final class MapVideoPlaybackCoordinator {
         Task { await pool.play(url, in: view, peakBitRate: 600_000, scope: candidate.id.rawValue) }
     }
 
-    private func stop(id: PostID, view: MapAnnotationView) {
+    private func stop(id: PostID, view: any MapVideoHost) {
         pool.stop(view.videoRenderView)
         view.endVideoPreview()
         playing[id] = nil

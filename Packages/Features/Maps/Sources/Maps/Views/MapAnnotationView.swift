@@ -15,7 +15,7 @@ import UIKit
 /// A play badge overlays video pins — dormant today because the Radar path
 /// carries no media kind yet (see `GeoDiscoveryRepository`), and it lights up
 /// automatically once field 5 lands.
-final class MapAnnotationView: MKAnnotationView {
+final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     static let reuseIdentifier = "MapAnnotationView"
 
     /// The LARGEST a marker gets — a media pin's square. Text markers are

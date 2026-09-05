@@ -79,6 +79,40 @@ through the pool's own `activePlayerCount` and `isAdvancing`, not by looking.
 everything else clusters and clusters never play. The binding constraint is
 geography and the cluster gap, not `maxConcurrent`.
 
+## 0c. Clusters made playable, and the sweep past 3
+
+A cluster hosts the same `PinCardView` and therefore the same surface, but
+`Candidate.view` was typed `MapAnnotationView`, so it could never be a
+candidate. `MapVideoHost` now abstracts "a marker that can host a preview" and
+both views conform; `refreshVideoPlayback` reads a cluster's REPRESENTATIVE.
+
+Measured on iPhone 17 Pro Max, 19 markers (`-maps-mock-density 20`), every
+decoder distinct and advancing, launch window excluded:
+
+| decoders | app CPU | frame_mean | worst frame | hitches | footprint |
+|---|---|---|---|---|---|
+| 1 | 13.0% | 16.67 ms | 16.67 ms | 0 | 108 MB |
+| 3 | 21.2% | 16.67 ms | 16.67 ms | 0 | 124 MB |
+| 5 | 29.4% | 16.67 ms | 16.67 ms | 0 | 146 MB |
+| **8** | **44.4%** | **16.67 ms** | **16.67 ms** | **0** | **147 MB** |
+
+**≈4.5 points of app CPU and ≈5.6 MB per decoder, roughly linear. The frame time
+never moved and there were no hitches at any level** — the cost lands on worker
+threads and `mediaserverd`, not on the main thread. Nothing degraded, no
+`-11839`, no media-services reset.
+
+**8 is where the CORPUS ran out, not the machine.** Raising the cap to 12 and to
+20 both still gave 8: only 8 of the 19 cluster representatives are video posts,
+the rest being text. The cap has still never been the binding constraint at any
+value tested.
+
+⚠️ **And the simulator cannot answer the question this sweep looks like it
+answers.** It does not model the hardware decode-session budget — a phone's
+ceiling is a property of its media hardware, and the 62-session figure below was
+measured against a MAC's decoder, not a phone's. Eight concurrent decoders
+running cleanly here is evidence about the app's own cost and no evidence at all
+about how many a device will admit. That number needs hardware.
+
 ## 1. Options, ruled out by mechanism
 
 | # | option | why it lives or dies |

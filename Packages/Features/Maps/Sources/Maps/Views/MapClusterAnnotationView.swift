@@ -1,6 +1,7 @@
 import CoreModels
 import MapKit
 import MediaCore
+import MediaPlayback
 import UIKit
 
 /// A cluster of overlapping / co-located pins, rendered to look exactly like a
@@ -14,7 +15,7 @@ import UIKit
 /// The face is a `PinCardView` — the same component the single pin renders and
 /// the hero transition flies — so pin, cluster, and flight card are twins by
 /// construction, with no per-surface styling constants left to drift.
-final class MapClusterAnnotationView: MKAnnotationView {
+final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
     static let reuseIdentifier = "MapClusterAnnotationView"
     /// Match the individual pin exactly.
     private static let side = MapAnnotationView.side
@@ -172,8 +173,35 @@ final class MapClusterAnnotationView: MKAnnotationView {
         card.reinstallIconPlayback()
     }
 
+    /// The live-preview surface. A cluster's face is one of its members' posts,
+    /// so when that post is a video the group shows the same moving preview a
+    /// lone pin would.
+    var videoRenderView: VideoRenderView { card.videoRenderView }
+
+    /// See `MapVideoHost`. Same two methods as the lone pin's, over the same
+    /// `PinCardView` — the surface was always here; nothing could reach it.
+    func beginVideoPreview() {
+        card.videoRenderView.setPoster(card.imageView.image)
+        card.videoRenderView.isHidden = false
+    }
+
+    func endVideoPreview() {
+        card.videoRenderView.isHidden = true
+        card.videoRenderView.setPoster(nil)
+    }
+
+    /// Invoked when MapKit recycles this view, so the coordinator can return a
+    /// bound player to the pool before it is reused for another group.
+    var onReuse: (() -> Void)?
+
     override func prepareForReuse() {
         super.prepareForReuse()
+        // ⚠️ BEFORE the rest: the coordinator has to hand its player back while
+        // this view still owns the surface. Clearing state first would leave a
+        // player bound to a view that is about to draw a different group.
+        onReuse?()
+        onReuse = nil
+        endVideoPreview()
         // Same reason as `MapAnnotationView`: pop state belongs to an
         // appearance, and a cluster view recycled mid-fade would otherwise
         // come back invisible and half-size.

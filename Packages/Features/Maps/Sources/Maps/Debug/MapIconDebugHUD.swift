@@ -266,8 +266,15 @@ final class MapIconDebugHUD: UIView {
     /// Surfaces the pool reports as genuinely moving — not merely bound.
     private var advancingSurfaces: Int {
         guard let mapView, let pool else { return 0 }
-        return mapView.annotations.compactMap { mapView.view(for: $0) as? MapAnnotationView }
-            .count { pool.isAdvancing(in: $0.videoSurface) }
+        // Pins AND clusters — the readout has to follow the coordinator, and the
+        // coordinator now hosts on either. Counting only pins reported 1 of 3
+        // advancing while two cluster faces were playing, which reads as
+        // "playback is broken" rather than "the probe is narrow".
+        return mapView.annotations.compactMap { annotation -> VideoRenderView? in
+            let view = mapView.view(for: annotation)
+            return (view as? MapAnnotationView)?.videoRenderView
+                ?? (view as? MapClusterAnnotationView)?.videoRenderView
+        }.count { pool.isAdvancing(in: $0) }
     }
 
     private func refresh() {
