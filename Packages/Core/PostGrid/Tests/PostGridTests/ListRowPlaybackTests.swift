@@ -63,6 +63,23 @@ struct ListRowPlaybackTests {
     }
 
     /// The coordinator can address a row at all — the point of the protocol.
+    /// A coordinator that has been told it is on screen.
+    ///
+    /// ⚠️ Construction alone no longer permits playback: `isSurfaceVisible` is
+    /// FALSE at birth, so a coordinator nobody has told about takes no loans on
+    /// the shared pool. Every test below is about what a VISIBLE grid does, so
+    /// they all go through here; the gated cases assert `false` explicitly
+    /// afterwards, which now reads as the state change it is.
+    private func makeVisibleCoordinator(
+        pool: VideoPlaybackController, maxConcurrent: Int? = nil
+    ) -> GridVideoPlaybackCoordinator {
+        let coordinator = maxConcurrent.map {
+            GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: $0)
+        } ?? GridVideoPlaybackCoordinator(pool: pool)
+        coordinator.setSurfaceVisible(true)
+        return coordinator
+    }
+
     @Test func aRowIsAPlaybackCell() {
         #expect(row() is any GridPlaybackCell)
     }
@@ -150,7 +167,7 @@ struct ListRowPlaybackTests {
     /// than incidental — the sim cannot produce this, because the fixtures
     /// never put more than two video rows on screen at once.
     @Test func theTimelineKeepsTheNearestFiveAndDropsTheRest() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 5)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 5)
         // Deliberately handed to the coordinator far-first: the ranking must
         // come from the distances, not from the caller's enumeration order.
         let candidates = (0..<8).map { rowCandidate($0, distance: CGFloat(800 - $0 * 100)) }
@@ -165,7 +182,7 @@ struct ListRowPlaybackTests {
     /// …and the handover a scroll performs: the centre moves, so a row that
     /// was playing must give its player to one that was not.
     @Test func aScrolledAwayRowGivesUpItsPlayer() {
-        let coordinator = GridVideoPlaybackCoordinator(pool: makePool(), maxConcurrent: 1)
+        let coordinator = makeVisibleCoordinator(pool: makePool(), maxConcurrent: 1)
         let leaving = rowCandidate(0, distance: 10)
         let arriving = rowCandidate(1, distance: 900)
         coordinator.update(candidates: [leaving, arriving])
