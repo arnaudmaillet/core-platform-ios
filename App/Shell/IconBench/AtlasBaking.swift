@@ -277,6 +277,14 @@ nonisolated protocol IconFrameSource: AnyObject {
 
 /// GIF / APNG / animated WebP / HEICS, through ImageIO. No dependency.
 nonisolated final class RasterFrameSource: IconFrameSource {
+    /// ⚠️ RETAINED. `CGImageSourceCreateWithData` holds this buffer rather than
+    /// copying it, and with `kCGImageSourceShouldCache: false` below every frame
+    /// read goes back to it — so letting the `Data` die makes
+    /// `CGImageSourceCreateImageAtIndex` return fully transparent frames, some
+    /// of the time. From outside it reads as icons blinking; the same bug in the
+    /// publish-time baker put 3 of 5 cells at alpha 0 in one sheet and none in
+    /// another, with no relation to the artwork.
+    private let data: Data
     private let source: CGImageSource
     private let plate: UIColor
     let timeline: FrameTimeline
@@ -306,6 +314,7 @@ nonisolated final class RasterFrameSource: IconFrameSource {
         // wanted again, so caching them is pure resident cost.
         let options = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, options) else { return nil }
+        self.data = data
         let count = CGImageSourceGetCount(source)
         guard count > 0 else { return nil }
 

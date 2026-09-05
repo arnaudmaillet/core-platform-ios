@@ -283,12 +283,21 @@ struct IconBaker {
             let t = document.loopSeconds * Double(frame) / Double(frameCount)
             AtlasWriter.drawCell(
                 document.frame(at: t), into: canvas,
-                at: CGPoint(x: (frame % columns) * cell, y: (frame / columns) * cell),
+                at: AtlasWriter.origin(
+                    frame: frame, columns: columns, rows: rows, cellPixels: cell
+                ),
                 cellPixels: cell, plate: options.plate
             )
         }
         guard let sheet = canvas.makeImage() else {
             throw BakeError("\(document.name): cannot flatten sheet")
+        }
+        let empty = AtlasWriter.emptyCells(
+            in: sheet, frameCount: frameCount, columns: columns, cellPixels: cell
+        )
+        guard empty.isEmpty else {
+            throw BakeError("\(document.name): cells \(empty) are transparent — "
+                            + "the grid does not match what the client reads")
         }
         let asset = "\(document.name).\(options.heic ? "heic" : "png")"
         let file = options.output.appendingPathComponent(asset)
@@ -325,12 +334,21 @@ struct IconBaker {
             )
             AtlasWriter.drawCell(
                 image, into: canvas,
-                at: CGPoint(x: (frame % columns) * cell, y: (frame / columns) * cell),
+                at: AtlasWriter.origin(
+                    frame: frame, columns: columns, rows: rows, cellPixels: cell
+                ),
                 cellPixels: cell, plate: options.plate
             )
         }
         guard let sheet = canvas.makeImage() else {
             throw BakeError("\(document.name): cannot flatten sheet")
+        }
+        let empty = AtlasWriter.emptyCells(
+            in: sheet, frameCount: frameCount, columns: columns, cellPixels: cell
+        )
+        guard empty.isEmpty else {
+            throw BakeError("\(document.name): cells \(empty) are transparent — "
+                            + "the grid does not match what the client reads")
         }
         let asset = "\(document.name).\(options.heic ? "heic" : "png")"
         let file = options.output.appendingPathComponent(asset)

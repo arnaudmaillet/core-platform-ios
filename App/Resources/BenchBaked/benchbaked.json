@@ -3217,7 +3217,7 @@
   },
   {
     "asset" : "animated_asd_laugh_icon.heic",
-    "bytes" : 30458,
+    "bytes" : 30467,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 5,
@@ -3229,7 +3229,7 @@
   },
   {
     "asset" : "animated_asd_laugh_icon_2.heic",
-    "bytes" : 30526,
+    "bytes" : 30474,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 5,
@@ -3241,7 +3241,7 @@
   },
   {
     "asset" : "animated_emoticon_blush.heic",
-    "bytes" : 125831,
+    "bytes" : 126017,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 23,
@@ -3253,7 +3253,7 @@
   },
   {
     "asset" : "conan_death_icons_animated.heic",
-    "bytes" : 220483,
+    "bytes" : 220517,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 24,
@@ -3265,7 +3265,7 @@
   },
   {
     "asset" : "iso_7000_2837_animated.heic",
-    "bytes" : 74877,
+    "bytes" : 74858,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 18,

@@ -30,6 +30,20 @@ struct RasterDocument {
     let starts: [Double]
     let durations: [Double]
     let source: CGImageSource
+    /// ⚠️ RETAINED, and the whole reason this property exists.
+    ///
+    /// `CGImageSourceCreateWithData` does NOT copy: it holds the buffer. Let the
+    /// `Data` go out of scope and the source is reading freed memory, so
+    /// `CGImageSourceCreateImageAtIndex` starts returning frames that are fully
+    /// transparent — INTERMITTENTLY, depending on whether that memory has been
+    /// reused yet.
+    ///
+    /// What it looks like from the outside is icons that blink. What it looked
+    /// like in the baked sheet was 3 of 5 cells at alpha 0 for one GIF, 1 of 23
+    /// for another, and none at all for a third — a pattern with no relation to
+    /// the artwork, which is the tell. It was reported as a rendering problem
+    /// and it is a lifetime bug two lines from here.
+    let data: Data
     var loopSeconds: Double { (starts.last ?? 0) + (durations.last ?? 0) }
     var frameCount: Int { starts.count }
 
@@ -52,7 +66,7 @@ struct RasterDocument {
         }
         return RasterDocument(
             name: url.deletingPathExtension().lastPathComponent,
-            starts: starts, durations: durations, source: source
+            starts: starts, durations: durations, source: source, data: data
         )
     }
 
