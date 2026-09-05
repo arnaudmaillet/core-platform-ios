@@ -152,6 +152,19 @@ extension AnimatedIconBenchViewController {
             self.resetMeasurement()
             self.dressCompletedIn = 0     // already dressed; go straight to measuring
         }
+        addSegment("surface (chat packs 5x the map's count)", ["map 44pt", "chat emotes 22pt"],
+                   selected: config.emoteDensity ? 1 : 0) { [weak self] index in
+            self?.config.emoteDensity = index == 1
+            self?.rebuildLattice()
+        }
+        // The simulator cannot switch on Low Power, so the policy has to be
+        // forceable or its two interesting states are untestable here.
+        let policies = IconPlayback.MotionPolicy.allCases
+        addSegment("motion policy (60fps / half / posed)", policies.map(\.rawValue),
+                   selected: policies.firstIndex(of: IconPlayback.policy) ?? 0) { [weak self] index in
+            IconPlayback.forcedPolicy = policies[index]
+            self?.rebuildLattice()
+        }
         addSegment("pan", ["still", "auto-pan"],
                    selected: config.autoPans ? 1 : 0) { [weak self] index in
             guard let self else { return }

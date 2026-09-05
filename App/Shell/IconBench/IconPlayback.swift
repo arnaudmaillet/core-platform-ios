@@ -57,6 +57,76 @@ enum IconPlayback {
         case continuous
     }
 
+    /// The product's three states, and the reason it is three rather than two.
+    ///
+    /// A boolean "animate or not" throws away the middle, which is the state the
+    /// device is in most often when it matters. Measured on the decomposed path
+    /// at chat density (684 emotes, iPhone 17 Pro Max simulator):
+    ///
+    ///     15 fps -> 10.7% app CPU, 1.1 MB    60 fps -> 12.0% app CPU, 1.1 MB
+    ///
+    /// So the rate is nearly free in CPU and exactly free in memory, and
+    /// `.reduced` exists for BATTERY alone: halving the change instants is the
+    /// only lever that touches whole-screen composite rate, which Apple prices
+    /// at up to 20% of drain (WWDC22, *Power down*). Nothing on this screen can
+    /// see that cost, which is precisely why the state has to exist as a
+    /// switchable policy rather than as a number someone picked.
+    ///
+    /// ⚠️ `.reduced` DECIMATES the keys rather than lowering
+    /// `preferredFrameRateRange`. Lowering the hint asks politely and leaves the
+    /// animation with the same number of change instants; dropping every other
+    /// key halves them for real. The hint is a ceiling, not a throttle.
+    enum MotionPolicy: String, CaseIterable {
+        /// Normal use: the asset's own rate, up to 60.
+        case full
+        /// Low Power. Half the change instants, same memory, same picture.
+        case reduced
+        /// Reduce Motion, or serious thermal pressure. The icon is POSED and
+        /// static — never blank. A marker never goes blank.
+        case still
+
+        /// How many keys to skip. `.still` never reaches playback.
+        var stride: Int { self == .reduced ? 2 : 1 }
+    }
+
+    /// The policy the device is asking for right now.
+    ///
+    /// ⚠️ Read at INSTALL time, so it must be re-read when the device changes
+    /// its mind. `NSProcessInfoPowerStateDidChange` and
+    /// `reduceMotionStatusDidChangeNotification` are the two that fire; without
+    /// observing them a field installed before the user enabled Low Power keeps
+    /// animating at full rate for the rest of the session, which is the exact
+    /// failure the setting exists to prevent.
+    static var devicePolicy: MotionPolicy {
+        if UIAccessibility.isReduceMotionEnabled { return .still }
+        if ProcessInfo.processInfo.thermalState.rawValue
+            >= ProcessInfo.ThermalState.serious.rawValue { return .still }
+        if ProcessInfo.processInfo.isLowPowerModeEnabled { return .reduced }
+        return .full
+    }
+
+    /// Set by the instrument to force a state the simulator cannot produce —
+    /// there is no way to switch on Low Power in a simulator.
+    static var forcedPolicy: MotionPolicy?
+
+    static var policy: MotionPolicy { forcedPolicy ?? devicePolicy }
+
+    /// Fires when the device's answer changes. The caller re-installs.
+    static func observePolicyChanges(
+        _ onChange: @escaping @MainActor @Sendable () -> Void
+    ) -> [any NSObjectProtocol] {
+        let names: [Notification.Name] = [
+            .NSProcessInfoPowerStateDidChange,
+            UIAccessibility.reduceMotionStatusDidChangeNotification,
+            ProcessInfo.thermalStateDidChangeNotification
+        ]
+        return names.map { name in
+            NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { _ in MainActor.assumeIsolated { onChange() } }
+        }
+    }
+
     static let animationKey = "iconbench.play"
     static let scaleKey = "iconbench.play.scale"
     static let rotationKey = "iconbench.play.rotation"
@@ -75,12 +145,15 @@ enum IconPlayback {
         layer.magnificationFilter = .trilinear
         layer.minificationFilter = .trilinear
 
-        guard atlas.frameCount > 1 else {
-            layer.contentsRect = atlas.frameRects[0]
+        let rotation = ((phase % atlas.frameCount) + atlas.frameCount) % atlas.frameCount
+
+        guard atlas.frameCount > 1, policy != .still else {
+            // Posed, not blank, and posed at THIS marker's phase so a field
+            // frozen by the policy still looks like a field rather than 128
+            // copies of frame zero.
+            layer.contentsRect = atlas.frameRects[rotation]
             return
         }
-
-        let rotation = ((phase % atlas.frameCount) + atlas.frameCount) % atlas.frameCount
         let animation = CAKeyframeAnimation(keyPath: "contentsRect")
         animation.calculationMode = .discrete
         animation.duration = atlas.loopDuration
@@ -90,7 +163,8 @@ enum IconPlayback {
         switch mode {
         case .quantised:
             // Phase by ROTATION, clock shared.
-            animation.values = Array(atlas.frameRects[rotation...] + atlas.frameRects[..<rotation])
+            let rotated = Array(atlas.frameRects[rotation...] + atlas.frameRects[..<rotation])
+            animation.values = Self.decimated(rotated)
             animation.beginTime = epoch
         case .freeRunning:
             // Phase by TIME, on instants INCOMMENSURATE with the frame duration.
@@ -103,7 +177,7 @@ enum IconPlayback {
             // An irrational-ish fraction of the loop is what actually scatters
             // the change instants, which is the thing under test.
             let scatter = (Double(phase) * 0.6180339887).truncatingRemainder(dividingBy: 1)
-            animation.values = atlas.frameRects
+            animation.values = Self.decimated(atlas.frameRects)
             animation.beginTime = epoch - scatter * atlas.loopDuration
         }
 
@@ -126,7 +200,7 @@ enum IconPlayback {
         // The key is deliberately NOT added here: that coupling is a
         // whole-app decision, and measuring the hint's effect with and without
         // it is one of the on-device tests this instrument exists to set up.
-        let ceiling = Float(1.0 / atlas.frameDuration)
+        let ceiling = Float(1.0 / (atlas.frameDuration * Double(policy.stride)))
         animation.preferredFrameRateRange = CAFrameRateRange(
             minimum: min(8, ceiling), maximum: ceiling, preferred: 0
         )
@@ -136,6 +210,15 @@ enum IconPlayback {
         // never goes blank — not while loading, not while paused, not ever.
         layer.contentsRect = animation.values?.first as? CGRect ?? atlas.frameRects[0]
         layer.add(animation, forKey: animationKey)
+    }
+
+    /// Keeps every `stride`-th value. The loop DURATION is unchanged, so the
+    /// icon runs at the same speed with half the change instants — not at half
+    /// speed, which is the mistake this exists to avoid.
+    static func decimated<T>(_ values: [T]) -> [T] {
+        let stride = policy.stride
+        guard stride > 1, values.count > stride else { return values }
+        return values.enumerated().compactMap { $0.offset % stride == 0 ? $0.element : nil }
     }
 
     /// Freezes on the current frame instead of resetting to zero, so a marker
@@ -197,7 +280,7 @@ enum IconPlayback {
         )
         glyph.opacity = Float(track.alphas[0])
 
-        guard track.frameCount > 1 else { return }
+        guard track.frameCount > 1, policy != .still else { return }
 
         // Only the channels that MOVE. `.spin` and `.pulse` install one
         // animation each; `.flicker` two. Installing three unconditionally would
@@ -239,10 +322,15 @@ enum IconPlayback {
             // would silently invalidate the very comparison the toggle exists
             // for.
             animation.calculationMode = .discrete
-            animation.values = Array(channel.dropLast())
+            animation.values = decimated(Array(channel.dropLast()))
         case .continuous:
             animation.calculationMode = .linear
-            animation.values = channel
+            // Decimate the KEYS, then re-close the loop: dropping the closing
+            // sample here would make `.linear` interpolate from the last key
+            // back to the first over one key-interval instead of arriving on it.
+            var keys = decimated(Array(channel.dropLast()))
+            keys.append(channel[channel.count - 1])
+            animation.values = keys
         }
 
         // The track is ALREADY phased by sampling from a rotated grid, exactly
@@ -268,7 +356,7 @@ enum IconPlayback {
             // declare `minimum == maximum` and give up the idle-down battery
             // win is a device question: it needs Instruments (Core Animation +
             // Energy) on hardware, not a decision taken from a simulator.
-            let ceiling = Float(1.0 / track.step)
+            let ceiling = Float(1.0 / (track.step * Double(policy.stride)))
             animation.preferredFrameRateRange = CAFrameRateRange(
                 minimum: min(8, ceiling), maximum: ceiling, preferred: 0
             )
@@ -276,7 +364,7 @@ enum IconPlayback {
             // No ceiling to declare: an interpolated curve genuinely changes on
             // every refresh. Asking for less would quantise it back into the
             // stepped case while still paying for the extra keyframes.
-            let panel = Float(UIScreen.main.maximumFramesPerSecond)
+            let panel = Float(UIScreen.main.maximumFramesPerSecond) / Float(policy.stride)
             animation.preferredFrameRateRange = CAFrameRateRange(
                 minimum: min(30, panel), maximum: panel, preferred: 0
             )
@@ -313,10 +401,10 @@ enum IconPlayback {
     /// them — and WCAG 2.2.2 (Level A, carried into native apps by EN 301 549
     /// and the European Accessibility Act) requires a pause mechanism for
     /// content that animates automatically past five seconds.
-    static var motionAllowed: Bool {
-        !UIAccessibility.isReduceMotionEnabled
-            && !ProcessInfo.processInfo.isLowPowerModeEnabled
-            && ProcessInfo.processInfo.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-    }
+    /// Kept as the coarse question some callers still ask. The nuance lives in
+    /// `policy`: Low Power now HALVES the rate rather than stopping the icon,
+    /// because a still icon is a worse answer than a slower one whenever the
+    /// motion is what the icon means.
+    static var motionAllowed: Bool { policy != .still }
 }
 #endif

@@ -69,6 +69,14 @@ final class AnimatedIconBenchViewController: UIViewController {
         var sampling: IconPlayback.Sampling = .stepped
         var verifies = false
         var latency: TimeInterval = 0.35
+        /// The CHAT worst case instead of the map's.
+        ///
+        /// Not a smaller map: a different geometry. Map markers are 44pt with a
+        /// 64pt guaranteed spacing (128 on screen). Chat emotes are ~22pt inline
+        /// in text with NO spacing guarantee, so Twitch-density spam packs the
+        /// same screen with five times as many. The map case being fine says
+        /// nothing about this one.
+        var emoteDensity = false
         var showsMap = true
         var autoPans = false
         var reportWindow: TimeInterval?
@@ -98,9 +106,13 @@ final class AnimatedIconBenchViewController: UIViewController {
             if let raw = value("-icon-bench-sampling"), let sampling = IconPlayback.Sampling(rawValue: raw) {
                 config.sampling = sampling
             }
+            if let raw = value("-icon-bench-policy") {
+                IconPlayback.forcedPolicy = IconPlayback.MotionPolicy(rawValue: raw)
+            }
             config.verifies = arguments.contains("-icon-bench-verify")
             if let raw = value("-icon-bench-latency"), let latency = TimeInterval(raw) { config.latency = latency }
             if let raw = value("-icon-bench-ground") { config.showsMap = raw != "plain" }
+            config.emoteDensity = arguments.contains("-icon-bench-emote")
             config.autoPans = arguments.contains("-icon-bench-pan")
             if let raw = value("-icon-bench-report"), let window = TimeInterval(raw) { config.reportWindow = window }
             config.exitsAfterReport = arguments.contains("-icon-bench-exit")
@@ -140,6 +152,7 @@ final class AnimatedIconBenchViewController: UIViewController {
     var config = Config.fromLaunchArguments()
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "icon-bench")
 
+    private var policyObservers: [any NSObjectProtocol] = []
     private var markerCount = 0
     private var latticeColumns = 0
     private var latticeRows = 0
@@ -244,6 +257,13 @@ final class AnimatedIconBenchViewController: UIViewController {
             self, selector: #selector(reinstallAnimations),
             name: UIApplication.willEnterForegroundNotification, object: nil
         )
+        // The policy is read at INSTALL time, so the field has to be told when
+        // the device changes its answer. Without this, a screen dressed before
+        // the user enabled Low Power keeps animating at full rate for the rest
+        // of the session — the exact failure the setting exists to prevent.
+        policyObservers = IconPlayback.observePolicyChanges { [weak self] in
+            self?.rebuildLattice()
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -277,7 +297,10 @@ final class AnimatedIconBenchViewController: UIViewController {
         store.purge()
         mapView.removeAnnotations(mapView.annotations)
 
-        let cell: CGFloat = 64                       // MapsViewController.clusterCellPoints
+        // 64pt is `MapsViewController.clusterCellPoints`; 26pt is a 22pt emote
+        // with 4pt of leading, which is what dense chat actually looks like.
+        BenchMarkerView.side = config.emoteDensity ? 22 : 44
+        let cell: CGFloat = config.emoteDensity ? 26 : 64
         let bounds = view.bounds
         latticeColumns = Int(ceil(bounds.width / cell)) + 1
         latticeRows = Int(ceil(bounds.height / cell)) + 1
@@ -448,6 +471,7 @@ final class AnimatedIconBenchViewController: UIViewController {
             "ICONBENCH",
             "markers=\(markerCount)",
             "lattice=\(latticeColumns)x\(latticeRows)",
+            "surface=\(config.emoteDensity ? "chat" : "map")",
             "variety=\(effectiveVariety)",
             "clock=\(config.mode == .quantised ? "quantised" : "free")",
             "fps=\(Int(config.framesPerSecond))",
@@ -461,6 +485,7 @@ final class AnimatedIconBenchViewController: UIViewController {
             "texture=\(config.sharesTexture ? "shared" : "distinct")",
             "wire=\(config.wireFormat.rawValue)",
             "sampling=\(config.sampling.rawValue)",
+            "policy=\(IconPlayback.policy.rawValue)",
             "decomposed=\(store.residentProfile(ids: 0..<effectiveVariety).decomposed)/\(effectiveVariety)",
             "ground=\(config.showsMap ? "map" : "plain")",
             "pan=\(config.autoPans)",
@@ -511,7 +536,7 @@ final class AnimatedIconBenchViewController: UIViewController {
         }
 
         hud.text = """
-        MARKERS \(markerCount) (\(latticeColumns)x\(latticeRows) @64pt)  variety \(effectiveVariety)  [\(stageLabel)]
+        MARKERS \(markerCount) (\(latticeColumns)x\(latticeRows) @\(Int(config.emoteDensity ? 26 : 64))pt \(config.emoteDensity ? "EMOTES" : "map"))  variety \(effectiveVariety)  [\(stageLabel)]
         clock \(config.mode == .quantised ? "quantised" : "free")  \
         \(config.wireFormat == .baked ? "\(residentRates)fps in assets" : "\(Int(config.framesPerSecond))fps asked") \
         / \(String(format: "%.1f", presentedFPS)) presented  \
@@ -528,7 +553,7 @@ final class AnimatedIconBenchViewController: UIViewController {
         footprint \(String(format: "%.1f", footprint)) MB   \
         textures \(String(format: "%.1f", Double(residentAtlasBytes) / 1024 / 1024)) MB  \
         (\(String(format: "%.1f", projectedWorstCaseMB)) MB at 128 distinct)
-        cold dress \(dress)   motion \(IconPlayback.motionAllowed ? "on" : "GATED")
+        cold dress \(dress)   policy \(IconPlayback.policy.rawValue)\(IconPlayback.forcedPolicy != nil ? " (forced)" : "")
         ⚠︎ render-server cost is invisible here — Instruments, on a device
         """
     }

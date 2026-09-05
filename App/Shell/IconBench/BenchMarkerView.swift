@@ -33,8 +33,16 @@ final class BenchMarkerView: MKAnnotationView {
 
     static let reuseIdentifier = "BenchMarkerView"
 
-    /// `PinCardView.Face.text.side`.
-    static let side: CGFloat = 44
+    /// `PinCardView.Face.text.side` on the map — but the same component has to
+    /// serve the CHAT worst case too, and that is a different geometry, not a
+    /// smaller version of the same one.
+    ///
+    /// A map marker is 44pt and the cluster engine guarantees 64pt spacing, so
+    /// the field saturates at 128. A chat emote is ~22pt inline in text with no
+    /// spacing guarantee at all, so the same screen holds FIVE TIMES as many.
+    /// Measuring the map case and assuming chat is easier gets the harder of the
+    /// two surfaces wrong.
+    static var side: CGFloat = 44
 
     /// Explicit `shadowPath` versus the pathless shadow shipping today.
     ///
@@ -138,7 +146,9 @@ final class BenchMarkerView: MKAnnotationView {
         addSubview(card)
 
         glyph.image = UIImage(systemName: "text.bubble.fill")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold))
+            .withConfiguration(UIImage.SymbolConfiguration(
+                pointSize: Self.side * 0.41, weight: .semibold
+            ))
         glyph.tintColor = .white
         glyph.contentMode = .center
         glyph.frame = bounds

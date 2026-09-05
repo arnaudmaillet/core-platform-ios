@@ -281,6 +281,43 @@ produced:
 The two memory figures are the same number, not similar ones — interpolating
 between keyframes allocates nothing.
 
+### The rate policy, and where it does and does not apply
+
+Product decision, now measured rather than assumed: **60 fps in normal use,
+30 fps in Low Power, no motion at all in the fallback state** (Reduce Motion or
+serious thermal pressure — posed and static, never blank).
+
+It holds on the DECOMPOSED path, on both surfaces, and the frame rate is very
+nearly free:
+
+| surface | 15 fps | 30 fps | 60 fps | textures |
+|---|---|---|---|---|
+| map, 128 markers | — | 6.7% CPU | 7.1% CPU | 1.1 MB at every rate |
+| chat, 684 emotes | 10.7% CPU | 11.4% CPU | 12.0% CPU | 1.1 MB at every rate |
+
+Quadrupling the rate costs **1.3 points of app CPU and zero bytes.** The three
+policy states measured end to end: 60.0 / 30.0 / 0.0 fps presented, 1.1 MB in
+all three — the picture never changes, only how often it moves.
+
+⚠️ **The policy does NOT hold on the sheet path, and that is the whole reason
+§3 matters.** Same request, same screen:
+
+| at 60 fps, 128 distinct | textures | peak footprint |
+|---|---|---|
+| still + track (§3) | **1.1 MB** | 99 MB |
+| sprite sheet (§4) | 46.6 MB resident, **541.9 MB projected** | 200.6 MB |
+| GIF, client-decoded | 45.2 MB resident, 361.2 MB projected | **839.1 MB** |
+
+**And a GIF cannot deliver 60 fps at all.** GIF89a stores its inter-frame delay
+in *centiseconds*, so the representable rates are exactly 100/k — 100, 50, 33.3,
+25, 20, 16.7 … **60 is not among them**, and neither is 30. Asking a GIF for
+60 fps is not expensive, it is undefined. Measured presented rate on that path:
+30.0, imposed by the client's resampling ladder rather than by the request.
+
+So the rate policy is a property the backend must make possible, not one the
+client can impose: **it is only available on assets that arrive as a still plus
+a track.**
+
 ⚠️ **Free in memory and CPU is not free in battery.** Continuous playback means
 every marker changes on every display refresh, so the whole screen composites at
 60 Hz — precisely what the shared-epoch quantisation exists to avoid, and Apple
