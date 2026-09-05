@@ -224,10 +224,88 @@ final class IconAtlasStore {
     /// looks: real files carry per-frame delays that vary INSIDE one file, so
     /// the markers stop changing on a common grid and the composite-rate
     /// argument for a quantised tick goes with it.
-    enum WireFormat: String, CaseIterable { case still, sheet, gif, apng, realGIF }
+    ///
+    /// `baked` is the only one that is not synthesised at all: it reads what
+    /// `Tools/IconBaker` actually produced from Lottie — 16 stills with sampled
+    /// tracks and 4 sheets, in one bundle folder with a manifest. It is the
+    /// closest this instrument gets to the shipping shape, and the only setting
+    /// where a MIXED field appears, which is the realistic production case:
+    /// some artwork reduces and some does not, and the report says which.
+    enum WireFormat: String, CaseIterable { case still, sheet, gif, apng, realGIF, baked }
 
     init(memoryBudgetMB: Int = 48) {
         cache.totalCostLimit = memoryBudgetMB * 1024 * 1024
+    }
+
+    // MARK: - The baked catalogue
+
+    /// One entry of `Tools/IconBaker`'s manifest.
+    ///
+    /// Decoded, not hand-parsed, and deliberately mirroring the tool's `Entry`
+    /// field for field: the manifest is a contract between a build step and a
+    /// client, and the day the two drift is the day icons animate wrongly with
+    /// nothing logging an error.
+    nonisolated struct BakedEntry: Decodable {
+        let id: String
+        let kind: String              // "still" | "sheet"
+        let asset: String
+        let frameCount: Int
+        let frameMS: Int
+        let cellPX: Int
+        let columns: Int?
+        let scale: [Double]?
+        let rotation: [Double]?
+        let opacity: [Double]?
+        let plate: String?
+    }
+
+    nonisolated static let bakedCatalog: [BakedEntry] = {
+        guard let url = Bundle.main.url(forResource: "benchbaked", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let entries = try? JSONDecoder().decode([BakedEntry].self, from: data)
+        else { return [] }
+        return entries
+    }()
+
+    /// Builds art from a manifest entry — the production path, end to end.
+    private nonisolated static func loadBaked(id: Int) throws -> IconArt {
+        let catalogue = bakedCatalog
+        guard !catalogue.isEmpty else { throw URLError(.fileDoesNotExist) }
+        let entry = catalogue[((id % catalogue.count) + catalogue.count) % catalogue.count]
+        guard let url = Bundle.main.url(
+            forResource: (entry.asset as NSString).deletingPathExtension,
+            withExtension: (entry.asset as NSString).pathExtension
+        ), let data = try? Data(contentsOf: url) else { throw URLError(.fileDoesNotExist) }
+
+        // ⚠️ `UIImage(data:)`, NOT `decodeFullSize`. Same bytes, same files: the
+        // app's own `ImagePipeline` call —
+        // `CGImageSourceCreateThumbnailAtIndex` with
+        // `kCGImageSourceShouldCacheImmediately` — never returns on HEIC in the
+        // iOS 26 simulator. Not an error, not a crash: 128 markers sat on their
+        // fallback glyph indefinitely while CPU idled at 7%. The identical
+        // assets encoded as PNG went through that same call in 0.13 s.
+        // Unverified on device; see the note in the backend document.
+        guard let image = UIImage(data: data) else { throw URLError(.cannotDecodeContentData) }
+        let step = CFTimeInterval(entry.frameMS) / 1000
+
+        if entry.kind == "still", let scale = entry.scale,
+           let rotation = entry.rotation, let opacity = entry.opacity {
+            return .decomposed(IconStill(
+                glyph: image,
+                plate: entry.plate.flatMap(UIColor.init(hex:)) ?? .systemGray,
+                motion: .sampled(scale: scale, rotation: rotation, opacity: opacity),
+                frameCount: entry.frameCount,
+                frameDuration: step,
+                // The baker insets the disc by a 2px gutter in a `cellPX` cell,
+                // so the client's plate has to use the SAME fraction or the
+                // colour peeks out from behind the mark's own clipped rim.
+                plateInsetFraction: 2 / Double(entry.cellPX)
+            ))
+        }
+        return .sheet(IconAtlas(
+            sheet: image, frameCount: entry.frameCount, columns: entry.columns ?? 4,
+            cellPixels: entry.cellPX, frameDuration: step
+        ))
     }
 
     func cached(_ id: Int) -> IconArt? { cache.object(forKey: NSNumber(value: id))?.art }
@@ -316,6 +394,10 @@ final class IconAtlasStore {
                     return .sheet(try Self.bakeFromBundledGIF(
                         id: id, maxFrames: frames, columns: columns, cellPixels: cellPixels
                     ))
+                case .baked:
+                    // No bake at all: the work happened at publish time, which
+                    // is the entire point. The client decodes one image.
+                    return try Self.loadBaked(id: id)
                 }
             }.value
         }
@@ -342,7 +424,7 @@ final class IconAtlasStore {
         return IconStill(
             glyph: try decodeFullSize(png),
             plate: IconAtlasBaker.plate(index: id),
-            motion: IconAtlasBaker.motion(index: id),
+            motion: .procedural(IconAtlasBaker.motion(index: id)),
             frameCount: frameCount,
             frameDuration: step,
             plateInsetFraction: Double(gutter) / Double(cellPixels)

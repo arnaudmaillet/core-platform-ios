@@ -58,6 +58,27 @@ def load(path):
         return json.load(handle)
 
 
+def is_animated(node):
+    """Is this dict an ANIMATED Lottie property?
+
+    ⚠️ Not `node.get("a") == 1`. That is the modern Bodymovin schema, and the
+    older one — which lottie-ios's own sample corpus is full of — omits the `a`
+    key entirely: `{"k": 0}` for static, `{"k": [{"t": 0, "s": [...]}, ...]}`
+    for animated. Testing the flag alone found ZERO animated properties in
+    13 of 19 of those files and then reported them as decomposable, because
+    "no raster properties" is trivially true of a file you failed to read.
+
+    So the test is STRUCTURAL: a property is animated when its `k` is a list of
+    keyframe objects. That holds in both schemas.
+    """
+    if not isinstance(node, dict) or "k" not in node:
+        return False
+    if node.get("a") == 1:
+        return True
+    k = node["k"]
+    return isinstance(k, list) and bool(k) and isinstance(k[0], dict)
+
+
 def scan(node, in_transform, out):
     """Collect animated properties, tagged by whether they sit in a transform.
 
@@ -65,8 +86,7 @@ def scan(node, in_transform, out):
     group's `tr` is affine wherever it appears beneath it.
     """
     if isinstance(node, dict):
-        # An animatable Lottie property is {"a": 1, "k": [keyframes...]}.
-        if node.get("a") == 1 and isinstance(node.get("k"), list):
+        if is_animated(node):
             out.append((in_transform, node.get("__key__", "?")))
             return
         transform_here = in_transform or node.get("ty") == "tr"
@@ -103,6 +123,15 @@ def report(path, frame_cap):
                      if not is_transform)
     layers = animated_layers(doc)
     name = os.path.basename(path)
+
+    if not raster and affine == 0:
+        # ⚠️ NOT a pass. Nothing animates, which means either a static file or
+        # one this script could not read — and both used to come back as
+        # "DECOMPOSABLE" because the check was "no raster properties found",
+        # which is trivially true of a file you failed to parse. A verdict has
+        # to be earned by evidence, not by the absence of it.
+        return None, (f"{name:<20}{layers:>4} anim layers{affine:>6} affine"
+                      f"{0:>6} raster   NO ANIMATION FOUND — static, or unreadable")
 
     if not raster:
         # Affine, but is it CHEAPER? One still per animated layer against

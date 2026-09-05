@@ -223,6 +223,23 @@ final class AnimatedIconBenchViewController: UIViewController {
         setUpControls()
         if config.verifies { runDecompositionAudit() }
 
+        // The baked catalogue either loaded or it did not, and a field of
+        // fallback glyphs looks the same either way — so say which, out loud,
+        // rather than leaving it to be inferred from an empty screen.
+        let catalogue = IconAtlasStore.bakedCatalog
+        let manifestFound = Bundle.main.url(forResource: "benchbaked", withExtension: "json") != nil
+        let firstAsset = catalogue.first?.asset ?? "-"
+        let assetFound = catalogue.first.flatMap {
+            Bundle.main.url(
+                forResource: ($0.asset as NSString).deletingPathExtension,
+                withExtension: ($0.asset as NSString).pathExtension
+            )
+        } != nil
+        let diagnosis = "ICONBENCH-BAKED entries=\(catalogue.count) manifest=\(manifestFound) "
+            + "firstAsset=\(firstAsset) assetFound=\(assetFound)"
+        print(diagnosis)
+        logger.notice("\(diagnosis, privacy: .public)")
+
         NotificationCenter.default.addObserver(
             self, selector: #selector(reinstallAnimations),
             name: UIApplication.willEnterForegroundNotification, object: nil
@@ -473,7 +490,8 @@ final class AnimatedIconBenchViewController: UIViewController {
         \(profile.distinctSteps) distinct steps  \
         shadow \(config.usesShadowPath ? "path" : "NONE")  mask \(config.masksOnCard ? "CLIP" : "baked")  \
         tex \(config.sharesTexture ? "shared" : "DISTINCT")
-        wire \(config.wireFormat.rawValue)  sampling \(config.sampling.rawValue)  \
+        wire \(config.wireFormat.rawValue)(\(IconAtlasStore.bakedCatalog.count) baked)  \
+        sampling \(config.sampling.rawValue)  \
         decomposed \(profile.decomposed)/\(effectiveVariety)\(fallbackNote)
         main-thread frame  mean \(String(format: "%.2f", meanFrame))ms  p95 \(String(format: "%.2f", p95Frame))ms
         hitches \(hitchCount)   app CPU \(String(format: "%.0f", meanCPU))%

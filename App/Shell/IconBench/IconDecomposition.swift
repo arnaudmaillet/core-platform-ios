@@ -122,6 +122,50 @@ nonisolated struct IconMotionTrack {
         self.rotations = rotations
         self.alphas = alphas
     }
+
+    /// The same track, from samples a BAKER produced rather than from a
+    /// procedural motion.
+    ///
+    /// This is the production shape: `IconBaker` walks a Lottie's layer
+    /// transform, evaluates After Effects' bezier easing at N even instants and
+    /// ships three arrays. The client never sees a curve, only its samples —
+    /// which is why the phasing here has to be identical to the procedural
+    /// path's, right down to the rotation unwrap. Two ways of building the same
+    /// value that phase differently would show up as one icon in the field
+    /// marching out of step with its neighbours, and be blamed on the asset.
+    init(sampled scale: [Double], rotation: [Double], opacity: [Double],
+         step: CFTimeInterval, phase: Int) {
+        // The wire carries `n + 1` samples over the closed interval; the last is
+        // the loop's closing value and is regenerated after rotation.
+        let count = max(1, min(scale.count, min(rotation.count, opacity.count)) - 1)
+        let offset = ((phase % count) + count) % count
+        self.step = step
+
+        func phased(_ channel: [Double]) -> [Double] {
+            let base = Array(channel.prefix(count))
+            guard !base.isEmpty else { return [0, 0] }
+            var rotated = (0..<count).map { base[(offset + $0) % count] }
+            rotated.append(rotated[0])
+            return rotated
+        }
+        self.scales = phased(scale)
+        self.alphas = phased(opacity)
+        self.rotations = Self.unwrapped(phased(rotation))
+    }
+
+    /// Takes every step along its SHORT arc and accumulates, so a full-turn spin
+    /// stays a monotone ramp whatever phase it starts on.
+    private static func unwrapped(_ channel: [Double]) -> [Double] {
+        guard channel.count > 1 else { return channel }
+        var result = channel
+        for i in 1..<result.count {
+            var delta = result[i] - result[i - 1]
+            if delta < -Double.pi { delta += 2 * .pi }
+            if delta > Double.pi { delta -= 2 * .pi }
+            result[i] = result[i - 1] + delta
+        }
+        return result
+    }
 }
 
 // MARK: - The still
@@ -141,7 +185,16 @@ nonisolated struct IconStill {
     let glyph: UIImage
     /// The plate. Free.
     let plate: UIColor
-    let motion: IconAtlasBaker.Motion
+    /// Where the motion comes from. Two cases rather than a flag, so a baked
+    /// asset and a synthetic one cannot be confused for one another anywhere
+    /// downstream — including in the report.
+    enum Source {
+        /// The instrument's own catalogue.
+        case procedural(IconAtlasBaker.Motion)
+        /// Samples from `IconBaker`'s manifest: the real wire shape.
+        case sampled(scale: [Double], rotation: [Double], opacity: [Double])
+    }
+    let motion: Source
     /// Sample count per loop. On this path it is a FIDELITY knob, not a memory
     /// one — the bytes do not move when it changes.
     let frameCount: Int
@@ -157,8 +210,20 @@ nonisolated struct IconStill {
         return cg.bytesPerRow * cg.height
     }
 
+    var isBaked: Bool { if case .sampled = motion { return true }; return false }
+
     func track(phase: Int) -> IconMotionTrack {
-        IconMotionTrack(motion: motion, frameCount: frameCount, step: frameDuration, phase: phase)
+        switch motion {
+        case .procedural(let motion):
+            IconMotionTrack(
+                motion: motion, frameCount: frameCount, step: frameDuration, phase: phase
+            )
+        case .sampled(let scale, let rotation, let opacity):
+            IconMotionTrack(
+                sampled: scale, rotation: rotation, opacity: opacity,
+                step: frameDuration, phase: phase
+            )
+        }
     }
 }
 
@@ -541,6 +606,24 @@ enum DecompositionAudit {
             context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
         }
         return buffer
+    }
+}
+#endif
+
+#if DEBUG
+extension UIColor {
+    /// `#RRGGBB` from the baker's manifest.
+    ///
+    /// `nonisolated` because the baked catalogue is decoded off the main actor,
+    /// on the same detached task every other bake path uses.
+    nonisolated convenience init?(hex: String) {
+        let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        guard digits.count == 6, let value = UInt32(digits, radix: 16) else { return nil }
+        self.init(
+            red: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255, alpha: 1
+        )
     }
 }
 #endif

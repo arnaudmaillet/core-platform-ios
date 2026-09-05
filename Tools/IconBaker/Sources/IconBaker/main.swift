@@ -32,6 +32,8 @@ struct IconBaker {
         var maxFrames = 24
         var heic = true
         var plate: CGColor?
+        var plateHex: String?
+        var manifest = "catalog.json"
         var fit: Rasteriser.Fit = .inscribe
     }
 
@@ -49,9 +51,13 @@ struct IconBaker {
             case "--out": options.output = URL(fileURLWithPath: try next())
             case "--cell": options.cellPixels = Int(try next()) ?? 136
             case "--max-frames": options.maxFrames = Int(try next()) ?? 24
+            case "--manifest": options.manifest = try next()
             case "--png": options.heic = false
             case "--fill": options.fit = .fill
-            case "--plate": options.plate = try colour(from: next())
+            case "--plate":
+                let hex = try next()
+                options.plate = try colour(from: hex)
+                options.plateHex = hex.hasPrefix("#") ? hex : "#" + hex
             default: options.inputs.append(URL(fileURLWithPath: argument))
             }
             index += 1
@@ -86,6 +92,11 @@ struct IconBaker {
         let opacity: [Double]?
         let bytes: Int
         let note: String
+        /// Set on `still` entries only. The plate is a COLOUR here rather than
+        /// pixels, deliberately: the still is the thing the client transforms,
+        /// so a plate baked into it would spin and pulse along with the mark.
+        /// On a `sheet` the whole cell is the frame, so the plate belongs in it.
+        let plate: String?
     }
 
     static func bake(_ url: URL, options: Options) throws -> Entry {
@@ -119,9 +130,12 @@ struct IconBaker {
                           width: options.cellPixels, height: options.cellPixels
                       )
                 else { throw BakeError("\(document.name): rasteriser produced nothing") }
+                // `plate: nil` — see `Entry.plate`. The mark is clipped to the
+                // disc so it cannot escape when the track scales it up, but the
+                // background stays transparent for the client's own plate layer.
                 AtlasWriter.drawCell(
                     still, into: canvas, at: .zero,
-                    cellPixels: options.cellPixels, plate: options.plate
+                    cellPixels: options.cellPixels, plate: nil
                 )
                 guard let flattened = canvas.makeImage() else {
                     throw BakeError("\(document.name): cannot flatten still")
@@ -135,7 +149,8 @@ struct IconBaker {
                     columns: nil,
                     scale: track.scale, rotation: track.rotation, opacity: track.opacity,
                     bytes: size(of: file),
-                    note: "\(profile.affine) affine properties, 1 animated layer"
+                    note: "\(profile.affine) affine properties, 1 animated layer",
+                    plate: options.plateHex
                 )
             case .failure(let refusal):
                 // Affine but not reducible by THIS tool. Sheeted, and said so —
@@ -190,7 +205,7 @@ struct IconBaker {
             id: document.name, kind: "sheet", asset: asset,
             frameCount: frameCount, frameMS: frameMS, cellPX: cell, columns: columns,
             scale: nil, rotation: nil, opacity: nil,
-            bytes: size(of: file), note: note
+            bytes: size(of: file), note: note, plate: nil
         )
     }
 
@@ -233,10 +248,10 @@ struct IconBaker {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(entries).write(
-                to: options.output.appendingPathComponent("catalog.json")
+                to: options.output.appendingPathComponent(options.manifest)
             )
             let stills = entries.count { $0.kind == "still" }
-            print("\n\(stills)/\(entries.count) decomposed → \(options.output.path)/catalog.json")
+            print("\n\(stills)/\(entries.count) decomposed → \(options.output.path)/\(options.manifest)")
         } catch {
             print("error: \(error)")
             exit(1)
