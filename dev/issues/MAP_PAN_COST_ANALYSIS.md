@@ -115,8 +115,8 @@ the metric, and **frame time and hitches are the only honest columns**.
 
 ## Options, ranked by evidence rather than appeal
 
-**1. Coalesce reconciles per region settle** — the only one worth doing, and it
-is small. The double reconcile is now confirmed (1.42/s against 0.71
+**1. Coalesce reconciles per region settle** — BUILT AND REJECTED, see above. It
+removes 73 % of the reconcile time and costs 7 hitches /2 s. The double reconcile is now confirmed (1.42/s against 0.71
 region-changes/s). Replace the inline `reconcileClusters()` in
 `regionDidChangeAnimated` with a cancel-and-reschedule work item mirroring
 `scheduleQuery`. Removes ~3.4 ms/s of main-thread work and one bursty stall per
@@ -144,9 +144,62 @@ continuously, and the `didAdd` comment argues the pop is what makes the map feel
 populated rather than stamped. Do not schedule it off the back of simulator
 numbers.
 
+## The throttle was built, measured, and is OFF
+
+`-maps-nav-sweep` calls `setRegion(animated:)`, which fires
+`regionDidChangeAnimated` **once per gesture**. A finger fires it once per
+frame. `-maps-nav-drag` (60 Hz stepped pan, 1.0 s moving / 0.5 s still) is the
+driver that can see the difference, and it changes the picture completely:
+
+| driver | reconcile/s | reconcile ms/s | arrivals/s | rebinds/s |
+|---|---|---|---|---|
+| `-maps-nav-sweep` | 1.42 | 6.73 | 11.1 | 15.3 |
+| `-maps-nav-drag` | 37.2 | **48.8** | 2.7 | ~0 |
+
+Under a real pan the reconcile budget is **4.9 % of the main thread, not
+0.67 %**, and it produces almost nothing. So the throttle was implemented: the
+settle path defers while the SNAPPED ZOOM is unchanged, arming one trailing item
+so it defers without ever dropping.
+
+Three paired 60-second runs, fresh launch per arm:
+
+| n=3 | reconcile/s | ms/s | CPU | frame | p95 | hitches /2 s |
+|---|---|---|---|---|---|---|
+| control | 37.21 | 48.83 | 48.5 % | 21.13 | 38.58 | **20.87** |
+| throttled | 7.82 | **13.30** | 46.4 % | 22.01 | 40.46 | **28.23** |
+
+**It works and it makes things worse.** 79 % of reconciles and 73 % of their
+main-thread time removed, tight across all three reps — and the frame, the p95
+and the hitch count all regress, with every throttled rep above the control's
+mean. Removing 35 ms/s of main-thread work made the map stutter more.
+
+The likely mechanism is **when**, not how much: the inline reconciles ran
+synchronously inside the region-change callback, a moment the frame had already
+conceded, while the trailing `asyncAfter` lands at an arbitrary point that can be
+mid-frame. At 1.3 ms apiece, scheduling dominates volume.
+
+It ships **disabled** (`-maps-reconcile-throttle` to enable), because the
+experiment is worth keeping and the regression is not.
+
+### Three ways this nearly shipped as a win
+
+- The first predicate compared `MKCoordinateSpan` with `==`. `MKMapView` fits
+  whatever span you hand `setRegion` to the view's aspect ratio, so it is never
+  bit-identical and the throttle fired **zero** times — which read as "the
+  optimisation does nothing" rather than "the predicate is broken".
+- The trailing item was cancel-and-rescheduled, i.e. a debounce. Under a 60 Hz
+  pan it was cancelled every 16 ms and never fired, so the map held **zero
+  markers** while every performance column improved.
+- The drag driver never stopped moving, so `scheduleQuery`'s settle debounce
+  (correctly) never fired and no pins ever loaded. This appeared only *after*
+  the throttle made settles cheap enough to sustain 60 Hz from launch — **the
+  optimisation was fast enough to starve the app's own query.**
+- And one paired run showed hitches 30.9 → 17.2, a 44 % win. The control arm
+  alone swings 17.4–27.7 between runs. One pair could not have told them apart.
+
 ## Recommendation
 
-**Do the two-line debounce (option 1), and nothing else yet.**
+**Do nothing. The debounce was built and measured, and it is a regression.**
 
 Everything the codebase controls on this path fits in 6.7 ms per second. The
 remaining ~14 ms of the clustered frame and ~22 ms of the unclustered one are

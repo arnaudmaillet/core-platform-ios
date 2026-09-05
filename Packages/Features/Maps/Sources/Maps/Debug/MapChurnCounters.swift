@@ -30,6 +30,20 @@ enum MapChurnCounters {
     /// `configure` calls that returned at the guard — free.
     static var skipped = 0
 
+    /// Reconciles by CALL SITE. Which trigger fired decides what can be
+    /// collapsed: two reconciles per region change are only redundant if they
+    /// are the SAME trigger twice, and "the settle re-laid out for a new zoom"
+    /// plus "the query returned new pins" are two different jobs that merely
+    /// happen close together.
+    static var fromSettle = 0
+    static var fromDiff = 0
+    static var fromFlush = 0
+    /// Settle reconciles the pure-pan throttle deferred.
+    static var settleThrottled = 0
+    /// Reconciles whose pin set was unchanged since the previous one — the only
+    /// ones a coalescer could actually drop for free.
+    static var withUnchangedPins = 0
+
     /// Total main-thread microseconds spent inside `reconcileClusters()`.
     ///
     /// The count of reconciles says how often the main thread is interrupted;
@@ -51,6 +65,7 @@ enum MapChurnCounters {
         defer {
             reconciles = 0; added = 0; departed = 0; viewFor = 0; bound = 0; skipped = 0
             reconcileMicros = 0; reconcileWorstMicros = 0
+            fromSettle = 0; fromDiff = 0; fromFlush = 0; withUnchangedPins = 0; settleThrottled = 0
         }
         return (reconciles, added, departed, viewFor, bound, skipped)
     }

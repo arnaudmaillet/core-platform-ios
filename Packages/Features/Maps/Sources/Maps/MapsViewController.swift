@@ -217,6 +217,27 @@ final class MapsViewController: UIViewController {
     /// A diff folded into the model during a transition still owes a layout;
     /// this asks the settle to run one.
     private var layoutPending = false
+    /// The SNAPPED zoom the last settle-driven reconcile ran at, and when it
+    /// ran. Together they tell a pure pan from a zoom.
+    ///
+    /// ⚠️ Snapped zoom, not the region's span. `MKMapView` fits whatever span
+    /// you hand `setRegion` to the view's aspect ratio, so `region.span` is
+    /// never bit-identical to what was set and `==` on it is always false — the
+    /// first version of this throttle fired exactly zero times for that reason,
+    /// and read as "the optimisation does nothing" rather than "the predicate is
+    /// broken". Snapped zoom is also the engine's ACTUAL input, so this asks the
+    /// question that decides the layout instead of a proxy for it.
+    private var lastSettleSnappedZoom: Double?
+    private var lastSettleReconcileAt: CFTimeInterval = 0
+    private var trailingSettleReconcile: DispatchWorkItem?
+    /// The floor between two settle-driven reconciles during a pure pan.
+    /// 100 ms bounds the staleness at six frames, and a pure pan cannot change
+    /// the layout anyway — see `reconcileClustersForSettle`.
+    private static let panReconcileInterval: CFTimeInterval = 0.1
+    #if DEBUG
+    /// Cheap "did the corpus move" probe for the churn readout only.
+    private var lastReconciledPinFingerprint = 0
+    #endif
     /// The annotations THIS reconcile put on the map, awaiting their views.
     ///
     /// ⚠️ `didAdd` IS NOT "SOMETHING NEW HAPPENED". MapKit calls it for every
@@ -287,6 +308,7 @@ final class MapsViewController: UIViewController {
         #if DEBUG
         installIconDebugHUD()
         installNavigationSweep()
+        installNavigationDrag()
         #endif
         // No title, deliberately: the map is the tab's whole surface and
         // names itself; the header band belongs to its controls — the
@@ -1304,13 +1326,117 @@ final class MapsViewController: UIViewController {
         if isRegionTransitioning {
             layoutPending = true
         } else {
+            #if DEBUG
+            MapChurnCounters.fromDiff += 1
+            #endif
             reconcileClusters()
         }
+    }
+
+    /// The settle path's reconcile, throttled while the camera is purely panning.
+    ///
+    /// A pan at an unchanged span cannot change the layout: `MapClusterEngine`
+    /// grids on ABSOLUTE `MKMapPoint`s with `cell = cellPoints / zoomScale`, so
+    /// the viewport centre is not one of its inputs. Measured under
+    /// `-maps-nav-drag` (60 Hz stepped pan, the cadence a finger produces):
+    /// **55.6 reconciles/s producing 0 arrivals and 0 rebinds, costing 65 ms/s
+    /// of main thread** — 6.5%, against 0.67% under `-maps-nav-sweep`, which
+    /// calls `setRegion(animated:)` and so fires this delegate once per gesture
+    /// instead of once per frame. The scripted sweep could not see this at all,
+    /// and the first version of this analysis concluded there was nothing here.
+    ///
+    /// ⚠️ It DEFERS, it never drops. The trailing item always runs, so the
+    /// layout converges even if the camera stops between two callbacks — a
+    /// throttle that skipped the last callback would leave the map permanently
+    /// wrong wherever the finger happened to lift.
+    ///
+    /// A zoom is never throttled. A changed span is exactly the case where the
+    /// layout does move, and it is also the case the user is watching.
+    private func reconcileClustersForSettle() {
+        // The trailing item can land mid-flight, which the settle path never
+        // could — `regionDidChangeAnimated` has just cleared the flag when it
+        // calls in. Restacking mid-flight is exactly what `isRegionTransitioning`
+        // exists to prevent, so hand it to the settle the same way a mid-flight
+        // diff is handed over.
+        if isRegionTransitioning {
+            layoutPending = true
+            return
+        }
+        // ⚠️ OFF BY DEFAULT — it is a MEASURED REGRESSION, kept only so the
+        // experiment stays reproducible. `-maps-reconcile-throttle` enables it.
+        //
+        // It does exactly what it claims: 3 paired 60-second runs, fresh launch
+        // per arm, under `-maps-nav-drag`.
+        //
+        //            reconcile/s   ms/s    cpu    frame    p95   hitches
+        //   control       37.21   48.83  48.5%   21.13  38.58     20.87
+        //   throttled      7.82   13.30  46.4%   22.01  40.46     28.23
+        //
+        // 79% of reconciles and 73% of their main-thread time removed — tight
+        // across all three reps — and the frame, the p95 and the hitches all got
+        // WORSE, every throttled rep above the control's mean. Removing work
+        // from the main thread made the map stutter more.
+        //
+        // The likely mechanism is WHEN, not how much: the inline reconciles ran
+        // synchronously inside the region-change callback, a moment the frame
+        // had already conceded, while the trailing `asyncAfter` lands at an
+        // arbitrary point that can be mid-frame. At 1.3 ms a piece, scheduling
+        // dominates volume.
+        //
+        // ⚠️ A single earlier pair showed hitches 30.9 -> 17.2 and nearly shipped
+        // as a 44% win. The control arm alone swings 17.4-27.7 between runs.
+        // One pair could not have told these apart.
+        guard ProcessInfo.processInfo.arguments.contains("-maps-reconcile-throttle") else {
+            #if DEBUG
+            MapChurnCounters.fromSettle += 1
+            #endif
+            reconcileClusters()
+            return
+        }
+        let zoom = currentZoomScale
+        guard zoom > 0 else { reconcileClusters(); return }
+        let snapped = MapClusterEngine.snapZoom(zoom)
+        let now = CACurrentMediaTime()
+        let isPurePan = lastSettleSnappedZoom == snapped
+        if isPurePan, now - lastSettleReconcileAt < Self.panReconcileInterval {
+            #if DEBUG
+            MapChurnCounters.settleThrottled += 1
+            #endif
+            // ⚠️ ARM ONCE. Cancel-and-reschedule is a DEBOUNCE, and a debounce
+            // waits for quiet — under a 60 Hz pan the item is cancelled every
+            // 16 ms and never fires at all. The first version did exactly that
+            // and emptied the map: the opening reconcile ran before the first
+            // query returned, every later one was starved, and the readout said
+            // `markers 0.0` while every performance column improved. A throttle
+            // arms on the first deferred call and lets it land.
+            guard trailingSettleReconcile == nil else { return }
+            let work = DispatchWorkItem { [weak self] in
+                self?.trailingSettleReconcile = nil
+                self?.reconcileClustersForSettle()
+            }
+            trailingSettleReconcile = work
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + (Self.panReconcileInterval - (now - lastSettleReconcileAt)),
+                execute: work
+            )
+            return
+        }
+        trailingSettleReconcile?.cancel()
+        trailingSettleReconcile = nil
+        lastSettleSnappedZoom = snapped
+        lastSettleReconcileAt = now
+        #if DEBUG
+        MapChurnCounters.fromSettle += 1
+        #endif
+        reconcileClusters()
     }
 
     private func flushPendingDiffs() {
         guard layoutPending else { return }
         layoutPending = false
+        #if DEBUG
+        MapChurnCounters.fromFlush += 1
+        #endif
         reconcileClusters()
     }
 
@@ -1357,6 +1483,9 @@ final class MapsViewController: UIViewController {
         #if DEBUG
         MapChurnCounters.reconciles += 1
         let reconcileStart = DispatchTime.now().uptimeNanoseconds
+        let pinFingerprint = pins.count &* 31 &+ (pins.keys.first?.rawValue.hashValue ?? 0)
+        if pinFingerprint == lastReconciledPinFingerprint { MapChurnCounters.withUnchangedPins += 1 }
+        lastReconciledPinFingerprint = pinFingerprint
         defer {
             MapChurnCounters.recordReconcile(
                 micros: Int((DispatchTime.now().uptimeNanoseconds - reconcileStart) / 1_000)
@@ -1804,7 +1933,7 @@ extension MapsViewController: MKMapViewDelegate {
         // the settled projection), fold in anything a mid-flight diff staged,
         // then request the next page.
         isRegionTransitioning = false
-        reconcileClusters()
+        reconcileClustersForSettle()
         flushPendingDiffs()
         scheduleQuery()
     }
@@ -2592,6 +2721,50 @@ extension MapsViewController {
     /// Scripted rather than driven by injected gestures: CGEvent swipes land on
     /// whichever window is frontmost and vanish silently when one overlaps, so
     /// a flaky driver would show up as a performance result.
+    /// `-maps-nav-drag`: step the camera in many small NON-animated increments,
+    /// the way a finger does.
+    ///
+    /// `-maps-nav-sweep` uses `setRegion(animated: true)`, which fires
+    /// `regionDidChangeAnimated` exactly ONCE per gesture — so it measured a
+    /// world in which reconcile bursts cannot happen, and reported no duplicate
+    /// reconciles because the workload could not produce one. A real pan fires
+    /// the delegate on every step. Whether coalescing is worth anything is a
+    /// question only this driver can answer.
+    fileprivate func installNavigationDrag() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-nav-drag") else { return }
+        let home = Self.defaultRegion
+        var step = 0
+        // 60 Hz stepping: one region change per display frame, which is the
+        // upper bound of what a finger can generate.
+        Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            // A slow lissajous over the seeded region: never repeats a frame,
+            // never leaves the corpus, and keeps the span fixed so this measures
+            // PAN only — zoom changes the marker population and would confound
+            // the reconcile count with realisation work.
+            // ⚠️ BURSTS, NOT A PERPETUAL PAN. A finger moves and then stops;
+            // this driver did not, and `scheduleQuery`'s cancel-and-reschedule
+            // debounce (by design: do not query while the camera is moving)
+            // therefore never fired, so the map held ZERO markers and every
+            // performance column looked excellent. Worse, the effect appeared
+            // only once the reconcile throttle had made the settles cheap
+            // enough to sustain 60 Hz from launch — the optimisation was fast
+            // enough to starve the app's own query. 1.0s of motion, 0.5s still.
+            let cycle = Double(step) / 60.0
+            if cycle.truncatingRemainder(dividingBy: 1.5) >= 1.0 { step += 1; return }
+            let t = Double(step) / 60.0
+            step += 1
+            let region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(
+                    latitude: home.center.latitude + 0.22 * home.span.latitudeDelta * sin(t * 0.9),
+                    longitude: home.center.longitude + 0.22 * home.span.longitudeDelta * sin(t * 1.4)
+                ),
+                span: home.span
+            )
+            self.mapView.setRegion(region, animated: false)
+        }
+    }
+
     fileprivate func installNavigationSweep() {
         guard ProcessInfo.processInfo.arguments.contains("-maps-nav-sweep") else { return }
         let home = Self.defaultRegion

@@ -296,6 +296,11 @@ final class MapIconDebugHUD: UIView {
     /// does nothing, which is how `sheets=N` lied about assignment-vs-motion.
     private func churnLine() -> String {
         // ⚠️ Read the timing BEFORE draining — `drain()` zeroes it.
+        let settle = MapChurnCounters.fromSettle
+        let diff = MapChurnCounters.fromDiff
+        let flush = MapChurnCounters.fromFlush
+        let samePins = MapChurnCounters.withUnchangedPins
+        let throttled = MapChurnCounters.settleThrottled
         let totalMs = Double(MapChurnCounters.reconcileMicros) / 1000
         let worstMs = Double(MapChurnCounters.reconcileWorstMicros) / 1000
         let c = MapChurnCounters.drain()
@@ -306,6 +311,7 @@ final class MapIconDebugHUD: UIView {
             "churn_viewfor=\(c.viewFor)",
             "churn_bound=\(c.bound)",
             "churn_skipped=\(c.skipped)",
+            "r_settle=\(settle)", "r_diff=\(diff)", "r_flush=\(flush)", "r_samepins=\(samePins)", "r_throttled=\(throttled)",
             String(format: "reconcile_ms=%.2f", totalMs),
             String(format: "reconcile_worst_ms=%.2f", worstMs)
         ].joined(separator: " ")
