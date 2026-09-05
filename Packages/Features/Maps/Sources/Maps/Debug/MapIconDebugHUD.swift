@@ -56,6 +56,17 @@ final class MapIconDebugHUD: UIView {
 
     /// What the render server is PRESENTING for one icon, which is a different
     /// question from what was asked for — and the only one worth trusting.
+    /// One machine-readable line per second, under `-map-icon-hud-log`.
+    ///
+    /// ⚠️ It exists because SCREENSHOTS ARE THE MEASUREMENT'S ENEMY here.
+    /// `simctl io screenshot` stalls the display link for tens of milliseconds,
+    /// so reading the HUD by capturing it manufactures exactly the hitches the
+    /// test is looking for — and during a pan, which is the case under
+    /// suspicion, it would be impossible to tell the two apart.
+    private let logsToConsole =
+        ProcessInfo.processInfo.arguments.contains("-map-icon-hud-log")
+    private var lastLogged: CFTimeInterval = 0
+
     private var probedTick: Double?
     private var tickTimestamps: [CFTimeInterval] = []
     private var presentedFPS: Double {
@@ -153,6 +164,10 @@ final class MapIconDebugHUD: UIView {
             if cpuSamples.count > 120 { cpuSamples.removeFirst() }
             refresh()
         }
+        if logsToConsole, now - lastLogged >= 1 {
+            lastLogged = now
+            emit()
+        }
     }
 
     /// Watches ONE icon marker. Every icon hangs off a single shared epoch, so
@@ -160,9 +175,16 @@ final class MapIconDebugHUD: UIView {
     /// is why the readout says so.
     private func probePresentedRate(at now: CFTimeInterval) {
         guard let mapView else { return }
+        // Pins AND clusters. At any zoom where the field is dense the engine
+        // folds everything into clusters, so a probe that only looked at pins
+        // reported 0 fps for a screen full of animating markers — which reads
+        // exactly like the animation being broken.
         let tick = mapView.annotations.lazy
-            .compactMap { mapView.view(for: $0) as? MapAnnotationView }
-            .compactMap(\.presentedIconTick)
+            .compactMap { annotation -> Double? in
+                let view = mapView.view(for: annotation)
+                return (view as? MapAnnotationView)?.presentedIconTick
+                    ?? (view as? MapClusterAnnotationView)?.presentedIconTick
+            }
             .first
         guard let tick else { return }
         if probedTick != tick {
@@ -182,6 +204,48 @@ final class MapIconDebugHUD: UIView {
     }
     private var meanCPU: Double {
         cpuSamples.isEmpty ? 0 : cpuSamples.reduce(0, +) / Double(cpuSamples.count)
+    }
+
+    /// Stats over the LAST TWO SECONDS, not the whole retained window.
+    ///
+    /// The on-screen readout averages 600 samples so it reads steadily; a
+    /// navigation test needs the opposite — a pan lasts a few seconds and a
+    /// ten-second average dilutes it into the idle either side of it, which is
+    /// how a real regression reads as "fine on average".
+    private func recent() -> (mean: Double, p95: Double, hitches: Int) {
+        let window = Array(frameSamples.suffix(120))
+        guard !window.isEmpty else { return (0, 0, 0) }
+        let sorted = window.sorted()
+        return (
+            window.reduce(0, +) / Double(window.count),
+            sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))],
+            window.count { $0 > hitchThresholdMs }
+        )
+    }
+
+    private func emit() {
+        guard let mapView else { return }
+        let views = mapView.annotations.compactMap { mapView.view(for: $0) }
+        let pins = views.compactMap { $0 as? MapAnnotationView }
+        let clusters = views.compactMap { $0 as? MapClusterAnnotationView }
+        let recent = recent()
+        let line = [
+            "MAPICONHUD",
+            "pins=\(pins.count)",
+            "clusters=\(clusters.count)",
+            "icons=\(pins.count { $0.wearsAnimatedIcon } + clusters.count { $0.wearsAnimatedIcon })",
+            "resident=\(catalog?.residentCount ?? 0)",
+            "policy=\(AnimatedIconView.policy.rawValue)",
+            String(format: "presented=%.1f", presentedFPS),
+            String(format: "frame_mean=%.2f", recent.mean),
+            String(format: "frame_p95=%.2f", recent.p95),
+            "hitches_2s=\(recent.hitches)",
+            String(format: "cpu=%.1f", meanCPU),
+            String(format: "textures_mb=%.2f", Double(catalog?.residentBytes ?? 0) / 1024 / 1024),
+            String(format: "footprint_mb=%.0f", Double(MemoryFootprint.current()) / 1024 / 1024),
+            String(format: "span=%.4f", mapView.region.span.latitudeDelta)
+        ].joined(separator: " ")
+        print(line)
     }
 
     private func refresh() {

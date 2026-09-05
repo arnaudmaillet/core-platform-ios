@@ -102,8 +102,23 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                     // "what is this" painted over it is not a feature.
                     guard pin.isText else { return pin }
                     var decorated = pin
-                    if let avatar = avatars[pin.postID] { decorated = decorated.wearing(avatar) }
-                    if let icon = icons[pin.postID] { decorated = decorated.showing(icon) }
+                    let avatarBase = pin.postID.rawValue.split(separator: "#").first.map(String.init)
+                    if let avatar = avatars[pin.postID]
+                        ?? avatarBase.flatMap({ avatars[PostID($0)] }) {
+                        decorated = decorated.wearing(avatar)
+                    }
+                    // The `#n` suffix is `-maps-mock-density`'s replication
+                    // marker. Falling back to the base id is what lets a dense
+                    // field wear icons at all — the seed is keyed by the ids the
+                    // DATASET knows, and a clone is not one of them. Each copy
+                    // still gets its own phase, because that comes from the full
+                    // id, so a replicated field animates out of step rather than
+                    // as one block.
+                    let base = pin.postID.rawValue.split(separator: "#").first.map(String.init)
+                    if let icon = icons[pin.postID]
+                        ?? base.flatMap({ icons[PostID($0)] }) {
+                        decorated = decorated.showing(icon)
+                    }
                     return decorated
                 }
             }

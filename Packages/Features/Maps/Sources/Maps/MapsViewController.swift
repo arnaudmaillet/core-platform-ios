@@ -2490,6 +2490,17 @@ extension MapsViewController {
     /// loading and the app's own working set cost around the feature. Only the
     /// shipping screen can.
     fileprivate func installIconDebugHUD() {
+        // `-map-icon-policy full|reduced|still` pins the motion state from
+        // launch. Read even without the HUD: an A/B that depends on tapping a
+        // control is an A/B whose two arms were run by hand, and the arm you
+        // tapped second is the one whose viewport had already drifted.
+        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-map-icon-policy"),
+           index + 1 < ProcessInfo.processInfo.arguments.count,
+           let policy = AnimatedIconView.MotionPolicy(
+               rawValue: ProcessInfo.processInfo.arguments[index + 1]
+           ) {
+            AnimatedIconView.forcedPolicy = policy
+        }
         guard ProcessInfo.processInfo.arguments.contains("-map-icon-hud") else { return }
         let hud = MapIconDebugHUD(mapView: mapView, catalog: iconCatalog)
         hud.translatesAutoresizingMaskIntoConstraints = false

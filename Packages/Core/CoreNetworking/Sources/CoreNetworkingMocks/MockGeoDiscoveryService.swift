@@ -161,6 +161,29 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// fixture a pin carries matches how the client will classify it.
     static let forcesMapVideo = ProcessInfo.processInfo.arguments.contains("-maps-force-video")
 
+    /// `-maps-mock-density <n>`: emit `n` copies of every matching post,
+    /// scattered across the queried viewport.
+    ///
+    /// The corpus is ~100 posts spread over Paris, so a viewport holds five to
+    /// thirteen markers — enough to prove a feature works and nowhere near
+    /// enough to prove it scales. The map's real worst case is a SATURATED
+    /// marker lattice: `MapClusterEngine` keeps markers 64pt apart, so a
+    /// 440x956pt screen tops out at 8 x 16 = 128, and in any populated city
+    /// that is the ordinary count rather than a rare peak.
+    ///
+    /// Replication rather than more fixtures: the point is marker COUNT under
+    /// pan and zoom, and inventing a hundred more posts would drag every other
+    /// mock surface — like counts, venues, arrivals — along with it. Position
+    /// is derived from the post id and the copy index, so a run is
+    /// reproducible.
+    static let density: Int = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-maps-mock-density"),
+              index + 1 < arguments.count, let value = Int(arguments[index + 1])
+        else { return 1 }
+        return max(1, min(value, 40))
+    }()
+
     public func register(on bff: MockBFF) {
         bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { [self] (request: GeoDiscovery_V1_QueryTileRequest, headers: Headers) in
             queryTile(request, filter: headers[Self.filterHeader]?.first)
@@ -204,10 +227,55 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             return pin
         }
 
-        response.pins = Array(pins.prefix(Self.topK))
+        response.pins = Array(Self.replicated(pins, across: viewport).prefix(Self.topK))
         // Stand-in tile count: scales with how wide the viewport is.
         response.tileCount = Int32(max(1, pins.count / 12 + 1))
         return .success(response)
+    }
+
+    /// Spreads `density` copies of each pin over the viewport.
+    ///
+    /// ⚠️ Each copy needs its OWN post id, or the client's diffing engine —
+    /// which keys annotations by `postID` — collapses them all back into one
+    /// marker and the density knob silently does nothing. The suffix keeps the
+    /// original id as a prefix so `-maps-open-first-text-pin` and the icon seed
+    /// still recognise it, and the ORIGINAL keeps its exact id so nothing that
+    /// looks a post up by name breaks.
+    private static func replicated(
+        _ pins: [GeoDiscovery_V1_RadarPin], across viewport: GeoDiscovery_V1_Viewport
+    ) -> [GeoDiscovery_V1_RadarPin] {
+        guard density > 1, !pins.isEmpty else { return pins }
+        let latSpan = abs(viewport.neLat - viewport.swLat)
+        let lngSpan = abs(viewport.neLng - viewport.swLng)
+        // ⚠️ SPACED AT THE CLUSTER PITCH, not packed as tightly as possible.
+        //
+        // Two wrong versions preceded this one, and both produced FEWER markers
+        // by trying for more. `MapClusterEngine` merges anything closer than
+        // 64pt, so clones dropped on a fine grid collapse right back into a
+        // handful of clusters: a 15x15 lattice over a 440x956pt screen puts
+        // markers 29pt apart and 200 pins came back as 13 markers.
+        //
+        // The saturated field IS the lattice — 440/64 ≈ 7 columns by 956/64 ≈ 15
+        // rows, which is the 128-marker worst case this feature was designed
+        // against. So the grid is derived from that pitch, in span fractions,
+        // and `density` chooses how much of it to fill.
+        let columns = 7, rows = 15
+        let slots = columns * rows
+        let wanted = min(slots, max(1, density) * pins.count)
+
+        return pins.enumerated().flatMap { pinIndex, pin -> [GeoDiscovery_V1_RadarPin] in
+            let copies = wanted / pins.count + (pinIndex < wanted % pins.count ? 1 : 0)
+            return (0..<max(1, copies)).map { copy in
+                guard copy > 0 else { return pin }
+                var clone = pin
+                clone.postID = "\(pin.postID)#\(copy)"
+                let slot = (pinIndex * (wanted / pins.count + 1) + copy) % slots
+                let row = slot / columns, column = slot % columns
+                clone.lat = viewport.swLat + latSpan * (Double(row) + 0.5) / Double(rows)
+                clone.lng = viewport.swLng + lngSpan * (Double(column) + 0.5) / Double(columns)
+                return clone
+            }
+        }
     }
 
     /// One `MapFilter` bucket, resolved against the shared dataset:

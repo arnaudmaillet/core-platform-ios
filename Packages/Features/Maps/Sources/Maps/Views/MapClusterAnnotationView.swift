@@ -164,6 +164,7 @@ final class MapClusterAnnotationView: MKAnnotationView {
 
     #if DEBUG
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+    var presentedIconTick: Double? { card.presentedIconTick }
     #endif
 
     /// See `MapAnnotationView.redressIcon`.
