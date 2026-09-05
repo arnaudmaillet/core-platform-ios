@@ -1,0 +1,50 @@
+[
+  {
+    "asset" : "big_buck_bunny.heic",
+    "bytes" : 381312,
+    "cellPX" : 172,
+    "columns" : 4,
+    "frameCount" : 24,
+    "frameMS" : 83,
+    "id" : "big_buck_bunny",
+    "kind" : "sheet",
+    "note" : "video: 10.0s source, sampled 24 frames from 1.0s over 2.0s",
+    "stepMS" : 83.33333333333333
+  },
+  {
+    "asset" : "jellyfish.heic",
+    "bytes" : 264174,
+    "cellPX" : 172,
+    "columns" : 4,
+    "frameCount" : 24,
+    "frameMS" : 83,
+    "id" : "jellyfish",
+    "kind" : "sheet",
+    "note" : "video: 10.0s source, sampled 24 frames from 1.0s over 2.0s",
+    "stepMS" : 83.33333333333333
+  },
+  {
+    "asset" : "sintel.heic",
+    "bytes" : 112304,
+    "cellPX" : 172,
+    "columns" : 4,
+    "frameCount" : 24,
+    "frameMS" : 83,
+    "id" : "sintel",
+    "kind" : "sheet",
+    "note" : "video: 10.0s source, sampled 24 frames from 1.0s over 2.0s",
+    "stepMS" : 83.33333333333333
+  },
+  {
+    "asset" : "trailer.heic",
+    "bytes" : 73872,
+    "cellPX" : 172,
+    "columns" : 4,
+    "frameCount" : 24,
+    "frameMS" : 83,
+    "id" : "trailer",
+    "kind" : "sheet",
+    "note" : "video: 52.2s source, sampled 24 frames from 1.0s over 2.0s",
+    "stepMS" : 83.33333333333333
+  }
+]

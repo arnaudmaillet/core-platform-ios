@@ -311,8 +311,38 @@ final class AppContainer {
         // the marker keeps the author's face.
         mockAnimatedIcons: environment == .mock
             ? Self.mockAnimatedIcons(in: mockBackend, catalogue: Self.mapIconCatalog) : [:],
-        iconCatalog: Self.mapIconCatalog
+        // Baked previews of a media post's own footage — the decode-free
+        // alternative to a player. Behind a launch argument because it is an
+        // experiment with a real memory cost (2.71 MB resident per clip), not a
+        // default: `-maps-preview-sheets`.
+        mockPreviewSheets: environment == .mock && Self.seedsPreviewSheets
+            ? Self.mockPreviewSheets(in: mockBackend, catalogue: Self.mapPreviewCatalog) : [:],
+        iconCatalog: Self.mapIconCatalog,
+        previewCatalog: Self.seedsPreviewSheets ? Self.mapPreviewCatalog : nil
     )
+
+    static let seedsPreviewSheets =
+        ProcessInfo.processInfo.arguments.contains("-maps-preview-sheets")
+
+    /// Baked from real clips by `Tools/IconBaker` — 24 frames at a 172px cell,
+    /// which is the 56pt media face at @3x plus the contract's 2px gutter.
+    private static let mapPreviewCatalog = AnimatedIconCatalog(
+        manifest: "mappreviews",
+        // ⚠️ 64 MB, not the icons' 24. A preview is 2.71 MB resident against an
+        // icon's 0.07 — a shared budget would let the dear one evict the cheap
+        // one on every pan. Nineteen previews is 51.5 MB, so this is sized to
+        // hold the measured field rather than to a round number.
+        memoryBudgetMB: 64
+    )
+
+    private static func mockPreviewSheets(
+        in backend: MockBackend, catalogue: AnimatedIconCatalog
+    ) -> [PostID: String] {
+        backend.dataset.previewSheetIDsByPostID(catalogue: catalogue.ids)
+            .reduce(into: [:]) { result, entry in
+                result[PostID(entry.key)] = entry.value
+            }
+    }
 
     /// The baked animated-icon catalogue that ships in the app bundle.
     ///

@@ -75,6 +75,15 @@ final class PinCardView: UIView {
     /// The animated-icon face, above the text face and below the ring. Hidden
     /// for every other face, so a recycled card must be told on every configure.
     private let iconFaceView = AnimatedIconView()
+    /// The baked media preview, over the cover and under the live video surface.
+    ///
+    /// UNDER the video on purpose: if a real decoder ever attaches to this
+    /// marker it is the better picture and must win, and the sheet is then the
+    /// poster it replaces. The two are alternatives, not a stack — but the
+    /// order decides which one a viewer sees if both are ever set, and leaving
+    /// that to chance is how a marker ends up showing a frozen grid over live
+    /// footage.
+    private let previewSheetView = AnimatedIconView()
     /// Live-preview surface above the image, hidden until playback attaches.
     let videoRenderView = VideoRenderView()
     /// The pin's border, drawn above the media so it survives live previews.
@@ -108,6 +117,11 @@ final class PinCardView: UIView {
         departureCoverView.frame = bounds
         departureCoverView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(departureCoverView)
+
+        previewSheetView.frame = bounds
+        previewSheetView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        previewSheetView.isHidden = true
+        addSubview(previewSheetView)
 
         videoRenderView.frame = bounds
         videoRenderView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -278,6 +292,10 @@ final class PinCardView: UIView {
         // Hidden, not faded. The ring is a 2pt border on the card's rectangle;
         // at radius 0 behind transparent artwork it draws a visible box.
         ringView.isHidden = face == .icon
+        // A preview belongs to a MEDIA face and nothing else — a recycled card
+        // that last wore one must take it off, or a text marker inherits
+        // somebody's footage.
+        if face != .media { setPreviewSheet(nil) }
         setCornerRadius(face.cornerRadius)
         applyBlend()
     }
@@ -304,8 +322,26 @@ final class PinCardView: UIView {
         iconFaceView.reinstall()
     }
 
+    /// The baked preview this card is playing, with its phase. `nil` clears it.
+    ///
+    /// Phase comes from the pin's identity, so two markers showing the same clip
+    /// are on different frames — a field of identical previews all in lockstep
+    /// reads as one video tiled, not as many posts.
+    func setPreviewSheet(_ preview: (art: AnimatedIconArt, phase: Int)?) {
+        wornPreview = preview
+        previewSheetView.setArt(preview?.art, phase: preview?.phase ?? 0)
+        previewSheetView.isHidden = preview == nil
+    }
+
+    private(set) var wornPreview: (art: AnimatedIconArt, phase: Int)?
+
+    func reinstallPreviewPlayback() {
+        previewSheetView.reinstall()
+    }
+
     #if DEBUG
-    var presentedIconTick: Double? { iconFaceView.presentedTick }
+    var presentedIconTick: Double? { iconFaceView.presentedTick ?? previewSheetView.presentedTick }
+    var isPlayingPreviewSheet: Bool { wornPreview != nil }
     #endif
 
     // MARK: - Departure blend

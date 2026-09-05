@@ -87,12 +87,17 @@ final class MapIconDebugHUD: UIView {
     /// video pin the same url — so three "concurrent videos" were one decoder
     /// fanned out three ways. A readout that counts surfaces would have agreed
     /// with the mistake.
+    private weak var previews: AnimatedIconCatalog?
     private weak var pool: VideoPlaybackController?
     var onPolicyChange: (() -> Void)?
 
-    init(mapView: MKMapView, catalog: AnimatedIconCatalog?, pool: VideoPlaybackController? = nil) {
+    init(
+        mapView: MKMapView, catalog: AnimatedIconCatalog?,
+        previews: AnimatedIconCatalog? = nil, pool: VideoPlaybackController? = nil
+    ) {
         self.mapView = mapView
         self.catalog = catalog
+        self.previews = previews
         self.pool = pool
         super.init(frame: .zero)
         isUserInteractionEnabled = true
@@ -258,7 +263,10 @@ final class MapIconDebugHUD: UIView {
             String(format: "span=%.4f", mapView.region.span.latitudeDelta),
             "players=\(pool?.activePlayerCount ?? 0)",
             "advancing=\(advancingSurfaces)",
-            "distinct_urls=\(pool?.playerCountByURL.count ?? 0)"
+            "distinct_urls=\(pool?.playerCountByURL.count ?? 0)",
+            "sheets=\(playingSheets)",
+            "sheets_resident=\(previews?.residentCount ?? 0)",
+            String(format: "sheets_mb=%.2f", Double(previews?.residentBytes ?? 0) / 1024 / 1024)
         ].joined(separator: " ")
         print(line)
     }
@@ -275,6 +283,16 @@ final class MapIconDebugHUD: UIView {
             return (view as? MapAnnotationView)?.videoRenderView
                 ?? (view as? MapClusterAnnotationView)?.videoRenderView
         }.count { pool.isAdvancing(in: $0) }
+    }
+
+    /// Markers playing a baked preview — pins and clusters alike.
+    private var playingSheets: Int {
+        guard let mapView else { return 0 }
+        return mapView.annotations.count { annotation in
+            let view = mapView.view(for: annotation)
+            return (view as? MapAnnotationView)?.isPlayingPreviewSheet == true
+                || (view as? MapClusterAnnotationView)?.isPlayingPreviewSheet == true
+        }
     }
 
     private func refresh() {
@@ -299,8 +317,9 @@ final class MapIconDebugHUD: UIView {
         presented \(String(format: "%.1f", presentedFPS))fps
         main-thread frame  mean \(String(format: "%.2f", meanFrame))ms  \
         p95 \(String(format: "%.2f", p95Frame))ms   hitches \(hitchCount)
-        video \(pool?.activePlayerCount ?? 0) players / \(advancingSurfaces) advancing / \
-        \(pool?.playerCountByURL.count ?? 0) urls
+        video \(pool?.activePlayerCount ?? 0) players / \(advancingSurfaces) advancing   \
+        sheets \(playingSheets) playing / \(previews?.residentCount ?? 0) resident \
+        \(String(format: "%.1f", Double(previews?.residentBytes ?? 0) / 1024 / 1024)) MB
         app CPU \(String(format: "%.0f", meanCPU))%   \
         textures \(String(format: "%.2f", textures)) MB   \
         peak footprint \(String(format: "%.0f", footprint)) MB

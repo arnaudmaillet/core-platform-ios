@@ -41,6 +41,12 @@ final class MapsViewController: UIViewController {
     /// through `decodeDownsampled` at all — that call never returns on HEIC
     /// under concurrent load in the iOS 26 simulator.
     private let iconCatalog: AnimatedIconCatalog?
+    /// Baked previews of a MEDIA post's own footage — the decode-session-free
+    /// alternative to attaching a player. Separate catalogue from the icons'
+    /// because the two have different cell sizes and very different byte costs
+    /// (2.71 MB resident per preview against 0.07 MB per icon), so one budget
+    /// could not serve both without the cheap one being evicted by the dear one.
+    private let previewCatalog: AnimatedIconCatalog?
     /// Re-dresses every marker when the device changes its motion policy.
     ///
     /// ⚠️ Read at INSTALL time, so this is not optional: without it a field
@@ -233,6 +239,7 @@ final class MapsViewController: UIViewController {
         pinService: MapProfilePinService,
         imagePipeline: ImagePipeline,
         iconCatalog: AnimatedIconCatalog? = nil,
+        previewCatalog: AnimatedIconCatalog? = nil,
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
@@ -255,6 +262,7 @@ final class MapsViewController: UIViewController {
         self.pinService = pinService
         self.imagePipeline = imagePipeline
         self.iconCatalog = iconCatalog
+        self.previewCatalog = previewCatalog
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
         #if DEBUG
         self.videoPool = videoPlayback
@@ -1623,11 +1631,11 @@ final class MapsViewController: UIViewController {
         if let cluster = annotation as? MapComputedCluster {
             cluster.apply(item)
             (mapView.view(for: cluster) as? MapClusterAnnotationView)?
-                .configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog)
+                .configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
         } else if let single = annotation as? MapAnnotation {
             single.update(pin: item.representative)
             (mapView.view(for: single) as? MapAnnotationView)?
-                .configure(with: item.representative, imagePipeline: imagePipeline, iconCatalog: iconCatalog)
+                .configure(with: item.representative, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
         }
     }
 
@@ -1902,7 +1910,7 @@ extension MapsViewController: MKMapViewDelegate {
                 withIdentifier: MapClusterAnnotationView.reuseIdentifier,
                 for: annotation
             ) as? MapClusterAnnotationView
-            view?.configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog)
+            view?.configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
             // Instant tap — bypasses MapKit's ~0.3s selection delay.
             view?.onSelect = { [weak self, weak view] in
                 self?.openAnnotation(cluster, thumbnail: view?.heroImage)
@@ -1914,7 +1922,7 @@ extension MapsViewController: MKMapViewDelegate {
             withIdentifier: MapAnnotationView.reuseIdentifier,
             for: annotation
         ) as? MapAnnotationView
-        view?.configure(with: pinAnnotation.pin, imagePipeline: imagePipeline, iconCatalog: iconCatalog)
+        view?.configure(with: pinAnnotation.pin, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
         view?.onSelect = { [weak self, weak view] in
             self?.openAnnotation(pinAnnotation, thumbnail: view?.heroImage)
         }
@@ -2537,7 +2545,9 @@ extension MapsViewController {
             AnimatedIconView.forcedPolicy = policy
         }
         guard ProcessInfo.processInfo.arguments.contains("-map-icon-hud") else { return }
-        let hud = MapIconDebugHUD(mapView: mapView, catalog: iconCatalog, pool: videoPool)
+        let hud = MapIconDebugHUD(
+            mapView: mapView, catalog: iconCatalog, previews: previewCatalog, pool: videoPool
+        )
         hud.translatesAutoresizingMaskIntoConstraints = false
         hud.onPolicyChange = { [weak self] in
             guard let self else { return }

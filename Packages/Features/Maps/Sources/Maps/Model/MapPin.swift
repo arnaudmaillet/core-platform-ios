@@ -96,6 +96,21 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     /// in the view layer's vocabulary.
     public let animatedIconID: String?
 
+    /// A baked PREVIEW SHEET for this post's media — a grid of frames the
+    /// marker scrubs with a keyframe animation.
+    ///
+    /// The opposite population to `animatedIconID`: only a MEDIA post has one,
+    /// because it is that post's own footage. And the opposite cost shape to a
+    /// video preview — a sheet needs **no decode session at all**, so the number
+    /// of markers moving at once stops being bounded by the device's media
+    /// hardware and becomes bounded by memory instead. Measured: 2.71 MB
+    /// resident per clip at a 172px cell, 51.5 MB at 19 markers.
+    ///
+    /// ⚠️ `nil` in production — the wire carries no such rendition yet
+    /// (`dev/issues/MARKER_MEDIA_PREVIEW_OPTIONS.md`). Populated in DEBUG mock
+    /// mode through the same decorator seam as the icon and the avatar.
+    public let previewSheetID: String?
+
     /// The most specific place — what a proximity cluster's members must
     /// share to make it SEMANTIC (Case B); everything else is generic.
     public var place: MapPlace? { places.first }
@@ -113,7 +128,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         likeCount: Int64 = 0,
         places: [MapPlace] = [],
         authorAvatarURL: URL? = nil,
-        animatedIconID: String? = nil
+        animatedIconID: String? = nil,
+        previewSheetID: String? = nil
     ) {
         self.postID = postID
         self.latitude = latitude
@@ -125,6 +141,7 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         self.places = places
         self.authorAvatarURL = authorAvatarURL
         self.animatedIconID = animatedIconID
+        self.previewSheetID = previewSheetID
     }
 
     /// The same pin, tagged with its place ladder — the decoration seam
@@ -141,7 +158,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             likeCount: likeCount,
             places: places,
             authorAvatarURL: authorAvatarURL,
-            animatedIconID: animatedIconID
+            animatedIconID: animatedIconID,
+            previewSheetID: previewSheetID
         )
     }
 
@@ -159,7 +177,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             likeCount: likeCount,
             places: places,
             authorAvatarURL: authorAvatarURL,
-            animatedIconID: animatedIconID
+            animatedIconID: animatedIconID,
+            previewSheetID: previewSheetID
         )
     }
 
@@ -176,9 +195,27 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             likeCount: likeCount,
             places: places,
             authorAvatarURL: authorAvatarURL,
-            animatedIconID: animatedIconID
+            animatedIconID: animatedIconID,
+            previewSheetID: previewSheetID
         )
     }
+
+    /// The same pin carrying a baked preview of its media.
+    public func previewing(_ previewSheetID: String?) -> MapPin {
+        MapPin(
+            postID: postID, latitude: latitude, longitude: longitude,
+            thumbnailURL: thumbnailURL, kind: kind, previewVideoURL: previewVideoURL,
+            likeCount: likeCount, places: places, authorAvatarURL: authorAvatarURL,
+            animatedIconID: animatedIconID, previewSheetID: previewSheetID
+        )
+    }
+
+    /// Whether this marker plays a baked preview of its own media.
+    ///
+    /// Guarded on NOT being text, the mirror of `hasAnimatedIcon`: a text post
+    /// has no footage to preview, and the two decorations must never both land
+    /// on one marker.
+    public var hasPreviewSheet: Bool { !isText && previewSheetID != nil }
 
     /// Whether this marker wears baked artwork instead of a face.
     ///
@@ -216,7 +253,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             likeCount: likeCount,
             places: places,
             authorAvatarURL: authorAvatarURL,
-            animatedIconID: animatedIconID
+            animatedIconID: animatedIconID,
+            previewSheetID: previewSheetID
         )
     }
 }

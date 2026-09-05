@@ -167,6 +167,42 @@ marker, or resident texture for every marker.** Video is cheap in memory and
 bounded in count; the sheet is unbounded in count and expensive in memory. The
 GIF is the worst of both — palette-limited, CPU-decoded, and 12x the bytes.
 
+## 0e. The sheet path, built and measured head to head
+
+`-maps-preview-sheets`. `Tools/IconBaker` gained a video source
+(`AVAssetImageGenerator`, zero tolerance both sides — the default returns the
+nearest KEYFRAME, which collapses a 24-frame sample into three images repeated
+eight times and looks like a stutter, with nothing erroring). Four real clips
+baked to 24-frame grids at a 172px cell = the 56pt media face at @3x plus the
+contract's 2px gutter.
+
+**Head to head, same field, same 8 moving markers:**
+
+| | preview sheets | live video |
+|---|---|---|
+| markers on screen | 19 | 19 |
+| moving | 8 | 8 |
+| decode sessions | **0** | 8 |
+| **app CPU** | **8.4%** | **44.3%** |
+| frame_mean | 16.67 ms | 16.67 ms |
+| hitches | 0 | 0 |
+| process footprint | 131 MB | 130 MB |
+
+**5.3x less CPU for the same eight moving markers, and no decode session at
+all** — so the count stops being bounded by media hardware.
+
+⚠️ **Read the memory line carefully.** 8.13 MB resident is for **3 distinct
+clips**, not 8 markers: a sheet's cost scales with the number of distinct CLIPS,
+because every marker showing the same clip points at one texture. Nineteen
+markers showing nineteen DIFFERENT clips is 2.71 MB x 19 = **51.5 MB**, which is
+why the preview catalogue is given a 64 MB budget of its own rather than sharing
+the icons' 24 MB — a preview is 2.71 MB against an icon's 0.07, and one budget
+would let the dear one evict the cheap one on every pan.
+
+Wire cost of the four baked clips: 72-372 KB each, against ~27 KB for the same
+2 s as H.264. So the sheet trades **~10x the bytes and memory-per-distinct-clip**
+for **zero decode sessions and 1/5 the CPU**.
+
 ## 1. Options, ruled out by mechanism
 
 | # | option | why it lives or dies |

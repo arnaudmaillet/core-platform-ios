@@ -541,6 +541,26 @@ public struct MockSocialDataset: Sendable {
         }
     }
 
+    /// Baked preview sheets, keyed by post id — **MEDIA posts only**, the exact
+    /// complement of `animatedIconIDsByPostID`.
+    ///
+    /// A text post has no footage to preview and a media post has no icon, so
+    /// the two decorations can never land on one marker. That disjointness is
+    /// the product rule, not an implementation detail: a marker answers "what is
+    /// this post" once.
+    ///
+    /// Every media post gets one. Unlike the icons, there is no deliberate
+    /// minority left undressed — the interesting question here is what a field
+    /// where EVERYTHING moves costs, and the still cover is already the fallback
+    /// while a sheet loads.
+    public func previewSheetIDsByPostID(catalogue: [String]) -> [String: String] {
+        guard !catalogue.isEmpty else { return [:] }
+        return posts.reduce(into: [:]) { result, post in
+            guard post.media != nil, let index = Self.numericSuffix(of: post.postID) else { return }
+            result[post.postID] = catalogue[index % catalogue.count]
+        }
+    }
+
     /// The trailing digits of `post-0007`. Nil when there are none, which keeps
     /// a hand-written id out of the seed rather than mapping it to zero.
     static func numericSuffix(of id: String) -> Int? {

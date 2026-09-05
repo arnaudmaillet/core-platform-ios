@@ -130,8 +130,15 @@ struct IconBaker {
     /// sheets rather than passing through. See `RasterDocument` for why the
     /// pass-through is not an option on the marker field.
     static let rasterExtensions: Set<String> = ["gif", "apng", "webp", "heics", "png"]
+    /// Video containers. These bake to a SHEET — never passed through, because a
+    /// marker that plays an MP4 needs a decode session and the whole reason to
+    /// bake one is to need none.
+    static let videoExtensions: Set<String> = ["mp4", "mov", "m4v"]
 
-    static func bake(_ url: URL, options: Options) throws -> Entry {
+    static func bake(_ url: URL, options: Options) async throws -> Entry {
+        if videoExtensions.contains(url.pathExtension.lowercased()) {
+            return try await bakeVideo(url, options: options)
+        }
         if rasterExtensions.contains(url.pathExtension.lowercased()) {
             return try bakeRaster(url, options: options)
         }
@@ -234,6 +241,65 @@ struct IconBaker {
         return try bakeSheet(
             document, options: options,
             frameCount: &frameCount, frameMS: &frameMS, note: why
+        )
+    }
+
+    /// A video clip into a preview sheet.
+    ///
+    /// The frame count is the memory lever and the only one: at a 170px cell
+    /// (56pt media face at @3x plus the gutter) each frame is 112.9 KiB
+    /// resident, so 24 frames is 2.65 MB per clip and 19 markers is 50.4 MB.
+    /// Nothing about the source changes that — a longer clip is sampled, not
+    /// packed.
+    static func bakeVideo(_ url: URL, options: Options) async throws -> Entry {
+        let document = try await VideoDocument.load(url)
+        let stepMS = options.trackFPS.map { 1000 / $0 } ?? 83.0
+        let frameCount = options.maxFrames
+        let window = Double(frameCount) * stepMS / 1000
+        // Start a little in: the first second of a clip is often a fade or a
+        // title card, and a marker preview that opens on black reads as broken.
+        let start = min(1.0, max(0, document.duration - window))
+
+        let frames = try await document.frames(
+            count: frameCount, start: start, window: window, side: options.cellPixels
+        )
+        guard !frames.isEmpty else { throw BakeError("\(document.name): no frames") }
+
+        let columns = 4
+        let rows = Int(ceil(Double(frameCount) / Double(columns)))
+        let cell = options.cellPixels
+        guard let canvas = AtlasWriter.canvas(width: cell * columns, height: cell * rows) else {
+            throw BakeError("\(document.name): cannot allocate sheet")
+        }
+        for (index, frame) in frames.enumerated() {
+            AtlasWriter.drawCell(
+                frame, into: canvas,
+                at: AtlasWriter.origin(frame: index, columns: columns, rows: rows, cellPixels: cell),
+                cellPixels: cell, plate: options.plate, shape: options.shape
+            )
+        }
+        guard let sheet = canvas.makeImage() else {
+            throw BakeError("\(document.name): cannot flatten sheet")
+        }
+        let empty = AtlasWriter.emptyCells(
+            in: sheet, frameCount: frameCount, columns: columns, cellPixels: cell
+        )
+        guard empty.isEmpty else {
+            throw BakeError("\(document.name): cells \(empty) are transparent")
+        }
+        let asset = "\(document.name).\(options.heic ? "heic" : "png")"
+        let file = options.output.appendingPathComponent(asset)
+        try AtlasWriter.write(sheet, to: file, heic: options.heic)
+        return Entry(
+            id: document.name, kind: "sheet", asset: asset,
+            frameCount: frameCount, frameMS: Int(stepMS.rounded()), cellPX: cell,
+            columns: columns, scale: nil, rotation: nil, opacity: nil,
+            bytes: size(of: file),
+            note: String(
+                format: "video: %.1fs source, sampled %d frames from %.1fs over %.1fs",
+                document.duration, frameCount, start, window
+            ),
+            stepMS: options.trackFPS.map { 1000 / $0 }, plate: nil
         )
     }
 
@@ -369,7 +435,7 @@ struct IconBaker {
 
     // MARK: - Entry point
 
-    static func run() {
+    static func run() async {
         do {
             let options = try parse(Array(CommandLine.arguments.dropFirst()))
             guard !options.inputs.isEmpty else {
@@ -381,7 +447,7 @@ struct IconBaker {
             var entries: [Entry] = []
             for input in options.inputs {
                 do {
-                    let entry = try bake(input, options: options)
+                    let entry = try await bake(input, options: options)
                     entries.append(entry)
                     let cost = entry.kind == "still"
                         ? "9.0 MB @128"
@@ -414,4 +480,4 @@ struct IconBaker {
     }
 }
 
-IconBaker.run()
+await IconBaker.run()

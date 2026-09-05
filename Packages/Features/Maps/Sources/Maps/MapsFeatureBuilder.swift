@@ -70,9 +70,13 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         /// field 12), so mock mode supplies what the wire cannot and production
         /// leaves it empty.
         mockAnimatedIcons: [PostID: String] = [:],
-        iconCatalog: AnimatedIconCatalog? = nil
+        /// Baked preview sheets, keyed by post id — MEDIA posts only.
+        mockPreviewSheets: [PostID: String] = [:],
+        iconCatalog: AnimatedIconCatalog? = nil,
+        previewCatalog: AnimatedIconCatalog? = nil
     ) {
         self.iconCatalog = iconCatalog
+        self.previewCatalog = previewCatalog
         self.repository = repository
         self.favoritesRepository = favoritesRepository
         self.imagePipeline = imagePipeline
@@ -92,7 +96,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         let places = seedsMockPlaces
         let avatars = mockAuthorAvatars
         let icons = mockAnimatedIcons
-        if places || !avatars.isEmpty || !icons.isEmpty {
+        let previews = mockPreviewSheets
+        if places || !avatars.isEmpty || !icons.isEmpty || !previews.isEmpty {
             self.placeDecoration = { pins in
                 let tagged = places ? MapMockPlaces.decorate(pins) : pins
                 return tagged.map { pin in
@@ -100,7 +105,16 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                     // than in the seed so a caller cannot hand in a media post
                     // by accident. A media pin has a cover; a second answer to
                     // "what is this" painted over it is not a feature.
-                    guard pin.isText else { return pin }
+                    // A MEDIA pin gets a preview of its own footage; a TEXT pin
+                    // gets an icon or an avatar. The two populations are
+                    // disjoint by construction, which is what stops a marker
+                    // ever carrying both.
+                    guard pin.isText else {
+                        let base = pin.postID.rawValue.split(separator: "#").first.map(String.init)
+                        guard let sheet = previews[pin.postID]
+                            ?? base.flatMap({ previews[PostID($0)] }) else { return pin }
+                        return pin.previewing(sheet)
+                    }
                     var decorated = pin
                     let avatarBase = pin.postID.rawValue.split(separator: "#").first.map(String.init)
                     if let avatar = avatars[pin.postID]
@@ -134,6 +148,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     /// decoration in DEBUG mock mode, identity everywhere else.
     private let placeDecoration: ([MapPin]) -> [MapPin]
     private let iconCatalog: AnimatedIconCatalog?
+    private let previewCatalog: AnimatedIconCatalog?
 
     public func makeMapViewController() -> UIViewController {
         let feedFeature = feedFeature
@@ -148,6 +163,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             pinService: pinService,
             imagePipeline: imagePipeline,
             iconCatalog: iconCatalog,
+            previewCatalog: previewCatalog,
             videoPlayback: videoPlayback,
             makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) },
             // The same feed, arrived at by the platform's own slide — what a

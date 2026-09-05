@@ -36,6 +36,9 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
     private var representedAvatar: URL?
     private var representedIcon: String?
     private var iconCatalog: AnimatedIconCatalog?
+    private var previewCatalog: AnimatedIconCatalog?
+    private var representedPreview: String?
+    private var previewTask: Task<Void, Never>?
 
     /// The loaded cover image, handed to the hero transition to fly.
     var heroImage: UIImage? { card.imageView.image }
@@ -85,9 +88,10 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
     /// owns the image pipeline.
     func configure(
         with cluster: MapComputedCluster, imagePipeline: ImagePipeline,
-        iconCatalog: AnimatedIconCatalog? = nil
+        iconCatalog: AnimatedIconCatalog? = nil, previewCatalog: AnimatedIconCatalog? = nil
     ) {
         self.iconCatalog = iconCatalog
+        self.previewCatalog = previewCatalog
         let url = cluster.representative.thumbnailURL
         let face = PinCardView.Face.of(cluster.representative)
         // The hierarchy ring, ABOVE the idempotence guard: a reconcile can
@@ -117,14 +121,22 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
         // everything above — and the second would keep the first one's artwork
         // for as long as the view survived. The same bug, one field later.
         let icon = cluster.representative.animatedIconID
+        // A media group's face is a post with footage, so it can preview too —
+        // and the id is part of the key for the same reason the icon and the
+        // avatar are: two groups led by different clips are not the same face.
+        let preview = cluster.representative.previewSheetID
         guard representedURL != url || representedFace != face
             || representedAvatar != avatar || representedIcon != icon
+            || representedPreview != preview
         else { return }
         imageTask?.cancel()
         representedURL = url
         representedFace = face
         representedAvatar = avatar
         representedIcon = icon
+        representedPreview = preview
+        previewTask?.cancel()
+        card.setPreviewSheet(nil)
         card.imageView.image = nil
         card.setTextAvatar(nil)
         card.setIcon(nil)
@@ -155,6 +167,18 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
             }
             return
         }
+        if face == .media, let previewCatalog, let preview {
+            let phase = cluster.representative.iconPhase
+            if let art = previewCatalog.cached(preview) {
+                card.setPreviewSheet((art, phase))
+            } else {
+                previewTask = Task { [weak self] in
+                    guard let art = try? await previewCatalog.art(for: preview) else { return }
+                    guard let self, self.representedPreview == preview else { return }
+                    self.card.setPreviewSheet((art, phase))
+                }
+            }
+        }
         guard face == .media, let url else { return }
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
@@ -166,11 +190,13 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
     #if DEBUG
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
     var presentedIconTick: Double? { card.presentedIconTick }
+    var isPlayingPreviewSheet: Bool { card.isPlayingPreviewSheet }
     #endif
 
     /// See `MapAnnotationView.redressIcon`.
     func redressIcon() {
         card.reinstallIconPlayback()
+        card.reinstallPreviewPlayback()
     }
 
     /// The live-preview surface. A cluster's face is one of its members' posts,
@@ -214,7 +240,11 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
         representedFace = nil
         representedAvatar = nil
         representedIcon = nil
+        representedPreview = nil
+        previewTask?.cancel()
+        previewTask = nil
         card.setIcon(nil)
+        card.setPreviewSheet(nil)
         card.imageView.image = nil
         card.setTextAvatar(nil)
         card.setRing(color: MapMarkerRing.color(for: nil), width: MapMarkerRing.width(for: nil))

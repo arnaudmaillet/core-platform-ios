@@ -28,6 +28,9 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
     private let playBadge = UIImageView()
     private var imageTask: Task<Void, Never>?
+    /// Separate from `imageTask`: a media pin loads its COVER and its PREVIEW,
+    /// and one task handle for two loads cancels whichever started first.
+    private var previewTask: Task<Void, Never>?
     /// Guards against a slow image load landing on a recycled view.
     private var representedID: PostID?
 
@@ -127,7 +130,8 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     /// Renders the pin's thumbnail and (dormant) video badge — or, for a
     /// text-only post, the symbol face instead of a cover.
     func configure(
-        with pin: MapPin, imagePipeline: ImagePipeline, iconCatalog: AnimatedIconCatalog? = nil
+        with pin: MapPin, imagePipeline: ImagePipeline,
+        iconCatalog: AnimatedIconCatalog? = nil, previewCatalog: AnimatedIconCatalog? = nil
     ) {
         self.imagePipeline = imagePipeline
         // Idempotent: a reconcile re-configures every surviving marker, so a
@@ -148,6 +152,24 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
         // else's face would show that face until its own arrived.
         card.setTextAvatar(nil)
         card.setIcon(nil)
+        card.setPreviewSheet(nil)
+
+        // A media pin may carry a baked preview of its own footage. It sits OVER
+        // the cover rather than replacing it: the cover is what shows while the
+        // sheet loads, and what remains under Reduce Motion.
+        if pin.hasPreviewSheet, let previewCatalog, let sheetID = pin.previewSheetID {
+            let phase = pin.iconPhase
+            if let art = previewCatalog.cached(sheetID) {
+                card.setPreviewSheet((art, phase))
+            } else {
+                let id = pin.postID
+                previewTask = Task { [weak self] in
+                    guard let art = try? await previewCatalog.art(for: sheetID) else { return }
+                    guard let self, self.representedID == id else { return }
+                    self.card.setPreviewSheet((art, phase))
+                }
+            }
+        }
 
         // An icon outranks the author's face: it is what the author CHOSE to
         // say about this post, where the avatar is only who they are.
@@ -206,6 +228,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
 
     /// The live-preview surface, for the debug readout.
     var videoSurface: VideoRenderView { card.videoRenderView }
+    var isPlayingPreviewSheet: Bool { card.isPlayingPreviewSheet }
 
     /// A fingerprint of what the RENDER SERVER is presenting for this icon.
     ///
@@ -221,6 +244,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     /// checks "is it already animating" only ever handles one of them.
     func redressIcon() {
         card.reinstallIconPlayback()
+        card.reinstallPreviewPlayback()
     }
 
     override func prepareForReuse() {
@@ -238,7 +262,10 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
         endVideoPreview()
         imageTask?.cancel()
         imageTask = nil
+        previewTask?.cancel()
+        previewTask = nil
         representedID = nil
+        card.setPreviewSheet(nil)
         card.imageView.image = nil
         // Cleared HERE as well as on configure. An animating icon left under a
         // photograph is worse than a stale avatar: it moves.
