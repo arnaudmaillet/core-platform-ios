@@ -286,6 +286,7 @@ final class MapsViewController: UIViewController {
         installIconPolicyObserver()
         #if DEBUG
         installIconDebugHUD()
+        installNavigationSweep()
         #endif
         // No title, deliberately: the map is the tab's whole surface and
         // names itself; the header band belongs to its controls — the
@@ -1364,23 +1365,55 @@ final class MapsViewController: UIViewController {
             layoutPending = true
             return
         }
-        let items = MapClusterEngine.cluster(
-            // ⚠️ SORTED, because the merge downstream is order-dependent (see
-            // `collide`). A dictionary's values re-order whenever it is
-            // mutated, and every return to this screen re-queries — so the
-            // markers moved on a map nobody had panned.
-            pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue },
-            // Snapped, so an epsilon in the viewport cannot move every grid
-            // line at once — see `MapClusterEngine.snapZoom`.
-            zoomScale: MapClusterEngine.snapZoom(currentZoomScale),
-            cellPoints: Double(Self.clusterCellPoints),
-            // The semantic pre-pass's two banding inputs: the zoom level is
-            // the FALLBACK for an H3-less corpus; the viewport diagonal
-            // drives the dynamic cell-span rule (`MapHierarchyBanding`)
-            // whenever the ladder carries H3 indexes.
-            zoomLevel: MapViewport.zoomLevel(forLongitudeSpan: mapView.region.span.longitudeDelta),
-            viewportDiagonalKm: currentViewportDiagonalKm
-        )
+        #if DEBUG
+        // `-maps-no-clustering`: every pin becomes its own marker.
+        //
+        // ⚠️ It exists because the SHIPPING map cannot produce its own designed
+        // worst case. `MapClusterEngine`'s proximity merge recomputes each
+        // cluster's centroid, so merges CHAIN and a dense uniform field
+        // collapses instead of packing the 64pt lattice — measured invariant at
+        // 19 markers whether the corpus is fed 5x, 15x or 40x. The 128-marker
+        // figure every budget in this feature is sized against is a GEOMETRIC
+        // bound, and this flag is the only way to stand a field of that size in
+        // front of the real renderer.
+        //
+        // It is not a product mode and must never become one: without the merge
+        // the map has no answer for a dense city.
+        let unclustered = ProcessInfo.processInfo.arguments.contains("-maps-no-clustering")
+        #else
+        let unclustered = false
+        #endif
+
+        // ⚠️ SORTED, because the merge downstream is order-dependent (see
+        // `collide`). A dictionary's values re-order whenever it is mutated, and
+        // every return to this screen re-queries — so the markers moved on a map
+        // nobody had panned.
+        let ordered = pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue }
+        // Singles go through the SAME reconciliation below, so what the flag
+        // measures is the real marker lifecycle and not a parallel code path
+        // that happens to look similar.
+        let items: [MapClusterEngine.Item] = unclustered
+            ? ordered.map {
+                MapClusterEngine.Item(
+                    representative: $0, memberIDs: [$0.postID],
+                    latitude: $0.latitude, longitude: $0.longitude, place: $0.place
+                )
+            }
+            : MapClusterEngine.cluster(
+                ordered,
+                // Snapped, so an epsilon in the viewport cannot move every grid
+                // line at once — see `MapClusterEngine.snapZoom`.
+                zoomScale: MapClusterEngine.snapZoom(currentZoomScale),
+                cellPoints: Double(Self.clusterCellPoints),
+                // The semantic pre-pass's two banding inputs: the zoom level is
+                // the FALLBACK for an H3-less corpus; the viewport diagonal
+                // drives the dynamic cell-span rule (`MapHierarchyBanding`)
+                // whenever the ladder carries H3 indexes.
+                zoomLevel: MapViewport.zoomLevel(
+                    forLongitudeSpan: mapView.region.span.longitudeDelta
+                ),
+                viewportDiagonalKm: currentViewportDiagonalKm
+            )
         var target = Set<String>()
         target.reserveCapacity(items.count)
         var toAdd: [MKAnnotation] = []
@@ -2532,6 +2565,47 @@ extension MapsViewController {
     /// synthetic lattice could not tell you what MapKit, clustering, tile
     /// loading and the app's own working set cost around the feature. Only the
     /// shipping screen can.
+    /// `-maps-nav-sweep`: pan and zoom the map on a fixed schedule, forever.
+    ///
+    /// The static field is the EASY case. Every earlier measurement on this
+    /// feature said the same thing — animation is nearly free and navigation is
+    /// what costs, because a pan re-runs clustering, re-reconciles annotations,
+    /// and re-attaches artwork to recycled views. Reporting "144 markers at
+    /// 16.67 ms" while the map sat still would be reporting the wrong number.
+    ///
+    /// Scripted rather than driven by injected gestures: CGEvent swipes land on
+    /// whichever window is frontmost and vanish silently when one overlaps, so
+    /// a flaky driver would show up as a performance result.
+    fileprivate func installNavigationSweep() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-nav-sweep") else { return }
+        let home = Self.defaultRegion
+        var step = 0
+        Timer.scheduledTimer(withTimeInterval: 1.4, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            // A six-phase cycle: four pans around the seeded region, then a zoom
+            // in and back out. Zoom is included because it changes the marker
+            // POPULATION, which is the expensive half — a pure pan only moves
+            // views that already exist.
+            let dLat = home.span.latitudeDelta, dLon = home.span.longitudeDelta
+            let offsets: [(Double, Double, Double)] = [
+                (0.30, 0, 1), (0, 0.30, 1), (-0.30, 0, 1),
+                (0, -0.30, 1), (0, 0, 0.45), (0, 0, 1)
+            ]
+            let (oLat, oLon, zoom) = offsets[step % offsets.count]
+            step += 1
+            let region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(
+                    latitude: home.center.latitude + oLat * dLat,
+                    longitude: home.center.longitude + oLon * dLon
+                ),
+                span: MKCoordinateSpan(
+                    latitudeDelta: dLat * zoom, longitudeDelta: dLon * zoom
+                )
+            )
+            self.mapView.setRegion(region, animated: true)
+        }
+    }
+
     fileprivate func installIconDebugHUD() {
         // `-map-icon-policy full|reduced|still` pins the motion state from
         // launch. Read even without the HUD: an A/B that depends on tapping a

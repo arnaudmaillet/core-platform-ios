@@ -236,6 +236,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     /// resting value for the whole animation, so probing it would report a
     /// frozen icon as a running one.
     var presentedIconTick: Double? { card.presentedIconTick }
+    var presentedPreviewTick: Double? { card.presentedPreviewTick }
     #endif
 
     /// Re-installs this marker's icon playback under the current motion policy.

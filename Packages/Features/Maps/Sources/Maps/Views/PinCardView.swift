@@ -350,6 +350,13 @@ final class PinCardView: UIView {
     #if DEBUG
     var presentedIconTick: Double? { iconFaceView.presentedTick ?? previewSheetView.presentedTick }
     var isPlayingPreviewSheet: Bool { wornPreview != nil }
+
+    /// The preview sheet's presentation-layer fingerprint, and ONLY the preview's.
+    ///
+    /// `presentedIconTick` falls back to the icon face first, so on a marker
+    /// wearing both it would report the icon's motion as though it were the
+    /// sheet's. The worst-case measurement turns on telling those apart.
+    var presentedPreviewTick: Double? { previewSheetView.presentedTick }
     #endif
 
     // MARK: - Departure blend

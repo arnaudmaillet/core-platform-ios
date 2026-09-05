@@ -190,6 +190,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
     #if DEBUG
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
     var presentedIconTick: Double? { card.presentedIconTick }
+    var presentedPreviewTick: Double? { card.presentedPreviewTick }
     var isPlayingPreviewSheet: Bool { card.isPlayingPreviewSheet }
     #endif
 

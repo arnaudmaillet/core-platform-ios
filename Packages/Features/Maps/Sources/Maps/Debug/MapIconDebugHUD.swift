@@ -265,6 +265,7 @@ final class MapIconDebugHUD: UIView {
             "advancing=\(advancingSurfaces)",
             "distinct_urls=\(pool?.playerCountByURL.count ?? 0)",
             "sheets=\(playingSheets)",
+            "sheets_advancing=\(advancingSheets)",
             "sheets_resident=\(previews?.residentCount ?? 0)",
             String(format: "sheets_mb=%.2f", Double(previews?.residentBytes ?? 0) / 1024 / 1024)
         ].joined(separator: " ")
@@ -284,6 +285,39 @@ final class MapIconDebugHUD: UIView {
                 ?? (view as? MapClusterAnnotationView)?.videoRenderView
         }.count { pool.isAdvancing(in: $0) }
     }
+
+    /// Sheets whose presentation layer actually MOVED since the previous emit.
+    ///
+    /// `playingSheets` counts `wornPreview != nil` — art handed to the view.
+    /// That is bound, not advancing, and it is the same trap the video readout
+    /// already carries a comment about: a field of 80 markers all reporting
+    /// "playing" told me nothing about whether one frame had stepped. A tick
+    /// that changed between two samples one second apart, against a 125 ms
+    /// frame step, is proof the render server is stepping it.
+    private var advancingSheets: Int {
+        guard let mapView else { return 0 }
+        var moved = 0
+        var seen: [ObjectIdentifier: Double] = [:]
+        for annotation in mapView.annotations {
+            let view = mapView.view(for: annotation)
+            guard let host = view as? MapAnnotationView ?? nil,
+                  let tick = host.presentedPreviewTick else {
+                guard let cluster = view as? MapClusterAnnotationView,
+                      let tick = cluster.presentedPreviewTick else { continue }
+                let key = ObjectIdentifier(cluster)
+                seen[key] = tick
+                if let previous = previousSheetTicks[key], previous != tick { moved += 1 }
+                continue
+            }
+            let key = ObjectIdentifier(host)
+            seen[key] = tick
+            if let previous = previousSheetTicks[key], previous != tick { moved += 1 }
+        }
+        previousSheetTicks = seen
+        return moved
+    }
+
+    private var previousSheetTicks: [ObjectIdentifier: Double] = [:]
 
     /// Markers playing a baked preview — pins and clusters alike.
     private var playingSheets: Int {

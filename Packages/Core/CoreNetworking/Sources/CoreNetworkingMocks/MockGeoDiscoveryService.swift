@@ -209,7 +209,14 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         guard let index = arguments.firstIndex(of: "-maps-mock-pitch"),
               index + 1 < arguments.count, let value = Double(arguments[index + 1])
         else { return nil }
-        return max(64, value)
+        // ⚠️ Floor of 16, not 64. The 64 was a guard against laying pins
+        // closer than the cluster engine's merge threshold — sensible while
+        // clustering was on, and exactly wrong once `-maps-no-clustering`
+        // exists, because then a tighter pitch is the ONLY way to stand a
+        // 128-marker field in front of the renderer. Clamping silently made
+        // `-maps-mock-pitch 45` and `-maps-mock-pitch 32` identical to 64, and
+        // the marker count did not move across three runs.
+        return max(16, value)
     }()
 
     static let density: Int = {
