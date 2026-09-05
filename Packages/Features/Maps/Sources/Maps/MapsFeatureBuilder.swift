@@ -62,8 +62,17 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         openConversation: @escaping (ProfileID) -> Void,
         seedsMockPlaces: Bool = false,
-        mockAuthorAvatars: [PostID: URL] = [:]
+        mockAuthorAvatars: [PostID: URL] = [:],
+        /// Baked animated icons, keyed by post id — text-only posts only.
+        ///
+        /// Same shape of absence as `mockAuthorAvatars`: `RadarPin` carries no
+        /// `icon_id` yet (`dev/issues/BACKEND_ANIMATED_PIN_ICONS.md` proposes
+        /// field 12), so mock mode supplies what the wire cannot and production
+        /// leaves it empty.
+        mockAnimatedIcons: [PostID: String] = [:],
+        iconCatalog: AnimatedIconCatalog? = nil
     ) {
+        self.iconCatalog = iconCatalog
         self.repository = repository
         self.favoritesRepository = favoritesRepository
         self.imagePipeline = imagePipeline
@@ -82,13 +91,20 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         // both nil. Folded into one closure so a pin is decorated once.
         let places = seedsMockPlaces
         let avatars = mockAuthorAvatars
-        if places || !avatars.isEmpty {
+        let icons = mockAnimatedIcons
+        if places || !avatars.isEmpty || !icons.isEmpty {
             self.placeDecoration = { pins in
                 let tagged = places ? MapMockPlaces.decorate(pins) : pins
-                guard !avatars.isEmpty else { return tagged }
                 return tagged.map { pin in
-                    guard pin.isText, let avatar = avatars[pin.postID] else { return pin }
-                    return pin.wearing(avatar)
+                    // TEXT ONLY, both of them, and the guard is here rather
+                    // than in the seed so a caller cannot hand in a media post
+                    // by accident. A media pin has a cover; a second answer to
+                    // "what is this" painted over it is not a feature.
+                    guard pin.isText else { return pin }
+                    var decorated = pin
+                    if let avatar = avatars[pin.postID] { decorated = decorated.wearing(avatar) }
+                    if let icon = icons[pin.postID] { decorated = decorated.showing(icon) }
+                    return decorated
                 }
             }
         } else {
@@ -102,6 +118,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     /// What the view model runs over every tile response — the place
     /// decoration in DEBUG mock mode, identity everywhere else.
     private let placeDecoration: ([MapPin]) -> [MapPin]
+    private let iconCatalog: AnimatedIconCatalog?
 
     public func makeMapViewController() -> UIViewController {
         let feedFeature = feedFeature
@@ -115,6 +132,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             favoritesRepository: favoritesRepository,
             pinService: pinService,
             imagePipeline: imagePipeline,
+            iconCatalog: iconCatalog,
             videoPlayback: videoPlayback,
             makeSnapFeed: { postIDs in feedFeature().makeSnapFeedViewController(postIDs: postIDs) },
             // The same feed, arrived at by the platform's own slide — what a

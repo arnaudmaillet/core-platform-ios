@@ -32,6 +32,23 @@ final class MapsViewController: UIViewController {
     /// What the sub-filter row currently shows — the full-list sheet's data.
     private var currentSubFilterOptions: [MapSubFilterOption] = []
     private let imagePipeline: ImagePipeline
+    /// The baked animated-icon catalogue, or `nil` where the surface has none.
+    ///
+    /// Separate from `imagePipeline` on purpose. Icons are decoded WHOLE
+    /// (downsampling a sprite grid lands every frame boundary mid-pixel) and
+    /// budgeted by BYTES rather than by count (a sheet is up to 1.7 MB, so the
+    /// pipeline's `countLimit = 300` would never evict), and they must not go
+    /// through `decodeDownsampled` at all — that call never returns on HEIC
+    /// under concurrent load in the iOS 26 simulator.
+    private let iconCatalog: AnimatedIconCatalog?
+    /// Re-dresses every marker when the device changes its motion policy.
+    ///
+    /// ⚠️ Read at INSTALL time, so this is not optional: without it a field
+    /// dressed before the user enabled Low Power keeps animating at full rate
+    /// for the rest of the session — the exact failure the setting exists to
+    /// prevent. And it must RE-DRESS rather than "reinstall if not running",
+    /// which can only promote a marker and never demote one.
+    private let iconPolicyBag = MapNotificationBag()
     /// Builds the snap feed a pin/cluster tap expands into (reuses the Feed
     /// feature via `FeedFeatureBuilding.makeSnapFeedViewController`).
     private let makeSnapFeed: ([PostID]) -> UIViewController
@@ -208,6 +225,7 @@ final class MapsViewController: UIViewController {
         favoritesRepository: any MapFavoritesProviding,
         pinService: MapProfilePinService,
         imagePipeline: ImagePipeline,
+        iconCatalog: AnimatedIconCatalog? = nil,
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
@@ -229,6 +247,7 @@ final class MapsViewController: UIViewController {
         self.favoritesRepository = favoritesRepository
         self.pinService = pinService
         self.imagePipeline = imagePipeline
+        self.iconCatalog = iconCatalog
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
         self.makeSnapFeed = makeSnapFeed
         self.pushPlainSnapFeed = pushPlainSnapFeed
@@ -246,6 +265,7 @@ final class MapsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        installIconPolicyObserver()
         // No title, deliberately: the map is the tab's whole surface and
         // names itself; the header band belongs to its controls — the
         // compose "+", the wallet badge, the bell. (The tab bar still says
@@ -1583,11 +1603,11 @@ final class MapsViewController: UIViewController {
         if let cluster = annotation as? MapComputedCluster {
             cluster.apply(item)
             (mapView.view(for: cluster) as? MapClusterAnnotationView)?
-                .configure(with: cluster, imagePipeline: imagePipeline)
+                .configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog)
         } else if let single = annotation as? MapAnnotation {
             single.update(pin: item.representative)
             (mapView.view(for: single) as? MapAnnotationView)?
-                .configure(with: item.representative, imagePipeline: imagePipeline)
+                .configure(with: item.representative, imagePipeline: imagePipeline, iconCatalog: iconCatalog)
         }
     }
 
@@ -1834,7 +1854,7 @@ extension MapsViewController: MKMapViewDelegate {
                 withIdentifier: MapClusterAnnotationView.reuseIdentifier,
                 for: annotation
             ) as? MapClusterAnnotationView
-            view?.configure(with: cluster, imagePipeline: imagePipeline)
+            view?.configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog)
             // Instant tap — bypasses MapKit's ~0.3s selection delay.
             view?.onSelect = { [weak self, weak view] in
                 self?.openAnnotation(cluster, thumbnail: view?.heroImage)
@@ -1846,7 +1866,7 @@ extension MapsViewController: MKMapViewDelegate {
             withIdentifier: MapAnnotationView.reuseIdentifier,
             for: annotation
         ) as? MapAnnotationView
-        view?.configure(with: pinAnnotation.pin, imagePipeline: imagePipeline)
+        view?.configure(with: pinAnnotation.pin, imagePipeline: imagePipeline, iconCatalog: iconCatalog)
         view?.onSelect = { [weak self, weak view] in
             self?.openAnnotation(pinAnnotation, thumbnail: view?.heroImage)
         }
@@ -2059,7 +2079,7 @@ extension MapsViewController: MKMapViewDelegate {
     private static func face(of annotation: any MKAnnotation) -> PinCardView.Face {
         let pin = (annotation as? MapAnnotation)?.pin
             ?? (annotation as? MapComputedCluster)?.representative
-        return pin?.isText == true ? .text : .media
+        return pin.map(PinCardView.Face.of) ?? .media
     }
 
     private func presentSnapFeed(postIDs: [PostID], from annotation: any MKAnnotation, thumbnail: UIImage?) {
@@ -2445,6 +2465,29 @@ extension MapsViewController: MKMapViewDelegate {
             }
         }
         #endif
+    }
+}
+
+extension MapsViewController {
+    /// Re-dresses every icon-bearing marker when the device changes its motion
+    /// policy — Low Power on or off, Reduce Motion on or off, thermal pressure.
+    ///
+    /// ⚠️ RE-CONFIGURES rather than reinstalling. A "reinstall if not already
+    /// running" guard can only ever PROMOTE a marker, so it silently ignores
+    /// every change INTO Low Power or Reduce Motion, which is the direction
+    /// that matters. Clearing `representedID` first is what makes `configure`
+    /// do its work instead of early-returning on an unchanged pin.
+    fileprivate func installIconPolicyObserver() {
+        guard iconCatalog != nil else { return }
+        for token in AnimatedIconView.observePolicyChanges({ [weak self] in
+            guard let self else { return }
+            for annotation in self.mapView.annotations {
+                (self.mapView.view(for: annotation) as? MapAnnotationView)?.redressIcon()
+                (self.mapView.view(for: annotation) as? MapClusterAnnotationView)?.redressIcon()
+            }
+        }) {
+            iconPolicyBag.add(token)
+        }
     }
 }
 

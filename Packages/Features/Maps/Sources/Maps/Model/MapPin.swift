@@ -72,6 +72,30 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     /// `GeoDiscoveryRepository` changes.
     public let authorAvatarURL: URL?
 
+    /// A baked animated icon this post carries — the catalogue key, not a URL.
+    ///
+    /// ONLY a text-only post may have one, on the wire and here: a media post
+    /// has a cover, and an icon competing with it would be a second answer to
+    /// "what is this". The rule is the backend's
+    /// (`dev/issues/BACKEND_ANIMATED_PIN_ICONS.md`, `icon_id` set only when
+    /// `thumbnail_url` is empty) and the repository re-checks it rather than
+    /// trusting it, because a server that broke the invariant would otherwise
+    /// paint icons over photographs.
+    ///
+    /// It outranks `authorAvatarURL`: an icon is something the AUTHOR CHOSE to
+    /// say about this post, where the avatar is who they are, and the more
+    /// specific statement wins the marker.
+    ///
+    /// ⚠️ ALWAYS `nil` IN PRODUCTION today — `RadarPin` has no `icon_id` yet
+    /// (proposed as field 12). Populated in DEBUG mock mode through the same
+    /// decorator seam `places` and `authorAvatarURL` use.
+    ///
+    /// A `String` rather than the wire's `uint32` because what the client needs
+    /// is the CATALOGUE key; mapping the integer onto it is the repository's
+    /// job the day the field lands, and doing it here would put a wire detail
+    /// in the view layer's vocabulary.
+    public let animatedIconID: String?
+
     /// The most specific place — what a proximity cluster's members must
     /// share to make it SEMANTIC (Case B); everything else is generic.
     public var place: MapPlace? { places.first }
@@ -88,7 +112,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         previewVideoURL: URL? = nil,
         likeCount: Int64 = 0,
         places: [MapPlace] = [],
-        authorAvatarURL: URL? = nil
+        authorAvatarURL: URL? = nil,
+        animatedIconID: String? = nil
     ) {
         self.postID = postID
         self.latitude = latitude
@@ -99,6 +124,7 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         self.likeCount = likeCount
         self.places = places
         self.authorAvatarURL = authorAvatarURL
+        self.animatedIconID = animatedIconID
     }
 
     /// The same pin, tagged with its place ladder — the decoration seam
@@ -114,7 +140,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             previewVideoURL: previewVideoURL,
             likeCount: likeCount,
             places: places,
-            authorAvatarURL: authorAvatarURL
+            authorAvatarURL: authorAvatarURL,
+            animatedIconID: animatedIconID
         )
     }
 
@@ -131,8 +158,48 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             previewVideoURL: previewVideoURL,
             likeCount: likeCount,
             places: places,
-            authorAvatarURL: authorAvatarURL
+            authorAvatarURL: authorAvatarURL,
+            animatedIconID: animatedIconID
         )
+    }
+
+    /// The same pin showing its animated icon — the fourth decoration seam,
+    /// for the same reason as `wearing(_:)`: every field is a `let`.
+    public func showing(_ animatedIconID: String?) -> MapPin {
+        MapPin(
+            postID: postID,
+            latitude: latitude,
+            longitude: longitude,
+            thumbnailURL: thumbnailURL,
+            kind: kind,
+            previewVideoURL: previewVideoURL,
+            likeCount: likeCount,
+            places: places,
+            authorAvatarURL: authorAvatarURL,
+            animatedIconID: animatedIconID
+        )
+    }
+
+    /// Whether this marker wears baked artwork instead of a face.
+    ///
+    /// Guarded on `isText` as well as on the id, so a server that stamped an
+    /// icon onto a media post cannot paint over its cover.
+    public var hasAnimatedIcon: Bool { isText && animatedIconID != nil }
+
+    /// The frame this marker starts on — a pure function of identity, so the
+    /// hero flight card reproduces the exact frame by copying one `Int` rather
+    /// than by sampling the marker mid-animation.
+    ///
+    /// ⚠️ NOT `hashValue`. Swift seeds its string hash per launch, so the same
+    /// post would start on a different frame every run: every screenshot diff
+    /// would drift and no QA recipe could pin a field's appearance. FNV-1a is
+    /// stable across launches and across devices.
+    public var iconPhase: Int {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in postID.rawValue.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3
+        }
+        return Int(hash % 997)
     }
 
     /// The same pin carrying its counter projection — the hydration seam
@@ -148,7 +215,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             previewVideoURL: previewVideoURL,
             likeCount: likeCount,
             places: places,
-            authorAvatarURL: authorAvatarURL
+            authorAvatarURL: authorAvatarURL,
+            animatedIconID: animatedIconID
         )
     }
 }

@@ -51,9 +51,13 @@ struct PinCardBlendTests {
     /// under a still would fly a frozen frame for the whole flight). The two
     /// middle layers are private, so they are addressed by their position
     /// between the ones that are not — which pins the order as a side effect.
-    @Test func theCardStacksItsFiveLayersInTheContractedOrder() {
+    ///
+    /// Six since the animated-icon face landed: it sits above the text face and
+    /// below the ring, for the same reason the text face sits above the cover —
+    /// it REPLACES what is beneath it rather than decorating it.
+    @Test func theCardStacksItsSixLayersInTheContractedOrder() {
         let card = makeCard()
-        #expect(card.subviews.count == 5)
+        #expect(card.subviews.count == 6)
         #expect(card.subviews.first === card.imageView)
         #expect(card.subviews.last === card.ringView)
     }
@@ -61,6 +65,44 @@ struct PinCardBlendTests {
     private func departureCover(of card: PinCardView) -> UIView { card.subviews[1] }
     private func liveSurface(of card: PinCardView) -> UIView { card.subviews[2] }
     private func textFace(of card: PinCardView) -> UIView { card.subviews[3] }
+    private func iconFace(of card: PinCardView) -> UIView { card.subviews[4] }
+
+    // MARK: - The icon face
+
+    /// "Fills the box, no circle" is one property with three parts, and each is
+    /// on a different object — so a change to any one of them can undo it
+    /// silently.
+    @Test func anIconFaceIsSquareRinglessAndShadowless() {
+        #expect(PinCardView.Face.icon.cornerRadius == 0)
+        // Same box as the avatar it replaces: the marker must not change size
+        // when a post happens to carry an icon.
+        #expect(PinCardView.Face.icon.side == PinCardView.Face.text.side)
+
+        let card = makeCard(.icon)
+        #expect(card.layer.cornerRadius == 0)
+        #expect(card.ringView.isHidden)
+        #expect(iconFace(of: card).isHidden == false)
+        #expect(textFace(of: card).isHidden)
+
+        // The pathless shadow is derived from the composited alpha every frame
+        // once the contents animate — the largest cost this feature could
+        // incur, and a rectangular path behind transparent art draws a box.
+        let layer = CALayer()
+        PinCardView.applyPinShadow(to: layer, face: .icon)
+        #expect(layer.shadowOpacity == 0)
+        PinCardView.applyPinShadow(to: layer, face: .text)
+        #expect(layer.shadowOpacity > 0)
+    }
+
+    /// A recycled card must take the icon face OFF again, or a photograph
+    /// dequeuing it keeps a square corner and no ring.
+    @Test func aRecycledCardTakesTheIconFaceOff() {
+        let card = makeCard(.icon)
+        card.setFace(.media)
+        #expect(iconFace(of: card).isHidden)
+        #expect(card.ringView.isHidden == false)
+        #expect(card.layer.cornerRadius == PinCardView.Face.media.cornerRadius)
+    }
 
     // MARK: - The un-blended card
 
@@ -143,14 +185,20 @@ struct PinCardBlendTests {
     /// moves and the one underneath stays fully opaque, so every intermediate
     /// frame is an opaque sum of two pictures rather than two transparent ones.
     @Test func theOperandUnderneathIsNeverPartlyDrawn() {
-        for face in [PinCardView.Face.media, .text] {
+        // `allCases`, not a hand-written list: the point of this test is that
+        // EVERY face obeys the law, and a literal list silently exempts the
+        // next face somebody adds — which is exactly how `.icon` reached six
+        // call sites without a single compile error.
+        for face in PinCardView.Face.allCases {
             let card = makeCard(face)
             card.setDeparturePicture(picture())
             for step in 0...10 {
                 card.setBlend(CGFloat(step) / 10)
                 switch face {
                 case .media: #expect(isAlpha(card.imageView, 1))
-                case .text: #expect(isAlpha(departureCover(of: card), 1))
+                // An icon face fades as one unit over an opaque departure
+                // picture, exactly as the text face does.
+                case .text, .icon: #expect(isAlpha(departureCover(of: card), 1))
                 }
             }
         }

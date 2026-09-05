@@ -1,4 +1,5 @@
 import CoreNavigation
+import MediaCore
 import MediaPlayback
 import UIKit
 
@@ -71,6 +72,9 @@ final class PinCardView: UIView {
     /// for every media pin, so a recycled view must be told which face to wear
     /// on every configure — see `setFace(_:)`.
     private let textFaceView = PinTextFaceView()
+    /// The animated-icon face, above the text face and below the ring. Hidden
+    /// for every other face, so a recycled card must be told on every configure.
+    private let iconFaceView = AnimatedIconView()
     /// Live-preview surface above the image, hidden until playback attaches.
     let videoRenderView = VideoRenderView()
     /// The pin's border, drawn above the media so it survives live previews.
@@ -116,6 +120,11 @@ final class PinCardView: UIView {
         textFaceView.isHidden = true
         addSubview(textFaceView)
 
+        iconFaceView.frame = bounds
+        iconFaceView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        iconFaceView.isHidden = true
+        addSubview(iconFaceView)
+
         ringView.isUserInteractionEnabled = false
         ringView.layer.borderWidth = Self.ringWidth
         ringView.layer.borderColor = ringColor.cgColor
@@ -160,11 +169,21 @@ final class PinCardView: UIView {
     /// three by construction rather than by three surfaces agreeing — the same
     /// reason the radius, border and crop rules live here. A surface that wants
     /// a marker's size asks the face; nothing re-derives 56 or 44 locally.
-    enum Face: Equatable {
+    enum Face: Equatable, CaseIterable {
         /// The post's cover image, loaded into `imageView`.
         case media
         /// A symbol on a neutral ground: a text-only post has no cover to show.
         case text
+        /// A text post wearing baked animated artwork instead of a face.
+        ///
+        /// Same box as `.text` and a DIFFERENT shape inside it: the artwork
+        /// owns the whole square, alpha included, where an avatar is cropped to
+        /// a disc. That is a product decision, and it also deletes the most
+        /// expensive thing this feature could have done — a rounded mask on a
+        /// layer whose contents change every frame costs an offscreen pass per
+        /// marker per frame, which at 128 markers outweighs everything else in
+        /// the design put together.
+        case icon
 
         /// The marker's resting side. A text post carries no image worth
         /// showing at cover size, so its marker is deliberately smaller than a
@@ -174,7 +193,7 @@ final class PinCardView: UIView {
         var side: CGFloat {
             switch self {
             case .media: 56
-            case .text: 44
+            case .text, .icon: 44
             }
         }
 
@@ -185,7 +204,24 @@ final class PinCardView: UIView {
             switch self {
             case .media: PinCardView.cornerRadius
             case .text: side / 2
+            // THIS ONE LINE IS "no circle". The disc was never in the image or
+            // in the face view — it is the card's own corner radius, and an
+            // icon simply does not ask for it.
+            case .icon: 0
             }
+        }
+
+        /// The face a pin wears.
+        ///
+        /// ⚠️ ONE helper, because resolving this inline is a ternary and a
+        /// ternary does not fail to compile when a case is added. Six sites
+        /// chose a face by hand before `.icon` existed — the pin, the cluster,
+        /// two zoom sources, the flight card and the presentation choice — and
+        /// every one of them would have kept building, silently never showing
+        /// an icon on that surface.
+        static func of(_ pin: MapPin) -> Face {
+            if pin.hasAnimatedIcon { return .icon }
+            return pin.isText ? .text : .media
         }
     }
 
@@ -224,12 +260,40 @@ final class PinCardView: UIView {
     func setFace(_ face: Face) {
         self.face = face
         textFaceView.isHidden = face != .text
+        iconFaceView.isHidden = face != .icon
         // The media ground is black so a letterboxed cover reads as framed; a
         // text card's ground is the face's own tint, and the black would show
-        // through its corner curve.
-        backgroundColor = face == .text ? .clear : .black
+        // through its corner curve. An icon has NO ground at all — its alpha is
+        // its shape, and any ground behind it would be the square the product
+        // asked not to see.
+        backgroundColor = face == .media ? .black : .clear
+        // Hidden, not faded. The ring is a 2pt border on the card's rectangle;
+        // at radius 0 behind transparent artwork it draws a visible box.
+        ringView.isHidden = face == .icon
         setCornerRadius(face.cornerRadius)
         applyBlend()
+    }
+
+    /// The animated icon this card wears, with the phase that reproduces its
+    /// exact frame. `nil` clears it.
+    ///
+    /// Art and phase travel TOGETHER, always: the flight card is a different
+    /// `PinCardView` instance built from what the marker is wearing, and frame
+    /// zero matches only if it is handed both.
+    func setIcon(_ icon: (art: AnimatedIconArt, phase: Int)?) {
+        wornIcon = icon
+        iconFaceView.setArt(icon?.art, phase: icon?.phase ?? 0)
+    }
+
+    /// Read back rather than remembered elsewhere — the same reason
+    /// `textAvatar` exists: it is what keeps the flying card and the marker the
+    /// same picture.
+    private(set) var wornIcon: (art: AnimatedIconArt, phase: Int)?
+
+    /// Re-installs playback after anything that strips animations: a foreground
+    /// transition does, and so does a motion-policy change.
+    func reinstallIconPlayback() {
+        iconFaceView.reinstall()
     }
 
     // MARK: - Departure blend
@@ -332,6 +396,7 @@ final class PinCardView: UIView {
             departureCoverView.alpha = 1
             videoRenderView.alpha = 1
             textFaceView.alpha = 1
+            iconFaceView.alpha = 1
             return
         }
         switch face {
@@ -349,6 +414,16 @@ final class PinCardView: UIView {
             departureCoverView.alpha = 1
             videoRenderView.alpha = 1
             textFaceView.alpha = blend
+        case .icon:
+            // Same law, same shape: the icon face is ONE unit and fades as one.
+            //
+            // ⚠️ Never the plate and the mark separately. The mark is line art
+            // by nature, and a mark drifting out from under a still-visible
+            // ground is precisely the two half-drawn overlays the note above
+            // rules out. `AnimatedIconView` is a single view for this reason.
+            departureCoverView.alpha = 1
+            videoRenderView.alpha = 1
+            iconFaceView.alpha = blend
         }
     }
 
@@ -367,9 +442,21 @@ final class PinCardView: UIView {
 
     /// The soft shadow that lifts a pin card off the map — one definition used
     /// by both the annotation view and the flight's stand-in shadow.
-    static func applyPinShadow(to layer: CALayer) {
+    ///
+    /// ⚠️ Takes the FACE, and must be re-applied on every face change rather
+    /// than once at init: these views are recycled across faces, so a card that
+    /// last wore an icon would keep its shadow setting for the photograph that
+    /// dequeues it next.
+    ///
+    /// An icon gets none. This shadow is PATHLESS, so Core Animation derives
+    /// its silhouette from the layer's composited alpha — free today only
+    /// because a marker's contents never change, and re-derived every frame on
+    /// every marker the moment they do. At 128 markers that is the single
+    /// largest cost this feature could incur. A rectangular `shadowPath` is not
+    /// the fix either: behind transparent artwork it draws a visible box.
+    static func applyPinShadow(to layer: CALayer, face: Face = .media) {
         layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.25
+        layer.shadowOpacity = face == .icon ? 0 : 0.25
         layer.shadowRadius = 4
         layer.shadowOffset = CGSize(width: 0, height: 2)
     }

@@ -42,16 +42,34 @@ enum AtlasWriter {
 
     /// Draws one frame into a cell: inset by the gutter, clipped to the disc,
     /// optionally over a plate.
+    /// The silhouette a cell is clipped to.
+    enum Shape {
+        /// A disc — for a marker that reads as a rounded avatar.
+        case disc
+        /// The full square, artwork alpha only.
+        ///
+        /// This is what the map's animated pin icons use: the product asks for
+        /// the artwork to own the whole box with no visible circle, unlike the
+        /// avatar it replaces. Clipping to a disc here would cut the corners off
+        /// artwork designed to fill them — and the client draws no ground
+        /// behind it, so there would be nothing where the corners had been.
+        case square
+    }
+
     static func drawCell(
         _ image: CGImage?, into context: CGContext, at origin: CGPoint,
-        cellPixels: Int, plate: CGColor?
+        cellPixels: Int, plate: CGColor?, shape: Shape = .disc
     ) {
         let art = CGRect(
             x: origin.x + CGFloat(gutter), y: origin.y + CGFloat(gutter),
             width: CGFloat(cellPixels - gutter * 2), height: CGFloat(cellPixels - gutter * 2)
         )
         context.saveGState()
-        context.addEllipse(in: art)
+        if shape == .disc {
+            context.addEllipse(in: art)
+        } else {
+            context.addRect(art)
+        }
         context.clip()
         if let plate {
             context.setFillColor(plate)

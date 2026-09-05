@@ -502,6 +502,52 @@ public struct MockSocialDataset: Sendable {
         }
     }
 
+    /// Animated pin icons, keyed by post id — **TEXT-ONLY posts, and only
+    /// every other one**.
+    ///
+    /// `RadarPin` carries no `icon_id` yet
+    /// (`dev/issues/BACKEND_ANIMATED_PIN_ICONS.md` proposes field 12), so the
+    /// mock answers what the wire cannot. Text-only is read from the record —
+    /// `media == nil` — never re-derived: the corpus expresses that rule three
+    /// different ways in three places, and a fourth formula would drift from
+    /// all of them.
+    ///
+    /// Two deliberate properties of the seed:
+    ///
+    /// - **Two text posts in three get one**, so the map shows icon markers
+    ///   NEXT TO avatar markers and glyph fallbacks. A field where every text
+    ///   pin animates proves the renderer and hides the mixing; a field where
+    ///   too few do shows nothing at all at city zoom, where a handful of
+    ///   clusters stand in for a hundred posts and their representatives are
+    ///   chosen by like count rather than by kind.
+    /// - **Icons are chosen by the post id's NUMERIC SUFFIX, not by
+    ///   `hashValue`.** ⚠️ Swift seeds its string hash per launch, so hashing
+    ///   would give the same post a different icon on every run: no screenshot
+    ///   diff would ever be stable and no QA recipe could pin a marker's
+    ///   appearance.
+    ///
+    /// `catalogue` is the baked catalogue's ids in manifest order, so the
+    /// caller decides how many distinct icons the map can show.
+    public func animatedIconIDsByPostID(catalogue: [String]) -> [String: String] {
+        guard !catalogue.isEmpty else { return [:] }
+        return posts.reduce(into: [:]) { result, post in
+            guard post.media == nil else { return }
+            guard let index = Self.numericSuffix(of: post.postID) else { return }
+            // Text posts are `index % 3 == 2` in this corpus, so `index / 3`
+            // numbers them 0, 1, 2 … — skipping every third leaves a visible
+            // minority wearing the author's face instead.
+            guard (index / 3) % 3 != 2 else { return }
+            result[post.postID] = catalogue[(index / 3) % catalogue.count]
+        }
+    }
+
+    /// The trailing digits of `post-0007`. Nil when there are none, which keeps
+    /// a hand-written id out of the seed rather than mapping it to zero.
+    static func numericSuffix(of id: String) -> Int? {
+        let digits = id.reversed().prefix { $0.isNumber }.reversed()
+        return digits.isEmpty ? nil : Int(String(digits))
+    }
+
     /// The viewer's social graph, shared by the social-graph and geo-discovery
     /// mocks so the map's "Friends"/"Following" filters and the following list
     /// agree on one truth. The viewer follows the first four authors; the

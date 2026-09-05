@@ -143,6 +143,15 @@ costs a migration the moment any one of them ships alone.
 
 ## 1. Ask A — `RadarPin.icon_id`
 
+> **The product rule this whole document exists to serve, stated once:**
+> **only a TEXT-ONLY post may carry an animated icon.** A media post already
+> has a cover; an icon competing with it would be a second answer to "what is
+> this". On the wire that means `icon_id` is set only when `thumbnail_url` is
+> empty. The client re-checks it rather than trusting it (`MapPin.hasAnimatedIcon`
+> is `isText && animatedIconID != nil`), because a server that broke the
+> invariant would otherwise paint artwork over photographs.
+
+
 ```proto
 // The animated face a TEXT-ONLY post wears in place of the author avatar.
 // 0 or absent = no icon; the marker keeps the avatar/glyph it draws today.
@@ -450,7 +459,7 @@ Asset invariants requested of the pipeline:
 | Square cells, row-major, `frame_count` ≤ 24 | The client precomputes one unit-space rect per frame. |
 | `cell_px = 136` | 132px is the marker disc at @3x; **plus a 2px fully transparent gutter**. |
 | The 2px gutter is mandatory | The same sheet is minified to ~66px for a chat emote and ~88px on a @2x device. Without a transparent gutter, bilinear sampling bleeds the neighbouring frame into the icon's rim. This is a silent, ugly, hard-to-attribute defect. |
-| **Circular alpha pre-baked** into every frame | The marker is a 44pt disc. If the asset is already round, the client sets no mask — and a mask on an animating layer costs an offscreen render pass *per marker per frame*, which at 128 markers is the single largest cost in the feature. Pre-baking the circle on the server removes it entirely. |
+| **SQUARE, with the artwork's own alpha. Not a disc.** | ⚠️ **CHANGED — this line used to ask for circular alpha pre-baked into every frame.** The product decided an icon is not an avatar: it fills the whole box and no circle is visible, where an author's face is cropped to a disc. So do not round the artwork, and do not add a plate behind it — the client draws no ground under an icon, so anything the artwork does not cover is map. The performance argument the old wording rested on is unchanged and now free: the client sets **no mask at all** on an icon face (`Face.icon.cornerRadius == 0`), and a mask on a layer whose contents change every frame would have cost an offscreen pass *per marker per frame* — at 128 markers, the single largest cost in the feature. Square gets that for nothing rather than by pre-baking a circle. |
 | `frame_ms` from a fixed set: **33, 50, 66, 83, 100** (30, 20, 15, 12, 10 fps), **33 preferred**. The set deliberately excludes **24 fps**. | One rate per icon — see below. |
 | ≤ 512 KB encoded per sheet | Bounds the catalog's download and disk footprint. |
 | **HEIC preferred over PNG** for `sheet_url` | At 30 frames, 118 KB against PNG's 260 KB, with alpha preserved (241 → 256 distinct levels, alpha RMSE 0.24%). One still decode, and HEVC hardware decode is universal on device. |

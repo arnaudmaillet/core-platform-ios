@@ -55,6 +55,7 @@ struct IconBaker {
         var plateHex: String?
         var manifest = "catalog.json"
         var fit: Rasteriser.Fit = .inscribe
+        var shape: AtlasWriter.Shape = .disc
     }
 
     static func parse(_ arguments: [String]) throws -> Options {
@@ -76,6 +77,7 @@ struct IconBaker {
             case "--manifest": options.manifest = try next()
             case "--png": options.heic = false
             case "--fill": options.fit = .fill
+            case "--square": options.shape = .square; options.fit = .fill
             case "--plate":
                 let hex = try next()
                 options.plate = try colour(from: hex)
@@ -193,7 +195,7 @@ struct IconBaker {
                 // background stays transparent for the client's own plate layer.
                 AtlasWriter.drawCell(
                     still, into: canvas, at: .zero,
-                    cellPixels: options.cellPixels, plate: nil
+                    cellPixels: options.cellPixels, plate: nil, shape: options.shape
                 )
                 guard let flattened = canvas.makeImage() else {
                     throw BakeError("\(document.name): cannot flatten still")
@@ -286,7 +288,7 @@ struct IconBaker {
                 at: AtlasWriter.origin(
                     frame: frame, columns: columns, rows: rows, cellPixels: cell
                 ),
-                cellPixels: cell, plate: options.plate
+                cellPixels: cell, plate: options.plate, shape: options.shape
             )
         }
         guard let sheet = canvas.makeImage() else {
@@ -337,7 +339,7 @@ struct IconBaker {
                 at: AtlasWriter.origin(
                     frame: frame, columns: columns, rows: rows, cellPixels: cell
                 ),
-                cellPixels: cell, plate: options.plate
+                cellPixels: cell, plate: options.plate, shape: options.shape
             )
         }
         guard let sheet = canvas.makeImage() else {
@@ -373,7 +375,7 @@ struct IconBaker {
             guard !options.inputs.isEmpty else {
                 print("usage: IconBaker <file.lottie|file.json>… --out <dir> "
                       + "[--cell 136] [--max-frames 24] [--max-keys 240] [--fps N] "
-                      + "[--png] [--fill] [--plate #RRGGBB] [--manifest name.json]")
+                      + "[--png] [--fill] [--square] [--plate #RRGGBB] [--manifest name.json]")
                 exit(2)
             }
             var entries: [Entry] = []

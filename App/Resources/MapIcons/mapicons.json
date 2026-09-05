@@ -1,7 +1,7 @@
 [
   {
     "asset" : "00-flame-spin.heic",
-    "bytes" : 2395,
+    "bytes" : 3032,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -71,7 +71,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0.003322886247100191,
@@ -202,7 +201,7 @@
   },
   {
     "asset" : "01-spark-spin.heic",
-    "bytes" : 2084,
+    "bytes" : 2466,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -272,7 +271,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0.003322886247100191,
@@ -403,7 +401,7 @@
   },
   {
     "asset" : "02-pulse-heart-pulse.heic",
-    "bytes" : 1941,
+    "bytes" : 2343,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -473,7 +471,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0,
@@ -604,7 +601,7 @@
   },
   {
     "asset" : "03-leaf-pulse.heic",
-    "bytes" : 1614,
+    "bytes" : 1756,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -674,7 +671,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0,
@@ -805,7 +801,7 @@
   },
   {
     "asset" : "04-wave-bob.heic",
-    "bytes" : 2358,
+    "bytes" : 2917,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -875,7 +871,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       -0.3141592653589793,
       -0.3128202689962858,
@@ -1006,7 +1001,7 @@
   },
   {
     "asset" : "05-note-bob.heic",
-    "bytes" : 1986,
+    "bytes" : 2360,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -1076,7 +1071,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       -0.3141592653589793,
       -0.3128202689962858,
@@ -1207,7 +1201,7 @@
   },
   {
     "asset" : "06-orbit-flicker.heic",
-    "bytes" : 1945,
+    "bytes" : 2275,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -1277,7 +1271,6 @@
       0.5509589855045713,
       0.55
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0,
@@ -1408,7 +1401,7 @@
   },
   {
     "asset" : "07-air-flicker.heic",
-    "bytes" : 1592,
+    "bytes" : 1761,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -1478,7 +1471,6 @@
       0.5509589855045713,
       0.55
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0,
@@ -1609,7 +1601,7 @@
   },
   {
     "asset" : "08-bloom-spin.heic",
-    "bytes" : 2249,
+    "bytes" : 2867,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -1679,7 +1671,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0.003322886247100191,
@@ -1810,7 +1801,7 @@
   },
   {
     "asset" : "09-sprout-spin.heic",
-    "bytes" : 1989,
+    "bytes" : 2361,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -1880,7 +1871,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0.003322886247100191,
@@ -2011,7 +2001,7 @@
   },
   {
     "asset" : "10-beacon-pulse.heic",
-    "bytes" : 1972,
+    "bytes" : 2396,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -2081,7 +2071,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0,
@@ -2212,7 +2201,7 @@
   },
   {
     "asset" : "11-cup-pulse.heic",
-    "bytes" : 1552,
+    "bytes" : 1648,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -2282,7 +2271,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0,
@@ -2413,7 +2401,7 @@
   },
   {
     "asset" : "12-lens-bob.heic",
-    "bytes" : 2306,
+    "bytes" : 2907,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -2483,7 +2471,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       -0.3141592653589793,
       -0.3128202689962858,
@@ -2614,7 +2601,7 @@
   },
   {
     "asset" : "13-star-bob.heic",
-    "bytes" : 2085,
+    "bytes" : 2454,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -2684,7 +2671,6 @@
       1,
       1
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       -0.3141592653589793,
       -0.3128202689962858,
@@ -2815,7 +2801,7 @@
   },
   {
     "asset" : "14-gem-flicker.heic",
-    "bytes" : 1960,
+    "bytes" : 2347,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -2885,7 +2871,6 @@
       0.5509589855045713,
       0.55
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0,
@@ -3016,7 +3001,7 @@
   },
   {
     "asset" : "15-petal-flicker.heic",
-    "bytes" : 1595,
+    "bytes" : 1729,
     "cellPX" : 136,
     "frameCount" : 60,
     "frameMS" : 33,
@@ -3086,7 +3071,6 @@
       0.5509589855045713,
       0.55
     ],
-    "plate" : "#1F2033",
     "rotation" : [
       0,
       0,
@@ -3217,7 +3201,7 @@
   },
   {
     "asset" : "animated_asd_laugh_icon.heic",
-    "bytes" : 30467,
+    "bytes" : 22629,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 5,
@@ -3229,7 +3213,7 @@
   },
   {
     "asset" : "animated_asd_laugh_icon_2.heic",
-    "bytes" : 30474,
+    "bytes" : 22684,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 5,
@@ -3241,7 +3225,7 @@
   },
   {
     "asset" : "animated_emoticon_blush.heic",
-    "bytes" : 126017,
+    "bytes" : 110301,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 23,
@@ -3253,7 +3237,7 @@
   },
   {
     "asset" : "conan_death_icons_animated.heic",
-    "bytes" : 220517,
+    "bytes" : 195236,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 24,
@@ -3265,7 +3249,7 @@
   },
   {
     "asset" : "iso_7000_2837_animated.heic",
-    "bytes" : 74858,
+    "bytes" : 37773,
     "cellPX" : 136,
     "columns" : 4,
     "frameCount" : 18,

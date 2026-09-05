@@ -33,6 +33,8 @@ final class MapClusterAnnotationView: MKAnnotationView {
     /// The author face this marker is showing — part of the idempotence key,
     /// because a text cluster's URL and face cannot tell two groups apart.
     private var representedAvatar: URL?
+    private var representedIcon: String?
+    private var iconCatalog: AnimatedIconCatalog?
 
     /// The loaded cover image, handed to the hero transition to fly.
     var heroImage: UIImage? { card.imageView.image }
@@ -63,6 +65,8 @@ final class MapClusterAnnotationView: MKAnnotationView {
     /// object from the markers it stands for. `bounds`, not `frame`: MapKit
     /// owns the center.
     private func applyFace(_ face: PinCardView.Face) {
+        // Recycled across faces, like the pin's — see the note there.
+        PinCardView.applyPinShadow(to: layer, face: face)
         if bounds.width != face.side {
             bounds = CGRect(x: 0, y: 0, width: face.side, height: face.side)
         }
@@ -78,9 +82,13 @@ final class MapClusterAnnotationView: MKAnnotationView {
     /// Renders the representative post's thumbnail — the cluster's face and the
     /// image the hero transition flies. Called from the map delegate, which
     /// owns the image pipeline.
-    func configure(with cluster: MapComputedCluster, imagePipeline: ImagePipeline) {
+    func configure(
+        with cluster: MapComputedCluster, imagePipeline: ImagePipeline,
+        iconCatalog: AnimatedIconCatalog? = nil
+    ) {
+        self.iconCatalog = iconCatalog
         let url = cluster.representative.thumbnailURL
-        let face: PinCardView.Face = cluster.representative.isText ? .text : .media
+        let face = PinCardView.Face.of(cluster.representative)
         // The hierarchy ring, ABOVE the idempotence guard: a reconcile can
         // change the marker's level (a re-layout that gains or loses the
         // shared place) while the representative — and so the face and URL —
@@ -102,16 +110,40 @@ final class MapClusterAnnotationView: MKAnnotationView {
         // authors compare equal on the pair above — and the second would keep
         // the first one's face for as long as the view survived.
         let avatar = cluster.representative.authorAvatarURL
+        // ⚠️ THE ICON IS PART OF THE KEY, for exactly the reason the avatar is.
+        // A text cluster's cover URL is nil and its face is `.icon` for every
+        // icon-led group, so two groups led by DIFFERENT icons compare equal on
+        // everything above — and the second would keep the first one's artwork
+        // for as long as the view survived. The same bug, one field later.
+        let icon = cluster.representative.animatedIconID
         guard representedURL != url || representedFace != face
-            || representedAvatar != avatar
+            || representedAvatar != avatar || representedIcon != icon
         else { return }
         imageTask?.cancel()
         representedURL = url
         representedFace = face
         representedAvatar = avatar
+        representedIcon = icon
         card.imageView.image = nil
         card.setTextAvatar(nil)
+        card.setIcon(nil)
         applyFace(face)
+
+        // A group led by an icon post wears that icon — the same representative
+        // whose thumbnail a media group would show.
+        if face == .icon, let iconCatalog, let icon {
+            let phase = cluster.representative.iconPhase
+            if let art = iconCatalog.cached(icon) {
+                card.setIcon((art, phase))
+                return
+            }
+            imageTask = Task { [weak self] in
+                guard let art = try? await iconCatalog.art(for: icon) else { return }
+                guard let self, self.representedIcon == icon else { return }
+                self.card.setIcon((art, phase))
+            }
+            return
+        }
         // A text group wears the face of the post that leads it — the same
         // representative whose thumbnail a media group would show.
         if face == .text, let avatar {
@@ -130,6 +162,11 @@ final class MapClusterAnnotationView: MKAnnotationView {
         }
     }
 
+    /// See `MapAnnotationView.redressIcon`.
+    func redressIcon() {
+        card.reinstallIconPlayback()
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         // Same reason as `MapAnnotationView`: pop state belongs to an
@@ -143,6 +180,8 @@ final class MapClusterAnnotationView: MKAnnotationView {
         representedURL = nil
         representedFace = nil
         representedAvatar = nil
+        representedIcon = nil
+        card.setIcon(nil)
         card.imageView.image = nil
         card.setTextAvatar(nil)
         card.setRing(color: MapMarkerRing.color(for: nil), width: MapMarkerRing.width(for: nil))
