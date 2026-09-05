@@ -227,7 +227,11 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             return pin
         }
 
-        response.pins = Array(Self.replicated(pins, across: viewport).prefix(Self.topK))
+        // ⚠️ The Top-K cap is lifted for the density fixture. It is 200 by
+        // default, and a saturated lattice is allowed to exceed that — capping
+        // it here would silently thin the very field the flag exists to build.
+        let replicated = Self.replicated(pins, across: viewport)
+        response.pins = Array(replicated.prefix(Self.density > 1 ? replicated.count : Self.topK))
         // Stand-in tile count: scales with how wide the viewport is.
         response.tileCount = Int32(max(1, pins.count / 12 + 1))
         return .success(response)
@@ -259,7 +263,36 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // rows, which is the 128-marker worst case this feature was designed
         // against. So the grid is derived from that pitch, in span fractions,
         // and `density` chooses how much of it to fill.
-        let columns = 7, rows = 15
+        // The lattice is derived from GEOMETRY, not guessed, and two guesses
+        // preceded it — each producing FEWER markers than the last.
+        //
+        // The trap is that the queried viewport is not the visible screen.
+        // `MKMapView.region` returns a region that CONTAINS the visible rect, so
+        // on a tall phone it overshoots vertically — measured here at roughly
+        // 2.8x the screen's height. A grid laid out as "one row per 64pt of
+        // viewport" therefore puts most of its rows off-screen: 14 rows arrived
+        // as five, spaced ~190pt apart, and the field looked sparse while the
+        // arithmetic said it was saturated.
+        //
+        // So: convert the viewport to METRES, work out how many points it maps
+        // to at the map's own fit, and space the grid at the cluster pitch in
+        // those points. Everything off-screen is wasted rather than wrong.
+        let metresPerDegree = 111_320.0
+        let centreLat = (viewport.neLat + viewport.swLat) / 2
+        let metresLat = latSpan * metresPerDegree
+        let metresLng = lngSpan * metresPerDegree * cos(centreLat * .pi / 180)
+        // The reference screen. A DEBUG fixture may know the device it is being
+        // run on; production code may not, which is one more reason this lives
+        // in the mock.
+        let screen = (width: 440.0, height: 956.0)
+        // The map fits the region to the view, so the binding axis is whichever
+        // needs the smaller scale.
+        let pointsPerMetre = min(screen.width / max(metresLng, 1), screen.height / max(metresLat, 1))
+        // Just ABOVE the 64pt merge threshold: at exactly 64 the engine is
+        // entitled to fold the pair, and one point under it certainly does.
+        let pitch = 70.0
+        let columns = max(1, Int((metresLng * pointsPerMetre / pitch).rounded(.down)))
+        let rows = max(1, Int((metresLat * pointsPerMetre / pitch).rounded(.down)))
         let slots = columns * rows
         let wanted = min(slots, max(1, density) * pins.count)
 

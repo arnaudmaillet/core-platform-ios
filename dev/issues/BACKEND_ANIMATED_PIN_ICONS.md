@@ -9,6 +9,36 @@ clusters), `dev/issues/BACKEND_MAP_PIN_AUTHOR.md` (same marker slot),
 this proposal voids), `dev/issues/BACKEND_H3_BOUNDING_BOX.md` (field-number
 collision)
 
+## ⚠️ Correction to this document's own premise (measured 2026-09-05)
+
+Everything below is sized against **128 simultaneous markers**, derived
+geometrically: `MapClusterEngine` keeps markers 64pt apart, so a 440x956pt
+viewport was reasoned to pack `ceil(440/64)+1` by `ceil(956/64)+1` = 8 x 16.
+
+**The real map does not reach it, and the reason is in the engine.** Its
+proximity merge recomputes each cluster's centroid on every merge, so merges
+CHAIN: a dense uniform field collapses instead of packing. Measured on the
+shipping screen, feeding the mock progressively denser corpora
+(`-maps-mock-density`):
+
+| pins fed | markers on screen |
+|---|---|
+| natural corpus | 8 |
+| 5x | **19** |
+| 15x | **19** |
+| 40x | **19** |
+
+Identical at every density above the first — the count is a function of the
+field's geometry, not of how many pins are in it. So the guarantee "no two
+markers within 64pt" is an upper bound the field never approaches.
+
+**Nothing below changes.** 128 remains the right number to design a contract
+against: it is what the client would have to survive if the engine were ever
+replaced or its merge relaxed, and a memory budget sized for 19 markers is a
+budget with no margin. But the SHIPPING cost is roughly a fifth of the
+projections in this document, and any decision that turns on those figures
+should be taken knowing that.
+
 ## Summary
 
 A text-only post has no cover, so its marker wears a glyph — or, once
