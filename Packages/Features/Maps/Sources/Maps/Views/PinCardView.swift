@@ -143,7 +143,10 @@ final class PinCardView: UIView {
         addSubview(textFaceView)
 
         iconFaceView.frame = bounds
-        iconFaceView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // ⚠️ NO autoresizing mask: `layoutSubviews` centres it at marker size.
+        // A mark is line art authored for a 44pt face; the reveal lays its
+        // stand-in out at the WINDOW's frame, so a filling icon was blown up to
+        // several hundred points as the window opened.
         iconFaceView.isHidden = true
         addSubview(iconFaceView)
 
@@ -369,11 +372,27 @@ final class PinCardView: UIView {
         //
         // `.circular`, because a `.continuous` curve at half the side is a
         // superellipse rather than a circle.
-        if iconIsBare {
-            ringView.layer.cornerRadius = min(bounds.width, bounds.height) / 2
+        // The floor and the ring both take the CARD's radius when it has one —
+        // in a reveal window that is the mask's, which grows toward the page's,
+        // so the stand-in FILLS the window instead of being an ellipse inside
+        // it. Only when the card is square (an icon at rest, radius 0 by
+        // design) does the floor supply its own disc.
+        let cardRadius = layer.cornerRadius
+        let floorRadius = cardRadius > 0 ? cardRadius : min(bounds.width, bounds.height) / 2
+        textFaceView.floorCornerRadius = (iconIsBare || face == .text) ? floorRadius : 0
+        // ⚠️ ONLY the square card overrides the ring. Everywhere else the ring
+        // already wears whatever `setCornerRadius` last wrote — in a reveal
+        // window that is the mask's radius, growing toward the page's — and
+        // re-asserting `face.cornerRadius` here would undo it one line later.
+        if iconIsBare, cardRadius == 0 {
+            ringView.layer.cornerRadius = floorRadius
             ringView.layer.cornerCurve = .circular
         } else {
-            ringView.layer.cornerRadius = face.cornerRadius
+            // The card's LIVE radius, not the face's constant: in a reveal
+            // window that is the mask's, and asserting the face's would undo
+            // what `setCornerRadius` wrote one line earlier. At rest the two
+            // are the same value, so the dressed icon still goes back to 0.
+            ringView.layer.cornerRadius = cardRadius
             ringView.layer.cornerCurve = face == .text ? .circular : .continuous
         }
     }
@@ -576,11 +595,31 @@ final class PinCardView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         layoutDepartureCover()
+        layoutIconFace()
+    }
+
+    /// The mark keeps its authored size and stays centred; only the CONTAINER
+    /// grows.
+    ///
+    /// A photograph can be scaled to any window because it is a picture of
+    /// something. A mark cannot: it is line art drawn for a 44pt face, and the
+    /// reveal — which lays its stand-in out at the window's own frame — was
+    /// blowing it up to fill several hundred points as the window opened.
+    /// Capping it at the icon face's side means the window opens AROUND a mark
+    /// that was already legible when it left the marker.
+    private func layoutIconFace() {
+        let side = min(Face.icon.side, min(bounds.width, bounds.height))
+        iconFaceView.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        iconFaceView.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
     func setCornerRadius(_ radius: CGFloat) {
         layer.cornerRadius = radius
         ringView.layer.cornerRadius = radius
+        // The floor tracks the card. The reveal drives this every frame with
+        // the mask's radius, and a floor that kept the marker's disc while the
+        // card opened into a window is the ellipse-in-a-rect that was filmed.
+        applyFaceVisibility()
     }
 
     /// The soft shadow that lifts a pin card off the map — one definition used
@@ -648,23 +687,26 @@ final class PinCardView: UIView {
 /// change on its own — the trap `PinCardView.ringView` needs a registration to
 /// work around.
 private final class PinTextFaceView: UIView {
-    /// ⚠️ ITS OWN ROUND SHAPE, not the card's.
+    /// The shape the floor clips itself to — SET BY THE CARD, not assumed.
     ///
-    /// This view is an opaque ground plus a bounds-filling `disc`, and neither
-    /// carried a radius: under `.text` the CARD is already clipped to `side / 2`,
-    /// so the square simply never showed. Then it became the fallback under a
-    /// bare `.icon` face — whose radius is 0, deliberately, because "no circle"
-    /// is exactly what an icon asked for — and the floor drew a flat coloured
-    /// SQUARE. The unit test said the face was visible, which was true and not
-    /// the question; only the simulator showed the shape.
-    ///
-    /// `.circular`, not `.continuous`: at a radius of half the side the latter
-    /// is a superellipse, not a circle.
+    /// ⚠️ It was `min(width, height) / 2`, unconditionally. Right at 44x44,
+    /// where the floor stands in for a text marker and must be a disc. Wrong
+    /// everywhere else, and the reveal is everywhere else: `RevealTransition`
+    /// lays the stand-in out at the WINDOW's frame, so the same view found
+    /// itself 300pt wide by 700 tall and clipped to a 150pt radius — a vertical
+    /// capsule, which is exactly what a viewer filmed. The card knows its own
+    /// radius; the floor's job is to agree with it.
+    var floorCornerRadius: CGFloat = 0 {
+        didSet { setNeedsLayout() }
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        layer.cornerRadius = min(bounds.width, bounds.height) / 2
+        layer.cornerRadius = floorCornerRadius
+        // `.circular`, not `.continuous`: at a radius of half the side the
+        // latter is a superellipse rather than a circle.
         layer.cornerCurve = .circular
-        layer.masksToBounds = true
+        layer.masksToBounds = floorCornerRadius > 0
     }
 
     /// The disc's opaque ground. Named for what it is now that it carries no
