@@ -4419,6 +4419,14 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return true
     }
 
+    /// The seam's name for `prepareForHeroPresentation`, so a presenter that
+    /// holds this screen as `any ZoomTransitionDestination` — which the map
+    /// does, since Maps depends on FeedInterface rather than Feed and cannot
+    /// name this type — can pre-pay the same layout For You pre-pays.
+    public func zoomPrepareForPresentation(in bounds: CGRect) {
+        prepareForHeroPresentation(in: bounds)
+    }
+
     public func prepareForHeroPresentation(in bounds: CGRect) {
         view.frame = bounds
         view.setNeedsLayout()

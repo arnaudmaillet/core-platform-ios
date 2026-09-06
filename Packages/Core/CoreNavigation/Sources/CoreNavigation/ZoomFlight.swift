@@ -78,11 +78,16 @@ struct ZoomFlight {
     /// Builds the card in page pose (so the chrome replica can resolve its
     /// full-screen layout before the first frame) plus its shadow stand-in.
     /// The caller inserts both into the container and lays out.
+    /// - Parameter presents: which leg this is, and it decides only one thing —
+    ///   how media taken from the DESTINATION appears. On a present that media
+    ///   is the arrival, so it comes up over the card's own picture; on a
+    ///   dismissal it is the departing page itself and simply replaces it.
     static func build(
         source: any ZoomTransitionSource,
         destination: (any ZoomTransitionDestination)?,
         sourceFrame: CGRect,
-        pageFrame: CGRect
+        pageFrame: CGRect,
+        presents: Bool = false
     ) -> ZoomFlight {
         let card = source.makeZoomFlightCard()
         card.frame = pageFrame
@@ -105,6 +110,22 @@ struct ZoomFlight {
         }
         if card.zoomLiveMediaSurface == nil, let destination {
             card.adoptZoomLiveMedia { surface in destination.zoomMirrorLiveMedia(onto: surface) }
+            // ⚠️ THE SAME DOOR THE RETRY GOES THROUGH NEEDS THE SAME MANNERS.
+            //
+            // A present that gets its picture HERE rather than mid-flight is
+            // still getting the arriving page's picture, and it must arrive the
+            // way `ZoomLiveMediaRetry` makes it arrive — over the card's own,
+            // which stays drawn. Without this the card cuts to a poster of the
+            // page over its animating sprite sheet at take-off, and the flight
+            // that finally got its media early would look worse than the one
+            // that got it late.
+            //
+            // Unreachable today (the page's playback has not registered by the
+            // time this asks), and one timing change away from being reachable
+            // — which is exactly when a hole like this ships.
+            if presents, card.zoomLiveMediaSurface != nil {
+                card.fadeInAdoptedLiveMedia(over: Self.springDuration)
+            }
         }
         // The native aspect is read AFTER the card has its surface, and the
         // order is load-bearing: on the dismiss leg the surface arrives from

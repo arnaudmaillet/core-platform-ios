@@ -398,6 +398,24 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// Default is nothing — a destination with no media has nothing to defer.
     func zoomTransitionWillBegin(flyingLivePlayer: Bool)
 
+    /// Pay this destination's first layout and raster NOW, before the push.
+    ///
+    /// A pushed screen's first layout otherwise happens inside the flight's own
+    /// stack — `ZoomAnimator` lays the container out and builds the card twelve
+    /// lines later — so the most expensive frame of the destination's life is
+    /// the frame the viewer is watching a card lift off in. Paid here it lands
+    /// in the tap's own frame, where a stall is invisible. Measured on the feed:
+    /// build 54-75ms down to 22ms.
+    ///
+    /// ⚠️ IT DOES NOT START THE PICTURE, and the belief that it does was tested
+    /// and refuted. Activation is visibility-gated (`isOnScreen` is set in
+    /// `viewWillAppear`, which UIKit runs INSIDE `pushViewController`), so no
+    /// page becomes active from this call. What it buys is frame pacing.
+    ///
+    /// Default is nothing — a destination whose first layout is cheap, or which
+    /// is not pushed, has nothing to pre-pay.
+    func zoomPrepareForPresentation(in bounds: CGRect)
+
     /// Where a dismissing flight IS, so a destination that draws beside the
     /// card can be drawn with it. See `ZoomDismissState`.
     ///
@@ -510,6 +528,7 @@ public extension ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
     func zoomTransitionWillBegin(flyingLivePlayer: Bool) {}
+    func zoomPrepareForPresentation(in bounds: CGRect) {}
     func setZoomDismissState(_ state: ZoomDismissState) {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }

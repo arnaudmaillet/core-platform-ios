@@ -45,7 +45,7 @@ struct ZoomExistentialDispatchTests {
         ])
     }
 
-    // MARK: - Destination (14 defaulted members)
+    // MARK: - Destination (15 defaulted members)
 
     @Test func everyDefaultedDestinationMemberDispatchesDynamically() {
         let spy = SpyDestination()
@@ -64,6 +64,7 @@ struct ZoomExistentialDispatchTests {
         destination.zoomReclaimLiveMediaView(probe)
         destination.zoomAdoptLiveMediaView(probe)
         destination.zoomTransitionWillBegin(flyingLivePlayer: true)
+        destination.zoomPrepareForPresentation(in: .zero)
         destination.setZoomDismissState(ZoomDismissState(
             progress: 0.5, card: .zero, cornerRadius: 1, isSettling: false
         ))
@@ -72,7 +73,7 @@ struct ZoomExistentialDispatchTests {
         #expect(spy.calls == [
             "kind", "contentReady", "ownsDismissal", "concealsTabBar", "mediaRendering",
             "verticalPermitted", "horizontalPermitted", "mirror", "donate",
-            "reclaim", "adopt", "willBegin", "dismissState", "park",
+            "reclaim", "adopt", "willBegin", "prepareForPresentation", "dismissState", "park",
         ])
     }
 
@@ -162,6 +163,7 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
     func zoomReclaimLiveMediaView(_ view: UIView) { calls.append("reclaim") }
     func zoomAdoptLiveMediaView(_ view: UIView) { calls.append("adopt") }
     func zoomTransitionWillBegin(flyingLivePlayer: Bool) { calls.append("willBegin") }
+    func zoomPrepareForPresentation(in bounds: CGRect) { calls.append("prepareForPresentation") }
     func setZoomDismissState(_ state: ZoomDismissState) { calls.append("dismissState") }
     func zoomParkLiveMediaForHandoff() -> Bool { calls.append("park"); return true }
 }

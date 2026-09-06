@@ -2576,6 +2576,16 @@ extension MapsViewController: MKMapViewDelegate {
         tabBarController?.setTabBarHidden(true, animated: true)
         setFilterBar(hidden: true)
         nav.delegate = transition
+        // Pay the destination's first layout and raster HERE, exactly as For
+        // You does before its own push. Otherwise it happens inside
+        // `ZoomAnimator`'s container layout — the flight's own stack — and the
+        // most expensive frame of the feed's life is the frame the viewer is
+        // watching the card lift off in.
+        //
+        // ⚠️ It buys frame PACING, not an earlier picture: activation is
+        // visibility-gated behind `viewWillAppear`, which UIKit runs inside the
+        // push below. The measurement that says otherwise has not been taken.
+        destination.zoomPrepareForPresentation(in: nav.view.bounds)
         // ⚠️ AN ORDINARY PUSH, WHATEVER CASE THIS IS — and the place page is
         // NOT in it.
         //

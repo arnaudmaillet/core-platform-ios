@@ -242,7 +242,8 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         destination?.setZoomContentHidden(true)
 
         let flight = ZoomFlight.build(
-            source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
+            source: source, destination: destination, sourceFrame: sourceFrame,
+            pageFrame: pageFrame, presents: true
         )
         stagedFlightCard = flight.card
         stagedFlightEndpoints = (start: sourceFrame, end: pageFrame)
