@@ -167,6 +167,13 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
            pin.thumbnailURL.contains("video") {
             return .video
         }
+        // The mock's stand-in for field 5, and it needs NO launch argument: a
+        // map on which no pin is ever a video is not a smaller version of the
+        // product, it is a different one. The corpus is an honest third video, a
+        // third photo, a third text, and this is what lets that reach the map.
+        // Release is untouched — every media pin still reads `.photo` there,
+        // which is the truth until field 5 ships.
+        if pin.thumbnailURL.contains("mock-kind=video") { return .video }
         #endif
         return .photo
     }

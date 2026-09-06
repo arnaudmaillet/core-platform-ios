@@ -27,6 +27,9 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     /// The pin's face; also the exact blueprint of the flying card.
     let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
     private let playBadge = UIImageView()
+    #if DEBUG
+    private var representedKind = "-"
+    #endif
     private var imageTask: Task<Void, Never>?
     /// Separate from `imageTask`: a media pin loads its COVER and its PREVIEW,
     /// and one task handle for two loads cancels whichever started first.
@@ -163,6 +166,13 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
         #endif
         guard representedID != pin.postID else { return }
         representedID = pin.postID
+        #if DEBUG
+        representedKind = switch pin.kind {
+        case .video: "video"
+        case .photo: "photo"
+        case .text: "text"
+        }
+        #endif
         playBadge.isHidden = pin.kind != .video
         // Set on every configure, not only for text: this view is recycled, so
         // a media pin dequeuing a view that last wore the text face has to take
@@ -256,6 +266,10 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     /// Whether this marker is currently wearing baked artwork.
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
     var debugFaceName: String { card.debugFaceName }
+    /// The pin's KIND, which the face hides: a photo and a video both wear
+    /// `.media`, and telling them apart is the whole question when asking
+    /// whether the map's corpus reaches it in thirds.
+    var debugKindName: String { representedKind }
 
     /// The live-preview surface, for the debug readout.
     var videoSurface: VideoRenderView { card.videoRenderView }

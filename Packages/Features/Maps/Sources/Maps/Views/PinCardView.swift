@@ -357,6 +357,9 @@ final class PinCardView: UIView {
     /// not to see.
     private func applyFaceVisibility() {
         let iconIsBare = face == .icon && wornIcon == nil
+        // A reveal may have borrowed the disc as the icon's container; re-facing
+        // or re-dressing the card takes it back.
+        textFaceView.alpha = 1
         textFaceView.isHidden = !(face == .text || iconIsBare)
         iconFaceView.isHidden = face != .icon
         // The ring belongs to the disc, so it follows the disc rather than the
@@ -812,6 +815,29 @@ extension PinCardView: RevealStandInShaping {
     /// at 44pt and as an outline drawn around the screen at full size, so it
     /// has to be gone well before the window is.
     func setContentOpacity(_ alpha: CGFloat) {
+        // ⚠️ UNDER AN ICON THIS CHANNEL DRIVES THE CONTAINER, NOT THE CONTENT.
+        //
+        // A mark is not a picture of a place — it is the thing the author chose
+        // to say, and it reads at 44pt or not at all. So it does not grow with
+        // the window and it does not fade in: it is already drawn, centred, at
+        // its authored size, from the first frame. What arrives gradually is the
+        // DISC AROUND IT — the container assembling itself over the transition
+        // while its content is simply there.
+        //
+        // The disc is `textFaceView`, which is exactly this shape already and is
+        // otherwise idle behind a dressed icon. `applyFaceVisibility` hides it
+        // again the moment the card is re-faced or re-dressed, so this cannot
+        // leak into a resting marker, where the product asked for no circle.
+        if face == .icon, wornIcon != nil {
+            textFaceView.isHidden = false
+            textFaceView.alpha = alpha
+            textFaceView.setContentOpacity(0)   // the ground, never its glyph
+            iconFaceView.alpha = 1
+            ringView.alpha = alpha
+            imageView.alpha = alpha
+            return
+        }
+        textFaceView.alpha = 1
         textFaceView.setContentOpacity(alpha)
         imageView.alpha = alpha
         ringView.alpha = alpha

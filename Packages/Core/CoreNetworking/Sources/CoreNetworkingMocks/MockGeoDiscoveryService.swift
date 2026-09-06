@@ -164,7 +164,23 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // because handing the raw video URL to an image view renders a blank pin.
         guard MockMediaFixtures.isVideoURL(url) || forcesMapVideo else { return url }
         guard forcesMapVideo else {
-            return MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
+            // A still, because handing a raw video URL to an image view renders
+            // a blank pin — but STAMPED, so the pin can say what its post is.
+            //
+            // ⚠️ Without the stamp the map has no video pins at all. `RadarPin`
+            // carries no media kind (`media.v1.MediaKind media_kind = 5` is not
+            // published to BSR, `dev/BACKEND_GAPS.md` §15), so every media pin
+            // classified as `.photo` and the corpus's honest thirds — 40 video,
+            // 40 photo, 40 text — reached the map as two thirds photo and no
+            // video whatsoever. The play badge and the preview path could only
+            // ever be seen under `-maps-force-video`, which makes EVERY pin a
+            // video and is therefore no better a picture of the product.
+            //
+            // A query item the origin ignores, mirroring the discriminator
+            // below. It is a mock standing in for field 5, and it disappears the
+            // day field 5 ships.
+            let still = MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
+            return "\(still)?\(Self.videoKindMarker)"
         }
         // ⚠️ ONE FIXTURE, DISTINCT URLS — and the distinctness is the fixture's
         // whole job now.
@@ -187,6 +203,10 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// Mirrors the Maps feature's own DEBUG launch argument. Read here so the
     /// fixture a pin carries matches how the client will classify it.
     static let forcesMapVideo = ProcessInfo.processInfo.arguments.contains("-maps-force-video")
+
+    /// The mock's stand-in for `media.v1.MediaKind`, read by
+    /// `GeoDiscoveryRepository.kind(for:)` in DEBUG builds only.
+    public static let videoKindMarker = "mock-kind=video"
 
     /// `-maps-mock-density <n>`: emit `n` copies of every matching post,
     /// scattered across the queried viewport.

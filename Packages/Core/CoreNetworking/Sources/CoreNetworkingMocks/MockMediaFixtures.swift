@@ -198,6 +198,13 @@ public enum MockMediaFixtures {
     /// such marker.
     public static func isVideoURL(_ url: String) -> Bool {
         if url.contains("mock://video/") { return true }
+        // ⚠️ MEMBERSHIP FIRST, sniffing second. The table is the truth about
+        // what is a video; the suffix test is a heuristic for urls that are not
+        // in it. Sniffing alone dropped every fixture whose url does not end in
+        // a known extension, so a THIRD of the corpus's videos read as
+        // photographs on the map — measured as photo 24 / text 24 / video 12
+        // where the corpus is an even 40/40/40.
+        if videos.contains(where: { $0.url == url }) { return true }
         let path = URLComponents(string: url)?.path.lowercased() ?? url.lowercased()
         return path.hasSuffix(".m3u8") || path.hasSuffix(".mp4") || path.hasSuffix(".m4v")
     }

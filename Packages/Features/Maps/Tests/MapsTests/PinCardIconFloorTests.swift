@@ -239,6 +239,62 @@ struct PinCardIconFloorTests {
         #expect(textFace.alpha == 1)
     }
 
+    // MARK: - The reveal's container channel
+
+    /// Under a DRESSED icon the reveal's ramp moves the CONTAINER, and the mark
+    /// stays drawn.
+    ///
+    /// A mark reads at 44pt or not at all: it does not grow with the window and
+    /// it does not fade in. What arrives gradually is the disc around it.
+    @Test func theContainerFadesWhileTheMarkStaysDrawn() {
+        let card = makeCard(.icon)
+        card.setIcon((art(), 0))
+        let textFace = card.subviews[4]
+        let iconFace = card.subviews[5]
+
+        card.setContentOpacity(0)
+        #expect(!textFace.isHidden, "the container must exist to arrive at all")
+        #expect(textFace.alpha == 0)
+        #expect(iconFace.alpha == 1, "the mark is already there at frame zero")
+
+        card.setContentOpacity(0.5)
+        #expect(abs(textFace.alpha - 0.5) < 0.001)
+        #expect(iconFace.alpha == 1)
+
+        card.setContentOpacity(1)
+        #expect(textFace.alpha == 1)
+        #expect(iconFace.alpha == 1)
+    }
+
+    /// ⚠️ And it cannot leak onto a resting marker, where the product asked for
+    /// no circle: re-facing or re-dressing takes the disc back.
+    @Test func theBorrowedContainerIsReturnedOnReface() {
+        let card = makeCard(.icon)
+        card.setIcon((art(), 0))
+        card.setContentOpacity(0.5)
+        #expect(card.debugTextFaceIsVisible, "the reveal borrows the disc as the container")
+
+        card.setIcon((art(), 1))
+        #expect(!card.debugTextFaceIsVisible, "a dressed icon shows no disc at rest")
+
+        card.setContentOpacity(0.5)
+        card.setFace(.icon)
+        #expect(!card.debugTextFaceIsVisible, "re-facing returns it too")
+    }
+
+    /// The mark's size is authored, not derived from the window.
+    @Test func theMarkKeepsItsAuthoredSizeInAWindow() {
+        let window = PinCardView(frame: CGRect(x: 0, y: 0, width: 320, height: 700))
+        window.setFace(.icon)
+        window.setIcon((art(), 0))
+        window.layoutIfNeeded()
+        let iconFace = window.subviews[5]
+        #expect(iconFace.bounds.width == PinCardView.Face.icon.side,
+                "a mark drawn for 44pt must not be blown up to the window")
+        #expect(abs(iconFace.center.x - window.bounds.midX) < 0.01)
+        #expect(abs(iconFace.center.y - window.bounds.midY) < 0.01)
+    }
+
     /// The face still answers the model, not the cache — the property the
     /// cluster's fetch gate depends on.
     @Test func theFaceIsStillAPureFunctionOfTheModel() {
