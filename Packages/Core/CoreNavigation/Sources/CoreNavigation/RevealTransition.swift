@@ -1202,9 +1202,23 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             fit: geometry.pageFit
         )
         if let standIn {
-            container.addSubview(standIn)
+            // ⚠️ BELOW THE PAGE, and the page starts absent.
+            //
+            // The rule is one rule in both directions: NOTHING FADES OUT. The
+            // arriving side fades in over a departing side that stays fully
+            // drawn, so there is never a frame where both are half-there and the
+            // map washes through the middle of them. The close leg has always
+            // worked this way — its stand-in is the ARRIVAL, added over the page
+            // and faded in. The open leg did the opposite: it faded the marker's
+            // own face out, so the source dissolved instead of the destination
+            // arriving, which is what a viewer filmed.
+            //
+            // Mirroring it means the stand-in goes UNDER the page and simply
+            // stays: opaque, from frame zero, for the whole opening.
+            container.insertSubview(standIn, belowSubview: toView)
             standIn.alpha = 1
             (standIn as? RevealStandInShaping)?.setContentOpacity(1)
+            toView.alpha = 0
         }
         RevealStage.apply(closed, mask: mask, page: toView, standIn: standIn)
         // The page wears the CARD before it wears itself. Set outside the
@@ -1287,21 +1301,18 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             // ⚠️ NOT RUN AT ALL on a carrying fit, rather than run to the same
             // value: `setContentOpacity(1)` above is where it stays, and the
             // face leaves as one unit on the view's own alpha.
-            if schedule.content.duration > 0 {
-                UIView.animate(
-                    withDuration: span * schedule.content.duration,
-                    delay: span * schedule.content.delay,
-                    options: [.curveEaseOut]
-                ) {
-                    shaping?.setContentOpacity(0)
-                }
-            }
+            // The source's content is NOT scheduled any more — it holds at 1
+            // for the whole opening. `shaping` is kept because the completion
+            // below still hands the card back in a known state.
+            _ = shaping
+            // The DESTINATION arrives instead, on the schedule the stand-in's
+            // own fill used to leave on: same span, same curve, opposite sign.
             UIView.animate(
                 withDuration: span * schedule.fill.duration,
                 delay: span * schedule.fill.delay,
                 options: [.curveEaseIn]
             ) {
-                standIn.alpha = 0
+                toView.alpha = 1
             }
         }
         UIView.animate(
@@ -1334,6 +1345,11 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             self.geometry.installDestinationAuthorBand(nil)
             RevealStage.unwrap(toView, from: host, to: container, frame: pageFrame)
             standIn?.removeFromSuperview()
+            // ⚠️ UNCONDITIONALLY, cancelled or not. The page starts the opening
+            // at alpha 0 now, and a cancelled present that left it there would
+            // hand the viewer a blank screen rather than the screen they backed
+            // out to.
+            toView.alpha = 1
             dim.removeFromSuperview()
             // Cleared under the opaque page, where the reset cannot be seen.
             presenting?.transform = .identity
