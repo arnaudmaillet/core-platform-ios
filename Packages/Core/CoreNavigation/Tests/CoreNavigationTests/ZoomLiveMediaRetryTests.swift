@@ -15,6 +15,7 @@ struct ZoomLiveMediaRetryTests {
     /// semantics the real ones have: take the view, keep it, report it.
     private final class StubCard: UIView, ZoomFlightCard {
         private(set) var preparedSize: CGSize?
+        private(set) var wasAskedToFade = false
         var zoomLiveMediaSurface: UIView?
         var zoomRestingCornerRadius: CGFloat { 12 }
         var zoomRestingChrome: UIView? { nil }
@@ -25,6 +26,9 @@ struct ZoomLiveMediaRetryTests {
         }
         func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
             preparedSize = destinationSize
+        }
+        func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+            wasAskedToFade = true
         }
     }
 
@@ -48,6 +52,9 @@ struct ZoomLiveMediaRetryTests {
     private final class StubMirroringCard: UIView, ZoomFlightCard {
         let ownSurface = UIView()
         private(set) var preparedSize: CGSize?
+        /// The duration the card was asked to fade its adopted media in over,
+        /// nil when it was never asked.
+        private(set) var fadeDuration: TimeInterval?
         private var isLive = false
         var zoomLiveMediaSurface: UIView? { isLive ? ownSurface : nil }
         var zoomRestingCornerRadius: CGFloat { 12 }
@@ -60,6 +67,9 @@ struct ZoomLiveMediaRetryTests {
         }
         func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
             preparedSize = destinationSize
+        }
+        func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+            fadeDuration = duration
         }
     }
 
@@ -273,6 +283,39 @@ struct ZoomLiveMediaRetryTests {
         #expect(poster.animationKeys() == nil,
                 "the poster inside it lags the same way, so it is stilled too")
         window.isHidden = true
+    }
+
+    /// ⚠️ WHICH SIDE THE PICTURE CAME FROM DECIDES HOW IT APPEARS.
+    ///
+    /// A tile's surface is the card's own picture in motion — same post, same
+    /// crop, already what the card was showing — so it replaces the cover and
+    /// nothing should be seen to happen. A page's is the OTHER end of the
+    /// flight arriving, and it comes up over a departure that stays fully
+    /// drawn: the same law the reveal runs on.
+    @Test func onlyTheArrivingSideFadesIn() {
+        let arriving = StubMirroringCard()
+        let arrivingWindow = staged(arriving)
+        let page = StubPage()
+        page.isPlaying = true
+        ZoomLiveMediaRetry.arm(card: arriving, pageSize: CGSize(width: 402, height: 874),
+                               mirroring: page, window: 600)?.debugTick()
+        let fade = arriving.fadeDuration
+        #expect(fade != nil, "the arriving picture cut in instead of fading")
+        // The rest of the flight, floored so a late adoption is still seen to
+        // arrive rather than snapping in over three milliseconds.
+        #expect((fade ?? 0) >= 0.2)
+        arrivingWindow.isHidden = true
+
+        let departing = StubCard()
+        let departingWindow = staged(departing)
+        let source = StubSource()
+        source.surface = UIView()
+        ZoomLiveMediaRetry.arm(card: departing, pageSize: CGSize(width: 402, height: 874),
+                               source: source, window: 600)?.debugTick()
+        #expect(departing.zoomLiveMediaSurface === source.surface)
+        #expect(departing.wasAskedToFade == false,
+                "the card's own picture in motion was faded in over itself")
+        departingWindow.isHidden = true
     }
 }
 

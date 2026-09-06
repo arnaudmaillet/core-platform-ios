@@ -42,6 +42,9 @@ final class ZoomLiveMediaRetry: NSObject {
     /// side that could be late.
     private let acquire: (any ZoomFlightCard) -> UIView?
     private let pageSize: CGSize
+    /// Whether an adoption is an ARRIVAL over this card's own picture, and so
+    /// fades in, or a surface the card was always going to be flying.
+    private let fadesIn: Bool
     private let deadline: CFTimeInterval
     private var link: CADisplayLink?
     private var liveMediaSize: CGSize = .zero
@@ -69,6 +72,10 @@ final class ZoomLiveMediaRetry: NSObject {
             card: card,
             pageSize: pageSize,
             window: window,
+            // A tile's surface is the card's own picture in motion — the same
+            // post, the same crop, already what the card was showing. It
+            // replaces the cover rather than arriving over it.
+            fadesIn: false,
             // The source is held WEAKLY through this closure's own capture, so
             // a flight outliving its screen stops asking rather than keeping a
             // grid that is being torn down alive to answer.
@@ -119,6 +126,8 @@ final class ZoomLiveMediaRetry: NSObject {
             card: card,
             pageSize: pageSize,
             window: window,
+            // The other screen's picture, arriving over this one's.
+            fadesIn: true,
             acquire: { [weak destination] card in
                 guard let destination else { return nil }
                 card.adoptZoomLiveMedia { destination.zoomMirrorLiveMedia(onto: $0) }
@@ -132,9 +141,11 @@ final class ZoomLiveMediaRetry: NSObject {
     private init(card: any ZoomFlightCard,
                  pageSize: CGSize,
                  window: CFTimeInterval,
+                 fadesIn: Bool,
                  acquire: @escaping (any ZoomFlightCard) -> UIView?) {
         self.card = card
         self.pageSize = pageSize
+        self.fadesIn = fadesIn
         self.acquire = acquire
         self.deadline = CACurrentMediaTime() + window
         super.init()
@@ -208,6 +219,17 @@ final class ZoomLiveMediaRetry: NSObject {
         // Recursive, because the poster inside the surface inherited the same
         // animation and lags the same way.
         Self.stopInheritedAnimations(on: surface.layer)
+        // ⚠️ AFTER the stilling, never before: the fade is an animation, and
+        // the sweep above removes every animation on this layer tree.
+        //
+        // The rest of the flight, so the arrival is a transition rather than a
+        // swap that happens to land inside one. Floored, because a surface
+        // adopted in the last few milliseconds should still be seen to arrive.
+        if fadesIn {
+            card.fadeInAdoptedLiveMedia(
+                over: max(0.2, deadline - CACurrentMediaTime())
+            )
+        }
         hasAdopted = true
         follow(card)
         #if DEBUG

@@ -86,6 +86,21 @@ public protocol ZoomFlightCard: UIView {
     /// recognise.
     func adoptZoomLiveMediaView(_ view: UIView)
 
+    /// Brings live media the card has JUST adopted up over the card's own
+    /// picture, across `duration`, instead of swapping to it.
+    ///
+    /// Only the present leg asks for this, and only when the card took off
+    /// with no player: what arrives mid-flight is the destination's picture,
+    /// and the card's cover is the source's. Fading one over the other is the
+    /// same law the reveal transition runs on — nothing fades OUT; the arrival
+    /// comes up over a departure that stays fully drawn.
+    ///
+    /// A card that adopts a surface it was ALREADY flying (the dismiss leg's
+    /// donation, a live-previewing marker mirrored at build time) has no such
+    /// pair and does nothing. Default: nothing — the card's own adopt already
+    /// decided how its media appears.
+    func fadeInAdoptedLiveMedia(over duration: TimeInterval)
+
     /// When true the card sizes its own live surface to its bounds, and the
     /// flight leaves the surface's transform alone.
     ///
@@ -182,6 +197,7 @@ public extension ZoomFlightCard {
     var zoomLiveMediaSurface: UIView? { nil }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
     func adoptZoomLiveMediaView(_ view: UIView) {}
+    func fadeInAdoptedLiveMedia(over duration: TimeInterval) {}
     var zoomLiveMediaTracksCardBounds: Bool { false }
     func setZoomContentBlend(_ t: CGFloat) {}
     func setZoomLandingLiveMedia(_ view: UIView) {}

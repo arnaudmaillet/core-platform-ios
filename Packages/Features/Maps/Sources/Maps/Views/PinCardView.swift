@@ -910,6 +910,23 @@ extension PinCardView: ZoomFlightCard {
         videoRenderView.isHidden = false
     }
 
+    /// The arriving page's picture comes UP over the marker's, which stays
+    /// fully drawn underneath — this card's cover is the source content.
+    ///
+    /// ⚠️ THE POSTER HAS TO GO FIRST, and it is not an optimisation. The poster
+    /// this card just seeded is a COPY of the cover directly behind the
+    /// surface, so fading it in changes nothing on screen: the transition would
+    /// look exactly as it did before, and the video would still arrive as a cut
+    /// when the poster retires. What must fade in is the VIDEO.
+    ///
+    /// Nothing is shown until there is a decoded frame to show; if none ever
+    /// arrives the surface simply stays at zero and the card lands on its
+    /// cover, which is the picture the viewer was already looking at.
+    func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+        videoRenderView.setPoster(nil)
+        videoRenderView.fadeInOnFirstFrame(over: duration)
+    }
+
     func setZoomCornerRadius(_ radius: CGFloat) {
         setCornerRadius(radius)
     }
