@@ -147,7 +147,16 @@ final class AppContainer {
         guard let id = mapPreviewCatalog.ids.first(where: { $0.hasPrefix("\(clip)-") }),
               let art = try? await mapPreviewCatalog.art(for: id),
               let frame = art.firstFrame()
-        else { return nil }
+        else {
+            // Kept: a miss here is silent otherwise, and the page simply shows
+            // black — which reads as a slow video rather than as a poster that
+            // never resolved. Verified resolving: `bigbuckbunny-0` and
+            // `sinteltrailer-0`, 172x172 each.
+            #if DEBUG
+            print("[poster] MISS clip=\(clip) ids=\(mapPreviewCatalog.ids.count)")
+            #endif
+            return nil
+        }
         return frame.pngData()
     }
 
