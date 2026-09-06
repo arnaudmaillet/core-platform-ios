@@ -569,6 +569,11 @@ public struct MockSocialDataset: Sendable {
                   MockMediaFixtures.isVideoURL(media.url),
                   let index = Self.numericSuffix(of: post.postID)
             else { return }
+            // ⚠️ NIL IS AN ANSWER. A fixture with no baked sheet gets NONE, and
+            // the marker falls back to its cover — which is the ladder. Handing
+            // it an arbitrary clip was the defect a viewer reported: five of the
+            // seven fixtures had no sheet of their own and every one of them
+            // wore somebody else's footage.
             result[post.postID] = Self.previewSheet(for: media.url, in: catalogue, index: index)
         }
     }
@@ -582,16 +587,11 @@ public struct MockSocialDataset: Sendable {
     /// still falls back to a deterministic pick — a marker that previews the
     /// wrong clip is a mock-fidelity gap, where a photograph that previews ANY
     /// clip was a lie about what the post is.
-    static func previewSheet(for url: String, in catalogue: [String], index: Int) -> String {
-        let haystack = url.lowercased()
-        let matching = catalogue.filter { id in
-            let clip = id.split(separator: "-").dropLast().joined(separator: "-")
-            guard !clip.isEmpty else { return false }
-            return haystack.contains(clip)
-                || haystack.contains(clip.replacingOccurrences(of: "_", with: ""))
-        }
-        let pool = matching.isEmpty ? catalogue : matching
-        return pool[index % pool.count]
+    static func previewSheet(for url: String, in catalogue: [String], index: Int) -> String? {
+        guard let clip = MockMediaFixtures.bakedClip(for: url) else { return nil }
+        let segments = catalogue.filter { $0.hasPrefix("\(clip)-") }
+        guard !segments.isEmpty else { return nil }
+        return segments[abs(index) % segments.count]
     }
 
     /// The trailing digits of `post-0007`. Nil when there are none, which keeps

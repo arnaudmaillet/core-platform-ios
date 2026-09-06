@@ -115,10 +115,25 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         var text = posts.lazy
             .filter { $0.media == nil && !$0.postID.hasPrefix(MockSocialDataset.arrivalIDPrefix) }
             .map(\.postID).makeIterator()
-        var media = posts.lazy.filter { $0.media != nil }.map(\.postID).makeIterator()
-        func assign(_ venue: Venue, text textCount: Int, media mediaCount: Int) {
+        // ⚠️ VIDEO AND PHOTO DRAW FROM SEPARATE ITERATORS.
+        //
+        // One `media` iterator cannot be asked for a balance it does not know
+        // about: it walks the corpus in order and hands back whatever comes
+        // next. The venues are what the default viewport mostly SHOWS — the
+        // scatter contributes a handful — so an assignment that counts "media"
+        // decides the map's whole composition by accident. Measured before this,
+        // in the default viewport: photo 7, text 8, video 3, from a corpus that
+        // is an exact 40/40/40.
+        var video = posts.lazy
+            .filter { $0.media.map { MockMediaFixtures.isVideoURL($0.url) } ?? false }
+            .map(\.postID).makeIterator()
+        var photo = posts.lazy
+            .filter { $0.media.map { !MockMediaFixtures.isVideoURL($0.url) } ?? false }
+            .map(\.postID).makeIterator()
+        func assign(_ venue: Venue, text textCount: Int, video videoCount: Int, photo photoCount: Int) {
             for _ in 0..<textCount { if let id = text.next() { assignments[id] = venue } }
-            for _ in 0..<mediaCount { if let id = media.next() { assignments[id] = venue } }
+            for _ in 0..<videoCount { if let id = video.next() { assignments[id] = venue } }
+            for _ in 0..<photoCount { if let id = photo.next() { assignments[id] = venue } }
         }
         // ⚠️ These counts are load-bearing beyond clustering: which posts land
         // here decides each venue's MOST-LIKED member, and that is the face the
@@ -128,9 +143,13 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // 0 and the id order decides instead — see the note on the text walk. The PLACE PROFILE's three tabs don't need more members
         // at venue scale: the mixed venue already spans all three kinds, and
         // the city/region markers roll up the whole zone's corpus.
-        assign(mixedVenue, text: 2, media: 3)
-        assign(textOnlyVenue, text: 3, media: 0)
-        assign(mediaOnlyVenue, text: 0, media: 3)
+        // Even thirds, venue by venue, so the map shows what the corpus is.
+        // The mixed venue still spans all three kinds — the property
+        // `aTextFacedMixedClusterOpensBothKinds` rests on — and the media-only
+        // venue still holds no text.
+        assign(mixedVenue, text: 2, video: 2, photo: 2)
+        assign(textOnlyVenue, text: 3, video: 0, photo: 0)
+        assign(mediaOnlyVenue, text: 0, video: 2, photo: 2)
         return assignments
     }
 
@@ -271,7 +290,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             // A venue's members share ONE coordinate exactly, so they cluster
             // at every zoom; everything else keeps its own scattered point.
             let (lat, lng) = venues[post.postID].map { ($0.lat, $0.lng) }
-                ?? coordinate(forIndex: index)
+                ?? coordinate(forIndex: index, postID: post.postID)
             guard Self.contains(viewport: viewport, lat: lat, lng: lng),
                   matches(filter: filter, post: post, lat: lat, lng: lng, viewport: viewport)
             else { return nil }
@@ -472,9 +491,22 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// across the box without randomness, so runs are reproducible. Under the
     /// hierarchy flag, every third post is re-anchored across Europe instead —
     /// same strides, so which posts travel never changes between runs.
-    private func coordinate(forIndex index: Int) -> (lat: Double, lng: Double) {
-        let latFraction = Double((index * 73) % 1000) / 1000.0
-        let lngFraction = Double((index * 137) % 1000) / 1000.0
+    private func coordinate(forIndex index: Int, postID: String) -> (lat: Double, lng: Double) {
+        // ⚠️ SCATTERED BY THE POST'S ID, NOT BY ITS ARRAY INDEX.
+        //
+        // The kind is `index % 3` in this corpus, so a placement that is also a
+        // function of `index` correlates position with kind, and the viewport
+        // rectangle then samples the three classes unevenly — deterministically,
+        // which is worse than noise because every launch shows the same skew.
+        // Measured in the default viewport before this: photo 7, text 8, video 3
+        // out of 18, from a corpus that is an exact 40/40/40.
+        //
+        // FNV-1a over the id, not `hashValue`: Swift seeds that per launch, and
+        // a map whose pins move between runs is a fixture nobody can film twice.
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in postID.utf8 { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3 }
+        let latFraction = Double(hash % 1000) / 1000.0
+        let lngFraction = Double((hash / 1000) % 1000) / 1000.0
         if spreadsHierarchy, index % 3 == 2 {
             let anchor = Self.hierarchyAnchors[(index / 3) % Self.hierarchyAnchors.count]
             return (

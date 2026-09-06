@@ -196,6 +196,27 @@ public enum MockMediaFixtures {
     /// synthetic catalog encodes it in the host (`mock://video/…`); the real
     /// catalog has to be recognised by extension, since a CDN URL carries no
     /// such marker.
+    /// Which BAKED preview clip this fixture's footage is, or nil when none was
+    /// baked from it.
+    ///
+    /// ⚠️ AN EXPLICIT TABLE, not a substring match on the url. Sniffing looked
+    /// like it worked because two fixtures happen to carry their clip's name;
+    /// the other five silently fell through to an arbitrary sheet, so most video
+    /// markers previewed footage from a different film. A table cannot do that
+    /// quietly — a fixture that is not in it has no sheet, and the marker shows
+    /// its cover instead, which is the honest rung of the same ladder.
+    ///
+    /// `Tools/IconBaker` produced these from the fixtures themselves; the ones
+    /// missing here are the HLS ladders and the synthetic clip, which
+    /// `AVAssetImageGenerator` would not decode from this machine.
+    public static func bakedClip(for url: String) -> String? {
+        switch url {
+        case bigBuckBunny720.url: "bigbuckbunny"
+        case sintelTrailer.url: "sinteltrailer"
+        default: nil
+        }
+    }
+
     public static func isVideoURL(_ url: String) -> Bool {
         if url.contains("mock://video/") { return true }
         // ⚠️ MEMBERSHIP FIRST, sniffing second. The table is the truth about
