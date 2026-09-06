@@ -85,7 +85,13 @@ final class PinCardView: UIView {
     /// footage.
     private let previewSheetView = AnimatedIconView()
     /// Live-preview surface above the image, hidden until playback attaches.
-    let videoRenderView = VideoRenderView()
+    /// ⚠️ SILENCED. This surface is a marker's, and a flight borrows it — it is
+    /// never the page the viewer lands on, which keeps its own indicator.
+    let videoRenderView: VideoRenderView = {
+        let view = VideoRenderView()
+        view.suppressesCatchUpIndicator = true
+        return view
+    }()
     /// The pin's border, drawn above the media so it survives live previews.
     /// The flight fades it out as the card leaves the pin (and back in on the
     /// way home).

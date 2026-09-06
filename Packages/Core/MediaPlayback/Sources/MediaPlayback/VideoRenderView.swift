@@ -170,11 +170,28 @@ public final class VideoRenderView: UIView {
         }
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.isCatchingUp else { return }
+            guard !self.suppressesCatchUpIndicator else { return }
             self.installSpinnerIfNeeded()
             self.spinner?.startAnimating()
         }
         catchUpWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.catchUpIndicatorDelay, execute: work)
+    }
+
+    /// Never show the catch-up indicator on this surface.
+    ///
+    /// ⚠️ A TRANSITION IS NOT A WAIT. A spinner says "this is taking longer than
+    /// it should" — true on a page the viewer is sitting on, meaningless on a
+    /// card that is in the air for a third of a second and whose whole job is to
+    /// carry a picture from one place to another. It read as the transition
+    /// stalling. The ARRIVAL page keeps its own indicator; only the marker's
+    /// surface, which is what the flight borrows, is silenced.
+    public var suppressesCatchUpIndicator = false {
+        didSet {
+            guard suppressesCatchUpIndicator else { return }
+            catchUpWorkItem?.cancel()
+            spinner?.stopAnimating()
+        }
     }
 
     /// How long a catch-up must last before it is worth telling the viewer.
