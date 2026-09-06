@@ -420,6 +420,18 @@ final class PinCardView: UIView {
         wornPreview = preview
         previewSheetView.setArt(preview?.art, phase: preview?.phase ?? 0)
         previewSheetView.isHidden = preview == nil
+        // ⚠️ THE COVER UNDER A PREVIEW IS THE PREVIEW'S OWN FIRST FRAME.
+        //
+        // The fallback ladder for a video marker is: the sheet animating, then
+        // the sheet's frame zero, then whatever cover the wire gave. The middle
+        // rung did not exist — under Reduce Motion, or while the catalogue was
+        // still resolving, or after an eviction, the marker showed a PHOTOGRAPH
+        // and then swapped to a clip, which is two claims about one post and
+        // the swap is visible. Frame zero is the same picture the animation
+        // starts from, so stopping looks like pausing rather than changing.
+        if let art = preview?.art, let frameZero = art.firstFrame() {
+            imageView.image = frameZero
+        }
     }
 
     private(set) var wornPreview: (art: AnimatedIconArt, phase: Int)?

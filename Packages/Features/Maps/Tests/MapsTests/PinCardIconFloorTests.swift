@@ -295,6 +295,25 @@ struct PinCardIconFloorTests {
         #expect(abs(iconFace.center.y - window.bounds.midY) < 0.01)
     }
 
+    /// A video marker's cover IS its preview's first frame.
+    ///
+    /// The ladder is: the sheet animating, then the sheet's frame zero, then
+    /// the wire's cover. The middle rung did not exist, so under Reduce Motion
+    /// — or mid-load, or after an eviction — the marker showed a photograph and
+    /// then swapped to a clip. Two claims about one post, and the swap is
+    /// visible.
+    @Test func aPreviewLaysItsOwnFirstFrameUnderneath() {
+        let card = makeCard(.media)
+        let unrelated = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
+            UIColor.systemBlue.setFill(); $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        card.imageView.image = unrelated
+        card.setPreviewSheet((art(), 0))
+        #expect(card.imageView.image !== unrelated,
+                "the wire's cover must give way to the preview's own frame zero")
+        #expect(card.imageView.image != nil, "and there must still be a cover")
+    }
+
     /// The face still answers the model, not the cache — the property the
     /// cluster's fetch gate depends on.
     @Test func theFaceIsStillAPureFunctionOfTheModel() {

@@ -186,6 +186,30 @@ public enum AnimatedIconArt: Sendable, Equatable {
     case decomposed(AnimatedIconStill)
     case sheet(AnimatedIconSheet)
 
+    /// The artwork's first frame, as a still.
+    ///
+    /// A video marker's cover and its preview must be the SAME picture: a
+    /// photograph underneath an animation of a different clip is two claims
+    /// about one post, and the viewer sees the swap the moment motion stops or
+    /// the catalogue evicts. `frameRects` are unit coordinates, so the crop is
+    /// the sheet's own geometry rather than an assumption about its layout.
+    public func firstFrame() -> UIImage? {
+        switch self {
+        case .decomposed(let still):
+            return still.mark
+        case .sheet(let sheet):
+            guard let cg = sheet.sheet.cgImage, let rect = sheet.frameRects.first else { return nil }
+            let pixels = CGRect(
+                x: rect.origin.x * CGFloat(cg.width),
+                y: rect.origin.y * CGFloat(cg.height),
+                width: rect.width * CGFloat(cg.width),
+                height: rect.height * CGFloat(cg.height)
+            ).integral
+            guard let cropped = cg.cropping(to: pixels) else { return nil }
+            return UIImage(cgImage: cropped, scale: sheet.sheet.scale, orientation: .up)
+        }
+    }
+
     public var byteCost: Int {
         switch self {
         case .decomposed(let still): still.byteCost
