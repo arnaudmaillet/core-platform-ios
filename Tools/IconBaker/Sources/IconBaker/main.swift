@@ -122,6 +122,10 @@ struct IconBaker {
         let frameMS: Int
         let cellPX: Int
         let columns: Int?
+        /// The transparent margin inside each cell, in sheet pixels — the
+        /// client has to sample INSIDE it or the margin shows as a border, so
+        /// the producer states it rather than leaving it to be guessed.
+        let gutterPX: Int
         let scale: [Double]?
         let rotation: [Double]?
         let opacity: [Double]?
@@ -228,7 +232,8 @@ struct IconBaker {
                 return [Entry(
                     id: document.name, kind: "still", asset: asset,
                     frameCount: frameCount, frameMS: frameMS, cellPX: options.cellPixels,
-                    columns: nil,
+                    // A still is not sampled from a grid, so no margin applies.
+                    columns: nil, gutterPX: 0,
                     scale: track.scale, rotation: track.rotation, opacity: track.opacity,
                     bytes: size(of: file),
                     note: "\(profile.affine) affine properties, 1 animated layer",
@@ -336,7 +341,8 @@ struct IconBaker {
         return Entry(
             id: id, kind: "sheet", asset: asset,
             frameCount: frameCount, frameMS: Int(stepMS.rounded()), cellPX: cell,
-            columns: columns, scale: nil, rotation: nil, opacity: nil,
+            columns: columns, gutterPX: AtlasWriter.gutter,
+            scale: nil, rotation: nil, opacity: nil,
             bytes: size(of: file),
             note: String(
                 format: "video: %.1fs source, sampled %d frames from %.1fs over %.1fs",
@@ -418,7 +424,8 @@ struct IconBaker {
         return Entry(
             id: document.name, kind: "sheet", asset: asset,
             frameCount: frameCount, frameMS: Int(stepMS.rounded()), cellPX: cell,
-            columns: columns, scale: nil, rotation: nil, opacity: nil,
+            columns: columns, gutterPX: AtlasWriter.gutter,
+            scale: nil, rotation: nil, opacity: nil,
             bytes: size(of: file),
             note: "raster: \(document.frameCount) src frames, \(steps) src step(s), "
                 + String(format: "%.2fs loop", document.loopSeconds)
@@ -467,6 +474,7 @@ struct IconBaker {
         return Entry(
             id: document.name, kind: "sheet", asset: asset,
             frameCount: frameCount, frameMS: frameMS, cellPX: cell, columns: columns,
+            gutterPX: AtlasWriter.gutter,
             scale: nil, rotation: nil, opacity: nil,
             bytes: size(of: file), note: note, stepMS: nil, plate: nil
         )

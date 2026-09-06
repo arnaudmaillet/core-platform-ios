@@ -22,6 +22,10 @@ public final class AnimatedIconCatalog: NSObject {
         let frameMS: Int
         let cellPX: Int
         let columns: Int?
+        /// The transparent margin inside each cell, in sheet pixels. Absent on
+        /// manifests written before the baker declared it — hence optional, and
+        /// hence a sheet that does not say keeps the old whole-cell sampling.
+        let gutterPX: Int?
         let scale: [Double]?
         let rotation: [Double]?
         let opacity: [Double]?
@@ -159,7 +163,8 @@ public final class AnimatedIconCatalog: NSObject {
             }
             return .sheet(AnimatedIconSheet(
                 sheet: image, frameCount: entry.frameCount,
-                columns: entry.columns ?? 4, frameDuration: step
+                columns: entry.columns ?? 4, frameDuration: step,
+                gutterPX: entry.gutterPX ?? 0
             ))
         }.value
     }
