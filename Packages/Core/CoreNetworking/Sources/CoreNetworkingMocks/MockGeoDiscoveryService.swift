@@ -295,6 +295,15 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
                   matches(filter: filter, post: post, lat: lat, lng: lng, viewport: viewport)
             else { return nil }
 
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-maps-log-pins") {
+                let kind = post.media.map {
+                    MockMediaFixtures.isVideoURL($0.url) ? "video" : "photo"
+                } ?? "text"
+                print("[pins] \(post.postID) \(kind) "
+                      + "\(venues[post.postID] != nil ? "venue" : "scatter")")
+            }
+            #endif
             var pin = GeoDiscovery_V1_RadarPin()
             pin.postID = post.postID
             pin.lat = lat
@@ -505,8 +514,17 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // a map whose pins move between runs is a fixture nobody can film twice.
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in postID.utf8 { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3 }
-        let latFraction = Double(hash % 1000) / 1000.0
-        let lngFraction = Double((hash / 1000) % 1000) / 1000.0
+        // ⚠️ FINALISE, then read the HIGH bits. FNV-1a's low bits barely move
+        // for inputs that differ only in their last characters — and every id
+        // here is `post-00NN`. Taking `hash % 1000` therefore kept the aliasing
+        // with `index % 3` that switching away from the index was meant to
+        // break: measured, the scatter placed FOUR photos and ZERO videos in the
+        // default viewport, the same four every launch.
+        hash ^= hash >> 33
+        hash = hash &* 0xff51_afd7_ed55_8ccd
+        hash ^= hash >> 33
+        let latFraction = Double(hash >> 40) / 16777216.0
+        let lngFraction = Double((hash >> 16) & 0xFF_FFFF) / 16777216.0
         if spreadsHierarchy, index % 3 == 2 {
             let anchor = Self.hierarchyAnchors[(index / 3) % Self.hierarchyAnchors.count]
             return (
