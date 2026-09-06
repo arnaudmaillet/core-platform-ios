@@ -75,8 +75,31 @@ enum AtlasWriter {
             context.setFillColor(plate)
             context.fill(art)
         }
-        if let image { context.draw(image, in: art) }
+        if let image { context.draw(image, in: aspectFill(image, in: art)) }
         context.restoreGState()
+    }
+
+    /// The rect that makes `image` COVER `cell` at its own aspect, centred.
+    ///
+    /// ⚠️ `CGContext.draw(_:in:)` STRETCHES an image to the rect it is given. It
+    /// has no content mode, and the caller above hands it a square — so every
+    /// frame of a 16:9 clip was squeezed to 1:1 and baked anamorphic: 1.78x too
+    /// narrow, permanently, in the asset. On screen that is a marker whose
+    /// picture does not match the video it previews, which is exactly how it was
+    /// reported. The cell is already clipped, so covering crops rather than
+    /// bleeds — the same aspect-fill the marker and the page both draw media
+    /// with, which is the point: the preview must be a crop of the SAME picture.
+    ///
+    /// A no-op for square artwork, so every Lottie icon bakes byte-identically.
+    static func aspectFill(_ image: CGImage, in cell: CGRect) -> CGRect {
+        let width = CGFloat(image.width), height = CGFloat(image.height)
+        guard width > 0, height > 0 else { return cell }
+        let scale = max(cell.width / width, cell.height / height)
+        let size = CGSize(width: width * scale, height: height * scale)
+        return CGRect(
+            x: cell.midX - size.width / 2, y: cell.midY - size.height / 2,
+            width: size.width, height: size.height
+        )
     }
 
     static func canvas(width: Int, height: Int) -> CGContext? {
