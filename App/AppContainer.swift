@@ -1,3 +1,4 @@
+import UIKit
 import Auth
 import AuthInterface
 import Chat
@@ -117,7 +118,7 @@ final class AppContainer {
             // Scheme-routing, not plain placeholder: under `-rich-media` the
             // dataset mixes real `https://` photographs with synthesized
             // `mock://` assets, and each has to reach the right fetcher.
-            SchemeRoutingImageFetcher()
+            SchemeRoutingImageFetcher(preferred: Self.bakedPreviewPoster)
         case .localFleet:
             URLSessionImageFetcher(hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000"))
         }
@@ -127,6 +128,29 @@ final class AppContainer {
     /// Snap-feed video playback. Mock mode synthesizes deterministic clips for
     /// `mock://video/…` URLs; fleet mode passes delivery URLs straight to the
     /// player (a no-op today — the backend serves no video renditions yet).
+    /// Resolves `mock://preview/<clip>` from the map's own preview catalogue.
+    ///
+    /// A video post's poster is the frame the page shows until the first frame
+    /// decodes, and the wire has no frame of the clip to give. The marker's
+    /// baked sheet does — its frame zero IS that clip's opening — so the poster
+    /// and the preview are one picture rather than two, and a flight that lands
+    /// on the page does not change the subject.
+    ///
+    /// ⚠️ Whole-sheet decode, then crop, then PNG. It runs once per clip and the
+    /// pipeline caches the result by URL, so the cost is four clips' worth of
+    /// decode over a session rather than one per post.
+    @MainActor
+    private static func bakedPreviewPoster(_ url: URL) async -> Data? {
+        let text = url.absoluteString
+        guard text.hasPrefix(MockMediaFixtures.previewPosterScheme) else { return nil }
+        let clip = String(text.dropFirst(MockMediaFixtures.previewPosterScheme.count))
+        guard let id = mapPreviewCatalog.ids.first(where: { $0.hasPrefix("\(clip)-") }),
+              let art = try? await mapPreviewCatalog.art(for: id),
+              let frame = art.firstFrame()
+        else { return nil }
+        return frame.pngData()
+    }
+
     private(set) lazy var videoPlayback: VideoPlaybackController = {
         let source: any VideoSource = switch environment {
         case .mock: PlaceholderVideoFetcher()

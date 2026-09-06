@@ -222,6 +222,10 @@ public enum MockMediaFixtures {
     /// `Tools/IconBaker` produced these from the fixtures themselves; the ones
     /// missing here are the HLS ladders and the synthetic clip, which
     /// `AVAssetImageGenerator` would not decode from this machine.
+    /// The scheme a baked clip's poster is served under. The app resolves it
+    /// from its own preview catalogue; nothing fetches it over the wire.
+    public static let previewPosterScheme = "mock://preview/"
+
     public static func bakedClip(for url: String) -> String? {
         switch url {
         case bigBuckBunny720.url: "bigbuckbunny"

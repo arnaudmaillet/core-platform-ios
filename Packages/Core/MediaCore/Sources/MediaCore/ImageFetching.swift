@@ -74,15 +74,29 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
     /// blank behind a 60-second wait each. Degrading to the synthesized
     /// color keeps the post VISIBLE and honest; `-media-audit` still logs
     /// the failed URL, so an outage stays observable rather than masked.
+    /// Answered BEFORE either fetcher, for URLs the app can satisfy from what it
+    /// already holds.
+    ///
+    /// The case it exists for: a video post's poster. The wire has no frame of
+    /// the clip to offer, so the mock used to point at an unrelated photograph
+    /// — and the viewer saw it, because a poster is what a page shows until the
+    /// first frame decodes. The app HAS the right picture: the marker's baked
+    /// preview, whose frame zero is that clip's own opening. Nothing in this
+    /// file can know that; a closure can be handed it.
+    private let preferred: (@Sendable (URL) async -> Data?)?
+
     public init(
         remote: any ImageFetching = URLSessionImageFetcher(timeout: 8),
-        placeholder: any ImageFetching = PlaceholderImageFetcher()
+        placeholder: any ImageFetching = PlaceholderImageFetcher(),
+        preferred: (@Sendable (URL) async -> Data?)? = nil
     ) {
         self.remote = remote
         self.placeholder = placeholder
+        self.preferred = preferred
     }
 
     public func fetchImageData(for url: URL) async throws -> Data {
+        if let preferred, let data = await preferred(url) { return data }
         let scheme = url.scheme?.lowercased()
         let isRemote = scheme == "http" || scheme == "https"
         let fetcher = isRemote ? remote : placeholder
