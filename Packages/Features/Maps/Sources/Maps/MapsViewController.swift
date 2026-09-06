@@ -2378,6 +2378,12 @@ extension MapsViewController: MKMapViewDelegate {
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             },
+            // Asked while this transition is being constructed — before the
+            // freeze three dozen lines below, which is what makes the answer
+            // hold for the whole flight.
+            isLivePreviewing: tappedID.map { id in
+                { coordinator.isLivePreviewing(id) }
+            },
             // Asked at DISMISSAL staging, so it reports where the viewer
             // actually stopped rather than where they started. The card lands
             // on this marker either way; only its departure face adapts.

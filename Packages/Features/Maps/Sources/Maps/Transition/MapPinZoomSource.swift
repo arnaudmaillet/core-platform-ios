@@ -24,6 +24,11 @@ final class MapPinZoomSource: ZoomTransitionSource {
     /// surface; returns whether the pin was actually live. `nil` when the
     /// source can't be live (a cluster, or no playback coordinator).
     private let mirrorLive: ((VideoRenderView) -> Bool)?
+    /// The same question `mirrorLive` answers as a side effect, asked without
+    /// one: is the tapped pin previewing live? Read at staging, before there is
+    /// a card to mirror onto. `nil` for a source that was never given the
+    /// probe — see `zoomFlightCarriesLivePlayer`.
+    private let isLivePreviewing: (() -> Bool)?
     /// The hierarchy level the tapped marker's ring announced (a semantic
     /// cluster's city/country color), so the flying card takes off as
     /// the marker's exact twin — ring included. `nil` flies the neutral ring.
@@ -66,6 +71,9 @@ final class MapPinZoomSource: ZoomTransitionSource {
     ///     flies the symbol, `.media` flies `thumbnail`.
     ///   - mirrorLive: attaches the pin's live preview player to the flight
     ///     card's surface, so an animating pin flies live instead of freezing.
+    ///   - isLivePreviewing: whether it WOULD, asked at staging. Pass it
+    ///     alongside `mirrorLive` or the destination defers its playback for a
+    ///     flight that carries no player.
     ///   - departureCover: see the property. Omitted means "no pager behind
     ///     this flight", and the card behaves exactly as it always has.
     init(
@@ -75,6 +83,7 @@ final class MapPinZoomSource: ZoomTransitionSource {
         face: PinCardView.Face = .media,
         ringKind: MapPlace.Kind? = nil,
         mirrorLive: ((VideoRenderView) -> Bool)? = nil,
+        isLivePreviewing: (() -> Bool)? = nil,
         departureCover: (() -> MapReturnCover)? = nil,
         awaitDepartureCover: ((@escaping (MapReturnCover) -> Void) -> Void)? = nil
     ) {
@@ -84,6 +93,7 @@ final class MapPinZoomSource: ZoomTransitionSource {
         self.face = face
         self.ringKind = ringKind
         self.mirrorLive = mirrorLive
+        self.isLivePreviewing = isLivePreviewing
         self.departureCover = departureCover
         self.awaitDepartureCover = awaitDepartureCover
     }
@@ -195,6 +205,43 @@ final class MapPinZoomSource: ZoomTransitionSource {
               mapView.annotations.contains(where: { ($0 as AnyObject) === (annotation as AnyObject) })
         else { return false }
         return mapView.visibleMapRect.contains(MKMapPoint(annotation.coordinate))
+    }
+
+    /// A marker's card flies a sprite sheet — a bundled animation with no
+    /// player behind it — unless the pin was previewing live, in which case
+    /// `makeZoomFlightCard` mirrors the pooled player onto it.
+    ///
+    /// The destination reads this to decide whether to hold its own playback
+    /// back for the flight. Both sides scope the pool by the post's id, so a
+    /// mirrored preview really is the page's own player and a start on the page
+    /// really would blank the card; a sheet is nobody's player and the page
+    /// should begin decoding at take-off.
+    ///
+    /// ⚠️ Answered at staging and durable by construction, not by luck: the
+    /// present path freezes the coordinator (`setSurfaceVisible(false,
+    /// keeping:)`) in the same synchronous stretch that builds this source, so
+    /// no pin can start previewing between this answer and the take-off. And a
+    /// map source implements no `zoomLiveMediaSurfaceIfReady`, so a flight that
+    /// left without a player can never acquire one in the air.
+    ///
+    /// A source given a mirror but no probe cannot tell, and says the
+    /// conservative thing rather than guessing.
+    var zoomFlightCarriesLivePlayer: Bool {
+        Self.fliesLivePlayer(canMirror: mirrorLive != nil, isLivePreviewing: isLivePreviewing?())
+    }
+
+    /// The rule above, as arithmetic — pinnable without an `MKMapView`, which
+    /// this test target deliberately never builds (instantiating one contacts
+    /// MapKit's services, the render-server work the CI doctrine keeps out).
+    ///
+    /// - Parameters:
+    ///   - canMirror: whether this source could mirror a player at all. A
+    ///     cluster cannot: it has no single post to ask about.
+    ///   - isLivePreviewing: whether the pin is previewing right now, or `nil`
+    ///     when nobody can be asked.
+    static func fliesLivePlayer(canMirror: Bool, isLivePreviewing: Bool?) -> Bool {
+        guard canMirror else { return false }
+        return isLivePreviewing ?? true
     }
 
     /// The map itself, not the whole screen.

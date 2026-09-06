@@ -88,6 +88,30 @@ final class MapVideoPlaybackCoordinator {
         }
     }
 
+    /// Whether `id` is previewing live RIGHT NOW — the same fact
+    /// `mirrorLivePreview` acts on, asked without acting on it.
+    ///
+    /// The hero seam needs it one step earlier than the mirror: the destination
+    /// is told whether the card will fly a player while the transition
+    /// controller is still being built, and the only way to answer by mirroring
+    /// would be to mirror onto a card that does not exist yet.
+    ///
+    /// ⚠️ BOTH HALVES, because `playing` means SELECTED, not rendering. A pin
+    /// is entered there the instant it is chosen, before the asynchronous
+    /// `play` has opened anything — and on the default mock corpus that open
+    /// never succeeds at all (`mock://video/...` is not a decodable asset, which
+    /// is what `-rich-media` exists to fix). Asking membership alone would
+    /// answer "live" for three pins that are showing a sprite sheet and nothing
+    /// else, which is precisely the configuration this question was added for.
+    ///
+    /// The pool's answer is the mirror's own precondition, so this is exactly
+    /// "would `mirrorLivePreview` take?" — and the two cannot drift into two
+    /// different ideas of what live means.
+    func isLivePreviewing(_ id: PostID) -> Bool {
+        guard let host = playing[id] else { return false }
+        return pool.hasPlayer(in: host.videoRenderView)
+    }
+
     /// Mirrors the live preview of `id` (if it is playing) onto `view` — the
     /// hero transition's flight card — so the flight carries the same player,
     /// frame-synced, instead of a frozen copy. Returns whether a live preview

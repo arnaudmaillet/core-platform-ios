@@ -21,7 +21,7 @@ import UIKit
 /// protocol; that is the maintenance contract this file buys.
 @MainActor
 struct ZoomExistentialDispatchTests {
-    // MARK: - Source (9 defaulted members)
+    // MARK: - Source (10 defaulted members)
 
     @Test func everyDefaultedSourceMemberDispatchesDynamically() {
         let spy = SpySource()
@@ -29,6 +29,7 @@ struct ZoomExistentialDispatchTests {
         let probe = UIView()
 
         #expect(source.zoomLiveMediaSurfaceIfReady() === spy.readySurface)
+        #expect(source.zoomFlightCarriesLivePlayer == false)
         #expect(source.zoomPresenterDepthView === spy.depthView)
         source.zoomSourceWillStageDismissal()
         source.zoomAdoptLiveMediaView(probe)
@@ -39,7 +40,7 @@ struct ZoomExistentialDispatchTests {
         #expect(source.zoomReleaseHoistedMedia() === spy.hoistedRelease)
 
         #expect(spy.calls == [
-            "surfaceIfReady", "depthView", "willStageDismissal", "adopt",
+            "surfaceIfReady", "carriesLivePlayer", "depthView", "willStageDismissal", "adopt",
             "landingReady", "finalizeLanding", "hoist", "poseHoisted", "releaseHoisted",
         ])
     }
@@ -62,7 +63,7 @@ struct ZoomExistentialDispatchTests {
         #expect(destination.zoomDonateLiveMediaView() === spy.donation)
         destination.zoomReclaimLiveMediaView(probe)
         destination.zoomAdoptLiveMediaView(probe)
-        destination.zoomTransitionWillBegin()
+        destination.zoomTransitionWillBegin(flyingLivePlayer: true)
         destination.setZoomDismissState(ZoomDismissState(
             progress: 0.5, card: .zero, cornerRadius: 1, isSettling: false
         ))
@@ -117,6 +118,7 @@ private final class SpySource: NSObject, ZoomTransitionSource {
 
     // Defaulted members, all overridden with observable answers.
     func zoomLiveMediaSurfaceIfReady() -> UIView? { calls.append("surfaceIfReady"); return readySurface }
+    var zoomFlightCarriesLivePlayer: Bool { calls.append("carriesLivePlayer"); return false }
     var zoomPresenterDepthView: UIView? { calls.append("depthView"); return depthView }
     func zoomSourceWillStageDismissal() { calls.append("willStageDismissal") }
     func zoomAdoptLiveMediaView(_ view: UIView) { calls.append("adopt") }
@@ -159,7 +161,7 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
     func zoomDonateLiveMediaView() -> UIView? { calls.append("donate"); return donation }
     func zoomReclaimLiveMediaView(_ view: UIView) { calls.append("reclaim") }
     func zoomAdoptLiveMediaView(_ view: UIView) { calls.append("adopt") }
-    func zoomTransitionWillBegin() { calls.append("willBegin") }
+    func zoomTransitionWillBegin(flyingLivePlayer: Bool) { calls.append("willBegin") }
     func setZoomDismissState(_ state: ZoomDismissState) { calls.append("dismissState") }
     func zoomParkLiveMediaForHandoff() -> Bool { calls.append("park"); return true }
 }
