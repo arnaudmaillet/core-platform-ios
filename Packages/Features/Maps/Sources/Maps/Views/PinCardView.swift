@@ -324,6 +324,10 @@ final class PinCardView: UIView {
         // face (a pin faces then strips, a cluster strips then faces), so a
         // rule evaluated in only one of them is right for one of them.
         applyFaceVisibility()
+        // And which unit the blend fades follows the same fact, so art landing
+        // mid-flight has to re-point the channel rather than leave it fading a
+        // view nobody can see.
+        applyBlend()
     }
 
     /// Which unit of the card is drawn — and the ICON FACE'S FLOOR.
@@ -552,7 +556,17 @@ final class PinCardView: UIView {
             // rules out. `AnimatedIconView` is a single view for this reason.
             departureCoverView.alpha = 1
             videoRenderView.alpha = 1
-            iconFaceView.alpha = blend
+            // ⚠️ WHICHEVER UNIT IS ACTUALLY DRAWN is the one that fades. With
+            // art that is the icon; standing on the floor it is the disc,
+            // exactly as under `.text`. Fading only `iconFaceView` left a bare
+            // icon's disc opaque at 1 for the whole flight while an invisible
+            // face faded in behind it — so a dismissal onto a marker whose
+            // artwork had not resolved COVERED the departing page in one step
+            // instead of crossfading over it. That is the arrival reading
+            // itself: what the viewer sees must be what the blend moves.
+            let isBare = wornIcon == nil
+            iconFaceView.alpha = isBare ? 1 : blend
+            textFaceView.alpha = isBare ? blend : 1
         }
     }
 

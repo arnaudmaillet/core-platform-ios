@@ -181,6 +181,64 @@ struct PinCardIconFloorTests {
         #expect(textFace.layer.cornerCurve == .circular)
     }
 
+    // MARK: - The blend, which is what a differing-post dismissal rides
+
+    /// ⚠️ The unit the VIEWER SEES must be the unit the blend moves.
+    ///
+    /// `theOperandUnderneathIsNeverPartlyDrawn` pins that the departure picture
+    /// stays opaque, and that stayed true while this was broken: the `.icon`
+    /// branch faded `iconFaceView` and never touched `textFaceView`, so a bare
+    /// icon's disc sat at alpha 1 for the whole flight while an invisible face
+    /// faded in behind it. A dismissal landing on a marker whose artwork had not
+    /// resolved therefore COVERED the departing page in one step instead of
+    /// crossfading over it — the arrival reading itself.
+    @Test func aBareIconFadesItsDiscAcrossTheBlend() {
+        let card = makeCard(.icon)
+        card.setDeparturePicture(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
+            UIColor.black.setFill(); $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        })
+        let textFace = card.subviews[4]
+
+        card.setBlend(0)
+        #expect(textFace.alpha == 0, "at blend 0 the arrival must not be drawn at all")
+        card.setBlend(0.5)
+        #expect(abs(textFace.alpha - 0.5) < 0.001, "it has to cross fade, not switch")
+        card.setBlend(1)
+        #expect(textFace.alpha == 1)
+    }
+
+    /// The dressed case keeps fading the icon, and the disc stays out of it.
+    @Test func aDressedIconFadesItsArtNotItsFloor() {
+        let card = makeCard(.icon)
+        card.setIcon((art(), 0))
+        card.setDeparturePicture(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
+            UIColor.black.setFill(); $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        })
+        let textFace = card.subviews[4]
+        let iconFace = card.subviews[5]
+
+        card.setBlend(0.5)
+        #expect(abs(iconFace.alpha - 0.5) < 0.001)
+        #expect(textFace.alpha == 1, "the floor is not in the flight when there is art")
+    }
+
+    /// Art landing MID-FLIGHT has to re-point the channel, or the blend keeps
+    /// fading a view nobody can see.
+    @Test func artLandingMidBlendMovesTheChannel() {
+        let card = makeCard(.icon)
+        card.setDeparturePicture(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
+            UIColor.black.setFill(); $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        })
+        card.setBlend(0.5)
+        let textFace = card.subviews[4]
+        let iconFace = card.subviews[5]
+        #expect(abs(textFace.alpha - 0.5) < 0.001)
+
+        card.setIcon((art(), 0))
+        #expect(abs(iconFace.alpha - 0.5) < 0.001, "the icon takes over the blend at its current value")
+        #expect(textFace.alpha == 1)
+    }
+
     /// The face still answers the model, not the cache — the property the
     /// cluster's fetch gate depends on.
     @Test func theFaceIsStillAPureFunctionOfTheModel() {
