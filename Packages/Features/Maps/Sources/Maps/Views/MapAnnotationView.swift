@@ -255,6 +255,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     #if DEBUG
     /// Whether this marker is currently wearing baked artwork.
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+    var debugFaceName: String { card.debugFaceName }
 
     /// The live-preview surface, for the debug readout.
     var videoSurface: VideoRenderView { card.videoRenderView }

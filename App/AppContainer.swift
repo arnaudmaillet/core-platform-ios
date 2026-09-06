@@ -327,9 +327,37 @@ final class AppContainer {
         // itself costs +1.6 ms of frame mean against animating nothing at all.
         mockPreviewSheets: environment == .mock
             ? Self.mockPreviewSheets(in: mockBackend, catalogue: Self.mapPreviewCatalog) : [:],
-        iconCatalog: Self.mapIconCatalog,
-        previewCatalog: Self.mapPreviewCatalog
+        // ⚠️ The ids above always come from the REAL catalogue, even when the
+        // one handed to the map cannot honour them. That is the whole point of
+        // `-map-icons-unavailable`: seeding from an empty catalogue would give
+        // no pin an icon id at all, so no marker would wear `.icon` and the
+        // fallback would never run — the flag would prove the opposite of what
+        // it claims. Here the pins carry ids and the catalogue answers nothing,
+        // which is exactly a fleet build, an evicted asset, or a decode that
+        // failed.
+        iconCatalog: Self.iconsUnavailable ? Self.unavailableIconCatalog : Self.mapIconCatalog,
+        previewCatalog: Self.previewsUnavailable ? Self.unavailableIconCatalog : Self.mapPreviewCatalog
     )
+
+    #if DEBUG
+    /// `-map-icons-unavailable` / `-map-previews-unavailable`: keep the ids,
+    /// break the resolution. The floor under an icon face is invisible in a
+    /// screenshot of a healthy build, so without these it is only ever pinned by
+    /// unit tests.
+    static let iconsUnavailable =
+        ProcessInfo.processInfo.arguments.contains("-map-icons-unavailable")
+    static let previewsUnavailable =
+        ProcessInfo.processInfo.arguments.contains("-map-previews-unavailable")
+    /// A manifest that does not exist. `AnimatedIconCatalog` answers an absent
+    /// manifest with an empty table rather than trapping, so every lookup misses
+    /// and every async resolve throws — the real failure path, not a stub.
+    private static let unavailableIconCatalog =
+        AnimatedIconCatalog(manifest: "mapicons-deliberately-absent")
+    #else
+    static let iconsUnavailable = false
+    static let previewsUnavailable = false
+    private static let unavailableIconCatalog: AnimatedIconCatalog? = nil
+    #endif
 
     /// Baked from real clips by `Tools/IconBaker` — 24 frames at a 172px cell,
     /// which is the 56pt media face at @3x plus the contract's 2px gutter.

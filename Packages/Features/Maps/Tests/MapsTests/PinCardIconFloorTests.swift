@@ -46,6 +46,11 @@ struct PinCardIconFloorTests {
         // "ringless" half of the icon contract is about a DRESSED icon, and
         // `PinCardBlendTests` now asserts it on one.
         #expect(!card.ringView.isHidden, "the floor wears the text marker's ring")
+        // ⚠️ And the ring must take the DISC's shape. It draws on the card's
+        // rectangle, which under `.icon` is a square — so left alone it framed
+        // the round floor in a squircle.
+        #expect(card.ringView.layer.cornerRadius == card.bounds.height / 2)
+        #expect(card.ringView.layer.cornerCurve == .circular)
     }
 
     /// The floor is a floor, not a layer: an icon's alpha is its shape, so a
@@ -57,6 +62,9 @@ struct PinCardIconFloorTests {
         card.setIcon((art(), 0))
         #expect(!card.debugTextFaceIsVisible, "art landed; the floor must go")
         #expect(card.debugIconFaceIsVisible)
+        // And the ring goes back to the icon's own square geometry.
+        #expect(card.ringView.isHidden)
+        #expect(card.ringView.layer.cornerRadius == PinCardView.Face.icon.cornerRadius)
     }
 
     /// ⚠️ The two callers write the art on OPPOSITE sides of the face — a pin
@@ -149,6 +157,28 @@ struct PinCardIconFloorTests {
         let bareLayer = CALayer()
         bare.applyZoomRestingShadow(to: bareLayer)
         #expect(bareLayer.shadowOpacity > 0, "the floor flies with its lift")
+    }
+
+    /// ⚠️ VISIBLE IS NOT ROUND, and the difference is the whole fallback.
+    ///
+    /// The first version of these tests asserted only that the text face was
+    /// not hidden. That was true, and the marker still drew a flat coloured
+    /// SQUARE: the face carried no radius of its own and relied on the CARD's,
+    /// which under `.icon` is 0 by design. Only the simulator showed it. This
+    /// pins the shape.
+    @Test func theFloorIsRoundEvenThoughTheCardIsNot() {
+        let card = makeCard(.icon)
+        card.layoutIfNeeded()
+        #expect(card.layer.cornerRadius == 0, "the icon face stays square — that is the contract")
+
+        let textFace = card.subviews[4]
+        textFace.layoutIfNeeded()
+        #expect(!textFace.isHidden)
+        #expect(textFace.layer.cornerRadius == textFace.bounds.height / 2,
+                "the floor must round ITSELF; the card will not do it under .icon")
+        #expect(textFace.layer.masksToBounds, "a radius that clips nothing is a square")
+        // ⚠️ A superellipse at half the side is not a circle.
+        #expect(textFace.layer.cornerCurve == .circular)
     }
 
     /// The face still answers the model, not the cache — the property the

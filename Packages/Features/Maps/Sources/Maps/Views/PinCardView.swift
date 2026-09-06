@@ -281,7 +281,6 @@ final class PinCardView: UIView {
 
     func setFace(_ face: Face) {
         self.face = face
-        applyFaceVisibility()
         // ⚠️ THE GREY BOX. `imageView` is the cover host and it is never
         // hidden — it carries an opaque `.secondarySystemBackground` ground so
         // a letterboxed photograph reads as framed. Under the TEXT face that
@@ -303,6 +302,11 @@ final class PinCardView: UIView {
         // somebody's footage.
         if face != .media { setPreviewSheet(nil) }
         setCornerRadius(face.cornerRadius)
+        // ⚠️ AFTER `setCornerRadius`, which writes the ring's radius from the
+        // face. Called before it, the floor's round ring was overwritten by the
+        // icon face's 0 one line later — the assertion said 0 and the marker
+        // drew a squircle around a disc.
+        applyFaceVisibility()
         applyBlend()
     }
 
@@ -352,6 +356,22 @@ final class PinCardView: UIView {
         // face: a bare icon wearing the text floor should look like a text
         // marker, ring included.
         ringView.isHidden = face == .icon && !iconIsBare
+        // ⚠️ AND IT MUST TAKE THE DISC'S SHAPE. `ringView` draws the marker's
+        // border on the CARD's rectangle, which under `.icon` is a square with
+        // radius 0 — that is the whole meaning of "no circle". Left alone it
+        // framed the round floor in a squircle: rounded, obviously wrong, and
+        // invisible to a test that only asked whether the face was hidden. Only
+        // the simulator showed it.
+        //
+        // `.circular`, because a `.continuous` curve at half the side is a
+        // superellipse rather than a circle.
+        if iconIsBare {
+            ringView.layer.cornerRadius = min(bounds.width, bounds.height) / 2
+            ringView.layer.cornerCurve = .circular
+        } else {
+            ringView.layer.cornerRadius = face.cornerRadius
+            ringView.layer.cornerCurve = face == .text ? .circular : .continuous
+        }
     }
 
     /// Read back rather than remembered elsewhere — the same reason
@@ -386,6 +406,14 @@ final class PinCardView: UIView {
     var presentedIconTick: Double? { iconFaceView.presentedTick ?? previewSheetView.presentedTick }
     /// The icon face's floor, read back for the tests that pin it.
     var debugTextFaceIsVisible: Bool { !textFaceView.isHidden }
+    /// The face worn, and whether it is standing on the floor.
+    var debugFaceName: String {
+        switch face {
+        case .media: "media"
+        case .text: "text"
+        case .icon: wornIcon == nil ? "icon-BARE" : "icon"
+        }
+    }
     var debugIconFaceIsVisible: Bool { !iconFaceView.isHidden }
     var isPlayingPreviewSheet: Bool { wornPreview != nil }
 
@@ -606,6 +634,25 @@ final class PinCardView: UIView {
 /// change on its own — the trap `PinCardView.ringView` needs a registration to
 /// work around.
 private final class PinTextFaceView: UIView {
+    /// ⚠️ ITS OWN ROUND SHAPE, not the card's.
+    ///
+    /// This view is an opaque ground plus a bounds-filling `disc`, and neither
+    /// carried a radius: under `.text` the CARD is already clipped to `side / 2`,
+    /// so the square simply never showed. Then it became the fallback under a
+    /// bare `.icon` face — whose radius is 0, deliberately, because "no circle"
+    /// is exactly what an icon asked for — and the floor drew a flat coloured
+    /// SQUARE. The unit test said the face was visible, which was true and not
+    /// the question; only the simulator showed the shape.
+    ///
+    /// `.circular`, not `.continuous`: at a radius of half the side the latter
+    /// is a superellipse, not a circle.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = min(bounds.width, bounds.height) / 2
+        layer.cornerCurve = .circular
+        layer.masksToBounds = true
+    }
+
     /// The disc's opaque ground. Named for what it is now that it carries no
     /// tint — it was a translucent accent wash, and the name outlived it.
     private let disc = UIView()
