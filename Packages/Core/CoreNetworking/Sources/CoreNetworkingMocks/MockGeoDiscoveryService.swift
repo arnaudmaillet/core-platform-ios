@@ -151,15 +151,81 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     ///   which is the whole point of the contract ask. Its `mock-kind=video`
     ///   marker is what `GeoDiscoveryRepository.kind(for:)` matches on.
     static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
-        guard catalog == .realAssets, MockMediaFixtures.isVideoURL(url) else { return url }
-        return forcesMapVideo
-            ? MockMediaFixtures.mapPreviewLoop.url
-            : MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
+        guard catalog == .realAssets else { return url }
+        // ⚠️ Under the FORCE flag, every covered pin becomes a video pin.
+        //
+        // It used to force only posts whose media was already a video, which is
+        // one third of the corpus — and after clustering, none of those survived
+        // as a LONE pin in the default viewport, so the playback path had
+        // literally never run. A flag named `-maps-force-video` that produces
+        // zero playing videos is a flag that measures nothing.
+        //
+        // Outside the flag the old rule stands: a real video post gets a still,
+        // because handing the raw video URL to an image view renders a blank pin.
+        guard MockMediaFixtures.isVideoURL(url) || forcesMapVideo else { return url }
+        guard forcesMapVideo else {
+            return MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
+        }
+        // ⚠️ ONE FIXTURE, DISTINCT URLS — and the distinctness is the fixture's
+        // whole job now.
+        //
+        // Every video pin used to get the identical `mapPreviewLoop` url. The
+        // pool shares one player when the asset AND the scope match, the map
+        // passed no scope, so `nil == nil` and three markers joined ONE player:
+        // three surfaces drawing one decoder on one clock. Any reading of
+        // "three concurrent videos" taken against that fixture was a reading of
+        // one video, and the cap it justified was never exercised.
+        //
+        // The discriminator is a query item the origin ignores (verified 206),
+        // so this is the SAME 320x176 clip decoded N times — which is what a
+        // concurrency test needs. Rotating real files instead would vary
+        // resolution and bitrate and measure those rather than concurrency.
+        let discriminator = url.reduce(into: UInt64(5381)) { $0 = $0 &* 33 &+ UInt64($1.asciiValue ?? 0) }
+        return "\(MockMediaFixtures.mapPreviewLoop.url)&pin=\(discriminator % 9973)"
     }
 
     /// Mirrors the Maps feature's own DEBUG launch argument. Read here so the
     /// fixture a pin carries matches how the client will classify it.
     static let forcesMapVideo = ProcessInfo.processInfo.arguments.contains("-maps-force-video")
+
+    /// `-maps-mock-density <n>`: emit `n` copies of every matching post,
+    /// scattered across the queried viewport.
+    ///
+    /// The corpus is ~100 posts spread over Paris, so a viewport holds five to
+    /// thirteen markers — enough to prove a feature works and nowhere near
+    /// enough to prove it scales. The map's real worst case is a SATURATED
+    /// marker lattice: `MapClusterEngine` keeps markers 64pt apart, so a
+    /// 440x956pt screen tops out at 8 x 16 = 128, and in any populated city
+    /// that is the ordinary count rather than a rare peak.
+    ///
+    /// Replication rather than more fixtures: the point is marker COUNT under
+    /// pan and zoom, and inventing a hundred more posts would drag every other
+    /// mock surface — like counts, venues, arrivals — along with it. Position
+    /// is derived from the post id and the copy index, so a run is
+    /// reproducible.
+    /// `-maps-mock-pitch <points>` — see `replicated`.
+    static let pitchOverride: Double? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-maps-mock-pitch"),
+              index + 1 < arguments.count, let value = Double(arguments[index + 1])
+        else { return nil }
+        // ⚠️ Floor of 16, not 64. The 64 was a guard against laying pins
+        // closer than the cluster engine's merge threshold — sensible while
+        // clustering was on, and exactly wrong once `-maps-no-clustering`
+        // exists, because then a tighter pitch is the ONLY way to stand a
+        // 128-marker field in front of the renderer. Clamping silently made
+        // `-maps-mock-pitch 45` and `-maps-mock-pitch 32` identical to 64, and
+        // the marker count did not move across three runs.
+        return max(16, value)
+    }()
+
+    static let density: Int = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-maps-mock-density"),
+              index + 1 < arguments.count, let value = Int(arguments[index + 1])
+        else { return 1 }
+        return max(1, min(value, 40))
+    }()
 
     public func register(on bff: MockBFF) {
         bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { [self] (request: GeoDiscovery_V1_QueryTileRequest, headers: Headers) in
@@ -204,10 +270,97 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             return pin
         }
 
-        response.pins = Array(pins.prefix(Self.topK))
+        // ⚠️ The Top-K cap is lifted for the density fixture. It is 200 by
+        // default, and a saturated lattice is allowed to exceed that — capping
+        // it here would silently thin the very field the flag exists to build.
+        let replicated = Self.replicated(pins, across: viewport)
+        response.pins = Array(replicated.prefix(Self.density > 1 ? replicated.count : Self.topK))
         // Stand-in tile count: scales with how wide the viewport is.
         response.tileCount = Int32(max(1, pins.count / 12 + 1))
         return .success(response)
+    }
+
+    /// Spreads `density` copies of each pin over the viewport.
+    ///
+    /// ⚠️ Each copy needs its OWN post id, or the client's diffing engine —
+    /// which keys annotations by `postID` — collapses them all back into one
+    /// marker and the density knob silently does nothing. The suffix keeps the
+    /// original id as a prefix so `-maps-open-first-text-pin` and the icon seed
+    /// still recognise it, and the ORIGINAL keeps its exact id so nothing that
+    /// looks a post up by name breaks.
+    private static func replicated(
+        _ pins: [GeoDiscovery_V1_RadarPin], across viewport: GeoDiscovery_V1_Viewport
+    ) -> [GeoDiscovery_V1_RadarPin] {
+        guard density > 1, !pins.isEmpty else { return pins }
+        let latSpan = abs(viewport.neLat - viewport.swLat)
+        let lngSpan = abs(viewport.neLng - viewport.swLng)
+        // ⚠️ SPACED AT THE CLUSTER PITCH, not packed as tightly as possible.
+        //
+        // Two wrong versions preceded this one, and both produced FEWER markers
+        // by trying for more. `MapClusterEngine` merges anything closer than
+        // 64pt, so clones dropped on a fine grid collapse right back into a
+        // handful of clusters: a 15x15 lattice over a 440x956pt screen puts
+        // markers 29pt apart and 200 pins came back as 13 markers.
+        //
+        // The saturated field IS the lattice — 440/64 ≈ 7 columns by 956/64 ≈ 15
+        // rows, which is the 128-marker worst case this feature was designed
+        // against. So the grid is derived from that pitch, in span fractions,
+        // and `density` chooses how much of it to fill.
+        // The lattice is derived from GEOMETRY, not guessed, and two guesses
+        // preceded it — each producing FEWER markers than the last.
+        //
+        // The trap is that the queried viewport is not the visible screen.
+        // `MKMapView.region` returns a region that CONTAINS the visible rect, so
+        // on a tall phone it overshoots vertically — measured here at roughly
+        // 2.8x the screen's height. A grid laid out as "one row per 64pt of
+        // viewport" therefore puts most of its rows off-screen: 14 rows arrived
+        // as five, spaced ~190pt apart, and the field looked sparse while the
+        // arithmetic said it was saturated.
+        //
+        // So: convert the viewport to METRES, work out how many points it maps
+        // to at the map's own fit, and space the grid at the cluster pitch in
+        // those points. Everything off-screen is wasted rather than wrong.
+        let metresPerDegree = 111_320.0
+        let centreLat = (viewport.neLat + viewport.swLat) / 2
+        let metresLat = latSpan * metresPerDegree
+        let metresLng = lngSpan * metresPerDegree * cos(centreLat * .pi / 180)
+        // The reference screen. A DEBUG fixture may know the device it is being
+        // run on; production code may not, which is one more reason this lives
+        // in the mock.
+        let screen = (width: 440.0, height: 956.0)
+        // The map fits the region to the view, so the binding axis is whichever
+        // needs the smaller scale.
+        let pointsPerMetre = min(screen.width / max(metresLng, 1), screen.height / max(metresLat, 1))
+        // Just ABOVE the 64pt merge threshold by default: at exactly 64 the
+        // engine is entitled to fold the pair, and one point under it certainly
+        // does.
+        //
+        // ⚠️ `-maps-mock-pitch <points>` widens it, and the reason is not
+        // cosmetic. At 70pt the engine's CHAINING merge still folds the field
+        // into a handful of clusters — and a cluster never plays video, because
+        // `MapVideoPlaybackCoordinator.Candidate.view` is typed
+        // `MapAnnotationView`. So a video-playback experiment run at the default
+        // pitch measures nothing: every video pin lands inside a cluster and the
+        // path never runs. Widening the pitch is what produces LONE pins.
+        let pitch = Self.pitchOverride ?? 70.0
+        let columns = max(1, Int((metresLng * pointsPerMetre / pitch).rounded(.down)))
+        let rows = max(1, Int((metresLat * pointsPerMetre / pitch).rounded(.down)))
+        let slots = columns * rows
+        let wanted = min(slots, max(1, density) * pins.count)
+
+        return pins.enumerated().flatMap { pinIndex, pin -> [GeoDiscovery_V1_RadarPin] in
+            let copies = wanted / pins.count + (pinIndex < wanted % pins.count ? 1 : 0)
+            return (0..<max(1, copies)).map { copy in
+                guard copy > 0 else { return pin }
+                var clone = pin
+                clone.postID = "\(pin.postID)#\(copy)"
+                let slot = (pinIndex * (wanted / pins.count + 1) + copy) % slots
+                let row = slot / columns, column = slot % columns
+                clone.lat = viewport.swLat + latSpan * (Double(row) + 0.5) / Double(rows)
+                clone.lng = viewport.swLng + lngSpan * (Double(column) + 0.5) / Double(columns)
+                return clone
+            }
+        }
     }
 
     /// One `MapFilter` bucket, resolved against the shared dataset:

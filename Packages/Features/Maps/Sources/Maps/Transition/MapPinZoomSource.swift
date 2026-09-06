@@ -103,10 +103,10 @@ final class MapPinZoomSource: ZoomTransitionSource {
                 ?? thumbnail
         }
         if let cluster = annotation as? MapComputedCluster {
-            face = cluster.representative.isText ? .text : .media
+            face = PinCardView.Face.of(cluster.representative)
             ringKind = cluster.isHierarchyMarker ? cluster.place?.kind : nil
         } else if let pin = (annotation as? MapAnnotation)?.pin {
-            face = pin.isText ? .text : .media
+            face = PinCardView.Face.of(pin)
         }
 
         stagedCover = departureCover?() ?? .none
