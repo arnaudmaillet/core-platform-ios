@@ -101,6 +101,19 @@ public struct MockSocialDataset: Sendable {
     /// Nine posts on the same three-kind cycle the main corpus uses (video,
     /// image, text), so all three profile tabs have something: the mosaic, the
     /// timeline, and Short.
+
+    /// ⚠️ EVERY MEDIA POST IS A VIDEO, for now.
+    ///
+    /// A product decision while the video path is the one under work: photographs
+    /// are set aside so the map and the feed exercise video everywhere a post has
+    /// media. The photo branches are DELIBERATELY LEFT IN PLACE below rather than
+    /// deleted — they are correct, they are tested, and this is a switch rather
+    /// than a removal. Flip it back and the corpus returns to thirds.
+    ///
+    /// What it does NOT change: `hasMedia`, so text-only posts stay exactly as
+    /// they were and the text/media split is untouched.
+    static let mediaIsAlwaysVideo = true
+
     static func viewerRecords(mediaCatalog: MediaCatalog, after count: Int) -> [PostRecord] {
         let captions = [
             "Testing in production is fine if production is your simulator.",
@@ -117,7 +130,7 @@ public struct MockSocialDataset: Sendable {
         let newestMS: Int64 = 1_780_000_000_000
         return (0..<captions.count).map { index in
             let hasMedia = index % 3 != 2
-            let isVideo = index % 3 == 0
+            let isVideo = Self.mediaIsAlwaysVideo || index % 3 == 0
             let shape = shapes[index % shapes.count]
             let media: (url: String, width: Int, height: Int)? = switch (hasMedia, mediaCatalog) {
             case (false, _):
@@ -749,7 +762,7 @@ public struct MockSocialDataset: Sendable {
             // One of every three posts is video, one image, one text-only —
             // a mix that exercises all three snap-feed cell paths.
             let hasMedia = index % 3 != 2
-            let isVideo = index % 3 == 0
+            let isVideo = Self.mediaIsAlwaysVideo || index % 3 == 0
             let mediaHost = isVideo ? "video" : "media"
             let shape = mediaShapes[index % mediaShapes.count]
             // Under `.realAssets` a video post takes its dimensions FROM the
