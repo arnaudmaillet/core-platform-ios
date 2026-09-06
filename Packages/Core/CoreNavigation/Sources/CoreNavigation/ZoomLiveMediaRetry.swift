@@ -191,6 +191,23 @@ final class ZoomLiveMediaRetry: NSObject {
             native: card.zoomLiveMediaNativeSize, page: pageSize
         )
         card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
+        // ⚠️ THE SURFACE MAY ARRIVE ALREADY ANIMATING, and then no amount of
+        // posing it moves anything.
+        //
+        // A surface that came from the other SCREEN is a fresh subview with no
+        // animations on it, and every value written below lands. A card's OWN
+        // surface does not: it has been inside the card since take-off, so the
+        // card's animated bounds gave it inherited position/bounds animations
+        // through autoresizing, and those are still running. `follow` writes
+        // MODEL values with actions disabled — correct, and completely
+        // invisible while a live animation owns the presentation. Measured: the
+        // model said 402x874 at scale 0.42 centred, while the presentation was
+        // a 34x66 patch at (-92, -244) — exactly the misplaced rectangle of
+        // video on a black card that was filmed.
+        //
+        // Recursive, because the poster inside the surface inherited the same
+        // animation and lags the same way.
+        Self.stopInheritedAnimations(on: surface.layer)
         hasAdopted = true
         follow(card)
         #if DEBUG
@@ -199,6 +216,13 @@ final class ZoomLiveMediaRetry: NSObject {
                          CACurrentMediaTime(), String(describing: type(of: surface))))
         }
         #endif
+    }
+
+    /// Clears animations from a layer tree, so per-frame posing is what the
+    /// screen shows.
+    private static func stopInheritedAnimations(on layer: CALayer) {
+        layer.removeAllAnimations()
+        layer.sublayers?.forEach(stopInheritedAnimations)
     }
 
     /// Poses the surface on the card's CURRENT on-screen size.

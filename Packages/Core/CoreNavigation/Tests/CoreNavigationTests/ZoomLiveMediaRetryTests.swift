@@ -233,5 +233,46 @@ struct ZoomLiveMediaRetryTests {
         #expect(retry == nil)
         #expect(page.asks == 0)
     }
+
+    /// ⚠️ A SURFACE CAN ARRIVE ALREADY ANIMATING, and then posing it moves
+    /// nothing at all.
+    ///
+    /// The surface a page mirrors onto is the card's OWN, and it has been
+    /// inside the card since take-off — so the card's animated bounds gave it
+    /// inherited position/bounds animations through autoresizing, and they are
+    /// still running when the retry adopts. `follow` writes MODEL values with
+    /// actions disabled, which a live animation simply outranks: measured on
+    /// the simulator as a model saying 402x874 at scale 0.42, centred, while
+    /// the presentation was a 34x66 patch at (-92, -244) — the misplaced
+    /// rectangle of video on a black card that was filmed.
+    ///
+    /// A surface donated by the OTHER screen never had this, which is why the
+    /// source arm went years without needing it.
+    @Test func anAlreadyAnimatingSurfaceIsStilled() {
+        let card = StubMirroringCard()
+        let window = staged(card)
+        let page = StubPage()
+        page.isPlaying = true
+        // What the card's animated layout leaves behind on its own subview.
+        let inherited = CABasicAnimation(keyPath: "position")
+        inherited.fromValue = CGPoint(x: 0, y: 0)
+        inherited.toValue = CGPoint(x: 200, y: 400)
+        inherited.duration = 10
+        card.ownSurface.layer.add(inherited, forKey: "position")
+        let poster = CALayer()
+        poster.add(inherited, forKey: "position")
+        card.ownSurface.layer.addSublayer(poster)
+
+        let retry = ZoomLiveMediaRetry.arm(card: card, pageSize: CGSize(width: 402, height: 874),
+                                           mirroring: page, window: 600)
+        retry?.debugTick()
+
+        #expect(card.zoomLiveMediaSurface === card.ownSurface)
+        #expect(card.ownSurface.layer.animationKeys() == nil,
+                "the adopted surface kept the animation that outranks every pose")
+        #expect(poster.animationKeys() == nil,
+                "the poster inside it lags the same way, so it is stilled too")
+        window.isHidden = true
+    }
 }
 
