@@ -92,10 +92,42 @@ final class PinCardView: UIView {
         view.suppressesCatchUpIndicator = true
         return view
     }()
+    /// Hosts a live surface DONATED by the other screen — the departing page's
+    /// own moving picture, which a dismissal's card carries home.
+    ///
+    /// ⚠️ A CONTAINER RATHER THAN THE SURFACE ITSELF, and the rule is stated on
+    /// `ZoomFlightCard.setZoomLandingLiveMedia`: a live surface's alpha belongs
+    /// to its own reveal machinery, which holds it at 0 until there is a frame
+    /// to show. The blend needs an alpha of its own to fade that picture out
+    /// across the return, so it gets the container's and the two drivers never
+    /// meet on one property.
+    private let donatedMediaHost = UIView()
+    /// The surface inside that host. Weak: the flight owns the card, the card
+    /// owns the host, and a finished flight must not keep a page's render
+    /// surface alive.
+    private weak var donatedSurface: VideoRenderView?
+
     /// The pin's border, drawn above the media so it survives live previews.
     /// The flight fades it out as the card leaves the pin (and back in on the
     /// way home).
     let ringView = UIView()
+
+    #if DEBUG
+    /// The stacked faces, BY NAME.
+    ///
+    /// ⚠️ The suites used to reach them as `card.subviews[4]`, and that made two
+    /// completely different mistakes indistinguishable: adding a subview to this
+    /// card reddened four tests whose subject is alpha, reporting a blend defect
+    /// that did not exist. An index is not a name.
+    var debugPreviewSheetFace: UIView { previewSheetView }
+    var debugDepartureCover: UIView { departureCoverView }
+    var debugLiveSurface: UIView { videoRenderView }
+    var debugTextFace: UIView { textFaceView }
+    var debugIconFace: UIView { iconFaceView }
+    /// Where a donated surface is hosted; its alpha is the blend's channel for
+    /// the departing page's moving picture.
+    var debugDonatedMediaHost: UIView { donatedMediaHost }
+    #endif
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -142,6 +174,15 @@ final class PinCardView: UIView {
         videoRenderView.clipsToBounds = true
         videoRenderView.isHidden = true
         addSubview(videoRenderView)
+
+        // Same z-position as the card's own surface — the two are alternatives,
+        // never a stack — and above the departure still, which is only this
+        // video's poster.
+        donatedMediaHost.frame = bounds
+        donatedMediaHost.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        donatedMediaHost.clipsToBounds = true
+        donatedMediaHost.isHidden = true
+        addSubview(donatedMediaHost)
 
         textFaceView.frame = bounds
         textFaceView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -563,6 +604,20 @@ final class PinCardView: UIView {
     /// reasons) would blend a symbol over a see-through ground and draw the two
     /// half-finished drawings the law forbids.
     private func applyBlend() {
+        // ⚠️ A DONATED SURFACE IS A BLEND OPERAND IN ITS OWN RIGHT, which is why
+        // this sits ABOVE the guard rather than inside a branch of it.
+        //
+        // The guard below asks whether a departure STILL was handed in, and on
+        // a dismissal that lands where it took off the answer is no — one post,
+        // one picture, nothing to blend. That reasoning was complete only while
+        // the card's pictures were stills. A donated surface is the departing
+        // PAGE in motion, arriving over the marker's own cover: it must fade out
+        // across the return, or the video is still at full opacity when the card
+        // reaches a marker showing something else, and the swap is a cut.
+        //
+        // Inert on every other flight: the host is hidden and its alpha is not
+        // drawn.
+        donatedMediaHost.alpha = 1 - blend
         guard departureCoverView.image != nil else {
             // No second operand. Every channel back to its resting value, which
             // is the un-blended card exactly as it was.
@@ -681,8 +736,13 @@ final class PinCardView: UIView {
     /// (plus an animated center), while the card's animating bounds do the
     /// crop morph. The layer's bounds never change, so rendering stays smooth.
     func prepareVideoForFlight(destinationSize: CGSize) {
-        videoRenderView.autoresizingMask = []
-        videoRenderView.bounds = CGRect(origin: .zero, size: destinationSize)
+        // Whichever surface is actually live — the card's own mirror, or a
+        // surface the arriving page handed over. Laying out only the first left
+        // a donated one at the card's take-off size for the whole flight.
+        let surface: UIView = donatedSurface ?? videoRenderView
+        surface.transform = .identity
+        surface.autoresizingMask = []
+        surface.bounds = CGRect(origin: .zero, size: destinationSize)
     }
 
 }
@@ -891,15 +951,52 @@ extension PinCardView: ZoomFlightCard {
     /// The pin's border, which must not survive into the page pose.
     var zoomRestingChrome: UIView? { ringView }
 
-    var zoomLiveMediaSurface: UIView? { videoRenderView.isHidden ? nil : videoRenderView }
+    /// The surface the flight poses — a donated one first, because when a page
+    /// has handed its picture over that IS what the card is flying.
+    var zoomLiveMediaSurface: UIView? {
+        if let donatedSurface, !donatedMediaHost.isHidden { return donatedSurface }
+        return videoRenderView.isHidden ? nil : videoRenderView
+    }
 
-    var zoomLiveMediaNativeSize: CGSize? { videoRenderView.nativeVideoSize }
+    var zoomLiveMediaNativeSize: CGSize? {
+        (donatedSurface ?? videoRenderView).nativeVideoSize
+    }
 
     /// Same rule as the grid's flight card: a pin flying without live media
     /// shows its cover, which is always drawing; one flying with live media is
     /// only "drawing" while that surface is actually visible.
     var zoomLiveMediaIsDrawing: Bool {
-        videoRenderView.isHidden ? true : videoRenderView.isRenderingVisibly
+        if let donatedSurface, !donatedMediaHost.isHidden {
+            return donatedSurface.isRenderingVisibly
+        }
+        return videoRenderView.isHidden ? true : videoRenderView.isRenderingVisibly
+    }
+
+    /// Takes a surface the other screen is ALREADY rendering, in place of
+    /// mirroring one of this card's own.
+    ///
+    /// ⚠️ THIS WAS MISSING, and its absence was silent. `ZoomFlight.build` tries
+    /// the donation FIRST on every leg, and `ZoomFlightCard` defaults this to
+    /// nothing — so on a dismissal the feed page handed over a surface already
+    /// carrying a decoded frame and the card dropped it on the floor, then fell
+    /// through to mirroring a second layer that had none. What the viewer saw
+    /// was the grab flying a still.
+    ///
+    /// No poster: the surface is already showing video, and a poster over it
+    /// could only be a chance to flash. `revealOnFirstFrame` — not
+    /// `isHidden = false` — because a surface with nothing to show must not
+    /// replace the cover underneath it, which is the picture the viewer has.
+    func adoptZoomLiveMediaView(_ view: UIView) {
+        guard let surface = view as? VideoRenderView else { return }
+        donatedSurface = surface
+        surface.frame = donatedMediaHost.bounds
+        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        surface.clipsToBounds = true
+        donatedMediaHost.addSubview(surface)
+        donatedMediaHost.isHidden = false
+        // The card may already be part-way through a blend when this arrives.
+        applyBlend()
+        surface.revealOnFirstFrame()
     }
 
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {

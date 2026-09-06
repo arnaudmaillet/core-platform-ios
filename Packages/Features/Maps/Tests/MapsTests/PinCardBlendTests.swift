@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 import MediaCore
+import MediaPlayback
 @testable import Maps
 
 /// `PinCardView`'s two opacity channels, and the fact that they are two.
@@ -53,16 +54,18 @@ struct PinCardBlendTests {
     /// middle layers are private, so they are addressed by their position
     /// between the ones that are not — which pins the order as a side effect.
     ///
-    /// Seven since the animated icon and the baked media preview landed.
+    /// Eight since a dismissal's card gained a host for the surface the
+    /// arriving page DONATES — same z-position as the card's own live surface,
+    /// because the two are alternatives and never a stack.
     ///
     /// ⚠️ The preview sits ABOVE the arrival cover and BELOW the departure one,
     /// and that position is load-bearing rather than aesthetic: above the
     /// departure cover it stays opaque while that cover fades, which hides the
     /// blend completely and hands the flight over to a picture nobody can see.
     /// It is the marker's OWN content, so it belongs in the arrival stack.
-    @Test func theCardStacksItsSevenLayersInTheContractedOrder() {
+    @Test func theCardStacksItsLayersInTheContractedOrder() {
         let card = makeCard()
-        #expect(card.subviews.count == 7)
+        #expect(card.subviews.count == 8)
         #expect(card.subviews.first === card.imageView)
         #expect(card.subviews.last === card.ringView)
         // The preview is BENEATH the departure operand, or the blend cannot be
@@ -70,6 +73,11 @@ struct PinCardBlendTests {
         let previewIndex = card.subviews.firstIndex(of: previewSheet(of: card)) ?? .max
         let departureIndex = card.subviews.firstIndex(of: departureCover(of: card)) ?? -1
         #expect(previewIndex < departureIndex)
+        // And the donated surface's host is ABOVE the departure still, for the
+        // same reason the card's own live surface is: on a dismissal that
+        // surface IS the departing page's picture and the still is its poster.
+        let hostIndex = card.subviews.firstIndex(of: card.debugDonatedMediaHost) ?? -1
+        #expect(hostIndex > departureIndex)
     }
 
     /// Artwork for the cases that are about a DRESSED icon.
@@ -81,11 +89,13 @@ struct PinCardBlendTests {
         return .sheet(AnimatedIconSheet(sheet: image, frameCount: 1, columns: 1, frameDuration: 0.1))
     }
 
-    private func previewSheet(of card: PinCardView) -> UIView { card.subviews[1] }
-    private func departureCover(of card: PinCardView) -> UIView { card.subviews[2] }
-    private func liveSurface(of card: PinCardView) -> UIView { card.subviews[3] }
-    private func textFace(of card: PinCardView) -> UIView { card.subviews[4] }
-    private func iconFace(of card: PinCardView) -> UIView { card.subviews[5] }
+    // ⚠️ BY NAME, never by subview index. These were `card.subviews[4]` and the
+    // like until adding one view to the card reddened four tests about alpha.
+    private func previewSheet(of card: PinCardView) -> UIView { card.debugPreviewSheetFace }
+    private func departureCover(of card: PinCardView) -> UIView { card.debugDepartureCover }
+    private func liveSurface(of card: PinCardView) -> UIView { card.debugLiveSurface }
+    private func textFace(of card: PinCardView) -> UIView { card.debugTextFace }
+    private func iconFace(of card: PinCardView) -> UIView { card.debugIconFace }
 
     // MARK: - The icon face
 
@@ -428,4 +438,51 @@ struct PinCardBlendTests {
         #expect(isAlpha(card.imageView, 1))
         #expect(isAlpha(card.ringView, 1))
     }
+
+    /// ⚠️ A DONATED SURFACE HAS TO LAND SOMEWHERE, and for a long time it did
+    /// not.
+    ///
+    /// `ZoomFlight.build` offers the destination's already-rendering surface to
+    /// the card BEFORE it falls back to mirroring, and `ZoomFlightCard` defaults
+    /// that hand-over to nothing. This card took the default, so a dismissal's
+    /// feed page handed over a surface already carrying a decoded frame and the
+    /// card dropped it — then mirrored a second layer that had none. Filmed as
+    /// the grab flying a still.
+    @Test func aDonatedSurfaceIsTheOneTheFlightPoses() {
+        let card = makeCard()
+        let donated = VideoRenderView()
+
+        card.adoptZoomLiveMediaView(donated)
+
+        #expect(card.zoomLiveMediaSurface === donated,
+                "the flight would pose the card's own empty surface instead")
+        #expect(donated.superview === card.debugDonatedMediaHost)
+        #expect(card.debugDonatedMediaHost.isHidden == false)
+    }
+
+    /// The departing page's picture goes home in a FADE, not a cut.
+    ///
+    /// The blend's rule is stated on stills — one post at both ends means one
+    /// picture and nothing to blend — and a donated surface breaks that
+    /// premise: it is the page in motion arriving over the marker's own cover,
+    /// so it has to fade out across the return however few stills are involved.
+    ///
+    /// ⚠️ The CONTAINER carries the alpha. A live surface's own alpha belongs to
+    /// its reveal machinery, which holds it at 0 until there is a frame — two
+    /// drivers on one property is a defect this codebase has already lived
+    /// through.
+    @Test func aDonatedSurfaceFadesOutAcrossTheReturn() {
+        let card = makeCard()
+        let donated = VideoRenderView()
+        card.adoptZoomLiveMediaView(donated)
+        let host = card.debugDonatedMediaHost
+
+        card.setZoomContentBlend(0)
+        #expect(host.alpha == 1, "at the page end the departing picture is whole")
+        card.setZoomContentBlend(0.5)
+        #expect(abs(host.alpha - 0.5) < 0.001, "it has to cross fade, not switch")
+        card.setZoomContentBlend(1)
+        #expect(host.alpha == 0, "at the marker the card must be showing the marker")
+    }
 }
+

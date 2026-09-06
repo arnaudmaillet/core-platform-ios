@@ -171,7 +171,7 @@ struct PinCardIconFloorTests {
         card.layoutIfNeeded()
         #expect(card.layer.cornerRadius == 0, "the icon face stays square — that is the contract")
 
-        let textFace = card.subviews[4]
+        let textFace = card.debugTextFace
         textFace.layoutIfNeeded()
         #expect(!textFace.isHidden)
         #expect(textFace.layer.cornerRadius == textFace.bounds.height / 2,
@@ -197,7 +197,7 @@ struct PinCardIconFloorTests {
         card.setDeparturePicture(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
             UIColor.black.setFill(); $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
         })
-        let textFace = card.subviews[4]
+        let textFace = card.debugTextFace
 
         card.setBlend(0)
         #expect(textFace.alpha == 0, "at blend 0 the arrival must not be drawn at all")
@@ -214,8 +214,8 @@ struct PinCardIconFloorTests {
         card.setDeparturePicture(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
             UIColor.black.setFill(); $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
         })
-        let textFace = card.subviews[4]
-        let iconFace = card.subviews[5]
+        let textFace = card.debugTextFace
+        let iconFace = card.debugIconFace
 
         card.setBlend(0.5)
         #expect(abs(iconFace.alpha - 0.5) < 0.001)
@@ -230,8 +230,8 @@ struct PinCardIconFloorTests {
             UIColor.black.setFill(); $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
         })
         card.setBlend(0.5)
-        let textFace = card.subviews[4]
-        let iconFace = card.subviews[5]
+        let textFace = card.debugTextFace
+        let iconFace = card.debugIconFace
         #expect(abs(textFace.alpha - 0.5) < 0.001)
 
         card.setIcon((art(), 0))
@@ -249,8 +249,8 @@ struct PinCardIconFloorTests {
     @Test func theContainerFadesWhileTheMarkStaysDrawn() {
         let card = makeCard(.icon)
         card.setIcon((art(), 0))
-        let textFace = card.subviews[4]
-        let iconFace = card.subviews[5]
+        let textFace = card.debugTextFace
+        let iconFace = card.debugIconFace
 
         card.setContentOpacity(0)
         #expect(!textFace.isHidden, "the container must exist to arrive at all")
@@ -288,7 +288,7 @@ struct PinCardIconFloorTests {
         window.setFace(.icon)
         window.setIcon((art(), 0))
         window.layoutIfNeeded()
-        let iconFace = window.subviews[5]
+        let iconFace = window.debugIconFace
         #expect(iconFace.bounds.width == PinCardView.Face.icon.side,
                 "a mark drawn for 44pt must not be blown up to the window")
         #expect(abs(iconFace.center.x - window.bounds.midX) < 0.01)
