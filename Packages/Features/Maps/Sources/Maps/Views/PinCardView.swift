@@ -197,11 +197,50 @@ final class PinCardView: UIView {
         iconFaceView.isHidden = true
         addSubview(iconFaceView)
 
+        // ⚠️ TOP-LEFT ANCHORED, and this is a REGISTER fix rather than a layout
+        // preference.
+        //
+        // `card.frame = …` is `bounds` + `position`, and autoresizing turns it
+        // into the same pair on every full-bleed child. The flight animates the
+        // card with `UISpringTimingParameters(dampingRatio:initialVelocity:)`,
+        // whose CGVector does not seed every property alike: `position` rides a
+        // spring seeded with the vector, `bounds` one seeded with dx — which is
+        // 0 here. Two curves through the same endpoints, so mid-flight a
+        // child's top edge (`position.y - bounds.height/2`) is not the card's:
+        // measured off the film at 4, 12, 14, 14, 12, 9 device px, zero at both
+        // ends and humping in the middle, on the vertical axis only because dx
+        // is 0.
+        //
+        // What showed in the gap was the card's own opaque ground, as a hard
+        // black bar across the top inside the card's rounded mask — reported,
+        // reasonably, as content escaping the transition window.
+        //
+        // With the anchor at the top-left a child's `position` is the constant
+        // (0, 0): there is nothing on the positional channel to diverge, only
+        // `bounds`, which is the card's own property and therefore its own
+        // curve. Registration is then exact at every instant, whatever the
+        // spring does.
+        //
+        // ⚠️ NOT for a view the FLIGHT poses by `center` — `videoRenderView`
+        // and a donated surface are both centred by `ZoomFlight`, and under a
+        // zero anchor `center` would move their top-left corner instead. Nor
+        // for `iconFaceView`, which `layoutIconFace` centres by hand.
+        for child in [imageView, previewSheetView, departureCoverView, donatedMediaHost, textFaceView] {
+            child.layer.anchorPoint = .zero
+            child.frame = bounds
+        }
+
         ringView.isUserInteractionEnabled = false
         ringView.layer.borderWidth = Self.ringWidth
         ringView.layer.borderColor = ringColor.cgColor
         ringView.layer.cornerRadius = Self.cornerRadius
         ringView.layer.cornerCurve = .continuous
+        // Same register fix as the covers above — and the ring is the view the
+        // defect was measured on: mid-flight its top border sat 4.7pt below the
+        // card's edge and its bottom border was pushed past the card's and
+        // clipped, while its left and right borders stayed exactly put. A pure
+        // vertical translation, which is what a `dx = 0` vector produces.
+        ringView.layer.anchorPoint = .zero
         ringView.frame = bounds
         ringView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(ringView)
