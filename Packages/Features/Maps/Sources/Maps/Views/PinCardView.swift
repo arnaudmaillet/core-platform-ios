@@ -281,8 +281,7 @@ final class PinCardView: UIView {
 
     func setFace(_ face: Face) {
         self.face = face
-        textFaceView.isHidden = face != .text
-        iconFaceView.isHidden = face != .icon
+        applyFaceVisibility()
         // ⚠️ THE GREY BOX. `imageView` is the cover host and it is never
         // hidden — it carries an opaque `.secondarySystemBackground` ground so
         // a letterboxed photograph reads as framed. Under the TEXT face that
@@ -299,7 +298,6 @@ final class PinCardView: UIView {
         backgroundColor = face == .media ? .black : .clear
         // Hidden, not faded. The ring is a 2pt border on the card's rectangle;
         // at radius 0 behind transparent artwork it draws a visible box.
-        ringView.isHidden = face == .icon
         // A preview belongs to a MEDIA face and nothing else — a recycled card
         // that last wore one must take it off, or a text marker inherits
         // somebody's footage.
@@ -317,6 +315,43 @@ final class PinCardView: UIView {
     func setIcon(_ icon: (art: AnimatedIconArt, phase: Int)?) {
         wornIcon = icon
         iconFaceView.setArt(icon?.art, phase: icon?.phase ?? 0)
+        // The floor moves with the art, so this has to re-run here as well as
+        // in `setFace` — the two callers write the art on OPPOSITE sides of the
+        // face (a pin faces then strips, a cluster strips then faces), so a
+        // rule evaluated in only one of them is right for one of them.
+        applyFaceVisibility()
+    }
+
+    /// Which unit of the card is drawn — and the ICON FACE'S FLOOR.
+    ///
+    /// ⚠️ `Face.of` promises `.icon` on the strength of an ID, and `.icon` hides
+    /// the cover host because an icon's alpha IS its shape and the host's opaque
+    /// ground would otherwise be a grey square. So an icon whose art never
+    /// arrives — a cold catalogue, a decode failure, a memory-pressure eviction,
+    /// or a fleet build where the id resolves to nothing — used to leave the
+    /// card drawing NOTHING AT ALL.
+    ///
+    /// The fix is not to make the face follow the art. The face is read from
+    /// outside (the flight's resting radius, the reveal origin, the cluster's
+    /// idempotence key) and, decisively, `MapClusterAnnotationView` gates the
+    /// icon FETCH on `face == .icon` — so a face derived from a cold cache would
+    /// never ask for the artwork, store `.text` as its key, and compare equal
+    /// forever after. The icon would never appear at all, and a cold cache is
+    /// every first paint.
+    ///
+    /// Instead the face stays a pure function of the model and gains a FLOOR:
+    /// under `.icon` with no art the text disc shows, and it goes the instant
+    /// art lands. Mutually exclusive, never stacked — a disc left underneath
+    /// would show through the icon's own alpha as the circle the product asked
+    /// not to see.
+    private func applyFaceVisibility() {
+        let iconIsBare = face == .icon && wornIcon == nil
+        textFaceView.isHidden = !(face == .text || iconIsBare)
+        iconFaceView.isHidden = face != .icon
+        // The ring belongs to the disc, so it follows the disc rather than the
+        // face: a bare icon wearing the text floor should look like a text
+        // marker, ring included.
+        ringView.isHidden = face == .icon && !iconIsBare
     }
 
     /// Read back rather than remembered elsewhere — the same reason
@@ -349,6 +384,9 @@ final class PinCardView: UIView {
 
     #if DEBUG
     var presentedIconTick: Double? { iconFaceView.presentedTick ?? previewSheetView.presentedTick }
+    /// The icon face's floor, read back for the tests that pin it.
+    var debugTextFaceIsVisible: Bool { !textFaceView.isHidden }
+    var debugIconFaceIsVisible: Bool { !iconFaceView.isHidden }
     var isPlayingPreviewSheet: Bool { wornPreview != nil }
 
     /// The preview sheet's presentation-layer fingerprint, and ONLY the preview's.
@@ -517,9 +555,17 @@ final class PinCardView: UIView {
     /// every marker the moment they do. At 128 markers that is the single
     /// largest cost this feature could incur. A rectangular `shadowPath` is not
     /// the fix either: behind transparent artwork it draws a visible box.
-    static func applyPinShadow(to layer: CALayer, face: Face = .media) {
+    /// ⚠️ `hasArt` matters only for `.icon`, and it is the difference between a
+    /// lift and a smear. An icon gets NO shadow because a pathless shadow is
+    /// re-derived from the composited alpha every frame once the contents
+    /// animate — the largest cost this feature could incur — and a rectangular
+    /// path behind transparent artwork draws a box. Neither objection applies to
+    /// a BARE icon: it is drawing the text disc, which is opaque and still, so
+    /// it should lift exactly like the text marker it is standing in for.
+    /// Suppressing the shadow there made the fallback look sunken into the map.
+    static func applyPinShadow(to layer: CALayer, face: Face = .media, hasArt: Bool = true) {
         layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = face == .icon ? 0 : 0.25
+        layer.shadowOpacity = (face == .icon && hasArt) ? 0 : 0.25
         layer.shadowRadius = 4
         layer.shadowOffset = CGSize(width: 0, height: 2)
     }
@@ -765,7 +811,12 @@ extension PinCardView: ZoomFlightCard {
     }
 
     /// A pin lifts off the map, so its flight carries the same drop shadow.
+    ///
+    /// ⚠️ Its OWN face, not the `.media` default. A flying icon was getting the
+    /// media shadow — a box behind transparent artwork — because the argument
+    /// was simply never passed, and the default is the one face for which the
+    /// answer is always wrong.
     func applyZoomRestingShadow(to layer: CALayer) {
-        Self.applyPinShadow(to: layer)
+        Self.applyPinShadow(to: layer, face: face, hasArt: wornIcon != nil)
     }
 }

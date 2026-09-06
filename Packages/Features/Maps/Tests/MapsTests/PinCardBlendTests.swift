@@ -1,5 +1,6 @@
 import Testing
 import UIKit
+import MediaCore
 @testable import Maps
 
 /// `PinCardView`'s two opacity channels, and the fact that they are two.
@@ -71,6 +72,15 @@ struct PinCardBlendTests {
         #expect(previewIndex < departureIndex)
     }
 
+    /// Artwork for the cases that are about a DRESSED icon.
+    private func dressedIconArt() -> AnimatedIconArt {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        return .sheet(AnimatedIconSheet(sheet: image, frameCount: 1, columns: 1, frameDuration: 0.1))
+    }
+
     private func previewSheet(of card: PinCardView) -> UIView { card.subviews[1] }
     private func departureCover(of card: PinCardView) -> UIView { card.subviews[2] }
     private func liveSurface(of card: PinCardView) -> UIView { card.subviews[3] }
@@ -82,6 +92,14 @@ struct PinCardBlendTests {
     /// "Fills the box, no circle" is one property with three parts, and each is
     /// on a different object — so a change to any one of them can undo it
     /// silently.
+    ///
+    /// ⚠️ The card is DRESSED here, which is what this contract has always been
+    /// about: an icon that is present fills its box and shows no circle. It used
+    /// to be asserted on a bare card, only because that was the shortest way to
+    /// get an `.icon` face — and a bare icon is now the FALLBACK state, which
+    /// deliberately looks like the text marker it stands in for (see
+    /// `PinCardIconFloorTests`). Asserting the dressed state is what this test
+    /// meant; asserting the bare one made it accidentally forbid a floor.
     @Test func anIconFaceIsSquareRinglessAndShadowless() {
         #expect(PinCardView.Face.icon.cornerRadius == 0)
         // Same box as the avatar it replaces: the marker must not change size
@@ -89,6 +107,7 @@ struct PinCardBlendTests {
         #expect(PinCardView.Face.icon.side == PinCardView.Face.text.side)
 
         let card = makeCard(.icon)
+        card.setIcon((dressedIconArt(), 0))
         #expect(card.layer.cornerRadius == 0)
         #expect(card.ringView.isHidden)
         #expect(iconFace(of: card).isHidden == false)

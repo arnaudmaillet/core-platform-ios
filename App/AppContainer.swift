@@ -312,17 +312,24 @@ final class AppContainer {
         mockAnimatedIcons: environment == .mock
             ? Self.mockAnimatedIcons(in: mockBackend, catalogue: Self.mapIconCatalog) : [:],
         // Baked previews of a media post's own footage — the decode-free
-        // alternative to a player. Behind a launch argument because it is an
-        // experiment with a real memory cost (2.71 MB resident per clip), not a
-        // default: `-maps-preview-sheets`.
-        mockPreviewSheets: environment == .mock && Self.seedsPreviewSheets
+        // alternative to a player, and the ONLY animated media the map can show
+        // without a network: the sheets are in the app bundle, so unlike live
+        // playback they owe nothing to `-rich-media`, whose absence leaves every
+        // media post pointing at an unplayable `mock://video/...`.
+        //
+        // No longer behind a launch argument. It was, while the memory cost was
+        // an open question; it is now measured. 24 distinct sheets are 4.8 MB on
+        // the wire and 65.0 MB if every one were resident at once, against a
+        // 64 MB byte-budgeted cache — so full variety GUARANTEES eviction, and
+        // eviction was measured holding at 7-9 resident (19.0-24.4 MB) across
+        // every run including a 464-marker field. The worst case measured 144
+        // markers with 80 sheets advancing at a locked 60fps, and the animation
+        // itself costs +1.6 ms of frame mean against animating nothing at all.
+        mockPreviewSheets: environment == .mock
             ? Self.mockPreviewSheets(in: mockBackend, catalogue: Self.mapPreviewCatalog) : [:],
         iconCatalog: Self.mapIconCatalog,
-        previewCatalog: Self.seedsPreviewSheets ? Self.mapPreviewCatalog : nil
+        previewCatalog: Self.mapPreviewCatalog
     )
-
-    static let seedsPreviewSheets =
-        ProcessInfo.processInfo.arguments.contains("-maps-preview-sheets")
 
     /// Baked from real clips by `Tools/IconBaker` — 24 frames at a 172px cell,
     /// which is the 56pt media face at @3x plus the contract's 2px gutter.

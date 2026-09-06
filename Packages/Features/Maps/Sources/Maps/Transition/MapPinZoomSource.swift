@@ -2,6 +2,7 @@ import CoreNavigation
 import MapKit
 import MediaPlayback
 import UIKit
+import MediaCore
 
 /// The map side of the hero transition: the tapped pin. It can recompute its
 /// own on-screen rect from the annotation's coordinate, so a dismiss returns to
@@ -138,6 +139,13 @@ final class MapPinZoomSource: ZoomTransitionSource {
         // pin behind it shows the avatar. Same reason `zoomHeroFrame` re-reads
         // the annotation's rect instead of remembering one.
         card.setTextAvatar(mapView?.wornAvatar(for: annotation))
+        // ⚠️ AND ITS ICON, read now for exactly the reason the avatar is. A
+        // flying card built without it wore `.icon` — which hides the cover host
+        // — with nothing to draw, so an icon marker's flight took off blank
+        // while the marker behind it was perfectly dressed. Nil is fine and is
+        // the fallback: the card then shows the disc `setTextAvatar` just put
+        // under it.
+        card.setIcon(mapView?.wornIcon(for: annotation))
         // The other end of the flight, when it is not this marker. Nil on every
         // present and on every dismissal that lands where it took off, which
         // leaves the card's blend channel inert.
