@@ -1,7 +1,7 @@
 [
   {
     "asset": "bigbuckbunny-0.heic",
-    "bytes": 370535,
+    "bytes": 381760,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -12,7 +12,7 @@
   },
   {
     "asset": "bigbuckbunny-1.heic",
-    "bytes": 369837,
+    "bytes": 381242,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -23,7 +23,7 @@
   },
   {
     "asset": "bigbuckbunny-2.heic",
-    "bytes": 370532,
+    "bytes": 380773,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -34,7 +34,7 @@
   },
   {
     "asset": "bigbuckbunny-3.heic",
-    "bytes": 370897,
+    "bytes": 381570,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -45,7 +45,7 @@
   },
   {
     "asset": "bigbuckbunny-4.heic",
-    "bytes": 370549,
+    "bytes": 381330,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -56,7 +56,7 @@
   },
   {
     "asset": "bigbuckbunny-5.heic",
-    "bytes": 372066,
+    "bytes": 382262,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -67,7 +67,7 @@
   },
   {
     "asset": "sinteltrailer-0.heic",
-    "bytes": 70540,
+    "bytes": 35292,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -78,7 +78,7 @@
   },
   {
     "asset": "sinteltrailer-1.heic",
-    "bytes": 44352,
+    "bytes": 11345,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -89,7 +89,7 @@
   },
   {
     "asset": "sinteltrailer-2.heic",
-    "bytes": 179702,
+    "bytes": 156253,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -100,7 +100,7 @@
   },
   {
     "asset": "sinteltrailer-3.heic",
-    "bytes": 200589,
+    "bytes": 166946,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -111,7 +111,7 @@
   },
   {
     "asset": "sinteltrailer-4.heic",
-    "bytes": 121356,
+    "bytes": 79892,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,
@@ -122,7 +122,7 @@
   },
   {
     "asset": "sinteltrailer-5.heic",
-    "bytes": 68884,
+    "bytes": 35786,
     "cellPX": 172,
     "columns": 4,
     "frameCount": 24,

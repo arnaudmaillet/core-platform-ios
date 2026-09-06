@@ -247,6 +247,13 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
             }
             return
         }
+        // ⚠️ A PIN WITH A PREVIEW FETCHES NO COVER. Its cover is the preview's
+        // own first frame, set the moment the sheet lands. Fetching the wire's
+        // thumbnail as well put a PHOTOGRAPH on the marker for as long as the
+        // catalogue took to answer — a picture of something else, swapped out
+        // once the clip arrived. The wire's still is a stand-in for a frame the
+        // backend does not generate; where we have the frame, it is not needed.
+        guard !pin.hasPreviewSheet else { return }
         guard !pin.isText, let url = pin.thumbnailURL else { return }
         let id = pin.postID
         imageTask = Task { [weak self] in
