@@ -556,9 +556,42 @@ public struct MockSocialDataset: Sendable {
     public func previewSheetIDsByPostID(catalogue: [String]) -> [String: String] {
         guard !catalogue.isEmpty else { return [:] }
         return posts.reduce(into: [:]) { result, post in
-            guard post.media != nil, let index = Self.numericSuffix(of: post.postID) else { return }
-            result[post.postID] = catalogue[index % catalogue.count]
+            // ⚠️ VIDEO POSTS ONLY, and the guard used to be `post.media != nil`.
+            //
+            // A preview sheet is a sample of the post's OWN footage. A
+            // photograph has none — its marker should wear the photograph (or
+            // its first frame), which is what the cover already does. Seeding
+            // every post that merely HAS media gave still photos an animated
+            // marker playing somebody else's clip: the annotation and the post
+            // no longer described the same thing, and opening one showed a page
+            // with nothing moving in it.
+            guard let media = post.media,
+                  MockMediaFixtures.isVideoURL(media.url),
+                  let index = Self.numericSuffix(of: post.postID)
+            else { return }
+            result[post.postID] = Self.previewSheet(for: media.url, in: catalogue, index: index)
         }
+    }
+
+    /// The sheet baked from THIS post's clip when one exists.
+    ///
+    /// The catalogue's ids are `<clip>-<segment>` and the fixtures' URLs carry
+    /// the clip's name, so most video posts can wear a preview of their own
+    /// footage rather than of an arbitrary one. Not all of them: the baked set
+    /// covers four clips and the fixture table lists seven, so the remainder
+    /// still falls back to a deterministic pick — a marker that previews the
+    /// wrong clip is a mock-fidelity gap, where a photograph that previews ANY
+    /// clip was a lie about what the post is.
+    static func previewSheet(for url: String, in catalogue: [String], index: Int) -> String {
+        let haystack = url.lowercased()
+        let matching = catalogue.filter { id in
+            let clip = id.split(separator: "-").dropLast().joined(separator: "-")
+            guard !clip.isEmpty else { return false }
+            return haystack.contains(clip)
+                || haystack.contains(clip.replacingOccurrences(of: "_", with: ""))
+        }
+        let pool = matching.isEmpty ? catalogue : matching
+        return pool[index % pool.count]
     }
 
     /// The trailing digits of `post-0007`. Nil when there are none, which keeps

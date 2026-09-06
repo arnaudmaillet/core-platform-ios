@@ -256,3 +256,62 @@ struct MockMediaFixturesTests {
         #expect(first.posts.compactMap { $0.media?.url } == second.posts.compactMap { $0.media?.url })
     }
 }
+
+/// A marker's preview is a sample of the POST'S OWN footage.
+///
+/// ⚠️ The seed used to guard on `post.media != nil`, so every photograph got a
+/// sprite sheet too — an animated marker playing an unrelated clip in front of a
+/// post that is a still. The annotation and the post stopped describing the same
+/// thing, which is the one thing a preview exists to do.
+
+struct MapPreviewSheetSeedTests {
+    private func dataset() -> MockSocialDataset {
+        MockSocialDataset(postCount: 120, mediaCatalog: .realAssets)
+    }
+
+    private let catalogue = [
+        "big_buck_bunny-0", "big_buck_bunny-1", "jellyfish-0", "jellyfish-1",
+        "sintel-0", "sintel-1", "trailer-0", "trailer-1"
+    ]
+
+    @Test func onlyVideoPostsGetASheet() {
+        let data = dataset()
+        let sheets = data.previewSheetIDsByPostID(catalogue: catalogue)
+        #expect(!sheets.isEmpty, "a corpus with videos must seed some previews")
+
+        for post in data.posts {
+            let seeded = sheets[post.postID] != nil
+            guard let media = post.media else {
+                #expect(!seeded, "\(post.postID) is text-only and must not wear a preview")
+                continue
+            }
+            let isVideo = MockMediaFixtures.isVideoURL(media.url)
+            #expect(seeded == isVideo,
+                    "\(post.postID) media=\(media.url) seeded=\(seeded) isVideo=\(isVideo)")
+        }
+    }
+
+    /// And it should be a preview of ITS clip where one was baked, not of an
+    /// arbitrary one — the fidelity half of the same idea.
+    @Test func aSheetPrefersItsOwnClip() {
+        let picked = MockSocialDataset.previewSheet(
+            for: "https://example.com/BigBuckBunny_320x180.mp4", in: catalogue, index: 0
+        )
+        #expect(picked.hasPrefix("big_buck_bunny"), "got \(picked)")
+
+        let sintel = MockSocialDataset.previewSheet(
+            for: "https://example.com/sintel/trailer.m3u8", in: catalogue, index: 1
+        )
+        #expect(sintel.hasPrefix("sintel") || sintel.hasPrefix("trailer"), "got \(sintel)")
+    }
+
+    /// An unbaked clip still gets SOMETHING rather than nothing — a marker that
+    /// previews the wrong clip is a mock gap; one that previews none is a
+    /// missing feature.
+    @Test func anUnbakedClipFallsBackRatherThanVanishing() {
+        let picked = MockSocialDataset.previewSheet(
+            for: "https://example.com/never_baked.m3u8", in: catalogue, index: 3
+        )
+        #expect(catalogue.contains(picked))
+    }
+}
