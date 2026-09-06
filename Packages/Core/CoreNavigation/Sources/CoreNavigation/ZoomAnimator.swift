@@ -324,6 +324,21 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // poster is often a hundred milliseconds nobody can schedule around.
         // Retained by its own display link; it stops itself.
         ZoomLiveMediaRetry.arm(card: flight.card, pageSize: flight.pageFrame.size, source: source)
+        // …and when the departing side has no player to be late WITH, the
+        // arriving one does. A marker flies a sprite sheet, so the page it
+        // opens is the only surface this post can be decoding on — and it is
+        // decoding, from take-off, precisely because nothing is flying its
+        // player. Its first frame still lands mid-air, after `ZoomFlight.build`
+        // asked and was told no.
+        //
+        // Gated on the same answer the destination was given, so a page that
+        // stood its playback down is never asked for a player it deliberately
+        // does not have.
+        if !source.zoomFlightCarriesLivePlayer, let destination {
+            ZoomLiveMediaRetry.arm(
+                card: flight.card, pageSize: flight.pageFrame.size, mirroring: destination
+            )
+        }
 
         #if DEBUG
         Self.debugTrackFlightGeometry(card: flight.card)

@@ -32,7 +32,15 @@ import UIKit
 @MainActor
 final class ZoomLiveMediaRetry: NSObject {
     private weak var card: (any ZoomFlightCard)?
-    private let ask: () -> UIView?
+    /// Tries to put live media on the card and reports the surface that ended
+    /// up there, or nil for "not yet".
+    ///
+    /// ⚠️ A CLOSURE THAT ACTS, not one that answers, because the two ends
+    /// hand media over differently: a tile GIVES its view, a page MIRRORS its
+    /// player onto the card's own surface. Modelling only the first shape is
+    /// what limited this class to sources for as long as sources were the only
+    /// side that could be late.
+    private let acquire: (any ZoomFlightCard) -> UIView?
     private let pageSize: CGSize
     private let deadline: CFTimeInterval
     private var link: CADisplayLink?
@@ -64,7 +72,58 @@ final class ZoomLiveMediaRetry: NSObject {
             // The source is held WEAKLY through this closure's own capture, so
             // a flight outliving its screen stops asking rather than keeping a
             // grid that is being torn down alive to answer.
-            ask: { [weak source] in source?.zoomLiveMediaSurfaceIfReady() }
+            acquire: { [weak source] card in
+                guard let surface = source?.zoomLiveMediaSurfaceIfReady() else { return nil }
+                card.adoptZoomLiveMediaView(surface)
+                // The card is free to refuse — a wrong surface type, or one it
+                // has since acquired for itself. Refusing is not a reason to
+                // stop asking.
+                return card.zoomLiveMediaSurface === surface ? surface : nil
+            }
+        )
+        retry.start()
+        return retry
+    }
+
+    /// The same wait, pointed at the ARRIVING page instead of the departing
+    /// thumbnail — the present leg's mirror image, and it exists for the same
+    /// reason in reverse.
+    ///
+    /// A marker flies a sprite sheet: no player leaves with the card, so the
+    /// only place this post's video can be decoding is the page underneath.
+    /// It is decoding — the destination is told at staging that nothing is
+    /// flying its player and starts at take-off — but its first frame lands a
+    /// couple of hundred milliseconds later, and `ZoomFlight.build` asked once,
+    /// before there was anything to say yes to. So the card spent the whole
+    /// flight showing a 172pt cover blown up sevenfold, and the sharp picture
+    /// appeared only after the landing. Filmed.
+    ///
+    /// ⚠️ ARMED ONLY WHERE THE PAGE IS ALLOWED TO PLAY IN FLIGHT. A destination
+    /// that stood its playback down has nothing to mirror, and asking it every
+    /// refresh for the length of a flight would be a question whose answer is
+    /// known. The caller gates on the same fact it told the destination.
+    ///
+    /// ⚠️ The mirror moves the render slot to the card (only the most recently
+    /// attached layer is guaranteed to draw), so the page is blank BEHIND the
+    /// card until `zoomTransitionDidEnd` reclaims it. That is the dismiss leg's
+    /// mechanism run backwards, and the landing already reclaims.
+    @discardableResult
+    static func arm(
+        card: any ZoomFlightCard,
+        pageSize: CGSize,
+        mirroring destination: any ZoomTransitionDestination,
+        window: CFTimeInterval = ZoomLiveMediaRetry.window
+    ) -> ZoomLiveMediaRetry? {
+        guard card.zoomLiveMediaSurface == nil else { return nil }
+        let retry = ZoomLiveMediaRetry(
+            card: card,
+            pageSize: pageSize,
+            window: window,
+            acquire: { [weak destination] card in
+                guard let destination else { return nil }
+                card.adoptZoomLiveMedia { destination.zoomMirrorLiveMedia(onto: $0) }
+                return card.zoomLiveMediaSurface
+            }
         )
         retry.start()
         return retry
@@ -73,10 +132,10 @@ final class ZoomLiveMediaRetry: NSObject {
     private init(card: any ZoomFlightCard,
                  pageSize: CGSize,
                  window: CFTimeInterval,
-                 ask: @escaping () -> UIView?) {
+                 acquire: @escaping (any ZoomFlightCard) -> UIView?) {
         self.card = card
         self.pageSize = pageSize
-        self.ask = ask
+        self.acquire = acquire
         self.deadline = CACurrentMediaTime() + window
         super.init()
         #if DEBUG
@@ -123,15 +182,11 @@ final class ZoomLiveMediaRetry: NSObject {
             return
         }
         guard CACurrentMediaTime() < deadline else { return stop() }
-        guard let surface = ask() else { return }
+        guard let surface = acquire(card) else { return }
         adopt(surface, on: card)
     }
 
     private func adopt(_ surface: UIView, on card: any ZoomFlightCard) {
-        card.adoptZoomLiveMediaView(surface)
-        // The card is free to refuse — a wrong surface type, or one it has
-        // since acquired for itself. Refusing is not a reason to stop asking.
-        guard card.zoomLiveMediaSurface === surface else { return }
         liveMediaSize = ZoomFlight.liveMediaLayoutSize(
             native: card.zoomLiveMediaNativeSize, page: pageSize
         )
