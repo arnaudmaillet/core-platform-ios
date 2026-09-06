@@ -147,9 +147,18 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // The mixed venue still spans all three kinds — the property
         // `aTextFacedMixedClusterOpensBothKinds` rests on — and the media-only
         // venue still holds no text.
-        assign(mixedVenue, text: 2, video: 2, photo: 2)
-        assign(textOnlyVenue, text: 3, video: 0, photo: 0)
-        assign(mediaOnlyVenue, text: 0, video: 2, photo: 2)
+        // ⚠️ RAISED, and evenly. The venues are what the default viewport mostly
+        // holds — the scatter contributes a handful — so their quota IS the
+        // map's composition. At 2/2/2 they were a minority of the pins and the
+        // scatter's draw decided the balance; at 8/8/8 they dominate it, and the
+        // scatter becomes a perturbation rather than the answer.
+        //
+        // The venues keep their meanings: the text-only one takes only text, the
+        // media-only one takes no text, and the mixed one spans all three —
+        // which `aTextFacedMixedClusterOpensBothKinds` rests on.
+        assign(mixedVenue, text: 4, video: 4, photo: 4)
+        assign(textOnlyVenue, text: 4, video: 0, photo: 0)
+        assign(mediaOnlyVenue, text: 0, video: 4, photo: 4)
         return assignments
     }
 
