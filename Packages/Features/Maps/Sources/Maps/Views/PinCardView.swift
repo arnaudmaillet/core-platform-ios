@@ -460,7 +460,13 @@ final class PinCardView: UIView {
         // stand-in with `imageView.image = cover`, an icon post's wire
         // thumbnail included. Filmed as a photograph appearing from nowhere
         // behind the icon as the window closed.
-        imageView.isHidden = face == .icon
+        //
+        // ⚠️ `!= .media`, NOT `== .icon`. The first cut of this rule named the
+        // face that was filmed, and a rule that names one case is a rule that
+        // has to be rediscovered for the next one: a TEXT face carries the same
+        // cover, and it is hidden there only by an opaque disc that happens to
+        // fill the window. The cover is `.media`'s content, and nothing else's.
+        imageView.isHidden = face != .media
         // The ring belongs to the disc, so it follows the disc rather than the
         // face: a bare icon wearing the text floor should look like a text
         // marker, ring included.
