@@ -96,6 +96,68 @@ struct SnapMediaLoaderSpecTests {
         return cell
     }
 
+    // MARK: - The surface the page is actually showing
+
+    /// **A PAGE THAT ADOPTS A SURFACE MID-FLIGHT STOPS WAITING.**
+    ///
+    /// Reported from the map: on the first open of a media post the spinner
+    /// sometimes never goes away, over video that is playing perfectly.
+    ///
+    /// The mechanism is a signal wired to the wrong object. A hero flight
+    /// carries the live player, so the page defers its own playback and its own
+    /// surface sits at zero frames while the grace runs out — spinner up. Then
+    /// the landing hands over the flight's surface, which has been rendering
+    /// the whole time. `restoreRenderView` re-points `renderView` at that
+    /// object and detaches the one the page installed its "there is a picture
+    /// now" closure on, so the page's only way down is wired to a view that
+    /// will never speak again, while the view the viewer is watching announces
+    /// to nobody.
+    ///
+    /// Measured before the fix: 19 cold opens, 11 stuck. Widening the grace to
+    /// 3s made 5 of 5 clean — which is not a fix, but it is the proof that the
+    /// answer is available at the landing and simply never asked for.
+    ///
+    /// Two claims, and they fail separately, so they are tested separately.
+    @Test func adoptingALiveSurfaceEndsTheWait() {
+        let cell = cell(clip())
+        cell.debugElapseMediaLoaderGrace()
+        #expect(cell.debugIsShowingMediaLoader, "the premise: nothing has arrived yet")
+
+        // What a landing hands over: a surface already drawing, whose
+        // announcement is in the past.
+        let adopted = VideoRenderView()
+        adopted.debugSimulateFirstFrame()
+
+        cell.adoptLiveRenderView(adopted)
+
+        #expect(!cell.debugIsShowingMediaLoader,
+                "the page is showing a picture, so it must stop saying it is not")
+    }
+
+    /// ⚠️ AND THE SIGNAL MOVES WITH THE SURFACE, for the frame that has not
+    /// arrived yet.
+    ///
+    /// Re-asking at the landing fixes the surface that arrives already
+    /// rendering. A surface that arrives EMPTY — flushed by a renderer change
+    /// on the way over — still has to be able to speak when its first frame
+    /// lands, and it can only do that if the page's closure followed it. Three
+    /// places re-point this surface (a landing, a reclaimed donation, a
+    /// carousel page turn), so the closure belongs to the card rather than to
+    /// whichever object happened to be there at bind.
+    @Test func thePictureSignalFollowsTheSurface() {
+        let cell = cell(clip())
+        let original = cell.debugRenderView
+        #expect(original.onPictureAvailabilityChange != nil, "the premise: the page is listening")
+
+        let adopted = VideoRenderView()
+        cell.adoptLiveRenderView(adopted)
+
+        #expect(adopted.onPictureAvailabilityChange != nil,
+                "the surface the page is showing has to be the one it listens to")
+        #expect(original.onPictureAvailabilityChange == nil,
+                "and the one it replaced must not still be holding the page's only edge")
+    }
+
     // MARK: - Whose wait it is
 
     /// ⚠️ THE WAIT BELONGS TO A MEDIA, NOT TO THE POST.

@@ -739,6 +739,31 @@ public final class VideoRenderView: UIView {
     ///
     /// A short clip loops, so the gap wraps and stays small — which is why this
     /// was reported on a long stream and not on a ten-second one.
+    /// ⚠️ THIS ZEROES THE COUNT WITHOUT ANNOUNCING, AND THAT IS A LATENT TRAP.
+    ///
+    /// `isReadyForDisplay` is `enqueuedFrameCount > 0` on this backing, and
+    /// `updatePosterVisibility` only fires `onPictureAvailabilityChange` on a
+    /// CHANGE. So after this runs on a surface that had already announced a
+    /// picture, `hasAnnouncedPicture` is true while `isReadyForDisplay` is
+    /// false — and the next first frame announces nothing, because the two now
+    /// agree. Any consumer holding the edge rather than re-asking the level is
+    /// then stuck on a stale answer forever.
+    ///
+    /// Not fixed in place, deliberately: the count answers two questions at
+    /// once — "how many frames are pending" and "has this surface ever shown
+    /// one" — and this flush keeps the displayed frame, so neither zeroing it
+    /// nor announcing `false` is honest. Announcing false would flash the
+    /// poster back over a surface that is still drawing; not zeroing would make
+    /// the next enqueue not-first and strand `isAwaitingFirstFrameToReveal` on
+    /// a surface waiting to be revealed. Separating the two is a real change to
+    /// the reveal gate and wants its own measurement.
+    ///
+    /// It was NOT the cause of the stuck-spinner defect — that was a callback
+    /// stranded on a discarded surface, see
+    /// `SnapMediaCardView.onPictureAvailabilityChange` — and it was never
+    /// observed firing across 19 instrumented opens. It is written down here so
+    /// the next reader does not have to rediscover it, and so that whoever does
+    /// separate the two questions knows what the shape of the answer is.
     func flushPendingSamples() {
         guard let sampleBufferLayer else { return }
         sampleBufferLayer.sampleBufferRenderer.flush()
@@ -810,6 +835,27 @@ public final class VideoRenderView: UIView {
 
     /// Names this surface in `-zoom-live-log` output (e.g. "tile", "card").
     public var debugLabel: String?
+
+    #if DEBUG
+    /// Puts this surface into the state an ADOPTED one arrives in: a picture on
+    /// screen, and its announcement already made.
+    ///
+    /// A hero landing hands the page a surface that has been rendering for the
+    /// length of the flight, so `onPictureAvailabilityChange` fired while
+    /// somebody else owned it and will never fire again. Any consumer that
+    /// holds that edge instead of re-asking the level is then stuck — which is
+    /// exactly the defect `SnapMediaLoaderSpecTests` pins, and it cannot be
+    /// written without a way to produce this state without a decoder.
+    ///
+    /// Goes through the real announcement path rather than forcing a flag, so a
+    /// spec cannot pass against a surface that would not actually report a
+    /// picture.
+    public func debugSimulateFirstFrame() {
+        let wasFirst = enqueuedFrameCount == 0
+        enqueuedFrameCount += 1
+        if wasFirst { updatePosterVisibility(ready: true) }
+    }
+    #endif
 
     /// Set only on the surfaces taking part in a hero flight. Background
     /// teardowns — the other autoplaying tiles being stopped as the grid is
