@@ -323,4 +323,38 @@ struct PinCardIconFloorTests {
         card.setIcon((art(), 0))
         #expect(card.face == .icon)
     }
+
+    /// ⚠️ THE COVER IS `.media`'s CONTENT, AND NO OTHER FACE'S.
+    ///
+    /// Invisible at rest on every face, which is why it went unwritten for so
+    /// long: a marker is 44 or 56pt, exactly the size at which its face covers
+    /// its card. A REVEAL WINDOW is several hundred points across and
+    /// `layoutIconFace` deliberately caps the mark at its authored size, so
+    /// everything around the mark is whatever else the card is holding — and
+    /// `MapPinRevealSource.marker` dresses every stand-in with the pin's cover,
+    /// an icon post's wire thumbnail included. Filmed as a photograph appearing
+    /// from nowhere as the window closed.
+    ///
+    /// A TEXT face carries the same cover and is saved only by an opaque disc
+    /// that happens to fill the window, which is why this asserts all three
+    /// faces rather than the one that was filmed.
+    @Test func onlyAMediaFaceDrawsTheCover() {
+        let cover = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+
+        for face in [PinCardView.Face.text, .icon] {
+            let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
+            card.setFace(face)
+            card.imageView.image = cover
+            #expect(card.imageView.isHidden, "a \(face) face drew the post's cover under its own")
+        }
+
+        let media = PinCardView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
+        media.setFace(.media)
+        media.imageView.image = cover
+        #expect(media.imageView.isHidden == false, "a media face IS its cover")
+    }
 }
+
