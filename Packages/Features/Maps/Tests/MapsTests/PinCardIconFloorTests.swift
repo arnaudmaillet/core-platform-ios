@@ -241,45 +241,75 @@ struct PinCardIconFloorTests {
 
     // MARK: - The reveal's container channel
 
-    /// Under a DRESSED icon the reveal's ramp moves the CONTAINER, and the mark
-    /// stays drawn.
+    /// A DRESSED ICON WEARS NO GROUND, ON ANY LEG AND AT ANY CALL ORDER — and
+    /// this test used to assert the opposite.
     ///
-    /// A mark reads at 44pt or not at all: it does not grow with the window and
-    /// it does not fade in. What arrives gradually is the disc around it.
-    @Test func theContainerFadesWhileTheMarkStaysDrawn() {
+    /// It pinned a "borrow": `setContentOpacity` un-hid `textFaceView` so the
+    /// disc could assemble itself around the mark over the transition. The idea
+    /// is defensible and the code never delivered it. `applyFaceVisibility`
+    /// hides the same `isHidden`, and it runs from `setCornerRadius`, which
+    /// every pose drives — so which of the two won was decided by CALL ORDER,
+    /// and the two dismiss drivers order them differently. The chevron applies
+    /// its pose last and the disc stayed hidden; a finger applies
+    /// `setContentOpacity` last and the disc appeared, full-bleed at the
+    /// window's size, `floorCornerRadius = 0`, in `.secondarySystemBackground`.
+    /// That is the "greyish ground that does not fade" a viewer filmed five
+    /// times, and it is why the promised behaviour was never once seen: the
+    /// only leg that showed the disc showed it as a block.
+    ///
+    /// `MapPinRevealSource` had already ruled the other way — a dressed icon is
+    /// a mark on the map and nothing else, so a window closing onto it ends on
+    /// nothing. One driver for the disc now, and it is `applyFaceVisibility`.
+    @Test func aDressedIconWearsNoDiscAtAnyRamp() {
         let card = makeCard(.icon)
         card.setIcon((art(), 0))
         let textFace = card.debugTextFace
         let iconFace = card.debugIconFace
 
-        card.setContentOpacity(0)
-        #expect(!textFace.isHidden, "the container must exist to arrive at all")
-        #expect(textFace.alpha == 0)
-        #expect(iconFace.alpha == 1, "the mark is already there at frame zero")
-
-        card.setContentOpacity(0.5)
-        #expect(abs(textFace.alpha - 0.5) < 0.001)
-        #expect(iconFace.alpha == 1)
-
-        card.setContentOpacity(1)
-        #expect(textFace.alpha == 1)
-        #expect(iconFace.alpha == 1)
+        for ramp in [CGFloat(0), 0.5, 1] {
+            card.setContentOpacity(ramp)
+            #expect(textFace.isHidden, "a dressed icon has no ground at ramp \(ramp)")
+            #expect(iconFace.alpha == 1, "the mark is already there, at ramp \(ramp)")
+        }
     }
 
-    /// ⚠️ And it cannot leak onto a resting marker, where the product asked for
-    /// no circle: re-facing or re-dressing takes the disc back.
-    @Test func theBorrowedContainerIsReturnedOnReface() {
-        let card = makeCard(.icon)
-        card.setIcon((art(), 0))
-        card.setContentOpacity(0.5)
-        #expect(card.debugTextFaceIsVisible, "the reveal borrows the disc as the container")
+    /// ⚠️ AND THE CALL ORDER MUST NOT DECIDE IT.
+    ///
+    /// The finger-drag driver applies its pose (which reaches
+    /// `applyFaceVisibility` through `setCornerRadius`) and THEN drives the
+    /// content ramp; the chevron does the two the other way round. Both orders
+    /// have to end on the same picture, or a defect is reachable by exactly one
+    /// of the two ways a person can dismiss — which is how this one survived
+    /// four fixes and five recordings.
+    @Test func neitherCallOrderCanPutADiscUnderADressedIcon() {
+        // The finger's order: pose, then ramp.
+        let dragged = makeCard(.icon)
+        dragged.setIcon((art(), 0))
+        dragged.setCornerRadius(0)
+        dragged.setContentOpacity(1)
+        #expect(dragged.debugTextFace.isHidden, "a finger's order must not un-hide the disc")
 
-        card.setIcon((art(), 1))
-        #expect(!card.debugTextFaceIsVisible, "a dressed icon shows no disc at rest")
+        // The chevron's order: ramp, then pose.
+        let popped = makeCard(.icon)
+        popped.setIcon((art(), 0))
+        popped.setContentOpacity(1)
+        popped.setCornerRadius(0)
+        #expect(popped.debugTextFace.isHidden, "and neither must the chevron's")
+    }
+
+    /// ⚠️ The floor is still there for a BARE icon, which is the case the disc
+    /// genuinely belongs to: no artwork has landed, so the marker has to be
+    /// something.
+    @Test func aBareIconStandsOnTheDisc() {
+        let card = makeCard(.icon)
+        #expect(card.debugTextFaceIsVisible, "an icon with no art stands on the floor")
+
+        card.setIcon((art(), 0))
+        #expect(!card.debugTextFaceIsVisible, "and steps off it the instant art lands")
 
         card.setContentOpacity(0.5)
         card.setFace(.icon)
-        #expect(!card.debugTextFaceIsVisible, "re-facing returns it too")
+        #expect(!card.debugTextFaceIsVisible, "re-facing cannot put it back either")
     }
 
     /// The mark's size is authored, not derived from the window.
@@ -366,27 +396,37 @@ struct PinCardIconFloorTests {
     ///
     /// It broke twice over: a TEXT marker's reveal kept the author's photograph
     /// at full opacity while everything else left, and an ICON marker — which
-    /// BORROWS this disc as its container and asks for its content to be silent
-    /// — closed onto that photograph. A post with no media at all, showing a
-    /// picture, which is what made it read as impossible.
-    @Test func aBorrowedDiscCarriesNoPictureOfItsOwn() {
+    /// then BORROWED this disc as its container and asked for its content to be
+    /// silent — closed onto that photograph. A post with no media at all,
+    /// showing a picture, which is what made it read as impossible.
+    ///
+    /// The icon half of that is now settled at the root: a dressed icon shows
+    /// no disc at all, so it can carry nothing. The TEXT half stands, and it is
+    /// what this pins.
+    @Test func theDiscFadesWhicheverOfItsTwoPicturesIsDrawn() {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
-        card.setFace(.icon)
+        card.setFace(.text)
         card.setTextAvatar(UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { c in
             UIColor.red.setFill()
             c.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
         })
-        card.setIcon((art(), 0))
 
         card.setContentOpacity(0)
-
-        let disc = card.debugTextFace
-        #expect(disc.isHidden == false, "the icon borrows the disc as its container")
-        // The GROUND stays — it is the container the mark is arriving inside.
-        // What must be silent is anything the disc DRAWS of its own.
         #expect(card.debugTextFaceGlyph.alpha == 0)
         #expect(card.debugTextFaceAvatar.alpha == 0,
-                "the author's picture rode in on the container")
+                "the author's picture is the disc's content too")
+
+        // …and the icon half, at the root: nothing to carry, because there is
+        // no container to carry it.
+        let dressed = PinCardView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        dressed.setFace(.icon)
+        dressed.setTextAvatar(UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { c in
+            UIColor.red.setFill()
+            c.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        })
+        dressed.setIcon((art(), 0))
+        dressed.setContentOpacity(0)
+        #expect(dressed.debugTextFace.isHidden, "a dressed icon closes onto nothing at all")
     }
 }
 

@@ -189,6 +189,12 @@ final class RevealDismissInteractionController: NSObject,
         // a fill applied before it is overwritten, and the instrument would
         // report nothing on the one layer the complaint is about.
         RevealDebugLayers.legend("dismiss (interactive)")
+        RevealDebugLayers.outline(container, "container (the transition's stage)", index: 0)
+        RevealDebugLayers.outline(dim, "dim (darkens the map behind)", index: 1)
+        RevealDebugLayers.outline(host, "host (holds the page, carries the mask)", index: 2)
+        RevealDebugLayers.outline(mask, "mask (THE WINDOW itself)", index: 3, width: 5, fills: false)
+        RevealDebugLayers.outline(fromView, "page (the post being dismissed)", index: 4)
+        RevealDebugLayers.outline(standIn, "stand-in (the marker, arriving)", index: 5, width: 5)
         (standIn as? RevealStandInShaping)?.debugOutlineContents()
         installVeil(geometry: geometry, anchor: anchor)
         installAuthorBand(geometry: geometry, anchor: anchor)
@@ -366,7 +372,7 @@ final class RevealDismissInteractionController: NSObject,
         // was already aiming at and there is nothing left to correct.
         let container = context.containerView
         let landing = commit ? currentLanding(in: container) : openRect
-        let closed = RevealStage.closed(
+        var closed = RevealStage.closed(
             sourceRect: landing,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
@@ -375,6 +381,17 @@ final class RevealDismissInteractionController: NSObject,
             ridingFrom: standIn != nil ? openRect : nil,
             fit: geometry.pageFit
         )
+        // ⚠️ THE SAME LAW AS THE CHEVRON'S, ON THE LEG PEOPLE ACTUALLY USE —
+        // and its absence here is why the law read as broken. This controller
+        // never wrote `pageOpacity` at all, so it applied the default 1 down to
+        // the 44pt landing: a block of the page's own ground sitting inside the
+        // window until the window was gone, filmed five times.
+        //
+        // ON THE COMMIT ONLY. The drag itself must keep the page whole — an
+        // abandoned grab hands it straight back — so this rides the release's
+        // spring and nothing else; `target` below takes the open pose's 1 when
+        // the grab is abandoned.
+        closed.pageOpacity = RevealStage.closingPageOpacity(sourceFill: geometry.sourceFill)
         let target = commit
             ? closed
             : RevealStage.Pose(
@@ -496,7 +513,9 @@ final class RevealDismissInteractionController: NSObject,
             // Into the card's tone on the way home, so the last frame of the
             // close and the row underneath are one colour; back to the page's
             // own if the grab is abandoned.
-            self.geometry.setDestinationGround(commit ? self.geometry.sourceFill : nil)
+            self.geometry.setDestinationGround(
+                commit ? RevealDebugLayers.ground(self.geometry.sourceFill) : nil
+            )
             presenting?.transform = commit
                 ? .identity
                 : CGAffineTransform(scaleX: depth, y: depth)

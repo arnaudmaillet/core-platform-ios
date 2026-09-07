@@ -123,11 +123,38 @@ struct SnapFeedEmptyGroundTests {
             )
         )
         #expect(marker == .secondarySystemBackground)
-        // A row says nothing, and takes the card's own fill.
+        // A row says nothing, and takes the card's own fill — resolved on
+        // `TextRevealOrigin.init`, so that by the time the installer sees it
+        // there is no absence left to interpret.
         let row = TextRevealInstaller.sourceFill(
             for: TextRevealOrigin(rowFrame: { _ in nil }, captionEnd: nil)
         )
         #expect(row == PostGridListRowCell.cardFillColor)
+    }
+
+    /// ⚠️ **AND A SOURCE WITH NO GROUND MUST REACH THE GEOMETRY AS `nil`.**
+    ///
+    /// This is the regression that cost four shipped fixes. `sourceFill(for:)`
+    /// was `origin.fill ?? PostGridListRowCell.cardFillColor`, and that
+    /// fallback is `.secondarySystemBackground` — the SAME COLOUR
+    /// `MapPinRevealSource` passes for a disc. So a dressed icon's deliberate
+    /// `nil`, which means "this marker is a mark and nothing else", came back
+    /// as the exact value it was refusing. `RevealGeometry.sourceFill` was
+    /// never nil on the map route, so every rule written on `sourceFill == nil`
+    /// — the page-leaves law in both dismiss drivers — was unreachable from the
+    /// day it was written, and the grey block it was written to remove stayed
+    /// on screen through five recordings.
+    ///
+    /// Two questions, two functions: what the WINDOW wears may be nothing; what
+    /// a bare pre-data SCREEN wears may not.
+    @Test func aSourceWithNoGroundKeepsItsAbsenceAllTheWayToTheGeometry() {
+        let dressedIcon = TextRevealOrigin(rowFrame: { _ in nil }, captionEnd: nil, fill: nil)
+
+        #expect(TextRevealInstaller.sourceFill(for: dressedIcon) == nil,
+                "a mark on the map has no ground, and the window must be told so")
+        #expect(TextRevealInstaller.emptyGround(for: dressedIcon)
+            == PostGridListRowCell.cardFillColor,
+                "but a screen with no data still has to be some colour")
     }
 }
 

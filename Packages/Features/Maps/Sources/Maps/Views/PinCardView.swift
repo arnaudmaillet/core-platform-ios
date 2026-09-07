@@ -1008,44 +1008,65 @@ extension PinCardView: RevealStandInShaping {
     /// The ring goes with the content on purpose. It reads as a marker's border
     /// at 44pt and as an outline drawn around the screen at full size, so it
     /// has to be gone well before the window is.
-    /// The three layers a dismissal's stubborn ground can be, and NOTHING
-    /// ELSE.
+    /// Every layer this card draws, named on screen.
     ///
-    /// The full eighteen-layer sweep did its job — it eliminated sixteen of
-    /// them — and leaving it in now works against the next answer: a screen
-    /// where every rectangle is stained cannot show which of two overlapping
-    /// ones is stubborn. Worse, the pair that survived were GREY and WHITE,
-    /// which is the one distinction a grey ground makes impossible to read.
-    /// They are LIME, MAGENTA and CYAN here for that reason: no shade of any of
-    /// them is a shade of another, or of the thing being hunted.
+    /// Narrowed to three once, when a full sweep pointed at two layers that
+    /// could not be told apart. That was the wrong lesson: the sweep's problem
+    /// was never how MANY layers it named, it was that it PAINTED transparent
+    /// ones and could not reach the page's own ground at all. `outline` now
+    /// refuses to stain a layer that paints nothing and says so in a line, so
+    /// naming everything costs printed text rather than paint over the
+    /// evidence — and `RevealDebugLayers.ground` reaches the layer that turned
+    /// out to be the culprit.
     func debugOutlineContents() {
         #if DEBUG
+        RevealDebugLayers.outline(self, "card (the stand-in's own bounds)", index: 7)
+        RevealDebugLayers.outline(imageView, "card.cover (the post's picture)", index: 8)
+        RevealDebugLayers.outline(previewSheetView, "card.previewSheet", index: 9)
+        RevealDebugLayers.outline(departureCoverView, "card.departureCover", index: 10)
+        RevealDebugLayers.outline(videoRenderView, "card.video", index: 11)
+        RevealDebugLayers.outline(donatedMediaHost, "card.donatedMediaHost", index: 12)
+        RevealDebugLayers.outline(textFaceView, "card.disc (the text face / icon's floor)", index: 13)
         RevealDebugLayers.outline(
-            textFaceView.debugDiscGround, "card.disc.ground (the floor's opaque fill)", index: 3
+            textFaceView.debugDiscGround, "card.disc.ground (the floor's opaque fill)", index: 14
         )
-        RevealDebugLayers.outline(textFaceView.debugGlyph, "card.disc.glyph", index: 10)
-        RevealDebugLayers.outline(iconFaceView, "card.icon (the lottie mark)", index: 6)
+        RevealDebugLayers.outline(textFaceView.debugGlyph, "card.disc.glyph", index: 15)
+        RevealDebugLayers.outline(textFaceView.debugAvatar, "card.disc.avatar", index: 16)
+        RevealDebugLayers.outline(iconFaceView, "card.icon (the lottie mark)", index: 17)
+        RevealDebugLayers.outline(ringView, "card.ring", index: 6)
         #endif
     }
 
     func setContentOpacity(_ alpha: CGFloat) {
-        // ⚠️ UNDER AN ICON THIS CHANNEL DRIVES THE CONTAINER, NOT THE CONTENT.
+        // ⚠️ UNDER A DRESSED ICON THIS CHANNEL MOVES NOTHING BUT THE FURNITURE.
         //
         // A mark is not a picture of a place — it is the thing the author chose
         // to say, and it reads at 44pt or not at all. So it does not grow with
         // the window and it does not fade in: it is already drawn, centred, at
-        // its authored size, from the first frame. What arrives gradually is the
-        // DISC AROUND IT — the container assembling itself over the transition
-        // while its content is simply there.
+        // its authored size, from the first frame, and there is nothing around
+        // it. A window closing onto such a marker ends on the map.
         //
-        // The disc is `textFaceView`, which is exactly this shape already and is
-        // otherwise idle behind a dressed icon. `applyFaceVisibility` hides it
-        // again the moment the card is re-faced or re-dressed, so this cannot
-        // leak into a resting marker, where the product asked for no circle.
+        // ⚠️ IT USED TO BORROW THE TEXT DISC AS A CONTAINER — "what arrives
+        // gradually is the DISC AROUND IT" — and that borrow was a SECOND GREY
+        // of the very colour this route exists to refuse.
+        //
+        // The lines that stood here un-hid `textFaceView` — `.systemBackground`
+        // wrapped around a full-bleed `.secondarySystemBackground` disc, given
+        // `floorCornerRadius = 0` under a dressed icon, i.e. a hard opaque
+        // SQUARE at the window's own size — and drove its alpha with this
+        // channel. `applyFaceVisibility` sets the same `isHidden` back to true,
+        // so which of the two won was a CALL-ORDER ACCIDENT that differed per
+        // leg: the present and the chevron run `RevealStage.apply` last and the
+        // disc stayed hidden, the finger drag runs `setContentOpacity` last and
+        // it did not. The "container assembling itself around the mark" this
+        // comment used to promise was therefore never delivered on any leg —
+        // it only ever appeared as a grey block, on one.
+        //
+        // `MapPinRevealSource` had already ruled the other way one commit
+        // earlier: a dressed icon has no ground, so a window closing onto it
+        // must end on nothing. One driver for `textFaceView.isHidden` now, and
+        // it is `applyFaceVisibility`.
         if face == .icon, wornIcon != nil {
-            textFaceView.isHidden = false
-            textFaceView.alpha = alpha
-            textFaceView.setContentOpacity(0)   // the ground, never its glyph
             iconFaceView.alpha = 1
             ringView.alpha = alpha
             imageView.alpha = alpha
