@@ -391,6 +391,21 @@ enum RevealStage {
         /// makes every intermediate frame an opaque sum of two finished
         /// drawings.
         var pageOpacity: CGFloat = 1
+
+        /// Whether `apply` writes `pageOpacity` at all.
+        ///
+        /// ⚠️ FALSE WHEN A STAND-IN OWNS THE FADE, and its absence was a defect
+        /// that read as the rule never having been applied. The opening sets
+        /// `toView.alpha = 0` so the destination can rise over a stand-in that
+        /// stays whole — and then called `apply(closed, …)`, which wrote
+        /// `page.alpha = pose.pageOpacity` (1) two lines later. The page was
+        /// opaque from frame zero, the ramp animated 1 to 1, and what shipped
+        /// was a window that opens with its content already fully there.
+        ///
+        /// Two drivers on one property is the trap this codebase keeps meeting;
+        /// this makes the pose stand down rather than making the caller shout
+        /// louder.
+        var ownsPageOpacity = true
     }
 
     /// The whole page, unmasked and untranslated — the landed pose, identical
@@ -962,7 +977,7 @@ enum RevealStage {
         page.transform = CGAffineTransform(
             translationX: pose.pageTranslation.x, y: pose.pageTranslation.y
         ).scaledBy(x: pose.pageScale, y: pose.pageScale)
-        page.alpha = pose.pageOpacity
+        if pose.ownsPageOpacity { page.alpha = pose.pageOpacity }
         standIn?.frame = pose.mask
         (standIn as? RevealStandInShaping)?.setCornerRadius(pose.maskRadius)
         // LAID OUT HERE, inside whatever block is applying the pose, and that
@@ -1165,7 +1180,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         let (host, mask) = RevealStage.makeHost(
             around: toView, in: container, pageFrame: pageFrame
         )
-        let open = RevealStage.open(container: container)
+        var open = RevealStage.open(container: container)
         // The window opens AS THE SOURCE when the source's content is not the
         // page's — a marker's face, which the page has nowhere. Added above the
         // masked page and posed on the same closed pose. Nil for a row, whose
@@ -1175,7 +1190,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         // that pose says — the same order, and the same reason, as the pop.
         let standIn = geometry.makePresentStandIn()
         let carries = standIn != nil && geometry.pageFit.carriesPage
-        let closed = RevealStage.closed(
+        var closed = RevealStage.closed(
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
@@ -1215,9 +1230,19 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             //
             // Mirroring it means the stand-in goes UNDER the page and simply
             // stays: opaque, from frame zero, for the whole opening.
-            container.insertSubview(standIn, belowSubview: toView)
+            // ⚠️ BELOW THE HOST, NOT BELOW THE PAGE. `makeHost` has already
+            // moved `toView` inside the masking host, so it is no longer a
+            // sibling in `container` — and `insertSubview(_:belowSubview:)`
+            // against a non-sibling does not place anything below it. The
+            // stand-in landed on TOP of the page: the marker's face drawn over
+            // the destination for the whole opening, which is the reverse of
+            // the rule and was filmed as the icon sitting on the page.
+            container.insertSubview(standIn, belowSubview: host)
             standIn.alpha = 1
             (standIn as? RevealStandInShaping)?.setContentOpacity(1)
+            // The pose must not write this back — see `Pose.ownsPageOpacity`.
+            closed.ownsPageOpacity = false
+            open.ownsPageOpacity = false
             toView.alpha = 0
         }
         RevealStage.apply(closed, mask: mask, page: toView, standIn: standIn)

@@ -449,6 +449,18 @@ final class PinCardView: UIView {
         textFaceView.alpha = 1
         textFaceView.isHidden = !(face == .text || iconIsBare)
         iconFaceView.isHidden = face != .icon
+        // ⚠️ AN ICON'S FACE IS THE ICON, and the cover under it is not part of
+        // it. The rule was never written down because at rest it cannot be
+        // seen: the card is 44pt and the mark fills it exactly.
+        //
+        // A REVEAL WINDOW is not 44pt. `layoutIconFace` deliberately caps the
+        // mark at its authored size and centres it, so in a window several
+        // hundred points across everything around the mark is whatever else the
+        // card is holding — and `MapPinRevealSource.marker` dresses every
+        // stand-in with `imageView.image = cover`, an icon post's wire
+        // thumbnail included. Filmed as a photograph appearing from nowhere
+        // behind the icon as the window closed.
+        imageView.isHidden = face == .icon
         // The ring belongs to the disc, so it follows the disc rather than the
         // face: a bare icon wearing the text floor should look like a text
         // marker, ring included.
