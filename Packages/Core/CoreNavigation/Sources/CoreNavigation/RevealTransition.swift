@@ -1593,7 +1593,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // window as a second copy of the same post. Put back below, in the same
         // transaction as the unwrap.
         geometry.setSourceConcealed(true)
-        let closed = RevealStage.closed(
+        var closed = RevealStage.closed(
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
@@ -1602,6 +1602,29 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             ridingFrom: standIn != nil ? open.mask : nil,
             fit: geometry.pageFit
         )
+        // ⚠️ THE LAW HAS A PREMISE, AND HERE IT FAILS.
+        //
+        // `Pose.pageOpacity` is always 1 because "the arrival is opaque and
+        // covers; a page that stays whole underneath makes every intermediate
+        // frame an opaque sum of two finished drawings" — and driving it to 0
+        // once produced a window that was briefly a hole. Both true, and both
+        // conditional on there BEING an opaque arrival.
+        //
+        // A marker with no ground is not one. A dressed icon is a mark and
+        // nothing else (`RevealGeometry.sourceFill == nil` is exactly that
+        // statement), so it covers nothing, and a page held at 1 underneath it
+        // is a block of the page's own ground sitting inside the window until
+        // the window is gone. Reported twice: once as the marker's grey, which
+        // was `sourceFill` and is now nil, and again underneath it as the
+        // page's own.
+        //
+        // So the page leaves on the legs where nothing arrives to cover it —
+        // which is the same channel the OPENING drives in the other direction,
+        // and for the same reason.
+        //
+        // No hole to reintroduce: what the two fades cross at is the MAP, which
+        // is where this window is going.
+        if geometry.sourceFill == nil { closed.pageOpacity = 0 }
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         geometry.setDestinationGround(nil)
         installVeil(geometry: geometry, anchor: anchor)
