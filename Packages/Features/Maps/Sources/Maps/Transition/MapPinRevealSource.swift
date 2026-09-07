@@ -118,7 +118,25 @@ enum MapPinRevealSource {
             alignsPageToSource: false,
             pageFit: .covering,
             cornerRadius: face.cornerRadius,
-            fill: PinCardView.textRevealGround,
+            // ⚠️ THE WINDOW WEARS THE MARKER'S GROUND, AND A DRESSED ICON HAS
+            // NONE.
+            //
+            // This colour is handed to the destination for the length of the
+            // transition (`RevealGeometry.sourceFill` -> `setDestinationGround`)
+            // so the inside of the window matches the marker it is opening from
+            // or closing onto. That is right for a disc — a text marker IS a
+            // grey disc, and a BARE icon wears the same disc as its floor.
+            //
+            // It is wrong for an icon with art. The product asked for no circle
+            // there: the marker is a mark on the map and nothing else, so a
+            // window closing onto it should end on nothing. It ended on a grey
+            // block instead — measured, not deduced: tinting this value magenta
+            // put magenta in exactly the reported rectangle.
+            //
+            // `nil` leaves the page its own ground, which fades out with the
+            // page across the close, so the window has nothing left to hold.
+            fill: mapView.wornIcon(for: annotation) != nil && face == .icon
+                ? nil : PinCardView.textRevealGround,
             setConcealed: concealMarker,
             dismissalDidEnd: dismissalDidEnd
         )
