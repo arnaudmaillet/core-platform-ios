@@ -995,6 +995,25 @@ extension PinCardView: RevealStandInShaping {
     /// The ring goes with the content on purpose. It reads as a marker's border
     /// at 44pt and as an outline drawn around the screen at full size, so it
     /// has to be gone well before the window is.
+    /// Every layer this card draws, named on screen — the other half of
+    /// `RevealDebugLayers`, which cannot see inside a stand-in it does not know
+    /// the type of. Indices continue the transition's own palette.
+    func debugOutlineContents() {
+        #if DEBUG
+        RevealDebugLayers.outline(self, "card (the stand-in's own bounds)", index: 7)
+        RevealDebugLayers.outline(imageView, "card.cover (the post's picture)", index: 8)
+        RevealDebugLayers.outline(previewSheetView, "card.previewSheet", index: 9)
+        RevealDebugLayers.outline(departureCoverView, "card.departureCover", index: 10)
+        RevealDebugLayers.outline(videoRenderView, "card.video", index: 11)
+        RevealDebugLayers.outline(donatedMediaHost, "card.donatedMediaHost", index: 12)
+        RevealDebugLayers.outline(textFaceView, "card.disc (the text face / icon's floor)", index: 13)
+        RevealDebugLayers.outline(textFaceView.debugGlyph, "card.disc.glyph", index: 14)
+        RevealDebugLayers.outline(textFaceView.debugAvatar, "card.disc.avatar", index: 15)
+        RevealDebugLayers.outline(iconFaceView, "card.icon (the lottie mark)", index: 16)
+        RevealDebugLayers.outline(ringView, "card.ring", index: 17)
+        #endif
+    }
+
     func setContentOpacity(_ alpha: CGFloat) {
         // ⚠️ UNDER AN ICON THIS CHANNEL DRIVES THE CONTAINER, NOT THE CONTENT.
         //

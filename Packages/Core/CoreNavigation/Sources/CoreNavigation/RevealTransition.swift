@@ -302,6 +302,14 @@ public protocol RevealStandInShaping: AnyObject {
     /// The card's opacity INSIDE the stand-in, separate from the stand-in's
     /// own — see `RevealStage.swapToStandIn`.
     func setContentOpacity(_ alpha: CGFloat)
+
+    /// Outlines whatever this stand-in draws of its own, for
+    /// `-reveal-debug-layers`. Default is nothing.
+    func debugOutlineContents()
+}
+
+public extension RevealStandInShaping {
+    func debugOutlineContents() {}
 }
 
 // MARK: - Shared staging
@@ -1626,6 +1634,17 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // is where this window is going.
         if geometry.sourceFill == nil { closed.pageOpacity = 0 }
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
+        // Every layer this leg touches, named on screen — see
+        // `RevealDebugLayers`. Ordered outermost-in, so the legend reads like
+        // the stack it describes.
+        RevealDebugLayers.legend("dismiss")
+        RevealDebugLayers.outline(container, "container (the transition's stage)", index: 0)
+        RevealDebugLayers.outline(dim, "dim (darkens the map behind)", index: 1)
+        RevealDebugLayers.outline(host, "host (holds the page, carries the mask)", index: 2)
+        RevealDebugLayers.outline(mask, "mask (THE WINDOW itself)", index: 3, width: 5)
+        RevealDebugLayers.outline(fromView, "page (the post being dismissed)", index: 4)
+        RevealDebugLayers.outline(standIn, "stand-in (the marker, arriving)", index: 5, width: 5)
+        (standIn as? RevealStandInShaping)?.debugOutlineContents()
         geometry.setDestinationGround(nil)
         installVeil(geometry: geometry, anchor: anchor)
         installAuthorBand(geometry: geometry, anchor: anchor)
@@ -1645,6 +1664,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
         )
         let chrome = returningChrome
+        RevealDebugLayers.outline(chrome, "chrome (the returning bar)", index: 6)
         let chromeAlpha: CGFloat = 1
         chrome?.alpha = 0
 
@@ -1754,4 +1774,94 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
         return animator
     }
+}
+
+@MainActor
+/// Names every layer that takes part in a reveal, on screen, so a defect can be
+/// POINTED AT instead of guessed at.
+///
+/// ⚠️ Borders, never backgrounds. The defects this exists for are things drawn
+/// where nothing should be — a ground that will not leave, a picture from
+/// somewhere else — and a debug FILL would paint over the very pixels in
+/// question. An outline says which rectangle a stray colour belongs to and
+/// changes none of it.
+///
+/// `-reveal-debug-layers`. The legend prints once per transition.
+public enum RevealDebugLayers {
+    #if DEBUG
+    public static var isOn: Bool {
+        ProcessInfo.processInfo.arguments.contains("-reveal-debug-layers")
+    }
+
+    /// Distinct and NAMEABLE — a viewer has to be able to say "the orange one"
+    /// out loud, so no two are a shade of the same word.
+    ///
+    /// ⚠️ ONE PER LAYER, never a wrapping index. The first cut of this had
+    /// twelve colours for eighteen layers and wrapped, so RED meant two
+    /// different things — which is worse than no instrument at all, because it
+    /// answers confidently and wrongly.
+    private static func entry(_ index: Int) -> (name: String, color: UIColor) {
+        let palette: [(String, UIColor)] = [
+            ("RED",     UIColor(red: 1.00, green: 0.15, blue: 0.10, alpha: 1)),
+            ("ORANGE",  UIColor(red: 1.00, green: 0.55, blue: 0.00, alpha: 1)),
+            ("YELLOW",  UIColor(red: 1.00, green: 0.92, blue: 0.10, alpha: 1)),
+            ("LIME",    UIColor(red: 0.65, green: 1.00, blue: 0.10, alpha: 1)),
+            ("GREEN",   UIColor(red: 0.05, green: 0.75, blue: 0.20, alpha: 1)),
+            ("TEAL",    UIColor(red: 0.00, green: 0.65, blue: 0.60, alpha: 1)),
+            ("CYAN",    UIColor(red: 0.10, green: 0.85, blue: 1.00, alpha: 1)),
+            ("BLUE",    UIColor(red: 0.10, green: 0.35, blue: 1.00, alpha: 1)),
+            ("NAVY",    UIColor(red: 0.05, green: 0.10, blue: 0.45, alpha: 1)),
+            ("PURPLE",  UIColor(red: 0.55, green: 0.20, blue: 0.90, alpha: 1)),
+            ("MAGENTA", UIColor(red: 1.00, green: 0.10, blue: 0.85, alpha: 1)),
+            ("PINK",    UIColor(red: 1.00, green: 0.60, blue: 0.75, alpha: 1)),
+            ("BROWN",   UIColor(red: 0.55, green: 0.35, blue: 0.15, alpha: 1)),
+            ("GOLD",    UIColor(red: 0.85, green: 0.70, blue: 0.10, alpha: 1)),
+            ("GREY",    UIColor(white: 0.55, alpha: 1)),
+            ("BLACK",   .black),
+            ("WHITE",   .white),
+            ("MINT",    UIColor(red: 0.60, green: 1.00, blue: 0.80, alpha: 1)),
+        ]
+        return index < palette.count
+            ? palette[index]
+            : ("UNNAMED-\(index)", UIColor(white: 0.5, alpha: 1))
+    }
+
+    /// `-reveal-debug-fills`: tint each layer's GROUND as well.
+    ///
+    /// The outline says which rectangle a stray colour belongs to; a tint says
+    /// which layer is PAINTING it, which is the question when the complaint is
+    /// a ground that will not leave. Translucent, so what it stains is still
+    /// recognisable underneath.
+    public static var fillsOn: Bool {
+        ProcessInfo.processInfo.arguments.contains("-reveal-debug-fills")
+    }
+
+    public static func outline(_ view: UIView?, _ label: String, index: Int, width: CGFloat = 3) {
+        guard isOn || fillsOn, let view else { return }
+        let entry = entry(index)
+        if isOn {
+            view.layer.borderColor = entry.color.cgColor
+            view.layer.borderWidth = width
+        }
+        if fillsOn {
+            // ⚠️ NEAR-OPAQUE, not a wash. The question this mode answers is
+            // "which layer is painting that block", and a 35% tint over a grey
+            // ground reads as a slightly warmer grey — which is the same
+            // ambiguity that made the block hard to place to begin with. At
+            // 0.85 the block simply BECOMES the colour, and its shape, its
+            // timing and its stubbornness are all still there to be pointed at.
+            view.backgroundColor = entry.color.withAlphaComponent(0.85)
+        }
+        print("[reveal-layers] \(entry.name.padding(toLength: 8, withPad: " ", startingAt: 0)) = \(label)")
+    }
+
+    public static func legend(_ title: String) {
+        guard isOn || fillsOn else { return }
+        print("[reveal-layers] ---- \(title) ----")
+    }
+    #else
+    public static var fillsOn: Bool { false }
+    public static func outline(_ view: UIView?, _ label: String, index: Int, width: CGFloat = 3) {}
+    public static func legend(_ title: String) {}
+    #endif
 }
