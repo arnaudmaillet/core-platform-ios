@@ -295,7 +295,15 @@ struct ZoomFlight {
         card.zoomRestingChrome?.alpha = 0
         shadow.alpha = 0
         let center = CGPoint(x: card.bounds.width / 2, y: card.bounds.height / 2)
-        if let surface = card.zoomLiveMediaSurface {
+        // ⚠️ THE SAME GUARD THE OTHER FOUR POSES HAVE, and its absence here was
+        // a live defect the moment a card started tracking its own bounds.
+        //
+        // A tracking card sizes its surface from its own bounds; writing a
+        // centre on top of that fights the autoresizing every pan event, and on
+        // a surface anchored at its top-left it puts the picture's CORNER at
+        // the card's centre — filmed on the dismiss as a second, differently
+        // cropped rectangle inset into the bottom-right quadrant.
+        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
             surface.center = center
         }
@@ -353,8 +361,12 @@ struct ZoomFlight {
         // only to the ones that fall through.
         card.setZoomContentBlend(t)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        if let surface = card.zoomLiveMediaSurface {
-            guard !card.zoomLiveMediaTracksCardBounds else { return }
+        // ⚠️ THE CONDITION IS ON THE SURFACE BLOCK, NOT ON THE FUNCTION. It was
+        // a `guard … else { return }` inside this block, so a tracking card
+        // carrying live media returned here and never posed its CHROME for the
+        // whole interpolation — the card's furniture frozen at its last value
+        // while the card morphed under it.
+        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
             // Interpolate the SCALE between the two endpoint scales, rather
             // than recomputing a cover scale from the interpolated size.
             //
