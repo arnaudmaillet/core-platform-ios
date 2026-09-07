@@ -1634,22 +1634,17 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // is where this window is going.
         if geometry.sourceFill == nil { closed.pageOpacity = 0 }
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
-        // Every layer this leg touches, named on screen — see
-        // `RevealDebugLayers`. Ordered outermost-in, so the legend reads like
-        // the stack it describes.
-        RevealDebugLayers.legend("dismiss")
-        RevealDebugLayers.outline(container, "container (the transition's stage)", index: 0)
-        RevealDebugLayers.outline(dim, "dim (darkens the map behind)", index: 1)
-        RevealDebugLayers.outline(host, "host (holds the page, carries the mask)", index: 2)
-        RevealDebugLayers.outline(mask, "mask (THE WINDOW itself)", index: 3, width: 5)
-        RevealDebugLayers.outline(fromView, "page (the post being dismissed)", index: 4)
-        RevealDebugLayers.outline(standIn, "stand-in (the marker, arriving)", index: 5, width: 5)
-        (standIn as? RevealStandInShaping)?.debugOutlineContents()
         geometry.setDestinationGround(nil)
         installVeil(geometry: geometry, anchor: anchor)
         installAuthorBand(geometry: geometry, anchor: anchor)
         geometry.setDestinationVeilOpacity(0)
         geometry.setDestinationAuthorBandOpacity(0)
+        // ⚠️ AFTER the staging, not inside it. `setDestinationGround` writes the
+        // page's background, so a debug fill applied above is simply overwritten
+        // — the instrument would then report nothing on the one layer the
+        // complaint is about.
+        RevealDebugLayers.legend("dismiss (animated pop)")
+        (standIn as? RevealStandInShaping)?.debugOutlineContents()
 
         #if DEBUG
         RevealStage.log("pop", "landing=\(NSCoder.string(for: sourceRect))"
@@ -1664,7 +1659,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             scaleX: ZoomFlight.presenterDepthScale, y: ZoomFlight.presenterDepthScale
         )
         let chrome = returningChrome
-        RevealDebugLayers.outline(chrome, "chrome (the returning bar)", index: 6)
         let chromeAlpha: CGFloat = 1
         chrome?.alpha = 0
 
@@ -1836,14 +1830,22 @@ public enum RevealDebugLayers {
         ProcessInfo.processInfo.arguments.contains("-reveal-debug-fills")
     }
 
-    public static func outline(_ view: UIView?, _ label: String, index: Int, width: CGFloat = 3) {
+    /// - Parameter fills: pass `false` for a view whose layer is used as a
+    ///   MASK. A mask layer's alpha *is* the masked content's alpha, so a 0.85
+    ///   tint there does not colour the window — it makes the whole page 85%
+    ///   translucent and lets the map show through, which is indistinguishable
+    ///   from the very defect this instrument is pointed at. The border is
+    ///   still safe (opaque colour → opaque mask) and still worth drawing.
+    public static func outline(
+        _ view: UIView?, _ label: String, index: Int, width: CGFloat = 3, fills: Bool = true
+    ) {
         guard isOn || fillsOn, let view else { return }
         let entry = entry(index)
         if isOn {
             view.layer.borderColor = entry.color.cgColor
             view.layer.borderWidth = width
         }
-        if fillsOn {
+        if fillsOn && fills {
             // ⚠️ NEAR-OPAQUE, not a wash. The question this mode answers is
             // "which layer is painting that block", and a 35% tint over a grey
             // ground reads as a slightly warmer grey — which is the same
@@ -1861,7 +1863,9 @@ public enum RevealDebugLayers {
     }
     #else
     public static var fillsOn: Bool { false }
-    public static func outline(_ view: UIView?, _ label: String, index: Int, width: CGFloat = 3) {}
+    public static func outline(
+        _ view: UIView?, _ label: String, index: Int, width: CGFloat = 3, fills: Bool = true
+    ) {}
     public static func legend(_ title: String) {}
     #endif
 }

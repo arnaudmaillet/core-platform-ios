@@ -172,11 +172,24 @@ final class RevealDismissInteractionController: NSObject,
         // so swapping them there is invisible.
         geometry.setSourceConcealed(true)
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
+        // ⚠️ THE SAME NAMING, ON THIS LEG TOO, and its absence is why the
+        // instrument reported nothing the first time it was used in anger.
+        //
+        // A dismissal has TWO drivers — the animator's pop (a chevron, an
+        // auto-dismiss) and this one (a finger) — and they stage their own
+        // host, mask, dim and stand-in separately. Instrumenting one of them
+        // reads as "the debug flag does not work" to anyone who dismisses the
+        // way people actually dismiss.
         openRect = open.mask
         openCentre = CGPoint(x: open.mask.midX, y: open.mask.midY)
         screenRadius = open.maskRadius
 
         geometry.setDestinationGround(nil)
+        // ⚠️ AFTER `setDestinationGround`, which writes the page's background —
+        // a fill applied before it is overwritten, and the instrument would
+        // report nothing on the one layer the complaint is about.
+        RevealDebugLayers.legend("dismiss (interactive)")
+        (standIn as? RevealStandInShaping)?.debugOutlineContents()
         installVeil(geometry: geometry, anchor: anchor)
         installAuthorBand(geometry: geometry, anchor: anchor)
         geometry.setDestinationVeilOpacity(0)

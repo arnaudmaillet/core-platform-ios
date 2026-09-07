@@ -945,6 +945,19 @@ private final class PinTextFaceView: UIView {
     /// container and is deliberately not one of them.
     var debugGlyph: UIView { glyph }
     var debugAvatar: UIView { avatar }
+
+    /// ⚠️ AND THE GROUND ITSELF, because leaving it out made the instrument
+    /// LIE.
+    ///
+    /// `disc` is opaque, full-bleed and autoresized, so it covers its own
+    /// container completely. Stain `PinTextFaceView` and the stain is hidden
+    /// behind this view; stain the glyph and nothing shows either, since an
+    /// icon marker holds the glyph at alpha 0. The floor was therefore the one
+    /// layer in the whole eighteen that could not be coloured — which is
+    /// exactly why the block being hunted stayed grey while every other
+    /// rectangle on screen changed colour, and why the two survivors were the
+    /// two whose debug colours are themselves grey and white.
+    var debugDiscGround: UIView { disc }
     #endif
 
     func setContentOpacity(_ alpha: CGFloat) {
@@ -995,22 +1008,23 @@ extension PinCardView: RevealStandInShaping {
     /// The ring goes with the content on purpose. It reads as a marker's border
     /// at 44pt and as an outline drawn around the screen at full size, so it
     /// has to be gone well before the window is.
-    /// Every layer this card draws, named on screen — the other half of
-    /// `RevealDebugLayers`, which cannot see inside a stand-in it does not know
-    /// the type of. Indices continue the transition's own palette.
+    /// The three layers a dismissal's stubborn ground can be, and NOTHING
+    /// ELSE.
+    ///
+    /// The full eighteen-layer sweep did its job — it eliminated sixteen of
+    /// them — and leaving it in now works against the next answer: a screen
+    /// where every rectangle is stained cannot show which of two overlapping
+    /// ones is stubborn. Worse, the pair that survived were GREY and WHITE,
+    /// which is the one distinction a grey ground makes impossible to read.
+    /// They are LIME, MAGENTA and CYAN here for that reason: no shade of any of
+    /// them is a shade of another, or of the thing being hunted.
     func debugOutlineContents() {
         #if DEBUG
-        RevealDebugLayers.outline(self, "card (the stand-in's own bounds)", index: 7)
-        RevealDebugLayers.outline(imageView, "card.cover (the post's picture)", index: 8)
-        RevealDebugLayers.outline(previewSheetView, "card.previewSheet", index: 9)
-        RevealDebugLayers.outline(departureCoverView, "card.departureCover", index: 10)
-        RevealDebugLayers.outline(videoRenderView, "card.video", index: 11)
-        RevealDebugLayers.outline(donatedMediaHost, "card.donatedMediaHost", index: 12)
-        RevealDebugLayers.outline(textFaceView, "card.disc (the text face / icon's floor)", index: 13)
-        RevealDebugLayers.outline(textFaceView.debugGlyph, "card.disc.glyph", index: 14)
-        RevealDebugLayers.outline(textFaceView.debugAvatar, "card.disc.avatar", index: 15)
-        RevealDebugLayers.outline(iconFaceView, "card.icon (the lottie mark)", index: 16)
-        RevealDebugLayers.outline(ringView, "card.ring", index: 17)
+        RevealDebugLayers.outline(
+            textFaceView.debugDiscGround, "card.disc.ground (the floor's opaque fill)", index: 3
+        )
+        RevealDebugLayers.outline(textFaceView.debugGlyph, "card.disc.glyph", index: 10)
+        RevealDebugLayers.outline(iconFaceView, "card.icon (the lottie mark)", index: 6)
         #endif
     }
 
