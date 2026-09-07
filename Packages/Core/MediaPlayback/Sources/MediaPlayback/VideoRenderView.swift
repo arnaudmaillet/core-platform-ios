@@ -408,9 +408,24 @@ public final class VideoRenderView: UIView {
         #endif
         renderer?.removeSurface(self)
         renderer = nil
-        // A flush empties the layer, so it must be COVERED before it happens or
-        // the surface goes black on the spot. There are two ways to cover it
-        // and the right one depends on whether this surface owns a poster:
+        // ⚠️ A BARE `flush()` DOES NOT EMPTY THE LAYER, and this comment used
+        // to say it did.
+        //
+        // `AVQueuedSampleBufferRendering.flush` is documented as discarding
+        // *pending enqueued* sample buffers and says nothing about the
+        // displayed image; `flushWithRemovalOfDisplayedImage:` is the only call
+        // that removes it, and nothing in this file uses it. So what a detached
+        // surface holds is not black — it is the last frame it decoded, from a
+        // source it no longer owns.
+        //
+        // The covering below is still right, for that reason instead: a frozen
+        // frame belonging to a clip this view has been taken off is a lie of a
+        // different kind, and the two cases below are how it is covered. What
+        // is NOT true is that skipping the cover shows black — it shows a stale
+        // picture, which is harder to notice and was mis-hunted as one.
+        //
+        // Two ways to cover it, and the right one depends on whether this
+        // surface owns a poster:
         //
         //  - With a poster, raise it. The poster is a subview ABOVE the layer,
         //    so the emptied layer is hidden behind the cover and the viewer
@@ -749,21 +764,43 @@ public final class VideoRenderView: UIView {
     /// agree. Any consumer holding the edge rather than re-asking the level is
     /// then stuck on a stale answer forever.
     ///
-    /// Not fixed in place, deliberately: the count answers two questions at
-    /// once — "how many frames are pending" and "has this surface ever shown
-    /// one" — and this flush keeps the displayed frame, so neither zeroing it
-    /// nor announcing `false` is honest. Announcing false would flash the
-    /// poster back over a surface that is still drawing; not zeroing would make
-    /// the next enqueue not-first and strand `isAwaitingFirstFrameToReveal` on
-    /// a surface waiting to be revealed. Separating the two is a real change to
-    /// the reveal gate and wants its own measurement.
+    /// Not fixed in place, and the obvious fix was designed, reviewed and
+    /// REJECTED — so here is what the next attempt needs to clear.
+    ///
+    /// The count answers two questions at once: "how many frames are pending"
+    /// and "has this surface ever shown one". The proposal was to split them —
+    /// keep the count for the first, add a `hasDisplayedFrame` for the second,
+    /// cleared only by teardown — and it does not survive:
+    ///
+    ///  - ⚠️ **THE COUNT CANNOT ANSWER THE QUESTION THAT MATTERS AT A REBIND.**
+    ///    What a surface needs to know when `attach(_:renderer:)` hands it a
+    ///    new source is "does the frame I am displaying belong to THIS
+    ///    renderer" — and only the renderer can say. Inferring it from
+    ///    `enqueuedFrameCount == 0` after the prime reads "the prime did not
+    ///    land", which is also what a dropped `isReadyForMoreMediaData` looks
+    ///    like right after a flush. On a warm rebind that lands there, the
+    ///    surface would announce a loss and raise its poster over a picture it
+    ///    is still displaying, taking it back a dispatch later — the exact
+    ///    blink the split exists to avoid.
+    ///  - The `guard renderer != nil || enqueuedFrameCount > 0` in
+    ///    `detachFromRenderer` changes meaning under the split and has NO test
+    ///    coverage in either direction: `invalidatingReleasesEverySurface`
+    ///    never calls `attach`, so `renderer` is nil throughout and the guard
+    ///    early-returns today. It stays green either way.
+    ///  - `isRenderingVisibly` feeds `GridVideoPlaybackCoordinator`'s
+    ///    `isShowingItsClip`, whose recency clause is SKIPPED for a paused
+    ///    surface — so a paused, windowless surface holding a stale frame flips
+    ///    from "no" to "yes" under the split. That, not a scrolling grid, is
+    ///    where an acceptance measurement belongs.
+    ///  - Whatever `hasFrame`'s doc says must stay true on the LEGACY
+    ///    `-avplayer-render` backing too, where `isReadyForDisplay` is true on
+    ///    a layer showing a frozen frame it no longer owns. The split improves
+    ///    one branch and must not claim to have fixed both.
     ///
     /// It was NOT the cause of the stuck-spinner defect — that was a callback
     /// stranded on a discarded surface, see
-    /// `SnapMediaCardView.onPictureAvailabilityChange` — and it was never
-    /// observed firing across 19 instrumented opens. It is written down here so
-    /// the next reader does not have to rediscover it, and so that whoever does
-    /// separate the two questions knows what the shape of the answer is.
+    /// `SnapMediaCardView.onPictureAvailabilityChange`. Written down so the
+    /// next reader inherits the constraints rather than the conclusion.
     func flushPendingSamples() {
         guard let sampleBufferLayer else { return }
         sampleBufferLayer.sampleBufferRenderer.flush()
@@ -773,12 +810,20 @@ public final class VideoRenderView: UIView {
     private func flushSampleBuffers() {
         guard let sampleBufferLayer else { return }
         #if DEBUG
-        // A flush empties the layer, so a VISIBLE surface that is flushed goes
-        // black on the spot. That is the shape of the remaining dismissal
-        // defect — one black frame on the feed page, chrome still lit — so the
-        // question is whether anything flushes a surface the viewer can see,
-        // and when. Logged with reachability because a flush on an off-screen
-        // surface is ordinary teardown and not interesting.
+        // ⚠️ THIS LOG WAS ADDED TO HUNT A BLACK FRAME A FLUSH CANNOT CAUSE.
+        //
+        // The premise was "a flush empties the layer, so a VISIBLE surface that
+        // is flushed goes black on the spot". `flush` discards PENDING buffers
+        // and leaves the displayed image alone — see the note in
+        // `detachFromRenderer`. A flushed surface holds its last frame; it goes
+        // black only if something else blanks it, and the only call that would
+        // (`flushWithRemovalOfDisplayedImage:`) appears nowhere here.
+        //
+        // Kept because the trace is still the one that says WHO flushes a
+        // surface the viewer can see, and when — which is worth knowing for the
+        // staleness above even though the black frame it was chasing was
+        // somebody else's. Reachability is logged because a flush on an
+        // off-screen surface is ordinary teardown and not interesting.
         if VideoRenderFlags.logsFrameDispatch, enqueuedFrameCount > 0 {
             print(String(format: "[avsbdl] %.3f %@ FLUSH frames=%d onScreen=%@ %@",
                          CACurrentMediaTime(), debugLabel ?? "surface", enqueuedFrameCount,
