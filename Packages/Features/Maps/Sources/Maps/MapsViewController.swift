@@ -2001,6 +2001,26 @@ extension MapsViewController: MKMapViewDelegate {
     /// only reachable by finding one of them by hand on the map.
     private func debugOpenFirstPinIfRequested(among views: [MKAnnotationView]) {
         let arguments = ProcessInfo.processInfo.arguments
+        // `-maps-open-post <id>`: open THAT post, not whichever one happens to
+        // be first.
+        //
+        // ⚠️ `-maps-open-first-pin` picks by kind and then by MapKit's
+        // annotation order, which is undefined — so two runs open two different
+        // posts, and a transition A/B across two builds compares two different
+        // flights. Three such comparisons proved nothing before this existed.
+        if let index = arguments.firstIndex(of: "-maps-open-post"),
+           index + 1 < arguments.count {
+            let wanted = arguments[index + 1]
+            guard !didDebugOpenPin,
+                  let annotation = views.compactMap({ $0.annotation as? MapAnnotation })
+                      .first(where: { $0.pin.postID.rawValue == wanted })
+            else { return }
+            didDebugOpenPin = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.mapView.selectAnnotation(annotation, animated: true)
+            }
+            return
+        }
         let wantsText = arguments.contains("-maps-open-first-text-pin")
         guard !didDebugOpenPin,
               wantsText || arguments.contains("-maps-open-first-pin") else { return }
@@ -2118,6 +2138,16 @@ extension MapsViewController: MKMapViewDelegate {
         let postIDs = Self.postIDs(of: annotation)
         guard !postIDs.isEmpty else { return }
         let face = Self.face(of: annotation)
+        #if DEBUG
+        // Which face a tapped marker wears decides its TRANSITION
+        // (`MapMarkerPresentation`: media flies, everything else reveals), and
+        // a reveal growing from a disc looks like a vertical capsule halfway
+        // through. Without this line, "the present animation is wrong" and
+        // "this marker is not the face you think" are indistinguishable from
+        // outside.
+        print("[maps] tap face=\(face) presentation=\(MapMarkerPresentation(face: face)) "
+              + "posts=\(postIDs.count) first=\(postIDs.first?.rawValue ?? "-")")
+        #endif
         switch MapMarkerPresentation(face: face) {
         case .reveal where navigationController != nil:
             // The disc IS the window. Same seam as the plain push below — the
@@ -2348,6 +2378,12 @@ extension MapsViewController: MKMapViewDelegate {
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             },
+            // Asked while this transition is being constructed — before the
+            // freeze three dozen lines below, which is what makes the answer
+            // hold for the whole flight.
+            isLivePreviewing: tappedID.map { id in
+                { coordinator.isLivePreviewing(id) }
+            },
             // Asked at DISMISSAL staging, so it reports where the viewer
             // actually stopped rather than where they started. The card lands
             // on this marker either way; only its departure face adapts.
@@ -2540,6 +2576,22 @@ extension MapsViewController: MKMapViewDelegate {
         tabBarController?.setTabBarHidden(true, animated: true)
         setFilterBar(hidden: true)
         nav.delegate = transition
+        // ⚠️ NOT pre-paying the destination's layout here, and the empty space
+        // is deliberate.
+        //
+        // For You calls `zoomPrepareForPresentation` before its own push, and
+        // the same call was added here for parity. It is the wrong trade on
+        // this screen: the map builds a FRESH feed on every tap
+        // (`makeSnapFeed`), so the layout it pre-pays is a cold one, and it
+        // runs synchronously — plus a `CATransaction.flush` — between the
+        // finger coming up and the flight starting. Reported as a long pause
+        // between tapping a marker and the animation beginning, which is worse
+        // than the frame pacing it was buying: a stall the viewer is waiting
+        // through beats one they are watching an animation through.
+        //
+        // The seam is left in place (`ZoomTransitionDestination`), because the
+        // measurement that would justify calling it — a cold feed laid out off
+        // the tap's critical path — is the thing to take before trying again.
         // ⚠️ AN ORDINARY PUSH, WHATEVER CASE THIS IS — and the place page is
         // NOT in it.
         //

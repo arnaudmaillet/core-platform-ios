@@ -85,11 +85,53 @@ final class PinCardView: UIView {
     /// footage.
     private let previewSheetView = AnimatedIconView()
     /// Live-preview surface above the image, hidden until playback attaches.
-    let videoRenderView = VideoRenderView()
+    /// ⚠️ SILENCED. This surface is a marker's, and a flight borrows it — it is
+    /// never the page the viewer lands on, which keeps its own indicator.
+    let videoRenderView: VideoRenderView = {
+        let view = VideoRenderView()
+        view.suppressesCatchUpIndicator = true
+        return view
+    }()
+    /// Hosts a live surface DONATED by the other screen — the departing page's
+    /// own moving picture, which a dismissal's card carries home.
+    ///
+    /// ⚠️ A CONTAINER RATHER THAN THE SURFACE ITSELF, and the rule is stated on
+    /// `ZoomFlightCard.setZoomLandingLiveMedia`: a live surface's alpha belongs
+    /// to its own reveal machinery, which holds it at 0 until there is a frame
+    /// to show. The blend needs an alpha of its own to fade that picture out
+    /// across the return, so it gets the container's and the two drivers never
+    /// meet on one property.
+    private let donatedMediaHost = UIView()
+    /// The surface inside that host. Weak: the flight owns the card, the card
+    /// owns the host, and a finished flight must not keep a page's render
+    /// surface alive.
+    private weak var donatedSurface: VideoRenderView?
+
     /// The pin's border, drawn above the media so it survives live previews.
     /// The flight fades it out as the card leaves the pin (and back in on the
     /// way home).
     let ringView = UIView()
+
+    #if DEBUG
+    /// The stacked faces, BY NAME.
+    ///
+    /// ⚠️ The suites used to reach them as `card.subviews[4]`, and that made two
+    /// completely different mistakes indistinguishable: adding a subview to this
+    /// card reddened four tests whose subject is alpha, reporting a blend defect
+    /// that did not exist. An index is not a name.
+    var debugPreviewSheetFace: UIView { previewSheetView }
+    var debugDepartureCover: UIView { departureCoverView }
+    var debugLiveSurface: UIView { videoRenderView }
+    var debugTextFace: UIView { textFaceView }
+    /// The two things the disc can DRAW — the author's picture and the fallback
+    /// mark. Its ground is the container and is deliberately not one of them.
+    var debugTextFaceGlyph: UIView { textFaceView.debugGlyph }
+    var debugTextFaceAvatar: UIView { textFaceView.debugAvatar }
+    var debugIconFace: UIView { iconFaceView }
+    /// Where a donated surface is hosted; its alpha is the blend's channel for
+    /// the departing page's moving picture.
+    var debugDonatedMediaHost: UIView { donatedMediaHost }
+    #endif
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -137,21 +179,73 @@ final class PinCardView: UIView {
         videoRenderView.isHidden = true
         addSubview(videoRenderView)
 
+        // Same z-position as the card's own surface — the two are alternatives,
+        // never a stack — and above the departure still, which is only this
+        // video's poster.
+        donatedMediaHost.frame = bounds
+        donatedMediaHost.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        donatedMediaHost.clipsToBounds = true
+        donatedMediaHost.isHidden = true
+        addSubview(donatedMediaHost)
+
         textFaceView.frame = bounds
         textFaceView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         textFaceView.isHidden = true
         addSubview(textFaceView)
 
         iconFaceView.frame = bounds
-        iconFaceView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // ⚠️ NO autoresizing mask: `layoutSubviews` centres it at marker size.
+        // A mark is line art authored for a 44pt face; the reveal lays its
+        // stand-in out at the WINDOW's frame, so a filling icon was blown up to
+        // several hundred points as the window opened.
         iconFaceView.isHidden = true
         addSubview(iconFaceView)
+
+        // ⚠️ TOP-LEFT ANCHORED, and this is a REGISTER fix rather than a layout
+        // preference.
+        //
+        // `card.frame = …` is `bounds` + `position`, and autoresizing turns it
+        // into the same pair on every full-bleed child. The flight animates the
+        // card with `UISpringTimingParameters(dampingRatio:initialVelocity:)`,
+        // whose CGVector does not seed every property alike: `position` rides a
+        // spring seeded with the vector, `bounds` one seeded with dx — which is
+        // 0 here. Two curves through the same endpoints, so mid-flight a
+        // child's top edge (`position.y - bounds.height/2`) is not the card's:
+        // measured off the film at 4, 12, 14, 14, 12, 9 device px, zero at both
+        // ends and humping in the middle, on the vertical axis only because dx
+        // is 0.
+        //
+        // What showed in the gap was the card's own opaque ground, as a hard
+        // black bar across the top inside the card's rounded mask — reported,
+        // reasonably, as content escaping the transition window.
+        //
+        // With the anchor at the top-left a child's `position` is the constant
+        // (0, 0): there is nothing on the positional channel to diverge, only
+        // `bounds`, which is the card's own property and therefore its own
+        // curve. Registration is then exact at every instant, whatever the
+        // spring does.
+        //
+        // ⚠️ NOT for a view the FLIGHT poses by `center` — `videoRenderView`
+        // and a donated surface are both centred by `ZoomFlight`, and under a
+        // zero anchor `center` would move their top-left corner instead. Nor
+        // for `iconFaceView`, which `layoutIconFace` centres by hand.
+        for child in [imageView, previewSheetView, departureCoverView, donatedMediaHost,
+                      textFaceView, videoRenderView] {
+            child.layer.anchorPoint = .zero
+            child.frame = bounds
+        }
 
         ringView.isUserInteractionEnabled = false
         ringView.layer.borderWidth = Self.ringWidth
         ringView.layer.borderColor = ringColor.cgColor
         ringView.layer.cornerRadius = Self.cornerRadius
         ringView.layer.cornerCurve = .continuous
+        // Same register fix as the covers above — and the ring is the view the
+        // defect was measured on: mid-flight its top border sat 4.7pt below the
+        // card's edge and its bottom border was pushed past the card's and
+        // clipped, while its left and right borders stayed exactly put. A pure
+        // vertical translation, which is what a `dx = 0` vector produces.
+        ringView.layer.anchorPoint = .zero
         ringView.frame = bounds
         ringView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(ringView)
@@ -281,8 +375,6 @@ final class PinCardView: UIView {
 
     func setFace(_ face: Face) {
         self.face = face
-        textFaceView.isHidden = face != .text
-        iconFaceView.isHidden = face != .icon
         // ⚠️ THE GREY BOX. `imageView` is the cover host and it is never
         // hidden — it carries an opaque `.secondarySystemBackground` ground so
         // a letterboxed photograph reads as framed. Under the TEXT face that
@@ -299,12 +391,16 @@ final class PinCardView: UIView {
         backgroundColor = face == .media ? .black : .clear
         // Hidden, not faded. The ring is a 2pt border on the card's rectangle;
         // at radius 0 behind transparent artwork it draws a visible box.
-        ringView.isHidden = face == .icon
         // A preview belongs to a MEDIA face and nothing else — a recycled card
         // that last wore one must take it off, or a text marker inherits
         // somebody's footage.
         if face != .media { setPreviewSheet(nil) }
         setCornerRadius(face.cornerRadius)
+        // ⚠️ AFTER `setCornerRadius`, which writes the ring's radius from the
+        // face. Called before it, the floor's round ring was overwritten by the
+        // icon face's 0 one line later — the assertion said 0 and the marker
+        // drew a squircle around a disc.
+        applyFaceVisibility()
         applyBlend()
     }
 
@@ -317,6 +413,100 @@ final class PinCardView: UIView {
     func setIcon(_ icon: (art: AnimatedIconArt, phase: Int)?) {
         wornIcon = icon
         iconFaceView.setArt(icon?.art, phase: icon?.phase ?? 0)
+        // The floor moves with the art, so this has to re-run here as well as
+        // in `setFace` — the two callers write the art on OPPOSITE sides of the
+        // face (a pin faces then strips, a cluster strips then faces), so a
+        // rule evaluated in only one of them is right for one of them.
+        applyFaceVisibility()
+        // And which unit the blend fades follows the same fact, so art landing
+        // mid-flight has to re-point the channel rather than leave it fading a
+        // view nobody can see.
+        applyBlend()
+    }
+
+    /// Which unit of the card is drawn — and the ICON FACE'S FLOOR.
+    ///
+    /// ⚠️ `Face.of` promises `.icon` on the strength of an ID, and `.icon` hides
+    /// the cover host because an icon's alpha IS its shape and the host's opaque
+    /// ground would otherwise be a grey square. So an icon whose art never
+    /// arrives — a cold catalogue, a decode failure, a memory-pressure eviction,
+    /// or a fleet build where the id resolves to nothing — used to leave the
+    /// card drawing NOTHING AT ALL.
+    ///
+    /// The fix is not to make the face follow the art. The face is read from
+    /// outside (the flight's resting radius, the reveal origin, the cluster's
+    /// idempotence key) and, decisively, `MapClusterAnnotationView` gates the
+    /// icon FETCH on `face == .icon` — so a face derived from a cold cache would
+    /// never ask for the artwork, store `.text` as its key, and compare equal
+    /// forever after. The icon would never appear at all, and a cold cache is
+    /// every first paint.
+    ///
+    /// Instead the face stays a pure function of the model and gains a FLOOR:
+    /// under `.icon` with no art the text disc shows, and it goes the instant
+    /// art lands. Mutually exclusive, never stacked — a disc left underneath
+    /// would show through the icon's own alpha as the circle the product asked
+    /// not to see.
+    private func applyFaceVisibility() {
+        let iconIsBare = face == .icon && wornIcon == nil
+        // A reveal may have borrowed the disc as the icon's container; re-facing
+        // or re-dressing the card takes it back.
+        textFaceView.alpha = 1
+        textFaceView.isHidden = !(face == .text || iconIsBare)
+        iconFaceView.isHidden = face != .icon
+        // ⚠️ AN ICON'S FACE IS THE ICON, and the cover under it is not part of
+        // it. The rule was never written down because at rest it cannot be
+        // seen: the card is 44pt and the mark fills it exactly.
+        //
+        // A REVEAL WINDOW is not 44pt. `layoutIconFace` deliberately caps the
+        // mark at its authored size and centres it, so in a window several
+        // hundred points across everything around the mark is whatever else the
+        // card is holding — and `MapPinRevealSource.marker` dresses every
+        // stand-in with `imageView.image = cover`, an icon post's wire
+        // thumbnail included. Filmed as a photograph appearing from nowhere
+        // behind the icon as the window closed.
+        //
+        // ⚠️ `!= .media`, NOT `== .icon`. The first cut of this rule named the
+        // face that was filmed, and a rule that names one case is a rule that
+        // has to be rediscovered for the next one: a TEXT face carries the same
+        // cover, and it is hidden there only by an opaque disc that happens to
+        // fill the window. The cover is `.media`'s content, and nothing else's.
+        imageView.isHidden = face != .media
+        // The ring belongs to the disc, so it follows the disc rather than the
+        // face: a bare icon wearing the text floor should look like a text
+        // marker, ring included.
+        ringView.isHidden = face == .icon && !iconIsBare
+        // ⚠️ AND IT MUST TAKE THE DISC'S SHAPE. `ringView` draws the marker's
+        // border on the CARD's rectangle, which under `.icon` is a square with
+        // radius 0 — that is the whole meaning of "no circle". Left alone it
+        // framed the round floor in a squircle: rounded, obviously wrong, and
+        // invisible to a test that only asked whether the face was hidden. Only
+        // the simulator showed it.
+        //
+        // `.circular`, because a `.continuous` curve at half the side is a
+        // superellipse rather than a circle.
+        // The floor and the ring both take the CARD's radius when it has one —
+        // in a reveal window that is the mask's, which grows toward the page's,
+        // so the stand-in FILLS the window instead of being an ellipse inside
+        // it. Only when the card is square (an icon at rest, radius 0 by
+        // design) does the floor supply its own disc.
+        let cardRadius = layer.cornerRadius
+        let floorRadius = cardRadius > 0 ? cardRadius : min(bounds.width, bounds.height) / 2
+        textFaceView.floorCornerRadius = (iconIsBare || face == .text) ? floorRadius : 0
+        // ⚠️ ONLY the square card overrides the ring. Everywhere else the ring
+        // already wears whatever `setCornerRadius` last wrote — in a reveal
+        // window that is the mask's radius, growing toward the page's — and
+        // re-asserting `face.cornerRadius` here would undo it one line later.
+        if iconIsBare, cardRadius == 0 {
+            ringView.layer.cornerRadius = floorRadius
+            ringView.layer.cornerCurve = .circular
+        } else {
+            // The card's LIVE radius, not the face's constant: in a reveal
+            // window that is the mask's, and asserting the face's would undo
+            // what `setCornerRadius` wrote one line earlier. At rest the two
+            // are the same value, so the dressed icon still goes back to 0.
+            ringView.layer.cornerRadius = cardRadius
+            ringView.layer.cornerCurve = face == .text ? .circular : .continuous
+        }
     }
 
     /// Read back rather than remembered elsewhere — the same reason
@@ -339,6 +529,18 @@ final class PinCardView: UIView {
         wornPreview = preview
         previewSheetView.setArt(preview?.art, phase: preview?.phase ?? 0)
         previewSheetView.isHidden = preview == nil
+        // ⚠️ THE COVER UNDER A PREVIEW IS THE PREVIEW'S OWN FIRST FRAME.
+        //
+        // The fallback ladder for a video marker is: the sheet animating, then
+        // the sheet's frame zero, then whatever cover the wire gave. The middle
+        // rung did not exist — under Reduce Motion, or while the catalogue was
+        // still resolving, or after an eviction, the marker showed a PHOTOGRAPH
+        // and then swapped to a clip, which is two claims about one post and
+        // the swap is visible. Frame zero is the same picture the animation
+        // starts from, so stopping looks like pausing rather than changing.
+        if let art = preview?.art, let frameZero = art.firstFrame() {
+            imageView.image = frameZero
+        }
     }
 
     private(set) var wornPreview: (art: AnimatedIconArt, phase: Int)?
@@ -349,6 +551,17 @@ final class PinCardView: UIView {
 
     #if DEBUG
     var presentedIconTick: Double? { iconFaceView.presentedTick ?? previewSheetView.presentedTick }
+    /// The icon face's floor, read back for the tests that pin it.
+    var debugTextFaceIsVisible: Bool { !textFaceView.isHidden }
+    /// The face worn, and whether it is standing on the floor.
+    var debugFaceName: String {
+        switch face {
+        case .media: "media"
+        case .text: "text"
+        case .icon: wornIcon == nil ? "icon-BARE" : "icon"
+        }
+    }
+    var debugIconFaceIsVisible: Bool { !iconFaceView.isHidden }
     var isPlayingPreviewSheet: Bool { wornPreview != nil }
 
     /// The preview sheet's presentation-layer fingerprint, and ONLY the preview's.
@@ -453,6 +666,20 @@ final class PinCardView: UIView {
     /// reasons) would blend a symbol over a see-through ground and draw the two
     /// half-finished drawings the law forbids.
     private func applyBlend() {
+        // ⚠️ A DONATED SURFACE IS A BLEND OPERAND IN ITS OWN RIGHT, which is why
+        // this sits ABOVE the guard rather than inside a branch of it.
+        //
+        // The guard below asks whether a departure STILL was handed in, and on
+        // a dismissal that lands where it took off the answer is no — one post,
+        // one picture, nothing to blend. That reasoning was complete only while
+        // the card's pictures were stills. A donated surface is the departing
+        // PAGE in motion, arriving over the marker's own cover: it must fade out
+        // across the return, or the video is still at full opacity when the card
+        // reaches a marker showing something else, and the swap is a cut.
+        //
+        // Inert on every other flight: the host is hidden and its alpha is not
+        // drawn.
+        donatedMediaHost.alpha = 1 - blend
         guard departureCoverView.image != nil else {
             // No second operand. Every channel back to its resting value, which
             // is the un-blended card exactly as it was.
@@ -486,7 +713,17 @@ final class PinCardView: UIView {
             // rules out. `AnimatedIconView` is a single view for this reason.
             departureCoverView.alpha = 1
             videoRenderView.alpha = 1
-            iconFaceView.alpha = blend
+            // ⚠️ WHICHEVER UNIT IS ACTUALLY DRAWN is the one that fades. With
+            // art that is the icon; standing on the floor it is the disc,
+            // exactly as under `.text`. Fading only `iconFaceView` left a bare
+            // icon's disc opaque at 1 for the whole flight while an invisible
+            // face faded in behind it — so a dismissal onto a marker whose
+            // artwork had not resolved COVERED the departing page in one step
+            // instead of crossfading over it. That is the arrival reading
+            // itself: what the viewer sees must be what the blend moves.
+            let isBare = wornIcon == nil
+            iconFaceView.alpha = isBare ? 1 : blend
+            textFaceView.alpha = isBare ? blend : 1
         }
     }
 
@@ -496,11 +733,31 @@ final class PinCardView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         layoutDepartureCover()
+        layoutIconFace()
+    }
+
+    /// The mark keeps its authored size and stays centred; only the CONTAINER
+    /// grows.
+    ///
+    /// A photograph can be scaled to any window because it is a picture of
+    /// something. A mark cannot: it is line art drawn for a 44pt face, and the
+    /// reveal — which lays its stand-in out at the window's own frame — was
+    /// blowing it up to fill several hundred points as the window opened.
+    /// Capping it at the icon face's side means the window opens AROUND a mark
+    /// that was already legible when it left the marker.
+    private func layoutIconFace() {
+        let side = min(Face.icon.side, min(bounds.width, bounds.height))
+        iconFaceView.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        iconFaceView.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
     func setCornerRadius(_ radius: CGFloat) {
         layer.cornerRadius = radius
         ringView.layer.cornerRadius = radius
+        // The floor tracks the card. The reveal drives this every frame with
+        // the mask's radius, and a floor that kept the marker's disc while the
+        // card opened into a window is the ellipse-in-a-rect that was filmed.
+        applyFaceVisibility()
     }
 
     /// The soft shadow that lifts a pin card off the map — one definition used
@@ -517,9 +774,17 @@ final class PinCardView: UIView {
     /// every marker the moment they do. At 128 markers that is the single
     /// largest cost this feature could incur. A rectangular `shadowPath` is not
     /// the fix either: behind transparent artwork it draws a visible box.
-    static func applyPinShadow(to layer: CALayer, face: Face = .media) {
+    /// ⚠️ `hasArt` matters only for `.icon`, and it is the difference between a
+    /// lift and a smear. An icon gets NO shadow because a pathless shadow is
+    /// re-derived from the composited alpha every frame once the contents
+    /// animate — the largest cost this feature could incur — and a rectangular
+    /// path behind transparent artwork draws a box. Neither objection applies to
+    /// a BARE icon: it is drawing the text disc, which is opaque and still, so
+    /// it should lift exactly like the text marker it is standing in for.
+    /// Suppressing the shadow there made the fallback look sunken into the map.
+    static func applyPinShadow(to layer: CALayer, face: Face = .media, hasArt: Bool = true) {
         layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = face == .icon ? 0 : 0.25
+        layer.shadowOpacity = (face == .icon && hasArt) ? 0 : 0.25
         layer.shadowRadius = 4
         layer.shadowOffset = CGSize(width: 0, height: 2)
     }
@@ -533,8 +798,30 @@ final class PinCardView: UIView {
     /// (plus an animated center), while the card's animating bounds do the
     /// crop morph. The layer's bounds never change, so rendering stays smooth.
     func prepareVideoForFlight(destinationSize: CGSize) {
-        videoRenderView.autoresizingMask = []
-        videoRenderView.bounds = CGRect(origin: .zero, size: destinationSize)
+        // ⚠️ NOTHING TO PREPARE ANY MORE, and the empty body is the fix.
+        //
+        // This used to lay the surface out at the PAGE's size with autoresizing
+        // off, so the flight could drive it by transform and centre. That is
+        // the contract behind `zoomLiveMediaTracksCardBounds == false`, and it
+        // has a defect this card cannot live with: those poses are computed
+        // from `card.layer.presentation()` on a display link, so the surface
+        // renders ONE FRAME BEHIND the card. Measured on the present, surface
+        // width against the card's in the same frame: -47.6%, -34.9%, -13.8%,
+        // -4.0%, -1.1%, 0 — the deficit tracks how fast the card is growing.
+        //
+        // The viewer sees the card's cover in the strip the video has not
+        // reached yet: a hard vertical seam between a sharp video on the left
+        // and a blurred still on the right, filmed and reported as the player
+        // being badly attached to its container.
+        //
+        // The surface is full-bleed with an autoresizing mask instead, so
+        // CoreAnimation sizes it from the card's own bounds — the same property
+        // on the same curve, in the same frame — and `resizeAspectFill`
+        // recomputes the crop continuously as the card morphs.
+        let surface: UIView = donatedSurface ?? videoRenderView
+        surface.transform = .identity
+        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        surface.frame = (surface === videoRenderView ? self : donatedMediaHost).bounds
     }
 
 }
@@ -560,6 +847,28 @@ final class PinCardView: UIView {
 /// change on its own — the trap `PinCardView.ringView` needs a registration to
 /// work around.
 private final class PinTextFaceView: UIView {
+    /// The shape the floor clips itself to — SET BY THE CARD, not assumed.
+    ///
+    /// ⚠️ It was `min(width, height) / 2`, unconditionally. Right at 44x44,
+    /// where the floor stands in for a text marker and must be a disc. Wrong
+    /// everywhere else, and the reveal is everywhere else: `RevealTransition`
+    /// lays the stand-in out at the WINDOW's frame, so the same view found
+    /// itself 300pt wide by 700 tall and clipped to a 150pt radius — a vertical
+    /// capsule, which is exactly what a viewer filmed. The card knows its own
+    /// radius; the floor's job is to agree with it.
+    var floorCornerRadius: CGFloat = 0 {
+        didSet { setNeedsLayout() }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = floorCornerRadius
+        // `.circular`, not `.continuous`: at a radius of half the side the
+        // latter is a superellipse rather than a circle.
+        layer.cornerCurve = .circular
+        layer.masksToBounds = floorCornerRadius > 0
+    }
+
     /// The disc's opaque ground. Named for what it is now that it carries no
     /// tint — it was a translucent accent wash, and the name outlived it.
     private let disc = UIView()
@@ -631,8 +940,32 @@ private final class PinTextFaceView: UIView {
 
     /// The glyph alone. The WASH stays: it is the disc's colour, and the colour
     /// is what the page is wearing on the other side of the hand-off.
+    #if DEBUG
+    /// The two things the disc can DRAW, by name — the ground it sits on is the
+    /// container and is deliberately not one of them.
+    var debugGlyph: UIView { glyph }
+    var debugAvatar: UIView { avatar }
+    #endif
+
     func setContentOpacity(_ alpha: CGFloat) {
+        // ⚠️ BOTH, and for a long time it was only the glyph.
+        //
+        // The disc draws whichever of the two it has — the author's picture
+        // when one has loaded, the fallback mark when none has. Fading one of
+        // them is fading the content only in the case that happens to be
+        // showing, which is the definition of a rule that works until it does
+        // not.
+        //
+        // It did not, twice over. A TEXT marker's reveal kept the author's
+        // photograph at full opacity while the ring, the cover and the glyph
+        // all left. And an ICON marker BORROWS this disc as its container
+        // (`PinCardView.setContentOpacity`) and asks for its content to be
+        // silent — so a post with no media at all closed onto a photograph,
+        // which is what was filmed and reported as impossible. It was the
+        // AUTHOR's face, riding in on a channel that had never been told to
+        // take it.
         glyph.alpha = alpha
+        avatar.alpha = alpha
     }
 
     /// The disc's colour, for a page to wear while a reveal opened from this
@@ -663,6 +996,41 @@ extension PinCardView: RevealStandInShaping {
     /// at 44pt and as an outline drawn around the screen at full size, so it
     /// has to be gone well before the window is.
     func setContentOpacity(_ alpha: CGFloat) {
+        // ⚠️ UNDER A DRESSED ICON THIS CHANNEL MOVES NOTHING BUT THE FURNITURE.
+        //
+        // A mark is not a picture of a place — it is the thing the author chose
+        // to say, and it reads at 44pt or not at all. So it does not grow with
+        // the window and it does not fade in: it is already drawn, centred, at
+        // its authored size, from the first frame, and there is nothing around
+        // it. A window closing onto such a marker ends on the map.
+        //
+        // ⚠️ IT USED TO BORROW THE TEXT DISC AS A CONTAINER — "what arrives
+        // gradually is the DISC AROUND IT" — and that borrow was a SECOND GREY
+        // of the very colour this route exists to refuse.
+        //
+        // The lines that stood here un-hid `textFaceView` — `.systemBackground`
+        // wrapped around a full-bleed `.secondarySystemBackground` disc, given
+        // `floorCornerRadius = 0` under a dressed icon, i.e. a hard opaque
+        // SQUARE at the window's own size — and drove its alpha with this
+        // channel. `applyFaceVisibility` sets the same `isHidden` back to true,
+        // so which of the two won was a CALL-ORDER ACCIDENT that differed per
+        // leg: the present and the chevron run `RevealStage.apply` last and the
+        // disc stayed hidden, the finger drag runs `setContentOpacity` last and
+        // it did not. The "container assembling itself around the mark" this
+        // comment used to promise was therefore never delivered on any leg —
+        // it only ever appeared as a grey block, on one.
+        //
+        // `MapPinRevealSource` had already ruled the other way one commit
+        // earlier: a dressed icon has no ground, so a window closing onto it
+        // must end on nothing. One driver for `textFaceView.isHidden` now, and
+        // it is `applyFaceVisibility`.
+        if face == .icon, wornIcon != nil {
+            iconFaceView.alpha = 1
+            ringView.alpha = alpha
+            imageView.alpha = alpha
+            return
+        }
+        textFaceView.alpha = 1
         textFaceView.setContentOpacity(alpha)
         imageView.alpha = alpha
         ringView.alpha = alpha
@@ -698,15 +1066,69 @@ extension PinCardView: ZoomFlightCard {
     /// The pin's border, which must not survive into the page pose.
     var zoomRestingChrome: UIView? { ringView }
 
-    var zoomLiveMediaSurface: UIView? { videoRenderView.isHidden ? nil : videoRenderView }
+    /// The surface the flight poses — a donated one first, because when a page
+    /// has handed its picture over that IS what the card is flying.
+    var zoomLiveMediaSurface: UIView? {
+        if let donatedSurface, !donatedMediaHost.isHidden { return donatedSurface }
+        return videoRenderView.isHidden ? nil : videoRenderView
+    }
 
-    var zoomLiveMediaNativeSize: CGSize? { videoRenderView.nativeVideoSize }
+    var zoomLiveMediaNativeSize: CGSize? {
+        (donatedSurface ?? videoRenderView).nativeVideoSize
+    }
 
     /// Same rule as the grid's flight card: a pin flying without live media
     /// shows its cover, which is always drawing; one flying with live media is
     /// only "drawing" while that surface is actually visible.
+    /// ⚠️ TRUE, so the flight leaves this surface's transform and centre alone.
+    ///
+    /// The alternative — a surface laid out at page size and driven by a
+    /// uniform scale — is posed from `card.layer.presentation()` on a display
+    /// link, which is a frame behind by construction. On a card that grows from
+    /// 56pt to a full page in 420ms that lag was measured at up to 47.6% of the
+    /// card's width, and what shows in the gap is the card's own cover: the
+    /// vertical seam between sharp video and blurred still that was filmed.
+    ///
+    /// Tracking the card's bounds hands the sizing to CoreAnimation, which
+    /// applies it in the same frame and on the same curve as the card's own
+    /// bounds, and lets `resizeAspectFill` recompute the crop at every instant
+    /// rather than showing the page's crop at every size.
+    var zoomLiveMediaTracksCardBounds: Bool { true }
+
     var zoomLiveMediaIsDrawing: Bool {
-        videoRenderView.isHidden ? true : videoRenderView.isRenderingVisibly
+        if let donatedSurface, !donatedMediaHost.isHidden {
+            return donatedSurface.isRenderingVisibly
+        }
+        return videoRenderView.isHidden ? true : videoRenderView.isRenderingVisibly
+    }
+
+    /// Takes a surface the other screen is ALREADY rendering, in place of
+    /// mirroring one of this card's own.
+    ///
+    /// ⚠️ THIS WAS MISSING, and its absence was silent. `ZoomFlight.build` tries
+    /// the donation FIRST on every leg, and `ZoomFlightCard` defaults this to
+    /// nothing — so on a dismissal the feed page handed over a surface already
+    /// carrying a decoded frame and the card dropped it on the floor, then fell
+    /// through to mirroring a second layer that had none. What the viewer saw
+    /// was the grab flying a still.
+    ///
+    /// No poster: the surface is already showing video, and a poster over it
+    /// could only be a chance to flash. `revealOnFirstFrame` — not
+    /// `isHidden = false` — because a surface with nothing to show must not
+    /// replace the cover underneath it, which is the picture the viewer has.
+    func adoptZoomLiveMediaView(_ view: UIView) {
+        guard let surface = view as? VideoRenderView else { return }
+        donatedSurface = surface
+        surface.frame = donatedMediaHost.bounds
+        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        surface.layer.anchorPoint = .zero
+        surface.frame = donatedMediaHost.bounds
+        surface.clipsToBounds = true
+        donatedMediaHost.addSubview(surface)
+        donatedMediaHost.isHidden = false
+        // The card may already be part-way through a blend when this arrives.
+        applyBlend()
+        surface.revealOnFirstFrame()
     }
 
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {
@@ -715,6 +1137,23 @@ extension PinCardView: ZoomFlightCard {
         // reports its first frame.
         videoRenderView.setPoster(imageView.image)
         videoRenderView.isHidden = false
+    }
+
+    /// The arriving page's picture comes UP over the marker's, which stays
+    /// fully drawn underneath — this card's cover is the source content.
+    ///
+    /// ⚠️ THE POSTER HAS TO GO FIRST, and it is not an optimisation. The poster
+    /// this card just seeded is a COPY of the cover directly behind the
+    /// surface, so fading it in changes nothing on screen: the transition would
+    /// look exactly as it did before, and the video would still arrive as a cut
+    /// when the poster retires. What must fade in is the VIDEO.
+    ///
+    /// Nothing is shown until there is a decoded frame to show; if none ever
+    /// arrives the surface simply stays at zero and the card lands on its
+    /// cover, which is the picture the viewer was already looking at.
+    func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+        videoRenderView.setPoster(nil)
+        videoRenderView.fadeInOnFirstFrame(over: duration)
     }
 
     func setZoomCornerRadius(_ radius: CGFloat) {
@@ -765,7 +1204,12 @@ extension PinCardView: ZoomFlightCard {
     }
 
     /// A pin lifts off the map, so its flight carries the same drop shadow.
+    ///
+    /// ⚠️ Its OWN face, not the `.media` default. A flying icon was getting the
+    /// media shadow — a box behind transparent artwork — because the argument
+    /// was simply never passed, and the default is the one face for which the
+    /// answer is always wrong.
     func applyZoomRestingShadow(to layer: CALayer) {
-        Self.applyPinShadow(to: layer)
+        Self.applyPinShadow(to: layer, face: face, hasArt: wornIcon != nil)
     }
 }

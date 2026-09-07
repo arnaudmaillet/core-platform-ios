@@ -53,6 +53,39 @@ public protocol ZoomTransitionSource: AnyObject {
     /// default's `nil` is the only answer anyone ever gets.
     func zoomLiveMediaSurfaceIfReady() -> UIView?
 
+    /// Whether the card this source is about to fly will render a LIVE player
+    /// — the one the destination's own page would be sharing.
+    ///
+    /// The destination suppresses its own playback for the length of a
+    /// presenting flight (`zoomTransitionWillBegin`), because several layers on
+    /// one player are resolved by whichever attached LAST: a page that starts
+    /// mid-flight blanks the card flying in front of it. That is the entire
+    /// justification, and it holds only while the card really is flying that
+    /// player.
+    ///
+    /// A marker showing a baked sprite sheet is not flying one. No player
+    /// exists on that side, nothing can be stolen, and deferring buys the
+    /// viewer a beat of poster-then-black on arrival to avert a hazard that
+    /// cannot occur. Answering `false` lets the page start decoding at take-off
+    /// instead of at the landing.
+    ///
+    /// ⚠️ ASKED ONCE, AT STAGING, AND NEVER AGAIN — so a source that may
+    /// acquire a player LATER must say `true` while it still holds none. That
+    /// is every grid tile: `zoomLiveMediaSurfaceIfReady` exists precisely
+    /// because a tile denied a player at the tap can be handed one three frames
+    /// into the flight, and a `false` read at staging would be a lie by the
+    /// time the card took off. The question is what this flight CAN carry, not
+    /// what it is carrying at this instant.
+    ///
+    /// ⚠️ A REQUIREMENT rather than a defaulted extension member, for the
+    /// reason `zoomLiveMediaSurfaceIfReady` spells out above: the controller
+    /// holds its source as `any ZoomTransitionSource`, through which an
+    /// extension member with no requirement behind it dispatches STATICALLY and
+    /// every conformer's answer is invisible.
+    ///
+    /// Default `true` — what every source did before this was asked.
+    var zoomFlightCarriesLivePlayer: Bool { get }
+
     /// The view the depth cue should recede, when it is not the presenter's
     /// whole view.
     ///
@@ -162,6 +195,7 @@ public protocol ZoomTransitionSource: AnyObject {
 
 public extension ZoomTransitionSource {
     func zoomLiveMediaSurfaceIfReady() -> UIView? { nil }
+    var zoomFlightCarriesLivePlayer: Bool { true }
     var zoomPresenterDepthView: UIView? { nil }
     func zoomSourceWillStageDismissal() {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
@@ -345,14 +379,42 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// A presentation is about to stage. Called before the destination is laid
     /// out, which is the only moment early enough to matter.
     ///
-    /// The destination must not begin rendering media of its own while a card
-    /// is flying its player: with several layers on one player, whichever
-    /// attaches last is the one that displays, so a destination that starts
-    /// playing mid-flight silently blanks the card. Implementations defer
-    /// their own playback until `zoomTransitionDidEnd`.
+    /// `flyingLivePlayer` says whether the card carries a live player this
+    /// destination would be sharing. When it does, the destination must not
+    /// begin rendering media of its own: with several layers on one player,
+    /// whichever attaches last is the one that displays, so a destination that
+    /// starts playing mid-flight silently blanks the card. Implementations
+    /// defer their own playback until `zoomTransitionDidEnd`.
+    ///
+    /// When it does not — a map marker flies a sprite sheet, and the page's
+    /// player does not exist yet — there is nothing to steal from, and the
+    /// destination should start as early as it can instead.
+    ///
+    /// ⚠️ The parameter is the SOURCE's answer (`zoomFlightCarriesLivePlayer`),
+    /// handed over by the controller: the destination is pushed by a flight it
+    /// cannot see the other end of, and guessing from its own state would be
+    /// guessing about somebody else's card.
     ///
     /// Default is nothing — a destination with no media has nothing to defer.
-    func zoomTransitionWillBegin()
+    func zoomTransitionWillBegin(flyingLivePlayer: Bool)
+
+    /// Pay this destination's first layout and raster NOW, before the push.
+    ///
+    /// A pushed screen's first layout otherwise happens inside the flight's own
+    /// stack — `ZoomAnimator` lays the container out and builds the card twelve
+    /// lines later — so the most expensive frame of the destination's life is
+    /// the frame the viewer is watching a card lift off in. Paid here it lands
+    /// in the tap's own frame, where a stall is invisible. Measured on the feed:
+    /// build 54-75ms down to 22ms.
+    ///
+    /// ⚠️ IT DOES NOT START THE PICTURE, and the belief that it does was tested
+    /// and refuted. Activation is visibility-gated (`isOnScreen` is set in
+    /// `viewWillAppear`, which UIKit runs INSIDE `pushViewController`), so no
+    /// page becomes active from this call. What it buys is frame pacing.
+    ///
+    /// Default is nothing — a destination whose first layout is cheap, or which
+    /// is not pushed, has nothing to pre-pay.
+    func zoomPrepareForPresentation(in bounds: CGRect)
 
     /// Where a dismissing flight IS, so a destination that draws beside the
     /// card can be drawn with it. See `ZoomDismissState`.
@@ -465,7 +527,8 @@ public extension ZoomTransitionDestination {
     func zoomDonateLiveMediaView() -> UIView? { nil }
     func zoomReclaimLiveMediaView(_ view: UIView) {}
     func zoomAdoptLiveMediaView(_ view: UIView) {}
-    func zoomTransitionWillBegin() {}
+    func zoomTransitionWillBegin(flyingLivePlayer: Bool) {}
+    func zoomPrepareForPresentation(in bounds: CGRect) {}
     func setZoomDismissState(_ state: ZoomDismissState) {}
     @discardableResult
     func zoomParkLiveMediaForHandoff() -> Bool { false }

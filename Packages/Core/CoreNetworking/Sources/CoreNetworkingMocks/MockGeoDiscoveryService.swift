@@ -115,10 +115,25 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         var text = posts.lazy
             .filter { $0.media == nil && !$0.postID.hasPrefix(MockSocialDataset.arrivalIDPrefix) }
             .map(\.postID).makeIterator()
-        var media = posts.lazy.filter { $0.media != nil }.map(\.postID).makeIterator()
-        func assign(_ venue: Venue, text textCount: Int, media mediaCount: Int) {
+        // ⚠️ VIDEO AND PHOTO DRAW FROM SEPARATE ITERATORS.
+        //
+        // One `media` iterator cannot be asked for a balance it does not know
+        // about: it walks the corpus in order and hands back whatever comes
+        // next. The venues are what the default viewport mostly SHOWS — the
+        // scatter contributes a handful — so an assignment that counts "media"
+        // decides the map's whole composition by accident. Measured before this,
+        // in the default viewport: photo 7, text 8, video 3, from a corpus that
+        // is an exact 40/40/40.
+        var video = posts.lazy
+            .filter { $0.media.map { MockMediaFixtures.isVideoURL($0.url) } ?? false }
+            .map(\.postID).makeIterator()
+        var photo = posts.lazy
+            .filter { $0.media.map { !MockMediaFixtures.isVideoURL($0.url) } ?? false }
+            .map(\.postID).makeIterator()
+        func assign(_ venue: Venue, text textCount: Int, video videoCount: Int, photo photoCount: Int) {
             for _ in 0..<textCount { if let id = text.next() { assignments[id] = venue } }
-            for _ in 0..<mediaCount { if let id = media.next() { assignments[id] = venue } }
+            for _ in 0..<videoCount { if let id = video.next() { assignments[id] = venue } }
+            for _ in 0..<photoCount { if let id = photo.next() { assignments[id] = venue } }
         }
         // ⚠️ These counts are load-bearing beyond clustering: which posts land
         // here decides each venue's MOST-LIKED member, and that is the face the
@@ -128,9 +143,28 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // 0 and the id order decides instead — see the note on the text walk. The PLACE PROFILE's three tabs don't need more members
         // at venue scale: the mixed venue already spans all three kinds, and
         // the city/region markers roll up the whole zone's corpus.
-        assign(mixedVenue, text: 2, media: 3)
-        assign(textOnlyVenue, text: 3, media: 0)
-        assign(mediaOnlyVenue, text: 0, media: 3)
+        // Even thirds, venue by venue, so the map shows what the corpus is.
+        // The mixed venue still spans all three kinds — the property
+        // `aTextFacedMixedClusterOpensBothKinds` rests on — and the media-only
+        // venue still holds no text.
+        // ⚠️ RAISED, and evenly. The venues are what the default viewport mostly
+        // holds — the scatter contributes a handful — so their quota IS the
+        // map's composition. At 2/2/2 they were a minority of the pins and the
+        // scatter's draw decided the balance; at 8/8/8 they dominate it, and the
+        // scatter becomes a perturbation rather than the answer.
+        //
+        // The venues keep their meanings: the text-only one takes only text, the
+        // media-only one takes no text, and the mixed one spans all three —
+        // which `aTextFacedMixedClusterOpensBothKinds` rests on.
+        // ⚠️ THE PHOTO QUOTAS ARE ZERO, NOT DELETED. While
+        // `MockSocialDataset.mediaIsAlwaysVideo` is on there are no photo posts
+        // to draw, and a quota asking for some would silently get nothing —
+        // `assign` stops when its iterator runs dry. Writing the zeros keeps the
+        // shape of the balance visible, so flipping the switch back is one edit
+        // here and not an archaeology exercise.
+        assign(mixedVenue, text: 6, video: 6, photo: 0)
+        assign(textOnlyVenue, text: 4, video: 0, photo: 0)
+        assign(mediaOnlyVenue, text: 0, video: 6, photo: 0)
         return assignments
     }
 
@@ -164,7 +198,23 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // because handing the raw video URL to an image view renders a blank pin.
         guard MockMediaFixtures.isVideoURL(url) || forcesMapVideo else { return url }
         guard forcesMapVideo else {
-            return MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
+            // A still, because handing a raw video URL to an image view renders
+            // a blank pin — but STAMPED, so the pin can say what its post is.
+            //
+            // ⚠️ Without the stamp the map has no video pins at all. `RadarPin`
+            // carries no media kind (`media.v1.MediaKind media_kind = 5` is not
+            // published to BSR, `dev/BACKEND_GAPS.md` §15), so every media pin
+            // classified as `.photo` and the corpus's honest thirds — 40 video,
+            // 40 photo, 40 text — reached the map as two thirds photo and no
+            // video whatsoever. The play badge and the preview path could only
+            // ever be seen under `-maps-force-video`, which makes EVERY pin a
+            // video and is therefore no better a picture of the product.
+            //
+            // A query item the origin ignores, mirroring the discriminator
+            // below. It is a mock standing in for field 5, and it disappears the
+            // day field 5 ships.
+            let still = MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
+            return "\(still)?\(Self.videoKindMarker)"
         }
         // ⚠️ ONE FIXTURE, DISTINCT URLS — and the distinctness is the fixture's
         // whole job now.
@@ -187,6 +237,10 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// Mirrors the Maps feature's own DEBUG launch argument. Read here so the
     /// fixture a pin carries matches how the client will classify it.
     static let forcesMapVideo = ProcessInfo.processInfo.arguments.contains("-maps-force-video")
+
+    /// The mock's stand-in for `media.v1.MediaKind`, read by
+    /// `GeoDiscoveryRepository.kind(for:)` in DEBUG builds only.
+    public static let videoKindMarker = "mock-kind=video"
 
     /// `-maps-mock-density <n>`: emit `n` copies of every matching post,
     /// scattered across the queried viewport.
@@ -251,11 +305,20 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             // A venue's members share ONE coordinate exactly, so they cluster
             // at every zoom; everything else keeps its own scattered point.
             let (lat, lng) = venues[post.postID].map { ($0.lat, $0.lng) }
-                ?? coordinate(forIndex: index)
+                ?? coordinate(forIndex: index, postID: post.postID)
             guard Self.contains(viewport: viewport, lat: lat, lng: lng),
                   matches(filter: filter, post: post, lat: lat, lng: lng, viewport: viewport)
             else { return nil }
 
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-maps-log-pins") {
+                let kind = post.media.map {
+                    MockMediaFixtures.isVideoURL($0.url) ? "video" : "photo"
+                } ?? "text"
+                print("[pins] \(post.postID) \(kind) "
+                      + "\(venues[post.postID] != nil ? "venue" : "scatter")")
+            }
+            #endif
             var pin = GeoDiscovery_V1_RadarPin()
             pin.postID = post.postID
             pin.lat = lat
@@ -452,9 +515,31 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// across the box without randomness, so runs are reproducible. Under the
     /// hierarchy flag, every third post is re-anchored across Europe instead —
     /// same strides, so which posts travel never changes between runs.
-    private func coordinate(forIndex index: Int) -> (lat: Double, lng: Double) {
-        let latFraction = Double((index * 73) % 1000) / 1000.0
-        let lngFraction = Double((index * 137) % 1000) / 1000.0
+    private func coordinate(forIndex index: Int, postID: String) -> (lat: Double, lng: Double) {
+        // ⚠️ SCATTERED BY THE POST'S ID, NOT BY ITS ARRAY INDEX.
+        //
+        // The kind is `index % 3` in this corpus, so a placement that is also a
+        // function of `index` correlates position with kind, and the viewport
+        // rectangle then samples the three classes unevenly — deterministically,
+        // which is worse than noise because every launch shows the same skew.
+        // Measured in the default viewport before this: photo 7, text 8, video 3
+        // out of 18, from a corpus that is an exact 40/40/40.
+        //
+        // FNV-1a over the id, not `hashValue`: Swift seeds that per launch, and
+        // a map whose pins move between runs is a fixture nobody can film twice.
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in postID.utf8 { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3 }
+        // ⚠️ FINALISE, then read the HIGH bits. FNV-1a's low bits barely move
+        // for inputs that differ only in their last characters — and every id
+        // here is `post-00NN`. Taking `hash % 1000` therefore kept the aliasing
+        // with `index % 3` that switching away from the index was meant to
+        // break: measured, the scatter placed FOUR photos and ZERO videos in the
+        // default viewport, the same four every launch.
+        hash ^= hash >> 33
+        hash = hash &* 0xff51_afd7_ed55_8ccd
+        hash ^= hash >> 33
+        let latFraction = Double(hash >> 40) / 16777216.0
+        let lngFraction = Double((hash >> 16) & 0xFF_FFFF) / 16777216.0
         if spreadsHierarchy, index % 3 == 2 {
             let anchor = Self.hierarchyAnchors[(index / 3) % Self.hierarchyAnchors.count]
             return (

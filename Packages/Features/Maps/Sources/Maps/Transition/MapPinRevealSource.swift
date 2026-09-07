@@ -1,6 +1,7 @@
 import FeedInterface
 import MapKit
 import UIKit
+import MediaCore
 
 /// The map side of the text reveal: a marker's disc, described as something a
 /// window can open out of.
@@ -100,14 +101,16 @@ enum MapPinRevealSource {
                 marker(
                     face: face, ringKind: ringKind,
                     avatar: mapView?.wornAvatar(for: annotation),
-                    cover: mapView?.wornCover(for: annotation)
+                    cover: mapView?.wornCover(for: annotation),
+                    icon: mapView?.wornIcon(for: annotation)
                 )
             },
             makePresentStandIn: { [weak mapView] in
                 marker(
                     face: face, ringKind: ringKind,
                     avatar: mapView?.wornAvatar(for: annotation),
-                    cover: mapView?.wornCover(for: annotation)
+                    cover: mapView?.wornCover(for: annotation),
+                    icon: mapView?.wornIcon(for: annotation)
                 )
             },
             // Nothing to align to. The page holds still and the window opens
@@ -115,7 +118,25 @@ enum MapPinRevealSource {
             alignsPageToSource: false,
             pageFit: .covering,
             cornerRadius: face.cornerRadius,
-            fill: PinCardView.textRevealGround,
+            // ⚠️ THE WINDOW WEARS THE MARKER'S GROUND, AND A DRESSED ICON HAS
+            // NONE.
+            //
+            // This colour is handed to the destination for the length of the
+            // transition (`RevealGeometry.sourceFill` -> `setDestinationGround`)
+            // so the inside of the window matches the marker it is opening from
+            // or closing onto. That is right for a disc — a text marker IS a
+            // grey disc, and a BARE icon wears the same disc as its floor.
+            //
+            // It is wrong for an icon with art. The product asked for no circle
+            // there: the marker is a mark on the map and nothing else, so a
+            // window closing onto it should end on nothing. It ended on a grey
+            // block instead — measured, not deduced: tinting this value magenta
+            // put magenta in exactly the reported rectangle.
+            //
+            // `nil` leaves the page its own ground, which fades out with the
+            // page across the close, so the window has nothing left to hold.
+            fill: mapView.wornIcon(for: annotation) != nil && face == .icon
+                ? nil : PinCardView.textRevealGround,
             setConcealed: concealMarker,
             dismissalDidEnd: dismissalDidEnd
         )
@@ -140,12 +161,16 @@ enum MapPinRevealSource {
     /// the hero's own card has always been handed the thumbnail.
     private static func marker(
         face: PinCardView.Face, ringKind: MapPlace.Kind?,
-        avatar: UIImage? = nil, cover: UIImage? = nil
+        avatar: UIImage? = nil, cover: UIImage? = nil,
+        icon: (art: AnimatedIconArt, phase: Int)? = nil
     ) -> UIView {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
         card.setFace(face)
         card.setTextAvatar(avatar)
         card.imageView.image = cover
+        // After `setTextAvatar`, so the floor is dressed before the icon decides
+        // whether to cover it.
+        card.setIcon(icon)
         card.setRing(
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
         )
@@ -177,6 +202,24 @@ extension MKMapView {
         switch view(for: annotation) {
         case let pin as MapAnnotationView: pin.card.imageView.image
         case let cluster as MapClusterAnnotationView: cluster.card.imageView.image
+        default: nil
+        }
+    }
+
+    /// The marker's ICON, read the same way and at the same moment as its author
+    /// and its cover, and for the same reason.
+    ///
+    /// ⚠️ Without this a stand-in for an icon marker was BLANK: these builders
+    /// make a fresh `PinCardView`, call `setFace(.icon)` — which hides the cover
+    /// host, because an icon's alpha is its shape — and then never put any icon
+    /// on it. The marker's own floor cannot help a card that was never told
+    /// about the artwork, so the transition had a hole the resting marker did
+    /// not. Now the stand-in carries the art when there is art, and falls to the
+    /// same disc as the marker when there is not.
+    func wornIcon(for annotation: any MKAnnotation) -> (art: AnimatedIconArt, phase: Int)? {
+        switch view(for: annotation) {
+        case let pin as MapAnnotationView: pin.card.wornIcon
+        case let cluster as MapClusterAnnotationView: cluster.card.wornIcon
         default: nil
         }
     }

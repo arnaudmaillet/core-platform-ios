@@ -78,11 +78,16 @@ struct ZoomFlight {
     /// Builds the card in page pose (so the chrome replica can resolve its
     /// full-screen layout before the first frame) plus its shadow stand-in.
     /// The caller inserts both into the container and lays out.
+    /// - Parameter presents: which leg this is, and it decides only one thing —
+    ///   how media taken from the DESTINATION appears. On a present that media
+    ///   is the arrival, so it comes up over the card's own picture; on a
+    ///   dismissal it is the departing page itself and simply replaces it.
     static func build(
         source: any ZoomTransitionSource,
         destination: (any ZoomTransitionDestination)?,
         sourceFrame: CGRect,
-        pageFrame: CGRect
+        pageFrame: CGRect,
+        presents: Bool = false
     ) -> ZoomFlight {
         let card = source.makeZoomFlightCard()
         card.frame = pageFrame
@@ -105,6 +110,22 @@ struct ZoomFlight {
         }
         if card.zoomLiveMediaSurface == nil, let destination {
             card.adoptZoomLiveMedia { surface in destination.zoomMirrorLiveMedia(onto: surface) }
+            // ⚠️ THE SAME DOOR THE RETRY GOES THROUGH NEEDS THE SAME MANNERS.
+            //
+            // A present that gets its picture HERE rather than mid-flight is
+            // still getting the arriving page's picture, and it must arrive the
+            // way `ZoomLiveMediaRetry` makes it arrive — over the card's own,
+            // which stays drawn. Without this the card cuts to a poster of the
+            // page over its animating sprite sheet at take-off, and the flight
+            // that finally got its media early would look worse than the one
+            // that got it late.
+            //
+            // Unreachable today (the page's playback has not registered by the
+            // time this asks), and one timing change away from being reachable
+            // — which is exactly when a hole like this ships.
+            if presents, card.zoomLiveMediaSurface != nil {
+                card.fadeInAdoptedLiveMedia(over: Self.springDuration)
+            }
         }
         // The native aspect is read AFTER the card has its surface, and the
         // order is load-bearing: on the dismiss leg the surface arrives from
@@ -274,7 +295,15 @@ struct ZoomFlight {
         card.zoomRestingChrome?.alpha = 0
         shadow.alpha = 0
         let center = CGPoint(x: card.bounds.width / 2, y: card.bounds.height / 2)
-        if let surface = card.zoomLiveMediaSurface {
+        // ⚠️ THE SAME GUARD THE OTHER FOUR POSES HAVE, and its absence here was
+        // a live defect the moment a card started tracking its own bounds.
+        //
+        // A tracking card sizes its surface from its own bounds; writing a
+        // centre on top of that fights the autoresizing every pan event, and on
+        // a surface anchored at its top-left it puts the picture's CORNER at
+        // the card's centre — filmed on the dismiss as a second, differently
+        // cropped rectangle inset into the bottom-right quadrant.
+        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
             surface.transform = CGAffineTransform(scaleX: scale, y: scale)
             surface.center = center
         }
@@ -332,8 +361,12 @@ struct ZoomFlight {
         // only to the ones that fall through.
         card.setZoomContentBlend(t)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        if let surface = card.zoomLiveMediaSurface {
-            guard !card.zoomLiveMediaTracksCardBounds else { return }
+        // ⚠️ THE CONDITION IS ON THE SURFACE BLOCK, NOT ON THE FUNCTION. It was
+        // a `guard … else { return }` inside this block, so a tracking card
+        // carrying live media returned here and never posed its CHROME for the
+        // whole interpolation — the card's furniture frozen at its last value
+        // while the card morphed under it.
+        if let surface = card.zoomLiveMediaSurface, !card.zoomLiveMediaTracksCardBounds {
             // Interpolate the SCALE between the two endpoint scales, rather
             // than recomputing a cover scale from the interpolated size.
             //

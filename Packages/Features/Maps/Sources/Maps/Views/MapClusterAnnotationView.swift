@@ -39,6 +39,11 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
     private var previewCatalog: AnimatedIconCatalog?
     private var representedPreview: String?
     private var previewTask: Task<Void, Never>?
+    /// The icon fetch, held apart from `imageTask` because an icon-led group now
+    /// loads its icon AND the representative's avatar underneath it — the floor
+    /// the card falls back to when the artwork never lands. One handle for both
+    /// would let whichever resolved second cancel the first.
+    private var iconTask: Task<Void, Never>?
 
     /// The loaded cover image, handed to the hero transition to fly.
     var heroImage: UIImage? { card.imageView.image }
@@ -68,9 +73,24 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
     /// all-text group is a 44pt circle, so a cluster is never a different
     /// object from the markers it stands for. `bounds`, not `frame`: MapKit
     /// owns the center.
+    /// The ONE place icon artwork is put on the card.
+    ///
+    /// ⚠️ The shadow lives on THIS view's layer, not on the card, so the card
+    /// cannot keep it honest by itself — and the art arrives on the other side
+    /// of `applyFace`. A pin faces (shadow computed) and only then strips and
+    /// re-dresses the icon; reading `card.wornIcon` inside `applyFace` therefore
+    /// reads the RECYCLED view's previous art and is never revisited when the
+    /// real art lands. Routing every write through here is what makes "no
+    /// shadow under an icon, the text marker's lift under a bare one" true at
+    /// every instant rather than at one.
+    func applyIconArt(_ art: (art: AnimatedIconArt, phase: Int)?) {
+        card.setIcon(art)
+        PinCardView.applyPinShadow(to: layer, face: card.face, hasArt: art != nil)
+    }
+
     private func applyFace(_ face: PinCardView.Face) {
         // Recycled across faces, like the pin's — see the note there.
-        PinCardView.applyPinShadow(to: layer, face: face)
+        PinCardView.applyPinShadow(to: layer, face: face, hasArt: card.wornIcon != nil)
         if bounds.width != face.side {
             bounds = CGRect(x: 0, y: 0, width: face.side, height: face.side)
         }
@@ -145,10 +165,11 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
         representedIcon = icon
         representedPreview = preview
         previewTask?.cancel()
+        iconTask?.cancel()
         card.setPreviewSheet(nil)
         card.imageView.image = nil
         card.setTextAvatar(nil)
-        card.setIcon(nil)
+        applyIconArt(nil)
         applyFace(face)
 
         // A group led by an icon post wears that icon — the same representative
@@ -156,19 +177,26 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
         if face == .icon, let iconCatalog, let icon {
             let phase = cluster.representative.iconPhase
             if let art = iconCatalog.cached(icon) {
-                card.setIcon((art, phase))
+                // In hand: the floor is never seen, so spend nothing on it.
+                applyIconArt((art, phase))
                 return
             }
-            imageTask = Task { [weak self] in
+            iconTask = Task { [weak self] in
                 guard let art = try? await iconCatalog.art(for: icon) else { return }
                 guard let self, self.representedIcon == icon else { return }
-                self.card.setIcon((art, phase))
+                self.applyIconArt((art, phase))
             }
-            return
+            // No `return`: fall through to the avatar load, which dresses the
+            // FLOOR under an icon that has not arrived — and may never.
         }
         // A text group wears the face of the post that leads it — the same
         // representative whose thumbnail a media group would show.
-        if face == .text, let avatar {
+        //
+        // ⚠️ Not `face == .text` any more. An icon-led group is a group of TEXT
+        // posts, and its representative has an author like any other; gating on
+        // the face meant the one face that can end up bare was the one face that
+        // never loaded anything to be bare with.
+        if face == .text || face == .icon, let avatar {
             imageTask = Task { [weak self] in
                 guard let image = try? await imagePipeline.image(for: avatar) else { return }
                 guard let self, self.representedAvatar == avatar else { return }
@@ -198,6 +226,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
 
     #if DEBUG
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+    var debugFaceName: String { card.debugFaceName }
     var presentedIconTick: Double? { card.presentedIconTick }
     var presentedPreviewTick: Double? { card.presentedPreviewTick }
     var isPlayingPreviewSheet: Bool { card.isPlayingPreviewSheet }
@@ -253,7 +282,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
         representedPreview = nil
         previewTask?.cancel()
         previewTask = nil
-        card.setIcon(nil)
+        applyIconArt(nil)
         card.setPreviewSheet(nil)
         card.imageView.image = nil
         card.setTextAvatar(nil)

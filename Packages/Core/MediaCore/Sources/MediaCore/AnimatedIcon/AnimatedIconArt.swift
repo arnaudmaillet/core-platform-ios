@@ -158,7 +158,10 @@ public struct AnimatedIconSheet: Sendable, Equatable {
     public var loopDuration: CFTimeInterval { frameDuration * CFTimeInterval(frameCount) }
     public var byteCost: Int { sheet.cgImage.map { $0.bytesPerRow * $0.height } ?? 0 }
 
-    public init(sheet: UIImage, frameCount: Int, columns: Int, frameDuration: CFTimeInterval) {
+    /// - Parameter gutterPX: the transparent margin the baker leaves INSIDE
+    ///   each cell, in sheet pixels. Sampled out — see `frameRects`.
+    public init(sheet: UIImage, frameCount: Int, columns: Int,
+                frameDuration: CFTimeInterval, gutterPX: Int = 0) {
         self.sheet = sheet
         self.frameCount = frameCount
         self.columns = columns
@@ -166,15 +169,33 @@ public struct AnimatedIconSheet: Sendable, Equatable {
         let rows = Int(ceil(Double(frameCount) / Double(columns)))
         let width = 1.0 / Double(columns)
         let height = 1.0 / Double(rows)
+        // ⚠️ THE GUTTER IS INSIDE THE CELL, AND IT IS TRANSPARENT.
+        //
+        // `AtlasWriter` insets every cell by a 2px margin so that bilinear
+        // filtering at a cell's edge samples emptiness rather than the
+        // neighbouring frame. Sampling the WHOLE cell therefore carries that
+        // margin into the picture, and the client's own background shows
+        // through it: 2px of a 172px cell is nothing on a 56pt marker (0.65pt)
+        // and a 10pt BAND once the same image is aspect-filled into a
+        // full-screen hero card, where it was filmed as a white bar across the
+        // top. The gutter is the producer's business, not the picture's.
+        //
+        // Insetting keeps what the gutter is for: the sampled edge lands on the
+        // art boundary, so the filter reaches into the transparent margin
+        // instead of into the next frame.
+        let pixelWidth = Double(sheet.cgImage?.width ?? 0)
+        let pixelHeight = Double(sheet.cgImage?.height ?? 0)
+        let insetX = pixelWidth > 0 ? Double(gutterPX) / pixelWidth : 0
+        let insetY = pixelHeight > 0 ? Double(gutterPX) / pixelHeight : 0
         self.frameRects = (0..<frameCount).map { index in
             CGRect(
-                x: Double(index % columns) * width,
+                x: Double(index % columns) * width + insetX,
                 // Row-major FROM THE TOP, which is what `contentsRect` means.
                 // The baker writes the grid the same way; when it did not, the
                 // client played the last row first and the partly-filled row —
                 // read first — opened every loop with blank frames.
-                y: Double(index / columns) * height,
-                width: width, height: height
+                y: Double(index / columns) * height + insetY,
+                width: width - insetX * 2, height: height - insetY * 2
             )
         }
     }
@@ -185,6 +206,30 @@ public struct AnimatedIconSheet: Sendable, Equatable {
 public enum AnimatedIconArt: Sendable, Equatable {
     case decomposed(AnimatedIconStill)
     case sheet(AnimatedIconSheet)
+
+    /// The artwork's first frame, as a still.
+    ///
+    /// A video marker's cover and its preview must be the SAME picture: a
+    /// photograph underneath an animation of a different clip is two claims
+    /// about one post, and the viewer sees the swap the moment motion stops or
+    /// the catalogue evicts. `frameRects` are unit coordinates, so the crop is
+    /// the sheet's own geometry rather than an assumption about its layout.
+    public func firstFrame() -> UIImage? {
+        switch self {
+        case .decomposed(let still):
+            return still.mark
+        case .sheet(let sheet):
+            guard let cg = sheet.sheet.cgImage, let rect = sheet.frameRects.first else { return nil }
+            let pixels = CGRect(
+                x: rect.origin.x * CGFloat(cg.width),
+                y: rect.origin.y * CGFloat(cg.height),
+                width: rect.width * CGFloat(cg.width),
+                height: rect.height * CGFloat(cg.height)
+            ).integral
+            guard let cropped = cg.cropping(to: pixels) else { return nil }
+            return UIImage(cgImage: cropped, scale: sheet.sheet.scale, orientation: .up)
+        }
+    }
 
     public var byteCost: Int {
         switch self {

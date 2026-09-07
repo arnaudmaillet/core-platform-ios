@@ -172,6 +172,14 @@ final class RevealDismissInteractionController: NSObject,
         // so swapping them there is invisible.
         geometry.setSourceConcealed(true)
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
+        // ⚠️ THE SAME NAMING, ON THIS LEG TOO, and its absence is why the
+        // instrument reported nothing the first time it was used in anger.
+        //
+        // A dismissal has TWO drivers — the animator's pop (a chevron, an
+        // auto-dismiss) and this one (a finger) — and they stage their own
+        // host, mask, dim and stand-in separately. Instrumenting one of them
+        // reads as "the debug flag does not work" to anyone who dismisses the
+        // way people actually dismiss.
         openRect = open.mask
         openCentre = CGPoint(x: open.mask.midX, y: open.mask.midY)
         screenRadius = open.maskRadius
@@ -353,7 +361,7 @@ final class RevealDismissInteractionController: NSObject,
         // was already aiming at and there is nothing left to correct.
         let container = context.containerView
         let landing = commit ? currentLanding(in: container) : openRect
-        let closed = RevealStage.closed(
+        var closed = RevealStage.closed(
             sourceRect: landing,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
@@ -362,6 +370,17 @@ final class RevealDismissInteractionController: NSObject,
             ridingFrom: standIn != nil ? openRect : nil,
             fit: geometry.pageFit
         )
+        // ⚠️ THE SAME LAW AS THE CHEVRON'S, ON THE LEG PEOPLE ACTUALLY USE —
+        // and its absence here is why the law read as broken. This controller
+        // never wrote `pageOpacity` at all, so it applied the default 1 down to
+        // the 44pt landing: a block of the page's own ground sitting inside the
+        // window until the window was gone, filmed five times.
+        //
+        // ON THE COMMIT ONLY. The drag itself must keep the page whole — an
+        // abandoned grab hands it straight back — so this rides the release's
+        // spring and nothing else; `target` below takes the open pose's 1 when
+        // the grab is abandoned.
+        closed.pageOpacity = RevealStage.closingPageOpacity(sourceFill: geometry.sourceFill)
         let target = commit
             ? closed
             : RevealStage.Pose(

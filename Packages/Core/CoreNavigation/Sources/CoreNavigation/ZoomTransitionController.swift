@@ -134,7 +134,11 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // Before the destination is pushed, and so before it lays out and
         // activates its first page — the only point early enough for it to
         // suppress its own playback for the duration of the flight.
-        if presents { destination.zoomTransitionWillBegin() }
+        if presents {
+            destination.zoomTransitionWillBegin(
+                flyingLivePlayer: source.zoomFlightCarriesLivePlayer
+            )
+        }
     }
 
     /// Installs the grab-to-dismiss gesture on the pushed feed's view. Called

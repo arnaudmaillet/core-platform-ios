@@ -101,6 +101,19 @@ public struct MockSocialDataset: Sendable {
     /// Nine posts on the same three-kind cycle the main corpus uses (video,
     /// image, text), so all three profile tabs have something: the mosaic, the
     /// timeline, and Short.
+
+    /// ⚠️ EVERY MEDIA POST IS A VIDEO, for now.
+    ///
+    /// A product decision while the video path is the one under work: photographs
+    /// are set aside so the map and the feed exercise video everywhere a post has
+    /// media. The photo branches are DELIBERATELY LEFT IN PLACE below rather than
+    /// deleted — they are correct, they are tested, and this is a switch rather
+    /// than a removal. Flip it back and the corpus returns to thirds.
+    ///
+    /// What it does NOT change: `hasMedia`, so text-only posts stay exactly as
+    /// they were and the text/media split is untouched.
+    static let mediaIsAlwaysVideo = true
+
     static func viewerRecords(mediaCatalog: MediaCatalog, after count: Int) -> [PostRecord] {
         let captions = [
             "Testing in production is fine if production is your simulator.",
@@ -117,7 +130,7 @@ public struct MockSocialDataset: Sendable {
         let newestMS: Int64 = 1_780_000_000_000
         return (0..<captions.count).map { index in
             let hasMedia = index % 3 != 2
-            let isVideo = index % 3 == 0
+            let isVideo = Self.mediaIsAlwaysVideo || index % 3 == 0
             let shape = shapes[index % shapes.count]
             let media: (url: String, width: Int, height: Int)? = switch (hasMedia, mediaCatalog) {
             case (false, _):
@@ -556,9 +569,42 @@ public struct MockSocialDataset: Sendable {
     public func previewSheetIDsByPostID(catalogue: [String]) -> [String: String] {
         guard !catalogue.isEmpty else { return [:] }
         return posts.reduce(into: [:]) { result, post in
-            guard post.media != nil, let index = Self.numericSuffix(of: post.postID) else { return }
-            result[post.postID] = catalogue[index % catalogue.count]
+            // ⚠️ VIDEO POSTS ONLY, and the guard used to be `post.media != nil`.
+            //
+            // A preview sheet is a sample of the post's OWN footage. A
+            // photograph has none — its marker should wear the photograph (or
+            // its first frame), which is what the cover already does. Seeding
+            // every post that merely HAS media gave still photos an animated
+            // marker playing somebody else's clip: the annotation and the post
+            // no longer described the same thing, and opening one showed a page
+            // with nothing moving in it.
+            guard let media = post.media,
+                  MockMediaFixtures.isVideoURL(media.url),
+                  let index = Self.numericSuffix(of: post.postID)
+            else { return }
+            // ⚠️ NIL IS AN ANSWER. A fixture with no baked sheet gets NONE, and
+            // the marker falls back to its cover — which is the ladder. Handing
+            // it an arbitrary clip was the defect a viewer reported: five of the
+            // seven fixtures had no sheet of their own and every one of them
+            // wore somebody else's footage.
+            result[post.postID] = Self.previewSheet(for: media.url, in: catalogue, index: index)
         }
+    }
+
+    /// The sheet baked from THIS post's clip when one exists.
+    ///
+    /// The catalogue's ids are `<clip>-<segment>` and the fixtures' URLs carry
+    /// the clip's name, so most video posts can wear a preview of their own
+    /// footage rather than of an arbitrary one. Not all of them: the baked set
+    /// covers four clips and the fixture table lists seven, so the remainder
+    /// still falls back to a deterministic pick — a marker that previews the
+    /// wrong clip is a mock-fidelity gap, where a photograph that previews ANY
+    /// clip was a lie about what the post is.
+    static func previewSheet(for url: String, in catalogue: [String], index: Int) -> String? {
+        guard let clip = MockMediaFixtures.bakedClip(for: url) else { return nil }
+        let segments = catalogue.filter { $0.hasPrefix("\(clip)-") }
+        guard !segments.isEmpty else { return nil }
+        return segments[abs(index) % segments.count]
     }
 
     /// The trailing digits of `post-0007`. Nil when there are none, which keeps
@@ -716,7 +762,7 @@ public struct MockSocialDataset: Sendable {
             // One of every three posts is video, one image, one text-only —
             // a mix that exercises all three snap-feed cell paths.
             let hasMedia = index % 3 != 2
-            let isVideo = index % 3 == 0
+            let isVideo = Self.mediaIsAlwaysVideo || index % 3 == 0
             let mediaHost = isVideo ? "video" : "media"
             let shape = mediaShapes[index % mediaShapes.count]
             // Under `.realAssets` a video post takes its dimensions FROM the

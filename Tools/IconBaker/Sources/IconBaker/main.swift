@@ -30,6 +30,15 @@ struct IconBaker {
         var output = URL(fileURLWithPath: "build/icons")
         var cellPixels = 136
         var maxFrames = 24
+        /// How many sheets to cut from ONE clip, spread evenly across it.
+        ///
+        /// A three-second window is a preview; a whole clip is a video. Cutting
+        /// several gives a marker field variety without multiplying the assets
+        /// downloaded, and each segment is still only `maxFrames` frames.
+        var segments = 1
+        /// The entry id, when the URL cannot supply one. A remote HLS fixture is
+        /// `.../master.m3u8` — every clip would be called `master`.
+        var identifier: String?
         /// Keys are not frames.
         ///
         /// ⚠️ The 24 above is the SHEET's cap and it exists because a frame is
@@ -72,6 +81,8 @@ struct IconBaker {
             case "--out": options.output = URL(fileURLWithPath: try next())
             case "--cell": options.cellPixels = Int(try next()) ?? 136
             case "--max-frames": options.maxFrames = Int(try next()) ?? 24
+            case "--segments": options.segments = max(1, Int(try next()) ?? 1)
+            case "--id": options.identifier = try next()
             case "--max-keys": options.maxKeys = Int(try next()) ?? 240
             case "--fps": options.trackFPS = Double(try next())
             case "--manifest": options.manifest = try next()
@@ -111,6 +122,10 @@ struct IconBaker {
         let frameMS: Int
         let cellPX: Int
         let columns: Int?
+        /// The transparent margin inside each cell, in sheet pixels — the
+        /// client has to sample INSIDE it or the margin shows as a border, so
+        /// the producer states it rather than leaving it to be guessed.
+        let gutterPX: Int
         let scale: [Double]?
         let rotation: [Double]?
         let opacity: [Double]?
@@ -133,14 +148,18 @@ struct IconBaker {
     /// Video containers. These bake to a SHEET — never passed through, because a
     /// marker that plays an MP4 needs a decode session and the whole reason to
     /// bake one is to need none.
-    static let videoExtensions: Set<String> = ["mp4", "mov", "m4v"]
+    /// ⚠️ `m3u8` included. `AVURLAsset` reads an HLS manifest exactly like a
+    /// container, and three of the mock's seven video fixtures are HLS — which
+    /// is precisely why the baked set did not cover them and their markers wore
+    /// somebody else's clip.
+    static let videoExtensions: Set<String> = ["mp4", "mov", "m4v", "m3u8"]
 
-    static func bake(_ url: URL, options: Options) async throws -> Entry {
+    static func bake(_ url: URL, options: Options) async throws -> [Entry] {
         if videoExtensions.contains(url.pathExtension.lowercased()) {
             return try await bakeVideo(url, options: options)
         }
         if rasterExtensions.contains(url.pathExtension.lowercased()) {
-            return try bakeRaster(url, options: options)
+            return [try bakeRaster(url, options: options)]
         }
         let document = try LottieDocument.load(url)
         let profile = document.survey()
@@ -210,26 +229,27 @@ struct IconBaker {
                 let asset = "\(document.name).\(options.heic ? "heic" : "png")"
                 let file = options.output.appendingPathComponent(asset)
                 try AtlasWriter.write(flattened, to: file, heic: options.heic)
-                return Entry(
+                return [Entry(
                     id: document.name, kind: "still", asset: asset,
                     frameCount: frameCount, frameMS: frameMS, cellPX: options.cellPixels,
-                    columns: nil,
+                    // A still is not sampled from a grid, so no margin applies.
+                    columns: nil, gutterPX: 0,
                     scale: track.scale, rotation: track.rotation, opacity: track.opacity,
                     bytes: size(of: file),
                     note: "\(profile.affine) affine properties, 1 animated layer",
                     stepMS: options.trackFPS.map { 1000 / $0 },
                     plate: options.plateHex
-                )
+                )]
             case .failure(let refusal):
                 // Affine but not reducible by THIS tool. Sheeted, and said so —
                 // silently sheeting it would hide a fixable authoring problem.
                 frameCount = sheetFrameCount
                 frameMS = sheetFrameMS
-                return try bakeSheet(
+                return [try bakeSheet(
                     document, options: options,
                     frameCount: &frameCount, frameMS: &frameMS,
                     note: "affine but sheeted: \(refusal)"
-                )
+                )]
             }
         }
 
@@ -238,10 +258,10 @@ struct IconBaker {
         let why = profile.isAffine
             ? "affine but \(profile.animatedLayers) animated layers"
             : "\(profile.rasterCount) raster properties (\(reasons))"
-        return try bakeSheet(
+        return [try bakeSheet(
             document, options: options,
             frameCount: &frameCount, frameMS: &frameMS, note: why
-        )
+        )]
     }
 
     /// A video clip into a preview sheet.
@@ -251,25 +271,53 @@ struct IconBaker {
     /// resident, so 24 frames is 2.65 MB per clip and 19 markers is 50.4 MB.
     /// Nothing about the source changes that — a longer clip is sampled, not
     /// packed.
-    static func bakeVideo(_ url: URL, options: Options) async throws -> Entry {
+    static func bakeVideo(_ url: URL, options: Options) async throws -> [Entry] {
         let document = try await VideoDocument.load(url)
         let stepMS = options.trackFPS.map { 1000 / $0 } ?? 83.0
         let frameCount = options.maxFrames
         let window = Double(frameCount) * stepMS / 1000
-        // Start a little in: the first second of a clip is often a fade or a
-        // title card, and a marker preview that opens on black reads as broken.
-        let start = min(1.0, max(0, document.duration - window))
+        let base = options.identifier ?? document.name
+        guard options.segments > 1 else {
+            // Start a little in: the first second of a clip is often a fade or
+            // a title card, and a marker preview that opens on black reads as
+            // broken.
+            let start = min(1.0, max(0, document.duration - window))
+            return [try await bakeSegment(document, id: base, start: start,
+                                          window: window, stepMS: stepMS, options: options)]
+        }
+        // Spread the cuts across the clip, each one a full window inside it. The
+        // last cut ends at the clip's end rather than running off it.
+        let span = max(0, document.duration - window)
+        // Sequential, deliberately: the segments share one `AVURLAsset`, and
+        // decoding several windows of one remote clip at once is how a bake
+        // starts timing out rather than finishing.
+        var cut: [Entry] = []
+        for index in 0..<options.segments {
+            let t = Double(index) / Double(options.segments - 1)
+            cut.append(try await bakeSegment(
+                document, id: "\(base)-\(index)", start: span * t,
+                window: window, stepMS: stepMS, options: options
+            ))
+        }
+        return cut
+    }
+
+    static func bakeSegment(
+        _ document: VideoDocument, id: String, start: Double,
+        window: Double, stepMS: Double, options: Options
+    ) async throws -> Entry {
+        let frameCount = options.maxFrames
 
         let frames = try await document.frames(
             count: frameCount, start: start, window: window, side: options.cellPixels
         )
-        guard !frames.isEmpty else { throw BakeError("\(document.name): no frames") }
+        guard !frames.isEmpty else { throw BakeError("\(id): no frames") }
 
         let columns = 4
         let rows = Int(ceil(Double(frameCount) / Double(columns)))
         let cell = options.cellPixels
         guard let canvas = AtlasWriter.canvas(width: cell * columns, height: cell * rows) else {
-            throw BakeError("\(document.name): cannot allocate sheet")
+            throw BakeError("\(id): cannot allocate sheet")
         }
         for (index, frame) in frames.enumerated() {
             AtlasWriter.drawCell(
@@ -279,21 +327,22 @@ struct IconBaker {
             )
         }
         guard let sheet = canvas.makeImage() else {
-            throw BakeError("\(document.name): cannot flatten sheet")
+            throw BakeError("\(id): cannot flatten sheet")
         }
         let empty = AtlasWriter.emptyCells(
             in: sheet, frameCount: frameCount, columns: columns, cellPixels: cell
         )
         guard empty.isEmpty else {
-            throw BakeError("\(document.name): cells \(empty) are transparent")
+            throw BakeError("\(id): cells \(empty) are transparent")
         }
-        let asset = "\(document.name).\(options.heic ? "heic" : "png")"
+        let asset = "\(id).\(options.heic ? "heic" : "png")"
         let file = options.output.appendingPathComponent(asset)
         try AtlasWriter.write(sheet, to: file, heic: options.heic)
         return Entry(
-            id: document.name, kind: "sheet", asset: asset,
+            id: id, kind: "sheet", asset: asset,
             frameCount: frameCount, frameMS: Int(stepMS.rounded()), cellPX: cell,
-            columns: columns, scale: nil, rotation: nil, opacity: nil,
+            columns: columns, gutterPX: AtlasWriter.gutter,
+            scale: nil, rotation: nil, opacity: nil,
             bytes: size(of: file),
             note: String(
                 format: "video: %.1fs source, sampled %d frames from %.1fs over %.1fs",
@@ -375,7 +424,8 @@ struct IconBaker {
         return Entry(
             id: document.name, kind: "sheet", asset: asset,
             frameCount: frameCount, frameMS: Int(stepMS.rounded()), cellPX: cell,
-            columns: columns, scale: nil, rotation: nil, opacity: nil,
+            columns: columns, gutterPX: AtlasWriter.gutter,
+            scale: nil, rotation: nil, opacity: nil,
             bytes: size(of: file),
             note: "raster: \(document.frameCount) src frames, \(steps) src step(s), "
                 + String(format: "%.2fs loop", document.loopSeconds)
@@ -424,6 +474,7 @@ struct IconBaker {
         return Entry(
             id: document.name, kind: "sheet", asset: asset,
             frameCount: frameCount, frameMS: frameMS, cellPX: cell, columns: columns,
+            gutterPX: AtlasWriter.gutter,
             scale: nil, rotation: nil, opacity: nil,
             bytes: size(of: file), note: note, stepMS: nil, plate: nil
         )
@@ -447,8 +498,9 @@ struct IconBaker {
             var entries: [Entry] = []
             for input in options.inputs {
                 do {
-                    let entry = try await bake(input, options: options)
-                    entries.append(entry)
+                    let baked = try await bake(input, options: options)
+                    entries.append(contentsOf: baked)
+                    for entry in baked {
                     let cost = entry.kind == "still"
                         ? "9.0 MB @128"
                         : String(format: "%.1f MB @128",
@@ -462,6 +514,7 @@ struct IconBaker {
                         (cost as NSString).utf8String!,
                         entry.note
                     ))
+                    }
                 } catch {
                     print("\(input.lastPathComponent): \(error)")
                 }

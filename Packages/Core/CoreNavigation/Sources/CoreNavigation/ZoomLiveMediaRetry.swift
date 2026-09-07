@@ -32,8 +32,19 @@ import UIKit
 @MainActor
 final class ZoomLiveMediaRetry: NSObject {
     private weak var card: (any ZoomFlightCard)?
-    private let ask: () -> UIView?
+    /// Tries to put live media on the card and reports the surface that ended
+    /// up there, or nil for "not yet".
+    ///
+    /// ⚠️ A CLOSURE THAT ACTS, not one that answers, because the two ends
+    /// hand media over differently: a tile GIVES its view, a page MIRRORS its
+    /// player onto the card's own surface. Modelling only the first shape is
+    /// what limited this class to sources for as long as sources were the only
+    /// side that could be late.
+    private let acquire: (any ZoomFlightCard) -> UIView?
     private let pageSize: CGSize
+    /// Whether an adoption is an ARRIVAL over this card's own picture, and so
+    /// fades in, or a surface the card was always going to be flying.
+    private let fadesIn: Bool
     private let deadline: CFTimeInterval
     private var link: CADisplayLink?
     private var liveMediaSize: CGSize = .zero
@@ -61,10 +72,67 @@ final class ZoomLiveMediaRetry: NSObject {
             card: card,
             pageSize: pageSize,
             window: window,
+            // A tile's surface is the card's own picture in motion — the same
+            // post, the same crop, already what the card was showing. It
+            // replaces the cover rather than arriving over it.
+            fadesIn: false,
             // The source is held WEAKLY through this closure's own capture, so
             // a flight outliving its screen stops asking rather than keeping a
             // grid that is being torn down alive to answer.
-            ask: { [weak source] in source?.zoomLiveMediaSurfaceIfReady() }
+            acquire: { [weak source] card in
+                guard let surface = source?.zoomLiveMediaSurfaceIfReady() else { return nil }
+                card.adoptZoomLiveMediaView(surface)
+                // The card is free to refuse — a wrong surface type, or one it
+                // has since acquired for itself. Refusing is not a reason to
+                // stop asking.
+                return card.zoomLiveMediaSurface === surface ? surface : nil
+            }
+        )
+        retry.start()
+        return retry
+    }
+
+    /// The same wait, pointed at the ARRIVING page instead of the departing
+    /// thumbnail — the present leg's mirror image, and it exists for the same
+    /// reason in reverse.
+    ///
+    /// A marker flies a sprite sheet: no player leaves with the card, so the
+    /// only place this post's video can be decoding is the page underneath.
+    /// It is decoding — the destination is told at staging that nothing is
+    /// flying its player and starts at take-off — but its first frame lands a
+    /// couple of hundred milliseconds later, and `ZoomFlight.build` asked once,
+    /// before there was anything to say yes to. So the card spent the whole
+    /// flight showing a 172pt cover blown up sevenfold, and the sharp picture
+    /// appeared only after the landing. Filmed.
+    ///
+    /// ⚠️ ARMED ONLY WHERE THE PAGE IS ALLOWED TO PLAY IN FLIGHT. A destination
+    /// that stood its playback down has nothing to mirror, and asking it every
+    /// refresh for the length of a flight would be a question whose answer is
+    /// known. The caller gates on the same fact it told the destination.
+    ///
+    /// ⚠️ The mirror moves the render slot to the card (only the most recently
+    /// attached layer is guaranteed to draw), so the page is blank BEHIND the
+    /// card until `zoomTransitionDidEnd` reclaims it. That is the dismiss leg's
+    /// mechanism run backwards, and the landing already reclaims.
+    @discardableResult
+    static func arm(
+        card: any ZoomFlightCard,
+        pageSize: CGSize,
+        mirroring destination: any ZoomTransitionDestination,
+        window: CFTimeInterval = ZoomLiveMediaRetry.window
+    ) -> ZoomLiveMediaRetry? {
+        guard card.zoomLiveMediaSurface == nil else { return nil }
+        let retry = ZoomLiveMediaRetry(
+            card: card,
+            pageSize: pageSize,
+            window: window,
+            // The other screen's picture, arriving over this one's.
+            fadesIn: true,
+            acquire: { [weak destination] card in
+                guard let destination else { return nil }
+                card.adoptZoomLiveMedia { destination.zoomMirrorLiveMedia(onto: $0) }
+                return card.zoomLiveMediaSurface
+            }
         )
         retry.start()
         return retry
@@ -73,10 +141,12 @@ final class ZoomLiveMediaRetry: NSObject {
     private init(card: any ZoomFlightCard,
                  pageSize: CGSize,
                  window: CFTimeInterval,
-                 ask: @escaping () -> UIView?) {
+                 fadesIn: Bool,
+                 acquire: @escaping (any ZoomFlightCard) -> UIView?) {
         self.card = card
         self.pageSize = pageSize
-        self.ask = ask
+        self.fadesIn = fadesIn
+        self.acquire = acquire
         self.deadline = CACurrentMediaTime() + window
         super.init()
         #if DEBUG
@@ -123,19 +193,43 @@ final class ZoomLiveMediaRetry: NSObject {
             return
         }
         guard CACurrentMediaTime() < deadline else { return stop() }
-        guard let surface = ask() else { return }
+        guard let surface = acquire(card) else { return }
         adopt(surface, on: card)
     }
 
     private func adopt(_ surface: UIView, on card: any ZoomFlightCard) {
-        card.adoptZoomLiveMediaView(surface)
-        // The card is free to refuse — a wrong surface type, or one it has
-        // since acquired for itself. Refusing is not a reason to stop asking.
-        guard card.zoomLiveMediaSurface === surface else { return }
         liveMediaSize = ZoomFlight.liveMediaLayoutSize(
             native: card.zoomLiveMediaNativeSize, page: pageSize
         )
         card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
+        // ⚠️ THE SURFACE MAY ARRIVE ALREADY ANIMATING, and then no amount of
+        // posing it moves anything.
+        //
+        // A surface that came from the other SCREEN is a fresh subview with no
+        // animations on it, and every value written below lands. A card's OWN
+        // surface does not: it has been inside the card since take-off, so the
+        // card's animated bounds gave it inherited position/bounds animations
+        // through autoresizing, and those are still running. `follow` writes
+        // MODEL values with actions disabled — correct, and completely
+        // invisible while a live animation owns the presentation. Measured: the
+        // model said 402x874 at scale 0.42 centred, while the presentation was
+        // a 34x66 patch at (-92, -244) — exactly the misplaced rectangle of
+        // video on a black card that was filmed.
+        //
+        // Recursive, because the poster inside the surface inherited the same
+        // animation and lags the same way.
+        Self.stopInheritedAnimations(on: surface.layer)
+        // ⚠️ AFTER the stilling, never before: the fade is an animation, and
+        // the sweep above removes every animation on this layer tree.
+        //
+        // The rest of the flight, so the arrival is a transition rather than a
+        // swap that happens to land inside one. Floored, because a surface
+        // adopted in the last few milliseconds should still be seen to arrive.
+        if fadesIn {
+            card.fadeInAdoptedLiveMedia(
+                over: max(0.2, deadline - CACurrentMediaTime())
+            )
+        }
         hasAdopted = true
         follow(card)
         #if DEBUG
@@ -144,6 +238,13 @@ final class ZoomLiveMediaRetry: NSObject {
                          CACurrentMediaTime(), String(describing: type(of: surface))))
         }
         #endif
+    }
+
+    /// Clears animations from a layer tree, so per-frame posing is what the
+    /// screen shows.
+    private static func stopInheritedAnimations(on layer: CALayer) {
+        layer.removeAllAnimations()
+        layer.sublayers?.forEach(stopInheritedAnimations)
     }
 
     /// Poses the surface on the card's CURRENT on-screen size.

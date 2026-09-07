@@ -1845,7 +1845,10 @@ extension PlaceProfileViewController: CardCloseLanding {
             // A ROW takes the card's own rounding (nil lets the installer use
             // it); a tile takes the grid's, asked rather than restated.
             cornerRadius: onList ? nil : page.tileCornerRadius,
-            fill: onList ? nil : PostGridTileCell.fillColor(for: post),
+            // `nil` now means "this source has no ground" — see
+            // `TextRevealOrigin.fill`. A list row HAS one; it is the card's.
+            fill: onList ? PostGridListRowCell.cardFillColor
+                : PostGridTileCell.fillColor(for: post),
             setConcealed: { [weak self] concealed in
                 guard let self else { return }
                 (onList ? activityPage : page).setRevealConcealed(concealed, for: anchor)

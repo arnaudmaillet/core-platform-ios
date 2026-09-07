@@ -160,13 +160,26 @@ public enum MockMediaFixtures {
     ///
     /// Entries are distinct on purpose — see the note on `attachSurface` about
     /// URL-keyed lookup when two tiles play the same asset.
+    /// ⚠️ ONLY WHAT DECODES. The three HLS ladders are gone.
+    ///
+    /// The table used to list seven. `AVAssetImageGenerator` opens neither the
+    /// HLS ladders (they will not load as assets from a build machine) nor the
+    /// w3 bunny mp4, which is 249 MB and answers -11821 "cannot decode". A
+    /// fixture that cannot be decoded cannot be previewed, so every post
+    /// carrying one had a marker with nothing honest to show — and, before the
+    /// mapping became a table, wore a preview of somebody else's film instead.
+    ///
+    /// What is left is two real clips that both bake, so a video post's marker
+    /// previews ITS OWN footage. The variety lost is variety that never
+    /// rendered.
     public static let videos: [Video] = [
-        appleBipBop16x9,
         bigBuckBunny720,
-        tearsOfSteel,
         sintelTrailer,
-        appleAdvancedFMP4,
-        longRunning,
+        // ⚠️ KEPT, and it is not a decode failure. This one is a deliberate
+        // placeholder — the synthetic half of the catalogue, and the only square
+        // aspect in it. Two suites pin both properties. It has no frames to bake
+        // from, so a post carrying it wears its cover rather than a preview,
+        // which is the ladder working rather than a gap in it.
         Video(url: "mock://video/square-1?w=1080&h=1080", width: 1080, height: 1080, isRemote: false)
     ]
 
@@ -196,8 +209,40 @@ public enum MockMediaFixtures {
     /// synthetic catalog encodes it in the host (`mock://video/…`); the real
     /// catalog has to be recognised by extension, since a CDN URL carries no
     /// such marker.
+    /// Which BAKED preview clip this fixture's footage is, or nil when none was
+    /// baked from it.
+    ///
+    /// ⚠️ AN EXPLICIT TABLE, not a substring match on the url. Sniffing looked
+    /// like it worked because two fixtures happen to carry their clip's name;
+    /// the other five silently fell through to an arbitrary sheet, so most video
+    /// markers previewed footage from a different film. A table cannot do that
+    /// quietly — a fixture that is not in it has no sheet, and the marker shows
+    /// its cover instead, which is the honest rung of the same ladder.
+    ///
+    /// `Tools/IconBaker` produced these from the fixtures themselves; the ones
+    /// missing here are the HLS ladders and the synthetic clip, which
+    /// `AVAssetImageGenerator` would not decode from this machine.
+    /// The scheme a baked clip's poster is served under. The app resolves it
+    /// from its own preview catalogue; nothing fetches it over the wire.
+    public static let previewPosterScheme = "mock://preview/"
+
+    public static func bakedClip(for url: String) -> String? {
+        switch url {
+        case bigBuckBunny720.url: "bigbuckbunny"
+        case sintelTrailer.url: "sinteltrailer"
+        default: nil
+        }
+    }
+
     public static func isVideoURL(_ url: String) -> Bool {
         if url.contains("mock://video/") { return true }
+        // ⚠️ MEMBERSHIP FIRST, sniffing second. The table is the truth about
+        // what is a video; the suffix test is a heuristic for urls that are not
+        // in it. Sniffing alone dropped every fixture whose url does not end in
+        // a known extension, so a THIRD of the corpus's videos read as
+        // photographs on the map — measured as photo 24 / text 24 / video 12
+        // where the corpus is an even 40/40/40.
+        if videos.contains(where: { $0.url == url }) { return true }
         let path = URLComponents(string: url)?.path.lowercased() ?? url.lowercased()
         return path.hasSuffix(".m3u8") || path.hasSuffix(".mp4") || path.hasSuffix(".m4v")
     }

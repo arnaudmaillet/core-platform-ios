@@ -251,6 +251,18 @@ final class MapIconDebugHUD: UIView {
             "pins=\(pins.count)",
             "clusters=\(clusters.count)",
             "icons=\(pins.count { $0.wearsAnimatedIcon } + clusters.count { $0.wearsAnimatedIcon })",
+            // What each marker is actually DRAWING. `icons=` counts art worn, so
+            // it reads 0 both when no marker wants an icon and when every icon
+            // failed to resolve — the two cases this feature has to tell apart.
+            "kinds=" + Dictionary(grouping: pins.map(\.debugKindName), by: { $0 })
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key):\($0.value.count)" }
+                .joined(separator: ","),
+            "faces=" + Dictionary(grouping: pins.map(\.debugFaceName) + clusters.map(\.debugFaceName),
+                                  by: { $0 })
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key):\($0.value.count)" }
+                .joined(separator: ","),
             "resident=\(catalog?.residentCount ?? 0)",
             "policy=\(AnimatedIconView.policy.rawValue)",
             String(format: "presented=%.1f", presentedFPS),

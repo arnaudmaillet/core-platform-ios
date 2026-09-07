@@ -91,11 +91,27 @@ public struct TextRevealOrigin {
     /// row is; a marker supplies its own, and for a disc that is half its side.
     public let cornerRadius: CGFloat?
     /// The source's own fill, worn by the page for the length of the reveal and
-    /// cross-faded back to its real ground. `nil` means the card's.
+    /// cross-faded back to its real ground. **`nil` means the source HAS NO
+    /// GROUND** — a dressed icon, which is a mark on the map and nothing else.
     ///
     /// This is the colour transition, and it is not decoration: the window is
     /// the source's shape, so it has to be the source's COLOUR at frame 0 or
     /// the source appears to vanish at the instant it starts growing.
+    ///
+    /// ⚠️ IT USED TO MEAN "the card's", AND THAT COST FOUR SHIPPED FIXES.
+    ///
+    /// A row leaves this alone and means "whatever a card is"; a marker with no
+    /// ground passes `nil` and means "nothing". Two meanings, one absence — and
+    /// the resolution lived downstream in `TextRevealInstaller.sourceFill(for:)`
+    /// as `origin.fill ?? PostGridListRowCell.cardFillColor`, whose fallback is
+    /// `.secondarySystemBackground`: the SAME COLOUR the map passes for a disc.
+    /// So the marker's deliberate `nil` was overwritten by a value identical to
+    /// the one it was refusing, invisibly, and every rule written downstream on
+    /// `sourceFill == nil` — the page-leaves law of `RevealPopAnimator` among
+    /// them — could never once fire.
+    ///
+    /// The row's default now lives on the initialiser, where "the card's" is
+    /// the row's own answer. Downstream, `nil` is a statement, not a shrug.
     public let fill: UIColor?
     /// The row's author band, so the destination can borrow it for the flight —
     /// see `RevealGeometry.installDestinationAuthorBand`. `nil` for a row that
@@ -133,7 +149,7 @@ public struct TextRevealOrigin {
         alignsPageToSource: Bool = true,
         pageFit: RevealPageFit = .clipped,
         cornerRadius: CGFloat? = nil,
-        fill: UIColor? = nil,
+        fill: UIColor? = PostGridListRowCell.cardFillColor,
         setConcealed: @escaping (Bool) -> Void = { _ in },
         presentationDidEnd: @escaping (Bool) -> Void = { _ in },
         willStageDismissal: @escaping (PostID?) -> Void = { _ in },

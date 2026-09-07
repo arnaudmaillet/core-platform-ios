@@ -170,11 +170,28 @@ public final class VideoRenderView: UIView {
         }
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.isCatchingUp else { return }
+            guard !self.suppressesCatchUpIndicator else { return }
             self.installSpinnerIfNeeded()
             self.spinner?.startAnimating()
         }
         catchUpWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.catchUpIndicatorDelay, execute: work)
+    }
+
+    /// Never show the catch-up indicator on this surface.
+    ///
+    /// ⚠️ A TRANSITION IS NOT A WAIT. A spinner says "this is taking longer than
+    /// it should" — true on a page the viewer is sitting on, meaningless on a
+    /// card that is in the air for a third of a second and whose whole job is to
+    /// carry a picture from one place to another. It read as the transition
+    /// stalling. The ARRIVAL page keeps its own indicator; only the marker's
+    /// surface, which is what the flight borrows, is silenced.
+    public var suppressesCatchUpIndicator = false {
+        didSet {
+            guard suppressesCatchUpIndicator else { return }
+            catchUpWorkItem?.cancel()
+            spinner?.stopAnimating()
+        }
     }
 
     /// How long a catch-up must last before it is worth telling the viewer.
@@ -450,6 +467,9 @@ public final class VideoRenderView: UIView {
     /// an invisible surface that then fails `isRenderingVisibly` and holds a
     /// landing card up to its ceiling before popping the cover.
     private var visibilityGeneration = 0
+    /// How long the PENDING first-frame reveal should take, when a caller asked
+    /// for something other than the two-frame default. Consumed by `reveal`.
+    private var pendingRevealDuration: TimeInterval?
 
     /// Reveals this surface now if it already has a frame, otherwise keeps it
     /// hidden and reveals it the instant one arrives.
@@ -502,6 +522,38 @@ public final class VideoRenderView: UIView {
         alpha = 0
     }
 
+    /// Fades this surface up over `duration` when its first frame lands, while
+    /// keeping it VISIBLE — and therefore addressable — in the meantime.
+    ///
+    /// ⚠️ THE DIFFERENCE FROM `revealOnFirstFrame` IS `isHidden`, and it is not
+    /// cosmetic. That method hides the view until a frame exists, which is the
+    /// right rule for a host that owns its surface outright. It is the wrong
+    /// one for a hero card: the flight reads `isHidden` as "there is no live
+    /// media here", so a hidden surface stops being posed each frame and the
+    /// retry that just adopted it goes on asking for one. Transparent says the
+    /// same thing to the viewer — whatever is behind it is what shows — without
+    /// lying to the machinery.
+    ///
+    /// The long fade is the point rather than a side effect: this is the
+    /// arriving page's picture coming up over the departing marker's across a
+    /// transition, not a two-frame swap covering a decode gap.
+    ///
+    /// The caller is expected to have cleared any poster first. A poster here
+    /// is a COPY of what is behind the surface, so fading one over the other
+    /// changes nothing on screen and the arrival never reads as an arrival.
+    public func fadeInOnFirstFrame(over duration: TimeInterval) {
+        pendingRevealDuration = duration
+        visibilityGeneration += 1
+        isHidden = false
+        alpha = 0
+        guard !isReadyForDisplay else {
+            isAwaitingFirstFrameToReveal = false
+            reveal(crossFading: true)
+            return
+        }
+        isAwaitingFirstFrameToReveal = true
+    }
+
     /// How long the surface takes to replace whatever is behind it. Two frames
     /// at 60Hz — long enough that the swap is a blend rather than a cut, short
     /// enough that it reads as instant.
@@ -524,6 +576,8 @@ public final class VideoRenderView: UIView {
     private func reveal(crossFading: Bool) {
         visibilityGeneration += 1
         let wasHidden = isHidden || alpha < 1
+        let duration = pendingRevealDuration ?? Self.revealDuration
+        pendingRevealDuration = nil
         isHidden = false
         guard crossFading, wasHidden else {
             // "opacity" is the key a UIView alpha animation actually lands
@@ -534,7 +588,7 @@ public final class VideoRenderView: UIView {
             alpha = 1
             return
         }
-        UIView.animate(withDuration: Self.revealDuration, delay: 0,
+        UIView.animate(withDuration: duration, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = 1
         }
