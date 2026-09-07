@@ -36,13 +36,46 @@ final class SnapMediaCardView: UIView {
     /// The video playback surface — the caller drives its external
     /// `VideoPlaybackController` into this (playback ownership stays out
     /// of the card by construction).
+    ///
+    /// ⚠️ RE-POINTED, not re-parented, at three places: a landing adopts the
+    /// flight's surface, a cancelled grab reclaims a donated one, and a
+    /// carousel page turn hosts its page's own. Anything hung off the OLD
+    /// object is stranded by each of those, which is why the picture signal
+    /// below lives on the card and is moved here rather than being installed
+    /// on a surface once.
     private(set) var renderView: VideoRenderView = {
         let view = VideoRenderView()
         #if DEBUG
         view.debugLabel = "feed"
         #endif
         return view
-    }()
+    }() {
+        didSet {
+            guard oldValue !== renderView else { return }
+            oldValue.onPictureAvailabilityChange = nil
+            renderView.onPictureAvailabilityChange = onPictureAvailabilityChange
+        }
+    }
+
+    /// "There is a picture on the surface now" — **held by the CARD**, and that
+    /// is the whole of it.
+    ///
+    /// It is the page's only edge for retiring the loading spinner, and it used
+    /// to be installed directly on `renderView` at bind. A hero landing then
+    /// adopts the flight's surface, `restoreRenderView` re-points `renderView`
+    /// at that object and detaches the one the closure was installed on — so
+    /// the page's only "there is a picture now" signal stayed wired to a view
+    /// that would never announce again, while the surface the viewer was
+    /// actually watching announced to nobody.
+    ///
+    /// Measured, not deduced: 19 cold opens from a map marker, 11 of them stuck
+    /// a spinner over playing video, and in every stuck run the card's own
+    /// surface printed no readiness line at all while a differently-labelled
+    /// adopted one printed its first frame with `super=SnapMediaCardView`.
+    /// Correlation with the retirement was perfect in both directions.
+    var onPictureAvailabilityChange: ((Bool) -> Void)? {
+        didSet { renderView.onPictureAvailabilityChange = onPictureAvailabilityChange }
+    }
 
     init() {
         super.init(frame: .zero)
