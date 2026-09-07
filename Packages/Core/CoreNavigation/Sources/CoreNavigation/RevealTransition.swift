@@ -302,14 +302,6 @@ public protocol RevealStandInShaping: AnyObject {
     /// The card's opacity INSIDE the stand-in, separate from the stand-in's
     /// own — see `RevealStage.swapToStandIn`.
     func setContentOpacity(_ alpha: CGFloat)
-
-    /// Outlines whatever this stand-in draws of its own, for
-    /// `-reveal-debug-layers`. Default is nothing.
-    func debugOutlineContents()
-}
-
-public extension RevealStandInShaping {
-    func debugOutlineContents() {}
 }
 
 // MARK: - Shared staging
@@ -853,9 +845,8 @@ enum RevealStage {
     /// `RevealPopAnimator` — the chevron — while a finger goes through
     /// `RevealDismissInteractionController`, which never wrote `pageOpacity` at
     /// all and applied the default 1 down to the 44pt landing. The law existed
-    /// and was invisible on the leg people actually use, which is the same
-    /// asymmetry that made `-reveal-debug-fills` report nothing a few commits
-    /// earlier. Anything that closes a window reads it from here.
+    /// and was invisible on the leg people actually use. Anything that closes a
+    /// window reads it from here.
     static func closingPageOpacity(sourceFill: UIColor?) -> CGFloat {
         sourceFill == nil ? 0 : 1
     }
@@ -1289,7 +1280,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         // The page wears the CARD before it wears itself. Set outside the
         // animation block so frame 0 is already the card's tone; the block
         // below hands the ground back, which cross-fades it.
-        geometry.setDestinationGround(RevealDebugLayers.ground(geometry.sourceFill))
+        geometry.setDestinationGround(geometry.sourceFill)
         // …and shows no more of itself than the card did. The cut is measured
         // from the SOURCE's top, and the two tops are aligned by `closed`, so
         // it lands in the destination at the anchor's top plus that offset.
@@ -1651,18 +1642,6 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         installAuthorBand(geometry: geometry, anchor: anchor)
         geometry.setDestinationVeilOpacity(0)
         geometry.setDestinationAuthorBandOpacity(0)
-        // ⚠️ AFTER the staging, not inside it. `setDestinationGround` writes the
-        // page's background, so a debug fill applied above is simply overwritten
-        // — the instrument would then report nothing on the one layer the
-        // complaint is about.
-        RevealDebugLayers.legend("dismiss (animated pop)")
-        RevealDebugLayers.outline(container, "container (the transition's stage)", index: 0)
-        RevealDebugLayers.outline(dim, "dim (darkens the map behind)", index: 1)
-        RevealDebugLayers.outline(host, "host (holds the page, carries the mask)", index: 2)
-        RevealDebugLayers.outline(mask, "mask (THE WINDOW itself)", index: 3, width: 5, fills: false)
-        RevealDebugLayers.outline(fromView, "page (the post being dismissed)", index: 4)
-        RevealDebugLayers.outline(standIn, "stand-in (the marker, arriving)", index: 5, width: 5)
-        (standIn as? RevealStandInShaping)?.debugOutlineContents()
 
         #if DEBUG
         RevealStage.log("pop", "landing=\(NSCoder.string(for: sourceRect))"
@@ -1731,9 +1710,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             RevealStage.apply(closed, mask: mask, page: fromView, standIn: standIn)
             // Back into the card's tone as the mask closes onto it, so the
             // last frame of the close and the row underneath are one colour.
-            self.geometry.setDestinationGround(
-                RevealDebugLayers.ground(self.geometry.sourceFill)
-            )
+            self.geometry.setDestinationGround(self.geometry.sourceFill)
             // …and back to showing only what the card shows, so the mask never
             // slices a sentence on its way home.
             self.geometry.setDestinationVeilOpacity(1)
@@ -1788,152 +1765,4 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
         return animator
     }
-}
-
-@MainActor
-/// Names every layer that takes part in a reveal, on screen, so a defect can be
-/// POINTED AT instead of guessed at.
-///
-/// ⚠️ Borders, never backgrounds. The defects this exists for are things drawn
-/// where nothing should be — a ground that will not leave, a picture from
-/// somewhere else — and a debug FILL would paint over the very pixels in
-/// question. An outline says which rectangle a stray colour belongs to and
-/// changes none of it.
-///
-/// `-reveal-debug-layers`. The legend prints once per transition.
-public enum RevealDebugLayers {
-    #if DEBUG
-    public static var isOn: Bool {
-        ProcessInfo.processInfo.arguments.contains("-reveal-debug-layers")
-    }
-
-    /// Distinct and NAMEABLE — a viewer has to be able to say "the orange one"
-    /// out loud, so no two are a shade of the same word.
-    ///
-    /// ⚠️ ONE PER LAYER, never a wrapping index. The first cut of this had
-    /// twelve colours for eighteen layers and wrapped, so RED meant two
-    /// different things — which is worse than no instrument at all, because it
-    /// answers confidently and wrongly.
-    private static func entry(_ index: Int) -> (name: String, color: UIColor) {
-        let palette: [(String, UIColor)] = [
-            ("RED",     UIColor(red: 1.00, green: 0.15, blue: 0.10, alpha: 1)),
-            ("ORANGE",  UIColor(red: 1.00, green: 0.55, blue: 0.00, alpha: 1)),
-            ("YELLOW",  UIColor(red: 1.00, green: 0.92, blue: 0.10, alpha: 1)),
-            ("LIME",    UIColor(red: 0.65, green: 1.00, blue: 0.10, alpha: 1)),
-            ("GREEN",   UIColor(red: 0.05, green: 0.75, blue: 0.20, alpha: 1)),
-            ("TEAL",    UIColor(red: 0.00, green: 0.65, blue: 0.60, alpha: 1)),
-            ("CYAN",    UIColor(red: 0.10, green: 0.85, blue: 1.00, alpha: 1)),
-            ("BLUE",    UIColor(red: 0.10, green: 0.35, blue: 1.00, alpha: 1)),
-            ("NAVY",    UIColor(red: 0.05, green: 0.10, blue: 0.45, alpha: 1)),
-            ("PURPLE",  UIColor(red: 0.55, green: 0.20, blue: 0.90, alpha: 1)),
-            ("MAGENTA", UIColor(red: 1.00, green: 0.10, blue: 0.85, alpha: 1)),
-            ("PINK",    UIColor(red: 1.00, green: 0.60, blue: 0.75, alpha: 1)),
-            ("BROWN",   UIColor(red: 0.55, green: 0.35, blue: 0.15, alpha: 1)),
-            ("GOLD",    UIColor(red: 0.85, green: 0.70, blue: 0.10, alpha: 1)),
-            ("GREY",    UIColor(white: 0.55, alpha: 1)),
-            ("BLACK",   .black),
-            ("WHITE",   .white),
-            ("MINT",    UIColor(red: 0.60, green: 1.00, blue: 0.80, alpha: 1)),
-        ]
-        return index < palette.count
-            ? palette[index]
-            : ("UNNAMED-\(index)", UIColor(white: 0.5, alpha: 1))
-    }
-
-    /// `-reveal-debug-fills`: tint each layer's GROUND as well.
-    ///
-    /// The outline says which rectangle a stray colour belongs to; a tint says
-    /// which layer is PAINTING it, which is the question when the complaint is
-    /// a ground that will not leave. Translucent, so what it stains is still
-    /// recognisable underneath.
-    public static var fillsOn: Bool {
-        ProcessInfo.processInfo.arguments.contains("-reveal-debug-fills")
-    }
-
-    /// - Parameter fills: pass `false` for a view whose layer is used as a
-    ///   MASK. A mask layer's alpha *is* the masked content's alpha, so a 0.85
-    ///   tint there does not colour the window — it makes the whole page 85%
-    ///   translucent and lets the map show through, which is indistinguishable
-    ///   from the very defect this instrument is pointed at. The border is
-    ///   still safe (opaque colour → opaque mask) and still worth drawing.
-    public static func outline(
-        _ view: UIView?, _ label: String, index: Int, width: CGFloat = 3, fills: Bool = true
-    ) {
-        guard isOn || fillsOn, let view else { return }
-        let entry = entry(index)
-        if isOn {
-            view.layer.borderColor = entry.color.cgColor
-            view.layer.borderWidth = width
-        }
-        var note = ""
-        if fillsOn {
-            // ⚠️ A FILL MAY ONLY STAIN A LAYER THAT ALREADY PAINTS.
-            //
-            // `backgroundColor` is not read here, it is WRITTEN — so staining a
-            // transparent view turns something that draws nothing in production
-            // into an opaque rectangle, and whoever is watching then names the
-            // colour of a view that was merely SITTING WHERE the defect is.
-            // That is not a hypothetical: `iconFaceView` is an
-            // `AnimatedIconView`, `.clear` on itself and on both its children,
-            // and `layoutIconFace` centres it at exactly the 44pt landing rect
-            // while `setContentOpacity` pins it at alpha 1. Stained, it was a
-            // permanent cyan square in the one place the complaint lived, and
-            // it was reported as the culprit. The actual painter was the
-            // departing page's own ground, two layers down.
-            //
-            // So an already-opaque ground gets the colour; anything else gets a
-            // printed line saying what it can and cannot be. A line costs
-            // nothing and can be widened to every layer in the tree, which is
-            // the other half of the same lesson — the eighteen-layer sweep
-            // failed by painting too much and reaching too little.
-            let opacity = view.backgroundColor?.cgColor.alpha ?? 0
-            if !fills {
-                note = "  (NOT STAINED: its layer is a MASK — a tint there is the"
-                    + " masked content's alpha, not a colour)"
-            } else if opacity > 0.99 {
-                // NEAR-OPAQUE, not a wash. A 35% tint over a grey ground reads
-                // as a slightly warmer grey — the same ambiguity that made the
-                // block hard to place to begin with. At 0.85 the block simply
-                // BECOMES the colour, and its shape, its timing and its
-                // stubbornness are all still there to be pointed at.
-                view.backgroundColor = entry.color.withAlphaComponent(0.85)
-            } else {
-                note = "  (NOT STAINED: ground is nil/α=\(String(format: "%.2f", opacity))"
-                    + " — it paints nothing, it can only be SITTING WHERE the defect is)"
-            }
-        }
-        print("[reveal-layers] \(entry.name.padding(toLength: 8, withPad: " ", startingAt: 0))"
-            + " = \(label)\(note)")
-    }
-
-    /// The page's ground, swapped for a debug tone — the one layer a sweep of
-    /// the view tree structurally CANNOT reach.
-    ///
-    /// `setDestinationGround` does not colour a view this module holds; it
-    /// reaches through the geometry into the destination's own active cell
-    /// (`SnapFeedCell.contentView.backgroundColor`). Nothing in
-    /// `debugOutlineContents` or in either dismiss staging has a reference to
-    /// it, and it is written AFTER the staging besides — so through five
-    /// instrumented runs it was the only rectangle on screen that never
-    /// changed colour, which read as "the debug does not work here" and then as
-    /// "it must be one of the ones that did". It was the culprit both times.
-    public static func ground(_ color: UIColor?) -> UIColor? {
-        guard fillsOn else { return color }
-        print("[reveal-layers] NAVY     = page.ground (the destination cell's own"
-            + " backgroundColor, via setDestinationGround)")
-        return entry(8).color
-    }
-
-    public static func legend(_ title: String) {
-        guard isOn || fillsOn else { return }
-        print("[reveal-layers] ---- \(title) ----")
-    }
-    #else
-    public static var fillsOn: Bool { false }
-    public static func outline(
-        _ view: UIView?, _ label: String, index: Int, width: CGFloat = 3, fills: Bool = true
-    ) {}
-    public static func ground(_ color: UIColor?) -> UIColor? { color }
-    public static func legend(_ title: String) {}
-    #endif
 }

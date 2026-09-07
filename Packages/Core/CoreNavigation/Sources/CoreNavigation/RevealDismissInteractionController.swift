@@ -185,17 +185,6 @@ final class RevealDismissInteractionController: NSObject,
         screenRadius = open.maskRadius
 
         geometry.setDestinationGround(nil)
-        // ⚠️ AFTER `setDestinationGround`, which writes the page's background —
-        // a fill applied before it is overwritten, and the instrument would
-        // report nothing on the one layer the complaint is about.
-        RevealDebugLayers.legend("dismiss (interactive)")
-        RevealDebugLayers.outline(container, "container (the transition's stage)", index: 0)
-        RevealDebugLayers.outline(dim, "dim (darkens the map behind)", index: 1)
-        RevealDebugLayers.outline(host, "host (holds the page, carries the mask)", index: 2)
-        RevealDebugLayers.outline(mask, "mask (THE WINDOW itself)", index: 3, width: 5, fills: false)
-        RevealDebugLayers.outline(fromView, "page (the post being dismissed)", index: 4)
-        RevealDebugLayers.outline(standIn, "stand-in (the marker, arriving)", index: 5, width: 5)
-        (standIn as? RevealStandInShaping)?.debugOutlineContents()
         installVeil(geometry: geometry, anchor: anchor)
         installAuthorBand(geometry: geometry, anchor: anchor)
         geometry.setDestinationVeilOpacity(0)
@@ -513,9 +502,7 @@ final class RevealDismissInteractionController: NSObject,
             // Into the card's tone on the way home, so the last frame of the
             // close and the row underneath are one colour; back to the page's
             // own if the grab is abandoned.
-            self.geometry.setDestinationGround(
-                commit ? RevealDebugLayers.ground(self.geometry.sourceFill) : nil
-            )
+            self.geometry.setDestinationGround(commit ? self.geometry.sourceFill : nil)
             presenting?.transform = commit
                 ? .identity
                 : CGAffineTransform(scaleX: depth, y: depth)

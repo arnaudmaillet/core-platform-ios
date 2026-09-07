@@ -945,19 +945,6 @@ private final class PinTextFaceView: UIView {
     /// container and is deliberately not one of them.
     var debugGlyph: UIView { glyph }
     var debugAvatar: UIView { avatar }
-
-    /// ⚠️ AND THE GROUND ITSELF, because leaving it out made the instrument
-    /// LIE.
-    ///
-    /// `disc` is opaque, full-bleed and autoresized, so it covers its own
-    /// container completely. Stain `PinTextFaceView` and the stain is hidden
-    /// behind this view; stain the glyph and nothing shows either, since an
-    /// icon marker holds the glyph at alpha 0. The floor was therefore the one
-    /// layer in the whole eighteen that could not be coloured — which is
-    /// exactly why the block being hunted stayed grey while every other
-    /// rectangle on screen changed colour, and why the two survivors were the
-    /// two whose debug colours are themselves grey and white.
-    var debugDiscGround: UIView { disc }
     #endif
 
     func setContentOpacity(_ alpha: CGFloat) {
@@ -1008,35 +995,6 @@ extension PinCardView: RevealStandInShaping {
     /// The ring goes with the content on purpose. It reads as a marker's border
     /// at 44pt and as an outline drawn around the screen at full size, so it
     /// has to be gone well before the window is.
-    /// Every layer this card draws, named on screen.
-    ///
-    /// Narrowed to three once, when a full sweep pointed at two layers that
-    /// could not be told apart. That was the wrong lesson: the sweep's problem
-    /// was never how MANY layers it named, it was that it PAINTED transparent
-    /// ones and could not reach the page's own ground at all. `outline` now
-    /// refuses to stain a layer that paints nothing and says so in a line, so
-    /// naming everything costs printed text rather than paint over the
-    /// evidence — and `RevealDebugLayers.ground` reaches the layer that turned
-    /// out to be the culprit.
-    func debugOutlineContents() {
-        #if DEBUG
-        RevealDebugLayers.outline(self, "card (the stand-in's own bounds)", index: 7)
-        RevealDebugLayers.outline(imageView, "card.cover (the post's picture)", index: 8)
-        RevealDebugLayers.outline(previewSheetView, "card.previewSheet", index: 9)
-        RevealDebugLayers.outline(departureCoverView, "card.departureCover", index: 10)
-        RevealDebugLayers.outline(videoRenderView, "card.video", index: 11)
-        RevealDebugLayers.outline(donatedMediaHost, "card.donatedMediaHost", index: 12)
-        RevealDebugLayers.outline(textFaceView, "card.disc (the text face / icon's floor)", index: 13)
-        RevealDebugLayers.outline(
-            textFaceView.debugDiscGround, "card.disc.ground (the floor's opaque fill)", index: 14
-        )
-        RevealDebugLayers.outline(textFaceView.debugGlyph, "card.disc.glyph", index: 15)
-        RevealDebugLayers.outline(textFaceView.debugAvatar, "card.disc.avatar", index: 16)
-        RevealDebugLayers.outline(iconFaceView, "card.icon (the lottie mark)", index: 17)
-        RevealDebugLayers.outline(ringView, "card.ring", index: 6)
-        #endif
-    }
-
     func setContentOpacity(_ alpha: CGFloat) {
         // ⚠️ UNDER A DRESSED ICON THIS CHANNEL MOVES NOTHING BUT THE FURNITURE.
         //
