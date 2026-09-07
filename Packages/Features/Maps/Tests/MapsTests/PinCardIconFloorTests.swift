@@ -356,5 +356,37 @@ struct PinCardIconFloorTests {
         media.imageView.image = cover
         #expect(media.imageView.isHidden == false, "a media face IS its cover")
     }
+
+    /// ⚠️ THE DISC'S CONTENT IS WHICHEVER OF THE TWO IS DRAWN.
+    ///
+    /// `PinTextFaceView` shows the author's picture when one has loaded and a
+    /// fallback mark when none has, and the reveal's content channel used to
+    /// fade only the mark. That is a rule that holds exactly in the case that
+    /// happens to be showing.
+    ///
+    /// It broke twice over: a TEXT marker's reveal kept the author's photograph
+    /// at full opacity while everything else left, and an ICON marker — which
+    /// BORROWS this disc as its container and asks for its content to be silent
+    /// — closed onto that photograph. A post with no media at all, showing a
+    /// picture, which is what made it read as impossible.
+    @Test func aBorrowedDiscCarriesNoPictureOfItsOwn() {
+        let card = PinCardView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        card.setFace(.icon)
+        card.setTextAvatar(UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { c in
+            UIColor.red.setFill()
+            c.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        })
+        card.setIcon((art(), 0))
+
+        card.setContentOpacity(0)
+
+        let disc = card.debugTextFace
+        #expect(disc.isHidden == false, "the icon borrows the disc as its container")
+        // The GROUND stays — it is the container the mark is arriving inside.
+        // What must be silent is anything the disc DRAWS of its own.
+        #expect(card.debugTextFaceGlyph.alpha == 0)
+        #expect(card.debugTextFaceAvatar.alpha == 0,
+                "the author's picture rode in on the container")
+    }
 }
 

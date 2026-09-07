@@ -123,6 +123,10 @@ final class PinCardView: UIView {
     var debugDepartureCover: UIView { departureCoverView }
     var debugLiveSurface: UIView { videoRenderView }
     var debugTextFace: UIView { textFaceView }
+    /// The two things the disc can DRAW — the author's picture and the fallback
+    /// mark. Its ground is the container and is deliberately not one of them.
+    var debugTextFaceGlyph: UIView { textFaceView.debugGlyph }
+    var debugTextFaceAvatar: UIView { textFaceView.debugAvatar }
     var debugIconFace: UIView { iconFaceView }
     /// Where a donated surface is hosted; its alpha is the blend's channel for
     /// the departing page's moving picture.
@@ -936,8 +940,32 @@ private final class PinTextFaceView: UIView {
 
     /// The glyph alone. The WASH stays: it is the disc's colour, and the colour
     /// is what the page is wearing on the other side of the hand-off.
+    #if DEBUG
+    /// The two things the disc can DRAW, by name — the ground it sits on is the
+    /// container and is deliberately not one of them.
+    var debugGlyph: UIView { glyph }
+    var debugAvatar: UIView { avatar }
+    #endif
+
     func setContentOpacity(_ alpha: CGFloat) {
+        // ⚠️ BOTH, and for a long time it was only the glyph.
+        //
+        // The disc draws whichever of the two it has — the author's picture
+        // when one has loaded, the fallback mark when none has. Fading one of
+        // them is fading the content only in the case that happens to be
+        // showing, which is the definition of a rule that works until it does
+        // not.
+        //
+        // It did not, twice over. A TEXT marker's reveal kept the author's
+        // photograph at full opacity while the ring, the cover and the glyph
+        // all left. And an ICON marker BORROWS this disc as its container
+        // (`PinCardView.setContentOpacity`) and asks for its content to be
+        // silent — so a post with no media at all closed onto a photograph,
+        // which is what was filmed and reported as impossible. It was the
+        // AUTHOR's face, riding in on a channel that had never been told to
+        // take it.
         glyph.alpha = alpha
+        avatar.alpha = alpha
     }
 
     /// The disc's colour, for a page to wear while a reveal opened from this
