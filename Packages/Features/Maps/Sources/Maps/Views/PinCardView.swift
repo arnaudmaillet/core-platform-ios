@@ -225,8 +225,7 @@ final class PinCardView: UIView {
         // and a donated surface are both centred by `ZoomFlight`, and under a
         // zero anchor `center` would move their top-left corner instead. Nor
         // for `iconFaceView`, which `layoutIconFace` centres by hand.
-        for child in [imageView, previewSheetView, departureCoverView, donatedMediaHost,
-                      textFaceView, videoRenderView] {
+        for child in [imageView, previewSheetView, departureCoverView, donatedMediaHost, textFaceView] {
             child.layer.anchorPoint = .zero
             child.frame = bounds
         }
@@ -776,30 +775,13 @@ final class PinCardView: UIView {
     /// (plus an animated center), while the card's animating bounds do the
     /// crop morph. The layer's bounds never change, so rendering stays smooth.
     func prepareVideoForFlight(destinationSize: CGSize) {
-        // ⚠️ NOTHING TO PREPARE ANY MORE, and the empty body is the fix.
-        //
-        // This used to lay the surface out at the PAGE's size with autoresizing
-        // off, so the flight could drive it by transform and centre. That is
-        // the contract behind `zoomLiveMediaTracksCardBounds == false`, and it
-        // has a defect this card cannot live with: those poses are computed
-        // from `card.layer.presentation()` on a display link, so the surface
-        // renders ONE FRAME BEHIND the card. Measured on the present, surface
-        // width against the card's in the same frame: -47.6%, -34.9%, -13.8%,
-        // -4.0%, -1.1%, 0 — the deficit tracks how fast the card is growing.
-        //
-        // The viewer sees the card's cover in the strip the video has not
-        // reached yet: a hard vertical seam between a sharp video on the left
-        // and a blurred still on the right, filmed and reported as the player
-        // being badly attached to its container.
-        //
-        // The surface is full-bleed with an autoresizing mask instead, so
-        // CoreAnimation sizes it from the card's own bounds — the same property
-        // on the same curve, in the same frame — and `resizeAspectFill`
-        // recomputes the crop continuously as the card morphs.
+        // Whichever surface is actually live — the card's own mirror, or a
+        // surface the arriving page handed over. Laying out only the first left
+        // a donated one at the card's take-off size for the whole flight.
         let surface: UIView = donatedSurface ?? videoRenderView
         surface.transform = .identity
-        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        surface.frame = (surface === videoRenderView ? self : donatedMediaHost).bounds
+        surface.autoresizingMask = []
+        surface.bounds = CGRect(origin: .zero, size: destinationSize)
     }
 
 }
@@ -1022,21 +1004,6 @@ extension PinCardView: ZoomFlightCard {
     /// Same rule as the grid's flight card: a pin flying without live media
     /// shows its cover, which is always drawing; one flying with live media is
     /// only "drawing" while that surface is actually visible.
-    /// ⚠️ TRUE, so the flight leaves this surface's transform and centre alone.
-    ///
-    /// The alternative — a surface laid out at page size and driven by a
-    /// uniform scale — is posed from `card.layer.presentation()` on a display
-    /// link, which is a frame behind by construction. On a card that grows from
-    /// 56pt to a full page in 420ms that lag was measured at up to 47.6% of the
-    /// card's width, and what shows in the gap is the card's own cover: the
-    /// vertical seam between sharp video and blurred still that was filmed.
-    ///
-    /// Tracking the card's bounds hands the sizing to CoreAnimation, which
-    /// applies it in the same frame and on the same curve as the card's own
-    /// bounds, and lets `resizeAspectFill` recompute the crop at every instant
-    /// rather than showing the page's crop at every size.
-    var zoomLiveMediaTracksCardBounds: Bool { true }
-
     var zoomLiveMediaIsDrawing: Bool {
         if let donatedSurface, !donatedMediaHost.isHidden {
             return donatedSurface.isRenderingVisibly
@@ -1063,8 +1030,6 @@ extension PinCardView: ZoomFlightCard {
         donatedSurface = surface
         surface.frame = donatedMediaHost.bounds
         surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        surface.layer.anchorPoint = .zero
-        surface.frame = donatedMediaHost.bounds
         surface.clipsToBounds = true
         donatedMediaHost.addSubview(surface)
         donatedMediaHost.isHidden = false

@@ -2576,16 +2576,22 @@ extension MapsViewController: MKMapViewDelegate {
         tabBarController?.setTabBarHidden(true, animated: true)
         setFilterBar(hidden: true)
         nav.delegate = transition
-        // Pay the destination's first layout and raster HERE, exactly as For
-        // You does before its own push. Otherwise it happens inside
-        // `ZoomAnimator`'s container layout — the flight's own stack — and the
-        // most expensive frame of the feed's life is the frame the viewer is
-        // watching the card lift off in.
+        // ⚠️ NOT pre-paying the destination's layout here, and the empty space
+        // is deliberate.
         //
-        // ⚠️ It buys frame PACING, not an earlier picture: activation is
-        // visibility-gated behind `viewWillAppear`, which UIKit runs inside the
-        // push below. The measurement that says otherwise has not been taken.
-        destination.zoomPrepareForPresentation(in: nav.view.bounds)
+        // For You calls `zoomPrepareForPresentation` before its own push, and
+        // the same call was added here for parity. It is the wrong trade on
+        // this screen: the map builds a FRESH feed on every tap
+        // (`makeSnapFeed`), so the layout it pre-pays is a cold one, and it
+        // runs synchronously — plus a `CATransaction.flush` — between the
+        // finger coming up and the flight starting. Reported as a long pause
+        // between tapping a marker and the animation beginning, which is worse
+        // than the frame pacing it was buying: a stall the viewer is waiting
+        // through beats one they are watching an animation through.
+        //
+        // The seam is left in place (`ZoomTransitionDestination`), because the
+        // measurement that would justify calling it — a cold feed laid out off
+        // the tap's critical path — is the thing to take before trying again.
         // ⚠️ AN ORDINARY PUSH, WHATEVER CASE THIS IS — and the place page is
         // NOT in it.
         //
