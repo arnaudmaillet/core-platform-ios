@@ -15,7 +15,7 @@ import UIKit
 /// The face is a `PinCardView` — the same component the single pin renders and
 /// the hero transition flies — so pin, cluster, and flight card are twins by
 /// construction, with no per-surface styling constants left to drift.
-final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
+final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing {
     static let reuseIdentifier = "MapClusterAnnotationView"
     /// Match the individual pin exactly.
     private static let side = MapAnnotationView.side
@@ -47,6 +47,22 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
 
     /// The loaded cover image, handed to the hero transition to fly.
     var heroImage: UIImage? { card.imageView.image }
+
+    /// See `MapMarkerDressing`. A media face is dressed once it has a picture;
+    /// every other face carries its own resting appearance.
+    var isDressed: Bool {
+        guard representedFace == .media else { return true }
+        return card.wornPreview != nil || card.imageView.image != nil
+    }
+
+    var onDressed: (() -> Void)?
+
+    private func reportDressed() {
+        guard isDressed, let report = onDressed else { return }
+        onDressed = nil
+        report()
+    }
+
 
     /// Fired the instant the cluster is tapped — see `installInstantTap`.
     var onSelect: (() -> Void)?
@@ -204,6 +220,17 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
             }
             return
         }
+        #if DEBUG
+        // `-maps-log-sheets`: the last link. A cluster wears its
+        // REPRESENTATIVE's sheet, so a group full of video can still show none
+        // if the member it elected has no baked clip.
+        if ProcessInfo.processInfo.arguments.contains("-maps-log-sheets") {
+            print("[cluster] rep=\(cluster.representative.postID.rawValue)"
+                  + " face=\(face) sheet=\(preview ?? "nil")"
+                  + " catalog=\(previewCatalog == nil ? "nil" : "ok")"
+                  )
+        }
+        #endif
         if face == .media, let previewCatalog, let preview {
             let phase = cluster.representative.iconPhase
             if let art = previewCatalog.cached(preview) {
@@ -213,19 +240,44 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
                     guard let art = try? await previewCatalog.art(for: preview) else { return }
                     guard let self, self.representedPreview == preview else { return }
                     self.card.setPreviewSheet((art, phase))
+                    self.reportDressed()
                 }
             }
         }
+        // ⚠️ THE SAME REFUSAL THE LONE PIN ALREADY MAKES, and its absence here
+        // is what a viewer sees. A cluster wearing a sheet writes that sheet's
+        // own frame zero into the cover (`PinCardView.setPreviewSheet`), and
+        // this fetch then landed ON TOP of it — so the marker, and the card
+        // that flies off it, showed a PHOTOGRAPH OF SOMETHING ELSE while the
+        // clip animated over it. Filmed: a marker opening a post about a build
+        // log flew a picture of a sky.
+        //
+        // Where we have the frame, the wire's still is not needed; it is a
+        // stand-in for a frame the backend does not generate.
         guard face == .media, let url else { return }
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedURL == url else { return }
+            // ⚠️ THE SHEET OUTRANKS THE WIRE, and this guard is the whole of it.
+            // Landing the wire cover on top of a sheet replaced that sheet's
+            // own frame zero — filmed as a marker showing a photograph of a sky
+            // over a post about a build log, and flown to the page as that same
+            // photograph. Held back instead, this is the third rung: what the
+            // marker falls to when the sheet does not resolve.
+            guard self.card.wornPreview == nil else { return }
             self.card.imageView.image = image
+            self.reportDressed()
         }
     }
 
     #if DEBUG
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+
+    /// Whether this marker is DRESSED in its preview sheet — which is a
+    /// different question from whether the sheet is advancing, and the one the
+    /// HUD needs. A paused or off-screen marker wears its sheet and animates
+    /// nothing.
+    var wearsPreviewSheet: Bool { card.wornPreview != nil }
     var debugFaceName: String { card.debugFaceName }
     var presentedIconTick: Double? { card.presentedIconTick }
     var presentedPreviewTick: Double? { card.presentedPreviewTick }

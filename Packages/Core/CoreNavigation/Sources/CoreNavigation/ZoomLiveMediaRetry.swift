@@ -50,6 +50,21 @@ final class ZoomLiveMediaRetry: NSObject {
     private var liveMediaSize: CGSize = .zero
     private var hasAdopted = false
 
+    /// Runs `work` inside the flight's own animation, and says whether it took.
+    ///
+    /// ⚠️ THIS IS WHAT LETS A LATE SURFACE ARRIVE IN THE WINDOW. A surface
+    /// acquired mid-flight has missed the pose that ran inside the animator's
+    /// block, and the display link below is a frame behind by construction —
+    /// which is why it used to be held back until the landing and appear only
+    /// on the settled page. Handed the animator, the landing pose is added to
+    /// the animation that is already running: same curve, same frames, no
+    /// clock of its own. Nil (or a refusal) falls back to the hold.
+    var joinFlight: ((@escaping () -> Void) -> Bool)?
+    /// Set once the card's presentation has been seen AWAY from its model, so a
+    /// flight sampled before its animation has started cannot read as landed.
+    private var hasTravelled = false
+    private var hasArrived = false
+
     /// How long after take-off a surface is still worth adopting.
     ///
     /// Past the flight's own settle there is nothing left to improve: the card
@@ -167,6 +182,11 @@ final class ZoomLiveMediaRetry: NSObject {
     func debugTick() { tick() }
     /// Whether the retry is still asking.
     var debugIsAsking: Bool { link != nil }
+    /// The landing, for a suite that cannot wait out a real flight. The SAME
+    /// entry point the deadline takes, for the reason `debugTick` states: a
+    /// test driving a parallel implementation would pin a route the app never
+    /// takes — and the arrival of a held-back surface happens exactly here.
+    func debugFinish() { stop() }
     #endif
 
     private func start() {
@@ -178,6 +198,36 @@ final class ZoomLiveMediaRetry: NSObject {
     private func stop() {
         link?.invalidate()
         link = nil
+        // The backstop: a flight that never settles — caught, cancelled, torn
+        // down — still has to hand its picture over rather than leave it held.
+        if let card { arrive(card) }
+    }
+
+    /// Whether the card's presentation has caught up with where it is going.
+    ///
+    /// Both axes, because a spring on a card that changes aspect reaches one
+    /// before the other. A tolerance rather than equality: a presentation lands
+    /// on its model asymptotically and would never test equal.
+    private func cardHasSettled(_ card: any ZoomFlightCard) -> Bool {
+        guard let presented = card.layer.presentation()?.bounds.size else { return true }
+        let target = card.layer.bounds.size
+        guard target.width > 0, target.height > 0 else { return false }
+        return abs(presented.width - target.width) <= max(0.5, target.width * 0.005)
+            && abs(presented.height - target.height) <= max(0.5, target.height * 0.005)
+    }
+
+    /// Poses the held surface exactly, then lets it be seen.
+    ///
+    /// The first instant it CAN be posed exactly is the card's own landing: the
+    /// card is the page then, so this pose crosses no gap and the fade that
+    /// follows has nothing to reconcile. Floored at 0.2s, for the reason the
+    /// fade always was — a surface adopted in the last few milliseconds should
+    /// still be SEEN to arrive rather than cut.
+    private func arrive(_ card: any ZoomFlightCard) {
+        guard hasAdopted, fadesIn, !hasArrived else { return }
+        hasArrived = true
+        poseAtLanding(card)
+        card.fadeInAdoptedLiveMedia(over: 0.2)
     }
 
     @objc private func tick() {
@@ -187,11 +237,20 @@ final class ZoomLiveMediaRetry: NSObject {
 
         if hasAdopted {
             follow(card)
+            // ⚠️ THE ARRIVAL IS THE CARD STOPPING, NOT THE CLOCK RUNNING OUT.
+            // This window is the spring's NOMINAL duration, and a spring is
+            // visually still long before it is nominally over — releasing on
+            // the deadline left a third of a second of blurred cover on a page
+            // that had already landed. The hold exists because a travelling
+            // card cannot be posed exactly, so it ends when the card stops
+            // travelling.
+            if !hasArrived, hasTravelled, cardHasSettled(card) { arrive(card) }
             // The follow ends with the FLIGHT, not with the adoption: the
             // surface must still be posed on the frame the card lands on.
             if CACurrentMediaTime() >= deadline { stop() }
             return
         }
+        if !hasTravelled, !cardHasSettled(card) { hasTravelled = true }
         guard CACurrentMediaTime() < deadline else { return stop() }
         guard let surface = acquire(card) else { return }
         adopt(surface, on: card)
@@ -201,7 +260,6 @@ final class ZoomLiveMediaRetry: NSObject {
         liveMediaSize = ZoomFlight.liveMediaLayoutSize(
             native: card.zoomLiveMediaNativeSize, page: pageSize
         )
-        card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
         // ⚠️ THE SURFACE MAY ARRIVE ALREADY ANIMATING, and then no amount of
         // posing it moves anything.
         //
@@ -219,19 +277,37 @@ final class ZoomLiveMediaRetry: NSObject {
         // Recursive, because the poster inside the surface inherited the same
         // animation and lags the same way.
         Self.stopInheritedAnimations(on: surface.layer)
-        // ⚠️ AFTER the stilling, never before: the fade is an animation, and
-        // the sweep above removes every animation on this layer tree.
-        //
-        // The rest of the flight, so the arrival is a transition rather than a
-        // swap that happens to land inside one. Floored, because a surface
-        // adopted in the last few milliseconds should still be seen to arrive.
-        if fadesIn {
-            card.fadeInAdoptedLiveMedia(
-                over: max(0.2, deadline - CACurrentMediaTime())
-            )
-        }
+        // ⚠️ AFTER the stilling, never before, and this ORDER is the fix. The
+        // sweep is a recursive `removeAllAnimations`, so a layout written ahead
+        // of it survives only as a model value — and the model is already the
+        // card's landing size while the card is a third of the way there. That
+        // is how the surface came to present the page's full width against a
+        // 138pt window: 263.68pt of disagreement, with `surfAnims=0` beside it
+        // saying plainly that nothing was driving it.
+        card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
         hasAdopted = true
+        // Where it is NOW, outside any animation, so the ramp below starts from
+        // the truth rather than from wherever the surface happened to be.
         follow(card)
+        // ⚠️ THE ARRIVAL BELONGS IN THE WINDOW, and it can be there whenever the
+        // flight will take the pose. Added to the running animator, the landing
+        // pose rides the card's own curve — so the picture is correctly framed
+        // at every intermediate size and fades up over the cover while the
+        // window is still travelling, which is what a hero flight is for.
+        let joined = joinFlight?({ [weak self, weak card] in
+            guard let self, let card else { return }
+            self.poseAtLanding(card)
+        }) ?? false
+        if joined {
+            hasArrived = true
+            if fadesIn { card.fadeInAdoptedLiveMedia(over: max(0.2, deadline - CACurrentMediaTime())) }
+        } else if fadesIn {
+            // No animation to join — the flight is over, or this leg poses by
+            // hand. The display link is all that is left and it is a frame
+            // behind, so the surface waits for the landing instead of showing a
+            // pose that arrived late.
+            card.holdAdoptedLiveMediaUntilLanding()
+        }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print(String(format: "[zoom-live] %.3f retry ADOPTED mid-flight (%@)",
@@ -254,10 +330,23 @@ final class ZoomLiveMediaRetry: NSObject {
     /// second interpolation of an interpolation — the drift this class exists
     /// to avoid.
     private func follow(_ card: any ZoomFlightCard) {
+        pose(card, in: (card.layer.presentation() ?? card.layer).bounds.size)
+    }
+
+    /// The landing pose, taken from the card's MODEL bounds.
+    ///
+    /// The presentation is still a fraction of a point out at the moment the
+    /// window closes — a spring overshoots to 405.8 and settles back — and the
+    /// held-back arrival is about to be faded up against it. The model is where
+    /// the card is going to be, which is the only value worth landing on.
+    private func poseAtLanding(_ card: any ZoomFlightCard) {
+        pose(card, in: card.layer.bounds.size)
+    }
+
+    private func pose(_ card: any ZoomFlightCard, in size: CGSize) {
         guard !card.zoomLiveMediaTracksCardBounds,
               let surface = card.zoomLiveMediaSurface
         else { return }
-        let size = (card.layer.presentation() ?? card.layer).bounds.size
         guard size.width > 0, size.height > 0 else { return }
         let scale = ZoomFlight.liveMediaScale(covering: size, surface: liveMediaSize)
         CATransaction.begin()

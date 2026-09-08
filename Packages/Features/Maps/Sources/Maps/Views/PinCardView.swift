@@ -107,6 +107,12 @@ final class PinCardView: UIView {
     /// surface alive.
     private weak var donatedSurface: VideoRenderView?
 
+    /// Set while a mid-flight arrival is being held back — see
+    /// `holdAdoptedLiveMediaUntilLanding`. Read by `applyBlend`, which owns the
+    /// donated host's alpha and would otherwise dissolve the arrival up across
+    /// a flight it cannot yet be posed for.
+    private var holdsAdoptedLiveMedia = false
+
     /// The pin's border, drawn above the media so it survives live previews.
     /// The flight fades it out as the card leaves the pin (and back in on the
     /// way home).
@@ -142,7 +148,13 @@ final class PinCardView: UIView {
 
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
-        imageView.backgroundColor = .secondarySystemBackground
+        // ⚠️ BLACK, AND IT IS THE LAST RUNG OF THE LADDER. The stack a post's
+        // picture is drawn as is `live media -> sprite sheet -> thumbnail ->
+        // black`, and this host is what the thumbnail sits on — so its ground
+        // IS that last rung. It was `.secondarySystemBackground`, an opaque
+        // grey that also hid the card's own black (:145, :397) completely, and
+        // a marker whose picture had not resolved was a light box.
+        imageView.backgroundColor = .black
         imageView.frame = bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(imageView)
@@ -154,7 +166,9 @@ final class PinCardView: UIView {
         // half-drawn frame, which is precisely what the fade law forbids; the
         // matching ground also makes the two crop and letterbox identically at
         // every size the card passes through.
-        departureCoverView.backgroundColor = .secondarySystemBackground
+        // Black, and it must MATCH the arrival cover's — see above. The two
+        // grounds move together or the blend draws a half-finished frame.
+        departureCoverView.backgroundColor = .black
         departureCoverView.isHidden = true
         // ⚠️ ABOVE the arrival cover and BELOW the departure one, which is the
         // only position the blend law allows.
@@ -164,6 +178,13 @@ final class PinCardView: UIView {
         // to a picture nobody could see. It is the marker's OWN content, so it
         // belongs in the arrival stack: the departure picture fades over it,
         // exactly as it fades over the cover.
+        // ⚠️ FILL, NOT RESIZE — see `AnimatedIconView.contentGravity`. This
+        // sheet's cells are frames of a film and this view is full-bleed in a
+        // card that travels from a 56pt square to a full page; the default
+        // stretches them to whatever shape the card currently is. The cover
+        // directly beneath is `.scaleAspectFill`, and the two rungs of one
+        // picture have to agree.
+        previewSheetView.contentGravity = .resizeAspectFill
         previewSheetView.frame = bounds
         previewSheetView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         previewSheetView.isHidden = true
@@ -375,13 +396,14 @@ final class PinCardView: UIView {
 
     func setFace(_ face: Face) {
         self.face = face
-        // ⚠️ THE GREY BOX. `imageView` is the cover host and it is never
-        // hidden — it carries an opaque `.secondarySystemBackground` ground so
-        // a letterboxed photograph reads as framed. Under the TEXT face that
-        // ground is invisible because the disc above it is opaque; under an
-        // icon, whose alpha IS its shape, it shows through as a grey square
-        // exactly the size of the marker. An icon pin is a text post and has no
-        // cover to host, so the whole layer goes away.
+        // ⚠️ THE COVER HOST IS NEVER HIDDEN under a media face, and it carries
+        // an OPAQUE BLACK ground so a letterboxed picture reads as framed and
+        // an unresolved one reads as the ladder's last rung rather than as a
+        // light box. Under the TEXT face that ground is invisible because the
+        // disc above it is opaque; under an icon, whose alpha IS its shape, it
+        // would show through as a square exactly the size of the marker. An
+        // icon pin is a text post and has no cover to host, so the whole layer
+        // goes away.
         imageView.isHidden = face == .icon
         // The media ground is black so a letterboxed cover reads as framed; a
         // text card's ground is the face's own tint, and the black would show
@@ -679,7 +701,13 @@ final class PinCardView: UIView {
         //
         // Inert on every other flight: the host is hidden and its alpha is not
         // drawn.
-        donatedMediaHost.alpha = 1 - blend
+        // ⚠️ THE HOLD WINS OVER THE BLEND. A surface adopted mid-flight cannot
+        // be posed exactly until the card lands (see
+        // `holdAdoptedLiveMediaUntilLanding`), and this is the channel that
+        // would otherwise dissolve it up over the cover while the two are
+        // framed differently — measured at 79.36pt of disagreement on the frame
+        // this line first made it opaque.
+        donatedMediaHost.alpha = holdsAdoptedLiveMedia ? 0 : 1 - blend
         guard departureCoverView.image != nil else {
             // No second operand. Every channel back to its resting value, which
             // is the un-blended card exactly as it was.
@@ -797,31 +825,48 @@ final class PinCardView: UIView {
     /// the destination size and driven purely by a uniform-scale transform
     /// (plus an animated center), while the card's animating bounds do the
     /// crop morph. The layer's bounds never change, so rendering stays smooth.
+    /// Lays the flying surface out ONCE at `destinationSize`, with autoresizing
+    /// off, so the flight owns its transform and centre and its BOUNDS never
+    /// change again.
+    ///
+    /// ⚠️ BOUNDS IS NOT AN ANIMATABLE CHANNEL FOR VIDEO — the law is stated at
+    /// `ZoomTransitionGeometry.mediaLayoutSize` and was measured a second time
+    /// on the grid card: an `AVSampleBufferDisplayLayer` does not re-render its
+    /// video rect during an ANIMATED bounds change, so inside a correctly
+    /// sized, correctly centred surface the content stays drawn at its previous
+    /// size, pinned to the layer origin. `VideoRenderFlags.usesSampleBufferLayer`
+    /// is the default, so that layer is what this card flies.
+    ///
+    /// This body was empty, and the surface full-bleed with an autoresizing
+    /// mask, on the reasoning that CoreAnimation would then size it from the
+    /// card's own bounds on the card's own curve. It does — the WINDOW tracked
+    /// within 0.27pt on the return, measured per frame off the presentation —
+    /// and the PICTURE inside it did not move at all. That is the whole of "le
+    /// média n'est pas stable, il se redimensionne comme si le fill était
+    /// recalculé": the window travels and the video unveils from its top-left
+    /// corner instead of zooming with it.
+    ///
+    /// Core Animation DOES interpolate layer content under a transform, so the
+    /// scale path renders smoothly at every intermediate size. At the NATIVE
+    /// aspect that `ZoomFlight.liveMediaLayoutSize` hands in, a cover scale
+    /// reproduces `resizeAspectFill` into the card's rect exactly — the same
+    /// framing the card's own cover shows, which is what the arriving video has
+    /// to match at the instant it takes over.
+    ///
+    /// ⚠️ AND THE ANCHOR GOES BACK TO THE CENTRE. `adoptZoomLiveMediaView` pins
+    /// a donated surface at `.zero` for its full-bleed life; the flight's poses
+    /// write `surface.center`, and on a top-left-anchored surface that puts the
+    /// picture's CORNER at the card's centre — already filmed on the dismiss as
+    /// a second, differently cropped rectangle inset into the bottom-right
+    /// quadrant, and recorded in `ZoomFlight.poseFloating`.
     func prepareVideoForFlight(destinationSize: CGSize) {
-        // ⚠️ NOTHING TO PREPARE ANY MORE, and the empty body is the fix.
-        //
-        // This used to lay the surface out at the PAGE's size with autoresizing
-        // off, so the flight could drive it by transform and centre. That is
-        // the contract behind `zoomLiveMediaTracksCardBounds == false`, and it
-        // has a defect this card cannot live with: those poses are computed
-        // from `card.layer.presentation()` on a display link, so the surface
-        // renders ONE FRAME BEHIND the card. Measured on the present, surface
-        // width against the card's in the same frame: -47.6%, -34.9%, -13.8%,
-        // -4.0%, -1.1%, 0 — the deficit tracks how fast the card is growing.
-        //
-        // The viewer sees the card's cover in the strip the video has not
-        // reached yet: a hard vertical seam between a sharp video on the left
-        // and a blurred still on the right, filmed and reported as the player
-        // being badly attached to its container.
-        //
-        // The surface is full-bleed with an autoresizing mask instead, so
-        // CoreAnimation sizes it from the card's own bounds — the same property
-        // on the same curve, in the same frame — and `resizeAspectFill`
-        // recomputes the crop continuously as the card morphs.
         let surface: UIView = donatedSurface ?? videoRenderView
+        let host: UIView = surface === videoRenderView ? self : donatedMediaHost
         surface.transform = .identity
-        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        surface.frame = (surface === videoRenderView ? self : donatedMediaHost).bounds
+        surface.autoresizingMask = []
+        surface.layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        surface.bounds = CGRect(origin: .zero, size: destinationSize)
+        surface.center = CGPoint(x: host.bounds.midX, y: host.bounds.midY)
     }
 
 }
@@ -1070,6 +1115,12 @@ extension PinCardView: ZoomFlightCard {
     /// has handed its picture over that IS what the card is flying.
     var zoomLiveMediaSurface: UIView? {
         if let donatedSurface, !donatedMediaHost.isHidden { return donatedSurface }
+        // ⚠️ A HELD SURFACE IS HIDDEN AND STILL THE ANSWER. The hold below
+        // hides the mirrored surface until the card lands, and "hidden" is
+        // otherwise this property's word for "not carrying media" — so
+        // reporting nil would make the retry think its adoption failed and
+        // mirror again on the next tick, forever.
+        if holdsAdoptedLiveMedia { return videoRenderView }
         return videoRenderView.isHidden ? nil : videoRenderView
     }
 
@@ -1077,23 +1128,78 @@ extension PinCardView: ZoomFlightCard {
         (donatedSurface ?? videoRenderView).nativeVideoSize
     }
 
+    /// The pin's own thumbnail — autoresized to the card, aspect-filled. On a
+    /// present this is what the viewer is looking at for most of the flight.
+    var zoomCoverSurface: UIView? { imageView }
+
+    var zoomLiveMediaContentRect: CGRect? {
+        (donatedSurface ?? videoRenderView).debugVideoRect
+    }
+
+    /// The whole media chain in one line, for `-grab-geometry` — see the probe
+    /// in `ZoomFlight.poseFloating`. CoreNavigation cannot ask a
+    /// `VideoRenderView` anything directly, so the card reports it.
+    var zoomLiveMediaDebugState: String {
+        let surface: UIView? = donatedSurface ?? (videoRenderView.isHidden ? nil : videoRenderView)
+        let host = donatedMediaHost
+        let native = (donatedSurface ?? videoRenderView).nativeVideoSize
+        return "host=\(NSCoder.string(for: host.bounds))"
+            + " hostHidden=\(host.isHidden ? "Y" : "n")"
+            + " surface=\(surface.map { NSCoder.string(for: $0.frame) } ?? "nil")"
+            + " sBounds=\(surface.map { NSCoder.string(for: $0.bounds) } ?? "-")"
+            + " sXf=\(surface.map { NSCoder.string(for: $0.transform) } ?? "-")"
+            + " sAnchor=\(surface.map { NSCoder.string(for: $0.layer.anchorPoint) } ?? "-")"
+            + " donated=\(donatedSurface == nil ? "n" : "Y")"
+            + " native=\(native.map { NSCoder.string(for: $0) } ?? "nil")"
+            // ⚠️ THE COVER, BESIDE THE SURFACE, because during a present the
+            // cover IS the picture and the surface is not yet.
+            //
+            // Measured: a scale sweep on the growing card showed the visible
+            // content tracking the card exactly (best match at s=1.00), while
+            // the sampler reported the live surface presenting the page's full
+            // width from the second frame. Both readings were right, about
+            // different objects — and a sampler that watches only the invisible
+            // one will approve a change that makes the visible one jump.
+            + " cover=\(NSCoder.string(for: imageView.bounds.size))"
+            + " coverPres=\(imageView.layer.presentation().map { NSCoder.string(for: $0.bounds.size) } ?? "nil")"
+            + " coverHidden=\(imageView.isHidden ? "Y" : "n")"
+            + String(format: " coverAlpha=%.2f", imageView.alpha)
+            + " coverAnims=\(imageView.layer.animationKeys()?.count ?? 0)"
+            // And the player's own container and gravity, so "the surface is in
+            // the wrong place" can be told apart from "the surface is right and
+            // the video inside it is drawn somewhere else".
+            + " layer=\((surface as? VideoRenderView)?.debugLayerClass ?? "-")"
+            + " gravity=\((surface as? VideoRenderView)?.debugVideoGravity ?? "-")"
+            + " videoRect=\((surface as? VideoRenderView)?.debugVideoRect.map { NSCoder.string(for: $0) } ?? "-")"
+            + " onHost=\(surface?.superview === donatedMediaHost ? "Y" : "n")"
+            + " onCard=\(surface?.superview === self ? "Y" : "n")"
+            // The two that actually decide what is on screen.
+            + " sPres=\(surface?.layer.presentation().map { NSCoder.string(for: $0.bounds) } ?? "nil")"
+            + " sAnim=[\(surface?.layer.animationKeys()?.joined(separator: ",") ?? "-")]"
+            + " hPres=\(host.layer.presentation().map { NSCoder.string(for: $0.bounds) } ?? "nil")"
+            + " hAnim=[\(host.layer.animationKeys()?.joined(separator: ",") ?? "-")]"
+    }
+
     /// Same rule as the grid's flight card: a pin flying without live media
     /// shows its cover, which is always drawing; one flying with live media is
     /// only "drawing" while that surface is actually visible.
-    /// ⚠️ TRUE, so the flight leaves this surface's transform and centre alone.
+    /// ⚠️ FALSE, so the flight poses this surface by TRANSFORM — see
+    /// `prepareVideoForFlight`, which carries the measurement.
     ///
-    /// The alternative — a surface laid out at page size and driven by a
-    /// uniform scale — is posed from `card.layer.presentation()` on a display
-    /// link, which is a frame behind by construction. On a card that grows from
-    /// 56pt to a full page in 420ms that lag was measured at up to 47.6% of the
-    /// card's width, and what shows in the gap is the card's own cover: the
-    /// vertical seam between sharp video and blurred still that was filmed.
+    /// It was true, and the argument for it was sound about the wrong object:
+    /// tracking the card's bounds does hand the sizing to CoreAnimation, on the
+    /// card's own curve, in the card's own frame. The WINDOW was never the
+    /// problem. An `AVSampleBufferDisplayLayer` does not re-render its video
+    /// rect during an animated bounds change, so the picture inside that
+    /// perfectly tracking window stayed frozen at its previous size — which is
+    /// what was filmed on the cancelled return and reported as the media being
+    /// badly attached to the window.
     ///
-    /// Tracking the card's bounds hands the sizing to CoreAnimation, which
-    /// applies it in the same frame and on the same curve as the card's own
-    /// bounds, and lets `resizeAspectFill` recompute the crop at every instant
-    /// rather than showing the page's crop at every size.
-    var zoomLiveMediaTracksCardBounds: Bool { true }
+    /// The display-link lag that drove the flip to true is real and is answered
+    /// separately: a surface adopted mid-flight is now held invisible until the
+    /// landing (`holdAdoptedLiveMediaUntilLanding`), so no frame ever shows a
+    /// pose that arrived late.
+    var zoomLiveMediaTracksCardBounds: Bool { false }
 
     var zoomLiveMediaIsDrawing: Bool {
         if let donatedSurface, !donatedMediaHost.isHidden {
@@ -1152,8 +1258,45 @@ extension PinCardView: ZoomFlightCard {
     /// arrives the surface simply stays at zero and the card lands on its
     /// cover, which is the picture the viewer was already looking at.
     func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+        // `fadeInOnFirstFrame` un-hides on its own terms (isHidden false, alpha
+        // 0, revealed when there is a frame), so it lifts the hold's hide as
+        // part of the arrival rather than beside it.
         videoRenderView.setPoster(nil)
         videoRenderView.fadeInOnFirstFrame(over: duration)
+        // A DONATED surface arrives on its host, and the host's alpha is the
+        // blend's. Releasing the hold inside an animation is what turns the
+        // held-back arrival back into an arrival — over the cover, which stays
+        // fully drawn underneath, exactly as the fade law asks.
+        guard holdsAdoptedLiveMedia else { return }
+        holdsAdoptedLiveMedia = false
+        UIView.animate(withDuration: duration) { self.applyBlend() }
+    }
+
+    func holdAdoptedLiveMediaUntilLanding() {
+        holdsAdoptedLiveMedia = true
+        // ⚠️ AND IT HAS TO REACH THE CARD'S OWN SURFACE, which is the one a
+        // PRESENT actually flies. A marker carries no player, so the retry
+        // always takes the mirroring arm and the picture arrives on
+        // `videoRenderView` — while the first version of this hold guarded only
+        // `donatedMediaHost`, the dismiss leg's surface. The present was
+        // therefore never held at all.
+        //
+        // Hidden, not faded: this surface's alpha belongs to
+        // `fadeInOnFirstFrame`, and two drivers on one layer property is a
+        // defect this codebase has already lived through.
+        //
+        // ⚠️ AND HIDING IT IS THE ONLY WAY, because the poster cannot stand in.
+        // `adoptZoomLiveMedia` seeds the cover as a poster, but
+        // `updatePosterVisibility` retires a poster the moment the first
+        // decoded frame lands — by design, and unasked. That is what put a
+        // half-fitted video on screen mid-flight: an `AVSampleBufferDisplayLayer`
+        // draws a new sample at the video rect it computed for its PREVIOUS
+        // bounds, so the picture unveiled from the layer's top-left corner and
+        // grew to fill the card over the following frames. Filmed by the user,
+        // and invisible to my own verification because `-snap-start-paused`
+        // stops the samples whose arrival causes it.
+        videoRenderView.isHidden = true
+        applyBlend()
     }
 
     func setZoomCornerRadius(_ radius: CGFloat) {

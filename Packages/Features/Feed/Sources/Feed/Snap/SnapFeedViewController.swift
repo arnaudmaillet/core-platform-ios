@@ -166,6 +166,31 @@ final class SnapFeedViewController: UIViewController {
     /// The two facts whose AND is the deferral. Read at all three stamping
     /// sites, so a page realized mid-flight cannot disagree with the one the
     /// flight staged over.
+    ///
+    /// ⚠️ A MAP FLIGHT DOES NOT DEFER, and the question "could the page start
+    /// sooner so the video is up earlier in the window" is CLOSED. Measured on
+    /// a present from a marker, `-zoom-live-log -media-log`, times relative to
+    /// the flight beginning:
+    ///
+    ///     +0 ms    willBegin flyingPlayer=N defers=N
+    ///     +68 ms   [page-play] start
+    ///     +230 ms  retry ADOPTED mid-flight — the first decoded frame
+    ///     +703 ms  landed
+    ///
+    /// A marker carries no player, so this reads false and the page starts as
+    /// early as there is a page to start. The 162 ms between the start and the
+    /// first frame is a remote asset decoding, not a policy, and the fade
+    /// begins in the same tick the frame exists.
+    ///
+    /// The only two ways to make that frame earlier are both refused: warming a
+    /// player for every visible marker would put an `AVPlayer` behind a 44pt
+    /// pin, spend pool loans the pool is already tight on and decode during
+    /// pan — the map's own invariant forbids the first and
+    /// `prewarmVisiblePosts` deliberately warms POSTS, not players; and a cheap
+    /// preview rendition is the standing contract ask
+    /// (`dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md`). Until that ships the
+    /// card is not empty for those 162 ms: it flies the marker's sprite sheet,
+    /// animating, at the page's own framing.
     private var defersPlaybackForStagingFlight: Bool {
         isAwaitingZoomPresentation && flightCarriesActivePlayer
     }

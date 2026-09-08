@@ -250,6 +250,131 @@ Apply the same two fields to `geo_discovery.v1.MapPostCard` (Focus path).
 Note the map deliberately does **not** want `cdn_url` here. A pin must never be
 able to start a full-stream fetch during a pan.
 
+### C.1 Client status: the map half is built, and dark (verified 2026-09-07)
+
+Everything §C asks for already has a client on the other side of it, wired end
+to end and unreachable. Recorded here because the gap is not "not implemented
+yet" — it is one `nil`, with the whole feature standing behind it.
+
+Candidate selection needs two facts, and the wire supplies neither
+(`Maps/MapsViewController.swift:1866-1868`):
+
+```swift
+guard let pin = spokenPin, let host,
+      pin.kind == .video,
+      let url = pin.previewVideoURL,
+```
+
+- `pin.kind` — `GeoDiscoveryRepository.kind(for:)` (`:163`) classifies every
+  covered pin as `.photo` in a release build. `.video` exists only inside
+  `#if DEBUG`.
+- `pin.previewVideoURL` — `previewVideoURL(for:kind:thumbnailURL:)` (`:185`)
+  returns `nil` outside `#if DEBUG`, unconditionally and by design: `RadarPin`
+  has no URL for it to return.
+
+So `MapVideoPlaybackCoordinator.playing` is empty for the life of a release
+build, and it is the only thing that can put a live player on a marker.
+
+⚠️ **The two gates do not open on the same switch**, which matters when reading
+a simulator run. The kind gate opens with **no launch argument** in DEBUG — the
+mock's `mock-kind=video` stand-in for field 5 (`:176`), added so the map has
+video pins at all — so play badges appear. The URL gate opens **only** under
+`-maps-force-video` (`:187`). A DEBUG map of badged video pins with nothing
+moving is the expected default, not a defect.
+
+**What that makes DEBUG-only, and the scope is narrower than it first looks:**
+
+| Client behaviour | Production, MAP route |
+|---|---|
+| `MapPinZoomSource.zoomFlightCarriesLivePlayer` (`:229`) | always `false` — `MapVideoPlaybackCoordinator.isLivePreviewing` cannot be true with `playing` empty |
+| `SnapFeedViewController.defersPlaybackForStagingFlight` (`:169`) | always `false` — it ANDs the source's own answer, handed over at `ZoomTransitionController.swift:139` |
+| `SnapFeedCell.warmAttachForFlight` | never called — it sits behind that deferral |
+| `ZoomAnimator`'s destination-mirroring `ZoomLiveMediaRetry` (`:338`) | **always armed** — it is gated on `!zoomFlightCarriesLivePlayer` |
+
+⚠️ **SCOPED TO THE MAP, NEVER TO THE MECHANISM, and the difference has already
+been got wrong once.** `zoomFlightCarriesLivePlayer` defaults to `true` on the
+protocol (`ZoomTransition.swift:198`) and **`MapPinZoomSource` is the only
+source in the repo that overrides it**. So every For You / Profile grid flight
+carries a live player and defers in production — `SnapFeedViewController`'s own
+comment says the deferral is "load-bearing" there — and those flights land
+through the same `zoomAdoptLiveMediaView` -> `SnapFeedCell.adoptLiveRenderView`
+path the map's would. The deferring ORDERING is ordinary production behaviour.
+What is DEBUG-only is reaching it *from a map marker*.
+
+**What a run under `-maps-force-video` tells you, and what it does not.** The
+flag does not make a map pin behave like a production map pin. It makes it
+behave like a *grid* cell — a marker that flies a live player — so a rate
+measured under it is a rate for the grid's ordering wearing the map's clothes.
+Bugs found in that window are usually real; their reproduction rate, and
+sometimes their trigger, are artifacts of the flag.
+
+This has already cost twice, in opposite directions. A merged PR description
+first explained *why a spinner only sometimes stuck* with the deferred-page
+ordering as though it were the map's own — wrong, and withdrawn. The correction
+then over-swung to "that ordering does not exist in production" — also wrong,
+because it does, on every grid flight. The defect and its fix were sound
+throughout; only the account of WHERE it is reachable moved.
+
+The rule, for anything measured on this surface until §C ships: before
+attributing a rate or a cause to production, name the flag-free route to the
+same defect, or say plainly that it is DEBUG-only today. Both are useful
+answers. A rate collected under the flag and reported as production behaviour
+is not.
+
+**The day fields 5 and 6 land.** Nothing in the client's playback stack changes
+shape; two branches are deleted:
+
+- `kind(for:)`'s media branch becomes a read of the wire's own kind. The client
+  already reserves field 5 for it (§C above) — and it needs the enum case as
+  well as the field: `media.v1.MediaKind` is `AVATAR | POST_IMAGE` today
+  ("Current contract reality"), so the video case named in §A is part of the
+  same landing. Field 6 alone would classify every video pin as a photo and
+  never ask for its preview.
+- `previewVideoURL` returns the wire's preview URL, and `-maps-force-video` is
+  deleted with it.
+
+The consequence worth stating in advance: **the ordering that is a flag artifact
+on this route today becomes the ordinary map open.** A video marker that is
+previewing when it is tapped really will fly a live player, the destination
+really will defer, and `warmAttachForFlight` really will run — so every
+transition measurement taken on the map under the flag is worth re-running
+without it. Acceptance criteria 1 and 2 are what gate that switch.
+
+### C.2 The thumbnail is not a second asset — it is the sheet's first cell
+
+Verified in the client on 2026-09-08, and it changes what we are asking for.
+
+A media post's picture is drawn as a ladder, and every surface keeps it:
+
+```
+live media  ->  sprite sheet  ->  thumbnail  ->  black
+```
+
+The thumbnail is the second-to-last rung, and its ONLY correct value is the
+first frame of the clip. Anything else is a picture of something the post is
+not, and the viewer sees it as the post changing its mind: the still is what a
+marker shows before its sheet resolves, what a hero flight carries, and what the
+page shows until the first frame decodes — three places, one picture.
+
+**So `thumbnail_url` for a video post should be a rendition of the preview
+sheet's own cell 0, not an independently chosen still.** One asset, two uses.
+Serving them separately guarantees they will drift, and the drift is visible:
+in our own fixtures a thumbnail picked independently of the sheet produced a
+marker showing a black title card over a post whose flight animated a forest —
+both frames of the same film, neither the same picture.
+
+Concretely, on top of §C:
+
+- `preview_sheet.first_frame_url` (or an agreed convention such as the sheet's
+  cell 0 at the sheet's own cell size), and `thumbnail_url` resolving to it for
+  any post that HAS a sheet.
+- Where a post has no sheet, `thumbnail_url` must still be a frame of its own
+  clip — the encoder already has it; the client cannot derive one without
+  fetching the media it was trying to avoid fetching.
+- The client's fallback if neither is served is BLACK. It is not a stock
+  picture, and it must not be an unrelated photograph: we removed two of those
+  from our own mock the same day.
+
 ### D. Lightweight list paths (lower priority)
 
 `post.v1.PostSummary` and `search.v1.PostHit` should carry `media_kind` plus

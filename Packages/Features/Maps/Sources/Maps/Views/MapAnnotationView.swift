@@ -4,6 +4,24 @@ import MediaCore
 import MediaPlayback
 import UIKit
 
+/// A marker that can say whether it has anything to show yet.
+///
+/// ⚠️ THE MAP ADDS ANNOTATIONS FIRST AND FETCHES THEIR PICTURE SECOND, never
+/// awaited: the reconcile ends in one unconditional `addAnnotations`, and the
+/// only fetch is inside `configure`, which MapKit reaches later through
+/// `viewFor` and which fires detached tasks reporting to nobody. Between the
+/// two the marker is a bare square. This is the report that was missing, and
+/// `MapAnnotationPop` holds a marker at zero until it arrives.
+@MainActor
+protocol MapMarkerDressing: MKAnnotationView {
+    /// Whether the marker is showing a picture of its post — a sheet, a cover,
+    /// or a face that needs neither.
+    var isDressed: Bool { get }
+    /// Fired once, the first time `isDressed` becomes true after a `configure`.
+    var onDressed: (() -> Void)? { get set }
+}
+
+
 /// A custom pin: the post's `thumbnail_url` rendered as a small rounded square
 /// on the map surface (UX req #1), its exact center anchored on the coordinate.
 /// A text-only post has no cover, so its marker wears `PinCardView`'s symbol
@@ -15,7 +33,7 @@ import UIKit
 /// A play badge overlays video pins — dormant today because the Radar path
 /// carries no media kind yet (see `GeoDiscoveryRepository`), and it lights up
 /// automatically once field 5 lands.
-final class MapAnnotationView: MKAnnotationView, MapVideoHost {
+final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing {
     static let reuseIdentifier = "MapAnnotationView"
 
     /// The LARGEST a marker gets — a media pin's square. Text markers are
@@ -42,6 +60,9 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     private var iconTask: Task<Void, Never>?
     /// Guards against a slow image load landing on a recycled view.
     private var representedID: PostID?
+    /// The pin this view is currently showing, so `isDressed` can ask what face
+    /// it wears without the caller having to pass one back in.
+    private var representedPin: MapPin?
 
     /// Set by the view controller so the view can fetch its own thumbnail.
     var imagePipeline: ImagePipeline?
@@ -56,6 +77,25 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     /// Invoked when MapKit recycles this view, so the coordinator can return any
     /// player bound to it to the pool before it's reused for another pin.
     var onReuse: (() -> Void)?
+
+    /// See `MapMarkerDressing`. A media marker is dressed once it has a
+    /// picture; every other face carries its own — a text pin's glyph and an
+    /// icon pin's disc are the resting appearance, not a placeholder.
+    var isDressed: Bool {
+        guard let pin = representedPin else { return false }
+        guard PinCardView.Face.of(pin) == .media else { return true }
+        return card.wornPreview != nil || card.imageView.image != nil
+    }
+
+    var onDressed: (() -> Void)?
+
+    /// Called at the end of every path that can dress the card. Fires at most
+    /// once per `configure`, and only when there is something to see.
+    private func reportDressed() {
+        guard isDressed, let report = onDressed else { return }
+        onDressed = nil
+        report()
+    }
 
     /// Fired the instant the pin is tapped — see `installInstantTap`.
     var onSelect: (() -> Void)?
@@ -166,6 +206,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
         #endif
         guard representedID != pin.postID else { return }
         representedID = pin.postID
+        representedPin = pin
         #if DEBUG
         representedKind = switch pin.kind {
         case .video: "video"
@@ -202,6 +243,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
                     guard let art = try? await previewCatalog.art(for: sheetID) else { return }
                     guard let self, self.representedID == id else { return }
                     self.card.setPreviewSheet((art, phase))
+                    self.reportDressed()
                 }
             }
         }
@@ -247,19 +289,33 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
             }
             return
         }
-        // ⚠️ A PIN WITH A PREVIEW FETCHES NO COVER. Its cover is the preview's
-        // own first frame, set the moment the sheet lands. Fetching the wire's
-        // thumbnail as well put a PHOTOGRAPH on the marker for as long as the
-        // catalogue took to answer — a picture of something else, swapped out
-        // once the clip arrived. The wire's still is a stand-in for a frame the
-        // backend does not generate; where we have the frame, it is not needed.
-        guard !pin.hasPreviewSheet else { return }
+        // ⚠️ A PIN WITH A PREVIEW FETCHES THE COVER AND HOLDS IT BACK.
+        //
+        // It used to refuse the fetch outright, because the wire's still was a
+        // PHOTOGRAPH OF SOMETHING ELSE and putting it on the marker until the
+        // catalogue answered was a picture of another post. That reasoning was
+        // about the wire's content, and the wire's content has changed: a video
+        // post's thumbnail is now its own clip's frame zero, the same picture
+        // the sheet opens on.
+        //
+        // What the refusal cost was the THIRD RUNG. `hasPreviewSheet` asks
+        // whether an id was SEEDED, not whether art RESOLVED — so a pin whose
+        // sheet never lands (catalogue miss, eviction, `-map-previews-unavailable`)
+        // had nothing at all to fall to, and stood on its ground. Filmed as
+        // black squares on the map.
+        //
+        // So the ladder is honest at last: the sheet wins where it lands, the
+        // thumbnail stands in where it does not, and the two are one picture.
         guard !pin.isText, let url = pin.thumbnailURL else { return }
         let id = pin.postID
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
+            // The sheet outranks it, and may have landed while this was in
+            // flight — its frame zero is already in the cover.
+            guard self.card.wornPreview == nil else { return }
             self.card.imageView.image = image
+            self.reportDressed()
             // If a live preview started before the thumbnail finished loading,
             // give it a poster now so the pin shows the still until the first
             // video frame — instead of a black square.
@@ -272,6 +328,12 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     #if DEBUG
     /// Whether this marker is currently wearing baked artwork.
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+
+    /// Whether this marker is DRESSED in its preview sheet — which is a
+    /// different question from whether the sheet is advancing, and the one the
+    /// HUD needs. A paused or off-screen marker wears its sheet and animates
+    /// nothing.
+    var wearsPreviewSheet: Bool { card.wornPreview != nil }
     var debugFaceName: String { card.debugFaceName }
     /// The pin's KIND, which the face hides: a photo and a video both wear
     /// `.media`, and telling them apart is the whole question when asking

@@ -29,6 +29,186 @@ public enum ZoomFlightSpring {
     public static var velocity: CGFloat { ZoomFlight.springVelocity }
 }
 
+#if DEBUG
+/// Samples the flying card and its live media **every frame**, under
+/// `-grab-geometry`.
+///
+/// ⚠️ THE ONE-SHOT PROBES IN THE POSES CANNOT ANSWER A QUESTION ABOUT MOTION.
+/// They print from inside an animation block, so they say whether the card and
+/// its surface agreed at the instant a pose was set — not whether they stay in
+/// step across the frames the viewer actually watches. A report that "the media
+/// lags on the way back" is entirely about those frames, and reading them out
+/// of a screen recording failed twice: the window extracted at an estimated
+/// timestamp turned out to be the next gesture.
+///
+/// A display link samples the PRESENTATION layer, which is what is on screen,
+/// on the same clock CoreAnimation composites on.
+@MainActor
+final class ZoomGeometrySampler {
+    static let shared = ZoomGeometrySampler()
+    static var isOn: Bool { ProcessInfo.processInfo.arguments.contains("-grab-geometry") }
+
+    private var link: CADisplayLink?
+    private weak var card: (any ZoomFlightCard)?
+    private var label = ""
+    private var frame = 0
+
+    func start(card: any ZoomFlightCard, label: String) {
+        guard Self.isOn else { return }
+        stop()
+        self.card = card
+        self.label = label
+        frame = 0
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        print("[sample] --- \(label) ---")
+    }
+
+    func stop() {
+        guard link != nil else { return }
+        link?.invalidate()
+        link = nil
+        card = nil
+    }
+
+    /// Where a layer's PRESENTATION sits in screen points.
+    ///
+    /// ⚠️ NOT `layer.convert(_:to: nil)`. That answered with the layer's own
+    /// origin on every frame of every run in this session — which is why the
+    /// sampler's `dx`/`dy` were a flat +0.0 whatever the geometry did, and why
+    /// the card's logged rect came out at {0, 0}. Two identically wrong
+    /// conversions compared against each other agree perfectly and say nothing.
+    ///
+    /// Walking the superlayer chain and summing each presented frame's origin
+    /// is correct because every layer in a flight has `bounds.origin == .zero`:
+    /// each step contributes exactly where its own presentation sits inside its
+    /// parent. Nil when any layer in the chain has no presentation, which is
+    /// itself worth seeing rather than papering over with the model value.
+    private static func presentedOrigin(of layer: CALayer) -> CGPoint? {
+        var point = CGPoint.zero
+        var node: CALayer? = layer
+        while let current = node, current.superlayer != nil {
+            guard let presented = current.presentation() else { return nil }
+            point.x += presented.frame.origin.x
+            point.y += presented.frame.origin.y
+            node = current.superlayer
+        }
+        return point
+    }
+
+    /// The presented opacity a layer is actually drawn at, from `layer` up to
+    /// (and excluding) `ancestor` — every host in between multiplied in.
+    private static func effectiveOpacity(of layer: CALayer, under ancestor: CALayer) -> Float? {
+        var value: Float = 1
+        var node: CALayer? = layer
+        while let current = node, current !== ancestor {
+            guard let presented = current.presentation() else { return nil }
+            value *= presented.opacity
+            node = current.superlayer
+        }
+        return value
+    }
+
+    @objc private func tick() {
+        guard let card else { stop(); return }
+        frame += 1
+        let cardPres = card.layer.presentation()?.bounds.width
+        let surface = card.zoomLiveMediaSurface
+        let surfPres = surface?.layer.presentation()?.bounds.width
+        // ⚠️ SIZE IS HALF THE QUESTION, and answering only that half is how a
+        // broken fix got called finished. A surface can present the card's
+        // exact width and still be drawn in the wrong place — this file's own
+        // `ZoomLiveMediaRetry` records the shape of it: "the model said 402x874
+        // at scale 0.42 centred, while the presentation was a 34x66 patch at
+        // (-92, -244)". Width agreed there too.
+        let cardOrigin = Self.presentedOrigin(of: card.layer)
+        let surfOrigin = surface.flatMap { Self.presentedOrigin(of: $0.layer) }
+        let dx = (cardOrigin != nil && surfOrigin != nil) ? surfOrigin!.x - cardOrigin!.x : Double.nan
+        let dy = (cardOrigin != nil && surfOrigin != nil) ? surfOrigin!.y - cardOrigin!.y : Double.nan
+        // The gap that matters: what the viewer sees of the card against what
+        // the viewer sees of its picture. Both read from the presentation, in
+        // the same frame.
+        let gap = (cardPres != nil && surfPres != nil) ? surfPres! - cardPres! : Double.nan
+        // ⚠️ THE SURFACE'S IDENTITY, because `zoomLiveMediaSurface` is a
+        // COMPUTED property that can answer with a different object from one
+        // frame to the next — the card's own view before a donation, the
+        // donated one after. A size that "jumps" may be two views, not one
+        // view moving.
+        let id = surface.map { String(UInt(bitPattern: ObjectIdentifier($0).hashValue) % 100000) }
+        // ⚠️ THE SURFACE'S MODEL TOO. Without it "the surface jumps" cannot be
+        // told apart from "the surface's model was set late": the first is a
+        // missing animation, the second is a missing resize, and they need
+        // opposite fixes.
+        // ⚠️ AND THE COVER, IN THE SAME LINE. Everything above describes the
+        // live surface, and on a present the live surface is not yet the
+        // picture: the card's still is, drawn directly beneath it. A sampler
+        // that reports only the surface answers questions about a view the
+        // viewer cannot see — which is exactly how "the surface presents 402
+        // from frame 2" and a filmed content landmark that tracked the card
+        // rigidly (best match at s=1.00) were both true at once, and how a
+        // change that made the surface animate could measure clean and be
+        // reported worse. `showing=` names which of the two is drawn.
+        let cover = card.zoomCoverSurface
+        let coverPres = cover?.layer.presentation()?.bounds.width
+        let coverOrigin = cover.flatMap { Self.presentedOrigin(of: $0.layer) }
+        let cdx = (cardOrigin != nil && coverOrigin != nil) ? coverOrigin!.x - cardOrigin!.x : Double.nan
+        let cdy = (cardOrigin != nil && coverOrigin != nil) ? coverOrigin!.y - cardOrigin!.y : Double.nan
+        // What the viewer actually gets. The surface wins only while it is
+        // parented, unhidden and not transparent; otherwise the cover is the
+        // frame — and "both" is the crossfade, the one interval where a
+        // mismatch between them is visible as a jump.
+        // ⚠️ PRESENTED opacity, never `view.alpha`. A fade-in writes the model
+        // to 1 in the frame it starts, so `alpha` says "fully visible" for the
+        // whole ramp — and this line said `showing=both` from the second frame
+        // of a present whose video was in fact still almost transparent. Model
+        // values written by the same call that logs them always agree with
+        // themselves; that is the trap this whole file exists to avoid.
+        // ⚠️ AND EVERY OPACITY BETWEEN IT AND THE CARD, not the view's own. A
+        // live surface is normally parented on a HOST, and the host's alpha is
+        // the channel the card fades it with — so a surface held at zero
+        // through its host reads 1.00 here and the line says `showing=both`
+        // over a picture nobody can see. That is the same class of lie as
+        // reading `alpha` instead of the presented opacity, one level up.
+        let surfOpacity = surface.flatMap { Self.effectiveOpacity(of: $0.layer, under: card.layer) }
+        let coverOpacity = cover.flatMap { Self.effectiveOpacity(of: $0.layer, under: card.layer) }
+        let surfaceDraws = surface.map {
+            !$0.isHidden && (surfOpacity ?? $0.layer.opacity) > 0.01 && $0.window != nil
+        } ?? false
+        let coverDraws = cover.map { !$0.isHidden && (coverOpacity ?? $0.layer.opacity) > 0.01 } ?? false
+        let showing = surfaceDraws && coverDraws ? "both" : (surfaceDraws ? "surf" : (coverDraws ? "cover" : "none"))
+        print(String(format: "[sample] %@ f%03d cardModel=%.2f cardPres=%.2f surfModel=%.2f surfPres=%.2f gap=%+.2f surf=%@ anims=%d hidden=%@",
+                     label, frame, card.bounds.width, cardPres ?? -1,
+                     surface?.bounds.width ?? -1, surfPres ?? -1, gap, id ?? "nil",
+                     surface?.layer.animationKeys()?.count ?? 0,
+                     (surface?.isHidden ?? true) ? "Y" : "n")
+              + String(format: " dx=%+.1f dy=%+.1f", dx, dy)
+              + String(format: " | covModel=%.2f covPres=%.2f covGap=%+.2f covAnims=%d covAlpha=%.2f cdx=%+.1f cdy=%+.1f sAlpha=%.2f showing=%@",
+                       cover?.bounds.width ?? -1, coverPres ?? -1,
+                       (cardPres != nil && coverPres != nil) ? coverPres! - cardPres! : Double.nan,
+                       cover?.layer.animationKeys()?.count ?? 0,
+                       Double(coverOpacity ?? -1), cdx, cdy,
+                       Double(surfOpacity ?? -1), showing)
+              // ⚠️ AND WHERE THE PICTURE IS INSIDE THAT SURFACE. Everything
+              // else here is about the window; this is about the video in it.
+              // A rect that stays at the page's crop while the window travels
+              // is a defect in the PLAYER, and reads identically to a perfect
+              // one in every measurement of the bounds.
+              + " vRect=\(card.zoomLiveMediaContentRect.map { NSCoder.string(for: $0) } ?? "-")"
+              // ⚠️ AND THE CARD'S PRESENTED RECT IN SCREEN POINTS, so a filmed
+              // frame can be cropped to the card EXACTLY rather than to an
+              // estimate. Measuring a transition off a recording has failed
+              // twice in this session for want of it: a window extracted at a
+              // guessed timestamp turned out to be the next gesture, and a
+              // search band fixed in screen space latched onto a different
+              // feature and "proved" the media shrank twice as fast as the
+              // card. With this, the film is aligned to the log by matching
+              // this width sequence, and every crop is the card's own box.
+              + " cardRect=\(Self.presentedOrigin(of: card.layer).map { o in NSCoder.string(for: CGRect(origin: o, size: card.layer.presentation()?.bounds.size ?? .zero)) } ?? "-")")
+    }
+}
+#endif
+
 @MainActor
 struct ZoomFlight {
     let card: any ZoomFlightCard
@@ -271,6 +451,19 @@ struct ZoomFlight {
             chrome.center = center
             chrome.alpha = 1
         }
+        #if DEBUG
+        // Same probe as `poseFloating`, on the two legs a grab's RELEASE and
+        // the PRESENT both drive. Model against presentation, because the model
+        // agreeing with itself proves nothing about what is on screen.
+        if ProcessInfo.processInfo.arguments.contains("-grab-geometry") {
+            let pres = card.layer.presentation()?.bounds
+            print(String(format: "[page] %.3f card=%@ pres=%@ anim=[%@] | %@",
+                         CACurrentMediaTime(), NSCoder.string(for: card.bounds),
+                         pres.map { NSCoder.string(for: $0) } ?? "nil",
+                         card.layer.animationKeys()?.joined(separator: ",") ?? "-",
+                         card.zoomLiveMediaDebugState))
+        }
+        #endif
     }
 
     /// The floating card, *position excluded*: page content scaled about the
@@ -312,6 +505,38 @@ struct ZoomFlight {
             chrome.center = center
             chrome.alpha = 1
         }
+        #if DEBUG
+        // `-grab-geometry`: the whole chain, once per pan event.
+        //
+        // Filmed and measured: during a grab the video inside the card shrinks
+        // about TWICE as fast as the card does — content separation -15.7%
+        // against a card height of -7.6%, drifting monotonically and freezing
+        // the instant the card stops. Every structural reading says it should
+        // be rigid: this pose scales `bounds` uniformly, nothing else scales
+        // the card, the surface is full-bleed and autoresized, and an
+        // aspect-fill of a wider-than-tall video into a narrower card is
+        // height-driven and therefore vertically invariant. One of those four
+        // is false, and only the running app can say which.
+        if ProcessInfo.processInfo.arguments.contains("-grab-geometry") {
+            // ⚠️ THE MODEL AGREEING PROVES NOTHING. Both values below are
+            // written in the same turn, so of course they match — the first
+            // pass of this probe read only those and concluded "rigid". What a
+            // viewer sees is the PRESENTATION, and a layer carrying an
+            // animation presents an interpolated value while its model has
+            // already arrived. `card.center` is set directly on every pan
+            // (`ZoomDismissInteractionController`) while `card.bounds` may be
+            // riding `springDetach`'s spring, so the two channels can be on
+            // different clocks — which is what "the video follows the drag with
+            // a delay" would be.
+            let cardPres = card.layer.presentation()?.bounds
+            let cardKeys = card.layer.animationKeys()?.joined(separator: ",") ?? "-"
+            print(String(format: "[grab] %.3f scale=%.4f card=%@ pres=%@ anim=[%@] | %@",
+                         CACurrentMediaTime(), scale,
+                         NSCoder.string(for: card.bounds),
+                         cardPres.map { NSCoder.string(for: $0) } ?? "nil",
+                         cardKeys, card.zoomLiveMediaDebugState))
+        }
+        #endif
     }
 
     /// The card partway home: size and corner radius interpolated between the

@@ -16,6 +16,7 @@ import CoreRealtimeMocks
 import CoreStorage
 import Feed
 import FeedInterface
+import AVFoundation
 import Foundation
 import Maps
 import MapsInterface
@@ -142,9 +143,23 @@ final class AppContainer {
     @MainActor
     private static func bakedPreviewPoster(_ url: URL) async -> Data? {
         let text = url.absoluteString
+        // A clip with no baked sheet still has a first frame — its own. Decoded
+        // from the asset rather than substituted with a stock photograph, which
+        // is the whole point of both schemes.
+        if let source = MockMediaFixtures.frameZeroSource(of: text) {
+            return await frameZero(ofClipAt: source)
+        }
         guard text.hasPrefix(MockMediaFixtures.previewPosterScheme) else { return nil }
-        let clip = String(text.dropFirst(MockMediaFixtures.previewPosterScheme.count))
-        guard let id = mapPreviewCatalog.ids.first(where: { $0.hasPrefix("\(clip)-") }),
+        // ⚠️ THE PATH, NOT THE REST OF THE STRING. The map stamps its pin URLs
+        // with `?mock-kind=video`, and taking everything after the scheme made
+        // that query part of the clip's NAME — every lookup missing silently,
+        // every video marker falling through to its ground.
+        let clip = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
+        // ⚠️ THE OPENING SEGMENT, by the SAME rule the seeding uses. `first` is
+        // the bundle's enumeration order, which is not the film's — so the
+        // poster resolved one segment while the marker wore another, and the
+        // two "frame zeros" were two different frames.
+        guard let id = MockMediaFixtures.openingSegment(ofClip: clip, in: mapPreviewCatalog.ids),
               let art = try? await mapPreviewCatalog.art(for: id),
               let frame = art.firstFrame()
         else {
@@ -158,6 +173,45 @@ final class AppContainer {
             return nil
         }
         return frame.pngData()
+    }
+
+    /// The first frame of a clip, decoded from the asset.
+    ///
+    /// ⚠️ TOLERANT ON PURPOSE, in both directions. `requestedTimeToleranceAfter`
+    /// is `.positiveInfinity` because an HLS ladder has no frame at exactly
+    /// zero and an exact request simply fails; and the whole thing is wrapped in
+    /// a timeout because these are PUBLIC TEST HOSTS — the same rule the image
+    /// fetcher already keeps, that a fixture convenience must never be the
+    /// reason nothing shows. A miss returns nil and the surface falls to its
+    /// next rung, which is black.
+    private nonisolated static func frameZero(ofClipAt source: String) async -> Data? {
+        guard let url = URL(string: source) else { return nil }
+        let work = Task.detached(priority: .utility) { () -> Data? in
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.appliesPreferredTrackTransform = true
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .positiveInfinity
+            generator.maximumSize = CGSize(width: 1080, height: 1080)
+            guard let frame = try? await generator.image(at: .zero).image else { return nil }
+            return UIImage(cgImage: frame).pngData()
+        }
+        // ⚠️ A DEADLINE, because these are PUBLIC TEST HOSTS. The same rule the
+        // image fetcher already keeps: a fixture convenience must never be the
+        // reason nothing shows.
+        let timeout = Task.detached(priority: .utility) { () -> Data? in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            work.cancel()
+            return nil
+        }
+        let data = await work.value
+        timeout.cancel()
+        guard let data else {
+            #if DEBUG
+            print("[poster] MISS frame0 src=\(source)")
+            #endif
+            return nil
+        }
+        return data
     }
 
     private(set) lazy var videoPlayback: VideoPlaybackController = {

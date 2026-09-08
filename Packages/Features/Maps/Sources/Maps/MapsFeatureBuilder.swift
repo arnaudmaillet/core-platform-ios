@@ -111,8 +111,21 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
                     // ever carrying both.
                     guard pin.isText else {
                         let base = pin.postID.rawValue.split(separator: "#").first.map(String.init)
-                        guard let sheet = previews[pin.postID]
-                            ?? base.flatMap({ previews[PostID($0)] }) else { return pin }
+                        let sheet = previews[pin.postID]
+                            ?? base.flatMap({ previews[PostID($0)] })
+                        #if DEBUG
+                        // `-maps-log-sheets`: the ONE question four rounds of
+                        // fixture archaeology never actually asked — does a
+                        // sheet id reach this pin? The HUD's `sheets=` counts
+                        // ADVANCING sheets, so it reads zero for a marker that
+                        // is wearing one perfectly, and every conclusion drawn
+                        // from it was unfounded.
+                        if ProcessInfo.processInfo.arguments.contains("-maps-log-sheets") {
+                            print("[sheet] \(pin.postID.rawValue) kind=\(pin.kind)"
+                                  + " sheet=\(sheet ?? "nil") seeded=\(previews.count)")
+                        }
+                        #endif
+                        guard let sheet else { return pin }
                         return pin.previewing(sheet)
                     }
                     var decorated = pin

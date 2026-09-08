@@ -102,17 +102,25 @@ public struct MockSocialDataset: Sendable {
     /// image, text), so all three profile tabs have something: the mosaic, the
     /// timeline, and Short.
 
-    /// ⚠️ EVERY MEDIA POST IS A VIDEO, for now.
+    /// Whether every post that has media is a VIDEO, or the corpus runs on its
+    /// honest thirds (video, image, text).
     ///
-    /// A product decision while the video path is the one under work: photographs
-    /// are set aside so the map and the feed exercise video everywhere a post has
-    /// media. The photo branches are DELIBERATELY LEFT IN PLACE below rather than
-    /// deleted — they are correct, they are tested, and this is a switch rather
-    /// than a removal. Flip it back and the corpus returns to thirds.
+    /// Was `true` while the video path was the one under work — photographs set
+    /// aside so the map and the feed exercised video everywhere a post had
+    /// media. Back to `false`: a hero flight's behaviour on a PHOTOGRAPH is not
+    /// deducible from its behaviour on a clip, and a corpus with no photographs
+    /// cannot answer the question at all. The two differ in the one place that
+    /// matters for a transition — a photo surface has no player, no first-frame
+    /// gate and no aspect-fill of a 1280x720 landscape source magnified ~3.9x
+    /// into a portrait card.
+    ///
+    /// The photo branches were deliberately left in place rather than deleted
+    /// while the switch was off, so this is one edit and not an excavation. The
+    /// venue quotas move with it — see `MockGeoDiscoveryService`.
     ///
     /// What it does NOT change: `hasMedia`, so text-only posts stay exactly as
     /// they were and the text/media split is untouched.
-    static let mediaIsAlwaysVideo = true
+    static let mediaIsAlwaysVideo = false
 
     static func viewerRecords(mediaCatalog: MediaCatalog, after count: Int) -> [PostRecord] {
         let captions = [
@@ -600,11 +608,24 @@ public struct MockSocialDataset: Sendable {
     /// still falls back to a deterministic pick — a marker that previews the
     /// wrong clip is a mock-fidelity gap, where a photograph that previews ANY
     /// clip was a lie about what the post is.
+    /// ⚠️ THE OPENING SEGMENT, NOT ONE PICKED BY POST INDEX.
+    ///
+    /// Spreading posts across a clip's segments made the map look varied and
+    /// made "frame 0" a lie: a marker's cover is the cell 0 of the sheet it
+    /// wears, so a post seeded with segment 7 had a cover that was the first
+    /// frame of the middle of the film, while the page it opened resolved a
+    /// different segment again. Filmed as a marker showing a black title card
+    /// over a post whose flight animated a forest.
+    ///
+    /// The cost is real and deliberate: every post of the same clip now
+    /// previews the same footage. The invariant is worth more than the variety
+    /// — and the variety was fictional anyway, since two clips carry the whole
+    /// corpus.
+    ///
+    /// `index` is kept for the signature's callers and no longer read.
     static func previewSheet(for url: String, in catalogue: [String], index: Int) -> String? {
         guard let clip = MockMediaFixtures.bakedClip(for: url) else { return nil }
-        let segments = catalogue.filter { $0.hasPrefix("\(clip)-") }
-        guard !segments.isEmpty else { return nil }
-        return segments[abs(index) % segments.count]
+        return MockMediaFixtures.openingSegment(ofClip: clip, in: catalogue)
     }
 
     /// The trailing digits of `post-0007`. Nil when there are none, which keeps

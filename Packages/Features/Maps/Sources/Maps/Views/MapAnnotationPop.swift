@@ -71,6 +71,8 @@ final class MapAnnotationPopChoreographer {
     /// so the key is identity — a reused view starting a new pop-in is what
     /// retires the stale animator still pointing at it.
     private var arrivals: [ObjectIdentifier: UIViewPropertyAnimator] = [:]
+    /// Markers on the map, at zero, waiting for a picture — see `hold`.
+    private var held: Set<ObjectIdentifier> = []
 
     /// In-flight departures, keyed by the caller's stable identity (encoding
     /// single-vs-cluster so a pin and the cluster it collapses into never share
@@ -106,11 +108,53 @@ final class MapAnnotationPopChoreographer {
     /// "leave it alone" would leave some markers invisible.
     func settle(_ views: [MKAnnotationView]) {
         for view in views {
+            held.remove(ObjectIdentifier(view))
             arrivals.removeValue(forKey: ObjectIdentifier(view))?.stopAnimation(true)
             view.alpha = 1
             view.transform = .identity
         }
     }
+
+    /// Holds a freshly added marker at zero because it has nothing to show yet.
+    ///
+    /// ⚠️ THE POP IS GATED, NOT THE ADD. Withholding an annotation from the map
+    /// breaks four things at once: a survivor is refreshed through
+    /// `mapView.view(for:)`, so a withheld one is never `configure`d again and
+    /// its picture is never even REQUESTED; taps arrive through the view's own
+    /// recognizer, so it is untappable; the prewarm reads `annotations(in:)`;
+    /// and both hero lookups require containment in `mapView.annotations`, so
+    /// it can be neither flown to nor flown from. Holding the view invisible
+    /// costs none of that — this class already owned the state "exists but is
+    /// not yet visible".
+    ///
+    /// `deadline` is not optional. A picture that never resolves would
+    /// otherwise leave a permanent hole in the map, and the ladder's last rung
+    /// is black — a marker standing on it is a legitimate answer, just not the
+    /// first one to reach for.
+    func hold(_ views: [MKAnnotationView], deadline: TimeInterval = 2.5) {
+        for view in views {
+            let key = ObjectIdentifier(view)
+            arrivals.removeValue(forKey: key)?.stopAnimation(true)
+            view.alpha = 0
+            view.transform = MapAnnotationPop.collapsedTransform
+            held.insert(key)
+            Task { @MainActor [weak self, weak view] in
+                try? await Task.sleep(nanoseconds: UInt64(deadline * 1_000_000_000))
+                guard let self, let view, self.held.contains(ObjectIdentifier(view)) else { return }
+                self.release(view)
+            }
+        }
+    }
+
+    /// Lets a held marker in, now that it has something to show. A no-op for a
+    /// view that was never held, so a late report cannot re-pop a settled pin.
+    func release(_ view: MKAnnotationView) {
+        guard held.remove(ObjectIdentifier(view)) != nil else { return }
+        popIn([view])
+    }
+
+    /// Whether this view is waiting on its picture.
+    func isHolding(_ view: MKAnnotationView) -> Bool { held.contains(ObjectIdentifier(view)) }
 
     func popIn(_ views: [MKAnnotationView]) {
         for (index, view) in views.enumerated() {

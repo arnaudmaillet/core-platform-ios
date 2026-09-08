@@ -85,6 +85,46 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     static let textOnlyVenue = Venue(name: "text-only", lat: 48.8480, lng: 2.3660)
     static let mediaOnlyVenue = Venue(name: "media-only", lat: 48.8500, lng: 2.3380)
 
+    /// ⚠️ LONE VIDEO ADDRESSES, because the scatter never puts a video here and
+    /// a venue always clusters one.
+    ///
+    /// Measured with `-maps-log-pins`, the opening viewport received 3 photo and
+    /// 2 text as scatter pins and 8 photo / 8 text / 8 video as venue members —
+    /// so every video that reached the map was a cluster member, and a cluster
+    /// draws ONE face. The result on screen was four separate photographs
+    /// against a single sprite sheet, which reads as "the map has almost no
+    /// video" even though the corpus in view is 8 video against 7 photo.
+    ///
+    /// Freeing the videos from the venues does not help: released posts fall
+    /// back to an id-derived scatter coordinate and none of those lands inside
+    /// the home viewport. Measured with both video quotas at zero — the answer
+    /// did not move.
+    ///
+    /// So video gets what photographs already have by accident: its own
+    /// addresses, one post each. Spaced beyond a collision cell (~0.014° at the
+    /// opening zoom) from each other and from the three venues, so each stays a
+    /// marker of its own rather than merging into anything.
+    /// ⚠️ THE COLLISION CELL IS TWICE AS WIDE IN LONGITUDE, and that is what
+    /// swallowed the first two attempts at these.
+    ///
+    /// Measured rather than estimated: the opening tile answers for
+    /// `lat 48.8130..48.9124, lng 2.3072..2.3972` — 0.0994° of latitude over
+    /// 874pt and 0.0900° of longitude over 402pt. So `MapClusterEngine`'s 64pt
+    /// merge threshold is **0.0073° of latitude but 0.0143° of longitude**. Two
+    /// addresses placed 0.012° from a venue were comfortably clear on latitude
+    /// and inside one cell on longitude, so they merged into it and only one of
+    /// three ever became its own marker — which reads exactly like the
+    /// assignment silently failing.
+    ///
+    /// These are ≥0.019° from every venue and from each other in longitude, and
+    /// well inside the measured window.
+    static let loneVideoPins = [
+        Venue(name: "lone-video-1", lat: 48.8900, lng: 2.3200),
+        Venue(name: "lone-video-2", lat: 48.8250, lng: 2.3850),
+        Venue(name: "lone-video-3", lat: 48.8850, lng: 2.3850)
+    ]
+
+
     /// Walks the corpus in order and hands the first few posts of each kind to
     /// a venue, so the assignment is deterministic and survives a reseed.
     ///
@@ -124,11 +164,43 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // decides the map's whole composition by accident. Measured before this,
         // in the default viewport: photo 7, text 8, video 3, from a corpus that
         // is an exact 40/40/40.
+        // ⚠️ SHEETED VIDEOS FIRST, and this is what puts a sprite sheet on the
+        // map at all.
+        //
+        // One video fixture in three is `mock://video/square-1`, which has no
+        // frames to bake from on purpose — a post carrying it wears its cover,
+        // and that fallback is the ladder working. But a venue draws its video
+        // members in corpus order and a cluster wears its REPRESENTATIVE's
+        // sheet, so the one video-led marker on the map elected `post-0015`,
+        // whose fixture is exactly that one. Measured end to end:
+        // `[sheet] post-0015 kind=video sheet=nil`, then
+        // `[cluster] rep=post-0015 face=media sheet=nil catalog=ok`, and
+        // `sheets_bound=0` — with nothing broken anywhere in the chain.
+        //
+        // A venue is the map's shop window. Ordering the draw so the posts that
+        // CAN show what a video is come first costs nothing, changes no post's
+        // content, and leaves the sheetless fixture reachable everywhere else —
+        // which is where the cover fallback is supposed to be exercised.
         var video = posts.lazy
             .filter { $0.media.map { MockMediaFixtures.isVideoURL($0.url) } ?? false }
+            .sorted { lhs, rhs in
+                let l = lhs.media.flatMap { MockMediaFixtures.bakedClip(for: $0.url) } != nil
+                let r = rhs.media.flatMap { MockMediaFixtures.bakedClip(for: $0.url) } != nil
+                return l && !r
+            }
             .map(\.postID).makeIterator()
         var photo = posts.lazy
             .filter { $0.media.map { !MockMediaFixtures.isVideoURL($0.url) } ?? false }
+            .map(\.postID).makeIterator()
+        // A video post that can actually SHOW what a video post is: the
+        // sheetless synthetic fixture would give these addresses a still, which
+        // is the one thing they exist to avoid.
+        var sheeted = posts.lazy
+            .filter {
+                guard let media = $0.media, MockMediaFixtures.isVideoURL(media.url)
+                else { return false }
+                return MockMediaFixtures.bakedClip(for: media.url) != nil
+            }
             .map(\.postID).makeIterator()
         func assign(_ venue: Venue, text textCount: Int, video videoCount: Int, photo photoCount: Int) {
             for _ in 0..<textCount { if let id = text.next() { assignments[id] = venue } }
@@ -156,15 +228,51 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // The venues keep their meanings: the text-only one takes only text, the
         // media-only one takes no text, and the mixed one spans all three —
         // which `aTextFacedMixedClusterOpensBothKinds` rests on.
-        // ⚠️ THE PHOTO QUOTAS ARE ZERO, NOT DELETED. While
-        // `MockSocialDataset.mediaIsAlwaysVideo` is on there are no photo posts
-        // to draw, and a quota asking for some would silently get nothing —
-        // `assign` stops when its iterator runs dry. Writing the zeros keeps the
-        // shape of the balance visible, so flipping the switch back is one edit
-        // here and not an archaeology exercise.
-        assign(mixedVenue, text: 6, video: 6, photo: 0)
+        // The photo quotas are back: `MockSocialDataset.mediaIsAlwaysVideo` is
+        // off, so the corpus draws its honest thirds again and a quota asking
+        // for photographs gets them. They were written as ZEROS rather than
+        // deleted while the switch was on, which is why restoring them is this
+        // edit and not an excavation.
+        assign(mixedVenue, text: 4, video: 4, photo: 4)
         assign(textOnlyVenue, text: 4, video: 0, photo: 0)
-        assign(mediaOnlyVenue, text: 0, video: 6, photo: 0)
+        // ⚠️ THE MEDIA-ONLY VENUE TAKES NO PHOTOGRAPHS, and that is what puts a
+        // sprite sheet on the map.
+        //
+        // A cluster wears its REPRESENTATIVE's sheet, and the representative is
+        // the most-liked member — which no draw order controls. Traced: with
+        // the venue evenly mixed the face went to `post-0013`, a photograph;
+        // before that, to `post-0015`, a video whose fixture is the synthetic
+        // one with no frames to bake. Video-only members, drawn sheeted-first,
+        // make every candidate a marker that can show what a video post is, so
+        // whichever wins carries a sheet.
+        //
+        // Photographs are not scarce: the mixed venue still takes four, and the
+        // scatter is mostly photo.
+        //
+        // ⚠️ AND THESE QUOTAS CANNOT PUT A LONE VIDEO *PIN* ON THE MAP, which
+        // is a different thing and worth knowing before the next person tries.
+        //
+        // With the corpus on honest thirds the default viewport shows
+        // `kinds=photo:3,text:1` — no lone video pin. That looks like a venue
+        // balance problem and is not one: measured by setting BOTH video quotas
+        // to zero, so no video post was absorbed at all, the answer did not
+        // move. Venue members are CLUSTER members and are never lone pins, and
+        // a scatter post's coordinate is derived from its id, so which posts
+        // fall inside the home viewport is fixed and none of them happens to be
+        // a video. That is the condition `mediaIsAlwaysVideo = true` was
+        // papering over, not a regression from turning it off.
+        //
+        // `-maps-force-video` is the flag that exists for exercising the video
+        // pin path; widening the region or panning reaches the others.
+        assign(mediaOnlyVenue, text: 0, video: 4, photo: 0)
+        // ⚠️ LAST, so these WIN. `sheeted` is a separate iterator that also
+        // starts at the head of the corpus, so drawing them first only had the
+        // venues re-assign the very same posts a line later — measured, the
+        // pins simply vanished. Assigned last they take their post back out of
+        // whatever venue claimed it, which costs that venue one member.
+        for address in loneVideoPins {
+            if let id = sheeted.next() { assignments[id] = address }
+        }
         return assignments
     }
 
@@ -185,19 +293,66 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     ///   which is the whole point of the contract ask. Its `mock-kind=video`
     ///   marker is what `GeoDiscoveryRepository.kind(for:)` matches on.
     static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
+        // ⚠️ A VIDEO POST'S MARKER SHOWS ITS OWN CLIP'S FIRST FRAME, and this
+        // is the line that used to make that false.
+        //
+        // It answered `imageURL(index: url.count)` — a stock photograph chosen
+        // by the LENGTH OF THE VIDEO'S URL. A picture of somewhere else, bound
+        // to a post it has nothing to do with, on the marker AND on the card
+        // that flies off it. Filmed: a marker whose post was a build log flew a
+        // photograph of a sky, and the page behind it was a forest.
+        //
+        // The sheet the marker animates already carries the answer, and the
+        // feed's poster already asks for it this way
+        // (`MockSocialServices.makeAttachment`), so the two ends of a flight
+        // are now one picture rather than two. Whatever the catalog: under the
+        // synthetic one this line used to hand an image pipeline a video URL,
+        // which decodes to nothing and is the empty marker.
+        if MockMediaFixtures.isVideoURL(url), let clip = MockMediaFixtures.bakedClip(for: url) {
+            let frameZero = "\(MockMediaFixtures.previewPosterScheme)\(clip)"
+            // ⚠️ The kind stamp has to survive: `GeoDiscoveryRepository.kind(for:)`
+            // matches on that string and NOTHING else, so dropping it leaves the
+            // map with no video pins at all. Only the real-asset catalog stamped
+            // before, and changing that would reclassify every synthetic pin.
+            return catalog == .realAssets ? "\(frameZero)?\(Self.videoKindMarker)" : frameZero
+        }
         guard catalog == .realAssets else { return url }
-        // ⚠️ Under the FORCE flag, every covered pin becomes a video pin.
+        // ⚠️ THE ANNOTATION DESCRIBES THE POST, AND THE FLAG DOES NOT GET TO
+        // LIE ABOUT THAT.
         //
-        // It used to force only posts whose media was already a video, which is
-        // one third of the corpus — and after clustering, none of those survived
-        // as a LONE pin in the default viewport, so the playback path had
-        // literally never run. A flag named `-maps-force-video` that produces
-        // zero playing videos is a flag that measures nothing.
+        // This used to read `isVideoURL(url) || forcesMapVideo`, so under
+        // `-maps-force-video` EVERY covered pin became a video pin — a
+        // photograph's marker wearing a play badge and a looping clip that was
+        // not its post's. It was reached for because forcing only real video
+        // posts left none as a lone pin in the default viewport, and "a flag
+        // that produces zero playing videos measures nothing". True, and it
+        // bought the measurement by breaking the rule the map exists to keep:
+        // a video post wears a sprite sheet (or its thumbnail), a photo or
+        // gallery wears the post, a text post wears its icon or its author.
+        // Filmed once photographs were back in the corpus — annotations playing
+        // video over posts that are stills, which is not a thing the product can
+        // ever do.
         //
-        // Outside the flag the old rule stands: a real video post gets a still,
-        // because handing the raw video URL to an image view renders a blank pin.
-        guard MockMediaFixtures.isVideoURL(url) || forcesMapVideo else { return url }
-        guard forcesMapVideo else {
+        // So the flag now only changes WHAT A VIDEO POST'S PIN PLAYS, never
+        // which posts are video. A photo post is returned untouched.
+        guard MockMediaFixtures.isVideoURL(url) else { return url }
+        // ⚠️ AN ANNOTATION NEVER HOLDS A PLAYER — sprite sheet, gif, lottie or
+        // still, and nothing else.
+        //
+        // `-maps-force-video` used to hand a video pin a PLAYABLE loop url so
+        // the map's playback path could be exercised, and that put a real
+        // `AVPlayer` behind a 44pt marker. In production it cannot happen —
+        // `previewVideoURL` returns nil, so `MapVideoPlaybackCoordinator` never
+        // gets a candidate — so the flag was the only thing that could ever
+        // produce it, and what it produced was a picture of the product that
+        // the product does not have. A marker's motion comes from a BAKED
+        // SHEET; a player on one is a defect however it got there.
+        //
+        // So the flag now only decides which posts a pin can be seen as, never
+        // what it plays: every video pin gets the stamped still, and its motion
+        // comes from `previewSheetID` like it does in a release build.
+        let neverPlayable = true
+        guard forcesMapVideo, !neverPlayable else {
             // A still, because handing a raw video URL to an image view renders
             // a blank pin — but STAMPED, so the pin can say what its post is.
             //
@@ -213,8 +368,11 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             // A query item the origin ignores, mirroring the discriminator
             // below. It is a mock standing in for field 5, and it disappears the
             // day field 5 ships.
-            let still = MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
-            return "\(still)?\(Self.videoKindMarker)"
+            // No baked sheet for this clip — so the frame comes from the clip
+            // itself. Still the post's own first frame, never a photograph of
+            // somewhere else, and still something the image pipeline can
+            // render, which is what a pin's single URL has to be.
+            return "\(MockMediaFixtures.frameZeroURL(for: url))&\(Self.videoKindMarker)"
         }
         // ⚠️ ONE FIXTURE, DISTINCT URLS — and the distinctness is the fixture's
         // whole job now.
@@ -299,6 +457,16 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         filter: String?
     ) -> Result<GeoDiscovery_V1_QueryTileResponse, ConnectError> {
         let viewport = request.viewport
+        #if DEBUG
+        // The window the tile actually answers for. Estimating it from the
+        // screen's aspect put two deliberate addresses outside it, and a pin
+        // that is filtered here looks exactly like one that was never assigned.
+        if ProcessInfo.processInfo.arguments.contains("-maps-log-pins") {
+            print(String(format: "[viewport] lat %.4f..%.4f  lng %.4f..%.4f",
+                         viewport.swLat, viewport.neLat,
+                         viewport.swLng, viewport.neLng))
+        }
+        #endif
         var response = GeoDiscovery_V1_QueryTileResponse()
 
         let pins = dataset.posts.enumerated().compactMap { index, post -> GeoDiscovery_V1_RadarPin? in
@@ -315,8 +483,14 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
                 let kind = post.media.map {
                     MockMediaFixtures.isVideoURL($0.url) ? "video" : "photo"
                 } ?? "text"
+                // The venue's NAME, not merely "in a venue": the three
+                // `loneVideoPins` are venues of one, and picking a pin to open
+                // by hand needs to tell those apart from a crowd of twelve.
+                // The URL too: "this marker is empty" and "this marker was
+                // given a picture it cannot render" look identical on screen.
                 print("[pins] \(post.postID) \(kind) "
-                      + "\(venues[post.postID] != nil ? "venue" : "scatter")")
+                      + "\(venues[post.postID]?.name ?? "scatter") "
+                      + "url=\(post.media.map { Self.pinURL(forMediaURL: $0.url, catalog: dataset.mediaCatalog) } ?? "-")")
             }
             #endif
             var pin = GeoDiscovery_V1_RadarPin()

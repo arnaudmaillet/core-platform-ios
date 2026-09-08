@@ -555,6 +555,12 @@ extension PostGridFlightCard: ZoomFlightCard {
 
     var zoomLiveMediaNativeSize: CGSize? { videoRenderView.nativeVideoSize }
 
+    /// The tile's own cover — see `ZoomFlightCard.zoomCoverSurface`.
+    var zoomCoverSurface: UIView? { imageView }
+
+    /// See `ZoomFlightCard.zoomLiveMediaContentRect`.
+    var zoomLiveMediaContentRect: CGRect? { videoRenderView.debugVideoRect }
+
     /// True when the card has no live media (the cover is the content and is
     /// always drawing), or when the live surface it adopted is genuinely
     /// visible and rendering. False is the interesting answer: it means the

@@ -105,10 +105,23 @@ public enum MockMediaFixtures {
     /// The `mock-kind=video` query item is a marker, not a server parameter —
     /// it lets `GeoDiscoveryRepository.kind(for:)` keep recognising a
     /// video pin by URL shape under `-maps-force-video` now that the URL is no
-    /// longer `mock://video/…`. The origin ignores it (verified 206).
+    /// longer `mock://video/…`. The origin ignores it.
+    ///
+    /// ⚠️ WAS `www.w3schools.com/html/mov_bbb.mp4`, AND THAT HOST NOW SERVES
+    /// **403** TO NON-BROWSER CLIENTS. The note here used to read "the origin
+    /// ignores it (verified 206)", which was true when it was written and
+    /// silently stopped being true. Nothing in the app reports it: a 403 on a
+    /// video is a page that stays black for ever, and because this clip is also
+    /// in the POST catalogue below, the failure showed up as an ordinary post
+    /// whose media never starts — filmed and reported as "a video in the mock
+    /// that does not work".
+    ///
+    /// A fixture URL is a dependency on somebody else's hosting policy. When
+    /// one of these goes quiet, check it with a ranged GET rather than a
+    /// browser: `curl -o /dev/null -w '%{http_code}' -r 0-1023 <url>`.
     public static let mapPreviewLoop = Video(
-        url: "https://www.w3schools.com/html/mov_bbb.mp4?mock-kind=video",
-        width: 320, height: 176
+        url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4?mock-kind=video",
+        width: 640, height: 360
     )
 
     // MARK: - Composed video catalog
@@ -226,9 +239,79 @@ public enum MockMediaFixtures {
     /// from its own preview catalogue; nothing fetches it over the wire.
     public static let previewPosterScheme = "mock://preview/"
 
+    /// The scheme a clip's OWN FIRST FRAME is served under, for clips that have
+    /// no baked sheet — the HLS ladders and anything else `bakedClip` does not
+    /// name. The app decodes it with `AVAssetImageGenerator` and the pipeline
+    /// caches the result by URL, so it runs once per clip per session.
+    ///
+    /// ⚠️ IT EXISTS SO THE ANSWER IS NEVER A PHOTOGRAPH OF SOMEWHERE ELSE. A
+    /// pin's single URL has to be something the surface can render, and the
+    /// two ways to satisfy that are a frame of the post's own clip or a stock
+    /// picture of something unrelated. The second was what shipped, and it put
+    /// a sky on a marker whose post was a build log.
+    public static let frameZeroScheme = "mock://frame0/"
+
+    /// The catalogue id of a clip's OPENING segment.
+    ///
+    /// ⚠️ ONE RULE, TWO CALLERS, and that is the whole point. The marker wears
+    /// a sheet and its cover is that sheet's cell 0 — but the seeding picked a
+    /// segment by post index while the poster resolved `ids.first(where:)`, so
+    /// a marker animated one part of the film while its cover, and the page it
+    /// opened, showed the first frame of ANOTHER part. Both ask here now, and
+    /// "frame 0" means the same picture everywhere.
+    ///
+    /// Lowest numeric suffix, not `first`: the catalogue's order is whatever
+    /// the bundle enumerated, and `bigbuckbunny-11` sorts before
+    /// `bigbuckbunny-2` as text.
+    public static func openingSegment(ofClip clip: String, in catalogue: [String]) -> String? {
+        catalogue
+            .filter { $0.hasPrefix("\(clip)-") }
+            .min { lhs, rhs in segmentIndex(of: lhs) < segmentIndex(of: rhs) }
+    }
+
+    private static func segmentIndex(of id: String) -> Int {
+        Int(id.reversed().prefix { $0.isNumber }.reversed().map(String.init).joined()) ?? .max
+    }
+
+    /// ⚠️ THE SOURCE IS PERCENT-ENCODED WHOLE, which is not decoration. Left
+    /// readable, a request for `mock://frame0/?src=mock://video/7` contains the
+    /// literal `mock://video/`, and `isVideoURL` — a substring test — would
+    /// call the still a video. Encoding removes the substring rather than
+    /// teaching every reader about the exception.
+    public static func frameZeroURL(for videoURL: String) -> String {
+        let encoded = videoURL.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? videoURL
+        return "\(frameZeroScheme)?src=\(encoded)"
+    }
+
+    /// The clip a frame-zero request is about, or nil if it is not one.
+    public static func frameZeroSource(of url: String) -> String? {
+        guard url.hasPrefix(frameZeroScheme),
+              let items = URLComponents(string: url)?.queryItems
+        else { return nil }
+        return items.first { $0.name == "src" }?.value
+    }
+
+    /// ⚠️ THREE OF THESE URLS ARE THE SAME FILM, and saying so is what puts
+    /// sprite sheets back on the map.
+    ///
+    /// Only two clips have baked sheets (`App/Resources/MapPreviews`), and this
+    /// table used to name exactly two URLs — so five of the seven video
+    /// fixtures resolved to `nil` and their markers fell back to a cover. That
+    /// was invisible while every media post was a video, because some visible
+    /// marker almost always held one of the two; with the corpus back on
+    /// honest thirds it became "the sprite sheets are gone from the
+    /// annotations", measured as `sheets=0` with two resident and none bound.
+    ///
+    /// `bigBuckBunny720`, `longRunning` and `mapPreviewLoop` are all Big Buck
+    /// Bunny at different encodes and lengths, so a sheet baked from one IS a
+    /// sample of the others' own footage — which is the rule
+    /// `previewSheetIDsByPostID` insists on. Sintel is a different film and
+    /// keeps its own. The HLS ladders are left out on purpose: they are there
+    /// to exercise manifest handling, and a still sampled from a variant
+    /// stream is not obviously the post's own frame.
     public static func bakedClip(for url: String) -> String? {
         switch url {
-        case bigBuckBunny720.url: "bigbuckbunny"
+        case bigBuckBunny720.url, longRunning.url, mapPreviewLoop.url: "bigbuckbunny"
         case sintelTrailer.url: "sinteltrailer"
         default: nil
         }
@@ -253,6 +336,11 @@ public enum MockMediaFixtures {
     /// `video/*` type, so the client's real routing rule
     /// (`MediaCore.MediaKind`) is exercised rather than side-stepped.
     public static func mimeType(for url: String) -> String {
+        // The two still schemes answer PICTURES, whatever they are about. Asked
+        // before anything else because a frame-zero request names a clip, and
+        // reading the answer off the subject rather than off the request is how
+        // a still gets classified as a video.
+        if url.hasPrefix(previewPosterScheme) || url.hasPrefix(frameZeroScheme) { return "image/png" }
         let path = URLComponents(string: url)?.path.lowercased() ?? url.lowercased()
         if path.hasSuffix(".m3u8") { return "application/vnd.apple.mpegurl" }
         if isVideoURL(url) { return "video/mp4" }

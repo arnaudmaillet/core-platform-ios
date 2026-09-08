@@ -104,6 +104,28 @@ public final class AnimatedIconView: UIView {
     private var art: AnimatedIconArt?
     private var phase = 0
 
+    /// What an ICON does with its face: fills it. An icon is authored for the
+    /// marker it is drawn on, and its plate is square in a square face, so
+    /// stretching and aspect-filling are the same operation.
+    static let defaultContentGravity: CALayerContentsGravity = .resize
+
+    /// How the artwork fits the view. `.resize` for a mark; a PHOTOGRAPHIC
+    /// sheet needs `.resizeAspectFill`.
+    ///
+    /// ⚠️ A VIDEO PREVIEW IS NOT AN ICON. The cells of a preview sheet are
+    /// frames of a film, and this view is full-bleed inside a card that travels
+    /// from a 56pt square to a 402x874 page — so `.resize` stretched the picture
+    /// to the card's aspect at every step. Filmed: the trunk of a tree thin and
+    /// elongated through the whole present, against a settled page where it is
+    /// not. It also broke the rung below it: the cover under the sheet is
+    /// `.scaleAspectFill`, so the two layers of one picture disagreed.
+    public var contentGravity: CALayerContentsGravity = AnimatedIconView.defaultContentGravity {
+        didSet {
+            sheetView.layer.contentsGravity = contentGravity
+            markView.layer.contentsGravity = contentGravity
+        }
+    }
+
     public override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
@@ -115,7 +137,7 @@ public final class AnimatedIconView: UIView {
             view.isUserInteractionEnabled = false
             view.backgroundColor = .clear
             view.isHidden = true
-            view.layer.contentsGravity = .resize
+            view.layer.contentsGravity = Self.defaultContentGravity
             view.layer.contentsScale = UIScreen.main.scale
             view.layer.magnificationFilter = .trilinear
             view.layer.minificationFilter = .trilinear

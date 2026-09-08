@@ -335,11 +335,14 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // Gated on the same answer the destination was given, so a page that
         // stood its playback down is never asked for a player it deliberately
         // does not have.
-        if !source.zoomFlightCarriesLivePlayer, let destination {
-            ZoomLiveMediaRetry.arm(
-                card: flight.card, pageSize: flight.pageFrame.size, mirroring: destination
-            )
-        }
+        let arrivingMedia: ZoomLiveMediaRetry? =
+            if !source.zoomFlightCarriesLivePlayer, let destination {
+                ZoomLiveMediaRetry.arm(
+                    card: flight.card, pageSize: flight.pageFrame.size, mirroring: destination
+                )
+            } else {
+                nil
+            }
 
         #if DEBUG
         Self.debugTrackFlightGeometry(card: flight.card)
@@ -354,6 +357,24 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             initialVelocity: CGVector(dx: 0, dy: ZoomFlight.springVelocity)
         )
         let animator = UIViewPropertyAnimator(duration: duration, timingParameters: spring)
+        // ⚠️ THE LATE PICTURE JOINS THIS ANIMATION rather than chasing it. The
+        // page's player arrives mid-flight, after the pose block below has run,
+        // and a display link posing it from the presentation is a frame behind
+        // by construction — measured at -47.6% of the card's width at the
+        // fastest part of a present. Adding its landing pose here puts it on
+        // the card's own curve, so it can be SEEN to arrive in the window
+        // instead of appearing on the settled page.
+        arrivingMedia?.joinFlight = { [weak animator] work in
+            guard let animator, animator.state != .stopped else { return false }
+            animator.addAnimations(work)
+            return true
+        }
+        #if DEBUG
+        ZoomGeometrySampler.shared.start(card: flight.card, label: "present")
+        animator.addCompletion { _ in
+            MainActor.assumeIsolated { ZoomGeometrySampler.shared.stop() }
+        }
+        #endif
         animator.addAnimations {
             #if DEBUG
             ZoomFlightProfiler.shared.note("pose block >")
