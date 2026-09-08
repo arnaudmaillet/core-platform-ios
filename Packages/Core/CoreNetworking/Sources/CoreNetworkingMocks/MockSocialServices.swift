@@ -211,8 +211,13 @@ public final class MockSocialServices: @unchecked Sendable {
         // resolves the scheme from the sheet it already holds.
         attachment.thumbnailURL = if let clip = MockMediaFixtures.bakedClip(for: url) {
             "\(MockMediaFixtures.previewPosterScheme)\(clip)"
-        } else if MockMediaFixtures.isVideoURL(url) && !url.hasPrefix("mock://") {
-            MockMediaFixtures.imageURL(index: width &+ height, width: width, height: height)
+        } else if MockMediaFixtures.isVideoURL(url) {
+            // ⚠️ NOT A PHOTOGRAPH. This branch used to hand a clip with no baked
+            // sheet a stock picture, which is the same lie the map's pin URL
+            // told: a picture of somewhere else standing in for a frame we do
+            // not have from a SHEET — so it comes from the clip itself, which
+            // is the same picture by a slower route.
+            MockMediaFixtures.frameZeroURL(for: url)
         } else {
             url
         }

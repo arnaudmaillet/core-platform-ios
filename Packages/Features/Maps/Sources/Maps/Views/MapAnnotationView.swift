@@ -247,18 +247,31 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
             }
             return
         }
-        // ⚠️ A PIN WITH A PREVIEW FETCHES NO COVER. Its cover is the preview's
-        // own first frame, set the moment the sheet lands. Fetching the wire's
-        // thumbnail as well put a PHOTOGRAPH on the marker for as long as the
-        // catalogue took to answer — a picture of something else, swapped out
-        // once the clip arrived. The wire's still is a stand-in for a frame the
-        // backend does not generate; where we have the frame, it is not needed.
-        guard !pin.hasPreviewSheet else { return }
+        // ⚠️ A PIN WITH A PREVIEW FETCHES THE COVER AND HOLDS IT BACK.
+        //
+        // It used to refuse the fetch outright, because the wire's still was a
+        // PHOTOGRAPH OF SOMETHING ELSE and putting it on the marker until the
+        // catalogue answered was a picture of another post. That reasoning was
+        // about the wire's content, and the wire's content has changed: a video
+        // post's thumbnail is now its own clip's frame zero, the same picture
+        // the sheet opens on.
+        //
+        // What the refusal cost was the THIRD RUNG. `hasPreviewSheet` asks
+        // whether an id was SEEDED, not whether art RESOLVED — so a pin whose
+        // sheet never lands (catalogue miss, eviction, `-map-previews-unavailable`)
+        // had nothing at all to fall to, and stood on its ground. Filmed as
+        // black squares on the map.
+        //
+        // So the ladder is honest at last: the sheet wins where it lands, the
+        // thumbnail stands in where it does not, and the two are one picture.
         guard !pin.isText, let url = pin.thumbnailURL else { return }
         let id = pin.postID
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
+            // The sheet outranks it, and may have landed while this was in
+            // flight — its frame zero is already in the cover.
+            guard self.card.wornPreview == nil else { return }
             self.card.imageView.image = image
             // If a live preview started before the thumbnail finished loading,
             // give it a poster now so the pin shows the still until the first

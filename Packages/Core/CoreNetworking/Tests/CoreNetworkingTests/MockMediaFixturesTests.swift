@@ -228,14 +228,46 @@ struct MockMediaFixturesTests {
     /// render. Without `-maps-force-video` the client treats every pin as an
     /// image, so handing it an HLS manifest or an MP4 paints a blank pin —
     /// caught in the simulator, and this is the regression guard.
-    @Test func videoPinsCarryADecodableStillByDefault() throws {
+    ///
+    /// ⚠️ AND IT MUST BE A FRAME OF THE POST'S OWN CLIP. This used to be
+    /// satisfied by a stock photograph chosen from the LENGTH of the video's
+    /// URL, which renders perfectly and is a picture of somewhere else — filmed
+    /// on the map as a marker whose post was a build log flying a photograph of
+    /// a sky. Renderable is necessary and was never sufficient.
+    @Test func videoPinsCarryAFrameOfTheirOwnClip() throws {
         try #require(!MockGeoDiscoveryService.forcesMapVideo,
                      "run without -maps-force-video")
-        let url = MockGeoDiscoveryService.pinURL(
+        // A clip with a baked sheet answers the sheet's own cell 0.
+        let sheeted = MockGeoDiscoveryService.pinURL(
+            forMediaURL: MockMediaFixtures.bigBuckBunny720.url, catalog: .realAssets
+        )
+        #expect(sheeted.hasPrefix(MockMediaFixtures.previewPosterScheme))
+        #expect(sheeted.contains(MockGeoDiscoveryService.videoKindMarker),
+                "the kind stamp is the map's only signal that a pin is a video")
+        #expect(MockMediaFixtures.mimeType(for: sheeted).hasPrefix("image/"))
+        #expect(!MockMediaFixtures.isVideoURL(sheeted))
+
+        // A clip without one answers its own first frame, decoded from the asset.
+        let bare = MockGeoDiscoveryService.pinURL(
             forMediaURL: MockMediaFixtures.appleBipBop16x9.url, catalog: .realAssets
         )
-        #expect(!MockMediaFixtures.isVideoURL(url))
-        #expect(MockMediaFixtures.mimeType(for: url).hasPrefix("image/"))
+        #expect(MockMediaFixtures.frameZeroSource(of: bare) == MockMediaFixtures.appleBipBop16x9.url)
+        #expect(bare.contains(MockGeoDiscoveryService.videoKindMarker))
+        #expect(MockMediaFixtures.mimeType(for: bare).hasPrefix("image/"))
+        #expect(!MockMediaFixtures.isVideoURL(bare),
+                "the encoded source must not make a still look like a clip")
+    }
+
+    /// The synthetic catalog carries renderable `mock://` URLs, but a video is
+    /// still a video: an image pipeline decodes nothing from one, which is the
+    /// empty marker filmed on the map.
+    @Test func syntheticVideoPinsAlsoCarryAFrame() {
+        let url = MockGeoDiscoveryService.pinURL(
+            forMediaURL: MockMediaFixtures.bigBuckBunny720.url, catalog: .synthetic
+        )
+        #expect(url.hasPrefix(MockMediaFixtures.previewPosterScheme))
+        #expect(!url.contains(MockGeoDiscoveryService.videoKindMarker),
+                "the synthetic catalog never stamped, and stamping would reclassify every pin")
     }
 
     @Test func imagePinsAreUntouched() {

@@ -293,6 +293,29 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     ///   which is the whole point of the contract ask. Its `mock-kind=video`
     ///   marker is what `GeoDiscoveryRepository.kind(for:)` matches on.
     static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
+        // ⚠️ A VIDEO POST'S MARKER SHOWS ITS OWN CLIP'S FIRST FRAME, and this
+        // is the line that used to make that false.
+        //
+        // It answered `imageURL(index: url.count)` — a stock photograph chosen
+        // by the LENGTH OF THE VIDEO'S URL. A picture of somewhere else, bound
+        // to a post it has nothing to do with, on the marker AND on the card
+        // that flies off it. Filmed: a marker whose post was a build log flew a
+        // photograph of a sky, and the page behind it was a forest.
+        //
+        // The sheet the marker animates already carries the answer, and the
+        // feed's poster already asks for it this way
+        // (`MockSocialServices.makeAttachment`), so the two ends of a flight
+        // are now one picture rather than two. Whatever the catalog: under the
+        // synthetic one this line used to hand an image pipeline a video URL,
+        // which decodes to nothing and is the empty marker.
+        if MockMediaFixtures.isVideoURL(url), let clip = MockMediaFixtures.bakedClip(for: url) {
+            let frameZero = "\(MockMediaFixtures.previewPosterScheme)\(clip)"
+            // ⚠️ The kind stamp has to survive: `GeoDiscoveryRepository.kind(for:)`
+            // matches on that string and NOTHING else, so dropping it leaves the
+            // map with no video pins at all. Only the real-asset catalog stamped
+            // before, and changing that would reclassify every synthetic pin.
+            return catalog == .realAssets ? "\(frameZero)?\(Self.videoKindMarker)" : frameZero
+        }
         guard catalog == .realAssets else { return url }
         // ⚠️ THE ANNOTATION DESCRIBES THE POST, AND THE FLAG DOES NOT GET TO
         // LIE ABOUT THAT.
@@ -345,8 +368,11 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             // A query item the origin ignores, mirroring the discriminator
             // below. It is a mock standing in for field 5, and it disappears the
             // day field 5 ships.
-            let still = MockMediaFixtures.imageURL(index: url.count, width: 256, height: 256)
-            return "\(still)?\(Self.videoKindMarker)"
+            // No baked sheet for this clip — so the frame comes from the clip
+            // itself. Still the post's own first frame, never a photograph of
+            // somewhere else, and still something the image pipeline can
+            // render, which is what a pin's single URL has to be.
+            return "\(MockMediaFixtures.frameZeroURL(for: url))&\(Self.videoKindMarker)"
         }
         // ⚠️ ONE FIXTURE, DISTINCT URLS — and the distinctness is the fixture's
         // whole job now.
@@ -460,8 +486,11 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
                 // The venue's NAME, not merely "in a venue": the three
                 // `loneVideoPins` are venues of one, and picking a pin to open
                 // by hand needs to tell those apart from a crowd of twelve.
+                // The URL too: "this marker is empty" and "this marker was
+                // given a picture it cannot render" look identical on screen.
                 print("[pins] \(post.postID) \(kind) "
-                      + "\(venues[post.postID]?.name ?? "scatter")")
+                      + "\(venues[post.postID]?.name ?? "scatter") "
+                      + "url=\(post.media.map { Self.pinURL(forMediaURL: $0.url, catalog: dataset.mediaCatalog) } ?? "-")")
             }
             #endif
             var pin = GeoDiscovery_V1_RadarPin()

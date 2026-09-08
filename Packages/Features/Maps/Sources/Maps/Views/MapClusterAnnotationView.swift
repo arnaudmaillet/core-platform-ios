@@ -227,10 +227,27 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
                 }
             }
         }
+        // ⚠️ THE SAME REFUSAL THE LONE PIN ALREADY MAKES, and its absence here
+        // is what a viewer sees. A cluster wearing a sheet writes that sheet's
+        // own frame zero into the cover (`PinCardView.setPreviewSheet`), and
+        // this fetch then landed ON TOP of it — so the marker, and the card
+        // that flies off it, showed a PHOTOGRAPH OF SOMETHING ELSE while the
+        // clip animated over it. Filmed: a marker opening a post about a build
+        // log flew a picture of a sky.
+        //
+        // Where we have the frame, the wire's still is not needed; it is a
+        // stand-in for a frame the backend does not generate.
         guard face == .media, let url else { return }
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedURL == url else { return }
+            // ⚠️ THE SHEET OUTRANKS THE WIRE, and this guard is the whole of it.
+            // Landing the wire cover on top of a sheet replaced that sheet's
+            // own frame zero — filmed as a marker showing a photograph of a sky
+            // over a post about a build log, and flown to the page as that same
+            // photograph. Held back instead, this is the third rung: what the
+            // marker falls to when the sheet does not resolve.
+            guard self.card.wornPreview == nil else { return }
             self.card.imageView.image = image
         }
     }

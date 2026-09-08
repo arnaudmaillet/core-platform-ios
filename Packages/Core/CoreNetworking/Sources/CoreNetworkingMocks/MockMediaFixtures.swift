@@ -239,6 +239,36 @@ public enum MockMediaFixtures {
     /// from its own preview catalogue; nothing fetches it over the wire.
     public static let previewPosterScheme = "mock://preview/"
 
+    /// The scheme a clip's OWN FIRST FRAME is served under, for clips that have
+    /// no baked sheet — the HLS ladders and anything else `bakedClip` does not
+    /// name. The app decodes it with `AVAssetImageGenerator` and the pipeline
+    /// caches the result by URL, so it runs once per clip per session.
+    ///
+    /// ⚠️ IT EXISTS SO THE ANSWER IS NEVER A PHOTOGRAPH OF SOMEWHERE ELSE. A
+    /// pin's single URL has to be something the surface can render, and the
+    /// two ways to satisfy that are a frame of the post's own clip or a stock
+    /// picture of something unrelated. The second was what shipped, and it put
+    /// a sky on a marker whose post was a build log.
+    public static let frameZeroScheme = "mock://frame0/"
+
+    /// ⚠️ THE SOURCE IS PERCENT-ENCODED WHOLE, which is not decoration. Left
+    /// readable, a request for `mock://frame0/?src=mock://video/7` contains the
+    /// literal `mock://video/`, and `isVideoURL` — a substring test — would
+    /// call the still a video. Encoding removes the substring rather than
+    /// teaching every reader about the exception.
+    public static func frameZeroURL(for videoURL: String) -> String {
+        let encoded = videoURL.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? videoURL
+        return "\(frameZeroScheme)?src=\(encoded)"
+    }
+
+    /// The clip a frame-zero request is about, or nil if it is not one.
+    public static func frameZeroSource(of url: String) -> String? {
+        guard url.hasPrefix(frameZeroScheme),
+              let items = URLComponents(string: url)?.queryItems
+        else { return nil }
+        return items.first { $0.name == "src" }?.value
+    }
+
     /// ⚠️ THREE OF THESE URLS ARE THE SAME FILM, and saying so is what puts
     /// sprite sheets back on the map.
     ///
@@ -284,6 +314,11 @@ public enum MockMediaFixtures {
     /// `video/*` type, so the client's real routing rule
     /// (`MediaCore.MediaKind`) is exercised rather than side-stepped.
     public static func mimeType(for url: String) -> String {
+        // The two still schemes answer PICTURES, whatever they are about. Asked
+        // before anything else because a frame-zero request names a clip, and
+        // reading the answer off the subject rather than off the request is how
+        // a still gets classified as a video.
+        if url.hasPrefix(previewPosterScheme) || url.hasPrefix(frameZeroScheme) { return "image/png" }
         let path = URLComponents(string: url)?.path.lowercased() ?? url.lowercased()
         if path.hasSuffix(".m3u8") { return "application/vnd.apple.mpegurl" }
         if isVideoURL(url) { return "video/mp4" }
