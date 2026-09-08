@@ -72,6 +72,31 @@ final class ZoomGeometrySampler {
         card = nil
     }
 
+    /// Where a layer's PRESENTATION sits in screen points.
+    ///
+    /// ⚠️ NOT `layer.convert(_:to: nil)`. That answered with the layer's own
+    /// origin on every frame of every run in this session — which is why the
+    /// sampler's `dx`/`dy` were a flat +0.0 whatever the geometry did, and why
+    /// the card's logged rect came out at {0, 0}. Two identically wrong
+    /// conversions compared against each other agree perfectly and say nothing.
+    ///
+    /// Walking the superlayer chain and summing each presented frame's origin
+    /// is correct because every layer in a flight has `bounds.origin == .zero`:
+    /// each step contributes exactly where its own presentation sits inside its
+    /// parent. Nil when any layer in the chain has no presentation, which is
+    /// itself worth seeing rather than papering over with the model value.
+    private static func presentedOrigin(of layer: CALayer) -> CGPoint? {
+        var point = CGPoint.zero
+        var node: CALayer? = layer
+        while let current = node, current.superlayer != nil {
+            guard let presented = current.presentation() else { return nil }
+            point.x += presented.frame.origin.x
+            point.y += presented.frame.origin.y
+            node = current.superlayer
+        }
+        return point
+    }
+
     @objc private func tick() {
         guard let card else { stop(); return }
         frame += 1
@@ -84,12 +109,8 @@ final class ZoomGeometrySampler {
         // `ZoomLiveMediaRetry` records the shape of it: "the model said 402x874
         // at scale 0.42 centred, while the presentation was a 34x66 patch at
         // (-92, -244)". Width agreed there too.
-        let cardOrigin = card.layer.presentation().map {
-            card.layer.convert($0.bounds.origin, to: nil)
-        }
-        let surfOrigin = surface?.layer.presentation().map {
-            surface!.layer.convert($0.bounds.origin, to: nil)
-        }
+        let cardOrigin = Self.presentedOrigin(of: card.layer)
+        let surfOrigin = surface.flatMap { Self.presentedOrigin(of: $0.layer) }
         let dx = (cardOrigin != nil && surfOrigin != nil) ? surfOrigin!.x - cardOrigin!.x : Double.nan
         let dy = (cardOrigin != nil && surfOrigin != nil) ? surfOrigin!.y - cardOrigin!.y : Double.nan
         // The gap that matters: what the viewer sees of the card against what
@@ -117,17 +138,25 @@ final class ZoomGeometrySampler {
         // reported worse. `showing=` names which of the two is drawn.
         let cover = card.zoomCoverSurface
         let coverPres = cover?.layer.presentation()?.bounds.width
-        let coverOrigin = cover?.layer.presentation().map {
-            cover!.layer.convert($0.bounds.origin, to: nil)
-        }
+        let coverOrigin = cover.flatMap { Self.presentedOrigin(of: $0.layer) }
         let cdx = (cardOrigin != nil && coverOrigin != nil) ? coverOrigin!.x - cardOrigin!.x : Double.nan
         let cdy = (cardOrigin != nil && coverOrigin != nil) ? coverOrigin!.y - cardOrigin!.y : Double.nan
         // What the viewer actually gets. The surface wins only while it is
         // parented, unhidden and not transparent; otherwise the cover is the
         // frame — and "both" is the crossfade, the one interval where a
         // mismatch between them is visible as a jump.
-        let surfaceDraws = surface.map { !$0.isHidden && $0.alpha > 0.01 && $0.window != nil } ?? false
-        let coverDraws = cover.map { !$0.isHidden && $0.alpha > 0.01 } ?? false
+        // ⚠️ PRESENTED opacity, never `view.alpha`. A fade-in writes the model
+        // to 1 in the frame it starts, so `alpha` says "fully visible" for the
+        // whole ramp — and this line said `showing=both` from the second frame
+        // of a present whose video was in fact still almost transparent. Model
+        // values written by the same call that logs them always agree with
+        // themselves; that is the trap this whole file exists to avoid.
+        let surfOpacity = surface?.layer.presentation()?.opacity
+        let coverOpacity = cover?.layer.presentation()?.opacity
+        let surfaceDraws = surface.map {
+            !$0.isHidden && (surfOpacity ?? $0.layer.opacity) > 0.01 && $0.window != nil
+        } ?? false
+        let coverDraws = cover.map { !$0.isHidden && (coverOpacity ?? $0.layer.opacity) > 0.01 } ?? false
         let showing = surfaceDraws && coverDraws ? "both" : (surfaceDraws ? "surf" : (coverDraws ? "cover" : "none"))
         print(String(format: "[sample] %@ f%03d cardModel=%.2f cardPres=%.2f surfModel=%.2f surfPres=%.2f gap=%+.2f surf=%@ anims=%d hidden=%@",
                      label, frame, card.bounds.width, cardPres ?? -1,
@@ -139,14 +168,24 @@ final class ZoomGeometrySampler {
                        cover?.bounds.width ?? -1, coverPres ?? -1,
                        (cardPres != nil && coverPres != nil) ? coverPres! - cardPres! : Double.nan,
                        cover?.layer.animationKeys()?.count ?? 0,
-                       cover?.alpha ?? -1, cdx, cdy,
-                       surface?.alpha ?? -1, showing)
+                       Double(coverOpacity ?? -1), cdx, cdy,
+                       Double(surfOpacity ?? -1), showing)
               // ⚠️ AND WHERE THE PICTURE IS INSIDE THAT SURFACE. Everything
               // else here is about the window; this is about the video in it.
               // A rect that stays at the page's crop while the window travels
               // is a defect in the PLAYER, and reads identically to a perfect
               // one in every measurement of the bounds.
-              + " vRect=\(card.zoomLiveMediaContentRect.map { NSCoder.string(for: $0) } ?? "-")")
+              + " vRect=\(card.zoomLiveMediaContentRect.map { NSCoder.string(for: $0) } ?? "-")"
+              // ⚠️ AND THE CARD'S PRESENTED RECT IN SCREEN POINTS, so a filmed
+              // frame can be cropped to the card EXACTLY rather than to an
+              // estimate. Measuring a transition off a recording has failed
+              // twice in this session for want of it: a window extracted at a
+              // guessed timestamp turned out to be the next gesture, and a
+              // search band fixed in screen space latched onto a different
+              // feature and "proved" the media shrank twice as fast as the
+              // card. With this, the film is aligned to the log by matching
+              // this width sequence, and every crop is the card's own box.
+              + " cardRect=\(Self.presentedOrigin(of: card.layer).map { o in NSCoder.string(for: CGRect(origin: o, size: card.layer.presentation()?.bounds.size ?? .zero)) } ?? "-")")
     }
 }
 #endif

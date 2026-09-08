@@ -140,6 +140,34 @@ public protocol ZoomFlightCard: UIView {
     /// decided how its media appears.
     func fadeInAdoptedLiveMedia(over duration: TimeInterval)
 
+    /// Holds a surface adopted MID-FLIGHT invisible until the card has landed.
+    ///
+    /// ⚠️ A SURFACE THAT ARRIVES MID-FLIGHT CANNOT BE POSED EXACTLY, and the
+    /// reason is structural rather than a bug to find. Every pose that is exact
+    /// runs INSIDE the flight's animation block, so CoreAnimation interpolates
+    /// the card and its picture on one curve in one frame. A surface acquired
+    /// after that block has run has missed it: the only driver left is
+    /// `ZoomLiveMediaRetry`'s display link, which is a frame behind by
+    /// construction — measured at -47.6% of the card's width at the fastest
+    /// part of a present, and filmed as a hard vertical seam between sharp
+    /// video and the blurred cover it had not reached.
+    ///
+    /// So it is not shown until it can be right. At the landing the card IS the
+    /// page, the surface's pose is exact by definition, and the fade that
+    /// follows crosses no geometric gap at all. Measured on the present it
+    /// replaces: the arriving video was drawn 263.68pt wider than its window at
+    /// frame 2, and still 79.36pt wider at the frame its cross-dissolve made it
+    /// opaque — two framings of one picture, dissolved into each other, which
+    /// is what "le média se redimensionne" was.
+    ///
+    /// Only the arm that fades applies it: a card adopting its OWN surface
+    /// (`fadesIn == false`) is showing the same picture it already showed, and
+    /// has nothing to hold back.
+    ///
+    /// Default: nothing — a card that cannot hold its media simply arrives as
+    /// it did before.
+    func holdAdoptedLiveMediaUntilLanding()
+
     /// When true the card sizes its own live surface to its bounds, and the
     /// flight leaves the surface's transform alone.
     ///
@@ -239,6 +267,7 @@ public extension ZoomFlightCard {
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
     func adoptZoomLiveMediaView(_ view: UIView) {}
     func fadeInAdoptedLiveMedia(over duration: TimeInterval) {}
+    func holdAdoptedLiveMediaUntilLanding() {}
     var zoomLiveMediaTracksCardBounds: Bool { false }
     func setZoomContentBlend(_ t: CGFloat) {}
     func setZoomLandingLiveMedia(_ view: UIView) {}
