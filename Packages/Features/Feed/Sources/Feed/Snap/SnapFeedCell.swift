@@ -2258,6 +2258,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // the start of a dismiss. The sibling is what the viewer is
             // watching, so the card provably flies the same frames.
             let card = VideoRenderView()
+            // ⚠️ NO OPAQUE GROUND ON A FLIGHT CARD'S SURFACE. The card carries
+            // the picture ladder underneath — cover, sheet, thumbnail — and a
+            // black ground on the live rung turns the one frame where this
+            // layer has nothing to show into a black screen. See
+            // `VideoRenderView.paintsOpaqueGround`.
+            card.paintsOpaqueGround = false
             #if DEBUG
             card.debugLabel = "card"
             card.debugTracksFlight = true

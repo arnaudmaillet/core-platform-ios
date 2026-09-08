@@ -190,14 +190,31 @@ judge_frozen() { # $1=case dir, $2=max frozen seconds (default 0.6)
   echo "ok not frozen (longest identical run ${seconds}s, budget ${budget}s)"
 }
 
-judge_no_black() { # $1=case dir — no full-frame black dip mid-sequence
+judge_no_black() { # $1=case dir — no single-frame collapse to black mid-sequence
+  # ⚠️ RELATIVE, AND IT USED TO BE ABSOLUTE — which is why it watched the
+  # abandoned grab's black flash go past for as long as that flash existed.
+  #
+  # The old rule was `mean <= 2%` between two frames at `>= 15%`: a FULL-frame
+  # black. The flash a user filmed is not one. The page's furniture is still
+  # drawn over it — the nav bar's platters, the caption, the engagement rail —
+  # so the frame measures 5-6% mean, not 2, and the judge said "ok no-black"
+  # on a recording that contains it. Measured on the filmed frame: 14.4/255.
+  #
+  # What names the defect is not an absolute darkness but a COLLAPSE: one frame
+  # at a fraction of both its neighbours. The floor stays as the noise gate
+  # (dark content dips a few percent all the time and neither neighbour is
+  # bright), and the ratio is what does the work.
   local dir="$1" i=0 dips=0
   local -a means
   for f in "$dir"/frames/*.png; do
     means[$((++i))]=$(magick "$f" -colorspace Gray -format "%[fx:int(mean*100)]" info:)
   done
   for ((j=2; j<i; j++)); do
-    if (( means[j] <= 2 && means[j-1] >= 15 && means[j+1] >= 15 )); then
+    # A third of both neighbours, and both neighbours plainly lit: a page that
+    # is genuinely dark cannot trip this, because the ratio needs a bright
+    # before AND a bright after.
+    if (( means[j] * 3 <= means[j-1] && means[j] * 3 <= means[j+1] \
+          && means[j-1] >= 15 && means[j+1] >= 15 )); then
       dips=$((dips+1))
       echo "  black dip at frame $j (${means[j-1]} -> ${means[j]} -> ${means[j+1]})"
     fi
