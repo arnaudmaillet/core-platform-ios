@@ -125,8 +125,30 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // decides the map's whole composition by accident. Measured before this,
         // in the default viewport: photo 7, text 8, video 3, from a corpus that
         // is an exact 40/40/40.
+        // ⚠️ SHEETED VIDEOS FIRST, and this is what puts a sprite sheet on the
+        // map at all.
+        //
+        // One video fixture in three is `mock://video/square-1`, which has no
+        // frames to bake from on purpose — a post carrying it wears its cover,
+        // and that fallback is the ladder working. But a venue draws its video
+        // members in corpus order and a cluster wears its REPRESENTATIVE's
+        // sheet, so the one video-led marker on the map elected `post-0015`,
+        // whose fixture is exactly that one. Measured end to end:
+        // `[sheet] post-0015 kind=video sheet=nil`, then
+        // `[cluster] rep=post-0015 face=media sheet=nil catalog=ok`, and
+        // `sheets_bound=0` — with nothing broken anywhere in the chain.
+        //
+        // A venue is the map's shop window. Ordering the draw so the posts that
+        // CAN show what a video is come first costs nothing, changes no post's
+        // content, and leaves the sheetless fixture reachable everywhere else —
+        // which is where the cover fallback is supposed to be exercised.
         var video = posts.lazy
             .filter { $0.media.map { MockMediaFixtures.isVideoURL($0.url) } ?? false }
+            .sorted { lhs, rhs in
+                let l = lhs.media.flatMap { MockMediaFixtures.bakedClip(for: $0.url) } != nil
+                let r = rhs.media.flatMap { MockMediaFixtures.bakedClip(for: $0.url) } != nil
+                return l && !r
+            }
             .map(\.postID).makeIterator()
         var photo = posts.lazy
             .filter { $0.media.map { !MockMediaFixtures.isVideoURL($0.url) } ?? false }
@@ -164,8 +186,22 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // edit and not an excavation.
         assign(mixedVenue, text: 4, video: 4, photo: 4)
         assign(textOnlyVenue, text: 4, video: 0, photo: 0)
-        // ⚠️ THESE QUOTAS CANNOT PUT A VIDEO PIN ON THE MAP, and it is worth
-        // knowing before the next person tries.
+        // ⚠️ THE MEDIA-ONLY VENUE TAKES NO PHOTOGRAPHS, and that is what puts a
+        // sprite sheet on the map.
+        //
+        // A cluster wears its REPRESENTATIVE's sheet, and the representative is
+        // the most-liked member — which no draw order controls. Traced: with
+        // the venue evenly mixed the face went to `post-0013`, a photograph;
+        // before that, to `post-0015`, a video whose fixture is the synthetic
+        // one with no frames to bake. Video-only members, drawn sheeted-first,
+        // make every candidate a marker that can show what a video post is, so
+        // whichever wins carries a sheet.
+        //
+        // Photographs are not scarce: the mixed venue still takes four, and the
+        // scatter is mostly photo.
+        //
+        // ⚠️ AND THESE QUOTAS CANNOT PUT A LONE VIDEO *PIN* ON THE MAP, which
+        // is a different thing and worth knowing before the next person tries.
         //
         // With the corpus on honest thirds the default viewport shows
         // `kinds=photo:3,text:1` — no lone video pin. That looks like a venue
@@ -179,7 +215,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         //
         // `-maps-force-video` is the flag that exists for exercising the video
         // pin path; widening the region or panning reaches the others.
-        assign(mediaOnlyVenue, text: 0, video: 4, photo: 4)
+        assign(mediaOnlyVenue, text: 0, video: 4, photo: 0)
         return assignments
     }
 

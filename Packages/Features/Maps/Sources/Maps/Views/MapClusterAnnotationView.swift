@@ -204,6 +204,17 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
             }
             return
         }
+        #if DEBUG
+        // `-maps-log-sheets`: the last link. A cluster wears its
+        // REPRESENTATIVE's sheet, so a group full of video can still show none
+        // if the member it elected has no baked clip.
+        if ProcessInfo.processInfo.arguments.contains("-maps-log-sheets") {
+            print("[cluster] rep=\(cluster.representative.postID.rawValue)"
+                  + " face=\(face) sheet=\(preview ?? "nil")"
+                  + " catalog=\(previewCatalog == nil ? "nil" : "ok")"
+                  )
+        }
+        #endif
         if face == .media, let previewCatalog, let preview {
             let phase = cluster.representative.iconPhase
             if let art = previewCatalog.cached(preview) {
