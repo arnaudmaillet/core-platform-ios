@@ -271,6 +271,19 @@ struct ZoomFlight {
             chrome.center = center
             chrome.alpha = 1
         }
+        #if DEBUG
+        // Same probe as `poseFloating`, on the two legs a grab's RELEASE and
+        // the PRESENT both drive. Model against presentation, because the model
+        // agreeing with itself proves nothing about what is on screen.
+        if ProcessInfo.processInfo.arguments.contains("-grab-geometry") {
+            let pres = card.layer.presentation()?.bounds
+            print(String(format: "[page] %.3f card=%@ pres=%@ anim=[%@] | %@",
+                         CACurrentMediaTime(), NSCoder.string(for: card.bounds),
+                         pres.map { NSCoder.string(for: $0) } ?? "nil",
+                         card.layer.animationKeys()?.joined(separator: ",") ?? "-",
+                         card.zoomLiveMediaDebugState))
+        }
+        #endif
     }
 
     /// The floating card, *position excluded*: page content scaled about the
