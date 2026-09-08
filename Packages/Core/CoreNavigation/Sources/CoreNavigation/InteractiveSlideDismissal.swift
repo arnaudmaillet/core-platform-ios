@@ -186,6 +186,14 @@ public final class InteractiveSlideDismissal: NSObject {
     /// claims the screen, and again when the pop it triggers asks for an
     /// animator. What it does — moving a card into the slot the dismissal
     /// flies to — undoes itself if it runs a second time.
+    /// ⚠️ CAPTURE THIS DRIVER WEAKLY. What this closure is FOR is writing back
+    /// through the driver — `revealGeometry` is read three lines after the call
+    /// — so the obvious way to write it is a strong capture, and a strong
+    /// capture is a retain cycle: the driver owns the closure and the closure
+    /// owns the driver. It leaks one driver per opened post, forever, and no
+    /// census sees it, because what leaks is a DRIVER and nothing counts those.
+    /// Two of the four call sites had it; `InteractiveSlideDismissalLifetimeTests`
+    /// pins the difference.
     public var prepareForDismissal: ((ZoomDismissAxis) -> Void)?
 
     /// The recognizer, so an owner can order a competing one behind it —

@@ -107,6 +107,38 @@ final class PinCardView: UIView {
     /// surface alive.
     private weak var donatedSurface: VideoRenderView?
 
+    #if DEBUG
+    /// Whether this card was built FOR A TRANSITION and is therefore counted.
+    ///
+    /// ⚠️ A CENSUS OF EVERY `PinCardView` READS A WORKING MAP AS A LEAK. This
+    /// component is the resting face of every marker — pin, cluster and flight
+    /// card are one type by design — so a field of twelve markers is twelve
+    /// live instances at rest and always will be. `ZoomDebugCensus.Key.pinCard`
+    /// was declared for this and incremented nowhere, which left a map soak
+    /// unable to see the only cards that are supposed to disappear.
+    ///
+    /// Only the transition sources mark one, and only a marked one is counted.
+    private var isCensusedTransitionCard = false
+    #endif
+
+    /// Says this card is a flight's, not a marker's, so the census can watch it
+    /// disappear. Idempotent.
+    func markAsTransitionCard() {
+        #if DEBUG
+        guard !isCensusedTransitionCard else { return }
+        isCensusedTransitionCard = true
+        ZoomDebugCensus.increment(ZoomDebugCensus.Key.pinCard)
+        #endif
+    }
+
+    #if DEBUG
+    deinit {
+        if isCensusedTransitionCard {
+            ZoomDebugCensus.decrement(ZoomDebugCensus.Key.pinCard)
+        }
+    }
+    #endif
+
     /// Set while a mid-flight arrival is being held back — see
     /// `holdAdoptedLiveMediaUntilLanding`. Read by `applyBlend`, which owns the
     /// donated host's alpha and would otherwise dissolve the arrival up across

@@ -2779,8 +2779,15 @@ extension MapsViewController: MKMapViewDelegate {
             nav.setViewControllers(plan, animated: false)
         }
         var hasPrepared = false
-        slide.prepareForDismissal = { [weak self, weak feed, weak landing] axis in
-            guard let self, let feed else { return }
+        // ⚠️ `slide` WEAKLY, and the strong capture it replaces was a retain
+        // cycle: the driver owns this closure and the closure writes back
+        // through the driver, so every card close ever staged kept its driver
+        // alive for the life of the process — one per opened post, and
+        // invisible to every census, because what leaks is a DRIVER and nothing
+        // counts those. `cardClose = nil` could not help: the cycle holds the
+        // object whether or not this controller still points at it.
+        slide.prepareForDismissal = { [weak self, weak feed, weak landing, weak slide] axis in
+            guard let self, let feed, let slide else { return }
             // ⚠️ A HERO'S POP IS FORWARDED BEFORE ANY OF THIS IS READ, so
             // staging here for a media post would only conceal a marker the
             // flight is about to land on.

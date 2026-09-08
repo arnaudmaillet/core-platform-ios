@@ -623,7 +623,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // back-direction is the honest look for a close that could not
             // stage its card.
             dismissal.fallbackSlideAxis = .horizontal
-            dismissal.prepareForDismissal = { [weak landing] axis in
+            // ⚠️ `dismissal` IS CAPTURED WEAKLY, and the strong capture it
+            // replaces was a retain cycle: the driver owns this closure and the
+            // closure wrote through the driver, so every dismissal ever prepared
+            // kept its driver alive for the life of the process. Invisible to
+            // every census — what leaks is a DRIVER, which nothing counts —
+            // and one per opened post.
+            dismissal.prepareForDismissal = { [weak landing, weak dismissal] axis in
+                guard let dismissal else { return }
                 guard axis == .vertical else {
                     dismissal.revealGeometry = markerGeometry
                     return

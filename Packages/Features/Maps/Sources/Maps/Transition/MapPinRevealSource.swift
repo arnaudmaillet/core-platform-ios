@@ -168,6 +168,9 @@ enum MapPinRevealSource {
         preview: (art: AnimatedIconArt, phase: Int)? = nil
     ) -> UIView {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
+        // Counted for the same reason the hero's card is: the reveal's stand-in
+        // is the half of the map's transitions no census could see at all.
+        card.markAsTransitionCard()
         card.setFace(face)
         card.setTextAvatar(avatar)
         card.imageView.image = cover
