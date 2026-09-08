@@ -93,6 +93,35 @@ judge_audit() { # $1=case dir — the audit log's own verdict, liveness first
   echo "ok audit ($beats beats, final: ${last#*hero;})"
 }
 
+judge_duty_cycle() { # $1=case dir — how much of the run the main thread MISSED
+  # ⚠️ THE DENOMINATOR A SILENT RUN NEEDS, and it costs nothing to read: the
+  # audit's sampler is a fixed 4 Hz timer on the main runloop, so a healthy run
+  # of D seconds ends with checks ≈ 4D. Missed fires COALESCE — the timer does
+  # not queue up the ticks it slept through — so the SHORTFALL, in seconds, is
+  # the time the main thread was blocked for longer than a quarter of a second.
+  #
+  # It is the cheap complement to `judge_frozen`: that one reads the composited
+  # frames and sees any stall, this one needs no video at all and says how much
+  # of the run was lost. Neither can be replaced by a log line the stalled
+  # thread writes, which is what both are for.
+  local dir="$1" log="$dir/hero-audit.log" budget="${2:-2.0}"
+  [[ -s "$log" ]] || { echo "FAIL duty: no audit log"; return 1; }
+  local checks=$(grep -o "beat checks=[0-9]*" "$log" | tail -1 | sed 's/.*=//')
+  [[ -n "$checks" ]] || { echo "FAIL duty: no heartbeat to count"; return 1; }
+  # ⚠️ THE ALLOWANCE IS MEASURED, NOT GUESSED. The audit installs early enough
+  # that it accounts for essentially the whole run: over a 41s wall window it
+  # reported checks=160, i.e. 40.0s of sampling at its 0.25s timer. 1.5s covers
+  # the launch it did not see. An allowance of several seconds — the obvious
+  # cautious choice — would swallow the very wedge this is looking for.
+  local expected=$(echo "($CASE_DURATION - 1.5) * 4" | bc -l 2>/dev/null || echo 0)
+  local missed=$(echo "scale=2; ($expected - $checks) / 4" | bc -l 2>/dev/null || echo 0)
+  local over=$(echo "$missed > $budget" | bc -l 2>/dev/null || echo 0)
+  (( over == 1 )) && {
+    echo "FAIL duty: ${missed}s of the run unaccounted for (checks=$checks," \
+         "expected ~${expected}) — the main thread was blocked"; return 1; }
+  echo "ok duty cycle (checks=$checks, ${missed}s unaccounted, budget ${budget}s)"
+}
+
 judge_motion() { # $1=case dir — did anything visibly FLY?
   local dir="$1" prev="" best=0
   for f in "$dir"/frames/*.png; do
@@ -254,6 +283,7 @@ for CASE in "${CASES[@]}"; do
       motion)          v=$(judge_motion "$dir") || ok=0 ;;
       no-black)        v=$(judge_no_black "$dir") || ok=0 ;;
       not-frozen)      v=$(judge_frozen "$dir") || ok=0 ;;
+      duty-cycle)      v=$(judge_duty_cycle "$dir") || ok=0 ;;
       settle-baseline) v=$(judge_settle_baseline "$dir") || ok=0 ;;
       *) v="FAIL unknown check $check"; ok=0 ;;
     esac
