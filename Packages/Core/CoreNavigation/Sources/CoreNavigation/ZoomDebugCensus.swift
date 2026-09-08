@@ -57,6 +57,16 @@ public enum ZoomDebugCensus {
         public static let landingHold = "zoom.landingHold"
         public static let flightCard = "zoom.flightCard"
         public static let pinCard = "zoom.pinCard"
+        /// A reveal in flight.
+        ///
+        /// ⚠️ THE REVEAL FAMILY CARRIED NO COUNTER AT ALL, so the audit read
+        /// `state=settled` for the whole of every window opening and closing —
+        /// and then reported the stand-in those transitions legitimately draw
+        /// as a STRANDED card. Measured on the first map soak: 14 failures,
+        /// every one of them after a TEXT marker, none after a media one. The
+        /// hero's markers were audited and the reveal's were not, on the same
+        /// map, and the difference read as a defect in the product.
+        public static let reveal = "reveal.animator"
     }
 }
 #endif

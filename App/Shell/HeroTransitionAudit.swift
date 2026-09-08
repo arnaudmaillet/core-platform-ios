@@ -100,7 +100,15 @@ final class HeroTransitionAudit {
         // keeps the card visible up to 0.75s AFTER the animator died, and the
         // first field run read exactly that window as `STRANDED cards=1`.
         let holds = census[ZoomDebugCensus.Key.landingHold] ?? 0
-        let isActive = animators > 0 || interruptors > 0 || retries > 0 || holds > 0
+        // ⚠️ AND REVEALS, which carried no counter until the map's first soak
+        // reported 14 stranded cards — every one of them after a TEXT marker
+        // and none after a media one. A reveal legitimately draws a stand-in;
+        // with nothing counting the reveal, the audit called that settled
+        // wreckage. The map is the only surface that opens both kinds, so it is
+        // the only one where the asymmetry was visible.
+        let reveals = census[ZoomDebugCensus.Key.reveal] ?? 0
+        let isActive = animators > 0 || interruptors > 0 || retries > 0
+            || holds > 0 || reveals > 0
 
         var players = 0
         var idle = 0
@@ -132,7 +140,7 @@ final class HeroTransitionAudit {
         let line = "hero;seq=\(sequence);state=\(state)"
             + ";animators=\(animators);interruptors=\(interruptors);drivers=\(drivers)"
             + ";retries=\(retries);cards=\(cards);pins=\(pins);controllers=\(controllers)"
-            + ";stranded=\(stranded)"
+            + ";reveals=\(reveals);stranded=\(stranded)"
             + ";players=\(players);idle=\(idle);dupes=\(duplicated)"
             + ";anchors=\(anchors);stalls=\(stalls);gen=\(generations)"
         probe.accessibilityIdentifier = line

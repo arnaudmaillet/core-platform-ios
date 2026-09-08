@@ -1156,6 +1156,12 @@ final class RevealGrabAnimator: NSObject, UIViewControllerAnimatedTransitioning 
 /// post and a media post settle with identical physics.
 @MainActor
 final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+    #if DEBUG
+    /// Counted for the LIFE OF THE TRANSITION — see `ZoomDebugCensus.Key.reveal`.
+    /// Without it the audit cannot tell a reveal in flight from a settled
+    /// screen, and reports the stand-in a reveal legitimately draws as wreckage.
+    private let censusToken = RevealCensusToken()
+    #endif
     private let geometry: RevealGeometry
     /// Source chrome that must LEAVE with the opening rather than before it —
     /// the app's floating tab bar.
@@ -1491,6 +1497,12 @@ final class RevealTrajectoryProbe {
 /// spring is the driver's own completion curve, not this one's.
 @MainActor
 final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+    #if DEBUG
+    /// Counted for the LIFE OF THE TRANSITION — see `ZoomDebugCensus.Key.reveal`.
+    /// Without it the audit cannot tell a reveal in flight from a settled
+    /// screen, and reports the stand-in a reveal legitimately draws as wreckage.
+    private let censusToken = RevealCensusToken()
+    #endif
     private let geometry: RevealGeometry
     /// Source chrome that comes back with the return (the app's tab bar), so
     /// it is revealed by the hand rather than switched on after the landing.
@@ -1766,3 +1778,14 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         return animator
     }
 }
+
+
+#if DEBUG
+/// Lives exactly as long as the animator holding it, so the census answers
+/// "a reveal is flying" without either animator having to remember to
+/// decrement on the several paths a transition can end on.
+private final class RevealCensusToken {
+    init() { ZoomDebugCensus.increment(ZoomDebugCensus.Key.reveal) }
+    deinit { ZoomDebugCensus.decrement(ZoomDebugCensus.Key.reveal) }
+}
+#endif

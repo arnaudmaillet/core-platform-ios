@@ -25,6 +25,9 @@ struct HeroProbe {
     /// swallows every marker tap. It was counted from the day it was written
     /// and never published, so no assertion could see it.
     let controllers: Int
+    /// Reveals in flight. Zero at a settle; non-zero says the audit's other
+    /// numbers are describing a transition, not a resting screen.
+    let reveals: Int
     let stranded: Int
     let players: Int
     let idle: Int
@@ -71,7 +74,7 @@ struct HeroProbe {
               let animators = int("animators"), let interruptors = int("interruptors"),
               let drivers = int("drivers"), let retries = int("retries"),
               let cards = int("cards"), let pins = int("pins"),
-              let controllers = int("controllers"),
+              let controllers = int("controllers"), let reveals = int("reveals"),
               let stranded = int("stranded"), let players = int("players"),
               let idle = int("idle"), let duplicates = int("dupes"),
               let anchors = int("anchors"), let stalls = int("stalls"),
@@ -86,6 +89,7 @@ struct HeroProbe {
         self.cards = cards
         self.pins = pins
         self.controllers = controllers
+        self.reveals = reveals
         self.stranded = stranded
         self.players = players
         self.idle = idle
