@@ -81,6 +81,14 @@ struct MapOpenGate: Equatable {
     /// any future deep link still work.
     var mapIsInert: Bool { state != .idle }
 
+    /// Whether the flow is resting on an intermediate screen — the place page.
+    ///
+    /// A legitimate ending, not a hang: the viewer is on a real screen and the
+    /// map is one pop away. A harness that cannot tell the two apart reports a
+    /// working route as a stuck one, which is what the first soak of this path
+    /// did.
+    var isAtIntermediate: Bool { state == .intermediate }
+
     /// The route currently owning the screen, if any.
     var route: Route? {
         switch state {

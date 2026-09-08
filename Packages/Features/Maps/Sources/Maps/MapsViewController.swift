@@ -1998,7 +1998,17 @@ final class MapsViewController: UIViewController {
                 } else { nil }
             }
             .sorted { ($0.hierarchy ? 0 : 1, $0.id) < ($1.hierarchy ? 0 : 1, $1.id) }
-        guard !ordered.isEmpty else { return }
+        // ⚠️ RETRY RATHER THAN DROP. The advance is edge-triggered on the gate,
+        // so a map whose annotations have not been re-added yet — which is the
+        // ordinary state one runloop turn after popping home — would lose that
+        // cycle and every cycle after it, silently. The first place-page soak
+        // ran exactly one of its six cycles this way.
+        guard !ordered.isEmpty else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.advanceSoakIfNeeded()
+            }
+            return
+        }
         let hierarchyCount = ordered.filter(\.hierarchy).count
         let target = (ordered[soakCursor % ordered.count].id,
                       ordered[soakCursor % ordered.count].value)
@@ -2019,7 +2029,14 @@ final class MapsViewController: UIViewController {
         // run continues and the log says which marker did it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
             guard let self, self.soakGeneration == generation, !self.openGate.canOpen else { return }
-            print("[soak] cycle \(generation) STUCK on \(target.0) — forcing the map back")
+            // ⚠️ RESTING ON THE PLACE PAGE IS NOT BEING STUCK. A vertical close
+            // lands there on purpose and the map is one pop away, so the soak
+            // pops and carries on. Calling that a hang is how a working route
+            // gets reported as a broken one — which is exactly what the first
+            // run of this path did, before the landing was even reported.
+            let resting = self.openGate.isAtIntermediate
+            print("[soak] cycle \(generation) \(resting ? "at the place page" : "STUCK")"
+                  + " on \(target.0) — popping home")
             self.navigationController?.popToViewController(self, animated: false)
             self.openGate.appearedAtRoot()
         }
@@ -2640,6 +2657,12 @@ extension MapsViewController: MKMapViewDelegate {
                     // (at alpha 0, for the drag to fade in); the filter bars
                     // are invisible under the gallery either way.
                     self?.restoreBottomChromeForReturn(alpha: 0)
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+                        print("[caseb] splice+pop delegate=\(nav?.delegate.map { "\(type(of: $0))" } ?? "nil")"
+                              + " stack=\(nav?.viewControllers.map { "\(type(of: $0))" } ?? [])")
+                    }
+                    #endif
                     nav?.popViewController(animated: true)
                 }
             }
@@ -2651,7 +2674,13 @@ extension MapsViewController: MKMapViewDelegate {
                 // gallery pops, when `viewWillAppear` finds
                 // `activeTransition == nil` and resumes previews normally).
                 guard let self else { return }
-                self.navigationController?.delegate = nil
+                // ⚠️ ONLY IF IT IS STILL OURS. The page we just landed on has
+                // already installed its own controller as the delegate — that
+                // is how this callback reached us at all — and clearing the
+                // slot here would take the page's map-return with it.
+                if self.navigationController?.delegate === self.activeTransition {
+                    self.navigationController?.delegate = nil
+                }
                 self.activeTransition = nil
                 self.openGate.dismissedToIntermediate()
                 self.barsStack.alpha = 1
