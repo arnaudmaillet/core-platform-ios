@@ -78,6 +78,20 @@ final class ZoomGeometrySampler {
         let cardPres = card.layer.presentation()?.bounds.width
         let surface = card.zoomLiveMediaSurface
         let surfPres = surface?.layer.presentation()?.bounds.width
+        // ⚠️ SIZE IS HALF THE QUESTION, and answering only that half is how a
+        // broken fix got called finished. A surface can present the card's
+        // exact width and still be drawn in the wrong place — this file's own
+        // `ZoomLiveMediaRetry` records the shape of it: "the model said 402x874
+        // at scale 0.42 centred, while the presentation was a 34x66 patch at
+        // (-92, -244)". Width agreed there too.
+        let cardOrigin = card.layer.presentation().map {
+            card.layer.convert($0.bounds.origin, to: nil)
+        }
+        let surfOrigin = surface?.layer.presentation().map {
+            surface!.layer.convert($0.bounds.origin, to: nil)
+        }
+        let dx = (cardOrigin != nil && surfOrigin != nil) ? surfOrigin!.x - cardOrigin!.x : Double.nan
+        let dy = (cardOrigin != nil && surfOrigin != nil) ? surfOrigin!.y - cardOrigin!.y : Double.nan
         // The gap that matters: what the viewer sees of the card against what
         // the viewer sees of its picture. Both read from the presentation, in
         // the same frame.
@@ -88,10 +102,16 @@ final class ZoomGeometrySampler {
         // donated one after. A size that "jumps" may be two views, not one
         // view moving.
         let id = surface.map { String(UInt(bitPattern: ObjectIdentifier($0).hashValue) % 100000) }
-        print(String(format: "[sample] %@ f%03d cardModel=%.2f cardPres=%.2f surfPres=%.2f gap=%+.2f surf=%@ anims=%d",
-                     label, frame, card.bounds.width,
-                     cardPres ?? -1, surfPres ?? -1, gap, id ?? "nil",
-                     surface?.layer.animationKeys()?.count ?? 0))
+        // ⚠️ THE SURFACE'S MODEL TOO. Without it "the surface jumps" cannot be
+        // told apart from "the surface's model was set late": the first is a
+        // missing animation, the second is a missing resize, and they need
+        // opposite fixes.
+        print(String(format: "[sample] %@ f%03d cardModel=%.2f cardPres=%.2f surfModel=%.2f surfPres=%.2f gap=%+.2f surf=%@ anims=%d hidden=%@",
+                     label, frame, card.bounds.width, cardPres ?? -1,
+                     surface?.bounds.width ?? -1, surfPres ?? -1, gap, id ?? "nil",
+                     surface?.layer.animationKeys()?.count ?? 0,
+                     (surface?.isHidden ?? true) ? "Y" : "n")
+              + String(format: " dx=%+.1f dy=%+.1f", dx, dy))
     }
 }
 #endif
