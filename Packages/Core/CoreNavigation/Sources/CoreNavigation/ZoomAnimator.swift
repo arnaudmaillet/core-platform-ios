@@ -354,6 +354,12 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             initialVelocity: CGVector(dx: 0, dy: ZoomFlight.springVelocity)
         )
         let animator = UIViewPropertyAnimator(duration: duration, timingParameters: spring)
+        #if DEBUG
+        ZoomGeometrySampler.shared.start(card: flight.card, label: "present")
+        animator.addCompletion { _ in
+            MainActor.assumeIsolated { ZoomGeometrySampler.shared.stop() }
+        }
+        #endif
         animator.addAnimations {
             #if DEBUG
             ZoomFlightProfiler.shared.note("pose block >")

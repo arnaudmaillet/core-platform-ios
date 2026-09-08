@@ -205,6 +205,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     }
 
     private func beginGrab() {
+        #if DEBUG
+        if let card = flight?.card { ZoomGeometrySampler.shared.start(card: card, label: "grab") }
+        #endif
         // `context == nil` also gates the debug path: a new grab must never
         // begin while a previous transition is still completing.
         guard !isInteracting, context == nil else { return }
@@ -792,6 +795,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // hidden strands an invisible tile behind the page, and nothing else
         // would ever restore it if the feed then left by some other route. On
         // the cancel path this is covered by the restored page anyway.
+        #if DEBUG
+        ZoomGeometrySampler.shared.stop()
+        #endif
         source?.setZoomSourceHidden(false)
         // A cancelled grab has to hand back the hidden state the owner undid
         // when the grab began; a completed one is reported through `didShow`.

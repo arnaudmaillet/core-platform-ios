@@ -29,6 +29,73 @@ public enum ZoomFlightSpring {
     public static var velocity: CGFloat { ZoomFlight.springVelocity }
 }
 
+#if DEBUG
+/// Samples the flying card and its live media **every frame**, under
+/// `-grab-geometry`.
+///
+/// ⚠️ THE ONE-SHOT PROBES IN THE POSES CANNOT ANSWER A QUESTION ABOUT MOTION.
+/// They print from inside an animation block, so they say whether the card and
+/// its surface agreed at the instant a pose was set — not whether they stay in
+/// step across the frames the viewer actually watches. A report that "the media
+/// lags on the way back" is entirely about those frames, and reading them out
+/// of a screen recording failed twice: the window extracted at an estimated
+/// timestamp turned out to be the next gesture.
+///
+/// A display link samples the PRESENTATION layer, which is what is on screen,
+/// on the same clock CoreAnimation composites on.
+@MainActor
+final class ZoomGeometrySampler {
+    static let shared = ZoomGeometrySampler()
+    static var isOn: Bool { ProcessInfo.processInfo.arguments.contains("-grab-geometry") }
+
+    private var link: CADisplayLink?
+    private weak var card: (any ZoomFlightCard)?
+    private var label = ""
+    private var frame = 0
+
+    func start(card: any ZoomFlightCard, label: String) {
+        guard Self.isOn else { return }
+        stop()
+        self.card = card
+        self.label = label
+        frame = 0
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        print("[sample] --- \(label) ---")
+    }
+
+    func stop() {
+        guard link != nil else { return }
+        link?.invalidate()
+        link = nil
+        card = nil
+    }
+
+    @objc private func tick() {
+        guard let card else { stop(); return }
+        frame += 1
+        let cardPres = card.layer.presentation()?.bounds.width
+        let surface = card.zoomLiveMediaSurface
+        let surfPres = surface?.layer.presentation()?.bounds.width
+        // The gap that matters: what the viewer sees of the card against what
+        // the viewer sees of its picture. Both read from the presentation, in
+        // the same frame.
+        let gap = (cardPres != nil && surfPres != nil) ? surfPres! - cardPres! : Double.nan
+        // ⚠️ THE SURFACE'S IDENTITY, because `zoomLiveMediaSurface` is a
+        // COMPUTED property that can answer with a different object from one
+        // frame to the next — the card's own view before a donation, the
+        // donated one after. A size that "jumps" may be two views, not one
+        // view moving.
+        let id = surface.map { String(UInt(bitPattern: ObjectIdentifier($0).hashValue) % 100000) }
+        print(String(format: "[sample] %@ f%03d cardModel=%.2f cardPres=%.2f surfPres=%.2f gap=%+.2f surf=%@ anims=%d",
+                     label, frame, card.bounds.width,
+                     cardPres ?? -1, surfPres ?? -1, gap, id ?? "nil",
+                     surface?.layer.animationKeys()?.count ?? 0))
+    }
+}
+#endif
+
 @MainActor
 struct ZoomFlight {
     let card: any ZoomFlightCard
