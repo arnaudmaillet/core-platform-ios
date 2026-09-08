@@ -15,4 +15,13 @@ CASE_DURATION=100
 # is eight chances at a defect measured at roughly one cancel in three — which is
 # the only way a one-frame, intermittent flash is caught by a suite at all.
 CASE_CHECKS=(audit duty-cycle not-frozen no-black)
+# ⚠️ ABOVE THIS CASE'S OWN DELIBERATE IDLE, and measured rather than chosen.
+# The soak opens a marker and waits 2.5s before closing it
+# (`MapsViewController.closeSoakedFeed`), so whatever it opened sits still for
+# that long — and a PHOTOGRAPH page sitting still composites identical frames
+# the whole time. The longest run on a healthy 100s run was 0.90s, beginning at
+# t=29.60s on exactly that: a photo page between its opening and its scripted
+# close. `judge_frozen` cannot tell that from a stall of the same length; on
+# this case the stall judge is `duty-cycle`, which reads the app's own sampler.
+CASE_FROZEN_BUDGET=2.8
 
