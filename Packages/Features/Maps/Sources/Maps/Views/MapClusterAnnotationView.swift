@@ -15,7 +15,7 @@ import UIKit
 /// The face is a `PinCardView` — the same component the single pin renders and
 /// the hero transition flies — so pin, cluster, and flight card are twins by
 /// construction, with no per-surface styling constants left to drift.
-final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
+final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing {
     static let reuseIdentifier = "MapClusterAnnotationView"
     /// Match the individual pin exactly.
     private static let side = MapAnnotationView.side
@@ -47,6 +47,22 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
 
     /// The loaded cover image, handed to the hero transition to fly.
     var heroImage: UIImage? { card.imageView.image }
+
+    /// See `MapMarkerDressing`. A media face is dressed once it has a picture;
+    /// every other face carries its own resting appearance.
+    var isDressed: Bool {
+        guard representedFace == .media else { return true }
+        return card.wornPreview != nil || card.imageView.image != nil
+    }
+
+    var onDressed: (() -> Void)?
+
+    private func reportDressed() {
+        guard isDressed, let report = onDressed else { return }
+        onDressed = nil
+        report()
+    }
+
 
     /// Fired the instant the cluster is tapped — see `installInstantTap`.
     var onSelect: (() -> Void)?
@@ -224,6 +240,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
                     guard let art = try? await previewCatalog.art(for: preview) else { return }
                     guard let self, self.representedPreview == preview else { return }
                     self.card.setPreviewSheet((art, phase))
+                    self.reportDressed()
                 }
             }
         }
@@ -249,6 +266,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
             // marker falls to when the sheet does not resolve.
             guard self.card.wornPreview == nil else { return }
             self.card.imageView.image = image
+            self.reportDressed()
         }
     }
 

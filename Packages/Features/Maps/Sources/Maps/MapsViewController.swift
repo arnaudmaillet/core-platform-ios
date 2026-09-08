@@ -1955,7 +1955,15 @@ extension MapsViewController: MKMapViewDelegate {
         for view in batch.arriving {
             view.annotation.map { pendingPopIn.remove(ObjectIdentifier($0 as AnyObject)) }
         }
-        popChoreographer.popIn(batch.arriving)
+        // ⚠️ ONLY WHAT HAS SOMETHING TO SHOW LANDS. The map adds annotations
+        // first and fetches their pictures second, never awaited, so popping
+        // the whole batch lands bare squares that fill in afterwards. A marker
+        // that is not dressed yet is held at zero and let in by its own report
+        // — see `MapMarkerDressing` and `MapAnnotationPop.hold`.
+        let dressed = batch.arriving.filter { ($0 as? any MapMarkerDressing)?.isDressed ?? true }
+        let undressed = batch.arriving.filter { !(($0 as? any MapMarkerDressing)?.isDressed ?? true) }
+        popChoreographer.popIn(dressed)
+        popChoreographer.hold(undressed)
         popChoreographer.settle(batch.settled)
         // Annotation views now exist (clustering is current) → bind autoplay and
         // warm the visible posts so a tap opens instantly.
@@ -2113,6 +2121,10 @@ extension MapsViewController: MKMapViewDelegate {
             view?.onSelect = { [weak self, weak view] in
                 self?.openAnnotation(cluster, thumbnail: view?.heroImage)
             }
+            view?.onDressed = { [weak self, weak view] in
+                guard let self, let view else { return }
+                popChoreographer.release(view)
+            }
             return view
         }
         guard let pinAnnotation = annotation as? MapAnnotation else { return nil }
@@ -2123,6 +2135,10 @@ extension MapsViewController: MKMapViewDelegate {
         view?.configure(with: pinAnnotation.pin, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
         view?.onSelect = { [weak self, weak view] in
             self?.openAnnotation(pinAnnotation, thumbnail: view?.heroImage)
+        }
+        view?.onDressed = { [weak self, weak view] in
+            guard let self, let view else { return }
+            popChoreographer.release(view)
         }
         return view
     }
