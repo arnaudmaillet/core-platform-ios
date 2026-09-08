@@ -142,7 +142,11 @@ final class MapPinZoomSource: ZoomTransitionSource {
         card.setRing(
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
         )
-        card.imageView.image = thumbnail
+        // ⚠️ READ NOW, for the reason the avatar and the icon below both give.
+        // `thumbnail` is a snapshot taken at the TAP, and a marker's cover
+        // arrives asynchronously — so a card built from it flies whatever the
+        // marker had loaded a moment earlier, which for a slow pin is nothing.
+        card.imageView.image = mapView?.wornCover(for: annotation) ?? thumbnail
         // ⚠️ READ NOW, NOT AT INIT. A text marker wears its author, and that
         // face arrives asynchronously — a card built from an answer captured
         // when the source was constructed flies the fallback glyph while the
@@ -156,6 +160,12 @@ final class MapPinZoomSource: ZoomTransitionSource {
         // the fallback: the card then shows the disc `setTextAvatar` just put
         // under it.
         card.setIcon(mapView?.wornIcon(for: annotation))
+        // ⚠️ AND ITS PREVIEW SHEET — the layer that was MOVING. Without this the
+        // card is a still of a marker the viewer just watched animate, and the
+        // "exact twin" this file promises is one rung short. It also seats the
+        // third rung: `setPreviewSheet` writes the sheet's own frame zero into
+        // the cover, so the card falls to the same picture the marker does.
+        card.setPreviewSheet(mapView?.wornPreview(for: annotation))
         // The other end of the flight, when it is not this marker. Nil on every
         // present and on every dismissal that lands where it took off, which
         // leaves the card's blend channel inert.

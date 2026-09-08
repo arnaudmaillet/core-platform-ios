@@ -79,6 +79,10 @@ final class SnapMediaCardView: UIView {
 
     init() {
         super.init(frame: .zero)
+        // ⚠️ CLEAR UNTIL THERE IS MEDIA — see `configure(kind:)`. A text page
+        // is a LIGHT page and this card is in its hierarchy with both surfaces
+        // hidden, so an unconditional ground here paints the text page black.
+        backgroundColor = .clear
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.pin(to: self)
@@ -160,7 +164,20 @@ final class SnapMediaCardView: UIView {
     // MARK: - Content
 
     /// Selects the surface for the post's kind and clears any prior frame.
-    func configure(kind: MediaKind) {
+    func configure(kind: MediaKind, hasMedia: Bool = true) {
+        // ⚠️ THE LAST RUNG, OWNED HERE. The ladder a post's picture is drawn as
+        // is `live media -> sprite sheet -> thumbnail -> black`, and this view
+        // had no ground at all: the black under a decoding video came from
+        // `SnapFeedCell.contentView`, three levels up, and only by coincidence
+        // of colour — that cell is `.systemBackground` for a post with no media
+        // URL, an arbitrary fill under `setRevealGroundTint`, and `.clear` for
+        // the length of a masked reveal. A card that owns its own ground cannot
+        // be undermined by any of them.
+        //
+        // Set HERE and not at init, and only for a post that HAS media: a text
+        // page keeps this card in its hierarchy with both surfaces hidden, and
+        // a text page is light. Pinned by `SnapPageRenderSpecTests`.
+        backgroundColor = hasMedia ? .black : .clear
         imageView.isHidden = kind != .image
         renderView.isHidden = kind != .video
         imageView.image = nil

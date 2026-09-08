@@ -148,7 +148,13 @@ final class PinCardView: UIView {
 
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
-        imageView.backgroundColor = .secondarySystemBackground
+        // ⚠️ BLACK, AND IT IS THE LAST RUNG OF THE LADDER. The stack a post's
+        // picture is drawn as is `live media -> sprite sheet -> thumbnail ->
+        // black`, and this host is what the thumbnail sits on — so its ground
+        // IS that last rung. It was `.secondarySystemBackground`, an opaque
+        // grey that also hid the card's own black (:145, :397) completely, and
+        // a marker whose picture had not resolved was a light box.
+        imageView.backgroundColor = .black
         imageView.frame = bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(imageView)
@@ -160,7 +166,9 @@ final class PinCardView: UIView {
         // half-drawn frame, which is precisely what the fade law forbids; the
         // matching ground also makes the two crop and letterbox identically at
         // every size the card passes through.
-        departureCoverView.backgroundColor = .secondarySystemBackground
+        // Black, and it must MATCH the arrival cover's — see above. The two
+        // grounds move together or the blend draws a half-finished frame.
+        departureCoverView.backgroundColor = .black
         departureCoverView.isHidden = true
         // ⚠️ ABOVE the arrival cover and BELOW the departure one, which is the
         // only position the blend law allows.
@@ -381,13 +389,14 @@ final class PinCardView: UIView {
 
     func setFace(_ face: Face) {
         self.face = face
-        // ⚠️ THE GREY BOX. `imageView` is the cover host and it is never
-        // hidden — it carries an opaque `.secondarySystemBackground` ground so
-        // a letterboxed photograph reads as framed. Under the TEXT face that
-        // ground is invisible because the disc above it is opaque; under an
-        // icon, whose alpha IS its shape, it shows through as a grey square
-        // exactly the size of the marker. An icon pin is a text post and has no
-        // cover to host, so the whole layer goes away.
+        // ⚠️ THE COVER HOST IS NEVER HIDDEN under a media face, and it carries
+        // an OPAQUE BLACK ground so a letterboxed picture reads as framed and
+        // an unresolved one reads as the ladder's last rung rather than as a
+        // light box. Under the TEXT face that ground is invisible because the
+        // disc above it is opaque; under an icon, whose alpha IS its shape, it
+        // would show through as a square exactly the size of the marker. An
+        // icon pin is a text post and has no cover to host, so the whole layer
+        // goes away.
         imageView.isHidden = face == .icon
         // The media ground is black so a letterboxed cover reads as framed; a
         // text card's ground is the face's own tint, and the black would show

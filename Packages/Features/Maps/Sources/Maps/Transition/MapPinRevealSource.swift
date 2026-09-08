@@ -102,7 +102,8 @@ enum MapPinRevealSource {
                     face: face, ringKind: ringKind,
                     avatar: mapView?.wornAvatar(for: annotation),
                     cover: mapView?.wornCover(for: annotation),
-                    icon: mapView?.wornIcon(for: annotation)
+                    icon: mapView?.wornIcon(for: annotation),
+                    preview: mapView?.wornPreview(for: annotation)
                 )
             },
             makePresentStandIn: { [weak mapView] in
@@ -110,7 +111,8 @@ enum MapPinRevealSource {
                     face: face, ringKind: ringKind,
                     avatar: mapView?.wornAvatar(for: annotation),
                     cover: mapView?.wornCover(for: annotation),
-                    icon: mapView?.wornIcon(for: annotation)
+                    icon: mapView?.wornIcon(for: annotation),
+                    preview: mapView?.wornPreview(for: annotation)
                 )
             },
             // Nothing to align to. The page holds still and the window opens
@@ -162,7 +164,8 @@ enum MapPinRevealSource {
     private static func marker(
         face: PinCardView.Face, ringKind: MapPlace.Kind?,
         avatar: UIImage? = nil, cover: UIImage? = nil,
-        icon: (art: AnimatedIconArt, phase: Int)? = nil
+        icon: (art: AnimatedIconArt, phase: Int)? = nil,
+        preview: (art: AnimatedIconArt, phase: Int)? = nil
     ) -> UIView {
         let card = PinCardView(frame: CGRect(x: 0, y: 0, width: face.side, height: face.side))
         card.setFace(face)
@@ -171,6 +174,11 @@ enum MapPinRevealSource {
         // After `setTextAvatar`, so the floor is dressed before the icon decides
         // whether to cover it.
         card.setIcon(icon)
+        // ⚠️ AFTER the cover, because `setPreviewSheet` writes the sheet's own
+        // frame zero over it — which is the point: a stand-in for a video
+        // marker must carry the moving picture the viewer was looking at, and
+        // fall to the same frame it does.
+        card.setPreviewSheet(preview)
         card.setRing(
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)
         )
@@ -220,6 +228,23 @@ extension MKMapView {
         switch view(for: annotation) {
         case let pin as MapAnnotationView: pin.card.wornIcon
         case let cluster as MapClusterAnnotationView: cluster.card.wornIcon
+        default: nil
+        }
+    }
+
+    /// The marker's PREVIEW SHEET — a video marker's moving picture — read the
+    /// same way and at the same moment as its cover, its author and its icon.
+    ///
+    /// ⚠️ Without it every flight off a video marker was a STILL. The card is
+    /// documented as "the pin's exact twin", and it copied the face, the ring,
+    /// the cover, the avatar and the icon — everything except the one layer
+    /// that was moving. A marker visibly playing its clip froze the instant it
+    /// was tapped, and the phase goes with the art so it freezes on the frame
+    /// it was on rather than restarting.
+    func wornPreview(for annotation: any MKAnnotation) -> (art: AnimatedIconArt, phase: Int)? {
+        switch view(for: annotation) {
+        case let pin as MapAnnotationView: pin.card.wornPreview
+        case let cluster as MapClusterAnnotationView: cluster.card.wornPreview
         default: nil
         }
     }

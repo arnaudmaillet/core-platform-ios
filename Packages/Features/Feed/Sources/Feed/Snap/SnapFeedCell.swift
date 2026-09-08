@@ -1555,7 +1555,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
         // The media card selects its surface for the kind and clears any
         // prior frame; a text post's surface simply never receives content.
-        mediaCard.configure(kind: hasMedia ? model.mediaKind : .image)
+        mediaCard.configure(kind: hasMedia ? model.mediaKind : .image, hasMedia: hasMedia)
         // ⚠️ ARMED HERE, ABOVE THE COLLECTION'S EARLY RETURN.
         //
         // It was armed after the single-media loads at the bottom, and a
