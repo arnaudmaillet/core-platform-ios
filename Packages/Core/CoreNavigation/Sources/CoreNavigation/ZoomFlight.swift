@@ -325,9 +325,23 @@ struct ZoomFlight {
         // height-driven and therefore vertically invariant. One of those four
         // is false, and only the running app can say which.
         if ProcessInfo.processInfo.arguments.contains("-grab-geometry") {
-            print(String(format: "[grab] %.3f scale=%.4f card=%@ | %@",
+            // ⚠️ THE MODEL AGREEING PROVES NOTHING. Both values below are
+            // written in the same turn, so of course they match — the first
+            // pass of this probe read only those and concluded "rigid". What a
+            // viewer sees is the PRESENTATION, and a layer carrying an
+            // animation presents an interpolated value while its model has
+            // already arrived. `card.center` is set directly on every pan
+            // (`ZoomDismissInteractionController`) while `card.bounds` may be
+            // riding `springDetach`'s spring, so the two channels can be on
+            // different clocks — which is what "the video follows the drag with
+            // a delay" would be.
+            let cardPres = card.layer.presentation()?.bounds
+            let cardKeys = card.layer.animationKeys()?.joined(separator: ",") ?? "-"
+            print(String(format: "[grab] %.3f scale=%.4f card=%@ pres=%@ anim=[%@] | %@",
                          CACurrentMediaTime(), scale,
-                         NSCoder.string(for: card.bounds), card.zoomLiveMediaDebugState))
+                         NSCoder.string(for: card.bounds),
+                         cardPres.map { NSCoder.string(for: $0) } ?? "nil",
+                         cardKeys, card.zoomLiveMediaDebugState))
         }
         #endif
     }

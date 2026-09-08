@@ -1092,6 +1092,11 @@ extension PinCardView: ZoomFlightCard {
             + " sAnchor=\(surface.map { NSCoder.string(for: $0.layer.anchorPoint) } ?? "-")"
             + " donated=\(donatedSurface == nil ? "n" : "Y")"
             + " native=\(native.map { NSCoder.string(for: $0) } ?? "nil")"
+            // The two that actually decide what is on screen.
+            + " sPres=\(surface?.layer.presentation().map { NSCoder.string(for: $0.bounds) } ?? "nil")"
+            + " sAnim=[\(surface?.layer.animationKeys()?.joined(separator: ",") ?? "-")]"
+            + " hPres=\(host.layer.presentation().map { NSCoder.string(for: $0.bounds) } ?? "nil")"
+            + " hAnim=[\(host.layer.animationKeys()?.joined(separator: ",") ?? "-")]"
     }
 
     /// Same rule as the grid's flight card: a pin flying without live media

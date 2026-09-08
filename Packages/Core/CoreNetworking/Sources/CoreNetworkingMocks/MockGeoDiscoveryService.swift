@@ -156,15 +156,14 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // The venues keep their meanings: the text-only one takes only text, the
         // media-only one takes no text, and the mixed one spans all three —
         // which `aTextFacedMixedClusterOpensBothKinds` rests on.
-        // ⚠️ THE PHOTO QUOTAS ARE ZERO, NOT DELETED. While
-        // `MockSocialDataset.mediaIsAlwaysVideo` is on there are no photo posts
-        // to draw, and a quota asking for some would silently get nothing —
-        // `assign` stops when its iterator runs dry. Writing the zeros keeps the
-        // shape of the balance visible, so flipping the switch back is one edit
-        // here and not an archaeology exercise.
-        assign(mixedVenue, text: 6, video: 6, photo: 0)
+        // The photo quotas are back: `MockSocialDataset.mediaIsAlwaysVideo` is
+        // off, so the corpus draws its honest thirds again and a quota asking
+        // for photographs gets them. They were written as ZEROS rather than
+        // deleted while the switch was on, which is why restoring them is this
+        // edit and not an excavation.
+        assign(mixedVenue, text: 4, video: 4, photo: 4)
         assign(textOnlyVenue, text: 4, video: 0, photo: 0)
-        assign(mediaOnlyVenue, text: 0, video: 6, photo: 0)
+        assign(mediaOnlyVenue, text: 0, video: 4, photo: 4)
         return assignments
     }
 
