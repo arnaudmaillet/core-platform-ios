@@ -128,7 +128,29 @@ final class MapsViewController: UIViewController {
     /// the flight: the instant-tap recognizer and MapKit's own `didSelect` can
     /// both fire for ONE tap, and without a guard the second one pushes a
     /// second copy of the feed.
-    private var isPlainFeedPushed = false
+    /// Whether the map may be touched, and whether a tap may open anything —
+    /// see `MapOpenGate`. It replaces two booleans that were set in three
+    /// branches and released from five unrelated places, and it is the ONLY
+    /// thing that writes the map's interaction.
+    private var openGate = MapOpenGate() {
+        didSet {
+            applyMapInteraction()
+            #if DEBUG
+            // `-maps-log-gate`: every state the map's lock passes through.
+            //
+            // ⚠️ WITHOUT IT, "the map is dead to taps" and "the map is fine" look
+            // identical from outside — which is exactly how a reversed present
+            // bricked it for a whole session without anyone being able to say
+            // what had happened.
+            if oldValue != openGate,
+               ProcessInfo.processInfo.arguments.contains("-maps-log-gate") {
+                print("[gate] \(oldValue.state) -> \(openGate.state) "
+                      + "canOpen=\(openGate.canOpen ? "Y" : "n") "
+                      + "inert=\(openGate.mapIsInert ? "Y" : "n")")
+            }
+            #endif
+        }
+    }
     /// Chooses which ≤3 visible video pins autoplay.
     private let videoCoordinator: MapVideoPlaybackCoordinator
     /// Runs the pins' staggered pop-in/pop-out and owns the in-flight
@@ -585,6 +607,12 @@ final class MapsViewController: UIViewController {
         for annotation in mapView.annotations {
             mapView.view(for: annotation)?.isHidden = false
         }
+        // ⚠️ AND THE GATE, for the same reason and in the same place: every
+        // transition is over by here. It is the backstop for endings nobody
+        // wired — a place page popping home, a multi-pop, a cross-tab return —
+        // and it is what makes a forgotten release a frame of dead map rather
+        // than a session of it.
+        openGate.appearedAtRoot()
         // WHEN ON THE MAP, THE TAB BAR IS ALWAYS THERE. The map is a tab ROOT:
         // there is no state in the product where an on-screen map has no dock
         // under it, so it asserts one rather than trusting whichever departing
@@ -612,9 +640,12 @@ final class MapsViewController: UIViewController {
         // is alive — under a push, this fires the moment a pop *begins*, and
         // an interactive grab can cancel; the completed return resumes via
         // the transition's onSourceReturned instead.
-        // The map is on its way back (or arriving for the first time), so a
-        // plainly-pushed feed is behind us and the next tap must open again.
-        isPlainFeedPushed = false
+        // ⚠️ THE GATE IS NOT RELEASED HERE, and it used to be. UIKit runs
+        // `viewWillAppear` at interactive-pop BEGIN, so from the first
+        // millimetre of a grab until it was cancelled the map believed nothing
+        // was open — a tap in that window opened a second post over the first.
+        // `viewDidAppear` is where every transition is genuinely over, and this
+        // file already says so three comments below for the tab bar.
         guard activeTransition == nil else {
             // A hero return, though, does need its bottom chrome put back —
             // invisible, so the flight can fade it in. This is the only chance
@@ -1899,6 +1930,27 @@ final class MapsViewController: UIViewController {
     /// a cluster — so a tap opens the snap feed from cache with no metadata
     /// desync. Bounded by clustering (a handful of annotations) and capped;
     /// cancels the prior sweep so a fast pan never piles up speculative fetches.
+    /// The ONLY place in this feature that writes the map's interaction.
+    ///
+    /// ⚠️ ONE WRITE, NOT FOUR FLAGS. `isUserInteractionEnabled` covers both
+    /// halves at once — MapKit's own pan/pinch/rotate AND every marker's
+    /// instant-tap recognizer, which is attached to the annotation VIEW.
+    /// Hit-testing never descends into a view that is not interactive, so one
+    /// write starves both; `isScrollEnabled` and friends would leave the marker
+    /// recognizers live, which is exactly the "a second post opened over the
+    /// first" case. Programmatic `selectAnnotation` is unaffected, so the DEBUG
+    /// openers and any deep link still work.
+    ///
+    /// The map's own bar items go with it: they sit ABOVE the transition
+    /// container, so neither the hero's shield nor the reveal's host covers
+    /// them, and the bell pushes onto the very stack the flight is animating.
+    private func applyMapInteraction() {
+        let inert = openGate.mapIsInert
+        mapView.isUserInteractionEnabled = !inert
+        navigationItem.leftBarButtonItems?.forEach { $0.isEnabled = !inert }
+        navigationItem.rightBarButtonItems?.forEach { $0.isEnabled = !inert }
+    }
+
     private func prewarmVisiblePosts() {
         let visible = mapView.annotations(in: mapView.visibleMapRect)
         var ids: [PostID] = []
@@ -2150,7 +2202,7 @@ extension MapsViewController: MKMapViewDelegate {
     /// `didSelect` (the fallback): whichever lands first wins, the other is a
     /// no-op while the flight is alive.
     private func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
-        guard activeTransition == nil, !isPlainFeedPushed else { return }
+        guard openGate.canOpen else { return }
         let postIDs = Self.postIDs(of: annotation)
         guard !postIDs.isEmpty else { return }
         let face = Self.face(of: annotation)
@@ -2170,7 +2222,7 @@ extension MapsViewController: MKMapViewDelegate {
             // feed owns the pushed screen's gestures either way — with an
             // origin that says where the marker is, what shape and colour it
             // is, and what to draw in the window at each end.
-            isPlainFeedPushed = true
+            guard openGate.openBegan(.reveal) else { return }
             // A HIERARCHY marker always offers its place page, whatever face
             // it wears (a city or country is a place before it is a
             // photograph): the same builder the hero's Case B uses, handed
@@ -2241,7 +2293,7 @@ extension MapsViewController: MKMapViewDelegate {
             // resume through the ordinary appearance callbacks — all of which
             // are keyed on `activeTransition == nil`, which is exactly what
             // this path is.
-            isPlainFeedPushed = true
+            guard openGate.openBegan(.plainPush) else { return }
             pushPlainSnapFeed(postIDs, self)
         case .plainPush, .hero, .reveal:
             // No stack to push onto: the window has nowhere to open, so the
@@ -2305,7 +2357,13 @@ extension MapsViewController: MKMapViewDelegate {
             },
             depthView: { [weak self] in self?.view },
             dismissalDidEnd: { [weak self] committed in
-                guard committed, let self else { return }
+                guard let self else { return }
+                // ⚠️ REPORTED WHATEVER THE OUTCOME. This is the reveal route's
+                // ONLY terminal signal, and the gate needs the cancelled case
+                // as much as the committed one.
+                openGate.dismissalBegan()
+                openGate.dismissalEnded(committed: committed)
+                guard committed else { return }
                 restoreBottomChromeForReturn(alpha: 1)
                 activeTransition = nil
                 videoCoordinator.setSurfaceVisible(true)
@@ -2366,6 +2424,10 @@ extension MapsViewController: MKMapViewDelegate {
         let feedVC = makeSnapFeed(postIDs)
         guard let nav = navigationController,
               let destination = feedVC as? any ZoomTransitionDestination else {
+            // ⚠️ THE DEFENSIVE BRANCH TAKES THE LOCK TOO. It set neither flag,
+            // so two taps could `present` twice — and presenting over a
+            // presentation raises rather than degrades.
+            guard openGate.openBegan(.modalFallback) else { return }
             // Defensive: without the hero seam (or a stack), show it plainly.
             if let nav = navigationController {
                 feedVC.hidesBottomBarWhenPushed = true
@@ -2414,6 +2476,7 @@ extension MapsViewController: MKMapViewDelegate {
         // navigation bar cross-fades "Maps" into the feed's back item + author
         // capsule natively — no second bar to pop in over the first. The
         // transition object is the stack's delegate for the feed's lifetime.
+        guard openGate.openBegan(.hero) else { return }
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
 
@@ -2469,11 +2532,28 @@ extension MapsViewController: MKMapViewDelegate {
                 guard let self else { return }
                 self.navigationController?.delegate = nil
                 self.activeTransition = nil
+                self.openGate.dismissedToIntermediate()
                 self.barsStack.alpha = 1
                 // The present flight hid the tapped marker; nothing on the
                 // gallery path would ever restore it.
                 source.setZoomSourceHidden(false)
             }
+        }
+
+        // ⚠️ THE FLIGHT CAUGHT MID-AIR AND THROWN BACK, which had no handler
+        // here at all. `activeTransition` stayed set, and since it was both the
+        // lock and the state handle, every marker tap for the rest of the
+        // session did nothing — on screen, broken markers rather than a stuck
+        // animation, which is how it survived. The hook is generic and two
+        // other surfaces already wire it.
+        transition.onPresentationCancelled = { [weak self, weak nav] in
+            guard let self else { return }
+            nav?.delegate = nil
+            self.activeTransition = nil
+            self.openGate.presentationCancelled()
+            self.restoreBottomChromeForReturn(alpha: 1)
+            self.videoCoordinator.setSurfaceVisible(true)
+            self.refreshVideoPlayback()
         }
 
         var didLand = false
@@ -2482,6 +2562,7 @@ extension MapsViewController: MKMapViewDelegate {
             // flight-scoped work must run once): release the donor player.
             guard !didLand else { return }
             didLand = true
+            self?.openGate.destinationShown()
             self?.videoCoordinator.stopAll()
             #if DEBUG
             // `[delay]`, for the reason its two siblings grew one: a run that
@@ -2516,10 +2597,16 @@ extension MapsViewController: MKMapViewDelegate {
             // now (see `restoreBottomChromeForReturn`).
             self.restoreBottomChromeForReturn(alpha: 1)
             self.activeTransition = nil
+            self.openGate.dismissalBegan()
+            self.openGate.dismissalEnded(committed: true)
             self.videoCoordinator.setSurfaceVisible(true)
             self.refreshVideoPlayback()
         }
         transition.onDismissalCancelled = { [weak self, gallery, weak nav, weak feedVC] in
+            // The feed is STAYING, so the gate does not reopen — it goes back to
+            // `.open`, which is what `committed: false` means.
+            self?.openGate.dismissalBegan()
+            self?.openGate.dismissalEnded(committed: false)
             // The feed is staying up: put the bottom chrome back down behind it.
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
