@@ -55,6 +55,7 @@ struct ZoomLiveMediaRetryTests {
         /// The duration the card was asked to fade its adopted media in over,
         /// nil when it was never asked.
         private(set) var fadeDuration: TimeInterval?
+        private(set) var isHoldingArrival = false
         private var isLive = false
         var zoomLiveMediaSurface: UIView? { isLive ? ownSurface : nil }
         var zoomRestingCornerRadius: CGFloat { 12 }
@@ -71,6 +72,7 @@ struct ZoomLiveMediaRetryTests {
         func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
             fadeDuration = duration
         }
+        func holdAdoptedLiveMediaUntilLanding() { isHoldingArrival = true }
     }
 
     /// A page whose player arrives while the card is in the air, which is the
@@ -292,17 +294,29 @@ struct ZoomLiveMediaRetryTests {
     /// nothing should be seen to happen. A page's is the OTHER end of the
     /// flight arriving, and it comes up over a departure that stays fully
     /// drawn: the same law the reveal runs on.
+    /// ⚠️ AND IT ARRIVES AT THE LANDING, NOT MID-FLIGHT. A surface adopted
+    /// while the card is still travelling has missed the only pose that is
+    /// exact — the one inside the flight's own animation block — so it is held
+    /// invisible until the card has stopped. Measured on the present this
+    /// replaces: the arriving video was drawn 263.68pt wider than its window
+    /// when it was adopted, and still 79.36pt wider on the frame its
+    /// cross-dissolve made it opaque.
     @Test func onlyTheArrivingSideFadesIn() {
         let arriving = StubMirroringCard()
         let arrivingWindow = staged(arriving)
         let page = StubPage()
         page.isPlaying = true
-        ZoomLiveMediaRetry.arm(card: arriving, pageSize: CGSize(width: 402, height: 874),
-                               mirroring: page, window: 600)?.debugTick()
+        let retry = ZoomLiveMediaRetry.arm(card: arriving,
+                                           pageSize: CGSize(width: 402, height: 874),
+                                           mirroring: page, window: 600)
+        retry?.debugTick()
+        #expect(arriving.isHoldingArrival, "the arriving picture was not held for the landing")
+        #expect(arriving.fadeDuration == nil, "it faded up mid-flight, where no pose is exact")
+        retry?.debugFinish()
         let fade = arriving.fadeDuration
         #expect(fade != nil, "the arriving picture cut in instead of fading")
-        // The rest of the flight, floored so a late adoption is still seen to
-        // arrive rather than snapping in over three milliseconds.
+        // Floored so a late adoption is still seen to arrive rather than
+        // snapping in over three milliseconds.
         #expect((fade ?? 0) >= 0.2)
         arrivingWindow.isHidden = true
 

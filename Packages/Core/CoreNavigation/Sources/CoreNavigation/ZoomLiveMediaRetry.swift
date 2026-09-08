@@ -167,6 +167,11 @@ final class ZoomLiveMediaRetry: NSObject {
     func debugTick() { tick() }
     /// Whether the retry is still asking.
     var debugIsAsking: Bool { link != nil }
+    /// The landing, for a suite that cannot wait out a real flight. The SAME
+    /// entry point the deadline takes, for the reason `debugTick` states: a
+    /// test driving a parallel implementation would pin a route the app never
+    /// takes — and the arrival of a held-back surface happens exactly here.
+    func debugFinish() { stop() }
     #endif
 
     private func start() {
