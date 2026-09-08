@@ -133,6 +133,20 @@ struct MapOpenGate: Equatable {
         state = .intermediate
     }
 
+    /// ⚠️ AND IT IS THE REVEAL ROUTE'S ORDINARY RELEASE, not only a backstop.
+    /// Traced over six cycles: a reveal reports `idle -> presenting(reveal)`
+    /// and then `presenting(reveal) -> idle`, never passing through `.open`,
+    /// because that route has no "the destination is up" hook on the map's
+    /// side. The gate is therefore COARSER there — it cannot tell presenting
+    /// from open, so a cancelled reveal dismissal is a no-op rather than a
+    /// return to `.open`.
+    ///
+    /// That coarseness is safe, and the reason is worth stating: every one of
+    /// those states answers `canOpen == false` and `mapIsInert == true`, so the
+    /// map is shut for the whole round trip either way, and the release still
+    /// happens exactly once, here, when the map is genuinely frontmost. What
+    /// the coarseness costs is diagnostic detail, not correctness.
+    ///
     /// The map is frontmost and every animation is over — `viewDidAppear`,
     /// never `viewWillAppear`, which UIKit runs at interactive-pop begin.
     ///

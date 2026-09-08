@@ -149,3 +149,29 @@ struct MapOpenGateTests {
         #expect(gate.canOpen, "a late destinationShown re-locked a released map")
     }
 }
+
+/// The shape the REVEAL route actually produces, traced over six soak cycles:
+/// `idle -> presenting(reveal) -> idle`, never passing through `.open`, because
+/// that route has no "destination shown" hook on the map's side.
+///
+/// Pinned because it looks like a hole and is not: every state in that path
+/// answers `canOpen == false`, so the map is shut for the whole round trip, and
+/// the release happens exactly once when the map is genuinely frontmost.
+extension MapOpenGateTests {
+
+    @Test func aRevealThatNeverReportsItsDestinationIsStillShut() {
+        var gate = MapOpenGate()
+        _ = gate.openBegan(.reveal)
+        // No `destinationShown` — the route has no hook for it.
+        #expect(!gate.canOpen)
+        #expect(gate.mapIsInert)
+        // A cancelled dismissal is a no-op from `.presenting`, and must not
+        // open the map with a feed still on screen.
+        gate.dismissalBegan()
+        gate.dismissalEnded(committed: false)
+        #expect(!gate.canOpen, "a cancelled reveal dismissal unlocked the map")
+        // The one release it does get.
+        gate.appearedAtRoot()
+        #expect(gate.canOpen)
+    }
+}
