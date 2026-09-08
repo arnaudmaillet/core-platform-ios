@@ -97,6 +97,19 @@ final class ZoomGeometrySampler {
         return point
     }
 
+    /// The presented opacity a layer is actually drawn at, from `layer` up to
+    /// (and excluding) `ancestor` — every host in between multiplied in.
+    private static func effectiveOpacity(of layer: CALayer, under ancestor: CALayer) -> Float? {
+        var value: Float = 1
+        var node: CALayer? = layer
+        while let current = node, current !== ancestor {
+            guard let presented = current.presentation() else { return nil }
+            value *= presented.opacity
+            node = current.superlayer
+        }
+        return value
+    }
+
     @objc private func tick() {
         guard let card else { stop(); return }
         frame += 1
@@ -151,8 +164,14 @@ final class ZoomGeometrySampler {
         // of a present whose video was in fact still almost transparent. Model
         // values written by the same call that logs them always agree with
         // themselves; that is the trap this whole file exists to avoid.
-        let surfOpacity = surface?.layer.presentation()?.opacity
-        let coverOpacity = cover?.layer.presentation()?.opacity
+        // ⚠️ AND EVERY OPACITY BETWEEN IT AND THE CARD, not the view's own. A
+        // live surface is normally parented on a HOST, and the host's alpha is
+        // the channel the card fades it with — so a surface held at zero
+        // through its host reads 1.00 here and the line says `showing=both`
+        // over a picture nobody can see. That is the same class of lie as
+        // reading `alpha` instead of the presented opacity, one level up.
+        let surfOpacity = surface.flatMap { Self.effectiveOpacity(of: $0.layer, under: card.layer) }
+        let coverOpacity = cover.flatMap { Self.effectiveOpacity(of: $0.layer, under: card.layer) }
         let surfaceDraws = surface.map {
             !$0.isHidden && (surfOpacity ?? $0.layer.opacity) > 0.01 && $0.window != nil
         } ?? false
