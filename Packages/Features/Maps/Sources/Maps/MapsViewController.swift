@@ -148,6 +148,9 @@ final class MapsViewController: UIViewController {
                       + "canOpen=\(openGate.canOpen ? "Y" : "n") "
                       + "inert=\(openGate.mapIsInert ? "Y" : "n")")
             }
+            // The soak's clock is the gate, not a timer: "the map is ready
+            // again" has exactly one honest definition and this is it.
+            if oldValue.canOpen == false, openGate.canOpen { advanceSoakIfNeeded() }
             #endif
         }
     }
@@ -160,6 +163,22 @@ final class MapsViewController: UIViewController {
     private let appObservers = MapNotificationBag()
     #if DEBUG
     private var didDebugOpenPin = false
+    #if DEBUG
+    /// `-maps-soak <cycles>`: opens a marker, closes it, opens the next, N times.
+    ///
+    /// ⚠️ THE MAP WAS THE ONE SURFACE WITH NO SOAK, and the reason was
+    /// mechanical: every `-maps-open-*` hook is a ONE-SHOT LATCH
+    /// (`didDebugOpenPin`), so nothing could iterate this seam at all. Every
+    /// leak, every stuck lock and every retained driver on the map→post→map
+    /// round trip was therefore unmeasurable by construction, whatever the
+    /// census said.
+    ///
+    /// Deterministic order, by post id: MapKit's own annotation order is
+    /// undefined, and a soak that opens a different sequence on every run
+    /// compares two different runs.
+    private var soakCyclesRemaining = 0
+    private var soakCursor = 0
+    #endif
     #endif
 
     private let mapView = MKMapView()
@@ -1951,6 +1970,62 @@ final class MapsViewController: UIViewController {
         navigationItem.rightBarButtonItems?.forEach { $0.isEnabled = !inert }
     }
 
+    #if DEBUG
+    /// Drives one soak cycle when the map is idle and cycles remain.
+    ///
+    /// Called from the gate's own idle transitions, which is the only honest
+    /// "the map is ready again" signal there is — a fixed delay would race the
+    /// spring's tail, and this file's history is full of measurements ruined by
+    /// exactly that.
+    private func advanceSoakIfNeeded() {
+        guard soakCyclesRemaining > 0, openGate.canOpen, view.window != nil else { return }
+        let ordered = mapView.annotations
+            .compactMap { annotation -> (String, any MKAnnotation)? in
+                if let pin = annotation as? MapAnnotation { (pin.pin.postID.rawValue, annotation) }
+                else if let cluster = annotation as? MapComputedCluster {
+                    (cluster.representative.postID.rawValue, annotation)
+                } else { nil }
+            }
+            .sorted { $0.0 < $1.0 }
+        guard !ordered.isEmpty else { return }
+        let target = ordered[soakCursor % ordered.count]
+        soakCursor += 1
+        soakCyclesRemaining -= 1
+        print("[soak] cycle \(soakCursor) opening \(target.0) of \(ordered.count) markers")
+        // One runloop turn, so this never runs inside the gate's own didSet.
+        DispatchQueue.main.async { [weak self] in
+            self?.mapView.selectAnnotation(target.1, animated: true)
+        }
+        // ⚠️ SCHEDULED FROM HERE AND NOT FROM A LANDING CALLBACK, because only
+        // ONE of the three routes has one. `onDestinationShown` belongs to the
+        // hero's transition controller; a reveal and a plain push have no such
+        // hook on this side, and a soak that can only close a hero would stall
+        // on the first text marker it met — which is exactly what the first run
+        // did. The delay is generous rather than tuned: it is a scheduling
+        // convenience, and nothing is measured against it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.closeSoakedFeed()
+        }
+    }
+
+    /// Closes whatever the soak opened, by the same path a finger would take on
+    /// that route.
+    ///
+    /// The hero gets `debugScriptedGrab` — one release below the threshold and
+    /// one above it, so a cycle exercises BOTH dismissal outcomes rather than
+    /// only the happy path. The reveal and the plain push have no interactive
+    /// script on this side, so they are popped, which is the chevron's own path
+    /// through the same animator.
+    private func closeSoakedFeed() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-soak") else { return }
+        if let transition = activeTransition {
+            transition.debugScriptedGrab()
+        } else if navigationController?.topViewController !== self {
+            navigationController?.popViewController(animated: true)
+        }
+    }
+    #endif
+
     private func prewarmVisiblePosts() {
         let visible = mapView.annotations(in: mapView.visibleMapRect)
         var ids: [PostID] = []
@@ -2061,6 +2136,18 @@ extension MapsViewController: MKMapViewDelegate {
     /// only reachable by finding one of them by hand on the map.
     private func debugOpenFirstPinIfRequested(among views: [MKAnnotationView]) {
         let arguments = ProcessInfo.processInfo.arguments
+        // `-maps-soak <cycles>`: arm once, then drive from the gate.
+        if soakCyclesRemaining == 0, !didDebugOpenPin,
+           let index = arguments.firstIndex(of: "-maps-soak"), index + 1 < arguments.count,
+           let cycles = Int(arguments[index + 1]), cycles > 0 {
+            didDebugOpenPin = true
+            soakCyclesRemaining = cycles
+            print("[soak] armed for \(cycles) cycles")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.advanceSoakIfNeeded()
+            }
+            return
+        }
         // `-maps-open-post <id>`: open THAT post, not whichever one happens to
         // be first.
         //
@@ -2564,6 +2651,7 @@ extension MapsViewController: MKMapViewDelegate {
             didLand = true
             self?.openGate.destinationShown()
             self?.videoCoordinator.stopAll()
+
             #if DEBUG
             // `[delay]`, for the reason its two siblings grew one: a run that
             // PAGES the feed first cannot be scripted against a hard-coded

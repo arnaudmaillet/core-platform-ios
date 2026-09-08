@@ -87,6 +87,13 @@ final class HeroTransitionAudit {
         let retries = census[ZoomDebugCensus.Key.liveMediaRetry] ?? 0
         let cards = census[ZoomDebugCensus.Key.flightCard] ?? 0
         let pins = census[ZoomDebugCensus.Key.pinCard] ?? 0
+        // ⚠️ COUNTED SINCE IT WAS WRITTEN AND NEVER PUBLISHED, and it is the
+        // object whose survival LOCKS THE MAP: the transition controller is
+        // both the map's re-entrancy handle and the owner of the source, the
+        // animators and the drivers. A retained one is a map that silently
+        // swallows every marker tap, and the line that was supposed to show it
+        // did not carry the number.
+        let controllers = census[ZoomDebugCensus.Key.controller] ?? 0
         // A grab-from-rest builds an animator too (superseded, but alive), so
         // "some transition object exists" is the honest activity signal for
         // every open/dismiss path. Landing holds count as active: the hold
@@ -124,7 +131,8 @@ final class HeroTransitionAudit {
         let state = isActive ? "active" : "settled"
         let line = "hero;seq=\(sequence);state=\(state)"
             + ";animators=\(animators);interruptors=\(interruptors);drivers=\(drivers)"
-            + ";retries=\(retries);cards=\(cards);pins=\(pins);stranded=\(stranded)"
+            + ";retries=\(retries);cards=\(cards);pins=\(pins);controllers=\(controllers)"
+            + ";stranded=\(stranded)"
             + ";players=\(players);idle=\(idle);dupes=\(duplicated)"
             + ";anchors=\(anchors);stalls=\(stalls);gen=\(generations)"
         probe.accessibilityIdentifier = line
