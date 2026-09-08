@@ -863,21 +863,12 @@ public final class VideoRenderView: UIView {
                      superview.map { "\(type(of: $0))" } ?? "nil"))
     }
 
-    #if DEBUG
-    var isPosterVisible: Bool { !posterView.isHidden && posterView.alpha > 0.01 }
-
-    /// Everything that decides whether this surface shows anything, in one
-    /// string. For tracing who blanks a media area: a black region is always
-    /// some combination of these, and reading them together is what separates
-    /// "hidden" from "empty layer" from "poster cleared".
-    public var debugSurfaceState: String {
-        let poster = posterView.image == nil
-            ? "nil" : (isPosterVisible ? "SHOWN" : "set/hidden")
-        return String(format: "hidden=%@ alpha=%.2f poster=%@ frames=%d bg=%@",
-                      isHidden ? "Y" : "N", alpha, poster, enqueuedFrameCount,
-                      backgroundColor == .clear ? "clear" : "black")
-    }
-
+    // ⚠️ NOT BEHIND `#if DEBUG`, and the fence below is why the distinction
+    // matters. These three are read by `ZoomFlightCard.zoomLiveMediaContentRect`,
+    // which is a protocol REQUIREMENT and therefore compiled in every
+    // configuration — so fencing them compiles in Debug, where the fenced
+    // member and its caller agree, and fails only in Release. CI builds Release
+    // for exactly this reason, and caught it.
     /// Where the picture is ACTUALLY drawn, in the surface's own coordinates.
     ///
     /// The surface's bounds say where the window is; this says where the video
@@ -904,6 +895,22 @@ public final class VideoRenderView: UIView {
         if let sample = layer as? AVSampleBufferDisplayLayer { return sample.videoGravity.rawValue }
         if let player = playerLayer { return player.videoGravity.rawValue }
         return "none"
+    }
+
+
+    #if DEBUG
+    var isPosterVisible: Bool { !posterView.isHidden && posterView.alpha > 0.01 }
+
+    /// Everything that decides whether this surface shows anything, in one
+    /// string. For tracing who blanks a media area: a black region is always
+    /// some combination of these, and reading them together is what separates
+    /// "hidden" from "empty layer" from "poster cleared".
+    public var debugSurfaceState: String {
+        let poster = posterView.image == nil
+            ? "nil" : (isPosterVisible ? "SHOWN" : "set/hidden")
+        return String(format: "hidden=%@ alpha=%.2f poster=%@ frames=%d bg=%@",
+                      isHidden ? "Y" : "N", alpha, poster, enqueuedFrameCount,
+                      backgroundColor == .clear ? "clear" : "black")
     }
 
     /// Names this surface in `-zoom-live-log` output (e.g. "tile", "card").
