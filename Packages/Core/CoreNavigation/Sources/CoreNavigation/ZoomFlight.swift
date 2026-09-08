@@ -312,6 +312,24 @@ struct ZoomFlight {
             chrome.center = center
             chrome.alpha = 1
         }
+        #if DEBUG
+        // `-grab-geometry`: the whole chain, once per pan event.
+        //
+        // Filmed and measured: during a grab the video inside the card shrinks
+        // about TWICE as fast as the card does — content separation -15.7%
+        // against a card height of -7.6%, drifting monotonically and freezing
+        // the instant the card stops. Every structural reading says it should
+        // be rigid: this pose scales `bounds` uniformly, nothing else scales
+        // the card, the surface is full-bleed and autoresized, and an
+        // aspect-fill of a wider-than-tall video into a narrower card is
+        // height-driven and therefore vertically invariant. One of those four
+        // is false, and only the running app can say which.
+        if ProcessInfo.processInfo.arguments.contains("-grab-geometry") {
+            print(String(format: "[grab] %.3f scale=%.4f card=%@ | %@",
+                         CACurrentMediaTime(), scale,
+                         NSCoder.string(for: card.bounds), card.zoomLiveMediaDebugState))
+        }
+        #endif
     }
 
     /// The card partway home: size and corner radius interpolated between the

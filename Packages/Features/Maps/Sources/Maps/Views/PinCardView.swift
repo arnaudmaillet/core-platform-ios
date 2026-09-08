@@ -1077,6 +1077,23 @@ extension PinCardView: ZoomFlightCard {
         (donatedSurface ?? videoRenderView).nativeVideoSize
     }
 
+    /// The whole media chain in one line, for `-grab-geometry` — see the probe
+    /// in `ZoomFlight.poseFloating`. CoreNavigation cannot ask a
+    /// `VideoRenderView` anything directly, so the card reports it.
+    var zoomLiveMediaDebugState: String {
+        let surface: UIView? = donatedSurface ?? (videoRenderView.isHidden ? nil : videoRenderView)
+        let host = donatedMediaHost
+        let native = (donatedSurface ?? videoRenderView).nativeVideoSize
+        return "host=\(NSCoder.string(for: host.bounds))"
+            + " hostHidden=\(host.isHidden ? "Y" : "n")"
+            + " surface=\(surface.map { NSCoder.string(for: $0.frame) } ?? "nil")"
+            + " sBounds=\(surface.map { NSCoder.string(for: $0.bounds) } ?? "-")"
+            + " sXf=\(surface.map { NSCoder.string(for: $0.transform) } ?? "-")"
+            + " sAnchor=\(surface.map { NSCoder.string(for: $0.layer.anchorPoint) } ?? "-")"
+            + " donated=\(donatedSurface == nil ? "n" : "Y")"
+            + " native=\(native.map { NSCoder.string(for: $0) } ?? "nil")"
+    }
+
     /// Same rule as the grid's flight card: a pin flying without live media
     /// shows its cover, which is always drawing; one flying with live media is
     /// only "drawing" while that surface is actually visible.
