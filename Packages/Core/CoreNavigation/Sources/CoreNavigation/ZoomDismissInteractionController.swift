@@ -88,7 +88,16 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// the animation converges to zero duration exactly as the window closes
     /// and the handoff to direct sets is continuous by construction.
     private var detachDeadline: CFTimeInterval = 0
-    private var isDetachSettling: Bool { CACurrentMediaTime() < detachDeadline }
+    private var isDetachSettling: Bool { CACurrentMediaTime() < detachDeadline && !hasYieldedDip }
+
+    /// Set the moment the finger travels, and never unset for the rest of the
+    /// grab — see the hand-over in `updateDrag`.
+    private var hasYieldedDip = false
+    /// The last translation seen, so a pan event can tell a resting thumb from
+    /// a travelling one. A thumb at rest jitters well under a point; a real
+    /// drag clears this in a single frame.
+    private var lastDragTranslation: CGPoint?
+    private static let dipYieldsAboveTravel: CGFloat = 0.5
 
     /// How long the detach dip takes to settle.
     private static let detachDuration: TimeInterval = 0.18
@@ -329,6 +338,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // a UIViewPropertyAnimator: its tracked animations entangled the
         // release spring's completion under the transition, freezing it.)
         detachDeadline = 0
+        hasYieldedDip = false
+        lastDragTranslation = nil
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.detachDeadline = CACurrentMediaTime() + Self.detachDuration
@@ -368,6 +379,18 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// into a capsule halfway through a drag that had decided nothing.
     private static func grabCornerRadius(at progress: CGFloat, screen: CGFloat) -> CGFloat {
         screen * grabScale(at: progress)
+    }
+
+    /// Clears the dip's in-flight animations across the card and everything
+    /// autoresized under it, so the hand-over leaves no residue.
+    ///
+    /// The whole subtree, because the card's live surface and its host are
+    /// sized by autoresizing: they carry their own copy of every `bounds.size`
+    /// animation the card was given, and leaving those behind would keep the
+    /// picture interpolating under a frame that has stopped.
+    private static func stopStackedAnimations(on layer: CALayer) {
+        layer.removeAllAnimations()
+        layer.sublayers?.forEach(stopStackedAnimations)
     }
 
     private func springDetach(_ flight: ZoomFlight, to scale: CGFloat, progress: CGFloat) {
@@ -481,6 +504,40 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // destination that draws alongside the card can be told the same
         // number instead of guessing it.
         let radius = Self.grabCornerRadius(at: progress, screen: screenRadius)
+        // ⚠️ THE DIP OWNS THE SCALE ONLY WHILE THE FINGER IS STILL, and its own
+        // note says why: it "springs to the detached scale on its own curve
+        // WHILE THE FINGER MAY NOT HAVE MOVED AT ALL". That premise is what
+        // makes an animated scale channel acceptable — nothing else is moving,
+        // so there is nothing for it to be out of step with.
+        //
+        // A finger that IS moving breaks it, and the break is visible. Position
+        // is set directly a few lines below, so the card's centre is exact to
+        // the touch; its SIZE is still on the dip's spring. Measured with
+        // `-grab-geometry`, the presented width trailed the model by up to 22pt
+        // through the dip. The card's live media is an aspect-fill of those
+        // bounds and a 1280x720 clip in a portrait card is magnified ~3.9x, so
+        // 22pt of size lag is ~85pt of picture arriving late against a frame
+        // that is tracking perfectly. Reported as the video following the drag
+        // a beat behind, and that is exactly what it is.
+        //
+        // So the dip hands the channel back the moment the drag travels, and
+        // ⚠️ IT ADOPTS WHAT IS ON SCREEN AS IT GOES. Simply switching to direct
+        // posing leaves the spring running — a UIView animation is not cancelled
+        // by writing its property — and the card would keep interpolating
+        // toward a target nothing is aiming at any more. Taking the presented
+        // bounds as the model first makes the hand-over a change of driver
+        // rather than of value: no jump, no residue.
+        let travel = lastDragTranslation.map {
+            hypot(translation.x - $0.x, translation.y - $0.y)
+        } ?? 0
+        lastDragTranslation = translation
+        if isDetachSettling, travel > Self.dipYieldsAboveTravel {
+            if let presented = flight.card.layer.presentation()?.bounds {
+                Self.stopStackedAnimations(on: flight.card.layer)
+                flight.card.bounds = presented
+            }
+            hasYieldedDip = true
+        }
         if isDetachSettling {
             springDetach(flight, to: scale, progress: progress)
         } else {
