@@ -250,6 +250,22 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // inherits the error.
         container.layoutIfNeeded()
         source.zoomSourceWillStageDismissal()
+        // ⚠️ THE GRAB ASSERTS THE CONCEALMENT RATHER THAN INHERITING IT.
+        //
+        // The card is the source's twin, so for the length of this gesture the
+        // original must not also be on screen — and until now that was true
+        // only by inheritance: the PUSH hid it (`ZoomAnimator`'s frame-0
+        // handoff) and nothing re-applied it. Inheritance is not enough here.
+        // The hide is an `isHidden` flag on one view instance, and this line is
+        // the first thing that runs after the presenter has been put back in
+        // the window — which is exactly when MapKit re-realizes its annotation
+        // views (`prepareForReuse` resets `isHidden`) and when a settling
+        // region can mint a replacement marker. Either one leaves the twin
+        // showing under the page for the whole drag.
+        //
+        // Idempotent everywhere it is not needed, and the same thing the reveal
+        // driver has always done at its own staging.
+        source.setZoomSourceHidden(true)
         // The presenter can't move under the user while the feed covers it, so
         // this rect is stable for the grab's lifetime — but it is recomputed at
         // release anyway (see `releaseGrab`), because staging can be seconds
@@ -780,6 +796,16 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                                       })
             case .removeCardNow:
                 card?.removeFromSuperview()
+            case .restoreDestinationContent:
+                // The page is staying: bring it back BEFORE anything is taken
+                // from the card. It sits above the card, so this covers the
+                // card in the same commit — see `ZoomGrabSettlement.Action`.
+                destination?.setZoomDismissState(ZoomDismissState(
+                    progress: 0, card: .zero, cornerRadius: 0, isSettling: false
+                ))
+                destination?.setZoomContentHidden(false)
+            case .revealSource, .concealSource:
+                source?.setZoomSourceHidden(action == .concealSource)
             }
         }
         flight?.shadow.removeFromSuperview()
@@ -790,20 +816,25 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // commit the feed's disappearance bookkeeping hides it within this
         // same completeTransition turn, so no restored frame can render.
         toolbar?.alpha = 1
-        // Restore the feed content for the cancel path; moot when finished.
+        // Idempotent on the cancel path — `.restoreDestinationContent` already
+        // ran these, first, for the reason that action documents — and the
+        // only place they run when the dismissal finished.
         destination?.setZoomDismissState(ZoomDismissState(
             progress: 0, card: .zero, cornerRadius: 0, isSettling: false
         ))
         destination?.setZoomContentHidden(false)
         destination?.zoomTransitionDidEnd()
-        // Unconditional, cancel included: a cancelled grab that left the source
-        // hidden strands an invisible tile behind the page, and nothing else
-        // would ever restore it if the feed then left by some other route. On
-        // the cancel path this is covered by the restored page anyway.
+        // ⚠️ THE SOURCE IS NOT TOUCHED HERE ANY MORE. It was un-hidden
+        // unconditionally, cancel included, on the reasoning that a source left
+        // concealed could be stranded — but a cancelled grab is a page that is
+        // STAYING, so revealing the twin put the tapped marker back on a map
+        // the viewer can see behind the very next grab. The verdict is now part
+        // of the settlement plan (`.revealSource` / `.concealSource`), and the
+        // stranding it guarded against cannot happen: every source surface
+        // restores blanket-fashion when it becomes the screen again.
         #if DEBUG
         ZoomGeometrySampler.shared.stop()
         #endif
-        source?.setZoomSourceHidden(false)
         // A cancelled grab has to hand back the hidden state the owner undid
         // when the grab began; a completed one is reported through `didShow`.
         if cancelled {

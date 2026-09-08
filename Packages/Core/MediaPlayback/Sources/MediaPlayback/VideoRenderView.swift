@@ -62,6 +62,36 @@ public final class VideoRenderView: UIView {
     public private(set) var enqueuedFrameCount = 0
     public private(set) var lastFrameHostTime: CFTimeInterval = 0
 
+    /// Whether this surface paints an OPAQUE ground behind its layer.
+    ///
+    /// ⚠️ FALSE FOR A FLIGHT CARD'S SURFACE, and that is a filmed one-frame
+    /// black flash in its entirety.
+    ///
+    /// The ground exists so a surface that is drawing owes nothing to whatever
+    /// is behind it. On a flight card there IS something behind it, and it is
+    /// the point of the card: the picture ladder — live media, then the sprite
+    /// sheet, then the thumbnail, then black. An opaque ground on the live rung
+    /// short-circuits the whole ladder to its last step, so the ONE composited
+    /// frame where the layer has nothing to show is black instead of the still
+    /// the card is already carrying.
+    ///
+    /// Measured on the abandoned grab, one line apart on the same build and the
+    /// same scripted gesture: 4 flashes in 16 runs with the ground opaque, 0 in
+    /// 16 with it transparent (14 in 40 against 0 in 44 pooled over the whole
+    /// hunt). No other outlier took its place, because what shows through is
+    /// the card's own cover — the same picture, one decode old.
+    public var paintsOpaqueGround = true {
+        didSet {
+            guard paintsOpaqueGround != oldValue else { return }
+            backgroundColor = groundColour(ready: hasAnnouncedPicture)
+        }
+    }
+
+    private func groundColour(ready: Bool) -> UIColor {
+        guard paintsOpaqueGround else { return .clear }
+        return (posterView.image == nil && !ready) ? .clear : .black
+    }
+
     public init() {
         super.init(frame: .zero)
         backgroundColor = .black
@@ -293,7 +323,7 @@ public final class VideoRenderView: UIView {
         // The dark floor is deliberate where it earns its keep — under a poster
         // that fails to render, and under video whose aspect leaves bars — so
         // it comes back the moment there is anything to floor.
-        backgroundColor = (posterView.image == nil && !ready) ? .clear : .black
+        backgroundColor = groundColour(ready: ready)
         #if DEBUG
         if wasVisible != !shouldHide { logPoster(visible: !shouldHide) }
         #endif

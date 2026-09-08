@@ -10,5 +10,9 @@
 # and defeats every frame-difference judge, including the two below.
 CASE_ARGS=(-rich-media -maps-soak 8)
 CASE_DURATION=100
-CASE_CHECKS=(audit duty-cycle not-frozen)
+# ⚠️ `no-black` IS HERE FOR THE ABANDONED GRAB. Each soak cycle drives one
+# release BELOW the threshold before the one that commits, so an eight-cycle run
+# is eight chances at a defect measured at roughly one cancel in three — which is
+# the only way a one-frame, intermittent flash is caught by a suite at all.
+CASE_CHECKS=(audit duty-cycle not-frozen no-black)
 
