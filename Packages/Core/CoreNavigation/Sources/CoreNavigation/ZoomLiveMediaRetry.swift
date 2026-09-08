@@ -49,6 +49,17 @@ final class ZoomLiveMediaRetry: NSObject {
     private var link: CADisplayLink?
     private var liveMediaSize: CGSize = .zero
     private var hasAdopted = false
+
+    /// Runs `work` inside the flight's own animation, and says whether it took.
+    ///
+    /// ⚠️ THIS IS WHAT LETS A LATE SURFACE ARRIVE IN THE WINDOW. A surface
+    /// acquired mid-flight has missed the pose that ran inside the animator's
+    /// block, and the display link below is a frame behind by construction —
+    /// which is why it used to be held back until the landing and appear only
+    /// on the settled page. Handed the animator, the landing pose is added to
+    /// the animation that is already running: same curve, same frames, no
+    /// clock of its own. Nil (or a refusal) falls back to the hold.
+    var joinFlight: ((@escaping () -> Void) -> Bool)?
     /// Set once the card's presentation has been seen AWAY from its model, so a
     /// flight sampled before its animation has started cannot read as landed.
     private var hasTravelled = false
@@ -274,19 +285,29 @@ final class ZoomLiveMediaRetry: NSObject {
         // 138pt window: 263.68pt of disagreement, with `surfAnims=0` beside it
         // saying plainly that nothing was driving it.
         card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
-        // ⚠️ AND THE ARRIVAL WAITS FOR THE LANDING. A surface acquired after
-        // the flight's animation block has run has missed the only pose that is
-        // exact; `follow` below is a display link and is a frame behind by
-        // construction. Held at zero it does not matter what it is posed at
-        // until the card has stopped — see
-        // `ZoomFlightCard.holdAdoptedLiveMediaUntilLanding`.
-        //
-        // Only the fading arm: a card adopting its OWN surface is showing the
-        // same picture it already showed, and holding it back would blank a
-        // tile that was never wrong.
-        if fadesIn { card.holdAdoptedLiveMediaUntilLanding() }
         hasAdopted = true
+        // Where it is NOW, outside any animation, so the ramp below starts from
+        // the truth rather than from wherever the surface happened to be.
         follow(card)
+        // ⚠️ THE ARRIVAL BELONGS IN THE WINDOW, and it can be there whenever the
+        // flight will take the pose. Added to the running animator, the landing
+        // pose rides the card's own curve — so the picture is correctly framed
+        // at every intermediate size and fades up over the cover while the
+        // window is still travelling, which is what a hero flight is for.
+        let joined = joinFlight?({ [weak self, weak card] in
+            guard let self, let card else { return }
+            self.poseAtLanding(card)
+        }) ?? false
+        if joined {
+            hasArrived = true
+            if fadesIn { card.fadeInAdoptedLiveMedia(over: max(0.2, deadline - CACurrentMediaTime())) }
+        } else if fadesIn {
+            // No animation to join — the flight is over, or this leg poses by
+            // hand. The display link is all that is left and it is a frame
+            // behind, so the surface waits for the landing instead of showing a
+            // pose that arrived late.
+            card.holdAdoptedLiveMediaUntilLanding()
+        }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print(String(format: "[zoom-live] %.3f retry ADOPTED mid-flight (%@)",

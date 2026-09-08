@@ -310,7 +310,8 @@ struct ZoomLiveMediaRetryTests {
                                            pageSize: CGSize(width: 402, height: 874),
                                            mirroring: page, window: 600)
         retry?.debugTick()
-        #expect(arriving.isHoldingArrival, "the arriving picture was not held for the landing")
+        #expect(arriving.isHoldingArrival,
+                "with no animation to join, the arriving picture was not held for the landing")
         #expect(arriving.fadeDuration == nil, "it faded up mid-flight, where no pose is exact")
         retry?.debugFinish()
         let fade = arriving.fadeDuration
@@ -319,6 +320,32 @@ struct ZoomLiveMediaRetryTests {
         // snapping in over three milliseconds.
         #expect((fade ?? 0) >= 0.2)
         arrivingWindow.isHidden = true
+
+        // ⚠️ AND IT IS NOT HELD WHEN THERE IS AN ANIMATION TO JOIN. Holding was
+        // a concession to the display link being a frame behind; handed the
+        // flight's own animator the pose rides the card's curve, so the picture
+        // belongs IN THE WINDOW and fades up there. Held anyway, it appeared on
+        // the settled page instead — reported as "the player is not in the
+        // transition window".
+        let joining = StubMirroringCard()
+        let joiningWindow = staged(joining)
+        let joiningPage = StubPage()
+        joiningPage.isPlaying = true
+        let joiningRetry = ZoomLiveMediaRetry.arm(
+            card: joining, pageSize: CGSize(width: 402, height: 874),
+            mirroring: joiningPage, window: 600
+        )
+        var posedInFlight = 0
+        joiningRetry?.joinFlight = { work in
+            posedInFlight += 1
+            work()
+            return true
+        }
+        joiningRetry?.debugTick()
+        #expect(posedInFlight == 1, "the landing pose was never handed to the flight")
+        #expect(!joining.isHoldingArrival, "it was held back from a window that would have carried it")
+        #expect((joining.fadeDuration ?? 0) >= 0.2, "it arrived as a cut instead of a fade")
+        joiningWindow.isHidden = true
 
         let departing = StubCard()
         let departingWindow = staged(departing)
