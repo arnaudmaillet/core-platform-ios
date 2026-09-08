@@ -28,6 +28,11 @@ struct HeroProbe {
     /// Reveals in flight. Zero at a settle; non-zero says the audit's other
     /// numbers are describing a transition, not a resting screen.
     let reveals: Int
+    /// Landing COVERS: cards left on screen after a transition has completed,
+    /// while the page catches up. Zero at a settle BY CONSTRUCTION — the audit
+    /// counts a cover as activity — so a settled sample carrying one would mean
+    /// the audit's own liveness rule has drifted from the code that draws them.
+    let covers: Int
     let stranded: Int
     let players: Int
     let idle: Int
@@ -75,6 +80,7 @@ struct HeroProbe {
               let drivers = int("drivers"), let retries = int("retries"),
               let cards = int("cards"), let pins = int("pins"),
               let controllers = int("controllers"), let reveals = int("reveals"),
+              let covers = int("covers"),
               let stranded = int("stranded"), let players = int("players"),
               let idle = int("idle"), let duplicates = int("dupes"),
               let anchors = int("anchors"), let stalls = int("stalls"),
@@ -90,6 +96,7 @@ struct HeroProbe {
         self.pins = pins
         self.controllers = controllers
         self.reveals = reveals
+        self.covers = covers
         self.stranded = stranded
         self.players = players
         self.idle = idle
