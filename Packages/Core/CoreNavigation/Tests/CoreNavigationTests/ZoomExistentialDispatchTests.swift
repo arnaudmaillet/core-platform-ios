@@ -77,7 +77,7 @@ struct ZoomExistentialDispatchTests {
         ])
     }
 
-    // MARK: - Flight card (11 defaulted members)
+    // MARK: - Flight card (13 defaulted members)
 
     @Test func everyDefaultedFlightCardMemberDispatchesDynamically() {
         let spy = SpyCard()
@@ -88,6 +88,8 @@ struct ZoomExistentialDispatchTests {
         #expect(card.zoomLiveMediaDebugState == "spy-state")
         #expect(card.zoomLiveMediaNativeSize == CGSize(width: 16, height: 9))
         #expect(card.zoomLiveMediaSurface === spy.surface)
+        #expect(card.zoomCoverSurface === spy.cover)
+        #expect(card.zoomLiveMediaContentRect == CGRect(x: 1, y: 2, width: 3, height: 4))
         card.adoptZoomLiveMedia { _ in true }
         card.adoptZoomLiveMediaView(probe)
         #expect(card.zoomLiveMediaTracksCardBounds)
@@ -97,8 +99,9 @@ struct ZoomExistentialDispatchTests {
         card.applyZoomRestingShadow(to: CALayer())
 
         #expect(spy.calls == [
-            "isDrawing", "debugState", "nativeSize", "surface", "adoptMirror",
-            "adoptView", "tracksBounds", "blend", "landingLive", "prepare", "applyShadow",
+            "isDrawing", "debugState", "nativeSize", "surface", "cover", "contentRect",
+            "adoptMirror", "adoptView", "tracksBounds", "blend", "landingLive", "prepare",
+            "applyShadow",
         ])
     }
 }
@@ -171,6 +174,7 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
 private final class SpyCard: UIView, ZoomFlightCard {
     private(set) var calls: [String] = []
     let surface = UIView()
+    let cover = UIView()
 
     // Required members.
     var zoomRestingCornerRadius: CGFloat { 10 }
@@ -182,6 +186,10 @@ private final class SpyCard: UIView, ZoomFlightCard {
     var zoomLiveMediaDebugState: String { calls.append("debugState"); return "spy-state" }
     var zoomLiveMediaNativeSize: CGSize? { calls.append("nativeSize"); return CGSize(width: 16, height: 9) }
     var zoomLiveMediaSurface: UIView? { calls.append("surface"); return surface }
+    var zoomCoverSurface: UIView? { calls.append("cover"); return cover }
+    var zoomLiveMediaContentRect: CGRect? {
+        calls.append("contentRect"); return CGRect(x: 1, y: 2, width: 3, height: 4)
+    }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) { calls.append("adoptMirror") }
     func adoptZoomLiveMediaView(_ view: UIView) { calls.append("adoptView") }
     var zoomLiveMediaTracksCardBounds: Bool { calls.append("tracksBounds"); return true }

@@ -106,12 +106,47 @@ final class ZoomGeometrySampler {
         // told apart from "the surface's model was set late": the first is a
         // missing animation, the second is a missing resize, and they need
         // opposite fixes.
+        // ⚠️ AND THE COVER, IN THE SAME LINE. Everything above describes the
+        // live surface, and on a present the live surface is not yet the
+        // picture: the card's still is, drawn directly beneath it. A sampler
+        // that reports only the surface answers questions about a view the
+        // viewer cannot see — which is exactly how "the surface presents 402
+        // from frame 2" and a filmed content landmark that tracked the card
+        // rigidly (best match at s=1.00) were both true at once, and how a
+        // change that made the surface animate could measure clean and be
+        // reported worse. `showing=` names which of the two is drawn.
+        let cover = card.zoomCoverSurface
+        let coverPres = cover?.layer.presentation()?.bounds.width
+        let coverOrigin = cover?.layer.presentation().map {
+            cover!.layer.convert($0.bounds.origin, to: nil)
+        }
+        let cdx = (cardOrigin != nil && coverOrigin != nil) ? coverOrigin!.x - cardOrigin!.x : Double.nan
+        let cdy = (cardOrigin != nil && coverOrigin != nil) ? coverOrigin!.y - cardOrigin!.y : Double.nan
+        // What the viewer actually gets. The surface wins only while it is
+        // parented, unhidden and not transparent; otherwise the cover is the
+        // frame — and "both" is the crossfade, the one interval where a
+        // mismatch between them is visible as a jump.
+        let surfaceDraws = surface.map { !$0.isHidden && $0.alpha > 0.01 && $0.window != nil } ?? false
+        let coverDraws = cover.map { !$0.isHidden && $0.alpha > 0.01 } ?? false
+        let showing = surfaceDraws && coverDraws ? "both" : (surfaceDraws ? "surf" : (coverDraws ? "cover" : "none"))
         print(String(format: "[sample] %@ f%03d cardModel=%.2f cardPres=%.2f surfModel=%.2f surfPres=%.2f gap=%+.2f surf=%@ anims=%d hidden=%@",
                      label, frame, card.bounds.width, cardPres ?? -1,
                      surface?.bounds.width ?? -1, surfPres ?? -1, gap, id ?? "nil",
                      surface?.layer.animationKeys()?.count ?? 0,
                      (surface?.isHidden ?? true) ? "Y" : "n")
-              + String(format: " dx=%+.1f dy=%+.1f", dx, dy))
+              + String(format: " dx=%+.1f dy=%+.1f", dx, dy)
+              + String(format: " | covModel=%.2f covPres=%.2f covGap=%+.2f covAnims=%d covAlpha=%.2f cdx=%+.1f cdy=%+.1f sAlpha=%.2f showing=%@",
+                       cover?.bounds.width ?? -1, coverPres ?? -1,
+                       (cardPres != nil && coverPres != nil) ? coverPres! - cardPres! : Double.nan,
+                       cover?.layer.animationKeys()?.count ?? 0,
+                       cover?.alpha ?? -1, cdx, cdy,
+                       surface?.alpha ?? -1, showing)
+              // ⚠️ AND WHERE THE PICTURE IS INSIDE THAT SURFACE. Everything
+              // else here is about the window; this is about the video in it.
+              // A rect that stays at the page's crop while the window travels
+              // is a defect in the PLAYER, and reads identically to a perfect
+              // one in every measurement of the bounds.
+              + " vRect=\(card.zoomLiveMediaContentRect.map { NSCoder.string(for: $0) } ?? "-")")
     }
 }
 #endif

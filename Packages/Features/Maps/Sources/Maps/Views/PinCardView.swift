@@ -1077,6 +1077,14 @@ extension PinCardView: ZoomFlightCard {
         (donatedSurface ?? videoRenderView).nativeVideoSize
     }
 
+    /// The pin's own thumbnail — autoresized to the card, aspect-filled. On a
+    /// present this is what the viewer is looking at for most of the flight.
+    var zoomCoverSurface: UIView? { imageView }
+
+    var zoomLiveMediaContentRect: CGRect? {
+        (donatedSurface ?? videoRenderView).debugVideoRect
+    }
+
     /// The whole media chain in one line, for `-grab-geometry` — see the probe
     /// in `ZoomFlight.poseFloating`. CoreNavigation cannot ask a
     /// `VideoRenderView` anything directly, so the card reports it.
@@ -1092,6 +1100,28 @@ extension PinCardView: ZoomFlightCard {
             + " sAnchor=\(surface.map { NSCoder.string(for: $0.layer.anchorPoint) } ?? "-")"
             + " donated=\(donatedSurface == nil ? "n" : "Y")"
             + " native=\(native.map { NSCoder.string(for: $0) } ?? "nil")"
+            // ⚠️ THE COVER, BESIDE THE SURFACE, because during a present the
+            // cover IS the picture and the surface is not yet.
+            //
+            // Measured: a scale sweep on the growing card showed the visible
+            // content tracking the card exactly (best match at s=1.00), while
+            // the sampler reported the live surface presenting the page's full
+            // width from the second frame. Both readings were right, about
+            // different objects — and a sampler that watches only the invisible
+            // one will approve a change that makes the visible one jump.
+            + " cover=\(NSCoder.string(for: imageView.bounds.size))"
+            + " coverPres=\(imageView.layer.presentation().map { NSCoder.string(for: $0.bounds.size) } ?? "nil")"
+            + " coverHidden=\(imageView.isHidden ? "Y" : "n")"
+            + String(format: " coverAlpha=%.2f", imageView.alpha)
+            + " coverAnims=\(imageView.layer.animationKeys()?.count ?? 0)"
+            // And the player's own container and gravity, so "the surface is in
+            // the wrong place" can be told apart from "the surface is right and
+            // the video inside it is drawn somewhere else".
+            + " layer=\((surface as? VideoRenderView)?.debugLayerClass ?? "-")"
+            + " gravity=\((surface as? VideoRenderView)?.debugVideoGravity ?? "-")"
+            + " videoRect=\((surface as? VideoRenderView)?.debugVideoRect.map { NSCoder.string(for: $0) } ?? "-")"
+            + " onHost=\(surface?.superview === donatedMediaHost ? "Y" : "n")"
+            + " onCard=\(surface?.superview === self ? "Y" : "n")"
             // The two that actually decide what is on screen.
             + " sPres=\(surface?.layer.presentation().map { NSCoder.string(for: $0.bounds) } ?? "nil")"
             + " sAnim=[\(surface?.layer.animationKeys()?.joined(separator: ",") ?? "-")]"

@@ -457,8 +457,11 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
                 let kind = post.media.map {
                     MockMediaFixtures.isVideoURL($0.url) ? "video" : "photo"
                 } ?? "text"
+                // The venue's NAME, not merely "in a venue": the three
+                // `loneVideoPins` are venues of one, and picking a pin to open
+                // by hand needs to tell those apart from a crowd of twelve.
                 print("[pins] \(post.postID) \(kind) "
-                      + "\(venues[post.postID] != nil ? "venue" : "scatter")")
+                      + "\(venues[post.postID]?.name ?? "scatter")")
             }
             #endif
             var pin = GeoDiscovery_V1_RadarPin()

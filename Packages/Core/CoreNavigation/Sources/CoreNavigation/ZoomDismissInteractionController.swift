@@ -205,9 +205,6 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     }
 
     private func beginGrab() {
-        #if DEBUG
-        if let card = flight?.card { ZoomGeometrySampler.shared.start(card: card, label: "grab") }
-        #endif
         // `context == nil` also gates the debug path: a new grab must never
         // begin while a previous transition is still completing.
         guard !isInteracting, context == nil else { return }
@@ -304,6 +301,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         self.context = context
         self.flight = flight
         self.dim = dim
+        #if DEBUG
+        // ⚠️ HERE, AND NOWHERE EARLIER. Armed from `beginGrab` — either before
+        // or after `onBeginDismiss`, both were tried — the sampler read
+        // `flight == nil` and recorded not one frame, with no error and a log
+        // that looked exactly like a passing one. The staging is what makes a
+        // card exist, so the arming belongs where the card is assigned.
+        ZoomGeometrySampler.shared.start(card: flight.card, label: "grab")
+        #endif
         if let nav = context.viewController(forKey: .from)?.navigationController,
            !nav.isToolbarHidden {
             self.toolbar = nav.toolbar

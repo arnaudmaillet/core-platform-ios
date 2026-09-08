@@ -878,6 +878,34 @@ public final class VideoRenderView: UIView {
                       backgroundColor == .clear ? "clear" : "black")
     }
 
+    /// Where the picture is ACTUALLY drawn, in the surface's own coordinates.
+    ///
+    /// The surface's bounds say where the window is; this says where the video
+    /// is inside it, which is the other half of "the media is badly attached to
+    /// the window". `AVPlayerLayer` derives it from the layer's MODEL bounds and
+    /// republishes it in steps — the note on
+    /// `ZoomFlightCard.prepareZoomLiveMediaForFlight` states the consequence
+    /// ("its video rect snaps") — so on an ANIMATED leg the window can travel
+    /// smoothly while the picture inside it lands late, which is a defect no
+    /// reading of the bounds can see.
+    ///
+    /// Nil on the sample-buffer path, which publishes no such rect.
+    public var debugVideoRect: CGRect? { playerLayer?.videoRect }
+
+    /// Which layer is doing the drawing — the two paths fit their content by
+    /// different machinery, so a finding about one says nothing about the other.
+    public var debugLayerClass: String { String(describing: type(of: layer)) }
+
+    /// How the layer fits the decoded picture into its own bounds — the other
+    /// half of "where is the video". A surface can be exactly where the card is
+    /// and still draw its content somewhere else, and `resizeAspectFill`
+    /// recomputes that fit from the layer's bounds on every change.
+    public var debugVideoGravity: String {
+        if let sample = layer as? AVSampleBufferDisplayLayer { return sample.videoGravity.rawValue }
+        if let player = playerLayer { return player.videoGravity.rawValue }
+        return "none"
+    }
+
     /// Names this surface in `-zoom-live-log` output (e.g. "tile", "card").
     public var debugLabel: String?
 
