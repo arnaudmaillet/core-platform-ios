@@ -1099,6 +1099,12 @@ extension PinCardView: ZoomFlightCard {
     /// has handed its picture over that IS what the card is flying.
     var zoomLiveMediaSurface: UIView? {
         if let donatedSurface, !donatedMediaHost.isHidden { return donatedSurface }
+        // ⚠️ A HELD SURFACE IS HIDDEN AND STILL THE ANSWER. The hold below
+        // hides the mirrored surface until the card lands, and "hidden" is
+        // otherwise this property's word for "not carrying media" — so
+        // reporting nil would make the retry think its adoption failed and
+        // mirror again on the next tick, forever.
+        if holdsAdoptedLiveMedia { return videoRenderView }
         return videoRenderView.isHidden ? nil : videoRenderView
     }
 
@@ -1236,6 +1242,9 @@ extension PinCardView: ZoomFlightCard {
     /// arrives the surface simply stays at zero and the card lands on its
     /// cover, which is the picture the viewer was already looking at.
     func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+        // `fadeInOnFirstFrame` un-hides on its own terms (isHidden false, alpha
+        // 0, revealed when there is a frame), so it lifts the hold's hide as
+        // part of the arrival rather than beside it.
         videoRenderView.setPoster(nil)
         videoRenderView.fadeInOnFirstFrame(over: duration)
         // A DONATED surface arrives on its host, and the host's alpha is the
@@ -1249,6 +1258,28 @@ extension PinCardView: ZoomFlightCard {
 
     func holdAdoptedLiveMediaUntilLanding() {
         holdsAdoptedLiveMedia = true
+        // ⚠️ AND IT HAS TO REACH THE CARD'S OWN SURFACE, which is the one a
+        // PRESENT actually flies. A marker carries no player, so the retry
+        // always takes the mirroring arm and the picture arrives on
+        // `videoRenderView` — while the first version of this hold guarded only
+        // `donatedMediaHost`, the dismiss leg's surface. The present was
+        // therefore never held at all.
+        //
+        // Hidden, not faded: this surface's alpha belongs to
+        // `fadeInOnFirstFrame`, and two drivers on one layer property is a
+        // defect this codebase has already lived through.
+        //
+        // ⚠️ AND HIDING IT IS THE ONLY WAY, because the poster cannot stand in.
+        // `adoptZoomLiveMedia` seeds the cover as a poster, but
+        // `updatePosterVisibility` retires a poster the moment the first
+        // decoded frame lands — by design, and unasked. That is what put a
+        // half-fitted video on screen mid-flight: an `AVSampleBufferDisplayLayer`
+        // draws a new sample at the video rect it computed for its PREVIOUS
+        // bounds, so the picture unveiled from the layer's top-left corner and
+        // grew to fill the card over the following frames. Filmed by the user,
+        // and invisible to my own verification because `-snap-start-paused`
+        // stops the samples whose arrival causes it.
+        videoRenderView.isHidden = true
         applyBlend()
     }
 
