@@ -57,6 +57,19 @@ public enum ZoomDebugCensus {
         public static let landingHold = "zoom.landingHold"
         public static let flightCard = "zoom.flightCard"
         public static let pinCard = "zoom.pinCard"
+        /// The landing COVER: the flight card left on screen AFTER the
+        /// transition has completed, while the page it landed on catches up.
+        ///
+        /// ⚠️ Counted for exactly the reason `landingHold` is, and the window
+        /// is far longer. The present no longer waits for the destination's
+        /// media (see `ZoomAnimator`): the transition finishes on schedule and
+        /// the card stays as an inert cover for up to the hydration ceiling.
+        /// The audit's stranded-card sweep looks for a `PinCardView` loose in
+        /// the hierarchy while nothing is flying — which is precisely what the
+        /// cover is — so without this every slow present would report
+        /// `STRANDED cards=1` for seconds, and a real stranding would be
+        /// indistinguishable from a working one.
+        public static let landingCover = "zoom.landingCover"
         /// A reveal in flight.
         ///
         /// ⚠️ THE REVEAL FAMILY CARRIED NO COUNTER AT ALL, so the audit read

@@ -107,8 +107,15 @@ final class HeroTransitionAudit {
         // wreckage. The map is the only surface that opens both kinds, so it is
         // the only one where the asymmetry was visible.
         let reveals = census[ZoomDebugCensus.Key.reveal] ?? 0
+        // ⚠️ AND LANDING COVERS, for the same reason as holds and over a much
+        // longer window. A present now finishes on the ANIMATION's clock and
+        // leaves its card as an inert cover while the page catches up — up to
+        // the hydration ceiling. That card is a `PinCardView` loose in the
+        // hierarchy with no animator alive, which is the exact shape this
+        // audit calls wreckage. Counted, it reads as what it is.
+        let covers = census[ZoomDebugCensus.Key.landingCover] ?? 0
         let isActive = animators > 0 || interruptors > 0 || retries > 0
-            || holds > 0 || reveals > 0
+            || holds > 0 || reveals > 0 || covers > 0
 
         var players = 0
         var idle = 0
@@ -140,7 +147,7 @@ final class HeroTransitionAudit {
         let line = "hero;seq=\(sequence);state=\(state)"
             + ";animators=\(animators);interruptors=\(interruptors);drivers=\(drivers)"
             + ";retries=\(retries);cards=\(cards);pins=\(pins);controllers=\(controllers)"
-            + ";reveals=\(reveals);stranded=\(stranded)"
+            + ";reveals=\(reveals);covers=\(covers);stranded=\(stranded)"
             + ";players=\(players);idle=\(idle);dupes=\(duplicated)"
             + ";anchors=\(anchors);stalls=\(stalls);gen=\(generations)"
         probe.accessibilityIdentifier = line
