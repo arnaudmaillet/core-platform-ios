@@ -105,10 +105,23 @@ public enum MockMediaFixtures {
     /// The `mock-kind=video` query item is a marker, not a server parameter —
     /// it lets `GeoDiscoveryRepository.kind(for:)` keep recognising a
     /// video pin by URL shape under `-maps-force-video` now that the URL is no
-    /// longer `mock://video/…`. The origin ignores it (verified 206).
+    /// longer `mock://video/…`. The origin ignores it.
+    ///
+    /// ⚠️ WAS `www.w3schools.com/html/mov_bbb.mp4`, AND THAT HOST NOW SERVES
+    /// **403** TO NON-BROWSER CLIENTS. The note here used to read "the origin
+    /// ignores it (verified 206)", which was true when it was written and
+    /// silently stopped being true. Nothing in the app reports it: a 403 on a
+    /// video is a page that stays black for ever, and because this clip is also
+    /// in the POST catalogue below, the failure showed up as an ordinary post
+    /// whose media never starts — filmed and reported as "a video in the mock
+    /// that does not work".
+    ///
+    /// A fixture URL is a dependency on somebody else's hosting policy. When
+    /// one of these goes quiet, check it with a ranged GET rather than a
+    /// browser: `curl -o /dev/null -w '%{http_code}' -r 0-1023 <url>`.
     public static let mapPreviewLoop = Video(
-        url: "https://www.w3schools.com/html/mov_bbb.mp4?mock-kind=video",
-        width: 320, height: 176
+        url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4?mock-kind=video",
+        width: 640, height: 360
     )
 
     // MARK: - Composed video catalog
@@ -226,9 +239,27 @@ public enum MockMediaFixtures {
     /// from its own preview catalogue; nothing fetches it over the wire.
     public static let previewPosterScheme = "mock://preview/"
 
+    /// ⚠️ THREE OF THESE URLS ARE THE SAME FILM, and saying so is what puts
+    /// sprite sheets back on the map.
+    ///
+    /// Only two clips have baked sheets (`App/Resources/MapPreviews`), and this
+    /// table used to name exactly two URLs — so five of the seven video
+    /// fixtures resolved to `nil` and their markers fell back to a cover. That
+    /// was invisible while every media post was a video, because some visible
+    /// marker almost always held one of the two; with the corpus back on
+    /// honest thirds it became "the sprite sheets are gone from the
+    /// annotations", measured as `sheets=0` with two resident and none bound.
+    ///
+    /// `bigBuckBunny720`, `longRunning` and `mapPreviewLoop` are all Big Buck
+    /// Bunny at different encodes and lengths, so a sheet baked from one IS a
+    /// sample of the others' own footage — which is the rule
+    /// `previewSheetIDsByPostID` insists on. Sintel is a different film and
+    /// keeps its own. The HLS ladders are left out on purpose: they are there
+    /// to exercise manifest handling, and a still sampled from a variant
+    /// stream is not obviously the post's own frame.
     public static func bakedClip(for url: String) -> String? {
         switch url {
-        case bigBuckBunny720.url: "bigbuckbunny"
+        case bigBuckBunny720.url, longRunning.url, mapPreviewLoop.url: "bigbuckbunny"
         case sintelTrailer.url: "sinteltrailer"
         default: nil
         }

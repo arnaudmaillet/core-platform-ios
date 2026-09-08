@@ -272,6 +272,12 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost {
     #if DEBUG
     /// Whether this marker is currently wearing baked artwork.
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+
+    /// Whether this marker is DRESSED in its preview sheet — which is a
+    /// different question from whether the sheet is advancing, and the one the
+    /// HUD needs. A paused or off-screen marker wears its sheet and animates
+    /// nothing.
+    var wearsPreviewSheet: Bool { card.wornPreview != nil }
     var debugFaceName: String { card.debugFaceName }
     /// The pin's KIND, which the face hides: a photo and a video both wear
     /// `.media`, and telling them apart is the whole question when asking

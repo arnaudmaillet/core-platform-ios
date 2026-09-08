@@ -85,6 +85,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     static let textOnlyVenue = Venue(name: "text-only", lat: 48.8480, lng: 2.3660)
     static let mediaOnlyVenue = Venue(name: "media-only", lat: 48.8500, lng: 2.3380)
 
+
     /// Walks the corpus in order and hands the first few posts of each kind to
     /// a venue, so the assignment is deterministic and survives a reseed.
     ///
@@ -163,6 +164,21 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // edit and not an excavation.
         assign(mixedVenue, text: 4, video: 4, photo: 4)
         assign(textOnlyVenue, text: 4, video: 0, photo: 0)
+        // ⚠️ THESE QUOTAS CANNOT PUT A VIDEO PIN ON THE MAP, and it is worth
+        // knowing before the next person tries.
+        //
+        // With the corpus on honest thirds the default viewport shows
+        // `kinds=photo:3,text:1` — no lone video pin. That looks like a venue
+        // balance problem and is not one: measured by setting BOTH video quotas
+        // to zero, so no video post was absorbed at all, the answer did not
+        // move. Venue members are CLUSTER members and are never lone pins, and
+        // a scatter post's coordinate is derived from its id, so which posts
+        // fall inside the home viewport is fixed and none of them happens to be
+        // a video. That is the condition `mediaIsAlwaysVideo = true` was
+        // papering over, not a regression from turning it off.
+        //
+        // `-maps-force-video` is the flag that exists for exercising the video
+        // pin path; widening the region or panning reaches the others.
         assign(mediaOnlyVenue, text: 0, video: 4, photo: 4)
         return assignments
     }
@@ -185,18 +201,42 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     ///   marker is what `GeoDiscoveryRepository.kind(for:)` matches on.
     static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
         guard catalog == .realAssets else { return url }
-        // ⚠️ Under the FORCE flag, every covered pin becomes a video pin.
+        // ⚠️ THE ANNOTATION DESCRIBES THE POST, AND THE FLAG DOES NOT GET TO
+        // LIE ABOUT THAT.
         //
-        // It used to force only posts whose media was already a video, which is
-        // one third of the corpus — and after clustering, none of those survived
-        // as a LONE pin in the default viewport, so the playback path had
-        // literally never run. A flag named `-maps-force-video` that produces
-        // zero playing videos is a flag that measures nothing.
+        // This used to read `isVideoURL(url) || forcesMapVideo`, so under
+        // `-maps-force-video` EVERY covered pin became a video pin — a
+        // photograph's marker wearing a play badge and a looping clip that was
+        // not its post's. It was reached for because forcing only real video
+        // posts left none as a lone pin in the default viewport, and "a flag
+        // that produces zero playing videos measures nothing". True, and it
+        // bought the measurement by breaking the rule the map exists to keep:
+        // a video post wears a sprite sheet (or its thumbnail), a photo or
+        // gallery wears the post, a text post wears its icon or its author.
+        // Filmed once photographs were back in the corpus — annotations playing
+        // video over posts that are stills, which is not a thing the product can
+        // ever do.
         //
-        // Outside the flag the old rule stands: a real video post gets a still,
-        // because handing the raw video URL to an image view renders a blank pin.
-        guard MockMediaFixtures.isVideoURL(url) || forcesMapVideo else { return url }
-        guard forcesMapVideo else {
+        // So the flag now only changes WHAT A VIDEO POST'S PIN PLAYS, never
+        // which posts are video. A photo post is returned untouched.
+        guard MockMediaFixtures.isVideoURL(url) else { return url }
+        // ⚠️ AN ANNOTATION NEVER HOLDS A PLAYER — sprite sheet, gif, lottie or
+        // still, and nothing else.
+        //
+        // `-maps-force-video` used to hand a video pin a PLAYABLE loop url so
+        // the map's playback path could be exercised, and that put a real
+        // `AVPlayer` behind a 44pt marker. In production it cannot happen —
+        // `previewVideoURL` returns nil, so `MapVideoPlaybackCoordinator` never
+        // gets a candidate — so the flag was the only thing that could ever
+        // produce it, and what it produced was a picture of the product that
+        // the product does not have. A marker's motion comes from a BAKED
+        // SHEET; a player on one is a defect however it got there.
+        //
+        // So the flag now only decides which posts a pin can be seen as, never
+        // what it plays: every video pin gets the stamped still, and its motion
+        // comes from `previewSheetID` like it does in a release build.
+        let neverPlayable = true
+        guard forcesMapVideo, !neverPlayable else {
             // A still, because handing a raw video URL to an image view renders
             // a blank pin — but STAMPED, so the pin can say what its post is.
             //

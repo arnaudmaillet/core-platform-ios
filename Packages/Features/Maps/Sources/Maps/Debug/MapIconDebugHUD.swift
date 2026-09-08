@@ -276,6 +276,14 @@ final class MapIconDebugHUD: UIView {
             "players=\(pool?.activePlayerCount ?? 0)",
             "advancing=\(advancingSurfaces)",
             "distinct_urls=\(pool?.playerCountByURL.count ?? 0)",
+            // ⚠️ BOUND FIRST, ADVANCING SECOND, and the order matters because
+            // the second one has already lied. `sheets=` is `playingSheets` —
+            // sheets currently ADVANCING — and a marker wearing its sprite
+            // sheet perfectly while paused or off-screen counts zero there. It
+            // was read as "no marker has a sheet" through several rounds of
+            // fixture archaeology. `sheets_bound=` answers the question that
+            // was actually being asked.
+            "sheets_bound=\(pins.count { $0.wearsPreviewSheet } + clusters.count { $0.wearsPreviewSheet })",
             "sheets=\(playingSheets)",
             "sheets_advancing=\(advancingSheets)",
             churnLine(),

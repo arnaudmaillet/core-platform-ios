@@ -226,6 +226,12 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost {
 
     #if DEBUG
     var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+
+    /// Whether this marker is DRESSED in its preview sheet — which is a
+    /// different question from whether the sheet is advancing, and the one the
+    /// HUD needs. A paused or off-screen marker wears its sheet and animates
+    /// nothing.
+    var wearsPreviewSheet: Bool { card.wornPreview != nil }
     var debugFaceName: String { card.debugFaceName }
     var presentedIconTick: Double? { card.presentedIconTick }
     var presentedPreviewTick: Double? { card.presentedPreviewTick }
