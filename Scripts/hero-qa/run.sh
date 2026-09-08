@@ -111,6 +111,56 @@ judge_motion() { # $1=case dir — did anything visibly FLY?
   echo "ok motion (peak inter-frame MAE x10000 = $best)"
 }
 
+judge_frozen() { # $1=case dir, $2=max frozen seconds (default 0.6)
+  # ⚠️ THE EXACT COMPLEMENT OF judge_motion, AND THE ONE IT CANNOT BE.
+  #
+  # judge_motion keeps the MAXIMUM inter-frame difference over a whole run, so
+  # a run that was frozen for 95% of its duration passes on the single moment
+  # something moved. This keeps the LONGEST RUN of adjacent frames that did not
+  # change, which is what a stall looks like from outside.
+  #
+  # From outside is the point: a main-thread stall cannot be measured by
+  # anything the stalled main thread writes. Both in-app channels are written
+  # by it and carry no timestamp, so three seconds of wedge read as three
+  # healthy seconds with fewer lines. `simctl io recordVideo` captures the
+  # COMPOSITED output through backboardd — frames keep arriving while the app
+  # is wedged, they simply stop changing.
+  #
+  # ⚠️ THE BUDGET IS PER CASE, and it has to be, because a healthy recording is
+  # not frame-unique. Measured on a real present: the longest identical run in a
+  # healthy 30-frame window was 0.40s — the map sitting still before the tap,
+  # plus the simulator's own frame duplication. A case that includes deliberate
+  # idle needs a larger budget than one that is all motion; the default 0.6s
+  # suits a window trimmed to the transition. A budget below the measured
+  # baseline is a judge that fails on a working app.
+  #
+  # ⚠️ Two conditions make it honest on the map, and both are about liveness:
+  # run with an animated-icon policy that keeps the markers moving (a posed,
+  # static field trips this judge on a healthy screen), and run WITHOUT
+  # `-map-icon-hud` (a sibling of the map that repaints ~6/s makes every frame
+  # differ and defeats any frame-difference judge at all).
+  local dir="$1" budget="${2:-0.6}" prev="" run=0 best=0 fps="${FRAME_FPS:-30}"
+  for f in "$dir"/frames/*.png; do
+    if [[ -n "$prev" ]]; then
+      local norm=$(magick compare -metric MAE "$prev" "$f" null: 2>&1 \
+        | sed -n 's/.*(\([0-9.e-]*\)).*/\1/p')
+      local scaled=$(printf '%.0f' $(echo "${norm:-0} * 1000000" | bc -l 2>/dev/null || echo 0))
+      # Below the noise floor of h264 on a static screen: identical, not similar.
+      if (( scaled < 30 )); then
+        run=$(( run + 1 ))
+        (( run > best )) && best=$run
+      else
+        run=0
+      fi
+    fi
+    prev="$f"
+  done
+  local seconds=$(echo "scale=2; $best / $fps" | bc -l 2>/dev/null || echo 0)
+  local over=$(echo "$seconds > $budget" | bc -l 2>/dev/null || echo 0)
+  (( over == 1 )) && { echo "FAIL frozen: ${seconds}s of identical frames (budget ${budget}s)"; return 1; }
+  echo "ok not frozen (longest identical run ${seconds}s, budget ${budget}s)"
+}
+
 judge_no_black() { # $1=case dir — no full-frame black dip mid-sequence
   local dir="$1" i=0 dips=0
   local -a means
@@ -203,6 +253,7 @@ for CASE in "${CASES[@]}"; do
       audit)           v=$(judge_audit "$dir") || ok=0 ;;
       motion)          v=$(judge_motion "$dir") || ok=0 ;;
       no-black)        v=$(judge_no_black "$dir") || ok=0 ;;
+      not-frozen)      v=$(judge_frozen "$dir") || ok=0 ;;
       settle-baseline) v=$(judge_settle_baseline "$dir") || ok=0 ;;
       *) v="FAIL unknown check $check"; ok=0 ;;
     esac
