@@ -32,6 +32,17 @@ final class MapVideoPlaybackCoordinator {
     /// AND of the facts that gate playback (tab frontmost, no feed presented,
     /// app foregrounded).
     private var isSurfaceVisible = true
+    /// The one pin `setSurfaceVisible(false, keeping:)` spared, held so the
+    /// reconcile below cannot undo the sparing.
+    ///
+    /// ⚠️ THE EXEMPTION WAS A ONE-SHOT AND NEEDED TO BE A STATE. `update` runs
+    /// on every query result, every annotation add and every pan settle, and
+    /// with the surface hidden it chooses NOTHING — so its "stop everything not
+    /// chosen" sweep stopped the kept pin too. A result landing inside the
+    /// 0.42s flight therefore killed the donor player the flight card was
+    /// mirroring: on screen, the live video in the window going black in
+    /// mid-air, with nothing in any log to say why.
+    private var keptWhileHidden: PostID?
 
     init(pool: VideoPlaybackController, maxConcurrent: Int = 3) {
         self.pool = pool
@@ -56,7 +67,7 @@ final class MapVideoPlaybackCoordinator {
         let chosen = isSurfaceVisible ? Array(candidates.prefix(maxConcurrent)) : []
         let chosenIDs = Set(chosen.map(\.id))
 
-        for (id, view) in playing where !chosenIDs.contains(id) {
+        for (id, view) in playing where !chosenIDs.contains(id) && id != keptWhileHidden {
             stop(id: id, view: view)
         }
         for candidate in chosen where playing[candidate.id] == nil {
@@ -82,7 +93,13 @@ final class MapVideoPlaybackCoordinator {
     func setSurfaceVisible(_ visible: Bool, keeping kept: PostID? = nil) {
         guard visible != isSurfaceVisible else { return }
         isSurfaceVisible = visible
-        guard !visible else { return }
+        guard !visible else {
+            // Back on screen: nothing is spared any more, and `update` decides
+            // afresh from the candidates.
+            keptWhileHidden = nil
+            return
+        }
+        keptWhileHidden = kept
         for (id, view) in playing where id != kept {
             stop(id: id, view: view)
         }
@@ -122,6 +139,8 @@ final class MapVideoPlaybackCoordinator {
     }
 
     func stopAll() {
+        // The flight has landed: whatever was spared is spared no longer.
+        keptWhileHidden = nil
         for (id, view) in playing { stop(id: id, view: view) }
     }
 

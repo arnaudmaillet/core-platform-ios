@@ -971,6 +971,20 @@ enum RevealStage {
         around page: UIView, in container: UIView, pageFrame: CGRect
     ) -> (host: UIView, mask: UIView) {
         let host = UIView(frame: container.bounds)
+        // ⚠️ THE HOST SWALLOWS TOUCHES FOR THE LENGTH OF THE TRANSITION, and
+        // its absence was a hole the hero does not have.
+        //
+        // The hero's animator installs a full-container shield for exactly this
+        // reason; the reveal installs none, and was covered only by accident —
+        // this host spans the container, so a tap "on the map" landed on the
+        // arriving PAGE instead. A MASK CLIPS PIXELS, NOT TOUCHES: for the
+        // whole of every opening AND closing, the invisible parts of that page
+        // were live, so a finger over what looked like map hit whatever the
+        // page has at that point.
+        //
+        // Non-interactive rather than hidden: the page must still be drawn, and
+        // `unwrap` hands it back to the container where it becomes live again.
+        host.isUserInteractionEnabled = false
         container.addSubview(host)
         host.addSubview(page)
         // Cleared BEFORE the frame is assigned: `frame` is derived from bounds
