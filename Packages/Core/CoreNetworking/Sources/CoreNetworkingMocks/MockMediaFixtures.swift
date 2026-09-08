@@ -251,6 +251,28 @@ public enum MockMediaFixtures {
     /// a sky on a marker whose post was a build log.
     public static let frameZeroScheme = "mock://frame0/"
 
+    /// The catalogue id of a clip's OPENING segment.
+    ///
+    /// ⚠️ ONE RULE, TWO CALLERS, and that is the whole point. The marker wears
+    /// a sheet and its cover is that sheet's cell 0 — but the seeding picked a
+    /// segment by post index while the poster resolved `ids.first(where:)`, so
+    /// a marker animated one part of the film while its cover, and the page it
+    /// opened, showed the first frame of ANOTHER part. Both ask here now, and
+    /// "frame 0" means the same picture everywhere.
+    ///
+    /// Lowest numeric suffix, not `first`: the catalogue's order is whatever
+    /// the bundle enumerated, and `bigbuckbunny-11` sorts before
+    /// `bigbuckbunny-2` as text.
+    public static func openingSegment(ofClip clip: String, in catalogue: [String]) -> String? {
+        catalogue
+            .filter { $0.hasPrefix("\(clip)-") }
+            .min { lhs, rhs in segmentIndex(of: lhs) < segmentIndex(of: rhs) }
+    }
+
+    private static func segmentIndex(of id: String) -> Int {
+        Int(id.reversed().prefix { $0.isNumber }.reversed().map(String.init).joined()) ?? .max
+    }
+
     /// ⚠️ THE SOURCE IS PERCENT-ENCODED WHOLE, which is not decoration. Left
     /// readable, a request for `mock://frame0/?src=mock://video/7` contains the
     /// literal `mock://video/`, and `isVideoURL` — a substring test — would

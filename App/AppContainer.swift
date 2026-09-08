@@ -155,7 +155,11 @@ final class AppContainer {
         // that query part of the clip's NAME — every lookup missing silently,
         // every video marker falling through to its ground.
         let clip = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
-        guard let id = mapPreviewCatalog.ids.first(where: { $0.hasPrefix("\(clip)-") }),
+        // ⚠️ THE OPENING SEGMENT, by the SAME rule the seeding uses. `first` is
+        // the bundle's enumeration order, which is not the film's — so the
+        // poster resolved one segment while the marker wore another, and the
+        // two "frame zeros" were two different frames.
+        guard let id = MockMediaFixtures.openingSegment(ofClip: clip, in: mapPreviewCatalog.ids),
               let art = try? await mapPreviewCatalog.art(for: id),
               let frame = art.firstFrame()
         else {

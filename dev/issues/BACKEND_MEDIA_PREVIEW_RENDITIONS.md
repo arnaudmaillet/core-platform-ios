@@ -340,6 +340,41 @@ really will defer, and `warmAttachForFlight` really will run — so every
 transition measurement taken on the map under the flag is worth re-running
 without it. Acceptance criteria 1 and 2 are what gate that switch.
 
+### C.2 The thumbnail is not a second asset — it is the sheet's first cell
+
+Verified in the client on 2026-09-08, and it changes what we are asking for.
+
+A media post's picture is drawn as a ladder, and every surface keeps it:
+
+```
+live media  ->  sprite sheet  ->  thumbnail  ->  black
+```
+
+The thumbnail is the second-to-last rung, and its ONLY correct value is the
+first frame of the clip. Anything else is a picture of something the post is
+not, and the viewer sees it as the post changing its mind: the still is what a
+marker shows before its sheet resolves, what a hero flight carries, and what the
+page shows until the first frame decodes — three places, one picture.
+
+**So `thumbnail_url` for a video post should be a rendition of the preview
+sheet's own cell 0, not an independently chosen still.** One asset, two uses.
+Serving them separately guarantees they will drift, and the drift is visible:
+in our own fixtures a thumbnail picked independently of the sheet produced a
+marker showing a black title card over a post whose flight animated a forest —
+both frames of the same film, neither the same picture.
+
+Concretely, on top of §C:
+
+- `preview_sheet.first_frame_url` (or an agreed convention such as the sheet's
+  cell 0 at the sheet's own cell size), and `thumbnail_url` resolving to it for
+  any post that HAS a sheet.
+- Where a post has no sheet, `thumbnail_url` must still be a frame of its own
+  clip — the encoder already has it; the client cannot derive one without
+  fetching the media it was trying to avoid fetching.
+- The client's fallback if neither is served is BLACK. It is not a stock
+  picture, and it must not be an unrelated photograph: we removed two of those
+  from our own mock the same day.
+
 ### D. Lightweight list paths (lower priority)
 
 `post.v1.PostSummary` and `search.v1.PostHit` should carry `media_kind` plus

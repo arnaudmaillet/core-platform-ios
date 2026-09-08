@@ -608,11 +608,24 @@ public struct MockSocialDataset: Sendable {
     /// still falls back to a deterministic pick — a marker that previews the
     /// wrong clip is a mock-fidelity gap, where a photograph that previews ANY
     /// clip was a lie about what the post is.
+    /// ⚠️ THE OPENING SEGMENT, NOT ONE PICKED BY POST INDEX.
+    ///
+    /// Spreading posts across a clip's segments made the map look varied and
+    /// made "frame 0" a lie: a marker's cover is the cell 0 of the sheet it
+    /// wears, so a post seeded with segment 7 had a cover that was the first
+    /// frame of the middle of the film, while the page it opened resolved a
+    /// different segment again. Filmed as a marker showing a black title card
+    /// over a post whose flight animated a forest.
+    ///
+    /// The cost is real and deliberate: every post of the same clip now
+    /// previews the same footage. The invariant is worth more than the variety
+    /// — and the variety was fictional anyway, since two clips carry the whole
+    /// corpus.
+    ///
+    /// `index` is kept for the signature's callers and no longer read.
     static func previewSheet(for url: String, in catalogue: [String], index: Int) -> String? {
         guard let clip = MockMediaFixtures.bakedClip(for: url) else { return nil }
-        let segments = catalogue.filter { $0.hasPrefix("\(clip)-") }
-        guard !segments.isEmpty else { return nil }
-        return segments[abs(index) % segments.count]
+        return MockMediaFixtures.openingSegment(ofClip: clip, in: catalogue)
     }
 
     /// The trailing digits of `post-0007`. Nil when there are none, which keeps

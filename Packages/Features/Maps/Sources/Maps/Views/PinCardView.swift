@@ -178,6 +178,13 @@ final class PinCardView: UIView {
         // to a picture nobody could see. It is the marker's OWN content, so it
         // belongs in the arrival stack: the departure picture fades over it,
         // exactly as it fades over the cover.
+        // ⚠️ FILL, NOT RESIZE — see `AnimatedIconView.contentGravity`. This
+        // sheet's cells are frames of a film and this view is full-bleed in a
+        // card that travels from a 56pt square to a full page; the default
+        // stretches them to whatever shape the card currently is. The cover
+        // directly beneath is `.scaleAspectFill`, and the two rungs of one
+        // picture have to agree.
+        previewSheetView.contentGravity = .resizeAspectFill
         previewSheetView.frame = bounds
         previewSheetView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         previewSheetView.isHidden = true
