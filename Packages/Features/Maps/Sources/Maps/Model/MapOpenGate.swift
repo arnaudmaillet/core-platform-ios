@@ -81,6 +81,14 @@ struct MapOpenGate: Equatable {
     /// any future deep link still work.
     var mapIsInert: Bool { state != .idle }
 
+    /// Whether the flow is resting on an intermediate screen — the place page.
+    ///
+    /// A legitimate ending, not a hang: the viewer is on a real screen and the
+    /// map is one pop away. A harness that cannot tell the two apart reports a
+    /// working route as a stuck one, which is what the first soak of this path
+    /// did.
+    var isAtIntermediate: Bool { state == .intermediate }
+
     /// The route currently owning the screen, if any.
     var route: Route? {
         switch state {
@@ -133,6 +141,20 @@ struct MapOpenGate: Equatable {
         state = .intermediate
     }
 
+    /// ⚠️ AND IT IS THE REVEAL ROUTE'S ORDINARY RELEASE, not only a backstop.
+    /// Traced over six cycles: a reveal reports `idle -> presenting(reveal)`
+    /// and then `presenting(reveal) -> idle`, never passing through `.open`,
+    /// because that route has no "the destination is up" hook on the map's
+    /// side. The gate is therefore COARSER there — it cannot tell presenting
+    /// from open, so a cancelled reveal dismissal is a no-op rather than a
+    /// return to `.open`.
+    ///
+    /// That coarseness is safe, and the reason is worth stating: every one of
+    /// those states answers `canOpen == false` and `mapIsInert == true`, so the
+    /// map is shut for the whole round trip either way, and the release still
+    /// happens exactly once, here, when the map is genuinely frontmost. What
+    /// the coarseness costs is diagnostic detail, not correctness.
+    ///
     /// The map is frontmost and every animation is over — `viewDidAppear`,
     /// never `viewWillAppear`, which UIKit runs at interactive-pop begin.
     ///

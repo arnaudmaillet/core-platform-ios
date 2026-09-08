@@ -148,6 +148,9 @@ final class MapsViewController: UIViewController {
                       + "canOpen=\(openGate.canOpen ? "Y" : "n") "
                       + "inert=\(openGate.mapIsInert ? "Y" : "n")")
             }
+            // The soak's clock is the gate, not a timer: "the map is ready
+            // again" has exactly one honest definition and this is it.
+            if oldValue.canOpen == false, openGate.canOpen { advanceSoakIfNeeded() }
             #endif
         }
     }
@@ -160,6 +163,27 @@ final class MapsViewController: UIViewController {
     private let appObservers = MapNotificationBag()
     #if DEBUG
     private var didDebugOpenPin = false
+    #if DEBUG
+    /// `-maps-soak <cycles>`: opens a marker, closes it, opens the next, N times.
+    ///
+    /// ⚠️ THE MAP WAS THE ONE SURFACE WITH NO SOAK, and the reason was
+    /// mechanical: every `-maps-open-*` hook is a ONE-SHOT LATCH
+    /// (`didDebugOpenPin`), so nothing could iterate this seam at all. Every
+    /// leak, every stuck lock and every retained driver on the map→post→map
+    /// round trip was therefore unmeasurable by construction, whatever the
+    /// census said.
+    ///
+    /// Deterministic order, by post id: MapKit's own annotation order is
+    /// undefined, and a soak that opens a different sequence on every run
+    /// compares two different runs.
+    private var soakCyclesRemaining = 0
+    private var soakCursor = 0
+    /// Bumped every time a cycle starts, so a watchdog can tell "still on the
+    /// cycle I was watching" from "already moved on".
+    private var soakGeneration = 0
+    /// One pending re-check at a time, so a shut gate cannot stack timers.
+    private var soakRetryScheduled = false
+    #endif
     #endif
 
     private let mapView = MKMapView()
@@ -1951,6 +1975,128 @@ final class MapsViewController: UIViewController {
         navigationItem.rightBarButtonItems?.forEach { $0.isEnabled = !inert }
     }
 
+    #if DEBUG
+    /// Drives one soak cycle when the map is idle and cycles remain.
+    ///
+    /// Called from the gate's own idle transitions, which is the only honest
+    /// "the map is ready again" signal there is — a fixed delay would race the
+    /// spring's tail, and this file's history is full of measurements ruined by
+    /// exactly that.
+    private func advanceSoakIfNeeded() {
+        guard soakCyclesRemaining > 0 else { return }
+        // ⚠️ EVERY UNMET PRECONDITION RETRIES, and it took two goes to get this
+        // right. The advance is EDGE-TRIGGERED on the gate, so any condition
+        // that is merely not-yet-true at that instant loses the cycle and every
+        // cycle after it — silently, because a soak that stops looks exactly
+        // like a soak that finished.
+        //
+        // The first version retried only on an empty annotation list, which was
+        // a guess. The trace named the real one: after popping home from the
+        // place page the gate opens while the map is still off-window
+        // (`window=n annotations=4`), one runloop turn before UIKit reattaches
+        // it. Retrying on the conjunction covers both, and whatever the third
+        // one turns out to be.
+        guard openGate.canOpen, view.window != nil else { return scheduleSoakRetry() }
+        // ⚠️ HIERARCHY MARKERS FIRST, and the ordering is the only way to reach
+        // the place page at all. That page is carried beneath the feed of a
+        // CITY or COUNTRY cluster and nothing else, and it is uncovered by a
+        // vertical close — so a soak that takes markers in post-id order can
+        // run for eight cycles without ever meeting one, which is what the
+        // first three runs did. Post-id order still decides everything after,
+        // because MapKit's own annotation order is undefined.
+        let ordered = mapView.annotations
+            .compactMap { annotation -> (id: String, hierarchy: Bool, value: any MKAnnotation)? in
+                if let pin = annotation as? MapAnnotation {
+                    (pin.pin.postID.rawValue, false, annotation)
+                } else if let cluster = annotation as? MapComputedCluster {
+                    (cluster.representative.postID.rawValue, cluster.isHierarchyMarker, annotation)
+                } else { nil }
+            }
+            .sorted { ($0.hierarchy ? 0 : 1, $0.id) < ($1.hierarchy ? 0 : 1, $1.id) }
+        // ⚠️ RETRY RATHER THAN DROP. The advance is edge-triggered on the gate,
+        // so a map whose annotations have not been re-added yet — which is the
+        // ordinary state one runloop turn after popping home — would lose that
+        // cycle and every cycle after it, silently. The first place-page soak
+        // ran exactly one of its six cycles this way.
+        guard !ordered.isEmpty else { return scheduleSoakRetry() }
+        let hierarchyCount = ordered.filter(\.hierarchy).count
+        let target = (ordered[soakCursor % ordered.count].id,
+                      ordered[soakCursor % ordered.count].value)
+        soakCursor += 1
+        soakCyclesRemaining -= 1
+        print("[soak] cycle \(soakCursor) opening \(target.0) of \(ordered.count) markers"
+              + " (\(hierarchyCount) hierarchy)")
+        // One runloop turn, so this never runs inside the gate's own didSet.
+        DispatchQueue.main.async { [weak self] in
+            self?.mapView.selectAnnotation(target.1, animated: true)
+        }
+        soakGeneration += 1
+        let generation = soakGeneration
+        // ⚠️ A WATCHDOG PER CYCLE, because a soak that hangs reports nothing at
+        // all — and "the round trip never came back" is the single most
+        // important thing this harness can find. A cycle that has not returned
+        // the map to idle by here is named, counted and force-closed, so the
+        // run continues and the log says which marker did it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+            guard let self, self.soakGeneration == generation, !self.openGate.canOpen else { return }
+            // ⚠️ RESTING ON THE PLACE PAGE IS NOT BEING STUCK. A vertical close
+            // lands there on purpose and the map is one pop away, so the soak
+            // pops and carries on. Calling that a hang is how a working route
+            // gets reported as a broken one — which is exactly what the first
+            // run of this path did, before the landing was even reported.
+            let resting = self.openGate.isAtIntermediate
+            print("[soak] cycle \(generation) \(resting ? "at the place page" : "STUCK")"
+                  + " on \(target.0) — popping home")
+            self.navigationController?.popToViewController(self, animated: false)
+            self.openGate.appearedAtRoot()
+        }
+        // ⚠️ SCHEDULED FROM HERE AND NOT FROM A LANDING CALLBACK, because only
+        // ONE of the three routes has one. `onDestinationShown` belongs to the
+        // hero's transition controller; a reveal and a plain push have no such
+        // hook on this side, and a soak that can only close a hero would stall
+        // on the first text marker it met — which is exactly what the first run
+        // did. The delay is generous rather than tuned: it is a scheduling
+        // convenience, and nothing is measured against it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.closeSoakedFeed()
+        }
+    }
+
+    /// Re-checks shortly, at most one pending check at a time.
+    private func scheduleSoakRetry() {
+        guard !soakRetryScheduled else { return }
+        soakRetryScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.soakRetryScheduled = false
+            self?.advanceSoakIfNeeded()
+        }
+    }
+
+    /// Closes whatever the soak opened, by the same path a finger would take on
+    /// that route.
+    ///
+    /// The hero gets `debugScriptedGrab` — one release below the threshold and
+    /// one above it, so a cycle exercises BOTH dismissal outcomes rather than
+    /// only the happy path. The reveal and the plain push have no interactive
+    /// script on this side, so they are popped, which is the chevron's own path
+    /// through the same animator.
+    private func closeSoakedFeed() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-soak") else { return }
+        if let transition = activeTransition {
+            // ⚠️ ALTERNATING AXES, because the two go to DIFFERENT SCREENS. A
+            // horizontal close lands on the marker; a vertical one lands on the
+            // place page a hierarchy marker carries beneath its feed — the
+            // route that fires `dismissedToIntermediate`, leaves the gate in
+            // `.intermediate`, and is then popped home by a second gesture. A
+            // soak that only ever closes sideways never reaches it, which is
+            // exactly what the first three runs did.
+            transition.debugScriptedGrab(axis: soakCursor % 2 == 0 ? .horizontal : .vertical)
+        } else if navigationController?.topViewController !== self {
+            navigationController?.popViewController(animated: true)
+        }
+    }
+    #endif
+
     private func prewarmVisiblePosts() {
         let visible = mapView.annotations(in: mapView.visibleMapRect)
         var ids: [PostID] = []
@@ -2061,6 +2207,18 @@ extension MapsViewController: MKMapViewDelegate {
     /// only reachable by finding one of them by hand on the map.
     private func debugOpenFirstPinIfRequested(among views: [MKAnnotationView]) {
         let arguments = ProcessInfo.processInfo.arguments
+        // `-maps-soak <cycles>`: arm once, then drive from the gate.
+        if soakCyclesRemaining == 0, !didDebugOpenPin,
+           let index = arguments.firstIndex(of: "-maps-soak"), index + 1 < arguments.count,
+           let cycles = Int(arguments[index + 1]), cycles > 0 {
+            didDebugOpenPin = true
+            soakCyclesRemaining = cycles
+            print("[soak] armed for \(cycles) cycles")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.advanceSoakIfNeeded()
+            }
+            return
+        }
         // `-maps-open-post <id>`: open THAT post, not whichever one happens to
         // be first.
         //
@@ -2519,6 +2677,12 @@ extension MapsViewController: MKMapViewDelegate {
                     // (at alpha 0, for the drag to fade in); the filter bars
                     // are invisible under the gallery either way.
                     self?.restoreBottomChromeForReturn(alpha: 0)
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+                        print("[caseb] splice+pop delegate=\(nav?.delegate.map { "\(type(of: $0))" } ?? "nil")"
+                              + " stack=\(nav?.viewControllers.map { "\(type(of: $0))" } ?? [])")
+                    }
+                    #endif
                     nav?.popViewController(animated: true)
                 }
             }
@@ -2530,7 +2694,13 @@ extension MapsViewController: MKMapViewDelegate {
                 // gallery pops, when `viewWillAppear` finds
                 // `activeTransition == nil` and resumes previews normally).
                 guard let self else { return }
-                self.navigationController?.delegate = nil
+                // ⚠️ ONLY IF IT IS STILL OURS. The page we just landed on has
+                // already installed its own controller as the delegate — that
+                // is how this callback reached us at all — and clearing the
+                // slot here would take the page's map-return with it.
+                if self.navigationController?.delegate === self.activeTransition {
+                    self.navigationController?.delegate = nil
+                }
                 self.activeTransition = nil
                 self.openGate.dismissedToIntermediate()
                 self.barsStack.alpha = 1
@@ -2564,6 +2734,7 @@ extension MapsViewController: MKMapViewDelegate {
             didLand = true
             self?.openGate.destinationShown()
             self?.videoCoordinator.stopAll()
+
             #if DEBUG
             // `[delay]`, for the reason its two siblings grew one: a run that
             // PAGES the feed first cannot be scripted against a hard-coded
@@ -2779,8 +2950,15 @@ extension MapsViewController: MKMapViewDelegate {
             nav.setViewControllers(plan, animated: false)
         }
         var hasPrepared = false
-        slide.prepareForDismissal = { [weak self, weak feed, weak landing] axis in
-            guard let self, let feed else { return }
+        // ⚠️ `slide` WEAKLY, and the strong capture it replaces was a retain
+        // cycle: the driver owns this closure and the closure writes back
+        // through the driver, so every card close ever staged kept its driver
+        // alive for the life of the process — one per opened post, and
+        // invisible to every census, because what leaks is a DRIVER and nothing
+        // counts those. `cardClose = nil` could not help: the cycle holds the
+        // object whether or not this controller still points at it.
+        slide.prepareForDismissal = { [weak self, weak feed, weak landing, weak slide] axis in
+            guard let self, let feed, let slide else { return }
             // ⚠️ A HERO'S POP IS FORWARDED BEFORE ANY OF THIS IS READ, so
             // staging here for a media post would only conceal a marker the
             // flight is about to land on.

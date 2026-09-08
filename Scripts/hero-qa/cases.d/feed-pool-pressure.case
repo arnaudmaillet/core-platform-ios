@@ -1,0 +1,15 @@
+# ⚠️ POOL PRESSURE COMES FROM THE FEED, NOT FROM THE MAP, and this case exists
+# because the obvious map-side test is MOOT: an annotation never holds a player
+# (`previewVideoURL` is nil by design), so the coordinator is never given a
+# candidate and `-map-video-concurrency` has nothing to raise. A soak with the
+# concurrency knob turned up reads `players=1` from start to finish and proves
+# nothing.
+#
+# Paging a cluster's feed is where players are actually taken and returned.
+# Measured over a 14-post cluster flung 12 pages: players peaked at 2, `dupes`
+# stayed 0 throughout, and the series ENDED FLAT at players=0 / idle=2 —
+# everything handed back. The plateau is the assertion; an absolute ceiling is
+# not, because a resting page legitimately holds one.
+CASE_ARGS=(-rich-media -maps-mock-semantic-clusters -maps-wide-region -maps-open-first-cluster -snap-fling 12)
+CASE_DURATION=70
+CASE_CHECKS=(audit duty-cycle)

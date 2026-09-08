@@ -1,0 +1,15 @@
+# The place-page route, iterated — the one the other soaks cannot reach.
+#
+# It needs all three: `-maps-mock-semantic-clusters` for hierarchy markers to
+# exist at all, `-maps-country-region` because at the default framing there are
+# NONE (the city and country bands only activate at a wider viewport) and at the
+# city band the single one wears a TEXT face and so carries no place page, and
+# the soak's own alternating close axis, because only a VERTICAL close lands on
+# the page.
+#
+# Measured on this configuration: 6 cycles over 4 hierarchy markers, two of them
+# landing on the page and popping home, 0 stuck, 0 failures, and the census back
+# to `drivers=0 controllers=0` at rest.
+CASE_ARGS=(-rich-media -maps-mock-semantic-clusters -maps-country-region -maps-soak 6)
+CASE_DURATION=150
+CASE_CHECKS=(audit duty-cycle)

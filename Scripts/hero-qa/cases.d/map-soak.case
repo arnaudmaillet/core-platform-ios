@@ -1,0 +1,14 @@
+# The map's own round trip, iterated — the one surface that had no soak,
+# because every `-maps-open-*` hook is a one-shot latch.
+#
+# `-maps-soak <n>` opens a marker, closes it, opens the next, clocked by
+# `MapOpenGate` rather than a timer, in post-id order (MapKit's own annotation
+# order is undefined), and closed by route with ALTERNATING AXES — a horizontal
+# close lands on the marker, a vertical one on the place page.
+#
+# ⚠️ Run WITHOUT `-map-icon-hud`: it is a sibling of the map that repaints ~6/s
+# and defeats every frame-difference judge, including the two below.
+CASE_ARGS=(-rich-media -maps-soak 8)
+CASE_DURATION=100
+CASE_CHECKS=(audit duty-cycle not-frozen)
+

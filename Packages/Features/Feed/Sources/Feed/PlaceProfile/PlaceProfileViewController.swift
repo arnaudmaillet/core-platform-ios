@@ -300,6 +300,14 @@ final class PlaceProfileViewController: UIViewController {
         if mapReturnPreviousDelegate == nil {
             mapReturnPreviousDelegate = nav.delegate
         }
+        // ⚠️ AND THE DISPLACED DELEGATE IS TOLD, not merely remembered. This
+        // page becomes top DURING the pop that lands on it, so it takes the
+        // slot before UIKit delivers `didShow` — and the driver that flew the
+        // feed here never learns its dismissal landed. Its owner's
+        // `onDismissedToIntermediate` is that news, and without it the map
+        // keeps its re-entrancy lock, its concealed marker and its whole
+        // transition graph alive for the rest of the session.
+        transition.displacedDelegate = mapReturnPreviousDelegate
         nav.delegate = transition
     }
 

@@ -87,13 +87,28 @@ final class HeroTransitionAudit {
         let retries = census[ZoomDebugCensus.Key.liveMediaRetry] ?? 0
         let cards = census[ZoomDebugCensus.Key.flightCard] ?? 0
         let pins = census[ZoomDebugCensus.Key.pinCard] ?? 0
+        // ⚠️ COUNTED SINCE IT WAS WRITTEN AND NEVER PUBLISHED, and it is the
+        // object whose survival LOCKS THE MAP: the transition controller is
+        // both the map's re-entrancy handle and the owner of the source, the
+        // animators and the drivers. A retained one is a map that silently
+        // swallows every marker tap, and the line that was supposed to show it
+        // did not carry the number.
+        let controllers = census[ZoomDebugCensus.Key.controller] ?? 0
         // A grab-from-rest builds an animator too (superseded, but alive), so
         // "some transition object exists" is the honest activity signal for
         // every open/dismiss path. Landing holds count as active: the hold
         // keeps the card visible up to 0.75s AFTER the animator died, and the
         // first field run read exactly that window as `STRANDED cards=1`.
         let holds = census[ZoomDebugCensus.Key.landingHold] ?? 0
-        let isActive = animators > 0 || interruptors > 0 || retries > 0 || holds > 0
+        // ⚠️ AND REVEALS, which carried no counter until the map's first soak
+        // reported 14 stranded cards — every one of them after a TEXT marker
+        // and none after a media one. A reveal legitimately draws a stand-in;
+        // with nothing counting the reveal, the audit called that settled
+        // wreckage. The map is the only surface that opens both kinds, so it is
+        // the only one where the asymmetry was visible.
+        let reveals = census[ZoomDebugCensus.Key.reveal] ?? 0
+        let isActive = animators > 0 || interruptors > 0 || retries > 0
+            || holds > 0 || reveals > 0
 
         var players = 0
         var idle = 0
@@ -124,7 +139,8 @@ final class HeroTransitionAudit {
         let state = isActive ? "active" : "settled"
         let line = "hero;seq=\(sequence);state=\(state)"
             + ";animators=\(animators);interruptors=\(interruptors);drivers=\(drivers)"
-            + ";retries=\(retries);cards=\(cards);pins=\(pins);stranded=\(stranded)"
+            + ";retries=\(retries);cards=\(cards);pins=\(pins);controllers=\(controllers)"
+            + ";reveals=\(reveals);stranded=\(stranded)"
             + ";players=\(players);idle=\(idle);dupes=\(duplicated)"
             + ";anchors=\(anchors);stalls=\(stalls);gen=\(generations)"
         probe.accessibilityIdentifier = line

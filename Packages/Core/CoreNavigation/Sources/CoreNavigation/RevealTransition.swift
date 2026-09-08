@@ -971,6 +971,20 @@ enum RevealStage {
         around page: UIView, in container: UIView, pageFrame: CGRect
     ) -> (host: UIView, mask: UIView) {
         let host = UIView(frame: container.bounds)
+        // ⚠️ THE HOST SWALLOWS TOUCHES FOR THE LENGTH OF THE TRANSITION, and
+        // its absence was a hole the hero does not have.
+        //
+        // The hero's animator installs a full-container shield for exactly this
+        // reason; the reveal installs none, and was covered only by accident —
+        // this host spans the container, so a tap "on the map" landed on the
+        // arriving PAGE instead. A MASK CLIPS PIXELS, NOT TOUCHES: for the
+        // whole of every opening AND closing, the invisible parts of that page
+        // were live, so a finger over what looked like map hit whatever the
+        // page has at that point.
+        //
+        // Non-interactive rather than hidden: the page must still be drawn, and
+        // `unwrap` hands it back to the container where it becomes live again.
+        host.isUserInteractionEnabled = false
         container.addSubview(host)
         host.addSubview(page)
         // Cleared BEFORE the frame is assigned: `frame` is derived from bounds
@@ -1156,6 +1170,12 @@ final class RevealGrabAnimator: NSObject, UIViewControllerAnimatedTransitioning 
 /// post and a media post settle with identical physics.
 @MainActor
 final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+    #if DEBUG
+    /// Counted for the LIFE OF THE TRANSITION — see `ZoomDebugCensus.Key.reveal`.
+    /// Without it the audit cannot tell a reveal in flight from a settled
+    /// screen, and reports the stand-in a reveal legitimately draws as wreckage.
+    private let censusToken = RevealCensusToken()
+    #endif
     private let geometry: RevealGeometry
     /// Source chrome that must LEAVE with the opening rather than before it —
     /// the app's floating tab bar.
@@ -1491,6 +1511,12 @@ final class RevealTrajectoryProbe {
 /// spring is the driver's own completion curve, not this one's.
 @MainActor
 final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+    #if DEBUG
+    /// Counted for the LIFE OF THE TRANSITION — see `ZoomDebugCensus.Key.reveal`.
+    /// Without it the audit cannot tell a reveal in flight from a settled
+    /// screen, and reports the stand-in a reveal legitimately draws as wreckage.
+    private let censusToken = RevealCensusToken()
+    #endif
     private let geometry: RevealGeometry
     /// Source chrome that comes back with the return (the app's tab bar), so
     /// it is revealed by the hand rather than switched on after the landing.
@@ -1766,3 +1792,14 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         return animator
     }
 }
+
+
+#if DEBUG
+/// Lives exactly as long as the animator holding it, so the census answers
+/// "a reveal is flying" without either animator having to remember to
+/// decrement on the several paths a transition can end on.
+private final class RevealCensusToken {
+    init() { ZoomDebugCensus.increment(ZoomDebugCensus.Key.reveal) }
+    deinit { ZoomDebugCensus.decrement(ZoomDebugCensus.Key.reveal) }
+}
+#endif

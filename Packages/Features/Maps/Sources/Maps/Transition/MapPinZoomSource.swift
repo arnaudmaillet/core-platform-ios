@@ -138,6 +138,8 @@ final class MapPinZoomSource: ZoomTransitionSource {
     /// flight carries the live video rather than a frozen copy of it.
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let card = PinCardView()
+        // Counted, so a soak can see it disappear — see `markAsTransitionCard`.
+        card.markAsTransitionCard()
         card.setFace(face)
         card.setRing(
             color: MapMarkerRing.color(for: ringKind), width: MapMarkerRing.width(for: ringKind)

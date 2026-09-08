@@ -1,0 +1,8 @@
+# The same round trip on a saturated marker field — the map's real worst case
+# is marker COUNT under a transition, not clip count.
+#
+# Measured on this configuration: 17 markers, hero and reveal alternating, 6
+# cycles, residue 0 at every settle and the player series flat at 1.
+CASE_ARGS=(-rich-media -maps-mock-density 6 -maps-soak 6)
+CASE_DURATION=100
+CASE_CHECKS=(audit duty-cycle)
