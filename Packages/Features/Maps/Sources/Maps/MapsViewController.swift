@@ -178,6 +178,9 @@ final class MapsViewController: UIViewController {
     /// compares two different runs.
     private var soakCyclesRemaining = 0
     private var soakCursor = 0
+    /// Bumped every time a cycle starts, so a watchdog can tell "still on the
+    /// cycle I was watching" from "already moved on".
+    private var soakGeneration = 0
     #endif
     #endif
 
@@ -1979,22 +1982,46 @@ final class MapsViewController: UIViewController {
     /// exactly that.
     private func advanceSoakIfNeeded() {
         guard soakCyclesRemaining > 0, openGate.canOpen, view.window != nil else { return }
+        // ⚠️ HIERARCHY MARKERS FIRST, and the ordering is the only way to reach
+        // the place page at all. That page is carried beneath the feed of a
+        // CITY or COUNTRY cluster and nothing else, and it is uncovered by a
+        // vertical close — so a soak that takes markers in post-id order can
+        // run for eight cycles without ever meeting one, which is what the
+        // first three runs did. Post-id order still decides everything after,
+        // because MapKit's own annotation order is undefined.
         let ordered = mapView.annotations
-            .compactMap { annotation -> (String, any MKAnnotation)? in
-                if let pin = annotation as? MapAnnotation { (pin.pin.postID.rawValue, annotation) }
-                else if let cluster = annotation as? MapComputedCluster {
-                    (cluster.representative.postID.rawValue, annotation)
+            .compactMap { annotation -> (id: String, hierarchy: Bool, value: any MKAnnotation)? in
+                if let pin = annotation as? MapAnnotation {
+                    (pin.pin.postID.rawValue, false, annotation)
+                } else if let cluster = annotation as? MapComputedCluster {
+                    (cluster.representative.postID.rawValue, cluster.isHierarchyMarker, annotation)
                 } else { nil }
             }
-            .sorted { $0.0 < $1.0 }
+            .sorted { ($0.hierarchy ? 0 : 1, $0.id) < ($1.hierarchy ? 0 : 1, $1.id) }
         guard !ordered.isEmpty else { return }
-        let target = ordered[soakCursor % ordered.count]
+        let hierarchyCount = ordered.filter(\.hierarchy).count
+        let target = (ordered[soakCursor % ordered.count].id,
+                      ordered[soakCursor % ordered.count].value)
         soakCursor += 1
         soakCyclesRemaining -= 1
-        print("[soak] cycle \(soakCursor) opening \(target.0) of \(ordered.count) markers")
+        print("[soak] cycle \(soakCursor) opening \(target.0) of \(ordered.count) markers"
+              + " (\(hierarchyCount) hierarchy)")
         // One runloop turn, so this never runs inside the gate's own didSet.
         DispatchQueue.main.async { [weak self] in
             self?.mapView.selectAnnotation(target.1, animated: true)
+        }
+        soakGeneration += 1
+        let generation = soakGeneration
+        // ⚠️ A WATCHDOG PER CYCLE, because a soak that hangs reports nothing at
+        // all — and "the round trip never came back" is the single most
+        // important thing this harness can find. A cycle that has not returned
+        // the map to idle by here is named, counted and force-closed, so the
+        // run continues and the log says which marker did it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+            guard let self, self.soakGeneration == generation, !self.openGate.canOpen else { return }
+            print("[soak] cycle \(generation) STUCK on \(target.0) — forcing the map back")
+            self.navigationController?.popToViewController(self, animated: false)
+            self.openGate.appearedAtRoot()
         }
         // ⚠️ SCHEDULED FROM HERE AND NOT FROM A LANDING CALLBACK, because only
         // ONE of the three routes has one. `onDestinationShown` belongs to the
@@ -2019,7 +2046,14 @@ final class MapsViewController: UIViewController {
     private func closeSoakedFeed() {
         guard ProcessInfo.processInfo.arguments.contains("-maps-soak") else { return }
         if let transition = activeTransition {
-            transition.debugScriptedGrab()
+            // ⚠️ ALTERNATING AXES, because the two go to DIFFERENT SCREENS. A
+            // horizontal close lands on the marker; a vertical one lands on the
+            // place page a hierarchy marker carries beneath its feed — the
+            // route that fires `dismissedToIntermediate`, leaves the gate in
+            // `.intermediate`, and is then popped home by a second gesture. A
+            // soak that only ever closes sideways never reaches it, which is
+            // exactly what the first three runs did.
+            transition.debugScriptedGrab(axis: soakCursor % 2 == 0 ? .horizontal : .vertical)
         } else if navigationController?.topViewController !== self {
             navigationController?.popViewController(animated: true)
         }
