@@ -181,6 +181,8 @@ final class MapsViewController: UIViewController {
     /// Bumped every time a cycle starts, so a watchdog can tell "still on the
     /// cycle I was watching" from "already moved on".
     private var soakGeneration = 0
+    /// One pending re-check at a time, so a shut gate cannot stack timers.
+    private var soakRetryScheduled = false
     #endif
     #endif
 
@@ -1981,7 +1983,20 @@ final class MapsViewController: UIViewController {
     /// spring's tail, and this file's history is full of measurements ruined by
     /// exactly that.
     private func advanceSoakIfNeeded() {
-        guard soakCyclesRemaining > 0, openGate.canOpen, view.window != nil else { return }
+        guard soakCyclesRemaining > 0 else { return }
+        // ⚠️ EVERY UNMET PRECONDITION RETRIES, and it took two goes to get this
+        // right. The advance is EDGE-TRIGGERED on the gate, so any condition
+        // that is merely not-yet-true at that instant loses the cycle and every
+        // cycle after it — silently, because a soak that stops looks exactly
+        // like a soak that finished.
+        //
+        // The first version retried only on an empty annotation list, which was
+        // a guess. The trace named the real one: after popping home from the
+        // place page the gate opens while the map is still off-window
+        // (`window=n annotations=4`), one runloop turn before UIKit reattaches
+        // it. Retrying on the conjunction covers both, and whatever the third
+        // one turns out to be.
+        guard openGate.canOpen, view.window != nil else { return scheduleSoakRetry() }
         // ⚠️ HIERARCHY MARKERS FIRST, and the ordering is the only way to reach
         // the place page at all. That page is carried beneath the feed of a
         // CITY or COUNTRY cluster and nothing else, and it is uncovered by a
@@ -2003,12 +2018,7 @@ final class MapsViewController: UIViewController {
         // ordinary state one runloop turn after popping home — would lose that
         // cycle and every cycle after it, silently. The first place-page soak
         // ran exactly one of its six cycles this way.
-        guard !ordered.isEmpty else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.advanceSoakIfNeeded()
-            }
-            return
-        }
+        guard !ordered.isEmpty else { return scheduleSoakRetry() }
         let hierarchyCount = ordered.filter(\.hierarchy).count
         let target = (ordered[soakCursor % ordered.count].id,
                       ordered[soakCursor % ordered.count].value)
@@ -2049,6 +2059,16 @@ final class MapsViewController: UIViewController {
         // convenience, and nothing is measured against it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
             self?.closeSoakedFeed()
+        }
+    }
+
+    /// Re-checks shortly, at most one pending check at a time.
+    private func scheduleSoakRetry() {
+        guard !soakRetryScheduled else { return }
+        soakRetryScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.soakRetryScheduled = false
+            self?.advanceSoakIfNeeded()
         }
     }
 
