@@ -85,6 +85,45 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     static let textOnlyVenue = Venue(name: "text-only", lat: 48.8480, lng: 2.3660)
     static let mediaOnlyVenue = Venue(name: "media-only", lat: 48.8500, lng: 2.3380)
 
+    /// ⚠️ LONE VIDEO ADDRESSES, because the scatter never puts a video here and
+    /// a venue always clusters one.
+    ///
+    /// Measured with `-maps-log-pins`, the opening viewport received 3 photo and
+    /// 2 text as scatter pins and 8 photo / 8 text / 8 video as venue members —
+    /// so every video that reached the map was a cluster member, and a cluster
+    /// draws ONE face. The result on screen was four separate photographs
+    /// against a single sprite sheet, which reads as "the map has almost no
+    /// video" even though the corpus in view is 8 video against 7 photo.
+    ///
+    /// Freeing the videos from the venues does not help: released posts fall
+    /// back to an id-derived scatter coordinate and none of those lands inside
+    /// the home viewport. Measured with both video quotas at zero — the answer
+    /// did not move.
+    ///
+    /// So video gets what photographs already have by accident: its own
+    /// addresses, one post each. Spaced beyond a collision cell (~0.014° at the
+    /// opening zoom) from each other and from the three venues, so each stays a
+    /// marker of its own rather than merging into anything.
+    /// ⚠️ THE COLLISION CELL IS TWICE AS WIDE IN LONGITUDE, and that is what
+    /// swallowed the first two attempts at these.
+    ///
+    /// Measured rather than estimated: the opening tile answers for
+    /// `lat 48.8130..48.9124, lng 2.3072..2.3972` — 0.0994° of latitude over
+    /// 874pt and 0.0900° of longitude over 402pt. So `MapClusterEngine`'s 64pt
+    /// merge threshold is **0.0073° of latitude but 0.0143° of longitude**. Two
+    /// addresses placed 0.012° from a venue were comfortably clear on latitude
+    /// and inside one cell on longitude, so they merged into it and only one of
+    /// three ever became its own marker — which reads exactly like the
+    /// assignment silently failing.
+    ///
+    /// These are ≥0.019° from every venue and from each other in longitude, and
+    /// well inside the measured window.
+    static let loneVideoPins = [
+        Venue(name: "lone-video-1", lat: 48.8900, lng: 2.3200),
+        Venue(name: "lone-video-2", lat: 48.8250, lng: 2.3850),
+        Venue(name: "lone-video-3", lat: 48.8850, lng: 2.3850)
+    ]
+
 
     /// Walks the corpus in order and hands the first few posts of each kind to
     /// a venue, so the assignment is deterministic and survives a reseed.
@@ -153,6 +192,16 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         var photo = posts.lazy
             .filter { $0.media.map { !MockMediaFixtures.isVideoURL($0.url) } ?? false }
             .map(\.postID).makeIterator()
+        // A video post that can actually SHOW what a video post is: the
+        // sheetless synthetic fixture would give these addresses a still, which
+        // is the one thing they exist to avoid.
+        var sheeted = posts.lazy
+            .filter {
+                guard let media = $0.media, MockMediaFixtures.isVideoURL(media.url)
+                else { return false }
+                return MockMediaFixtures.bakedClip(for: media.url) != nil
+            }
+            .map(\.postID).makeIterator()
         func assign(_ venue: Venue, text textCount: Int, video videoCount: Int, photo photoCount: Int) {
             for _ in 0..<textCount { if let id = text.next() { assignments[id] = venue } }
             for _ in 0..<videoCount { if let id = video.next() { assignments[id] = venue } }
@@ -216,6 +265,14 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // `-maps-force-video` is the flag that exists for exercising the video
         // pin path; widening the region or panning reaches the others.
         assign(mediaOnlyVenue, text: 0, video: 4, photo: 0)
+        // ⚠️ LAST, so these WIN. `sheeted` is a separate iterator that also
+        // starts at the head of the corpus, so drawing them first only had the
+        // venues re-assign the very same posts a line later — measured, the
+        // pins simply vanished. Assigned last they take their post back out of
+        // whatever venue claimed it, which costs that venue one member.
+        for address in loneVideoPins {
+            if let id = sheeted.next() { assignments[id] = address }
+        }
         return assignments
     }
 
@@ -374,6 +431,16 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         filter: String?
     ) -> Result<GeoDiscovery_V1_QueryTileResponse, ConnectError> {
         let viewport = request.viewport
+        #if DEBUG
+        // The window the tile actually answers for. Estimating it from the
+        // screen's aspect put two deliberate addresses outside it, and a pin
+        // that is filtered here looks exactly like one that was never assigned.
+        if ProcessInfo.processInfo.arguments.contains("-maps-log-pins") {
+            print(String(format: "[viewport] lat %.4f..%.4f  lng %.4f..%.4f",
+                         viewport.swLat, viewport.neLat,
+                         viewport.swLng, viewport.neLng))
+        }
+        #endif
         var response = GeoDiscovery_V1_QueryTileResponse()
 
         let pins = dataset.posts.enumerated().compactMap { index, post -> GeoDiscovery_V1_RadarPin? in
