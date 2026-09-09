@@ -54,6 +54,17 @@ enum ForYouSelectorDock {
         #endif
     }
 
+    /// `-foryou-dock-no-catchup`: leave the strip where UIKit puts it, in one
+    /// step. On by default in the spike — see
+    /// `ForYouSelectorAccessoryHost.playCatchUpIfMoved`.
+    static var animatesCatchUp: Bool {
+        #if DEBUG
+        !ProcessInfo.processInfo.arguments.contains("-foryou-dock-no-catchup")
+        #else
+        true
+        #endif
+    }
+
     /// `-foryou-dock-trace`: one line per layout and per environment change.
     static var isTracing: Bool {
         #if DEBUG
@@ -139,15 +150,21 @@ final class ForYouSelectorAccessoryHost: UIView {
             strip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
         ])
 
-        // The one appearance property that may change after init, and the only
-        // per-environment lever there is: filled reads as a bar across the full
-        // width, hugging reads as a control docked beside the tab bubbles.
+        // ⚠️ **FILLED IN BOTH ENVIRONMENTS, AND `.inline` IS WHY.** Hugging
+        // was the obvious answer for the docked state — ask only for what the
+        // titles need, so the strip reads as a control beside the tab bubbles
+        // rather than a bar. Measured, it is the arrangement that puts a hole
+        // on each side: the accessory hands out 226pt, the titles want 173, and
+        // the capsule centres itself in the difference, leaving ~26pt of dead
+        // glass left and right INSIDE the container. `fillsWidth` decides
+        // whether the row hugs or spans, so spanning it is, and the margins
+        // stay the four equal ones the edge pins give.
+        strip.fillsWidth = true
+
         registerForTraitChanges([UITraitTabAccessoryEnvironment.self]) {
             (self: ForYouSelectorAccessoryHost, _) in
-            self.applyEnvironment()
             self.trace("trait")
         }
-        applyEnvironment()
     }
 
     @available(*, unavailable)
@@ -159,12 +176,56 @@ final class ForYouSelectorAccessoryHost: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        playCatchUpIfMoved()
         trace("layout")
         onLayoutChanged?()
     }
 
-    private func applyEnvironment() {
-        strip.fillsWidth = traitCollection.tabAccessoryEnvironment == .regular
+    /// Where this view was last seen, in window space — the only thing a
+    /// catch-up needs to know.
+    ///
+    /// ⚠️ MEASURED FROM `center`, NOT FROM `frame`. `center` mirrors
+    /// `layer.position`, which a transform does not move; a frame read back
+    /// while the catch-up is mid-flight would include the very offset being
+    /// animated, and each pass would chase the last one.
+    private var lastCentre: CGPoint?
+
+    /// Carries the strip from where it WAS to where UIKit just put it.
+    ///
+    /// ⚠️ **THIS EXISTS BECAUSE UIKIT DOES NOT ANIMATE THE MOVE, and it is a
+    /// spike's answer, not a good one.** Measured with the trace below, a whole
+    /// collapse is THREE layout passes: 360x48@21,735 → 234x48@84,735 →
+    /// 234x48@84,798. The width and the x land in one step and the y in
+    /// another, with no animation attached to the layer either time — which is
+    /// what "teleported over the tab bar" is.
+    ///
+    /// So the move is inverted and played back: the view is put back where it
+    /// was with a transform, and the transform is animated to identity. It is
+    /// the standard trick for a layout change you do not own. What it does NOT
+    /// carry is the width change — a scale would stretch the type — so the
+    /// strip still narrows in one step while it travels. Half of Apple's
+    /// motion, which is more than none.
+    private func playCatchUpIfMoved() {
+        guard let window, let superview else { return }
+        let centreNow = superview.convert(center, to: window)
+        defer { lastCentre = centreNow }
+        guard ForYouSelectorDock.animatesCatchUp, let was = lastCentre else { return }
+        let dx = was.x - centreNow.x
+        let dy = was.y - centreNow.y
+        // A pass that did not move it, or moved it a hair, is not a journey.
+        guard abs(dx) > 1 || abs(dy) > 1 else { return }
+        if ForYouSelectorDock.isTracing {
+            print(String(format: "[dock] catchup dx=%.0f dy=%.0f", dx, dy))
+        }
+        transform = CGAffineTransform(translationX: dx, y: dy)
+        UIView.animate(
+            withDuration: 0.32, delay: 0,
+            usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
+            // ⚠️ The scroll that caused this is still under the finger.
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.transform = .identity
+        }
     }
 
     private var lastTrace = ""
