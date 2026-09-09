@@ -112,28 +112,32 @@ final class SearchViewController: UIViewController {
     /// there would fight the viewer who just came back to read a result.
     private var hasClaimedField = false
 
-    /// Takes the field out of its own closing animation.
-    ///
-    /// ⚠️ THE FIELD OUTLIVES ITS CONTENT, and that is the artefact. Filmed at
-    /// 20fps: once the clear button has gone and the caret with it, the search
-    /// field stays at FULL WIDTH for another ten to twelve frames — half a
-    /// second of a wide, empty pill with the magnifier sliding across the
-    /// inside of it — before UIKit finally collapses it onto the trailing
-    /// button. Nothing is in it for that whole stretch.
-    ///
-    /// So it is taken out at once, on `willDismiss`. Not faded: `willDismiss`
-    /// already lands a frame or two into UIKit's collapse, so a fade only
-    /// makes the first frames translucent instead of absent.
-    ///
-    /// ⚠️ THE TEXT FIELD, NOT THE SEARCH BAR. The bar also carries the
-    /// magnifier that has to survive and become the button — setting the bar's
-    /// own alpha was tried and is simply overridden by UIKit's animation on it.
-    ///
-    /// Restored unanimated on `willPresent` and `didDismiss`, both moments
-    /// where nothing of it can be seen landing.
-    private func hideFieldForCollapse(_ hidden: Bool) {
-        searchController.searchBar.searchTextField.alpha = hidden ? 0 : 1
-    }
+    // ⚠️ THE WHITE CAPSULE IS NOT THIS SCREEN'S TO REMOVE, and that is the
+    // end of what the native API allows here.
+    //
+    // Hiding `searchBar.searchTextField` for the collapse was tried — twice,
+    // because it is the obvious lever and it is what the shape of the artefact
+    // suggests. Filmed at 30fps, every frame, it does the opposite of what it
+    // looks like it should:
+    //
+    //     604-607  active field: magnifier, caret, clear button
+    //     608-611  magnifier and caret GONE — a wide empty capsule with only
+    //              the clear button in it, a state that did not exist before
+    //     612-627  the wide capsule collapses exactly as it did anyway
+    //
+    // So the capsule survives hiding the text field, which means it is not the
+    // text field's background: on iOS 26 it is the navigation bar's own glass
+    // PLATTER, the same one that hosts bar-button bubbles. The app can change
+    // what is INSIDE that platter — icon, caret, placeholder — and cannot
+    // remove it, resize it, or opt out of the width animation UIKit plays on
+    // it. `searchBar.alpha = 0` is likewise overridden by that animation.
+    //
+    // Everything that CAN be reached from here has now been measured:
+    // `.stacked`, `.integrated`, `.integratedButton`, `.integratedCentered`,
+    // with and without a placeholder, with the field hidden and with the bar
+    // hidden. A closing that lands straight on an icon-only bubble is not
+    // among them. It needs a navigation bar this app draws itself.
+
 
 
     override func viewDidAppear(_ animated: Bool) {
@@ -775,7 +779,6 @@ private extension Array {
 /// animation this exists to remove.
 extension SearchViewController: UISearchControllerDelegate {
     func willPresentSearchController(_ searchController: UISearchController) {
-        hideFieldForCollapse(false)
         logPlacement("willPresent")
     }
 
@@ -784,12 +787,10 @@ extension SearchViewController: UISearchControllerDelegate {
     }
 
     func willDismissSearchController(_ searchController: UISearchController) {
-        hideFieldForCollapse(true)
         logPlacement("willDismiss")
     }
 
     func didDismissSearchController(_ searchController: UISearchController) {
-        hideFieldForCollapse(false)
         logPlacement("didDismiss")
     }
 
