@@ -81,6 +81,9 @@ final class SearchResultsViewController: UIViewController {
     private var pager: HorizontalPagerView!
 
     private let peoplePage: SearchPeoplePage
+    /// The Users tab, for tests that need to see what this screen actually
+    /// rendered rather than what it was told.
+    var peoplePageForTesting: SearchPeoplePage { peoplePage }
     private let postsPage: any SearchPostSurface
     private let mediaPage: any SearchPostSurface
 
@@ -118,13 +121,9 @@ final class SearchResultsViewController: UIViewController {
         configureHeader()
         configurePages()
         configureToolbar()
+        subscribe()
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
-        viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
-        viewModel.onPostResultsChange = { [weak self] _ in
-            guard let self else { return }
-            self.showPosts(self.postState(for: self.viewModel.currentPhase))
-        }
         #if DEBUG
         // `-search-results-tab <0|1|2>` opens on a tab. The pager is driven by
         // a swipe and the simulator injects none, so without this only the
@@ -276,6 +275,16 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // ⚠️ RE-SUBSCRIBED EVERY TIME, and this is not belt and braces.
+        // `SearchViewModel`'s callbacks are single-assignment slots, and a
+        // refine screen pushed over this one takes `onPhaseChange` in its own
+        // `viewDidLoad` and never hands it back. Without this, coming back from
+        // a refine left this screen deaf: the Users tab and the header query
+        // would keep showing the OLD answer while the post tabs — driven by a
+        // different callback — showed the new one. One screen, two answers.
+        subscribe()
+        render(viewModel.currentPhase)
+        showPosts(postState(for: viewModel.currentPhase))
         // ⚠️ SHOWN HERE AND HIDDEN ON THE WAY OUT, because a navigation
         // controller's toolbar is SHARED: left visible, it would follow the pop
         // back onto the search screen, which has no toolbar items and would
@@ -341,6 +350,15 @@ final class SearchResultsViewController: UIViewController {
     /// subset with a picture. Handing the gallery the full set drew a blank
     /// tile per text post — filmed, a grid of empty rectangles among the
     /// photographs.
+    /// Claims the view model's callbacks for this screen.
+    private func subscribe() {
+        viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        viewModel.onPostResultsChange = { [weak self] _ in
+            guard let self else { return }
+            self.showPosts(self.postState(for: self.viewModel.currentPhase))
+        }
+    }
+
     private func showPosts(_ state: SearchPostSurfaceState) {
         postsPage.show(state)
         mediaPage.show(mediaState(from: state))

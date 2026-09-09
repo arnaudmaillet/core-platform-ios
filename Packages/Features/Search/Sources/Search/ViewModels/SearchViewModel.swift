@@ -267,6 +267,24 @@ public final class SearchViewModel {
         publishResults()
     }
 
+    /// Re-emits the last SUBMITTED answer, discarding whatever the typeahead
+    /// left behind.
+    ///
+    /// ⚠️ THIS EXISTS BECAUSE ONE VIEW MODEL NOW SERVES TWO SCREENS. A refine
+    /// screen is pushed over the answer and shares this instance, so typing in
+    /// it drives the phase to `.suggesting` — which is right for the screen
+    /// being typed in and wrong for the one underneath, whose whole content is
+    /// an answer. Cancelling has to put back what the answer was, or the screen
+    /// it returns to renders a typeahead it never asked for.
+    ///
+    /// ⚠️ NOT THE SAME AS RE-RUNNING. Nothing is fetched: the answer is still
+    /// held, and asking the engine again for a question already answered would
+    /// spend a round trip to arrive at the same rows.
+    public func restoreSubmittedAnswer() {
+        guard !submittedQuery.isEmpty else { return showExplore() }
+        publishResults()
+    }
+
     /// Publishes `unfilteredResults` through the current scope.
     ///
     /// ⚠️ AN EMPTY SCOPE IS NOT AN EMPTY SEARCH. "Following" matching nobody

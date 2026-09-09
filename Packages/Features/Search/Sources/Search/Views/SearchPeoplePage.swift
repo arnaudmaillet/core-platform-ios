@@ -99,6 +99,10 @@ final class SearchPeoplePage: UIViewController {
         statusView.isHidden = true
     }
 
+    /// How many people are on screen. The only thing a test can honestly
+    /// observe about this page without reaching into cells.
+    var rowCountForTesting: Int { dataSource.snapshot().numberOfItems }
+
     func render(_ state: State) {
         switch state {
         case .loading:

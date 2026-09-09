@@ -21,7 +21,27 @@ import UIKit
 /// `keyboardLayoutGuide` so they centre in the space actually left over rather
 /// than behind the keyboard.
 final class SearchViewController: UIViewController {
+    /// Where this screen was reached from, which decides its header and what
+    /// submitting does.
+    enum Mode {
+        /// Pushed from the Maps or For You header: `[back][field]`, and
+        /// submitting pushes the answer.
+        case origin
+        /// Pushed from the ANSWER, to ask again: `[field][Cancel]`, and
+        /// submitting pops back onto the answer it just changed.
+        ///
+        /// ⚠️ Cancel is the only way out of this one. Hiding the back button
+        /// is what gives the field the full width, and
+        /// `ProfileRelationshipsViewController` records the consequence in the
+        /// same breath: the interactive edge pop goes with the button, and
+        /// comes back with it. That is a real cost, taken deliberately —
+        /// the alternative is a back chevron beside a Cancel, two ways out of
+        /// the same screen sitting next to each other.
+        case refine
+    }
+
     private let viewModel: SearchViewModel
+    private let mode: Mode
     private let imagePipeline: ImagePipeline
     /// Filled by the composition root; `nil` in a composition without Feed —
     /// see `SearchPostSurfaceProviding`.
@@ -50,11 +70,13 @@ final class SearchViewController: UIViewController {
     init(
         viewModel: SearchViewModel,
         imagePipeline: ImagePipeline,
-        postSurfaces: (any SearchPostSurfaceProviding)? = nil
+        postSurfaces: (any SearchPostSurfaceProviding)? = nil,
+        mode: Mode = .origin
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.postSurfaces = postSurfaces
+        self.mode = mode
         super.init(nibName: nil, bundle: nil)
         // ⚠️ IN THE INITIALISER, not `viewDidLoad`. A navigation controller
         // reads this when the push BEGINS, and `viewDidLoad` can run inside
@@ -371,12 +393,50 @@ final class SearchViewController: UIViewController {
         // one-line menu is not worth a permanent seat over a screen that is
         // usually showing a history and a keyboard.
         //
-        // ⚠️ NOTHING TRAILING, AND THE TRAY THAT WAS HERE IS NOT MISSING. It
-        // moved to the results screen's TOOLBAR, because that is the only
-        // screen with an answer to filter — this one shows a history and a
-        // typeahead, and neither has an order.
         navigationItem.titleView = searchField
-        navigationItem.rightBarButtonItems = []
+        switch mode {
+        case .origin:
+            // ⚠️ NOTHING TRAILING, AND THE TRAY THAT WAS HERE IS NOT MISSING.
+            // It moved to the results screen's TOOLBAR, because that is the
+            // only screen with an answer to filter — this one shows a history
+            // and a typeahead, and neither has an order.
+            navigationItem.rightBarButtonItems = []
+        case .refine:
+            // ⚠️ THE FIELD OPENS CARRYING THE QUERY. This screen exists to
+            // change an answer that already exists, so starting empty would
+            // make "adjust one word" mean "type the whole thing again" — and
+            // the query is right there in the header the viewer just tapped.
+            //
+            // Reported as typed, through the same path a keystroke takes, so
+            // the list underneath is the typeahead for what is in the field
+            // rather than a history that disagrees with it.
+            setFieldText(viewModel.submittedQueryText)
+            lastReportedQuery = viewModel.submittedQueryText
+            viewModel.queryChanged(viewModel.submittedQueryText)
+
+            // `[ field ————————————————— ][ Cancel ]`, which is the inbox's
+            // searching bar and the relationship lists', in that order and for
+            // the same reason: the field wants the width, and Cancel is the way
+            // back to what it is refining.
+            navigationItem.setHidesBackButton(true, animated: false)
+            navigationItem.rightBarButtonItems = [
+                UIBarButtonItem(
+                    title: "Cancel",
+                    primaryAction: UIAction { [weak self] _ in
+                        guard let self else { return }
+                        // ⚠️ RESTORES BEFORE IT POPS. This screen shares its
+                        // view model with the answer underneath, so the typing
+                        // that happened here has already driven the phase to
+                        // `.suggesting` — a typeahead, on a screen whose whole
+                        // content is an answer. Cancelling means "forget I
+                        // asked", and forgetting has to include putting the
+                        // answer back.
+                        self.viewModel.restoreSubmittedAnswer()
+                        self.navigationController?.popViewController(animated: false)
+                    }
+                )
+            ]
+        }
     }
 
 
@@ -398,7 +458,18 @@ final class SearchViewController: UIViewController {
         // there.
         searchField.resignFirstResponder()
         viewModel.submitQuery(text)
-        pushResults()
+        switch mode {
+        case .origin:
+            showResults()
+        case .refine:
+            // ⚠️ POPS RATHER THAN PUSHING A SECOND ANSWER. This screen and the
+            // results screen underneath share ONE view model, so submitting has
+            // already changed the answer that is down there — pushing a fresh
+            // results screen would stack two views of the same state, and going
+            // back would walk through spellings the viewer abandoned. That
+            // property is why the answer was given its own screen at all.
+            navigationController?.popViewController(animated: false)
+        }
     }
 
     /// ⚠️ UNANIMATED, and the POP is untouched by that. `animated:` describes
@@ -411,7 +482,7 @@ final class SearchViewController: UIViewController {
     /// screen's own field re-runs in place; only a submit made HERE pushes.
     /// Otherwise a viewer refining a query three times would have three
     /// answers to swipe back through, each to a spelling they abandoned.
-    private func pushResults() {
+    private func showResults() {
         let results = SearchResultsViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
@@ -423,16 +494,40 @@ final class SearchViewController: UIViewController {
         // the same field the viewer is already looking at, and animating a
         // slide between two headers that differ by one control reads as a
         // glitch rather than as travel.
-        results.onEditQuery = { [weak self] in
-            guard let self else { return }
-            self.navigationController?.popViewController(animated: false)
-            // ⚠️ AFTER THE POP, and only because the tap said so.
-            // `viewDidAppear`'s claim is once-only on purpose — re-focusing on
-            // every return would fight a viewer who came back to read. This is
-            // the one return that asked for the keyboard.
-            self.searchField.becomeFirstResponder()
+        // ⚠️ ASKING AGAIN PUSHES A FRESH SCREEN RATHER THAN POPPING TO THIS
+        // ONE. It used to pop back here, which worked but meant this screen had
+        // to survive underneath the answer for the whole visit — and it is the
+        // screen Back would then land on, which is not where Back belongs (see
+        // the stack replacement below). A refine screen is built on demand,
+        // shares this screen's view model so the filters and the history carry
+        // over, and pops itself when it is done.
+        results.onEditQuery = { [weak results, viewModel, imagePipeline, postSurfaces] in
+            guard let results else { return }
+            let refine = SearchViewController(
+                viewModel: viewModel,
+                imagePipeline: imagePipeline,
+                postSurfaces: postSurfaces,
+                mode: .refine
+            )
+            results.navigationController?.pushViewController(refine, animated: false)
         }
-        navigationController?.pushViewController(results, animated: false)
+
+        // ⚠️ THIS SCREEN LEAVES THE STACK AS THE ANSWER ARRIVES. Back on the
+        // results screen has to reach the ORIGIN — the map or For You — not the
+        // search screen: a viewer who has an answer is done asking, and making
+        // them walk back through the question is a step nobody wants.
+        //
+        // ⚠️ THE VIEW MODEL SURVIVES THIS, and that is the load-bearing part.
+        // The results screen holds it with a `let`, so it is retained by the
+        // screen that is staying rather than by the one that is going. A refine
+        // screen built later is handed the same instance, which is what keeps
+        // the recent history, the sort and the scope continuous across a
+        // question the viewer asks twice.
+        guard let navigation = navigationController else { return }
+        var stack = navigation.viewControllers
+        stack.removeAll { $0 === self }
+        stack.append(results)
+        navigation.setViewControllers(stack, animated: false)
     }
 
     /// ⚠️ KEPT AS ITS OWN METHOD WITH ONE CALLER. It reads like something to
@@ -832,6 +927,16 @@ final class SearchViewController: UIViewController {
 
     #if DEBUG
     private func applyDebugArguments() {
+        // ⚠️ LAUNCH ARGUMENTS ARE PROCESS-WIDE, AND THIS SCREEN NOW EXISTS
+        // TWICE. A refine screen is a second `SearchViewController` in the same
+        // process, so it read `-search-query … -search-submit` too, seeded
+        // itself and submitted — which in refine mode pops. It closed itself
+        // the instant it was born, and the instrument reported "the push did
+        // not happen" for a push that had happened and been undone.
+        //
+        // The seeding belongs to the screen the argument was written for: the
+        // one reached from a tab header.
+        guard case .origin = mode else { return }
         let arguments = ProcessInfo.processInfo.arguments
         // `-search-query <text>` seeds the field on launch, so the typing path
         // is testable without driving the keyboard.

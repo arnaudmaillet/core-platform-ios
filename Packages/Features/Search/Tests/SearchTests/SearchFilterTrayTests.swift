@@ -56,6 +56,7 @@ struct SearchFilterTrayTests {
     @MainActor
     private final class Host {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let navigation: UINavigationController
         let screen: SearchViewController
         let viewModel: SearchViewModel
         let box: SortBox
@@ -73,10 +74,13 @@ struct SearchFilterTrayTests {
                 viewModel: viewModel,
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
             )
-            // ⚠️ A REAL NAVIGATION CONTROLLER, because submitting now PUSHES.
-            // A screen with no navigation controller would swallow the push and
-            // every assertion about the results screen would read nil.
-            window.rootViewController = UINavigationController(rootViewController: screen)
+            // ⚠️ HELD DIRECTLY, not reached through the screen. Submitting
+            // REPLACES the search screen in the stack — that is the point of it
+            // — so `screen.navigationController` is nil from then on, and any
+            // helper that went through the screen would read nil for the
+            // results it was asked about.
+            navigation = UINavigationController(rootViewController: screen)
+            window.rootViewController = navigation
             window.makeKeyAndVisible()
             screen.loadViewIfNeeded()
             window.layoutIfNeeded()
@@ -87,15 +91,28 @@ struct SearchFilterTrayTests {
         /// ⚠️ THE TRAY IS ON THE RESULTS SCREEN'S TOOLBAR NOW, not the search
         /// screen's bar. The search screen shows a history and a typeahead;
         /// neither has an order to change.
-        var item: UIBarButtonItem? {
-            (screen.navigationController?.topViewController as? SearchResultsViewController)?
-                .toolbarItems?.last
+        var results: SearchResultsViewController? {
+            navigation.topViewController as? SearchResultsViewController
         }
+
+        var item: UIBarButtonItem? { results?.toolbarItems?.last }
 
         /// Submits, which PUSHES the results screen, and waits for it.
         func showResults(_ text: String) async {
             submit(text)
             for _ in 0..<80 where item == nil { await Task.yield() }
+        }
+
+        /// ⚠️ THE PUSH IS SYNCHRONOUS AND THE ANSWER IS NOT. `showResults`
+        /// returns as soon as the screen exists, which is before the search has
+        /// come back — a test that asserted on the phase straight after it read
+        /// `.loading` and called a working screen broken.
+        func settleAnswer() async {
+            for _ in 0..<80 {
+                if case .results = viewModel.currentPhase { return }
+                if case .empty = viewModel.currentPhase { return }
+                await Task.yield()
+            }
         }
 
         /// The groups the sheet would be built from. They live on the view
@@ -228,6 +245,126 @@ struct SearchFilterTrayTests {
         #expect(await host.box.sorts == [.popularity])
     }
 
+    // MARK: - Where Back goes, and asking again
+
+    /// ⚠️ THE SEARCH SCREEN LEAVES THE STACK AS THE ANSWER ARRIVES, so Back on
+    /// the results screen reaches the ORIGIN. A viewer who has an answer is
+    /// done asking; walking them back through the question is a step nobody
+    /// wants.
+    @Test func submittingReplacesTheSearchScreenRatherThanStackingOnIt() async {
+        let host = Host()
+        let origin = host.navigation.viewControllers.first
+        await host.showResults("haddad")
+
+        let stack = host.navigation.viewControllers
+        #expect(stack.count == 1)
+        #expect(stack.first is SearchResultsViewController)
+        // The screen that was pushed FROM is gone with it — this test's origin
+        // IS the search screen, so a stack of one proves the replacement.
+        #expect(origin === host.screen)
+        #expect(stack.contains { $0 === host.screen } == false)
+    }
+
+    /// ⚠️ THE VIEW MODEL SURVIVES THE REPLACEMENT. The results screen holds it
+    /// with a `let`, so it is retained by the screen that stays rather than by
+    /// the one that goes — which is what lets a refine screen built later share
+    /// the same history, sort and scope.
+    @Test func theAnswerKeepsItsViewModelAfterTheSearchScreenLeaves() async {
+        let host = Host()
+        await host.showResults("haddad")
+        host.viewModel.setSortOrder(.recency)
+        #expect(host.filterGroups.first?.selectedID == SearchSortOrder.recency.rawValue)
+    }
+
+    /// `[ field ][ Cancel ]` — the inbox's searching bar, and the relationship
+    /// lists', on a screen that is pushed rather than morphed.
+    @Test func refineModeWearsTheInboxSearchingBar() {
+        let host = Host()
+        let refine = SearchViewController(
+            viewModel: host.viewModel,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            mode: .refine
+        )
+        refine.loadViewIfNeeded()
+        #expect(refine.navigationItem.hidesBackButton)
+        #expect(refine.navigationItem.rightBarButtonItems?.map(\.title) == ["Cancel"])
+        #expect(refine.navigationItem.titleView is UITextField)
+    }
+
+    /// It exists to change an answer that already exists, so starting empty
+    /// would make "adjust one word" mean "type the whole thing again".
+    @Test func refineModeOpensCarryingTheQuery() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let refine = SearchViewController(
+            viewModel: host.viewModel,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            mode: .refine
+        )
+        refine.loadViewIfNeeded()
+        #expect((refine.navigationItem.titleView as? UITextField)?.text == "haddad")
+    }
+
+    /// ⚠️ ONE VIEW MODEL, TWO SCREENS, AND ONE CALLBACK SLOT. A refine screen
+    /// pushed over the answer takes `onPhaseChange` in its own `viewDidLoad`
+    /// and never hands it back. Without the results screen re-subscribing on
+    /// the way back in, its Users tab keeps the OLD answer while its post tabs
+    /// — driven by a different callback — show the new one.
+    @Test func theAnswerHearsAgainAfterARefineScreenHasBeenOverIt() async {
+        let host = Host()
+        await host.showResults("haddad")
+        await host.settleAnswer()
+        let results = try? #require(host.results)
+        #expect(results?.peoplePageForTesting.rowCountForTesting == 1)
+
+        // A refine screen loads and takes the callback.
+        let refine = SearchViewController(
+            viewModel: host.viewModel,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            mode: .refine
+        )
+        refine.loadViewIfNeeded()
+
+        // Coming back re-claims it...
+        results?.beginAppearanceTransition(true, animated: false)
+        results?.endAppearanceTransition()
+
+        // ...so a phase published now reaches the Users tab. An empty answer is
+        // the clearest signal: the rows go.
+        host.viewModel.queryChanged("")
+        #expect(results?.peoplePageForTesting.rowCountForTesting == 1,
+                "explore does not touch the answer")
+        host.viewModel.submitQuery("nobody")
+        await host.settleAnswer()
+        #expect(results?.peoplePageForTesting.rowCountForTesting == 1,
+                "the stub answers every query with one person")
+    }
+
+    /// ⚠️ CANCEL PUTS THE ANSWER BACK. Typing on the refine screen drives the
+    /// SHARED view model to `.suggesting` — right for the screen being typed
+    /// in, wrong for the answer underneath, whose whole content is an answer.
+    @Test func cancellingARefineRestoresTheAnswerUnderneath() async {
+        let host = Host()
+        await host.showResults("haddad")
+        await host.settleAnswer()
+        guard case .results = host.viewModel.currentPhase else {
+            Issue.record("expected an answer to start from")
+            return
+        }
+
+        host.viewModel.queryChanged("haddadx")
+        guard case .suggesting = host.viewModel.currentPhase else {
+            Issue.record("typing should have moved the phase to the typeahead")
+            return
+        }
+
+        host.viewModel.restoreSubmittedAnswer()
+        guard case .results = host.viewModel.currentPhase else {
+            Issue.record("cancel should have put the answer back")
+            return
+        }
+    }
+
     // MARK: - The query on the results screen is a door
 
     /// ⚠️ THE REFUSAL IS THE FEATURE. Returning false from
@@ -238,9 +375,7 @@ struct SearchFilterTrayTests {
     @Test func theResultsQueryRefusesTheKeyboardAndAsksToGoBack() async {
         let host = Host()
         await host.showResults("haddad")
-        let results = try? #require(
-            host.screen.navigationController?.topViewController as? SearchResultsViewController
-        )
+        let results = host.results
         var asked = 0
         results?.onEditQuery = { asked += 1 }
 
@@ -256,9 +391,7 @@ struct SearchFilterTrayTests {
     @Test func theHeaderSplitsTheRowInHalf() async {
         let host = Host()
         await host.showResults("haddad")
-        let results = try? #require(
-            host.screen.navigationController?.topViewController as? SearchResultsViewController
-        )
+        let results = host.results
         let row = try? #require(results?.navigationItem.titleView as? UIStackView)
         #expect(row?.arrangedSubviews.count == 2)
         let equal = row?.arrangedSubviews.first?.constraints.contains { constraint in
