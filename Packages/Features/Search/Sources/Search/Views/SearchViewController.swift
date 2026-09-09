@@ -24,7 +24,20 @@ final class SearchViewController: UIViewController {
     private let viewModel: SearchViewModel
     private let imagePipeline: ImagePipeline
 
-    private let searchController = UISearchController(searchResultsController: nil)
+    /// The classic magnifier, trailing, at rest.
+    private lazy var searchItem = UIBarButtonItem(
+        image: UIImage(systemName: "magnifyingglass"),
+        primaryAction: UIAction { [weak self] _ in self?.presentSearch() }
+    )
+
+    private lazy var cancelItem = UIBarButtonItem(
+        title: "Cancel",
+        primaryAction: UIAction { [weak self] _ in self?.dismissSearch() }
+    )
+
+    /// The field that takes the bar over while searching.
+    private let searchField = UISearchTextField()
+    private var isSearching = false
     private var collectionView: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let statusView = EmptyStateView()
@@ -64,7 +77,7 @@ final class SearchViewController: UIViewController {
         super.viewDidLoad()
         title = nil
         view.backgroundColor = .systemBackground
-        configureSearchController()
+        configureSearchAffordance()
         configureCollectionView()
         configureStatusViews()
 
@@ -77,7 +90,7 @@ final class SearchViewController: UIViewController {
             // screen would narrow the history for the very query it is in the
             // middle of searching for.
             self?.lastReportedQuery = text
-            self?.searchController.searchBar.text = text
+            self?.searchField.text = text
         }
         viewModel.showExplore()
 
@@ -146,8 +159,7 @@ final class SearchViewController: UIViewController {
         hasClaimedField = true
         let claim = { [weak self] in
             guard let self else { return }
-            self.searchController.isActive = true
-            self.searchController.searchBar.becomeFirstResponder()
+            self.presentSearch()
         }
         if let coordinator = transitionCoordinator {
             coordinator.animate(alongsideTransition: nil) { _ in claim() }
@@ -234,7 +246,7 @@ final class SearchViewController: UIViewController {
     ///
     /// **The field is not in this view hierarchy at all.** `UISearchTab`
     /// mirrors the search controller into a capsule it draws in the tab bar;
-    /// `searchController.searchBar.window` is nil for the life of the screen,
+    /// The field lives in the navigation bar's title slot, so its own window is
     /// so the capsule's position cannot be measured — only its height, which
     /// the bar still reports because it is the object UIKit is mirroring.
     ///
@@ -252,7 +264,7 @@ final class SearchViewController: UIViewController {
         let keyboardTop = view.keyboardLayoutGuide.layoutFrame.minY
         let keyboardIsUp = keyboardTop < restingBottom - 1
         let inset = keyboardIsUp
-            ? (restingBottom - keyboardTop) + searchController.searchBar.bounds.height
+            ? (restingBottom - keyboardTop) + searchField.bounds.height
             : 0
         // Guarded: assigning an inset lays out again, and an unguarded
         // assignment here would be a layout loop.
@@ -285,104 +297,107 @@ final class SearchViewController: UIViewController {
 
     // MARK: - Setup
 
-    private func configureSearchController() {
-        searchController.searchResultsUpdater = self
-        searchController.searchBar.delegate = self
-        // No dimming: the results land in THIS collection view, so there is
-        // nothing above to obscure and a scrim would only grey out the answer.
-        searchController.obscuresBackgroundDuringPresentation = false
-        // ⚠️ NO PLACEHOLDER AT ALL.
-        //
-        // The previous revision of this file argued the opposite, from frame
-        // sheets: with `.integratedButton` the placeholder is never on screen
-        // at rest, and emptying the field made UIKit's collapse read as a
-        // blank slab crossing the bar rather than a field shrinking to its
-        // icon. That reasoning is sound about what the FRAMES contain and was
-        // still overruled — by the person watching it move, twice, which is
-        // the authority that matters for an animation.
-        //
-        // Recorded rather than deleted so the next reader knows the trade was
-        // examined and decided, not missed: if the closing ever needs to be
-        // revisited, the placeholder is the one thing that changes what is in
-        // the field while UIKit plays that animation.
-        searchController.searchBar.placeholder = nil
-        searchController.searchBar.autocapitalizationType = .none
-        searchController.searchBar.autocorrectionType = .no
-        searchController.searchBar.returnKeyType = .search
+    /// The bar's two states, swapped by hand.
+    ///
+    /// ⚠️ NO `UISearchController`, AND THAT IS THE WHOLE POINT. A search
+    /// controller owns its own activation animation: on iOS 26 it collapses
+    /// the active field into the navigation bar's glass PLATTER, and that
+    /// platter is not this app's to remove, resize or opt out of. Measured
+    /// frame by frame through every placement (`.stacked`, `.integrated`,
+    /// `.integratedButton`, `.integratedCentered`), with and without a
+    /// placeholder, with the text field hidden and with the search bar hidden:
+    /// the platter's width animation survives all of it, and the closing reads
+    /// as a wide empty capsule crossing the bar.
+    ///
+    /// `MessagesInboxViewController` never had that problem because it never
+    /// used a search controller — it swaps the bar itself and dissolves
+    /// between the two states. This screen now does the same thing, which is
+    /// where it should have started.
+    ///
+    ///     resting    [ selector-less bar ]              [ 🔍 ]
+    ///     searching  [ field ——————————————————————— ]  [ Cancel ]
+    ///
+    /// At rest the magnifier is an ordinary `UIBarButtonItem`, so it is a
+    /// bubble that hugs its glyph — a bar button is laid out to its icon,
+    /// which is exactly the resting shape this header asked for.
+    private func configureSearchAffordance() {
+        searchItem.accessibilityLabel = "Search"
+        searchField.placeholder = nil
+        searchField.autocapitalizationType = .none
+        searchField.autocorrectionType = .no
+        searchField.returnKeyType = .search
         // Stated rather than inherited: clearing through the system glyph
-        // routes back out via `updateSearchResults`, so an emptied field
+        // routes back out through `searchTextChanged`, so an emptied field
         // restores the history by the same path typing narrowed it.
-        searchController.searchBar.searchTextField.clearButtonMode = .whileEditing
-        // The bar stays while the field is active. It is the only thing on
-        // this screen that says which screen it is — the field lives in the
-        // tab bar, so letting UIKit hide the navigation bar on activation left
-        // the list running up under the status bar with nothing titling it,
-        // and with auto-focus that is the state the screen OPENS in.
-        searchController.hidesNavigationBarDuringPresentation = false
-        navigationItem.searchController = searchController
-        navigationItem.hidesSearchBarWhenScrolling = false
-        // ⚠️ THE FIELD TAKES THE TITLE'S SLOT, which is why there is no title.
-        //
-        // Stacked (the default here) puts the field on its own row BELOW the
-        // bar — a whole extra band of vertical space on a screen that is a
-        // list. This puts it inline with the bar's own content, where the word
-        // "Search" used to be.
-        //
-        // `.inline` is the same value under its pre-iOS-26 name and is
-        // deprecated; `.integrated` is the one to write.
-        //
-        // ⚠️ WHAT EACH PLACEMENT ACTUALLY GIVES, ALL FOUR MEASURED ON THIS
-        // SCREEN, so the next change starts from evidence rather than from the
-        // enum's names:
-        //
-        //   .stacked            a second row under the bar — the vertical band
-        //                       this screen was rebuilt to reclaim.
-        //   .integratedButton   at rest a magnifier BUBBLE at the trailing
-        //                       edge; the collapse travels the width of the bar
-        //                       to reach it.
-        //   .integrated         at rest a WIDE PILL holding only the magnifier
-        //                       (there is no placeholder), beside the back
-        //                       chevron; nothing travels, because the field
-        //                       simply deactivates where it is.
-        //   .integratedCentered same as integrated on iPhone; its centring is
-        //                       an iPad regular-width rule.
-        //
-        // ⚠️ THE TWO COMPLAINTS ARE ONE CHOICE, and this is the whole of it.
-        // `.integrated` rests as a FIELD and `.integratedButton` rests as a
-        // BUTTON — that is the difference, and everything else follows:
-        //
-        //   a field is laid out at field width whatever is in it, so with no
-        //   placeholder the space to the right of the magnifier is empty and
-        //   there is no width knob to close it; a button is laid out to its
-        //   icon, so it hugs it — but it lives at the trailing edge, and the
-        //   active field is the bar's width, so the collapse has to cross.
-        //
-        // Empty space at rest, or a crossing on the way out. There is no third
-        // shape in this API, and no setting that mixes them: a bubble that
-        // hugs its icon AND a collapse that lands straight on it needs a bar
-        // this app draws itself.
-        //
-        // `navigationItem.searchBarPlacement` — the REALIZED value — was logged
-        // at configure / willPresent / didPresent / willDismiss / six ticks /
-        // didDismiss for both integrated variants and never changed within a
-        // run, so none of this is a placement flip mid-animation.
-        //
-        // `.inline` is `.integrated` under its pre-iOS-26 name and is
-        // deprecated; write `.integrated`.
-        navigationItem.preferredSearchBarPlacement = .integratedButton
-        // ⚠️ NO TOOLBAR NEGOTIATION. Defaults to YES, and the enum's own note
-        // warns that on iPhone "the search bar may be integrated into the
-        // toolbar" under a navigation controller. This screen has no toolbar,
-        // so the only thing that setting can do here is give UIKit a second
-        // layout to consider on every activation.
-        navigationItem.searchBarPlacementAllowsToolbarIntegration = false
-        searchController.delegate = self
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-search-layout-audit") {
-            logPlacement("configure")
+        searchField.clearButtonMode = .whileEditing
+        searchField.delegate = self
+        searchField.addTarget(self, action: #selector(searchTextChanged), for: .editingChanged)
+        // ⚠️ A BARE `UISearchTextField`, not a `UISearchBar` — the inbox's note
+        // verbatim, and for the same reason: a search bar carries its own
+        // chrome (a background, its own layout margins, a field inset within
+        // them) and sits the input off the Cancel item's centre line whatever
+        // the title slot does. A bare field IS the input, so it centres on the
+        // slot's axis, which is the axis UIKit centres a bar item on.
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight).isActive = true
+        applyRestingBar()
+    }
+
+    /// The field's height, and also the Cancel item's touch height, so the two
+    /// share a centre line with nothing left over above or below.
+    private static let fieldHeight: CGFloat = 36
+
+    private func applyRestingBar() {
+        navigationItem.rightBarButtonItems = [searchItem]
+        // ⚠️ AN EMPTY VIEW, not nil — the same claim the leading selector makes
+        // on other screens. Left nil, UIKit keeps a central title reservation
+        // that the bar's own items cannot grow into.
+        let emptyTitle = UIView()
+        emptyTitle.frame = .zero
+        navigationItem.titleView = emptyTitle
+    }
+
+    /// `[ field ————————————————— ][ Cancel ]`
+    private func applySearchingBar() {
+        navigationItem.rightBarButtonItems = [cancelItem]
+        navigationItem.titleView = searchField
+    }
+
+    private func presentSearch() {
+        guard !isSearching else { return }
+        isSearching = true
+        morphNavigationBar {
+            self.setNavigationBarOpaque(true)
+            self.applySearchingBar()
         }
-        #endif
-        definesPresentationContext = true
+        searchField.becomeFirstResponder()
+    }
+
+    private func dismissSearch() {
+        guard isSearching else { return }
+        isSearching = false
+        searchField.resignFirstResponder()
+        searchField.text = nil
+        report(query: "")
+        morphNavigationBar {
+            self.setNavigationBarOpaque(false)
+            self.applyRestingBar()
+        }
+    }
+
+    /// ⚠️ NOT "the viewer typed" on its own. The field also fires this when it
+    /// is cleared programmatically, so the last reported text is compared
+    /// rather than trusted — that comparison is what makes this a text-CHANGE
+    /// callback, and it is what stopped a returning search being replaced by
+    /// the narrowed history a beat after it arrived.
+    @objc private func searchTextChanged() {
+        report(query: searchField.text ?? "")
+    }
+
+    private func report(query text: String) {
+        guard text != lastReportedQuery else { return }
+        lastReportedQuery = text
+        viewModel.queryChanged(text)
     }
 
     private func configureCollectionView() {
@@ -716,7 +731,7 @@ final class SearchViewController: UIViewController {
         else { return }
         let seeded = arguments[index + 1]
         lastReportedQuery = seeded
-        searchController.searchBar.text = seeded
+        searchField.text = seeded
         viewModel.queryChanged(seeded)
         // `-search-submit`: also press Search. Seeding alone only types, and
         // typing deliberately searches nothing — so without this the results
@@ -729,23 +744,7 @@ final class SearchViewController: UIViewController {
     #endif
 }
 
-extension SearchViewController: UISearchResultsUpdating {
-    func updateSearchResults(for searchController: UISearchController) {
-        let text = searchController.searchBar.text ?? ""
-        guard text != lastReportedQuery else { return }
-        lastReportedQuery = text
-        viewModel.queryChanged(text)
-    }
-}
 
-extension SearchViewController: UISearchBarDelegate {
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        viewModel.submitQuery(searchBar.text ?? "")
-        // The answer is what the viewer wants to look at now, and the keyboard
-        // is the only thing still covering it.
-        searchBar.resignFirstResponder()
-    }
-}
 
 extension SearchViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -754,7 +753,7 @@ extension SearchViewController: UICollectionViewDelegate {
         switch item {
         case .row(let id):
             viewModel.didSelectRow(id)
-            searchController.searchBar.resignFirstResponder()
+            searchField.resignFirstResponder()
         case .seeMoreRecents:
             viewModel.didRequestMoreRecents()
         case .result(let id):
@@ -777,32 +776,13 @@ private extension Array {
 /// fade below is product behaviour, and an earlier revision of this file had
 /// the whole extension behind `#if DEBUG`, which would have shipped the very
 /// animation this exists to remove.
-extension SearchViewController: UISearchControllerDelegate {
-    func willPresentSearchController(_ searchController: UISearchController) {
-        logPlacement("willPresent")
-    }
 
-    func didPresentSearchController(_ searchController: UISearchController) {
-        logPlacement("didPresent")
-    }
-
-    func willDismissSearchController(_ searchController: UISearchController) {
-        logPlacement("willDismiss")
-    }
-
-    func didDismissSearchController(_ searchController: UISearchController) {
-        logPlacement("didDismiss")
-    }
-
-    /// No-op unless `-search-layout-audit` is passed.
-    func logPlacement(_ stage: String) {
-        #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-search-layout-audit") else { return }
-        let names = ["automatic", "integrated", "stacked", "integratedCentered", "integratedButton"]
-        let raw = navigationItem.searchBarPlacement.rawValue
-        print("[placement] \(stage): realized=\(names[safe: raw] ?? String(raw))"
-            + " active=\(navigationItem.searchController?.isActive == true)")
-        #endif
+extension SearchViewController: UITextFieldDelegate {
+    /// The keyboard's Search key. The answer is what the viewer wants to look
+    /// at now, and the keyboard is the only thing still covering it.
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        viewModel.submitQuery(textField.text ?? "")
+        textField.resignFirstResponder()
+        return true
     }
 }
-
