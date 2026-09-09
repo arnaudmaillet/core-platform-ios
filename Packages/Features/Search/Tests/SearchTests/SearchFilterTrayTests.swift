@@ -82,6 +82,13 @@ struct SearchFilterTrayTests {
         var field: UITextField? { screen.navigationItem.titleView as? UITextField }
         var item: UIBarButtonItem? { screen.navigationItem.rightBarButtonItems?.first }
 
+        /// Submits and waits for the answer, because the tray only exists over
+        /// one — see `updateFilterVisibility`.
+        func showResults(_ text: String) async {
+            submit(text)
+            for _ in 0..<80 where item == nil { await Task.yield() }
+        }
+
         /// The tray's contents. Readable because the menu is rebuilt when the
         /// order changes rather than deferred to the moment it opens —
         /// `UIDeferredMenuElement`'s provider is not public, so a deferred tray
@@ -100,16 +107,27 @@ struct SearchFilterTrayTests {
 
     // MARK: - The tray
 
-    @Test func theTrailingSlotOpensAMenuRatherThanSubmitting() {
+    /// ⚠️ THE TRAY IS NOT IN THE BAR UNTIL THERE IS AN ANSWER. It held a
+    /// "Search" button first, then the tray permanently; both were wrong. Sort
+    /// changes the ORDER of an answer, so before one exists there is nothing
+    /// for it to act on.
+    @Test func theBarIsBareOnTheRestingScreen() {
+        #expect(Host().item == nil)
+    }
+
+    @Test func theTrayArrivesWithTheResults() async {
         let host = Host()
+        await host.showResults("haddad")
         #expect(host.item?.menu != nil)
         // A submit button had a title and an action; this has neither.
         #expect(host.item?.title == nil)
         #expect(host.item?.action == nil)
     }
 
-    @Test func theTrayOffersTheThreeOrdersTheContractSupports() {
-        let titles = Host().trayActions.map(\.title)
+    @Test func theTrayOffersTheThreeOrdersTheContractSupports() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let titles = host.trayActions.map(\.title)
         #expect(titles == ["Top matches", "Most recent", "Most popular"])
     }
 
@@ -117,18 +135,23 @@ struct SearchFilterTrayTests {
     /// periodically-refreshed signal rather than a live count, so a label
     /// promising an exact ranking by likes would describe something the engine
     /// does not do.
-    @Test func popularityIsNotLabelledAsALikeCount() {
-        let titles = Host().trayActions.map(\.title)
+    @Test func popularityIsNotLabelledAsALikeCount() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let titles = host.trayActions.map(\.title)
         #expect(!titles.contains { $0.localizedCaseInsensitiveContains("like") })
     }
 
-    @Test func theCheckmarkStartsOnRelevance() {
-        let on = Host().trayActions.filter { $0.state == .on }.map(\.title)
+    @Test func theCheckmarkStartsOnRelevance() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let on = host.trayActions.filter { $0.state == .on }.map(\.title)
         #expect(on == ["Top matches"])
     }
 
-    @Test func theCheckmarkFollowsTheOrderInEffect() {
+    @Test func theCheckmarkFollowsTheOrderInEffect() async {
         let host = Host()
+        await host.showResults("haddad")
         host.viewModel.setSortOrder(.recency)
         let on = host.trayActions.filter { $0.state == .on }.map(\.title)
         #expect(on == ["Most recent"])

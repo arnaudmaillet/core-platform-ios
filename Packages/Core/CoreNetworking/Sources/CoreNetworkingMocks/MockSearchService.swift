@@ -103,7 +103,25 @@ public final class MockSearchService: @unchecked Sendable {
                 hit.id = record.postID
                 var post = Search_V1_PostHit()
                 post.authorID = record.authorProfileID
-                post.authorHandle = dataset.author(for: record.authorProfileID)?.handle ?? ""
+                post.authorHandle = handle(forAuthor: record.authorProfileID)
+                // ⚠️ THESE TWO WERE LEFT AT THEIR DEFAULTS, which made every
+                // post hit dateless and pictureless — `hasCreatedAt == false`
+                // and an empty key. Nothing read post hits at the time, so
+                // nothing noticed; a screen that renders them would have shown
+                // a row with no thumbnail and no date and looked like a broken
+                // projection rather than an unfilled fake.
+                //
+                // `thumbnailKey` is the media URL rather than an object-store
+                // key, and that is the same shape `geo_discovery.v1` hands the
+                // map: this fake serves URLs its own catalog can resolve, and a
+                // reader that expects a key would have nothing to resolve it
+                // against offline anyway. Text-only posts keep it empty, which
+                // is the same "this post has no picture" signal the map reads.
+                post.thumbnailKey = record.media?.url ?? ""
+                post.createdAt = .init(
+                    seconds: record.publishedAtMS / 1000,
+                    nanos: Int32((record.publishedAtMS % 1000) * 1_000_000)
+                )
                 hit.post = post
                 return hit
             }
@@ -111,6 +129,24 @@ public final class MockSearchService: @unchecked Sendable {
 
         response.estimatedTotal = Int64(response.hits.count)
         return .success(response)
+    }
+
+    /// The author's handle, INCLUDING the viewer's own.
+    ///
+    /// ⚠️ `dataset.author(for:)` searches `authors`, and the viewer is not in
+    /// it — `prof-demo-viewer` is a profile the dataset owns separately. So the
+    /// viewer's own posts came back with an EMPTY handle, which nothing noticed
+    /// while nothing rendered post hits. Measured, on the query "harbour":
+    ///
+    ///     id=post-new-04 author=sofia.reyes ...
+    ///     id=post-me-06  author=            ...   ← the viewer's own post
+    ///
+    /// "you" is the handle every other mock answers with for that profile (see
+    /// `MockSocialServices`' account-profiles route), so this agrees with them
+    /// rather than inventing a second name for the same person.
+    private func handle(forAuthor profileID: String) -> String {
+        if profileID == MockSocialDataset.viewerProfileID { return "you" }
+        return dataset.author(for: profileID)?.handle ?? ""
     }
 
     /// Orders people the way `request.sort` asks for.

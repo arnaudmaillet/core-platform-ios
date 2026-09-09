@@ -101,6 +101,7 @@ final class SearchViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in
+            self?.updateFilterVisibility(for: phase)
             self?.render(phase)
         }
         viewModel.onSortOrderChange = { [weak self] _ in
@@ -356,17 +357,41 @@ final class SearchViewController: UIViewController {
         // slot's axis, which is the axis UIKit centres a bar item on.
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight).isActive = true
-        // ⚠️ THE TRAILING SLOT IS NOT A SECOND SUBMIT, AND IT WAS. A "Search"
-        // button lived here for exactly one round: it did the same thing as the
-        // keyboard's own Search key, on a screen that opens with that keyboard
-        // already up, so it was a wide word of the field's width buying a
-        // second way to do the thing the viewer's thumb was already on.
+        // ⚠️ THE TRAILING SLOT IS EMPTY UNTIL THERE ARE RESULTS, and it has
+        // now been wrong twice in the other direction.
         //
-        // The width buys the filter tray instead — the one control here that
-        // has no other way in.
-        navigationItem.rightBarButtonItems = [filterItem]
+        // First it held a "Search" button, which did what the keyboard's own
+        // Search key already did on a screen that opens with that keyboard up.
+        // Then it held the filter tray permanently — but the tray carries ONE
+        // dimension (the only one `search.v1` can express; see gap §19), and a
+        // one-line menu is not worth a permanent seat over a screen that is
+        // usually showing a history and a keyboard.
+        //
+        // It belongs where it means something: over an answer. Nothing on the
+        // resting screen or the typeahead can be sorted, and until a search has
+        // been run there is no order to change.
         navigationItem.titleView = searchField
+        navigationItem.rightBarButtonItems = []
         refreshFilterMenu()
+    }
+
+    /// Shows the tray only over a submitted answer.
+    ///
+    /// ⚠️ NOT over `.empty` or `.failed`. Sort changes the ORDER of an answer,
+    /// never its membership — so on a search that matched nothing, every
+    /// option leads to the same empty screen. A control that provably cannot
+    /// change what the viewer is looking at should not be offered to them.
+    ///
+    /// ⚠️ AND NOT over `.loading`, because the tray would appear a beat before
+    /// the rows and slide the field's width twice for one search.
+    private func updateFilterVisibility(for phase: SearchViewModel.Phase) {
+        let wanted: [UIBarButtonItem] = if case .results = phase { [filterItem] } else { [] }
+        let current = navigationItem.rightBarButtonItems ?? []
+        guard current.count != wanted.count else { return }
+        // Animated, because the field's width moves with it: the title slot
+        // takes what the bar has left over, so an item arriving is the input
+        // getting shorter.
+        navigationItem.setRightBarButtonItems(wanted, animated: true)
     }
 
     /// The filter tray: a glyph that opens a menu.
