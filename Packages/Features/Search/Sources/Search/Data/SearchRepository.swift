@@ -6,6 +6,26 @@ public enum SearchError: Error, Equatable, Sendable {
     case transport(message: String)
 }
 
+/// How the engine should order what it returns.
+///
+/// ⚠️ THESE THREE ARE THE WHOLE OF IT, and the ceiling is the contract's, not
+/// this screen's: `search.v1.SearchSort` has exactly `RELEVANCE`, `RECENCY` and
+/// `POPULARITY`. There is no sort for comment counts, no date RANGE on
+/// `SearchRequest`, and nothing that expresses a per-viewer scope — see
+/// `dev/BACKEND_GAPS.md` for what was asked for and what is missing.
+///
+/// ⚠️ AND POPULARITY IS COARSE BY DESIGN. The generated comment says it "reads
+/// the periodically-refreshed popularity signal, never a real-time count", so
+/// it is not "most liked right now" and must not be labelled as if it were.
+public enum SearchSortOrder: String, Equatable, Sendable, CaseIterable {
+    /// What the engine thinks matches the words best. The default.
+    case relevance
+    /// Freshest first, at the cost of text relevance.
+    case recency
+    /// Coarse engagement first, at the cost of text relevance.
+    case popularity
+}
+
 /// A profile match from search.v1, projected to just what the results list
 /// renders. `id` is the profile's id, so a tap routes straight to `.profile`.
 public struct ProfileSearchResult: Equatable, Sendable, Identifiable {
@@ -54,7 +74,13 @@ public struct SearchSuggestion: Equatable, Sendable {
 public protocol SearchProviding: Sendable {
     /// People search. The backend token-matches (whole words, case-insensitive),
     /// so callers pass complete query terms rather than prefixes.
-    func searchProfiles(matching query: String, limit: Int32) async throws -> [ProfileSearchResult]
+    ///
+    /// `sort` is the viewer's pick from the filter tray; it goes on the wire
+    /// rather than being applied to the answer, because the engine ranks the
+    /// whole index and the client only ever sees a page of it.
+    func searchProfiles(
+        matching query: String, sort: SearchSortOrder, limit: Int32
+    ) async throws -> [ProfileSearchResult]
 
     /// Typeahead completions for a partial query.
     ///
@@ -75,14 +101,16 @@ public actor SearchRepository: SearchProviding {
         self.searchClient = searchClient
     }
 
-    public func searchProfiles(matching query: String, limit: Int32) async throws -> [ProfileSearchResult] {
+    public func searchProfiles(
+        matching query: String, sort: SearchSortOrder, limit: Int32
+    ) async throws -> [ProfileSearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
         var request = Search_V1_SearchRequest()
         request.query = trimmed
         request.entityTypes = [.profile]
-        request.sort = .relevance
+        request.sort = Self.wireSort(sort)
         request.pageSize = limit
 
         let response = await searchClient.search(request: request, headers: [:])
@@ -91,6 +119,18 @@ public actor SearchRepository: SearchProviding {
             return body.hits.compactMap(Self.makeResult)
         case .failure(let error):
             throw SearchError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    /// ⚠️ `.unspecified` is NOT passed for relevance. The contract documents
+    /// UNSPECIFIED as *defaulting* to relevance, which makes the two
+    /// interchangeable today and hostage to that default tomorrow. Naming the
+    /// order the viewer picked keeps the request true to the menu.
+    private static func wireSort(_ sort: SearchSortOrder) -> Search_V1_SearchSort {
+        switch sort {
+        case .relevance: .relevance
+        case .recency: .recency
+        case .popularity: .popularity
         }
     }
 

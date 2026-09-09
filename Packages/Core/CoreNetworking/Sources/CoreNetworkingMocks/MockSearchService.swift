@@ -13,9 +13,13 @@ import Foundation
 /// guess about a shape no screen has had to agree with yet.
 public final class MockSearchService: @unchecked Sendable {
     private let dataset: MockSocialDataset
+    /// Read for POPULARITY only. Optional so a test can build this fake alone;
+    /// without it, popularity falls back to how many posts an author has.
+    private let counters: MockCounterStore?
 
-    public init(dataset: MockSocialDataset) {
+    public init(dataset: MockSocialDataset, counters: MockCounterStore? = nil) {
         self.dataset = dataset
+        self.counters = counters
     }
 
     public func register(on bff: MockBFF) {
@@ -73,9 +77,12 @@ public final class MockSearchService: @unchecked Sendable {
         let wantsPosts = request.entityTypes.isEmpty || request.entityTypes.contains(.post)
 
         if wantsProfiles {
-            let matches = dataset.authors.filter {
-                $0.handle.lowercased().contains(query) || $0.displayName.lowercased().contains(query)
-            }
+            let matches = sorted(
+                dataset.authors.filter {
+                    $0.handle.lowercased().contains(query) || $0.displayName.lowercased().contains(query)
+                },
+                by: request.sort
+            )
             response.hits += matches.map { author in
                 var hit = Search_V1_SearchHit()
                 hit.entityType = .profile
@@ -104,5 +111,77 @@ public final class MockSearchService: @unchecked Sendable {
 
         response.estimatedTotal = Int64(response.hits.count)
         return .success(response)
+    }
+
+    /// Orders people the way `request.sort` asks for.
+    ///
+    /// ⚠️ THIS EXISTED AS A NO-OP AND THAT WAS WORSE THAN MISSING. The mock
+    /// accepted `sort` and ignored it, so the search screen's filter tray —
+    /// which puts the order on the wire correctly — changed nothing at all in
+    /// the mode the app is developed and demoed in. A control that does nothing
+    /// offline is indistinguishable from a control that is broken.
+    ///
+    /// ⚠️ WHAT THE STAND-INS ARE, so nobody reads them as the fleet's ranking:
+    ///
+    ///   - `relevance` (and unspecified): dataset order, which is what this
+    ///     fake has always answered with. The real engine scores text; there is
+    ///     no scorer here and inventing one would fake a signal.
+    ///   - `recency`: the author's most recent post, newest first. `Author`
+    ///     carries no date of its own, so the freshest thing they published is
+    ///     the honest stand-in for how fresh THEY are.
+    ///
+    ///     ⚠️ THIS LOOKS LIKE A NO-OP ON THE SEEDED DATASET AND IS NOT. The
+    ///     fixture publishes authors in descending time order, so "newest
+    ///     first" and "dataset order" are the same list — measured, keys
+    ///     descending: ava.moreau 1788941307181 > kenji.dev 1788941247181 >
+    ///     lena_klein 1788941187181. Relevance and recency agreeing here is a
+    ///     property of the fixture, not a sort that failed to run.
+    ///   - `popularity`: the author's total received likes, from
+    ///     `MockCounterStore.totalLikes(forAuthor:)` — the same figure
+    ///     `counter.v1` projects for a profile, so the fake and the screens
+    ///     that read counters agree. Falling back to post COUNT when no store
+    ///     is injected.
+    ///
+    /// ⚠️ THE FALLBACK IS NOT ENOUGH ON ITS OWN, and that is why the store is
+    /// wired in. Post count was the first stand-in, and it ranked every author
+    /// identically: the seeded dataset gives all of them exactly four posts, so
+    /// the sort ran, honoured the request, and returned the input order. A
+    /// filter that provably works and visibly does nothing is the thing this
+    /// whole change exists to avoid.
+    ///
+    /// Ties keep dataset order — `sorted(by:)` is not stable, so the key
+    /// includes the author's index to make the answer reproducible run to run.
+    private func sorted(
+        _ authors: [MockSocialDataset.Author], by sort: Search_V1_SearchSort
+    ) -> [MockSocialDataset.Author] {
+        switch sort {
+        case .recency:
+            rank(authors) { posts in posts.map(\.publishedAtMS).max() ?? .min }
+        case .popularity:
+            if let counters {
+                rank(authors) { posts in
+                    posts.reduce(0) { $0 + counters.likeCount(for: $1.postID) }
+                }
+            } else {
+                rank(authors) { posts in Int64(posts.count) }
+            }
+        case .relevance, .unspecified, .UNRECOGNIZED:
+            authors
+        }
+    }
+
+    /// Orders by a key derived from each author's posts, descending, with the
+    /// author's original position breaking ties.
+    private func rank(
+        _ authors: [MockSocialDataset.Author],
+        by key: ([MockSocialDataset.PostRecord]) -> Int64
+    ) -> [MockSocialDataset.Author] {
+        let postsByAuthor = Dictionary(grouping: dataset.posts, by: \.authorProfileID)
+        let keyed = authors.enumerated().map { index, author in
+            (author: author, key: key(postsByAuthor[author.profileID] ?? []), index: index)
+        }
+        return keyed
+            .sorted { ($0.key, -$0.index) > ($1.key, -$1.index) }
+            .map(\.author)
     }
 }

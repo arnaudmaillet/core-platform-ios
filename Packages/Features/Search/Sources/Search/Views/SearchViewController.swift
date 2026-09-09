@@ -103,6 +103,9 @@ final class SearchViewController: UIViewController {
         viewModel.onPhaseChange = { [weak self] phase in
             self?.render(phase)
         }
+        viewModel.onSortOrderChange = { [weak self] _ in
+            self?.refreshFilterMenu()
+        }
         viewModel.onQueryTextChange = { [weak self] text in
             // Recorded as already reported BEFORE the assignment: setting the
             // field re-enters `updateSearchResults`, and without this the
@@ -353,33 +356,79 @@ final class SearchViewController: UIViewController {
         // slot's axis, which is the axis UIKit centres a bar item on.
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight).isActive = true
-        // The trailing item is the ONLY thing between the field and the edge,
-        // and it earns that width: until it existed the keyboard's own Search
-        // key was the only way to submit, which is invisible to anyone who has
-        // not already put the caret in the field. The screen's own empty state
-        // says "Press Search" — this is the button it was talking about.
-        navigationItem.rightBarButtonItems = [submitItem]
+        // ⚠️ THE TRAILING SLOT IS NOT A SECOND SUBMIT, AND IT WAS. A "Search"
+        // button lived here for exactly one round: it did the same thing as the
+        // keyboard's own Search key, on a screen that opens with that keyboard
+        // already up, so it was a wide word of the field's width buying a
+        // second way to do the thing the viewer's thumb was already on.
+        //
+        // The width buys the filter tray instead — the one control here that
+        // has no other way in.
+        navigationItem.rightBarButtonItems = [filterItem]
         navigationItem.titleView = searchField
-        updateSubmitAvailability()
+        refreshFilterMenu()
     }
 
-    /// Runs the search. The same path the keyboard's Search key takes — one
-    /// method, so the two affordances cannot drift apart.
+    /// The filter tray: a glyph that opens a menu.
     ///
-    /// `.done` and target/action, which is the shape this app's other two
-    /// submits already wear (`OTPVerificationViewController`'s Verify,
-    /// `EditFieldViewController`'s Save). Target/action rather than a
-    /// `UIAction` closure on purpose: a test can fire
-    /// `item.target?.perform(item.action)`, and a `UIAction` offers no public
-    /// way in.
-    private lazy var submitItem = UIBarButtonItem(
-        title: "Search",
-        style: .done,
-        target: self,
-        action: #selector(submitTapped)
+    /// ⚠️ THE MENU IS REBUILT WHEN THE ORDER CHANGES, not deferred to the
+    /// moment it opens. The map's pills use `UIDeferredMenuElement.uncached`
+    /// and are right to: their mute state changes from anywhere, so a menu
+    /// assembled at configuration time shows whatever was true then. Here the
+    /// order has ONE writer — `SearchViewModel.setSortOrder` — and it
+    /// announces itself, so a rebuild on that announcement cannot go stale.
+    ///
+    /// It is also the difference between a menu a test can read and one it
+    /// cannot: `UIDeferredMenuElement`'s provider is not public, so a deferred
+    /// tray can only be checked by opening it on a device.
+    private lazy var filterItem = UIBarButtonItem(
+        image: UIImage(systemName: "line.3.horizontal.decrease"),
+        menu: UIMenu(children: [])
     )
 
-    @objc private func submitTapped() { submitCurrentQuery() }
+    private func refreshFilterMenu() {
+        filterItem.menu = UIMenu(children: [sortMenu()])
+    }
+
+    /// The order dimension. One choice, checkmarked, applied on pick.
+    ///
+    /// ⚠️ ONE DIMENSION, AND THE OTHER TWO ARE ABSENT ON PURPOSE. The tray was
+    /// asked for with three: an order, a publication-date window, and a
+    /// per-viewer scope (all / seen / unseen / followed). Only the order has a
+    /// contract behind it — `search.v1.SearchRequest` carries `sort` and
+    /// nothing else of the three. There is no date range on the request and no
+    /// date on a `ProfileHit` to filter locally, and nothing anywhere knows
+    /// which posts this viewer has seen.
+    ///
+    /// They are not shipped greyed out. A disabled row is still a promise, and
+    /// this screen has no idea when it could be kept. What exists instead is
+    /// `dev/BACKEND_GAPS.md` §19 and `dev/issues/BACKEND_SEARCH_FILTERS.md`,
+    /// which is where the missing half is being asked for.
+    ///
+    /// ⚠️ "Most liked" is deliberately NOT the label for `.popularity`. The
+    /// contract's own comment says it "reads the periodically-refreshed
+    /// popularity signal, never a real-time count", so a label promising an
+    /// exact ranking by likes would be describing something the engine does not
+    /// do.
+    private func sortMenu() -> UIMenu {
+        UIMenu(title: "Sort by", options: [.displayInline, .singleSelection], children: [
+            sortAction(.relevance, title: "Top matches", symbol: "sparkles"),
+            sortAction(.recency, title: "Most recent", symbol: "clock"),
+            sortAction(.popularity, title: "Most popular", symbol: "flame")
+        ])
+    }
+
+    private func sortAction(
+        _ order: SearchSortOrder, title: String, symbol: String
+    ) -> UIAction {
+        UIAction(
+            title: title,
+            image: UIImage(systemName: symbol),
+            state: viewModel.sortOrder == order ? .on : .off
+        ) { [weak self] _ in
+            self?.viewModel.setSortOrder(order)
+        }
+    }
 
     /// ⚠️ **Submitting is what fills the list.** Typing only narrows the
     /// history — `queryChanged` moves the view model to `.suggesting`, which is
@@ -397,24 +446,18 @@ final class SearchViewController: UIViewController {
         searchField.resignFirstResponder()
     }
 
-    /// ⚠️ **THE ONE WAY TO WRITE THE FIELD PROGRAMMATICALLY**, and it exists
-    /// because there is more than one writer. A viewer typing routes through
-    /// `searchTextChanged`, which refreshes the button; assigning
-    /// `searchField.text` does NOT — `UITextField` raises no editing event for
-    /// a programmatic write. The view model's replay and the debug seeder both
-    /// assign, and the seeded field shipped with a dead Search button on
-    /// screen until a screenshot caught it.
+    /// ⚠️ KEPT AS ITS OWN METHOD WITH ONE CALLER. It reads like something to
+    /// inline back into `textFieldShouldReturn` now that the bar's button is
+    /// gone — but the debug seeder (`-search-submit`) is the second caller, and
+    /// it exists precisely so the instrument runs the viewer's path rather than
+    /// poking the view model behind it.
+
+    /// The one way to write the field programmatically. A viewer typing routes
+    /// through `searchTextChanged`; assigning `searchField.text` raises no
+    /// editing event, so anything that has to follow the text goes here rather
+    /// than beside each assignment.
     private func setFieldText(_ text: String) {
         searchField.text = text
-        updateSubmitAvailability()
-    }
-
-    /// Dimmed on an empty field, because `submitQuery` refuses an empty query
-    /// and a button that does nothing is worse than one that says so.
-    private func updateSubmitAvailability() {
-        let trimmed = (searchField.text ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        submitItem.isEnabled = !trimmed.isEmpty
     }
 
     /// The field's height: the bar's own glass platter, from
@@ -435,7 +478,6 @@ final class SearchViewController: UIViewController {
     /// the narrowed history a beat after it arrived.
     @objc private func searchTextChanged() {
         report(query: searchField.text ?? "")
-        updateSubmitAvailability()
     }
 
     private func report(query text: String) {
@@ -626,7 +668,7 @@ final class SearchViewController: UIViewController {
             if model.isEmpty {
                 showStatus(
                     symbolName: "magnifyingglass",
-                    title: "Search",
+                    title: "Find people",
                     subtitle: "Search by name or @handle. What you search for shows up here."
                 )
             } else {
@@ -642,10 +684,14 @@ final class SearchViewController: UIViewController {
                 // been searched for yet. This is also where the screen teaches
                 // that searching is something you DO, since the flow is
                 // submit-driven and nothing happens while you type.
+                // ⚠️ "ON THE KEYBOARD", since the bar's Search button was
+                // deleted. It was the obvious thing this sentence pointed at
+                // for exactly one round; the keyboard's return key still reads
+                // "Search", and now it is the only thing that does.
                 showStatus(
                     symbolName: "return",
                     title: "Press Search",
-                    subtitle: "Search for “\(query)” to see results."
+                    subtitle: "Press Search on the keyboard to look for “\(query)”."
                 )
             } else {
                 hideStatus()
@@ -787,6 +833,17 @@ final class SearchViewController: UIViewController {
         // is testable without driving the keyboard.
         guard let index = arguments.firstIndex(of: "-search-query"), index + 1 < arguments.count
         else { return }
+        // `-search-sort <relevance|recency|popularity>` picks the order the
+        // filter tray would pick. The tray is a `UIMenu` and the simulator taps
+        // nothing, so without this the one thing the tray DOES — change what
+        // goes on the wire and therefore what comes back — has no way to be
+        // seen offline.
+        if let sortIndex = arguments.firstIndex(of: "-search-sort"),
+           sortIndex + 1 < arguments.count,
+           let order = SearchSortOrder(rawValue: arguments[sortIndex + 1]) {
+            viewModel.setSortOrder(order)
+        }
+
         let seeded = arguments[index + 1]
         lastReportedQuery = seeded
         setFieldText(seeded)

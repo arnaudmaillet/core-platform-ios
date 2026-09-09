@@ -51,6 +51,20 @@ public final class SearchViewModel {
         didSet { onPhaseChange?(phase) }
     }
     private var query = ""
+
+    /// What was last SUBMITTED, as opposed to what is in the field.
+    ///
+    /// ⚠️ THE TWO DIVERGE, and re-running the wrong one is a real answer to a
+    /// question nobody asked. `query` follows every keystroke — `queryChanged`
+    /// assigns it — so it means "what the field says". A filter change has to
+    /// re-run what the viewer actually SEARCHED for.
+    ///
+    /// It happens to be safe today to re-run `query` instead, because typing
+    /// moves the phase to `.suggesting` and a filter change is only a re-run
+    /// while results are showing — so the two are equal exactly when it
+    /// matters. That is an invariant held by two methods a hundred lines
+    /// apart, and it is one edit away from being false. This says it outright.
+    private var submittedQuery = ""
     /// Whether the Recent section is showing everything or just the first
     /// window of it. Sticky for the life of the screen: a viewer who expanded
     /// the list has said they want the long version, and collapsing it again
@@ -153,6 +167,50 @@ public final class SearchViewModel {
         }
     }
 
+    /// How the engine is asked to order results. Owned here rather than by the
+    /// view controller because it is part of the REQUEST, not of the bar: the
+    /// screen can be rebuilt around it and the pick has to survive.
+    public private(set) var sortOrder: SearchSortOrder = .relevance
+
+    /// Fires when the order changes, so the bar can redraw its checkmark
+    /// without owning the state.
+    public var onSortOrderChange: ((SearchSortOrder) -> Void)?
+
+    /// Picks an order and, if there is a search on screen, runs it again.
+    ///
+    /// ⚠️ RE-RUNS RATHER THAN RE-SORTS. The engine ranks the whole index and
+    /// answers with a page of it; re-ordering the page the client happens to
+    /// hold would show the viewer the *same* people in a different order and
+    /// call it "most recent", which is a different and wrong answer.
+    ///
+    /// ⚠️ AND IT DOES NOT RE-RECORD THE QUERY. Going through `submitQuery`
+    /// would write the same text to the recent searches once per filter
+    /// change; the search is re-run directly for that reason.
+    public func setSortOrder(_ order: SearchSortOrder) {
+        guard order != sortOrder else { return }
+        sortOrder = order
+        onSortOrderChange?(order)
+
+        // Nothing has been searched for yet — the pick is remembered and takes
+        // effect on the next submit. Re-running here would search for "".
+        let trimmed = submittedQuery
+        guard !trimmed.isEmpty, isShowingSearchResults else { return }
+        searchTask?.cancel()
+        searchTask = Task { [weak self] in
+            await self?.runSearch(trimmed)
+        }
+    }
+
+    /// Whether the screen is showing (or fetching) the answer to a submitted
+    /// search, as opposed to the history or the typeahead. A filter change is
+    /// only a re-run when there is an answer for it to change.
+    private var isShowingSearchResults: Bool {
+        switch phase {
+        case .loading, .results, .empty, .failed: true
+        case .explore, .suggesting: false
+        }
+    }
+
     /// The viewer pressed Search — the one input that searches, and the one
     /// that writes to the history.
     ///
@@ -164,6 +222,7 @@ public final class SearchViewModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         query = trimmed
+        submittedQuery = trimmed
         recentSearches?.recordQuery(trimmed)
 
         searchTask?.cancel()
@@ -515,9 +574,15 @@ public final class SearchViewModel {
     private func runSearch(_ trimmed: String) async {
         phase = .loading
         do {
-            let results = try await repository.searchProfiles(matching: trimmed, limit: pageSize)
-            // A late response for a superseded query must not overwrite newer state.
-            guard !Task.isCancelled, query.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+            let results = try await repository.searchProfiles(
+                matching: trimmed, sort: sortOrder, limit: pageSize
+            )
+            // A late response for a superseded query must not overwrite newer
+            // state. ⚠️ Against `submittedQuery`, not `query`: `query` follows
+            // the field, so a re-run triggered by a filter change while the
+            // viewer had typed something new would be discarded here — the
+            // spinner would stay up forever, on a screen with no error.
+            guard !Task.isCancelled, submittedQuery == trimmed else { return }
             if results.isEmpty {
                 phase = .empty(query: trimmed)
             } else {

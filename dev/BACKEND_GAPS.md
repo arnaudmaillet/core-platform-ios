@@ -733,6 +733,39 @@ the cell-span-vs-viewport rule instead of client-side zoom thresholds.
 
 ---
 
+## 19. `search.v1` has no date filter, no viewer scope, and no engagement sorts
+
+**What the client wants.** The global search screen's filter tray: an order
+(trending / publication date / most liked / most commented), a publication
+window (24h / week / six months / all) and a perimeter (all / seen / unseen /
+followed).
+
+**What `search.v1` offers.** `SearchRequest` has six fields — query,
+entity_types, sort, page_size, page_token, exclude_author_ids — and `SearchSort`
+has three values: RELEVANCE, RECENCY, POPULARITY. So of twelve requested
+entries, exactly one maps cleanly (publication date → RECENCY) and one maps
+approximately (trending → POPULARITY, which the contract itself describes as a
+periodically-refreshed signal rather than a live count). There is no date field,
+no scope field, no like or comment sort, and no PLACE entity kind.
+
+⚠️ Nor is the rest client-derivable. `ProfileHit` carries no timestamp, no
+counts and no viewer state, and this screen sends `entity_types = [PROFILE]`.
+Filtering a PAGE by date would answer a different question from filtering the
+QUERY. And nothing in the fleet or the client records which entities a viewer
+has already seen — "seen / unseen" needs a producer before it needs a filter.
+
+**What ships meanwhile.** The order dimension only, wired end to end (including
+the mock, which accepted `sort` and ignored it). The other two dimensions are
+absent from the tray rather than present and inert: a greyed-out row is still a
+promise, and this screen cannot say when it would be kept.
+
+**What we need.** The additive contract in `dev/issues/BACKEND_SEARCH_FILTERS.md`
+— `published_after` / `published_before`, a `SearchScope` resolved at the edge
+the way `exclude_author_ids` already is, `MOST_COMMENTED` / `MOST_LIKED` sorts,
+and a `PLACE` entity kind if locations are to be searchable at all.
+
+---
+
 ## Resolved
 
 - **`ProfileService.ListProfilesByAccount` ScyllaDB CQL type bug** (`limit`
