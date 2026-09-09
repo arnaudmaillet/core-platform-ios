@@ -21,21 +21,20 @@ final class MapsTabCoordinator: TabCoordinator {
         identifier: AppTab.maps.rawValue
     ) { [navigationController] _ in navigationController }
 
-    /// The post-creation entry point: a top-left "+" that opens the compose
-    /// flow. Stateless (unlike the avatar, which carries image + unread state,
-    /// so the shell injects it) — the tap just fires the `.upload` route, which
-    /// the resolver presents as the compose sheet. Constructed here so the tap
-    /// is owned by the coordinator, not the map surface; the Maps package stays
-    /// navigation-agnostic. iOS 26 renders bar items in a glass bubble natively,
-    /// so no custom chrome is needed to match the header aesthetic.
-    private lazy var createPostButtonItem: UIBarButtonItem = {
+    /// Search, at the very edge of the trailing group.
+    ///
+    /// It lives here rather than in the bar because the bar's detached trailing
+    /// item is the camera now. Constructed by the coordinator so the tap is
+    /// owned by navigation and the Maps package stays navigation-agnostic —
+    /// exactly as the "+" that stood opposite it used to be.
+    private lazy var searchButtonItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            image: UIImage(systemName: "plus"),
+            image: UIImage(systemName: "magnifyingglass"),
             primaryAction: UIAction { [weak self] _ in
-                self?.container.router.route(to: .upload)
+                self?.container.router.route(to: .search)
             }
         )
-        item.accessibilityLabel = "Create Post"
+        item.accessibilityLabel = "Search"
         return item
     }()
 
@@ -67,8 +66,10 @@ final class MapsTabCoordinator: TabCoordinator {
         // of the bell ([coin] [bell]) — in its own glass bubble via
         // `sharesBackground = false` rather than the fixedSpace the avatar
         // era used.
-        // The post-creation "+" sits opposite the pair, top-left.
-        mapViewController.navigationItem.leftBarButtonItem = createPostButtonItem
+        // ⚠️ THE BELL MOVED TO THE LEADING EDGE and the "+" is gone — the
+        // compose screen it opened has been removed from the product. The
+        // header now reads `[bell] … [coins][search]`.
+        mapViewController.navigationItem.leftBarButtonItem = notificationsButtonItem
         navigationController.viewControllers = [mapViewController]
 
         // The badge stands where the avatar used to — trailing group, inboard
@@ -78,8 +79,10 @@ final class MapsTabCoordinator: TabCoordinator {
             presenter: navigationController
         ) { [weak self] item in
             guard let self else { return }
+            // ⚠️ `[0]` IS THE SCREEN EDGE: search takes the corner the bell
+            // used to hold, and the wallet badge stays inboard of it.
             self.mapViewController?.navigationItem.rightBarButtonItems =
-                [self.notificationsButtonItem, item]
+                [self.searchButtonItem, item]
         }
 
         #if DEBUG

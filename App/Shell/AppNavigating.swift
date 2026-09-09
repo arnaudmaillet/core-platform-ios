@@ -1,9 +1,14 @@
 import UIKit
 
-/// The buttons of the app shell's bar, in bar order. The search tab is rendered
-/// detached at the trailing edge by the system (see `SearchTabCoordinator`'s
-/// `UISearchTab`), giving the grouped layout
-/// `| Maps  For You  Messages  Profile |  Search |` with no custom bar.
+/// The buttons of the app shell's bar, in bar order. The fifth item is rendered
+/// DETACHED at the trailing edge, giving the grouped layout
+/// `| Maps  For You  Messages  Profile |  Camera |` with no custom bar.
+///
+/// ⚠️ SPIKE: that detachment used to come from `UISearchTab`, a type the system
+/// pins by role. It is now asked for explicitly with
+/// `UITab.preferredPlacement = .pinned` (see `CameraTabCoordinator`), which is
+/// the documented way to put an ARBITRARY tab there. The search feature is
+/// intact and still builds; only its wire into the bar is cut.
 ///
 /// **Every case here is now a real selectable root.** Slot 1 used to be `.feed`,
 /// a bar button that was not a *place*: its selection was vetoed and the
@@ -22,7 +27,7 @@ enum AppTab: String, CaseIterable {
     case forYou
     case messages
     case profile
-    case search
+    case camera
 }
 
 /// The navigation surface the `RouteResolver` drives: which tab is showing and

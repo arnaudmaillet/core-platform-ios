@@ -5,7 +5,7 @@ import FeedInterface
 import OSLog
 import ProfileInterface
 import UIKit
-import UploadInterface
+import SearchInterface
 
 /// Maps `AppRoute`s onto the app shell. In-app taps, universal links, and push
 /// notification payloads all end up here — one navigation code path.
@@ -17,7 +17,15 @@ import UploadInterface
 @MainActor
 final class RouteResolver: Router {
     weak var navigator: AppNavigating?
-    private let uploadFeature: any UploadFeatureBuilding
+    /// ⚠️ A CLOSURE, like every other feature here, and NOT the value.
+    ///
+    /// `searchFeature` reaches the router, and the router IS this resolver, so
+    /// handing the value in makes `routeResolver → searchFeature →
+    /// routeResolver` a lazy cycle that recurses until the stack ends
+    /// (`EXC_BAD_ACCESS` in `swift_beginAccess`, with the two getters
+    /// alternating all the way down). The upload builder it replaced could be
+    /// passed by value precisely because it needed no router.
+    private let searchFeature: () -> any SearchFeatureBuilding
     /// Feature builders are resolved lazily: each one depends on this resolver
     /// (as its router), so injecting them directly would be a construction
     /// cycle. The closures are only called when a route actually fires.
@@ -27,12 +35,12 @@ final class RouteResolver: Router {
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
 
     init(
-        uploadFeature: any UploadFeatureBuilding,
+        searchFeature: @escaping () -> any SearchFeatureBuilding,
         profileFeature: @escaping () -> any ProfileFeatureBuilding,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         chatFeature: @escaping () -> any ChatFeatureBuilding
     ) {
-        self.uploadFeature = uploadFeature
+        self.searchFeature = searchFeature
         self.profileFeature = profileFeature
         self.feedFeature = feedFeature
         self.chatFeature = chatFeature
@@ -127,9 +135,8 @@ final class RouteResolver: Router {
             }
             push(profile, using: navigator)
 
-        case .upload:
-            let compose = uploadFeature.makeComposeViewController()
-            navigator.activeNavigationController?.present(compose, animated: true)
+        case .search:
+            push(searchFeature().makeSearchViewController(), using: navigator)
 
         case .post(let postID):
             let detail = feedFeature().makePostDetailViewController(for: postID, mode: .full)

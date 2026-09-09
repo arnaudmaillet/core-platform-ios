@@ -46,6 +46,15 @@ final class SearchViewController: UIViewController {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         super.init(nibName: nil, bundle: nil)
+        // ⚠️ IN THE INITIALISER, not `viewDidLoad`. A navigation controller
+        // reads this when the push BEGINS, and `viewDidLoad` can run inside
+        // that same push — set there it is a coin toss whether the bar goes.
+        //
+        // This screen is a destination now, not a tab root: it is pushed from
+        // the Maps and For You headers, and the bar it would sit under belongs
+        // to the screen it came from. UIKit puts that bar back on the pop; the
+        // fade below is only about HOW it leaves and returns.
+        hidesBottomBarWhenPushed = true
     }
 
     @available(*, unavailable)
@@ -53,7 +62,7 @@ final class SearchViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Search"
+        title = nil
         view.backgroundColor = .systemBackground
         configureSearchController()
         configureCollectionView()
@@ -77,35 +86,68 @@ final class SearchViewController: UIViewController {
         #endif
     }
 
-    // ⚠️ **No auto-focus, deliberately.** This screen used to claim the field
-    // as first responder in `viewDidAppear`, which opened the keyboard on
-    // arrival — and the keyboard covers roughly half the screen, so the two
-    // sections the tab exists to show were mostly hidden behind it before the
-    // viewer had done anything. The field is a tap away; the content is worth
-    // seeing first.
-
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        // Only when something was PUSHED over this screen. A tab switch also
-        // sends `viewWillDisappear`, and fading the bar for that would take it
-        // away from whichever tab the viewer just moved to.
-        guard navigationController?.topViewController !== self else { return }
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-search-layout-audit") { dumpBottomChrome() }
-        #endif
-        fadeTabBar(to: 0)
-    }
-
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        fadeTabBar(to: 1)
-    }
+    /// ⚠️ **AUTO-FOCUS IS BACK, AND THE REASON IT WAS REMOVED NO LONGER
+    /// HOLDS.** It was dropped because the keyboard covers roughly half the
+    /// screen, so a viewer who selected the Search TAB had the two sections
+    /// that tab existed to show hidden before they had done anything.
+    ///
+    /// This is not a tab any more. It is reached by tapping a magnifier in the
+    /// Maps or For You header — a gesture that already says "I want to
+    /// search" — so opening in the state that gesture asked for costs nothing
+    /// and saves a tap. The suggestions are one keyboard-dismiss away, which is
+    /// the opposite of the old trade rather than a repeat of it.
+    ///
+    /// It also buys the header's animation back. With `.integratedButton` the
+    /// RESTING representation is a magnifier, which is what makes the
+    /// dismissal coherent — the field collapses onto something instead of
+    /// cutting to a wide placeholder (see `preferredSearchBarPlacement`). The
+    /// cost of that placement was the bare button on arrival; activating on
+    /// appearance means the arrival is never that button.
+    ///
+    /// ⚠️ ONCE, and after the push has SETTLED. Activating a search controller
+    /// inside an appearance transition is how the field ends up half-presented
+    /// with no keyboard; the coordinator's completion is the first moment the
+    /// screen is genuinely on screen. `viewDidAppear` also fires again after
+    /// anything this screen pushed pops back, and re-claiming the keyboard
+    /// there would fight the viewer who just came back to read a result.
+    private var hasClaimedField = false
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // Belt and braces: whatever the transition did or did not finish, a
-        // screen that is on top must never leave invisible chrome behind it.
-        tabBarChrome?.alpha = 1
+        guard !hasClaimedField else { return }
+        hasClaimedField = true
+        let claim = { [weak self] in
+            guard let self else { return }
+            self.searchController.isActive = true
+            self.searchController.searchBar.becomeFirstResponder()
+        }
+        if let coordinator = transitionCoordinator {
+            coordinator.animate(alongsideTransition: nil) { _ in claim() }
+        } else {
+            claim()
+        }
+    }
+
+    /// ⚠️ THIS SCREEN NO LONGER TOUCHES THE BOTTOM CHROME, and the three hooks
+    /// that did are gone. It hid the bar by fading it out here and faded it
+    /// back in on return — machinery from when Search was a TAB ROOT that
+    /// pushed profiles over itself.
+    ///
+    /// It is a pushed destination now (`hidesBottomBarWhenPushed`), so UIKit
+    /// owns the bar for the whole visit: it goes on the push and comes back on
+    /// the pop, and anything Search pushes is pushed over a screen that already
+    /// has no bar.
+    ///
+    /// Leaving the fade in place did real damage, and the guard could not catch
+    /// it: `topViewController !== self` was written to mean "something was
+    /// pushed OVER me", but it is equally true while this screen is being
+    /// POPPED — so the pop faded the chrome to alpha 0 on its way out and the
+    /// map underneath came back with an invisible tab bar. Filmed.
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-search-layout-audit") { dumpBottomChrome() }
+        #endif
     }
 
     /// The view holding the bottom chrome — the bar, its platters, and the
@@ -130,33 +172,6 @@ final class SearchViewController: UIViewController {
         return container
     }
 
-    /// Fades the bottom chrome in step with the push or pop moving this screen.
-    ///
-    /// ⚠️ **The glitch this exists to fix.** `hidesBottomBarWhenPushed` takes
-    /// the bar away at the END of the push, while its *contents* leave at the
-    /// start — so for the whole transition two emptied glass containers sat
-    /// frozen over the incoming profile and then popped out of existence.
-    /// Riding the transition coordinator makes the glass leave with everything
-    /// else, and come back the same way on the pop.
-    ///
-    /// Alpha rather than the house's usual render-level dissolve because the
-    /// chrome is *leaving*, not restyling: the rule against fading a glass lens
-    /// is about a material sampling the wrong backdrop while it stays on
-    /// screen, and nothing here stays.
-    private func fadeTabBar(to alpha: CGFloat) {
-        guard let chrome = tabBarChrome else { return }
-        guard let coordinator = transitionCoordinator else {
-            chrome.alpha = alpha
-            return
-        }
-        coordinator.animate(alongsideTransition: { _ in
-            chrome.alpha = alpha
-        }, completion: { context in
-            // An interactive pop the viewer abandoned leaves the profile up, so
-            // the chrome has to go back to where the push left it.
-            if context.isCancelled { chrome.alpha = 1 - alpha }
-        })
-    }
 
     #if DEBUG
     /// `-search-layout-audit`: names every view sitting in the bottom band at
@@ -248,7 +263,14 @@ final class SearchViewController: UIViewController {
         // No dimming: the results land in THIS collection view, so there is
         // nothing above to obscure and a scrim would only grey out the answer.
         searchController.obscuresBackgroundDuringPresentation = false
-        searchController.searchBar.placeholder = "Search people"
+        // ⚠️ NO PLACEHOLDER. The resting representation is the magnifier
+        // button (`.integratedButton`), and the field is only ever seen with a
+        // caret already in it — the screen activates on arrival. A grey
+        // "Search people" would therefore appear for exactly the fraction of a
+        // second between the field opening and the caret landing, and again
+        // behind the caret while the viewer types nothing. The icon says what
+        // the field is; the words repeat it.
+        searchController.searchBar.placeholder = nil
         searchController.searchBar.autocapitalizationType = .none
         searchController.searchBar.autocorrectionType = .no
         searchController.searchBar.returnKeyType = .search
@@ -264,6 +286,55 @@ final class SearchViewController: UIViewController {
         searchController.hidesNavigationBarDuringPresentation = false
         navigationItem.searchController = searchController
         navigationItem.hidesSearchBarWhenScrolling = false
+        // ⚠️ THE FIELD TAKES THE TITLE'S SLOT, which is why there is no title.
+        //
+        // Stacked (the default here) puts the field on its own row BELOW the
+        // bar — a whole extra band of vertical space on a screen that is a
+        // list. This puts it inline with the bar's own content, where the word
+        // "Search" used to be.
+        //
+        // `.inline` is the same value under its pre-iOS-26 name and is
+        // deprecated; `.integrated` is the one to write.
+        //
+        // ⚠️ ITS DISMISSAL ANIMATION IS UIKIT'S, AND IT HAS A SEAM. Filmed at
+        // 15fps: the active field shrinks to a magnifier-only button, HOLDS
+        // there for ~4 frames (~270ms), and the wide placeholder field then
+        // appears in a single frame — a cut, not an animation.
+        //
+        // It is not a placement flip: `navigationItem.searchBarPlacement`
+        // (the REALIZED value) reads `integrated` at every stage —
+        // configure / willPresent / didPresent / willDismiss / +6 ticks /
+        // didDismiss — so nothing is choosing the button representation. The
+        // seam is inside UIKit's own animation of the bar.
+        //
+        // Two knobs were tried and neither touches it:
+        //   - `searchBarPlacementAllowsToolbarIntegration = false` (below):
+        //     no change, though it is kept because this screen has no toolbar
+        //     and the enum's own note warns UIKit may reach for one;
+        //   - `.integratedButton`: the seam GOES, because the button is then
+        //     the resting state and the collapse has somewhere coherent to
+        //     land.
+        //
+        // `.integratedButton` is what ships, and its one cost — a bare
+        // magnifier where a placeholder field used to sit — is paid off by
+        // activating on arrival: the viewer never meets the button on the way
+        // IN, only on the way out, where it is the thing the field collapses
+        // onto. Filmed at 15fps: one continuous slide-and-fade, no hold, no
+        // cut. Keeping the placeholder field at rest instead would need a bar
+        // this app draws itself.
+        navigationItem.preferredSearchBarPlacement = .integratedButton
+        // ⚠️ NO TOOLBAR NEGOTIATION. Defaults to YES, and the enum's own note
+        // warns that on iPhone "the search bar may be integrated into the
+        // toolbar" under a navigation controller. This screen has no toolbar,
+        // so the only thing that setting can do here is give UIKit a second
+        // layout to consider on every activation.
+        navigationItem.searchBarPlacementAllowsToolbarIntegration = false
+        searchController.delegate = self
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-search-layout-audit") {
+            logPlacement("configure")
+        }
+        #endif
         definesPresentationContext = true
     }
 
@@ -654,3 +725,29 @@ private extension Array {
         indices.contains(index) ? self[index] : nil
     }
 }
+
+#if DEBUG
+extension SearchViewController: UISearchControllerDelegate {
+    func willPresentSearchController(_ searchController: UISearchController) { logPlacement("willPresent") }
+    func didPresentSearchController(_ searchController: UISearchController) { logPlacement("didPresent") }
+    func willDismissSearchController(_ searchController: UISearchController) {
+        logPlacement("willDismiss")
+        for tick in 1...6 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(tick) * 0.06) { [weak self] in
+                self?.logPlacement("dismiss+\(tick)")
+            }
+        }
+    }
+    func didDismissSearchController(_ searchController: UISearchController) { logPlacement("didDismiss") }
+
+    func logPlacement(_ stage: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-search-layout-audit") else { return }
+        let names = ["automatic", "integrated", "stacked", "integratedCentered", "integratedButton"]
+        let raw = navigationItem.searchBarPlacement.rawValue
+        print("[placement] \(stage): realized=\(names[safe: raw] ?? String(raw))"
+            + " active=\(navigationItem.searchController?.isActive == true)")
+    }
+}
+#else
+extension SearchViewController: UISearchControllerDelegate {}
+#endif

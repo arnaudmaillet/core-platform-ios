@@ -164,9 +164,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
         self.profileTab = profileTab
         let forYouTab = ForYouTabCoordinator(container: container)
         self.forYouTab = forYouTab
-        // Ordered before Search deliberately: `UISearchTab` is pinned to the
-        // trailing edge by the system, so this array reads as bar order rather
-        // than relying on that.
+        // SPIKE: the trailing item is a plain `UITab` asking for
+        // `.pinned` rather than a `UISearchTab` pinned by role, so this array
+        // reads as bar order either way.
         orderedTabs = [
             (.maps, MapsTabCoordinator(
                 container: container,
@@ -175,7 +175,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             (.forYou, forYouTab),
             (.messages, MessagesTabCoordinator(container: container)),
             (.profile, profileTab),
-            (.search, SearchTabCoordinator(container: container))
+            (.camera, CameraTabCoordinator())
         ]
         for (_, tab) in orderedTabs {
             tab.start()
@@ -338,18 +338,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // (the sim injects none). Deferred a tick, as above.
         if arguments.contains("-open-notifications") {
             DispatchQueue.main.async { [weak self] in self?.pushNotifications() }
-        }
-        // `-present-compose` presents the compose sheet on launch, for
-        // driving/screenshotting compose without tapping through the UI.
-        // Presented over the shell: the feed's bar no longer carries a compose
-        // item (its chrome is identical across both entry paths), so this is
-        // the `.upload` route's presentation, not a feed affordance. Deferred
-        // a tick: at `start()` the shell isn't the window root yet.
-        if arguments.contains("-present-compose") {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                tabBarController.present(container.uploadFeature.makeComposeViewController(), animated: true)
-            }
         }
         // `-feed-repush-demo` pushes the feed twice (combine with
         // `-snap-auto-dismiss`, which pops it ~2.5s after each landing): the

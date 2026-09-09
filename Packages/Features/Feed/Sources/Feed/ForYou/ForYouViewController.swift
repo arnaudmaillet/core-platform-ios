@@ -20,7 +20,7 @@ import UIKit
 /// screen does not is stack a search field beneath the title row.
 ///
 /// **The bar items are one action and one state.** Leading is `+`, which opens
-/// the composer through `AppRoute.upload`. Trailing is the `ContentContext`
+/// search through `AppRoute.search`. Trailing is the wallet badge and search
 /// lens, whose glyph IS the current context — it does not offer an action, it
 /// reports what the surface is currently showing, and tapping it opens the menu
 /// to change that.
@@ -71,14 +71,19 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// why the lens is a tint rather than a second material.
     private let tabBar = PagedTabBar(titles: tabTitles, style: .navigationTitle)
 
-    /// Compose. The leading item is an ACTION, so it is a plain glyph with a
-    /// target — no menu, no state.
-    private lazy var composeItem: UIBarButtonItem = {
+    /// Search. The trailing EDGE item — an action, so a plain glyph with a
+    /// target and no menu.
+    ///
+    /// It stands where the context glyph used to, because the bar's detached
+    /// trailing item is the camera now and search had to land somewhere it is
+    /// actually wanted. The "+" that used to hold the leading corner is gone
+    /// with the compose screen it opened.
+    private lazy var searchItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
-            image: UIImage(systemName: "plus"),
-            primaryAction: UIAction { [weak self] _ in self?.openComposer() }
+            image: UIImage(systemName: "magnifyingglass"),
+            primaryAction: UIAction { [weak self] _ in self?.router?.route(to: .search) }
         )
-        item.accessibilityLabel = "New Post"
+        item.accessibilityLabel = "Search"
         return item
     }()
 
@@ -455,11 +460,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         applyTrailingItems()
     }
 
-    /// ⚠️ `[0]` IS THE SCREEN EDGE. The lens menu keeps the corner and the
-    /// accessory sits to its left, which is the arrangement the Maps header
-    /// already wears ([coin] [bell]).
+    /// ⚠️ `[0]` IS THE SCREEN EDGE. Search keeps the corner and the wallet
+    /// badge sits to its left — the same arrangement the Maps header wears
+    /// ([coins] [search]). The lens menu moved to the LEADING group, ahead of
+    /// the selector, so the header reads
+    /// `[lens][selector] … [coins][search]`.
     private func applyTrailingItems() {
-        navigationItem.rightBarButtonItems = [contextItem, trailingAccessoryItem].compactMap { $0 }
+        navigationItem.rightBarButtonItems = [searchItem, trailingAccessoryItem].compactMap { $0 }
     }
 
     override func viewDidLoad() {
@@ -477,7 +484,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         navigationItem.largeTitleDisplayMode = .never
         // Native bar items on both sides; the selector joins the LEADING group
         // behind the compose glyph, so the centre stays empty and flexible.
-        navigationItem.leftBarButtonItem = composeItem
+        // ⚠️ BEFORE `installLeadingSelector`, which APPENDS: whatever is here
+        // keeps its place at the front, so the lens glyph leads and the
+        // selector follows it.
+        navigationItem.leftBarButtonItems = [contextItem]
         applyTrailingItems()
         navigationItem.installLeadingSelector(tabBar)
         contextItem.menu = makeContextMenu()
@@ -621,13 +631,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// Opens the post composer.
     ///
-    /// Through the ROUTE, not by building the composer here: `AppRoute.upload`
-    /// already presents it, and it is presented from several places. A screen
-    /// that constructed its own would be a second answer to "what is the
-    /// composer" the day one of them changes.
-    private func openComposer() {
-        router?.route(to: .upload)
-    }
 
     /// The context menu: plain actions, **no `.singleSelection` and no
     /// checkmark**.
@@ -2464,7 +2467,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                     late.append("segment \(index) unreachable (hit=\(hit.map { "\(type(of: $0))" } ?? "nil"))")
                 }
             }
-            for (name, item) in [("compose", composeItem), ("context", contextItem)] {
+            for (name, item) in [("search", searchItem), ("context", contextItem)] {
                 guard let itemView = item.value(forKey: "view") as? UIView else {
                     late.append("\(name) item has no view")
                     continue
@@ -2514,7 +2517,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // The title-slot question, in numbers: how wide is the capsule allowed
         // to be, where do the side items start and end, and is the capsule
         // scrolling its own content (which is what silently crops a badge)?
-        let leftRect = (composeItem.value(forKey: "view") as? UIView)
+        let leftRect = (contextItem.value(forKey: "view") as? UIView)
             .map { $0.convert($0.bounds, to: window) } ?? .zero
         let rightRect = (navigationItem.rightBarButtonItem?.value(forKey: "view") as? UIView)
             .map { $0.convert($0.bounds, to: window) } ?? .zero

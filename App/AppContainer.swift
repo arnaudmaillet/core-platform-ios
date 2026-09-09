@@ -700,7 +700,7 @@ final class AppContainer {
     /// The one place `AppRoute`s become navigation. Features receive it as an
     /// opaque `Router`; the shell binds its `navigator` when it starts.
     private(set) lazy var routeResolver = RouteResolver(
-        uploadFeature: uploadFeature,
+        searchFeature: { [unowned self] in self.searchFeature },
         profileFeature: { [unowned self] in self.profileFeature },
         feedFeature: { [unowned self] in self.feedFeature },
         chatFeature: { [unowned self] in self.chatFeature }
