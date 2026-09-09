@@ -11,43 +11,6 @@ import UIKit
 /// left. It is a horizontal scroller, so "what is left" is always enough: down
 /// to `bubbleWidth` it is a perfect circle showing one tab and swiping to the
 /// rest.
-/// How wide a control sharing a bar with a leading selector should ask for.
-///
-/// ⚠️ **A HALF IS WHAT A CONTROL ASKS FOR, NOT WHAT IT GETS.** Both controls
-/// asking for exactly half puts the pair on the bar's boundary, and a POP
-/// briefly narrows the bar — it carries the departing screen's back-button
-/// title beside the arriving items — so something has to give or UIKit sweeps
-/// the trailing group into a `•••`.
-///
-/// ⚠️ AND THE ONE THAT GIVES IS NOT THE ONE YOU WOULD PICK. The obvious answer
-/// is the selector: a `PagedTabBar` in a bar host caps itself and SCROLLS,
-/// while a text field short of room is just a worse field. Filmed, that
-/// arrangement still produced the `•••` — the host re-measures on its own
-/// layout pass, which does not come in time, whereas a constraint's PRIORITY is
-/// read by the very pass that decides whether to overflow. See
-/// `SearchResultsViewController.queryWidth`, where the four arrangements tried
-/// are written down.
-///
-/// The arithmetic lives here, beside the constants it is made of, rather than
-/// in the screen that needs it — the same reason `LeadingSelectorBudget` does.
-public enum NavigationBarShare {
-    /// Half of what `barWidth` has left beside a back button and a selector,
-    /// never less than `bubble`.
-    ///
-    /// - `bubble`: the control's own height. A control as wide as it is tall is
-    ///   one perfect bubble — the least a control can be and still be one, and
-    ///   the floor `LeadingSelectorItem.ceiling(bubbleWidth:)` uses for the
-    ///   strip for the same reason.
-    public static func halfBesideBackButton(inBarOfWidth barWidth: CGFloat, bubble: CGFloat) -> CGFloat {
-        let claimed = LeadingSelectorBudget.barMargin * 2
-            + LeadingSelectorBudget.itemWidth          // the back button
-            + LeadingSelectorBudget.platterGap         // back ↔ selector
-            + LeadingSelectorBudget.interGroupGap      // leading ↔ trailing
-            + LeadingSelectorBudget.platterPadding
-        return max(bubble, (barWidth - claimed) / 2)
-    }
-}
-
 struct LeadingSelectorBudget {
     /// The width UIKit draws a bar item's platter at — the standard 44pt touch
     /// target, which is also the least room a glyph item occupies.

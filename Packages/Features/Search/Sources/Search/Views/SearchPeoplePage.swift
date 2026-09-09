@@ -103,6 +103,16 @@ final class SearchPeoplePage: UIViewController {
     /// observe about this page without reaching into cells.
     var rowCountForTesting: Int { dataSource.snapshot().numberOfItems }
 
+    /// The handles this page is showing, in the order it is showing them.
+    ///
+    /// ⚠️ THIS IS WHERE A REFINED QUERY IS VISIBLE NOW. The results header used
+    /// to carry the words in a field and a test could read its text; the header
+    /// is a magnifier glyph, so what the page RENDERED is the only place the
+    /// screen still shows which query it answered.
+    var displayedHandlesForTesting: [String] {
+        dataSource.snapshot().itemIdentifiers.compactMap { modelsByID[$0]?.handle }
+    }
+
     #if DEBUG
     /// `-search-tap-user <index>` selects a row the way a finger would — the
     /// simulator injects no touches, and the only way to see what a tap does
