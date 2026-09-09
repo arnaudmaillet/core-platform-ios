@@ -57,10 +57,40 @@ final class SearchViewController: UIViewController {
         // to the screen it came from. UIKit puts that bar back on the pop; the
         // fade below is only about HOW it leaves and returns.
         hidesBottomBarWhenPushed = true
+        #if DEBUG
+        installKeyboardTraceIfRequested()
+        #endif
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    #if DEBUG
+    /// `-search-layout-trace`: how long the keyboard takes to arrive, timed
+    /// from the moment this screen is BUILT — which is the moment the route
+    /// fires, one line before the push.
+    ///
+    /// ⚠️ The push's own animation is inside that number, which is the whole
+    /// reason to measure it here rather than from `viewDidAppear`: the question
+    /// is what the viewer waits through between tapping a magnifier and being
+    /// able to type, and an animated push spends its duration inside that wait.
+    private func installKeyboardTraceIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("-search-layout-trace") else { return }
+        let start = CACurrentMediaTime()
+        for name: Notification.Name in [
+            UIResponder.keyboardWillShowNotification,
+            UIResponder.keyboardDidShowNotification
+        ] {
+            NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { note in
+                print(String(format: "[search-keyboard] t=%4.0fms %@",
+                             (CACurrentMediaTime() - start) * 1000,
+                             note.name.rawValue.replacingOccurrences(of: "UIKeyboard", with: "")))
+            }
+        }
+    }
+    #endif
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -79,7 +109,7 @@ final class SearchViewController: UIViewController {
             // screen would narrow the history for the very query it is in the
             // middle of searching for.
             self?.lastReportedQuery = text
-            self?.searchField.text = text
+            self?.setFieldText(text)
         }
         viewModel.showExplore()
 
@@ -112,19 +142,30 @@ final class SearchViewController: UIViewController {
     // What removed the artefact was removing the resting state, not fighting
     // the animation.
 
-    /// ⚠️ AFTER THE PUSH HAS SETTLED, and that is a preference rather than a
-    /// limit.
+    /// ⚠️ AS SOON AS THE SCREEN IS STILL — which, since this route stopped
+    /// animating its push, is immediately.
     ///
-    /// `viewWillAppear` is the earliest this can be asked for — a view must be
-    /// in a window to become first responder, and the navigation controller
-    /// has put this one into the transition's container by then. Claiming it
-    /// there was tried, and filmed: the keyboard starts rising while the push
-    /// is still running, so the screen slides in with the keyboard coming up
-    /// underneath it. Two animations at once, and it was judged worse on
-    /// screen than the keyboard arriving on a settled page.
+    /// The history is worth keeping because both ends of it were tried on
+    /// screen. `viewWillAppear` is the earliest a first responder can be
+    /// claimed: a view must be in a window, and the navigation controller has
+    /// put this one into the transition's container by then. Claimed there,
+    /// the keyboard rises WHILE the push slides — two animations at once, and
+    /// judged worse than a keyboard arriving on a settled page. Claimed after
+    /// the push, the keyboard is a whole transition late: measured from the
+    /// route firing, `WillShow` at 872–1055ms and `DidShow` at 1281–1475ms
+    /// over four runs.
     ///
-    /// So the claim waits for the transition coordinator's completion, which
-    /// is the first moment the screen is genuinely still.
+    /// What actually fixed it was removing the push animation rather than
+    /// moving the claim (`RouteResolver`'s `.search` case): same code, same
+    /// ordering, `WillShow` at 330–471ms and `DidShow` at 773–887ms.
+    ///
+    /// ⚠️ THE `isAnimated` AND RETURN-VALUE GUARDS ARE NOT BELT AND BRACES.
+    /// `animate(alongsideTransition:)` DROPS its block, returning false, when
+    /// the coordinator cannot queue it — and the coordinator is not
+    /// necessarily nil on an unanimated push. Trusting `if let` alone would
+    /// mean the completion never fires and the keyboard NEVER appears, which
+    /// reads as a broken screen rather than as a rejected design. The pattern
+    /// is `ProfileViewController.alongsideTransition`'s, for the same reason.
     ///
     /// ⚠️ ONCE. `viewDidAppear` fires again when anything this screen pushed
     /// pops back, and re-claiming the keyboard there would fight a viewer who
@@ -134,11 +175,11 @@ final class SearchViewController: UIViewController {
         guard !hasClaimedField else { return }
         hasClaimedField = true
         let claim = { [weak self] in self?.searchField.becomeFirstResponder() }
-        if let coordinator = transitionCoordinator {
-            coordinator.animate(alongsideTransition: nil) { _ in claim() }
-        } else {
-            claim()
+        if let coordinator = transitionCoordinator, coordinator.isAnimated,
+           coordinator.animate(alongsideTransition: nil, completion: { _ in claim() }) {
+            return
         }
+        claim()
     }
 
     /// ⚠️ THIS SCREEN NO LONGER TOUCHES THE BOTTOM CHROME, and the three hooks
@@ -312,22 +353,80 @@ final class SearchViewController: UIViewController {
         // slot's axis, which is the axis UIKit centres a bar item on.
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight).isActive = true
-        // ⚠️ NO TRAILING ITEM, which is what lets the field run to the edge.
-        // The title slot takes whatever the bar has left over, so an empty
-        // trailing group is the width.
-        navigationItem.rightBarButtonItems = []
+        // The trailing item is the ONLY thing between the field and the edge,
+        // and it earns that width: until it existed the keyboard's own Search
+        // key was the only way to submit, which is invisible to anyone who has
+        // not already put the caret in the field. The screen's own empty state
+        // says "Press Search" — this is the button it was talking about.
+        navigationItem.rightBarButtonItems = [submitItem]
         navigationItem.titleView = searchField
+        updateSubmitAvailability()
     }
 
-    /// The field's height, matched to the bar's own glass platters.
+    /// Runs the search. The same path the keyboard's Search key takes — one
+    /// method, so the two affordances cannot drift apart.
     ///
-    /// ⚠️ MEASURED OFF THE SCREEN, not inherited. This started at 36 — the
-    /// inbox's constant, where it is right because that bar has no back button
-    /// beside the field to disagree with. Here the field sits next to a back
-    /// chevron, and a column profile through the rendered bar reads 40.0pt for
-    /// a bar-button platter against 36.0pt for the field: four points short,
-    /// which is exactly the mismatch that was visible.
-    private static let fieldHeight: CGFloat = 40
+    /// `.done` and target/action, which is the shape this app's other two
+    /// submits already wear (`OTPVerificationViewController`'s Verify,
+    /// `EditFieldViewController`'s Save). Target/action rather than a
+    /// `UIAction` closure on purpose: a test can fire
+    /// `item.target?.perform(item.action)`, and a `UIAction` offers no public
+    /// way in.
+    private lazy var submitItem = UIBarButtonItem(
+        title: "Search",
+        style: .done,
+        target: self,
+        action: #selector(submitTapped)
+    )
+
+    @objc private func submitTapped() { submitCurrentQuery() }
+
+    /// ⚠️ **Submitting is what fills the list.** Typing only narrows the
+    /// history — `queryChanged` moves the view model to `.suggesting`, which is
+    /// autocompletion over what has been searched before. The people search
+    /// itself runs on submit, and the results replace the suggestions in the
+    /// same collection view, through the same diffable data source.
+    ///
+    /// So there is nothing to push and nothing to clear by hand: the
+    /// suggestions go because the snapshot that replaces them is the results
+    /// snapshot.
+    private func submitCurrentQuery() {
+        viewModel.submitQuery(searchField.text ?? "")
+        // The answer is what the viewer wants to look at now, and the keyboard
+        // is the only thing still covering it.
+        searchField.resignFirstResponder()
+    }
+
+    /// ⚠️ **THE ONE WAY TO WRITE THE FIELD PROGRAMMATICALLY**, and it exists
+    /// because there is more than one writer. A viewer typing routes through
+    /// `searchTextChanged`, which refreshes the button; assigning
+    /// `searchField.text` does NOT — `UITextField` raises no editing event for
+    /// a programmatic write. The view model's replay and the debug seeder both
+    /// assign, and the seeded field shipped with a dead Search button on
+    /// screen until a screenshot caught it.
+    private func setFieldText(_ text: String) {
+        searchField.text = text
+        updateSubmitAvailability()
+    }
+
+    /// Dimmed on an empty field, because `submitQuery` refuses an empty query
+    /// and a button that does nothing is worse than one that says so.
+    private func updateSubmitAvailability() {
+        let trimmed = (searchField.text ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        submitItem.isEnabled = !trimmed.isEmpty
+    }
+
+    /// The field's height: the bar's own glass platter, from
+    /// `NavigationBarMetrics.itemPlatterHeight`.
+    ///
+    /// ⚠️ MEASURED TWICE, and the first measurement was wrong. It started at
+    /// 36 (the inbox's constant), then went to 40 off a column profile through
+    /// a screenshot — a technique that reads whatever the anti-aliased capsule
+    /// edge happens to give at the sampled column. Walking the view hierarchy
+    /// instead names the view and its exact bounds: `PlatterGlassView` is
+    /// 44.0pt. The screenshot was measuring the pill's rounded end.
+    private static let fieldHeight = NavigationBarMetrics.itemPlatterHeight
 
     /// ⚠️ NOT "the viewer typed" on its own. The field also fires this when it
     /// is cleared programmatically, so the last reported text is compared
@@ -336,6 +435,7 @@ final class SearchViewController: UIViewController {
     /// the narrowed history a beat after it arrived.
     @objc private func searchTextChanged() {
         report(query: searchField.text ?? "")
+        updateSubmitAvailability()
     }
 
     private func report(query text: String) {
@@ -676,14 +776,19 @@ final class SearchViewController: UIViewController {
         else { return }
         let seeded = arguments[index + 1]
         lastReportedQuery = seeded
-        searchField.text = seeded
+        setFieldText(seeded)
         viewModel.queryChanged(seeded)
         // `-search-submit`: also press Search. Seeding alone only types, and
         // typing deliberately searches nothing — so without this the results
-        // and history paths have no way to run in-sim, where the Search key
-        // cannot be tapped.
+        // and history paths have no way to run in-sim, where neither the Search
+        // key nor the bar's button can be tapped.
+        //
+        // ⚠️ THROUGH `submitCurrentQuery`, not `viewModel.submitQuery`. Calling
+        // the view model directly skipped the resign, so the instrument left
+        // the keyboard up over results it had just asked for — a state no
+        // viewer can reach, filmed as though it were the real one.
         if arguments.contains("-search-submit") {
-            viewModel.submitQuery(seeded)
+            submitCurrentQuery()
         }
     }
     #endif
@@ -723,11 +828,10 @@ private extension Array {
 /// animation this exists to remove.
 
 extension SearchViewController: UITextFieldDelegate {
-    /// The keyboard's Search key. The answer is what the viewer wants to look
-    /// at now, and the keyboard is the only thing still covering it.
+    /// The keyboard's Search key — the same method the bar's Search button
+    /// runs, so the two cannot come to mean different things.
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        viewModel.submitQuery(textField.text ?? "")
-        textField.resignFirstResponder()
+        submitCurrentQuery()
         return true
     }
 }

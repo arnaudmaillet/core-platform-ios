@@ -65,7 +65,17 @@ final class RouteResolver: Router {
     /// picker simply absent from the result. Pruning afterwards would either
     /// fight the in-flight animation or have to be deferred into its completion,
     /// where an interactive pop can interleave.
-    private func push(_ destination: UIViewController, using navigator: AppNavigating) {
+    /// - `animated`: `false` skips the slide entirely. Only the search screen
+    ///   asks for it, and for one reason: it opens the keyboard as soon as it
+    ///   is on screen, and a push animation is time the keyboard spends
+    ///   waiting. UIKit hands out no transition coordinator for an unanimated
+    ///   push, so the destination's `viewDidAppear` claim runs immediately
+    ///   instead of after a transition that no longer exists.
+    private func push(
+        _ destination: UIViewController,
+        using navigator: AppNavigating,
+        animated: Bool = true
+    ) {
         guard let navigation = navigator.activeNavigationController else { return }
         // The overwhelmingly common case takes the plain path, untouched. This
         // app drives pushes through custom navigation delegates — zoom
@@ -73,7 +83,7 @@ final class RouteResolver: Router {
         // different enough entry point that routing every ordinary push through
         // it would be a wide change to buy a narrow fix.
         guard navigation.viewControllers.contains(where: { $0 is TransientDestinationPicking }) else {
-            navigation.pushViewController(destination, animated: true)
+            navigation.pushViewController(destination, animated: animated)
             return
         }
         var stack = navigation.viewControllers
@@ -84,7 +94,7 @@ final class RouteResolver: Router {
         // viewer can never see but must swipe back through.
         stack.removeAll { $0 is TransientDestinationPicking }
         stack.append(destination)
-        navigation.setViewControllers(stack, animated: true)
+        navigation.setViewControllers(stack, animated: animated)
     }
 
     func route(to route: AppRoute) {
@@ -136,7 +146,13 @@ final class RouteResolver: Router {
             push(profile, using: navigator)
 
         case .search:
-            push(searchFeature().makeSearchViewController(), using: navigator)
+            // ⚠️ NOT ANIMATED, and that is the whole point of this route being
+            // different. The screen's job is a keyboard: it claims the field
+            // the moment it appears, and with a push animation that claim waits
+            // for the slide to finish before the keyboard even starts rising.
+            // Skipping the slide takes the transition out of the sum — the
+            // screen and its keyboard arrive together.
+            push(searchFeature().makeSearchViewController(), using: navigator, animated: false)
 
         case .post(let postID):
             let detail = feedFeature().makePostDetailViewController(for: postID, mode: .full)

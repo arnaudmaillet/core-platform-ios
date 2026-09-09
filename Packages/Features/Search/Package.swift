@@ -37,6 +37,7 @@ let package = Package(
                 "CoreNavigation",
                 "CoreNetworking",
                 "CoreStorage",
+                "MediaCore",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

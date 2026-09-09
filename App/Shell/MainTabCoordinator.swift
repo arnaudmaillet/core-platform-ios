@@ -163,9 +163,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
         self.profileTab = profileTab
         let forYouTab = ForYouTabCoordinator(container: container)
         self.forYouTab = forYouTab
-        // SPIKE: the trailing item is a plain `UITab` asking for
-        // `.pinned` rather than a `UISearchTab` pinned by role, so this array
-        // reads as bar order either way.
+        // Bar order. The trailing entry is separated from the other four by
+        // UIKit itself because it is a `UISearchTab` — see `CameraTabCoordinator`
+        // for why the type, not `.pinned`, is what detaches it.
         orderedTabs = [
             (.maps, MapsTabCoordinator(
                 container: container,
@@ -209,7 +209,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
         #if DEBUG
         // Dev convenience: `-select-tab N` opens directly on a tab for testing,
-        // in bar order (0 = Maps … 4 = Search). Every index is a plain
+        // in bar order (0 = Maps … 4 = Camera). Every index is a plain
         // selection now — 1 used to trigger the feed push instead, which it no
         // longer does; use `-open-feed` for the timeline.
         let arguments = ProcessInfo.processInfo.arguments
@@ -243,6 +243,13 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // shell isn't the window root yet.
         if arguments.contains("-open-my-profile") {
             DispatchQueue.main.async { [weak self] in self?.selectTab(.profile) }
+        }
+        // `-open-search` pushes the global search screen onto the current tab —
+        // the `AppRoute.search` path both header magnifiers take. The simulator
+        // injects no taps, so this is the only way to reach that screen, and its
+        // keyboard, headlessly. Pair with `-select-tab` to choose the origin.
+        if arguments.contains("-open-search") {
+            DispatchQueue.main.async { [weak self] in self?.container.router.route(to: .search) }
         }
         // `-tab-round-trip` leaves the current tab and comes back ~1.5s apart.
         // Pair with any push that hides the bar (`-open-my-profile`,
