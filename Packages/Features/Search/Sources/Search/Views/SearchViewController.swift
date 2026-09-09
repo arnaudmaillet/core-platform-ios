@@ -417,6 +417,21 @@ final class SearchViewController: UIViewController {
             imagePipeline: imagePipeline,
             postSurfaces: postSurfaces
         )
+        // ⚠️ UNANIMATED BOTH WAYS ON THIS ONE PATH. The ordinary back button
+        // still slides — that is UIKit's and it is right, because leaving an
+        // answer is a departure. Tapping the QUERY is not a departure: it is
+        // the same field the viewer is already looking at, and animating a
+        // slide between two headers that differ by one control reads as a
+        // glitch rather than as travel.
+        results.onEditQuery = { [weak self] in
+            guard let self else { return }
+            self.navigationController?.popViewController(animated: false)
+            // ⚠️ AFTER THE POP, and only because the tap said so.
+            // `viewDidAppear`'s claim is once-only on purpose — re-focusing on
+            // every return would fight a viewer who came back to read. This is
+            // the one return that asked for the keyboard.
+            self.searchField.becomeFirstResponder()
+        }
         navigationController?.pushViewController(results, animated: false)
     }
 

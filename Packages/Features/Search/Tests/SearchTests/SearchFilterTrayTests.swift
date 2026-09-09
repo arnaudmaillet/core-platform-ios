@@ -228,6 +228,48 @@ struct SearchFilterTrayTests {
         #expect(await host.box.sorts == [.popularity])
     }
 
+    // MARK: - The query on the results screen is a door
+
+    /// ⚠️ THE REFUSAL IS THE FEATURE. Returning false from
+    /// `textFieldShouldBeginEditing` is what stops the field becoming first
+    /// responder — no keyboard is summoned, so none has to be dismissed on the
+    /// way out. A transparent button over the field would have let the keyboard
+    /// start rising before the pop.
+    @Test func theResultsQueryRefusesTheKeyboardAndAsksToGoBack() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let results = try? #require(
+            host.screen.navigationController?.topViewController as? SearchResultsViewController
+        )
+        var asked = 0
+        results?.onEditQuery = { asked += 1 }
+
+        let field = try? #require(results?.navigationItem.titleView?
+            .subviews.compactMap { $0 as? UITextField }.first)
+        #expect(field?.becomeFirstResponder() == false)
+        #expect(field?.isFirstResponder == false)
+        #expect(asked == 1)
+    }
+
+    /// The header keeps one shape: the two halves are tied to each other, so
+    /// the split holds at whatever width the bar hands the title view.
+    @Test func theHeaderSplitsTheRowInHalf() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let results = try? #require(
+            host.screen.navigationController?.topViewController as? SearchResultsViewController
+        )
+        let row = try? #require(results?.navigationItem.titleView as? UIStackView)
+        #expect(row?.arrangedSubviews.count == 2)
+        let equal = row?.arrangedSubviews.first?.constraints.contains { constraint in
+            constraint.firstAttribute == .width && constraint.multiplier == 1
+        }
+        // The constraint is installed on the tab bar against the field, so it
+        // is held by their common ancestor rather than by either view.
+        let held = row?.constraints.contains { $0.firstAttribute == .width } ?? false
+        #expect(held || equal == true)
+    }
+
     // MARK: - Cancel and Done
 
     /// ⚠️ CANCEL MEANS "PUT BACK WHAT WAS IN EFFECT", not "discard a buffer".
