@@ -117,8 +117,21 @@ final class SearchFilterSheetViewController: UIViewController {
         super.viewDidLoad()
         title = "Filters"
         view.backgroundColor = .systemGroupedBackground
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            systemItem: .done,
+        // ⚠️ LEADING, AND SPELLED OUT — both on precedent, not preference.
+        //
+        // Leading because there is nothing to commit: every pick applies to the
+        // results underneath as it is made, so this sheet has a dismiss and no
+        // affirmative. A trailing "Done" would be the second half of a
+        // Cancel/Done pair whose first half does not exist, and would read as
+        // "apply these" over filters that are already applied.
+        //
+        // Spelled out because `systemItem: .close` and `.done` draw as a
+        // WORDLESS ✕ and ✓ on a sheet under iOS 26 — measured in-sim and
+        // recorded on `MapSubFilterSheetViewController`, which spells its own
+        // items out for the same reason: a bare checkmark on a screen full of
+        // selections reads as one more selection.
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "Close",
             primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
         )
         configureStack()
