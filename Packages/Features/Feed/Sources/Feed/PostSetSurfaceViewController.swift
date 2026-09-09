@@ -1,6 +1,7 @@
 import CoreContracts
 import CoreModels
 import FeedInterface
+import MediaPlayback
 import PostGrid
 import MediaCore
 import UIKit
@@ -18,12 +19,26 @@ import UIKit
 /// counter read, so every member is a cache hit against what the feed already
 /// holds.
 ///
-/// ⚠️ NO VIDEO PLAYBACK. `ForYouGridPage` takes an optional
-/// `VideoPlaybackController` and this passes none. The pool is app-wide, its
-/// budget is the tightest thing the hero suite measures, and a surface that is
-/// one tab of a pushed screen is not where the remaining loans belong. Posts
-/// render their posters here — which is also what a search result is: a thing
-/// to recognise and open, not a thing to watch in place.
+/// ⚠️ IT PLAYS, AND IT DID NOT. `ForYouGridPage` takes an optional
+/// `VideoPlaybackController`, and this passed `nil` on the argument that the
+/// player pool is app-wide, that its budget is the tightest thing the hero
+/// suite measures, and that one tab of a pushed screen is not where the
+/// remaining loans belong.
+///
+/// That was the wrong trade to make quietly. These pages ARE For You's tabs:
+/// a viewer scrolling search results reads the same rows they read on the feed,
+/// and clips that stay frozen there make the surface look broken rather than
+/// frugal. The pool is handed over now, and the page's own autoplay reconcile —
+/// the same one For You runs, with the same fling gate and the same visibility
+/// rules — decides what plays.
+///
+/// ⚠️ WHAT THIS COSTS IS REAL AND IS NOT PAID HERE. The pool is shared, and
+/// `HeroSoak`'s `players<=6` is already red on develop for reasons that predate
+/// this screen (the profile gallery holds loans for a tab nobody opened). Two
+/// more grids that can borrow makes a tight budget tighter. The honest position
+/// is that the surface should behave like the feed and the pool accounting is a
+/// separate, already-open problem — not that this screen should be the one to
+/// go without.
 @MainActor
 final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     var viewController: UIViewController { self }
@@ -49,12 +64,13 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     init(
         style: PostSetSurfaceStyle,
         imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController?,
         hydrate: @escaping ([PostID]) async -> [GalleryPost]
     ) {
         page = ForYouGridPage(
             imagePipeline: imagePipeline,
             style: style == .gallery ? .grid : .list,
-            videoPlayback: nil
+            videoPlayback: videoPlayback
         )
         self.hydrate = hydrate
         super.init(nibName: nil, bundle: nil)
@@ -153,6 +169,31 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     private var didOpenForQA = false
     #endif
 
+    /// ⚠️ THE PAGE PLAYS NOTHING UNTIL IT IS TOLD IT IS VISIBLE, and handing it
+    /// the pool is not that. `ForYouGridPage` gates its whole autoplay
+    /// reconcile behind `setAutoplayActive` — measured before this existed: the
+    /// grids had the pool, sat on screen, and every clip was a still, because
+    /// nothing had ever said they were being looked at. For You drives the same
+    /// call from its own appearance and from its pager's settle, and only for
+    /// the page at the active index.
+    func setPlaybackActive(_ active: Bool) {
+        loadViewIfNeeded()
+        isPlaybackActive = active
+        page.setAutoplayActive(active)
+    }
+
+    /// ⚠️ REMEMBERED, BECAUSE VISIBILITY ARRIVES BEFORE THE CONTENT DOES.
+    /// The screen appears, says "you are the visible tab", and at that moment
+    /// this page has no posts — the answer is still being hydrated. Measured:
+    ///
+    ///     [autoplay-probe] active=true posts=0 videos=0
+    ///
+    /// `setAutoplayActive(true)` on an empty page reconciles nothing and is
+    /// never asked again, so every clip stayed a still on a screen that had
+    /// been told twice over that it was visible. The flag is kept and
+    /// re-asserted the moment there is something to reconcile.
+    private var isPlaybackActive = false
+
     func show(_ state: PostSetSurfaceState) {
         loadViewIfNeeded()
         switch state {
@@ -186,6 +227,25 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
                 // the provider's order would quietly replace their sort.
                 let byID = Dictionary(posts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 self.page.render(.content(ids.compactMap { byID[$0] }))
+                // ⚠️ RE-ASSERTED AFTER THE RENDER. See `isPlaybackActive`.
+                // ⚠️ AFTER A LAYOUT PASS, not just after the snapshot. The
+                // page's autoplay reconcile asks the collection view which
+                // cells are VISIBLE, and a snapshot applied this turn has none
+                // until the next pass. Measured, straight after the apply:
+                //
+                //     straightAfterSnapshot visible=0
+                //     afterLayoutIfNeeded   visible=2
+                //
+                // So `setAutoplayActive(true)` here would walk an empty list
+                // over a page holding 71 posts, 23 of them video. The layout
+                // and the hop are what turn a correct call into an effective
+                // one.
+                guard self.isPlaybackActive else { return }
+                self.page.layoutIfNeeded()
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.isPlaybackActive else { return }
+                    self.page.setAutoplayActive(true)
+                }
             }
 
         case .empty(let message):

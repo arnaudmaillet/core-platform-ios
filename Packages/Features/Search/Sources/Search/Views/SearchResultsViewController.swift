@@ -15,29 +15,28 @@ import UIKit
 ///
 /// # The header
 ///
-/// `[back][selector][query]`, one row, the selector and the field splitting
-/// what the back button leaves down the middle.
+/// `[back][selector]` in the LEADING group, `[query]` in the trailing one.
 ///
-/// ⚠️ ONE VIEW IN THE TITLE SLOT — WHICH IS NOT THE SAME AS ONE CONTROL, and
-/// getting that wrong cost this screen a revision. `navigationItem.titleView`
-/// takes a single view, so the selector and the field cannot be two ITEMS; but
-/// a view can contain both, and a composite in the title slot is one view by
-/// UIKit's reckoning. The first build stacked them — field in the title,
-/// selector on a floating strip beneath — on the conclusion that a row was
-/// impossible. It was not.
+/// ⚠️ REAL BAR ITEMS, AND THE COMPOSITE THEY REPLACE IS WHY. This was one
+/// `UIStackView` in `navigationItem.titleView` holding both controls, which
+/// looked identical at rest and animated wrongly: a title view is ONE view to
+/// UIKit, so a push snapshots it and cross-fades the picture. The individual
+/// glass bubbles cannot interpolate into the destination's, because as far as
+/// the bar is concerned there are no individual bubbles. Bar ITEMS do
+/// interpolate, which is what every other header in this app relies on.
 ///
-/// ⚠️ THE LEADING GROUP IS STILL BARRED, and that part was right.
-/// `NativePopPolicy` refuses the edge-swipe pop when a custom leading item sits
-/// beside the back button and `leftItemsSupplementBackButton` is false, and
-/// `ProfileRelationshipsViewController` records that back + selector in one
-/// leading group collapses into a `•••` on an iPhone SE. The composite keeps
-/// the leading group to the back button alone, so the pop survives.
+/// ⚠️ `leftItemsSupplementBackButton = true` IS LOAD-BEARING, not tidiness.
+/// `NativePopPolicy` refuses the interactive edge pop when a custom leading
+/// item sits beside the back button and that flag is false — which is exactly
+/// why an earlier revision here concluded the leading group was unusable and
+/// reached for the title slot instead. The flag is the answer that policy is
+/// asking for: the system back button stays the back button, and the selector
+/// beside it is a supplement.
 ///
-/// ⚠️ THE SELECTOR SCROLLS WHEN IT DOES NOT FIT, and at half of a narrow bar it
-/// often will not. That is `PagedTabBar`'s documented behaviour for a title
-/// host — its minimums are required and the strip overflows and scrolls rather
-/// than truncating a title, with `keepLensVisible` bringing the selected tab
-/// back. Three tabs in ~150pt degrades by hiding a tab reachably instead of by
+/// ⚠️ THE SELECTOR SCROLLS WHEN IT DOES NOT FIT — `PagedTabBar`'s documented
+/// behaviour for a bar host. Its minimums are required, so the strip overflows
+/// and scrolls rather than truncating a title, with `keepLensVisible` bringing
+/// the selected tab back: it degrades by hiding a tab reachably instead of by
 /// rendering an unreadable word.
 ///
 /// # The three pages
@@ -54,23 +53,43 @@ final class SearchResultsViewController: UIViewController {
     private let imagePipeline: ImagePipeline
     private let postSurfaces: (any SearchPostSurfaceProviding)?
 
-    /// The query — a `UISearchTextField` that is never edited.
+    /// The way back to asking: a magnifier, and nothing else.
     ///
-    /// ⚠️ IT LOOKS LIKE AN INPUT AND IS A DOOR. Tapping it takes the viewer
-    /// BACK to the search screen with its own field already focused, rather
-    /// than opening a keyboard here. That is the honest arrangement: the search
-    /// screen owns asking — it has the history, the typeahead, and a field the
-    /// viewer has already used once — and duplicating a lesser version of it in
-    /// this header would give the same gesture two different answers depending
-    /// on which screen you were standing on.
+    /// ⚠️ IT IS A DOOR, AND IT NO LONGER PRETENDS TO BE AN INPUT. Tapping it
+    /// takes the viewer BACK to the search screen with its own field already
+    /// focused, rather than opening a keyboard here. The search screen owns
+    /// asking — it has the history, the typeahead, and a field the viewer has
+    /// already used once — so a second, lesser field in this header would give
+    /// the same gesture two different answers depending on which screen you
+    /// were standing on.
     ///
-    /// A real field rather than a styled button so the two screens' headers are
-    /// the same object: same capsule, same magnifier, same metrics, and no
-    /// second thing to keep in step when one changes. The focus is refused at
-    /// `textFieldShouldBeginEditing`, which is UIKit's own hook for exactly
-    /// this — the field never becomes first responder, so no keyboard is ever
-    /// summoned and dismissed.
-    private let searchField = UISearchTextField()
+    /// ⚠️ **IT WAS A `UISearchTextField` CLAIMING HALF THE BAR, AND THE HALVES
+    /// LEFT NO MARGIN.** Measured on iPhone 17 Pro with `-leading-room`: a
+    /// 402pt bar, 120pt of fixed costs, 141pt to each of the selector and the
+    /// field — which paves the bar EXACTLY, to the point. A pop briefly
+    /// narrows the bar (it carries the departing screen's back-button title
+    /// beside the arriving items), and UIKit's one answer to items that will
+    /// not fit is to sweep the whole group into a `•••`. Every arrangement
+    /// tried bought margin somewhere and paid for it somewhere else.
+    ///
+    /// A glyph asks for 44pt. That is the same shape For You's header has —
+    /// `[lens][selector] … [coins][search]` — and it is the arrangement the
+    /// budget in `LeadingSelectorBudget` was written for: one elastic claimant,
+    /// the selector, taking whatever is left and scrolling for the rest.
+    ///
+    /// ⚠️ THE COST, WRITTEN DOWN: the header no longer shows what was searched
+    /// for. The empty states still name the query; a populated result set does
+    /// not.
+    private lazy var queryDoorItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "magnifyingglass"),
+            style: .plain,
+            target: self,
+            action: #selector(editQueryTapped)
+        )
+        item.accessibilityLabel = "Search"
+        return item
+    }()
 
     /// ⚠️ `.navigationTitle`, because it lives IN the bar now. That style is
     /// documented as "compact, marginless, and BARE: the navigation bar
@@ -140,14 +159,11 @@ final class SearchResultsViewController: UIViewController {
         // `-search-filters-open` raises the filter sheet. The tray is a toolbar
         // item and the simulator taps nothing, so without this the sheet has no
         // way to be seen offline.
-        // `-search-tap-query` taps the query the way a viewer would, which is
-        // the only way to reach the way BACK to the search screen offline. It
-        // goes through `becomeFirstResponder` on purpose: the refusal it meets
-        // in `textFieldShouldBeginEditing` is the thing being tested, so an
-        // instrument calling `onEditQuery` directly would prove nothing.
+        // `-search-tap-query` taps the door the way a viewer would, which is
+        // the only way to reach the way BACK to the search screen offline.
         if arguments.contains("-search-tap-query") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                _ = self?.searchField.becomeFirstResponder()
+                self?.editQueryTapped()
             }
         }
         if arguments.contains("-search-filters-open") {
@@ -161,46 +177,49 @@ final class SearchResultsViewController: UIViewController {
     // MARK: - Header
 
     private func configureHeader() {
-        searchField.text = viewModel.submittedQueryText
-        searchField.placeholder = "Search..."
-        searchField.autocapitalizationType = .none
-        searchField.autocorrectionType = .no
-        searchField.returnKeyType = .search
-        searchField.delegate = self
+        // ⚠️ TRAILING FIRST, THEN THE SELECTOR. `installLeadingSelector`
+        // measures the room the rest of the bar has already claimed, so the
+        // door has to be in place before it is asked. Its own note says the
+        // same: "add the trailing actions BEFORE calling this".
+        navigationItem.rightBarButtonItems = [queryDoorItem]
 
-        tabBar.translatesAutoresizingMaskIntoConstraints = false
-        searchField.translatesAutoresizingMaskIntoConstraints = false
-
-        let row = UIStackView(arrangedSubviews: [tabBar, searchField])
-        row.axis = .horizontal
-        row.spacing = 8
-        row.alignment = .center
-        // ⚠️ HALVES, and stated as a constraint rather than as
-        // `.fillEqually`. A stack's equal fill divides the space it is GIVEN,
-        // and a title view is given whatever the bar has left over — which
-        // UIKit decides after measuring intrinsic sizes. Tying the two widths
-        // to each other makes the split hold at whatever width the bar lands
-        // on, including when the field grows a clear button mid-edit.
-        // ⚠️ HALVES, tied to each OTHER rather than to the row. The row is
-        // whatever the bar leaves over, which UIKit decides after measuring
-        // intrinsic sizes; a relation between the two survives that being
-        // decided late, and `.fillEqually` on a stack of unknown width does
-        // not.
-        //
-        // It briefly widened to 70% while the field was focused. The field
-        // cannot be focused any more — see `textFieldShouldBeginEditing` — so
-        // there is one shape and no reason to animate between two.
-        tabBar.widthAnchor.constraint(equalTo: searchField.widthAnchor).isActive = true
-        NSLayoutConstraint.activate([
-            tabBar.heightAnchor.constraint(
-                equalToConstant: NavigationBarMetrics.itemPlatterHeight
-            ),
-            searchField.heightAnchor.constraint(
-                equalToConstant: NavigationBarMetrics.itemPlatterHeight
-            )
-        ])
-        navigationItem.titleView = row
+        // ⚠️ `leftItemsSupplementBackButton` KEEPS THE INTERACTIVE POP ALIVE
+        // beside a custom leading item — `NativePopPolicy` refuses the edge
+        // gesture without it, which is why an earlier revision here concluded
+        // the leading group was unusable and reached for the title slot.
+        navigationItem.leftItemsSupplementBackButton = true
     }
+
+
+    /// ⚠️ THE SELECTOR IS INSTALLED WHEN THERE IS A REAL BAR TO MEASURE, not in
+    /// `viewDidLoad`. `LeadingSelectorHost` caps the strip against the room the
+    /// rest of the bar claims, and takes that measurement ONCE, in
+    /// `sizeToOwnContent()`, before the item is offered to UIKit — a cap
+    /// applied later arrives on a view that no longer has anywhere to be. So
+    /// the install waits for a bar with a width.
+    ///
+    /// ⚠️ NOT WHILE A TRANSITION IS RUNNING: this fires during a push and a pop
+    /// too, and the bar's width is not settled there.
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        guard let bar = navigationController?.navigationBar, bar.bounds.width > 0 else { return }
+        guard transitionCoordinator == nil else { return }
+        guard !hasInstalledSelector else { return }
+        hasInstalledSelector = true
+        navigationItem.installLeadingSelector(tabBar)
+    }
+
+    /// The door's action, and the one the `-search-tap-query` instrument fires.
+    ///
+    /// ⚠️ THERE IS NO REFUSAL TO TEST ANY MORE. While the door was a field, the
+    /// instrument went through `becomeFirstResponder` on purpose — the refusal
+    /// in `textFieldShouldBeginEditing` was the thing being measured. A button
+    /// has nothing to refuse, so the instrument invokes what a tap invokes.
+    @objc private func editQueryTapped() {
+        onEditQuery?()
+    }
+
+    private var hasInstalledSelector = false
 
     // MARK: - Pages
 
@@ -209,6 +228,21 @@ final class SearchResultsViewController: UIViewController {
             guard let self else { return }
             self.pager.setActivePage(self.tabBar.selectedIndex, animated: true)
         }, for: .valueChanged)
+
+        // ⚠️ THE USERS TAB HAD NO HANDLER AT ALL. `SearchPeoplePage.onSelect`
+        // was declared and never assigned, so a tap on a person did nothing —
+        // and "nothing" on a row that highlights and deselects under the finger
+        // is indistinguishable from a screen that has stopped responding.
+        //
+        // A PLAIN PUSH, deliberately, and not the flight the post tabs get. A
+        // person row has no picture to carry: the avatar is a 48pt disc that a
+        // profile header does not open out of, and this app already reserves
+        // the flight for a media surface that the destination redraws at full
+        // size. `SearchViewModel.didSelectResult` is the same path the inline
+        // results used before this screen existed — it records the visit and
+        // routes with the identity stub the row already holds, so the profile
+        // opens on a name and a face rather than on a spinner.
+        peoplePage.onSelect = { [weak self] id in self?.viewModel.didSelectResult(id) }
 
         for page in [postsPage.viewController, mediaPage.viewController, peoplePage] {
             addChild(page)
@@ -223,7 +257,10 @@ final class SearchResultsViewController: UIViewController {
         // moved on its own taps would sit on "Posts" while the viewer read the
         // gallery, which is the bug this channel exists to prevent.
         pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
-        pager.onSettled = { [weak self] index in self?.tabBar.select(index) }
+        pager.onSettled = { [weak self] index in
+            self?.tabBar.select(index)
+            self?.updatePlayback()
+        }
 
         view.addSubview(pager)
         NSLayoutConstraint.activate([
@@ -283,11 +320,6 @@ final class SearchResultsViewController: UIViewController {
         // would keep showing the OLD answer while the post tabs — driven by a
         // different callback — showed the new one. One screen, two answers.
         subscribe()
-        // ⚠️ THE HEADER'S QUERY IS RE-READ, not set once. A refine screen can
-        // change what was searched for while this screen sits underneath it,
-        // and the field was assigned in `configureHeader` — so after a refine
-        // submit the tabs showed the new answer under the OLD words.
-        searchField.text = viewModel.submittedQueryText
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
         // ⚠️ SHOWN HERE AND HIDDEN ON THE WAY OUT, because a navigation
@@ -297,8 +329,22 @@ final class SearchResultsViewController: UIViewController {
         navigationController?.setToolbarHidden(false, animated: animated)
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // ⚠️ HERE, NOT `viewWillAppear`. The window is what
+        // `updatePlayback` reads, and a screen arriving has none until it has
+        // appeared — asked earlier it would decide "not visible" and leave
+        // every clip frozen on the screen the viewer is looking at.
+        updatePlayback()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Anything pushed over this screen — a post, a profile, a refine — gets
+        // the pool. A grid under another screen holding players is the leak
+        // this call exists to prevent.
+        postsPage.setPlaybackActive(false)
+        mediaPage.setPlaybackActive(false)
         guard isMovingFromParent else { return }
         navigationController?.setToolbarHidden(true, animated: animated)
     }
@@ -364,6 +410,21 @@ final class SearchResultsViewController: UIViewController {
         }
     }
 
+    /// Exactly ONE surface plays: the tab that is showing, and only while this
+    /// screen is.
+    ///
+    /// ⚠️ THE OTHER TABS ARE LAID OUT AND MUST BE SILENT. A pager builds every
+    /// page; without this, two grids would hold players for tabs nobody is
+    /// reading, out of a pool the whole app shares. For You's pager applies the
+    /// same rule at the same granularity — the page at the active index, and no
+    /// other.
+    private func updatePlayback() {
+        let active = isViewLoaded && view.window != nil
+        let index = tabBar.selectedIndex
+        postsPage.setPlaybackActive(active && index == 0)
+        mediaPage.setPlaybackActive(active && index == 1)
+    }
+
     private func showPosts(_ state: SearchPostSurfaceState) {
         postsPage.show(state)
         mediaPage.show(mediaState(from: state))
@@ -373,18 +434,5 @@ final class SearchResultsViewController: UIViewController {
         guard case .posts = state else { return state }
         let media = viewModel.mediaResults
         return media.isEmpty ? .empty(query: viewModel.submittedQueryText) : .posts(media)
-    }
-}
-
-extension SearchResultsViewController: UITextFieldDelegate {
-    /// ⚠️ ALWAYS FALSE, AND THE TAP IS NOT LOST. Returning false is what stops
-    /// the field becoming first responder — no keyboard is summoned, so none
-    /// has to be dismissed on the way out, which is the difference between this
-    /// and hiding the field behind a transparent button. The gesture still
-    /// arrives, and it means "let me ask again": that is the search screen's
-    /// job, so it goes back there.
-    func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
-        onEditQuery?()
-        return false
     }
 }

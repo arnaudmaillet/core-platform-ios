@@ -115,6 +115,19 @@ struct SearchFilterTrayTests {
             }
         }
 
+        /// ⚠️ `settleAnswer()` CANNOT TELL ONE ANSWER FROM THE NEXT. It returns
+        /// the moment the phase is `.results`, which it already is after the
+        /// first query — so a test that submits a SECOND query and calls it
+        /// reads the first answer and believes it waited. This waits for the
+        /// words to change.
+        func settleAnswer(showing handle: String) async {
+            for _ in 0..<200 {
+                if case .results(let models) = viewModel.currentPhase,
+                   models.first?.handle == handle { return }
+                await Task.yield()
+            }
+        }
+
         /// The groups the sheet would be built from. They live on the view
         /// model — two screens read them — so this needs no presentation.
         var filterGroups: [SearchFilterSheetViewController.Group] {
@@ -329,15 +342,19 @@ struct SearchFilterTrayTests {
         results?.beginAppearanceTransition(true, animated: false)
         results?.endAppearanceTransition()
 
-        // ...so a phase published now reaches the Users tab. An empty answer is
-        // the clearest signal: the rows go.
+        // ...so a phase published now reaches the Users tab.
         host.viewModel.queryChanged("")
-        #expect(results?.peoplePageForTesting.rowCountForTesting == 1,
+        #expect(results?.peoplePageForTesting.displayedHandlesForTesting == ["@haddad"],
                 "explore does not touch the answer")
+
+        // ⚠️ COUNTED, THIS PROVED NOTHING. The stub answers every query with
+        // exactly one person, so "still 1 row" is the same assertion before and
+        // after — it passed whether or not the tab had heard anything. The
+        // handle is what distinguishes the new answer from the old one, and the
+        // results header used to be where a test could read it.
         host.viewModel.submitQuery("nobody")
-        await host.settleAnswer()
-        #expect(results?.peoplePageForTesting.rowCountForTesting == 1,
-                "the stub answers every query with one person")
+        await host.settleAnswer(showing: "@nobody")
+        #expect(results?.peoplePageForTesting.displayedHandlesForTesting == ["@nobody"])
     }
 
     /// ⚠️ CANCEL PUTS THE ANSWER BACK. Typing on the refine screen drives the
@@ -363,26 +380,6 @@ struct SearchFilterTrayTests {
             Issue.record("cancel should have put the answer back")
             return
         }
-    }
-
-    /// ⚠️ THE HEADER RE-READS THE QUERY. It was assigned once, in
-    /// `configureHeader`, so after a refine submit the tabs showed the new
-    /// answer under the OLD words.
-    @Test func theAnswerHeaderCatchesUpWithARefinedQuery() async {
-        let host = Host()
-        await host.showResults("haddad")
-        await host.settleAnswer()
-        let results = try? #require(host.results)
-        let field = results?.navigationItem.titleView?
-            .subviews.compactMap { $0 as? UITextField }.first
-        #expect(field?.text == "haddad")
-
-        // A refine screen submits something else, then goes.
-        host.viewModel.submitQuery("okafor")
-        await host.settleAnswer()
-        results?.beginAppearanceTransition(true, animated: false)
-        results?.endAppearanceTransition()
-        #expect(field?.text == "okafor")
     }
 
     /// ⚠️ A REFINE SCREEN MUST NOT RESET THE SHARED PHASE. `showExplore()` in
@@ -414,40 +411,59 @@ struct SearchFilterTrayTests {
 
     // MARK: - The query on the results screen is a door
 
-    /// ⚠️ THE REFUSAL IS THE FEATURE. Returning false from
-    /// `textFieldShouldBeginEditing` is what stops the field becoming first
-    /// responder — no keyboard is summoned, so none has to be dismissed on the
-    /// way out. A transparent button over the field would have let the keyboard
-    /// start rising before the pop.
-    @Test func theResultsQueryRefusesTheKeyboardAndAsksToGoBack() async {
+    /// ⚠️ NO KEYBOARD IS EVER SUMMONED HERE, and now that is structural rather
+    /// than refused. The door used to be a `UISearchTextField` that said no in
+    /// `textFieldShouldBeginEditing`; it is a glyph, so there is no responder
+    /// to become. What is still worth pinning is that the tap ASKS — a door
+    /// that leads nowhere is indistinguishable from a screen that has stopped
+    /// responding.
+    @Test func theResultsQueryDoorAsksToGoBack() async {
         let host = Host()
         await host.showResults("haddad")
         let results = host.results
         var asked = 0
         results?.onEditQuery = { asked += 1 }
 
-        let field = try? #require(results?.navigationItem.titleView?
-            .subviews.compactMap { $0 as? UITextField }.first)
-        #expect(field?.becomeFirstResponder() == false)
-        #expect(field?.isFirstResponder == false)
+        let door = try? #require(results?.navigationItem.rightBarButtonItems?.first)
+        #expect(door?.customView == nil)
+        _ = door?.target?.perform(door?.action, with: door)
         #expect(asked == 1)
     }
 
-    /// The header keeps one shape: the two halves are tied to each other, so
-    /// the split holds at whatever width the bar hands the title view.
-    @Test func theHeaderSplitsTheRowInHalf() async {
+    /// ⚠️ **A GLYPH, NOT A FIELD, AND THE WIDTH IS THE REASON.** Measured with
+    /// `-leading-room` on a 402pt bar: 120pt of fixed costs leaves 282 to
+    /// share, and a selector and a field each taking half paves the bar EXACTLY
+    /// — no margin at all. A pop briefly narrows the bar, and UIKit's one
+    /// answer to items that will not fit is to sweep the group into a `•••`.
+    /// A 44pt glyph leaves the selector 141pt of ceiling and ~100pt of slack.
+    @Test func theQueryDoorIsAGlyphAndNotACustomView() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let items = host.results?.navigationItem.rightBarButtonItems
+
+        #expect(items?.count == 1)
+        // No custom view means no width of its own to negotiate: UIKit sizes it
+        // at the platter, the same as For You's search glyph.
+        #expect(items?.first?.customView == nil)
+        #expect(items?.compactMap { $0.customView as? UITextField }.isEmpty == true)
+    }
+
+    /// ⚠️ REAL BAR ITEMS, NOT A COMPOSITE TITLE VIEW. A title view is one view
+    /// to UIKit: a push snapshots it and cross-fades the picture, so the glass
+    /// bubbles cannot interpolate into the destination's. Items do.
+    @Test func theHeaderIsBuiltFromBarItems() async {
         let host = Host()
         await host.showResults("haddad")
         let results = host.results
-        let row = try? #require(results?.navigationItem.titleView as? UIStackView)
-        #expect(row?.arrangedSubviews.count == 2)
-        let equal = row?.arrangedSubviews.first?.constraints.contains { constraint in
-            constraint.firstAttribute == .width && constraint.multiplier == 1
-        }
-        // The constraint is installed on the tab bar against the field, so it
-        // is held by their common ancestor rather than by either view.
-        let held = row?.constraints.contains { $0.firstAttribute == .width } ?? false
-        #expect(held || equal == true)
+
+        // The query door is a trailing item...
+        #expect(results?.navigationItem.rightBarButtonItems?.count == 1)
+        // ...and the selector SUPPLEMENTS the back button rather than replacing
+        // it, which is what keeps the interactive pop alive — `NativePopPolicy`
+        // refuses the edge gesture for a custom leading item without this, and
+        // refuses it outright for a hidden back button.
+        #expect(results?.navigationItem.leftItemsSupplementBackButton == true)
+        #expect(results?.navigationItem.hidesBackButton == false)
     }
 
     // MARK: - Cancel and Done

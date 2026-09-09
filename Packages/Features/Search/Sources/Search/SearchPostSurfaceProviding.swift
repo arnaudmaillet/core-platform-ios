@@ -43,6 +43,10 @@ public protocol SearchPostSurface: AnyObject {
     /// What to show. Called again whenever the answer changes — a new query, a
     /// new order, a new scope.
     func show(_ state: SearchPostSurfaceState)
+
+    /// Whether this surface is the tab the viewer is on. A surface one swipe
+    /// away is laid out and must not be playing.
+    func setPlaybackActive(_ active: Bool)
 }
 
 /// What a post surface is being asked to show.

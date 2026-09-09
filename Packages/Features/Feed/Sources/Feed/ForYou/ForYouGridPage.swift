@@ -1093,6 +1093,10 @@ final class ForYouGridPage: UIView {
     /// tap actually does, and the scroll-into-view work went three rounds with
     /// no run able to reach it. Going through the delegate means a scripted
     /// open and a real one differ only in what produced the touch.
+    /// How many cells the collection view currently has laid out — the number
+    /// `updateAutoplay` walks to find candidates.
+    var debugVisibleItemCount: Int { collectionView.indexPathsForVisibleItems.count }
+
     func debugSelectItem(at index: Int) -> Bool {
         guard posts.indices.contains(index) else { return false }
         collectionView(collectionView, didSelectItemAt: indexPath(for: index))
