@@ -112,28 +112,33 @@ final class SearchViewController: UIViewController {
     // What removed the artefact was removing the resting state, not fighting
     // the animation.
 
-    /// ⚠️ `viewWillAppear`, WHICH IS AS EARLY AS THIS CAN BE ASKED FOR.
+    /// ⚠️ AFTER THE PUSH HAS SETTLED, and that is a preference rather than a
+    /// limit.
     ///
-    /// A view must be IN A WINDOW to become first responder, and the earliest
-    /// moment that is true on a push is here: the navigation controller has
-    /// already put this view into the transition's container. `viewDidLoad` is
-    /// too early — the field is not in a window yet and the call is simply
-    /// refused — and `viewDidAppear` is a whole push too late, which is what
-    /// this used to do (and, deferred to the transition coordinator's
-    /// completion on top of that, later still).
+    /// `viewWillAppear` is the earliest this can be asked for — a view must be
+    /// in a window to become first responder, and the navigation controller
+    /// has put this one into the transition's container by then. Claiming it
+    /// there was tried, and filmed: the keyboard starts rising while the push
+    /// is still running, so the screen slides in with the keyboard coming up
+    /// underneath it. Two animations at once, and it was judged worse on
+    /// screen than the keyboard arriving on a settled page.
     ///
-    /// Claiming it here means the keyboard rises ALONGSIDE the push rather
-    /// than after it: the screen arrives already focused instead of arriving
-    /// and then focusing.
+    /// So the claim waits for the transition coordinator's completion, which
+    /// is the first moment the screen is genuinely still.
     ///
-    /// ⚠️ ONCE. `viewWillAppear` fires again when anything this screen pushed
+    /// ⚠️ ONCE. `viewDidAppear` fires again when anything this screen pushed
     /// pops back, and re-claiming the keyboard there would fight a viewer who
     /// has just come back to read a result.
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
         guard !hasClaimedField else { return }
         hasClaimedField = true
-        searchField.becomeFirstResponder()
+        let claim = { [weak self] in self?.searchField.becomeFirstResponder() }
+        if let coordinator = transitionCoordinator {
+            coordinator.animate(alongsideTransition: nil) { _ in claim() }
+        } else {
+            claim()
+        }
     }
 
     /// ⚠️ THIS SCREEN NO LONGER TOUCHES THE BOTTOM CHROME, and the three hooks
