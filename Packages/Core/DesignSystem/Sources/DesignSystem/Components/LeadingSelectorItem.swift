@@ -11,51 +11,41 @@ import UIKit
 /// left. It is a horizontal scroller, so "what is left" is always enough: down
 /// to `bubbleWidth` it is a perfect circle showing one tab and swiping to the
 /// rest.
-/// How wide a control beside a leading selector may be.
+/// How wide a control sharing a bar with a leading selector should ask for.
 ///
-/// ⚠️ **A HALF WITH A BUBBLE FLOOR, which is why a `•••` should be impossible.**
-/// UIKit sweeps a group into an overflow when its items ask for more than the
-/// bar has. Both controls asking for HALF of what is actually left can never do
-/// that — and floored at their own height, the worst case is a bar holding
-/// three perfect bubbles, which is narrower than any device this app runs on.
+/// ⚠️ **A HALF IS WHAT A CONTROL ASKS FOR, NOT WHAT IT GETS.** Both controls
+/// asking for exactly half puts the pair on the bar's boundary, and a POP
+/// briefly narrows the bar — it carries the departing screen's back-button
+/// title beside the arriving items — so something has to give or UIKit sweeps
+/// the trailing group into a `•••`.
 ///
-/// It exists because the first version of the search results header stated
-/// 150pt a side by hand: ten points over the budget on a 402pt bar, and UIKit
-/// answered with a `•••`. A number can be wrong for a device nobody tested; a
-/// proportion with a floor cannot.
+/// ⚠️ AND THE ONE THAT GIVES IS NOT THE ONE YOU WOULD PICK. The obvious answer
+/// is the selector: a `PagedTabBar` in a bar host caps itself and SCROLLS,
+/// while a text field short of room is just a worse field. Filmed, that
+/// arrangement still produced the `•••` — the host re-measures on its own
+/// layout pass, which does not come in time, whereas a constraint's PRIORITY is
+/// read by the very pass that decides whether to overflow. See
+/// `SearchResultsViewController.queryWidth`, where the four arrangements tried
+/// are written down.
 ///
 /// The arithmetic lives here, beside the constants it is made of, rather than
 /// in the screen that needs it — the same reason `LeadingSelectorBudget` does.
 public enum NavigationBarShare {
-    /// Half of what `barWidth` has left beside a back button and one other
-    /// control, never less than `bubble`.
+    /// Half of what `barWidth` has left beside a back button and a selector,
+    /// never less than `bubble`.
     ///
     /// - `bubble`: the control's own height. A control as wide as it is tall is
-    ///   one perfect bubble, which is the least a control can be and still be a
-    ///   control — the floor `LeadingSelectorItem.ceiling(bubbleWidth:)` uses
-    ///   for the same reason.
+    ///   one perfect bubble — the least a control can be and still be one, and
+    ///   the floor `LeadingSelectorItem.ceiling(bubbleWidth:)` uses for the
+    ///   strip for the same reason.
     public static func halfBesideBackButton(inBarOfWidth barWidth: CGFloat, bubble: CGFloat) -> CGFloat {
         let claimed = LeadingSelectorBudget.barMargin * 2
             + LeadingSelectorBudget.itemWidth          // the back button
             + LeadingSelectorBudget.platterGap         // back ↔ selector
             + LeadingSelectorBudget.interGroupGap      // leading ↔ trailing
             + LeadingSelectorBudget.platterPadding
-        return max(bubble, (barWidth - claimed) * share)
+        return max(bubble, (barWidth - claimed) / 2)
     }
-
-    /// ⚠️ 48%, NOT 50%, AND THE TWO PERCENT IS THE WHOLE POINT. Exact halves
-    /// put the two groups on the boundary: their sum is the bar's usable width
-    /// to the point, and anything that shaves a point off it during a
-    /// transition — a destination's back-button title being measured, a
-    /// rounding — puts them over. UIKit's answer to over is an overflow, so the
-    /// trailing item collapsed to a `•••` for a few frames mid-animation and
-    /// re-expanded when the bar settled. Reported from a recording as "the
-    /// input transitions to the three dots and then widens again".
-    ///
-    /// Slack rather than a smaller constant: a percentage keeps the halves
-    /// halves on every width, and the two points is what keeps them off the
-    /// edge on all of them.
-    private static let share: CGFloat = 0.48
 }
 
 struct LeadingSelectorBudget {

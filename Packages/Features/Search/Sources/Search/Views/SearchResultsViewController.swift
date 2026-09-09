@@ -208,19 +208,33 @@ final class SearchResultsViewController: UIViewController {
     /// Restated on every layout, because a bar item's custom view is measured
     /// before it has a bar to measure against — the constraint is created with
     /// a placeholder and corrected as soon as there is a width to read.
-    /// ⚠️ NOT REQUIRED, AND THAT IS WHAT STOPS THE `•••`. A required width
-    /// cannot compress, so when the bar is momentarily narrower than the two
-    /// halves want — which is what a POP does, carrying the departing screen's
-    /// back-button title beside the arriving items — UIKit has no way to fit
-    /// them and sweeps the trailing group into an overflow. It returns a few
-    /// frames later when the bar settles: the flicker reported as "the input
-    /// turns into three dots and then widens again".
+    /// ⚠️ **NOT REQUIRED, AND FOUR ARRANGEMENTS WERE FILMED TO GET HERE.** The
+    /// symptom each time was the trailing group collapsing to a `•••` for a few
+    /// frames of a POP and re-expanding — a pop carries the departing screen's
+    /// back-button title beside the arriving items, so the bar is briefly
+    /// narrower than it settles at, and UIKit's answer to items that will not
+    /// fit is an overflow.
     ///
-    /// Neither a smaller share nor refusing to resize mid-transition fixed it —
-    /// both were tried and filmed — because neither addresses a width that is
-    /// transiently smaller than any settled arithmetic can predict. Letting the
-    /// field YIELD does: it asks for its half and gives ground rather than
-    /// overflowing.
+    ///   - both halves required          → `•••`
+    ///   - 48% rather than 50%           → `•••` (the transient width is
+    ///                                     smaller than any share of the
+    ///                                     settled one)
+    ///   - field required, SELECTOR left
+    ///     to absorb the shortfall       → `•••`
+    ///   - field yielding                → no `•••`
+    ///
+    /// ⚠️ THE THIRD IS THE INTERESTING ONE, because it is the better model on
+    /// paper: put the give in the control built to give — a `PagedTabBar` in a
+    /// bar host caps itself and SCROLLS, a text field short of room is just a
+    /// worse field. Filmed, it did not work. The selector's host re-measures on
+    /// its OWN layout pass, which does not come in time; the field's constraint
+    /// priority is read by the very pass that decides whether to overflow. Only
+    /// one of those two is in the room when the decision is made.
+    ///
+    /// So the field yields, and the cost is written down where it shows: it
+    /// narrows towards its bubble as the profile leaves and is back at full
+    /// width by the time the bar settles. A continuous width change instead of
+    /// a discrete collapse.
     private lazy var queryWidth: NSLayoutConstraint = {
         let width = searchField.widthAnchor.constraint(
             equalToConstant: NavigationBarMetrics.itemPlatterHeight
