@@ -141,7 +141,15 @@ final class SearchViewController: UIViewController {
             self?.lastReportedQuery = text
             self?.setFieldText(text)
         }
-        viewModel.showExplore()
+        // ⚠️ ONLY THE ORIGIN SCREEN RESETS TO THE HISTORY. A refine screen
+        // shares its view model with the answer it was pushed over, so
+        // `showExplore()` here would cancel that screen's in-flight search and
+        // drive the shared phase to `.explore` — which the results screen maps
+        // to a spinner, so a post answer landing while the refine screen is up
+        // would flip the Posts tab back to loading. The refine branch of
+        // `configureSearchAffordance` has already put the query in and reported
+        // it; resetting straight afterwards would undo that too.
+        if case .origin = mode { viewModel.showExplore() }
 
         #if DEBUG
         applyDebugArguments()

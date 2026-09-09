@@ -283,6 +283,11 @@ final class SearchResultsViewController: UIViewController {
         // would keep showing the OLD answer while the post tabs — driven by a
         // different callback — showed the new one. One screen, two answers.
         subscribe()
+        // ⚠️ THE HEADER'S QUERY IS RE-READ, not set once. A refine screen can
+        // change what was searched for while this screen sits underneath it,
+        // and the field was assigned in `configureHeader` — so after a refine
+        // submit the tabs showed the new answer under the OLD words.
+        searchField.text = viewModel.submittedQueryText
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
         // ⚠️ SHOWN HERE AND HIDDEN ON THE WAY OUT, because a navigation

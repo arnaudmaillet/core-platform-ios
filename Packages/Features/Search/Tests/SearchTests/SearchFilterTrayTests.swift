@@ -365,6 +365,53 @@ struct SearchFilterTrayTests {
         }
     }
 
+    /// ⚠️ THE HEADER RE-READS THE QUERY. It was assigned once, in
+    /// `configureHeader`, so after a refine submit the tabs showed the new
+    /// answer under the OLD words.
+    @Test func theAnswerHeaderCatchesUpWithARefinedQuery() async {
+        let host = Host()
+        await host.showResults("haddad")
+        await host.settleAnswer()
+        let results = try? #require(host.results)
+        let field = results?.navigationItem.titleView?
+            .subviews.compactMap { $0 as? UITextField }.first
+        #expect(field?.text == "haddad")
+
+        // A refine screen submits something else, then goes.
+        host.viewModel.submitQuery("okafor")
+        await host.settleAnswer()
+        results?.beginAppearanceTransition(true, animated: false)
+        results?.endAppearanceTransition()
+        #expect(field?.text == "okafor")
+    }
+
+    /// ⚠️ A REFINE SCREEN MUST NOT RESET THE SHARED PHASE. `showExplore()` in
+    /// `viewDidLoad` would cancel the answer's in-flight search and drive the
+    /// phase to `.explore`, which the results screen maps to a spinner — so a
+    /// post answer landing while refine is up would flip its Posts tab back to
+    /// loading.
+    @Test func buildingARefineScreenLeavesTheAnswerAlone() async {
+        let host = Host()
+        await host.showResults("haddad")
+        await host.settleAnswer()
+
+        let refine = SearchViewController(
+            viewModel: host.viewModel,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            mode: .refine
+        )
+        refine.loadViewIfNeeded()
+
+        // The phase is the typeahead for the query being edited, never
+        // `.explore` — which is what `showExplore()` would have made it.
+        switch host.viewModel.currentPhase {
+        case .suggesting, .results:
+            break
+        default:
+            Issue.record("a refine screen reset the shared phase")
+        }
+    }
+
     // MARK: - The query on the results screen is a door
 
     /// ⚠️ THE REFUSAL IS THE FEATURE. Returning false from
