@@ -1,3 +1,4 @@
+import CoreModels
 import UIKit
 
 /// The two post surfaces the results screen shows, vended from outside Search.
@@ -18,11 +19,44 @@ import UIKit
 public protocol SearchPostSurfaceProviding: Sendable {
     /// A surface showing the posts a search matched.
     ///
-    /// The caller owns WHERE it goes; the surface owns what a post looks like.
-    /// Both styles are the same component in this app — For You's Following and
-    /// Discover tabs are one type in two styles — which is why this is one
-    /// method with a parameter rather than two.
-    func makePostSurface(style: SearchPostSurfaceStyle) -> UIViewController
+    /// The caller owns WHERE it goes and WHICH posts; the surface owns what a
+    /// post looks like and how to hydrate one. Both styles are the same
+    /// component in this app — For You's Following and Discover tabs are one
+    /// type in two styles — which is why this is one method with a parameter.
+    func makePostSurface(style: SearchPostSurfaceStyle) -> any SearchPostSurface
+}
+
+/// A post surface, once made.
+///
+/// ⚠️ IDS CROSS, NOT POSTS. `search.v1` answers with references — a
+/// `PostHit` carries an author, a thumbnail key and a date, and NO caption, no
+/// attachments, no aspect ratio and no counts. A card cannot be drawn from
+/// that, so whatever fills this seam has to hydrate the ids through `post.v1`
+/// before it can render. Feed already owns the only path in this repo that
+/// does (`FixedPostsFeedProvider` into `ForYouRepository.firstPage()`, plus one
+/// batched counter read), which is the other half of why these surfaces are
+/// vended rather than built here.
+@MainActor
+public protocol SearchPostSurface: AnyObject {
+    /// The thing to put on screen.
+    var viewController: UIViewController { get }
+    /// What to show. Called again whenever the answer changes — a new query, a
+    /// new order, a new scope.
+    func show(_ state: SearchPostSurfaceState)
+}
+
+/// What a post surface is being asked to show.
+public enum SearchPostSurfaceState: Equatable, Sendable {
+    case loading
+    /// The posts a search matched, in the order the engine ranked them.
+    ///
+    /// ⚠️ ORDER IS PART OF THE ANSWER. The surface must not re-rank: the sort
+    /// the viewer picked was applied by the engine over the whole index, and a
+    /// surface reordering the page it was handed would show a different answer
+    /// under the same label.
+    case posts([PostID])
+    case empty(query: String)
+    case failed(message: String)
 }
 
 /// Which of the two the caller wants.

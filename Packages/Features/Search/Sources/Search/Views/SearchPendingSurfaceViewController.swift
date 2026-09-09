@@ -12,7 +12,14 @@ import UIKit
 ///
 /// In the app, the root wires the provider and this is never seen.
 @MainActor
-final class SearchPendingSurfaceViewController: UIViewController {
+final class SearchPendingSurfaceViewController: UIViewController, SearchPostSurface {
+    var viewController: UIViewController { self }
+
+    /// Ignored. There is nothing here that could show a post — see the type's
+    /// note. Conforming anyway is what lets the screen hold ONE kind of thing
+    /// rather than branching on whether a provider was wired.
+    func show(_ state: SearchPostSurfaceState) {}
+
     enum Kind {
         case posts
         case media

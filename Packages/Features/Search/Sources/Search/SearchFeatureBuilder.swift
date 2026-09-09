@@ -14,6 +14,9 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     private let metadata: (any ProfileMetadataProviding)?
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
+    /// Where the results screen's Posts and Media tabs come from. `nil` in a
+    /// composition without Feed — see `SearchPostSurfaceProviding`.
+    private let postSurfaces: (any SearchPostSurfaceProviding)?
 
     public init(
         repository: any SearchProviding,
@@ -21,7 +24,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         explore: (any ExploreProviding)? = nil,
         metadata: (any ProfileMetadataProviding)? = nil,
         imagePipeline: ImagePipeline,
-        router: (any Router)? = nil
+        router: (any Router)? = nil,
+        postSurfaces: (any SearchPostSurfaceProviding)? = nil
     ) {
         self.repository = repository
         self.recentSearches = recentSearches
@@ -29,6 +33,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         self.metadata = metadata
         self.imagePipeline = imagePipeline
         self.router = router
+        self.postSurfaces = postSurfaces
     }
 
     public func makeSearchViewController() -> UIViewController {
@@ -40,7 +45,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
                 explore: explore,
                 metadata: metadata
             ),
-            imagePipeline: imagePipeline
+            imagePipeline: imagePipeline,
+            postSurfaces: postSurfaces
         )
     }
 }

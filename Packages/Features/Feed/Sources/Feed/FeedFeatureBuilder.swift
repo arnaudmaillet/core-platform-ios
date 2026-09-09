@@ -348,6 +348,40 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         }
     }
 
+    public func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface {
+        let base = repository
+        let counterClient = counterClient
+        let surface = PostSetSurfaceViewController(
+            style: style,
+            imagePipeline: imagePipeline,
+            hydrate: { ids in
+                // The place profile's hydration, verbatim in shape: a fixed-set
+                // provider through the For You repository so every member is a
+                // cache hit, then ONE batched counter read for all three counts.
+                // Three surfaces asking three different ways is how they come to
+                // disagree — see `makeClusterGallery`'s note.
+                let provider = FixedPostsFeedProvider(base: base, ids: ids)
+                guard let posts = try? await ForYouRepository(feed: provider).firstPage().posts
+                else { return [] }
+                guard let counterClient else { return posts }
+                let byPostID = await PostCounterReader.counters(
+                    forPostIDs: posts.map(\.id.rawValue), using: counterClient
+                )
+                guard !byPostID.isEmpty else { return posts }
+                return posts.map { post in
+                    guard let counts = byPostID[post.id.rawValue] else { return post }
+                    var decorated = post
+                    decorated.reactionCount = counts.likes ?? post.reactionCount
+                    decorated.commentCount = counts.comments
+                    decorated.viewCount = counts.views ?? post.viewCount
+                    return decorated
+                }
+            }
+        )
+        surface.onOpenPost = { [router] id in router?.route(to: .post(id)) }
+        return surface
+    }
+
     public func makeClusterGallery(
         postIDs: [PostID],
         title: String,

@@ -58,8 +58,8 @@ final class SearchResultsViewController: UIViewController {
     private var pager: HorizontalPagerView!
 
     private let peoplePage: SearchPeoplePage
-    private let postsPage: UIViewController
-    private let mediaPage: UIViewController
+    private let postsPage: any SearchPostSurface
+    private let mediaPage: any SearchPostSurface
 
     init(
         viewModel: SearchViewModel,
@@ -92,7 +92,12 @@ final class SearchResultsViewController: UIViewController {
         configurePages()
         configureToolbar()
         render(viewModel.currentPhase)
+        showPosts(postState(for: viewModel.currentPhase))
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        viewModel.onPostResultsChange = { [weak self] _ in
+            guard let self else { return }
+            self.showPosts(self.postState(for: self.viewModel.currentPhase))
+        }
         #if DEBUG
         // `-search-results-tab <0|1|2>` opens on a tab. The pager is driven by
         // a swipe and the simulator injects none, so without this only the
@@ -134,12 +139,12 @@ final class SearchResultsViewController: UIViewController {
             self.pager.setActivePage(self.tabBar.selectedIndex, animated: true)
         }, for: .valueChanged)
 
-        for page in [postsPage, mediaPage, peoplePage] {
+        for page in [postsPage.viewController, mediaPage.viewController, peoplePage] {
             addChild(page)
             page.didMove(toParent: self)
         }
         pager = HorizontalPagerView(
-            pages: [postsPage.view, mediaPage.view, peoplePage.view],
+            pages: [postsPage.viewController.view, mediaPage.viewController.view, peoplePage.view],
             initialIndex: 0
         )
         pager.translatesAutoresizingMaskIntoConstraints = false
@@ -220,6 +225,43 @@ final class SearchResultsViewController: UIViewController {
             // is the last one submitted; it stays until they ask again.
             break
         }
+    }
+
+    /// ⚠️ THE POST TABS ARE NOT THE PEOPLE TAB'S STATE. The two searches are
+    /// separate round trips with separate answers, and they disagree often:
+    /// "harbour" matches two posts and nobody at all. Deriving the post tabs
+    /// from the people phase showed an empty Posts tab for exactly that query.
+    ///
+    /// The phase is still read for LOADING and FAILED, which are properties of
+    /// the request rather than of either answer.
+    private func postState(for phase: SearchViewModel.Phase) -> SearchPostSurfaceState {
+        switch phase {
+        case .loading where viewModel.postResults.isEmpty:
+            .loading
+        case .failed(let message):
+            .failed(message: message)
+        case .explore, .suggesting:
+            .loading
+        case .loading, .results, .empty:
+            viewModel.postResults.isEmpty
+                ? .empty(query: viewModel.submittedQueryText)
+                : .posts(viewModel.postResults)
+        }
+    }
+
+    /// ⚠️ THE TWO TABS GET DIFFERENT SETS. Posts is every match; Media is the
+    /// subset with a picture. Handing the gallery the full set drew a blank
+    /// tile per text post — filmed, a grid of empty rectangles among the
+    /// photographs.
+    private func showPosts(_ state: SearchPostSurfaceState) {
+        postsPage.show(state)
+        mediaPage.show(mediaState(from: state))
+    }
+
+    private func mediaState(from state: SearchPostSurfaceState) -> SearchPostSurfaceState {
+        guard case .posts = state else { return state }
+        let media = viewModel.mediaResults
+        return media.isEmpty ? .empty(query: viewModel.submittedQueryText) : .posts(media)
     }
 }
 

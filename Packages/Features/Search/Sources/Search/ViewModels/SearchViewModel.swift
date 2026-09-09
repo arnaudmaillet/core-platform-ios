@@ -65,6 +65,7 @@ public final class SearchViewModel {
     /// matters. That is an invariant held by two methods a hundred lines
     /// apart, and it is one edit away from being false. This says it outright.
     private var submittedQuery = ""
+    private var postsTask: Task<Void, Never>?
     /// Whether the Recent section is showing everything or just the first
     /// window of it. Sticky for the life of the screen: a viewer who expanded
     /// the list has said they want the long version, and collapsing it again
@@ -186,6 +187,31 @@ public final class SearchViewModel {
     /// tray by design — if best-text-match should be offered, it needs a fifth
     /// segment, not a silent default.
     public private(set) var sortOrder: SearchSortOrder = .popularity
+
+    /// The POSTS the last submitted search matched, as ids.
+    ///
+    /// ⚠️ ALONGSIDE THE PHASE, NOT INSIDE IT. The phase describes the PEOPLE
+    /// answer, which is what the search screen has always rendered; folding a
+    /// second answer into it would mean every existing `case .results` had to
+    /// learn about posts. The results screen reads both, and the two searches
+    /// can legitimately disagree — people found, no posts, or the reverse.
+    public private(set) var postResults: [PostID] = [] {
+        didSet { onPostResultsChange?(postResults) }
+    }
+
+    /// The subset of `postResults` that has a picture — what the Media tab
+    /// shows. See `PostSearchHit.hasMedia`: a gallery of text posts is a grid
+    /// of blank tiles.
+    public private(set) var mediaResults: [PostID] = []
+
+    /// ⚠️ ITS OWN CHANNEL, and it earned one the hard way. The post answer
+    /// used to ride the phase: the screen read `postResults` whenever a phase
+    /// arrived. Two searches, one notification — so a post answer landing after
+    /// the people answer was never announced, and worse, when the people search
+    /// matched NOBODY the phase went `.empty` and stayed there, so a query with
+    /// posts and no people showed an empty Posts tab. Filmed on "harbour",
+    /// which is exactly that query.
+    public var onPostResultsChange: (([PostID]) -> Void)?
 
     /// What the screen is showing right now, for a view that arrives AFTER the
     /// phase it needs. The results screen is pushed once the answer is already
@@ -742,6 +768,25 @@ public final class SearchViewModel {
 
     private func runSearch(_ trimmed: String) async {
         phase = .loading
+        postResults = []
+        mediaResults = []
+        // ⚠️ ITS OWN TASK, deliberately unawaited by the people search. The two
+        // are separate round trips (see `searchPosts` for why they cannot be
+        // one federated page), and making the list of people wait for the list
+        // of posts would spend the slower of the two on a tab the viewer is
+        // probably not looking at.
+        postsTask?.cancel()
+        postsTask = Task { [weak self] in
+            guard let self else { return }
+            let hits = (try? await self.repository.searchPosts(
+                matching: trimmed, sort: self.sortOrder, limit: self.pageSize
+            )) ?? []
+            guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
+            // ⚠️ MEDIA FIRST, because `postResults` announces and the screen
+            // reads both in that announcement.
+            self.mediaResults = hits.filter(\.hasMedia).map(\.id)
+            self.postResults = hits.map(\.id)
+        }
         do {
             let results = try await repository.searchProfiles(
                 matching: trimmed, sort: sortOrder, limit: pageSize

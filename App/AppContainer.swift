@@ -640,7 +640,11 @@ final class AppContainer {
         explore: exploreRepository,
         metadata: profileMetadataRepository,
         imagePipeline: imagePipeline,
-        router: routeResolver
+        router: routeResolver,
+        // The results screen's Posts and Media tabs, from Feed — joined HERE
+        // rather than by a dependency, exactly as `explore:` above is. See
+        // `SearchPostSurfaceAdapter`.
+        postSurfaces: SearchPostSurfaceAdapter(feed: feedFeature)
     )
 
     // MARK: - Notifications
