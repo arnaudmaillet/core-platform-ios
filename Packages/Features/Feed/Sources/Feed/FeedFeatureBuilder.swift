@@ -348,6 +348,47 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         }
     }
 
+    public func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface {
+        let base = repository
+        let counterClient = counterClient
+        let surface = PostSetSurfaceViewController(
+            style: style,
+            imagePipeline: imagePipeline,
+            hydrate: { ids in
+                // The place profile's hydration, verbatim in shape: a fixed-set
+                // provider through the For You repository so every member is a
+                // cache hit, then ONE batched counter read for all three counts.
+                // Three surfaces asking three different ways is how they come to
+                // disagree — see `makeClusterGallery`'s note.
+                let provider = FixedPostsFeedProvider(base: base, ids: ids)
+                guard let posts = try? await ForYouRepository(feed: provider).firstPage().posts
+                else { return [] }
+                guard let counterClient else { return posts }
+                let byPostID = await PostCounterReader.counters(
+                    forPostIDs: posts.map(\.id.rawValue), using: counterClient
+                )
+                guard !byPostID.isEmpty else { return posts }
+                return posts.map { post in
+                    guard let counts = byPostID[post.id.rawValue] else { return post }
+                    var decorated = post
+                    decorated.reactionCount = counts.likes ?? post.reactionCount
+                    decorated.commentCount = counts.comments
+                    decorated.viewCount = counts.views ?? post.viewCount
+                    return decorated
+                }
+            }
+        )
+        // ⚠️ A FLIGHT, NOT A PUSH, and this is what it used to be:
+        // `router.route(to: .post(id))`, the platform's plain slide. These two
+        // pages ARE For You's tabs, so a tap on one of them had every reason to
+        // open the way a tap on the other does — and did not, because the host
+        // was new and nobody had handed it the opener.
+        surface.openPost = { [self] presenter, origin, ids in
+            presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+        }
+        return surface
+    }
+
     public func makeClusterGallery(
         postIDs: [PostID],
         title: String,

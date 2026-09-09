@@ -51,6 +51,21 @@ public final class SearchViewModel {
         didSet { onPhaseChange?(phase) }
     }
     private var query = ""
+
+    /// What was last SUBMITTED, as opposed to what is in the field.
+    ///
+    /// ⚠️ THE TWO DIVERGE, and re-running the wrong one is a real answer to a
+    /// question nobody asked. `query` follows every keystroke — `queryChanged`
+    /// assigns it — so it means "what the field says". A filter change has to
+    /// re-run what the viewer actually SEARCHED for.
+    ///
+    /// It happens to be safe today to re-run `query` instead, because typing
+    /// moves the phase to `.suggesting` and a filter change is only a re-run
+    /// while results are showing — so the two are equal exactly when it
+    /// matters. That is an invariant held by two methods a hundred lines
+    /// apart, and it is one edit away from being false. This says it outright.
+    private var submittedQuery = ""
+    private var postsTask: Task<Void, Never>?
     /// Whether the Recent section is showing everything or just the first
     /// window of it. Sticky for the life of the screen: a viewer who expanded
     /// the list has said they want the long version, and collapsing it again
@@ -153,6 +168,170 @@ public final class SearchViewModel {
         }
     }
 
+    /// How the engine is asked to order results. Owned here rather than by the
+    /// view controller because it is part of the REQUEST, not of the bar: the
+    /// screen can be rebuilt around it and the pick has to survive.
+    /// ⚠️ `.popularity`, NOT `.relevance`, AND THAT IS A PRODUCT DECISION
+    /// RATHER THAN A DEFAULT LEFT ALONE.
+    ///
+    /// `search.v1` defaults to RELEVANCE — best text match — and that was this
+    /// screen's default until the filter tray got its ranking dimension. The
+    /// tray's four segments are Trending / Newest / Most liked / Most
+    /// commented: relevance is not one of them, so leaving it in effect meant
+    /// the sheet opened showing "Trending" selected while the engine was
+    /// ranking by something else. A control that misreports the state it
+    /// controls is worse than a coarser default.
+    ///
+    /// So the first segment is true: Trending is POPULARITY, and it is what
+    /// runs until the viewer picks otherwise. Relevance is unreachable from the
+    /// tray by design — if best-text-match should be offered, it needs a fifth
+    /// segment, not a silent default.
+    public private(set) var sortOrder: SearchSortOrder = .popularity
+
+    /// The POSTS the last submitted search matched, as ids.
+    ///
+    /// ⚠️ ALONGSIDE THE PHASE, NOT INSIDE IT. The phase describes the PEOPLE
+    /// answer, which is what the search screen has always rendered; folding a
+    /// second answer into it would mean every existing `case .results` had to
+    /// learn about posts. The results screen reads both, and the two searches
+    /// can legitimately disagree — people found, no posts, or the reverse.
+    public private(set) var postResults: [PostID] = [] {
+        didSet { onPostResultsChange?(postResults) }
+    }
+
+    /// The subset of `postResults` that has a picture — what the Media tab
+    /// shows. See `PostSearchHit.hasMedia`: a gallery of text posts is a grid
+    /// of blank tiles.
+    public private(set) var mediaResults: [PostID] = []
+
+    /// ⚠️ ITS OWN CHANNEL, and it earned one the hard way. The post answer
+    /// used to ride the phase: the screen read `postResults` whenever a phase
+    /// arrived. Two searches, one notification — so a post answer landing after
+    /// the people answer was never announced, and worse, when the people search
+    /// matched NOBODY the phase went `.empty` and stayed there, so a query with
+    /// posts and no people showed an empty Posts tab. Filmed on "harbour",
+    /// which is exactly that query.
+    public var onPostResultsChange: (([PostID]) -> Void)?
+
+    /// What the screen is showing right now, for a view that arrives AFTER the
+    /// phase it needs. The results screen is pushed once the answer is already
+    /// in flight, so it has to ask rather than wait to be told.
+    public var currentPhase: Phase { phase }
+
+    /// The text that was actually searched for, for a header that has to show
+    /// it. Not `query`, which follows the field — see `submittedQuery`.
+    public var submittedQueryText: String { submittedQuery }
+
+    /// Whose results are shown. See `SearchScope` — this filters the answer on
+    /// screen, never the query.
+    public private(set) var scope: SearchScope = .everyone
+
+    /// The answer as it came back, before the scope narrowed it.
+    ///
+    /// ⚠️ KEPT SEPARATELY BECAUSE THE FILTER IS NOT DESTRUCTIVE. Narrowing to
+    /// Following and back has to give the same list, and the follow state each
+    /// row is judged on ARRIVES LATE — `search.v1` says nothing about the
+    /// viewer's relationship to a hit, so it is a second read. Filtering the
+    /// published list in place would have thrown away the rows that had not
+    /// been judged yet.
+    private var unfilteredResults: [SearchResultDisplayModel] = []
+
+    // ⚠️ THERE IS NO `onSortOrderChange`, AND THERE WAS. It existed so the
+    // bar could redraw a menu's checkmark when the order changed from
+    // elsewhere. The tray is a sheet now: it is built at PRESENTATION from
+    // `sortOrder`, and it is the only thing that changes the order while it is
+    // open — so it already knows. An unread callback is a subscription nobody
+    // holds, and this file kept firing it.
+
+    /// Picks an order and, if there is a search on screen, runs it again.
+    ///
+    /// ⚠️ RE-RUNS RATHER THAN RE-SORTS. The engine ranks the whole index and
+    /// answers with a page of it; re-ordering the page the client happens to
+    /// hold would show the viewer the *same* people in a different order and
+    /// call it "most recent", which is a different and wrong answer.
+    ///
+    /// ⚠️ AND IT DOES NOT RE-RECORD THE QUERY. Going through `submitQuery`
+    /// would write the same text to the recent searches once per filter
+    /// change; the search is re-run directly for that reason.
+    /// Narrows what is on screen. No round trip: the scope is not on the wire.
+    ///
+    /// ⚠️ RE-PUBLISHES RATHER THAN RE-SEARCHES, which is the opposite of
+    /// `setSortOrder`. An order is a question for the engine — it ranks the
+    /// whole index and answers with a page. A scope is a question about the
+    /// page already held, and asking the server again would return the same
+    /// rows in the same order to filter identically.
+    public func setScope(_ scope: SearchScope) {
+        guard scope != self.scope else { return }
+        self.scope = scope
+        guard case .results = phase else { return }
+        publishResults()
+    }
+
+    /// Re-emits the last SUBMITTED answer, discarding whatever the typeahead
+    /// left behind.
+    ///
+    /// ⚠️ THIS EXISTS BECAUSE ONE VIEW MODEL NOW SERVES TWO SCREENS. A refine
+    /// screen is pushed over the answer and shares this instance, so typing in
+    /// it drives the phase to `.suggesting` — which is right for the screen
+    /// being typed in and wrong for the one underneath, whose whole content is
+    /// an answer. Cancelling has to put back what the answer was, or the screen
+    /// it returns to renders a typeahead it never asked for.
+    ///
+    /// ⚠️ NOT THE SAME AS RE-RUNNING. Nothing is fetched: the answer is still
+    /// held, and asking the engine again for a question already answered would
+    /// spend a round trip to arrive at the same rows.
+    public func restoreSubmittedAnswer() {
+        guard !submittedQuery.isEmpty else { return showExplore() }
+        publishResults()
+    }
+
+    /// Publishes `unfilteredResults` through the current scope.
+    ///
+    /// ⚠️ AN EMPTY SCOPE IS NOT AN EMPTY SEARCH. "Following" matching nobody
+    /// still means the search found people — so it keeps the `.results` phase
+    /// with no rows rather than falling into `.empty`, whose copy says nothing
+    /// matched the query. The screen tells the two apart; conflating them would
+    /// blame the query for a filter.
+    private func publishResults() {
+        phase = .results(filtered(unfilteredResults))
+    }
+
+    private func filtered(_ models: [SearchResultDisplayModel]) -> [SearchResultDisplayModel] {
+        switch scope {
+        case .everyone:
+            models
+        case .following:
+            // ⚠️ Unresolved metadata is NOT "not followed". A row whose second
+            // read has not landed is unjudged, and dropping it would make the
+            // list shrink and grow as answers trickle in.
+            models.filter { resolvedMetadata[$0.id]?.isFollowed ?? false }
+        }
+    }
+
+    public func setSortOrder(_ order: SearchSortOrder) {
+        guard order != sortOrder else { return }
+        sortOrder = order
+
+        // Nothing has been searched for yet — the pick is remembered and takes
+        // effect on the next submit. Re-running here would search for "".
+        let trimmed = submittedQuery
+        guard !trimmed.isEmpty, isShowingSearchResults else { return }
+        searchTask?.cancel()
+        searchTask = Task { [weak self] in
+            await self?.runSearch(trimmed)
+        }
+    }
+
+    /// Whether the screen is showing (or fetching) the answer to a submitted
+    /// search, as opposed to the history or the typeahead. A filter change is
+    /// only a re-run when there is an answer for it to change.
+    private var isShowingSearchResults: Bool {
+        switch phase {
+        case .loading, .results, .empty, .failed: true
+        case .explore, .suggesting: false
+        }
+    }
+
     /// The viewer pressed Search — the one input that searches, and the one
     /// that writes to the history.
     ///
@@ -164,6 +343,7 @@ public final class SearchViewModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         query = trimmed
+        submittedQuery = trimmed
         recentSearches?.recordQuery(trimmed)
 
         searchTask?.cancel()
@@ -373,8 +553,13 @@ public final class SearchViewModel {
             phase = .explore(exploreModel())
         case .suggesting(let query, let rows):
             phase = .suggesting(query: query, rows: withResolvedAvatars(rows))
-        case .results(let models):
-            phase = .results(models.map(withResolvedMetadata))
+        case .results:
+            // ⚠️ Re-filtered, not just re-decorated. Under a Following scope the
+            // metadata that just landed is what DECIDES whether a row belongs
+            // on screen at all, so re-publishing through the scope is what lets
+            // the list fill in as the second reads answer.
+            unfilteredResults = unfilteredResults.map(withResolvedMetadata)
+            publishResults()
         case .loading, .empty, .failed:
             break
         }
@@ -510,14 +695,126 @@ public final class SearchViewModel {
         }
     }
 
+
+    // MARK: - The filter tray's vocabulary
+    //
+    // ⚠️ HERE RATHER THAN ON A SCREEN, because two screens read it now: the
+    // search screen used to own both the tray and the answer, and the answer
+    // moved to `SearchResultsViewController`. State and the words describing
+    // it belong together, and this way the tray is testable without a view.
+
+    /// What the sheet shows: three dimensions, in the order they were asked
+    /// for, with every segment the product named.
+    ///
+    /// ⚠️ FOUR OF TWELVE SEGMENTS CAN ACT. `search.v1.SearchRequest` carries
+    /// six fields — query, entity_types, sort, page_size, page_token,
+    /// exclude_author_ids — and `SearchSort` has three values. There is no
+    /// like or comment sort, no date bound, and no viewer scope. The rest are
+    /// drawn and disabled, with the reason in each footer, because a
+    /// segmented control showing two of four options makes the dimension
+    /// itself unreadable. Asked for in `dev/BACKEND_GAPS.md` §19.
+    func filterGroups() -> [SearchFilterSheetViewController.Group] {
+        [
+            .init(
+                id: Self.rankingGroupID,
+                title: "Rank by",
+                // ⚠️ "Trending" is `SearchSort.POPULARITY`, and the contract's
+                // own comment is why the footer says what it says: it "reads
+                // the periodically-refreshed popularity signal, never a
+                // real-time count".
+                footer: "Trending reads a periodically-refreshed popularity signal, "
+                    + "not a live count. Likes and comments need a sort search.v1 "
+                    + "does not have yet.",
+                segments: [
+                    .init(SearchSortOrder.popularity.rawValue, "Trending"),
+                    .init(SearchSortOrder.recency.rawValue, "Newest"),
+                    .init("mostLiked", "Liked", isEnabled: false),
+                    .init("mostCommented", "Commented", isEnabled: false)
+                ],
+                selectedID: sortOrder.rawValue
+            ),
+            .init(
+                id: Self.publishedGroupID,
+                title: "Published",
+                footer: "A date window needs a bound on the request, and a date on "
+                    + "each result. search.v1 has neither for people.",
+                segments: [
+                    .init("day", "24h", isEnabled: false),
+                    .init("week", "Week", isEnabled: false),
+                    .init("halfYear", "6 months", isEnabled: false),
+                    .init("all", "All time")
+                ],
+                selectedID: "all"
+            ),
+            .init(
+                id: Self.scopeGroupID,
+                title: "Scope",
+                footer: "Following narrows the results on screen. Nothing records "
+                    + "which of them you have already seen, so those two cannot be "
+                    + "offered yet.",
+                segments: [
+                    .init(SearchScope.everyone.rawValue, "Everyone"),
+                    .init("seen", "Seen", isEnabled: false),
+                    .init("unseen", "Unseen", isEnabled: false),
+                    .init(SearchScope.following.rawValue, "Following")
+                ],
+                selectedID: scope.rawValue
+            )
+        ]
+    }
+
+    static let rankingGroupID = "ranking"
+    static let publishedGroupID = "published"
+    static let scopeGroupID = "scope"
+
+    func applyFilter(group: String, option: String) {
+        switch group {
+        case Self.rankingGroupID:
+            guard let order = SearchSortOrder(rawValue: option) else { return }
+            setSortOrder(order)
+        case Self.scopeGroupID:
+            guard let scope = SearchScope(rawValue: option) else { return }
+            setScope(scope)
+        default:
+            // `published` reaches here only if a disabled segment is picked
+            // programmatically, which the sheet already refuses.
+            break
+        }
+    }
+
     // MARK: - Search
 
     private func runSearch(_ trimmed: String) async {
         phase = .loading
+        postResults = []
+        mediaResults = []
+        // ⚠️ ITS OWN TASK, deliberately unawaited by the people search. The two
+        // are separate round trips (see `searchPosts` for why they cannot be
+        // one federated page), and making the list of people wait for the list
+        // of posts would spend the slower of the two on a tab the viewer is
+        // probably not looking at.
+        postsTask?.cancel()
+        postsTask = Task { [weak self] in
+            guard let self else { return }
+            let hits = (try? await self.repository.searchPosts(
+                matching: trimmed, sort: self.sortOrder, limit: self.pageSize
+            )) ?? []
+            guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
+            // ⚠️ MEDIA FIRST, because `postResults` announces and the screen
+            // reads both in that announcement.
+            self.mediaResults = hits.filter(\.hasMedia).map(\.id)
+            self.postResults = hits.map(\.id)
+        }
         do {
-            let results = try await repository.searchProfiles(matching: trimmed, limit: pageSize)
-            // A late response for a superseded query must not overwrite newer state.
-            guard !Task.isCancelled, query.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+            let results = try await repository.searchProfiles(
+                matching: trimmed, sort: sortOrder, limit: pageSize
+            )
+            // A late response for a superseded query must not overwrite newer
+            // state. ⚠️ Against `submittedQuery`, not `query`: `query` follows
+            // the field, so a re-run triggered by a filter change while the
+            // viewer had typed something new would be discarded here — the
+            // spinner would stay up forever, on a screen with no error.
+            guard !Task.isCancelled, submittedQuery == trimmed else { return }
             if results.isEmpty {
                 phase = .empty(query: trimmed)
             } else {
@@ -525,7 +822,8 @@ public final class SearchViewModel {
                 // nothing about the viewer's relationship — so a result starts
                 // bare and is completed by `ProfileMetadataProviding`.
                 let models = results.map { withResolvedMetadata(SearchResultDisplayModel(result: $0)) }
-                phase = .results(models)
+                unfilteredResults = models
+                publishResults()
                 resolveAvatars(for: models.filter { resolvedMetadata[$0.id] == nil }.map(\.id))
             }
         } catch {

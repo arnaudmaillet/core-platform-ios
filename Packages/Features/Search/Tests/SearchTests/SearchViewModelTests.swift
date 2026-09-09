@@ -8,13 +8,17 @@ import Testing
 private actor StubSearchProvider: SearchProviding {
     private let results: [ProfileSearchResult]
     private(set) var lastQuery: String?
+    /// Every order the screen has asked for, in order — so a test can prove a
+    /// filter change re-ran the search rather than re-sorting what it held.
+    private(set) var sorts: [SearchSortOrder] = []
 
     init(results: [ProfileSearchResult]) {
         self.results = results
     }
 
-    func searchProfiles(matching query: String, limit: Int32) async throws -> [ProfileSearchResult] {
+    func searchProfiles(matching query: String, sort: SearchSortOrder, limit: Int32) async throws -> [ProfileSearchResult] {
         lastQuery = query
+        sorts.append(sort)
         return results
     }
 

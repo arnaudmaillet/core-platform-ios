@@ -12,7 +12,7 @@ private actor StubProvider: SearchProviding {
         self.completions = completions
     }
 
-    func searchProfiles(matching query: String, limit: Int32) async throws -> [ProfileSearchResult] { [] }
+    func searchProfiles(matching query: String, sort: SearchSortOrder, limit: Int32) async throws -> [ProfileSearchResult] { [] }
     func suggestions(forPrefix prefix: String, limit: Int32) async throws -> [SearchSuggestion] { completions }
 }
 

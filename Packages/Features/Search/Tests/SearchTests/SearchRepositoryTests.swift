@@ -42,7 +42,7 @@ struct SearchRepositoryTests {
             return response
         }
 
-        let results = try await repository.searchProfiles(matching: "a", limit: 25)
+        let results = try await repository.searchProfiles(matching: "a", sort: .relevance, limit: 25)
 
         #expect(results.count == 2)
         #expect(results.first?.id == ProfileID("prof-1"))
@@ -57,7 +57,7 @@ struct SearchRepositoryTests {
             return Search_V1_SearchResponse()
         }
 
-        _ = try await repository.searchProfiles(matching: "  alice  ", limit: 25)
+        _ = try await repository.searchProfiles(matching: "  alice  ", sort: .relevance, limit: 25)
 
         #expect(received.query == "alice")
         #expect(received.types == [.profile])
@@ -73,7 +73,7 @@ struct SearchRepositoryTests {
             return response
         }
 
-        let results = try await repository.searchProfiles(matching: "c", limit: 25)
+        let results = try await repository.searchProfiles(matching: "c", sort: .relevance, limit: 25)
 
         #expect(results.map(\.id) == [ProfileID("prof-9")])
     }
@@ -85,7 +85,7 @@ struct SearchRepositoryTests {
             return Search_V1_SearchResponse()
         }
 
-        let results = try await repository.searchProfiles(matching: "   ", limit: 25)
+        let results = try await repository.searchProfiles(matching: "   ", sort: .relevance, limit: 25)
 
         #expect(results.isEmpty)
         #expect(called.query == nil) // never hit the wire

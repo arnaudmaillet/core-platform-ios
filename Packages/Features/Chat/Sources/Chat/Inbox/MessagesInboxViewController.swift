@@ -336,6 +336,20 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                                  cancelCentre.map { String(format: "%.1f", $0.y) } ?? "not-found",
                                  cancelCentre.map { String(format: "%.1f", fieldCentre.y - $0.y) } ?? "-",
                                  self.searchField.bounds.height))
+                    // ⚠️ CENTRES ARE NOT HEIGHTS, and the line above only ever
+                    // checked centres. Two pills can share an axis and still be
+                    // visibly different sizes, which is exactly what shipped:
+                    // the field was 36pt against a Cancel platter UIKit draws
+                    // taller. The platter is private, so it is found by walking
+                    // up from the label to the first ancestor that is taller
+                    // than the label itself — that view IS the glass pill.
+                    // ⚠️ CENTRES ARE NOT HEIGHTS, and the line above only ever
+                    // checked centres. Two pills can share an axis and still be
+                    // visibly different sizes, which is exactly what shipped —
+                    // a 36pt field beside a 44pt Cancel platter, `delta=-0.2`.
+                    print(String(format: "[inbox-search] fieldPillH=%.1f platters=%@",
+                                 self.searchField.bounds.height,
+                                 self.debugDescribeBarPlatters()))
                 }
                 print("[inbox-search] searching=\(self.isSearching) "
                     + "resultsOnScreen=\(results.view.window != nil) "
@@ -375,13 +389,18 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private var selectorItem: UIBarButtonItem?
     private var isSearching = false
 
-    /// The field's height, which is also the Cancel item's touch height, so the
-    /// two share a centre line with nothing left over above or below.
-    private static let fieldHeight: CGFloat = 36
+    /// The field's height, which is the Cancel PILL's height — see
+    /// `NavigationBarMetrics.itemPlatterHeight` for the measured nesting.
+    ///
+    /// ⚠️ This was 36, taken from `_UIButtonBarButton`, which is the Cancel
+    /// item's TOUCH target and not the glass pill drawn around it. The two
+    /// shared a centre line exactly (`delta=-0.2`, which is why the existing
+    /// audit passed) and were visibly different sizes: 36 against 44.
+    private static let fieldHeight = NavigationBarMetrics.itemPlatterHeight
 
     private func configureSearchAffordance() {
         searchItem.accessibilityLabel = "Search"
-        searchField.placeholder = "Search"
+        searchField.placeholder = "Search..."
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no
         searchField.returnKeyType = .search
@@ -473,8 +492,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // Searching is a mode, not a place: the tab bar is a way OUT of it that
         // would take the query with it, and the results deserve the height.
         tabBarController?.setTabBarHidden(true, animated: true)
-        morphBar(duration: 0.3) {
-            self.setBarOpaque(true)
+        morphNavigationBar(duration: 0.3) {
             self.applySearchingBar()
             // ⚠️ LAID OUT FIRST. A title view is installed on the bar's next
             // layout pass, and `becomeFirstResponder` on a view that is not in a
@@ -512,8 +530,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         searchField.text = nil
         let results = searchResults
 
-        morphBar(duration: 0.26) {
-            self.setBarOpaque(false)
+        morphNavigationBar(duration: 0.26) {
             self.applyRestingBar()
         }
         tabBarController?.setTabBarHidden(false, animated: true)
@@ -531,31 +548,18 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// right until the bar becomes the search field, at which point the rows
     /// sliding behind the text are simply noise. Opaque while searching, and back
     /// to inherited afterwards so the resting bar keeps the system's material.
-    private func setBarOpaque(_ opaque: Bool) {
-        guard opaque else {
-            navigationItem.standardAppearance = nil
-            navigationItem.scrollEdgeAppearance = nil
-            navigationItem.compactAppearance = nil
-            return
-        }
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = .systemBackground
-        // No hairline. The results start immediately under the bar, so a divider
-        // there separates the field from its own results — the two are one surface
-        // while searching, and the line is the only thing saying otherwise.
-        appearance.shadowColor = nil
-        navigationItem.standardAppearance = appearance
-        navigationItem.scrollEdgeAppearance = appearance
-        navigationItem.compactAppearance = appearance
-    }
-
-    private func morphBar(duration: TimeInterval, _ change: @escaping () -> Void) {
-        guard let bar = navigationController?.navigationBar else { change(); return }
-        UIView.transition(with: bar, duration: duration,
-                          options: [.transitionCrossDissolve, .allowUserInteraction],
-                          animations: change)
-    }
+    // ⚠️ THE SEARCHING BAR IS NOT MADE OPAQUE, and it used to be. A
+    // `UINavigationBarAppearance` with `configureWithOpaqueBackground()` and a
+    // `.systemBackground` fill was installed for the length of the search, on
+    // the argument that result rows sliding behind the field are noise.
+    //
+    // What it actually did was give this one state a flat slab where every
+    // other header in the app — this same bar at rest, the Maps and For You
+    // headers, the global search screen — is the system's glass. The rows are
+    // no less legible through it, and the app is one header again.
+    //
+    // The dissolve itself now comes from `DesignSystem`: this file's private
+    // copy was the third of three identical ones.
 
     // MARK: - Category selection
 

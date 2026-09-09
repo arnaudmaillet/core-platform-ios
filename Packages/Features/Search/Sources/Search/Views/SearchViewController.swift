@@ -21,10 +21,35 @@ import UIKit
 /// `keyboardLayoutGuide` so they centre in the space actually left over rather
 /// than behind the keyboard.
 final class SearchViewController: UIViewController {
-    private let viewModel: SearchViewModel
-    private let imagePipeline: ImagePipeline
+    /// Where this screen was reached from, which decides its header and what
+    /// submitting does.
+    enum Mode {
+        /// Pushed from the Maps or For You header: `[back][field]`, and
+        /// submitting pushes the answer.
+        case origin
+        /// Pushed from the ANSWER, to ask again: `[field][Cancel]`, and
+        /// submitting pops back onto the answer it just changed.
+        ///
+        /// ⚠️ Cancel is the only way out of this one. Hiding the back button
+        /// is what gives the field the full width, and
+        /// `ProfileRelationshipsViewController` records the consequence in the
+        /// same breath: the interactive edge pop goes with the button, and
+        /// comes back with it. That is a real cost, taken deliberately —
+        /// the alternative is a back chevron beside a Cancel, two ways out of
+        /// the same screen sitting next to each other.
+        case refine
+    }
 
-    private let searchController = UISearchController(searchResultsController: nil)
+    private let viewModel: SearchViewModel
+    private let mode: Mode
+    private let imagePipeline: ImagePipeline
+    /// Filled by the composition root; `nil` in a composition without Feed —
+    /// see `SearchPostSurfaceProviding`.
+    private let postSurfaces: (any SearchPostSurfaceProviding)?
+
+    /// The field. It is the bar's title view for the life of the screen.
+    private let searchField = UISearchTextField()
+
     private var collectionView: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let statusView = EmptyStateView()
@@ -42,20 +67,66 @@ final class SearchViewController: UIViewController {
     private var resultsByID: [ProfileID: SearchResultDisplayModel] = [:]
     private var creatorsByID: [ProfileID: ExploreCreator] = [:]
 
-    init(viewModel: SearchViewModel, imagePipeline: ImagePipeline) {
+    init(
+        viewModel: SearchViewModel,
+        imagePipeline: ImagePipeline,
+        postSurfaces: (any SearchPostSurfaceProviding)? = nil,
+        mode: Mode = .origin
+    ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
+        self.postSurfaces = postSurfaces
+        self.mode = mode
         super.init(nibName: nil, bundle: nil)
+        // ⚠️ IN THE INITIALISER, not `viewDidLoad`. A navigation controller
+        // reads this when the push BEGINS, and `viewDidLoad` can run inside
+        // that same push — set there it is a coin toss whether the bar goes.
+        //
+        // This screen is a destination now, not a tab root: it is pushed from
+        // the Maps and For You headers, and the bar it would sit under belongs
+        // to the screen it came from. UIKit puts that bar back on the pop; the
+        // fade below is only about HOW it leaves and returns.
+        hidesBottomBarWhenPushed = true
+        #if DEBUG
+        installKeyboardTraceIfRequested()
+        #endif
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    #if DEBUG
+    /// `-search-layout-trace`: how long the keyboard takes to arrive, timed
+    /// from the moment this screen is BUILT — which is the moment the route
+    /// fires, one line before the push.
+    ///
+    /// ⚠️ The push's own animation is inside that number, which is the whole
+    /// reason to measure it here rather than from `viewDidAppear`: the question
+    /// is what the viewer waits through between tapping a magnifier and being
+    /// able to type, and an animated push spends its duration inside that wait.
+    private func installKeyboardTraceIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("-search-layout-trace") else { return }
+        let start = CACurrentMediaTime()
+        for name: Notification.Name in [
+            UIResponder.keyboardWillShowNotification,
+            UIResponder.keyboardDidShowNotification
+        ] {
+            NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { note in
+                print(String(format: "[search-keyboard] t=%4.0fms %@",
+                             (CACurrentMediaTime() - start) * 1000,
+                             note.name.rawValue.replacingOccurrences(of: "UIKeyboard", with: "")))
+            }
+        }
+    }
+    #endif
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Search"
+        title = nil
         view.backgroundColor = .systemBackground
-        configureSearchController()
+        configureSearchAffordance()
         configureCollectionView()
         configureStatusViews()
 
@@ -68,44 +139,107 @@ final class SearchViewController: UIViewController {
             // screen would narrow the history for the very query it is in the
             // middle of searching for.
             self?.lastReportedQuery = text
-            self?.searchController.searchBar.text = text
+            self?.setFieldText(text)
         }
-        viewModel.showExplore()
+        // ⚠️ ONLY THE ORIGIN SCREEN RESETS TO THE HISTORY. A refine screen
+        // shares its view model with the answer it was pushed over, so
+        // `showExplore()` here would cancel that screen's in-flight search and
+        // drive the shared phase to `.explore` — which the results screen maps
+        // to a spinner, so a post answer landing while the refine screen is up
+        // would flip the Posts tab back to loading. The refine branch of
+        // `configureSearchAffordance` has already put the query in and reported
+        // it; resetting straight afterwards would undo that too.
+        if case .origin = mode { viewModel.showExplore() }
 
         #if DEBUG
         applyDebugArguments()
         #endif
     }
 
-    // ⚠️ **No auto-focus, deliberately.** This screen used to claim the field
-    // as first responder in `viewDidAppear`, which opened the keyboard on
-    // arrival — and the keyboard covers roughly half the screen, so the two
-    // sections the tab exists to show were mostly hidden behind it before the
-    // viewer had done anything. The field is a tap away; the content is worth
-    // seeing first.
+    /// ⚠️ **AUTO-FOCUS IS BACK, AND THE REASON IT WAS REMOVED NO LONGER
+    /// HOLDS.** It was dropped because the keyboard covers roughly half the
+    /// screen, so a viewer who selected the Search TAB had the two sections
+    /// that tab existed to show hidden before they had done anything.
+    ///
+    /// This is not a tab any more. It is reached by tapping a magnifier in the
+    /// Maps or For You header — a gesture that already says "I want to
+    /// search" — so opening in the state that gesture asked for costs nothing
+    /// and saves a tap. The suggestions are one keyboard-dismiss away, which is
+    /// the opposite of the old trade rather than a repeat of it.
+    ///
+    private var hasClaimedField = false
 
+    // ⚠️ THE HISTORY OF THIS BAR, kept because it is the reason it looks
+    // nothing like a `UISearchController`. A search controller owns its own
+    // activation animation, and on iOS 26 it collapses the active field into
+    // the navigation bar's glass PLATTER — which is not the app's to remove,
+    // resize or opt out of. Measured frame by frame through every placement
+    // (`.stacked`, `.integrated`, `.integratedButton`, `.integratedCentered`),
+    // with and without a placeholder, with the text field hidden and with the
+    // search bar hidden: the platter's width animation survives all of it.
+    // What removed the artefact was removing the resting state, not fighting
+    // the animation.
+
+    /// ⚠️ AS SOON AS THE SCREEN IS STILL — which, since this route stopped
+    /// animating its push, is immediately.
+    ///
+    /// The history is worth keeping because both ends of it were tried on
+    /// screen. `viewWillAppear` is the earliest a first responder can be
+    /// claimed: a view must be in a window, and the navigation controller has
+    /// put this one into the transition's container by then. Claimed there,
+    /// the keyboard rises WHILE the push slides — two animations at once, and
+    /// judged worse than a keyboard arriving on a settled page. Claimed after
+    /// the push, the keyboard is a whole transition late: measured from the
+    /// route firing, `WillShow` at 872–1055ms and `DidShow` at 1281–1475ms
+    /// over four runs.
+    ///
+    /// What actually fixed it was removing the push animation rather than
+    /// moving the claim (`RouteResolver`'s `.search` case): same code, same
+    /// ordering, `WillShow` at 330–471ms and `DidShow` at 773–887ms.
+    ///
+    /// ⚠️ THE `isAnimated` AND RETURN-VALUE GUARDS ARE NOT BELT AND BRACES.
+    /// `animate(alongsideTransition:)` DROPS its block, returning false, when
+    /// the coordinator cannot queue it — and the coordinator is not
+    /// necessarily nil on an unanimated push. Trusting `if let` alone would
+    /// mean the completion never fires and the keyboard NEVER appears, which
+    /// reads as a broken screen rather than as a rejected design. The pattern
+    /// is `ProfileViewController.alongsideTransition`'s, for the same reason.
+    ///
+    /// ⚠️ ONCE. `viewDidAppear` fires again when anything this screen pushed
+    /// pops back, and re-claiming the keyboard there would fight a viewer who
+    /// has just come back to read a result.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !hasClaimedField else { return }
+        hasClaimedField = true
+        let claim = { [weak self] in self?.searchField.becomeFirstResponder() }
+        if let coordinator = transitionCoordinator, coordinator.isAnimated,
+           coordinator.animate(alongsideTransition: nil, completion: { _ in claim() }) {
+            return
+        }
+        claim()
+    }
+
+    /// ⚠️ THIS SCREEN NO LONGER TOUCHES THE BOTTOM CHROME, and the three hooks
+    /// that did are gone. It hid the bar by fading it out here and faded it
+    /// back in on return — machinery from when Search was a TAB ROOT that
+    /// pushed profiles over itself.
+    ///
+    /// It is a pushed destination now (`hidesBottomBarWhenPushed`), so UIKit
+    /// owns the bar for the whole visit: it goes on the push and comes back on
+    /// the pop, and anything Search pushes is pushed over a screen that already
+    /// has no bar.
+    ///
+    /// Leaving the fade in place did real damage, and the guard could not catch
+    /// it: `topViewController !== self` was written to mean "something was
+    /// pushed OVER me", but it is equally true while this screen is being
+    /// POPPED — so the pop faded the chrome to alpha 0 on its way out and the
+    /// map underneath came back with an invisible tab bar. Filmed.
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Only when something was PUSHED over this screen. A tab switch also
-        // sends `viewWillDisappear`, and fading the bar for that would take it
-        // away from whichever tab the viewer just moved to.
-        guard navigationController?.topViewController !== self else { return }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-search-layout-audit") { dumpBottomChrome() }
         #endif
-        fadeTabBar(to: 0)
-    }
-
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        fadeTabBar(to: 1)
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        // Belt and braces: whatever the transition did or did not finish, a
-        // screen that is on top must never leave invisible chrome behind it.
-        tabBarChrome?.alpha = 1
     }
 
     /// The view holding the bottom chrome — the bar, its platters, and the
@@ -130,33 +264,6 @@ final class SearchViewController: UIViewController {
         return container
     }
 
-    /// Fades the bottom chrome in step with the push or pop moving this screen.
-    ///
-    /// ⚠️ **The glitch this exists to fix.** `hidesBottomBarWhenPushed` takes
-    /// the bar away at the END of the push, while its *contents* leave at the
-    /// start — so for the whole transition two emptied glass containers sat
-    /// frozen over the incoming profile and then popped out of existence.
-    /// Riding the transition coordinator makes the glass leave with everything
-    /// else, and come back the same way on the pop.
-    ///
-    /// Alpha rather than the house's usual render-level dissolve because the
-    /// chrome is *leaving*, not restyling: the rule against fading a glass lens
-    /// is about a material sampling the wrong backdrop while it stays on
-    /// screen, and nothing here stays.
-    private func fadeTabBar(to alpha: CGFloat) {
-        guard let chrome = tabBarChrome else { return }
-        guard let coordinator = transitionCoordinator else {
-            chrome.alpha = alpha
-            return
-        }
-        coordinator.animate(alongsideTransition: { _ in
-            chrome.alpha = alpha
-        }, completion: { context in
-            // An interactive pop the viewer abandoned leaves the profile up, so
-            // the chrome has to go back to where the push left it.
-            if context.isCancelled { chrome.alpha = 1 - alpha }
-        })
-    }
 
     #if DEBUG
     /// `-search-layout-audit`: names every view sitting in the bottom band at
@@ -191,7 +298,7 @@ final class SearchViewController: UIViewController {
     ///
     /// **The field is not in this view hierarchy at all.** `UISearchTab`
     /// mirrors the search controller into a capsule it draws in the tab bar;
-    /// `searchController.searchBar.window` is nil for the life of the screen,
+    /// The field lives in the navigation bar's title slot, so its own window is
     /// so the capsule's position cannot be measured — only its height, which
     /// the bar still reports because it is the object UIKit is mirroring.
     ///
@@ -209,7 +316,7 @@ final class SearchViewController: UIViewController {
         let keyboardTop = view.keyboardLayoutGuide.layoutFrame.minY
         let keyboardIsUp = keyboardTop < restingBottom - 1
         let inset = keyboardIsUp
-            ? (restingBottom - keyboardTop) + searchController.searchBar.bounds.height
+            ? (restingBottom - keyboardTop) + searchField.bounds.height
             : 0
         // Guarded: assigning an inset lays out again, and an unguarded
         // assignment here would be a layout loop.
@@ -242,30 +349,235 @@ final class SearchViewController: UIViewController {
 
     // MARK: - Setup
 
-    private func configureSearchController() {
-        searchController.searchResultsUpdater = self
-        searchController.searchBar.delegate = self
-        // No dimming: the results land in THIS collection view, so there is
-        // nothing above to obscure and a scrim would only grey out the answer.
-        searchController.obscuresBackgroundDuringPresentation = false
-        searchController.searchBar.placeholder = "Search people"
-        searchController.searchBar.autocapitalizationType = .none
-        searchController.searchBar.autocorrectionType = .no
-        searchController.searchBar.returnKeyType = .search
+    /// The bar, which has ONE state: `[ back ][ field ———————————————— ]`.
+    ///
+    /// ⚠️ NO `UISearchController`, AND NOW NO SWAP EITHER.
+    ///
+    /// A search controller owns its own activation animation: on iOS 26 it
+    /// collapses the active field into the navigation bar's glass PLATTER, and
+    /// that platter is not this app's to remove, resize or opt out of. Measured
+    /// frame by frame through every placement (`.stacked`, `.integrated`,
+    /// `.integratedButton`, `.integratedCentered`), with and without a
+    /// placeholder, with the field hidden and with the bar hidden: the
+    /// platter's width animation survives all of it, and the closing reads as a
+    /// wide empty capsule crossing the bar.
+    ///
+    /// `MessagesInboxViewController` avoided that by swapping the bar itself
+    /// and dissolving between a resting magnifier and a searching field. This
+    /// screen went one step further and has no resting state at all: it IS the
+    /// search, so the field is simply always there. The magnifier that opens it
+    /// lives on the Maps and For You headers, which is where the choice to
+    /// search is actually made.
+    ///
+    /// The closing animation that took a dozen attempts to tame therefore does
+    /// not exist here any more. There is nothing to close: the way out is the
+    /// back button.
+    private func configureSearchAffordance() {
+        searchField.placeholder = "Search..."
+        searchField.autocapitalizationType = .none
+        searchField.autocorrectionType = .no
+        searchField.returnKeyType = .search
         // Stated rather than inherited: clearing through the system glyph
-        // routes back out via `updateSearchResults`, so an emptied field
+        // routes back out through `searchTextChanged`, so an emptied field
         // restores the history by the same path typing narrowed it.
-        searchController.searchBar.searchTextField.clearButtonMode = .whileEditing
-        // The bar stays while the field is active. It is the only thing on
-        // this screen that says which screen it is — the field lives in the
-        // tab bar, so letting UIKit hide the navigation bar on activation left
-        // the list running up under the status bar with nothing titling it,
-        // and with auto-focus that is the state the screen OPENS in.
-        searchController.hidesNavigationBarDuringPresentation = false
-        navigationItem.searchController = searchController
-        navigationItem.hidesSearchBarWhenScrolling = false
-        definesPresentationContext = true
+        searchField.clearButtonMode = .whileEditing
+        searchField.delegate = self
+        searchField.addTarget(self, action: #selector(searchTextChanged), for: .editingChanged)
+        // ⚠️ A BARE `UISearchTextField`, not a `UISearchBar` — the inbox's note
+        // verbatim, and for the same reason: a search bar carries its own
+        // chrome (a background, its own layout margins, a field inset within
+        // them) and sits the input off the back button's centre line whatever
+        // the title slot does. A bare field IS the input, so it centres on the
+        // slot's axis, which is the axis UIKit centres a bar item on.
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight).isActive = true
+        // ⚠️ THE TRAILING SLOT IS EMPTY UNTIL THERE ARE RESULTS, and it has
+        // now been wrong twice in the other direction.
+        //
+        // First it held a "Search" button, which did what the keyboard's own
+        // Search key already did on a screen that opens with that keyboard up.
+        // Then it held the filter tray permanently — but the tray carries ONE
+        // dimension (the only one `search.v1` can express; see gap §19), and a
+        // one-line menu is not worth a permanent seat over a screen that is
+        // usually showing a history and a keyboard.
+        //
+        navigationItem.titleView = searchField
+        switch mode {
+        case .origin:
+            // ⚠️ NOTHING TRAILING, AND THE TRAY THAT WAS HERE IS NOT MISSING.
+            // It moved to the results screen's TOOLBAR, because that is the
+            // only screen with an answer to filter — this one shows a history
+            // and a typeahead, and neither has an order.
+            navigationItem.rightBarButtonItems = []
+        case .refine:
+            // ⚠️ THE FIELD OPENS CARRYING THE QUERY. This screen exists to
+            // change an answer that already exists, so starting empty would
+            // make "adjust one word" mean "type the whole thing again" — and
+            // the query is right there in the header the viewer just tapped.
+            //
+            // Reported as typed, through the same path a keystroke takes, so
+            // the list underneath is the typeahead for what is in the field
+            // rather than a history that disagrees with it.
+            setFieldText(viewModel.submittedQueryText)
+            lastReportedQuery = viewModel.submittedQueryText
+            viewModel.queryChanged(viewModel.submittedQueryText)
+
+            // `[ field ————————————————— ][ Cancel ]`, which is the inbox's
+            // searching bar and the relationship lists', in that order and for
+            // the same reason: the field wants the width, and Cancel is the way
+            // back to what it is refining.
+            navigationItem.setHidesBackButton(true, animated: false)
+            navigationItem.rightBarButtonItems = [
+                UIBarButtonItem(
+                    title: "Cancel",
+                    primaryAction: UIAction { [weak self] _ in
+                        guard let self else { return }
+                        // ⚠️ RESTORES BEFORE IT POPS. This screen shares its
+                        // view model with the answer underneath, so the typing
+                        // that happened here has already driven the phase to
+                        // `.suggesting` — a typeahead, on a screen whose whole
+                        // content is an answer. Cancelling means "forget I
+                        // asked", and forgetting has to include putting the
+                        // answer back.
+                        self.viewModel.restoreSubmittedAnswer()
+                        self.navigationController?.popViewController(animated: false)
+                    }
+                )
+            ]
+        }
     }
+
+
+    /// ⚠️ **Submitting is what fills the list.** Typing only narrows the
+    /// history — `queryChanged` moves the view model to `.suggesting`, which is
+    /// autocompletion over what has been searched before. The people search
+    /// itself runs on submit, and the results replace the suggestions in the
+    /// same collection view, through the same diffable data source.
+    ///
+    /// So there is nothing to push and nothing to clear by hand: the
+    /// suggestions go because the snapshot that replaces them is the results
+    /// snapshot.
+    private func submitCurrentQuery() {
+        let text = searchField.text ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // ⚠️ THE KEYBOARD GOES BEFORE THE PUSH, not after. With no push
+        // animation the destination arrives instantly, so a keyboard dismissed
+        // afterwards would be sliding down under a screen that is already
+        // there.
+        searchField.resignFirstResponder()
+        viewModel.submitQuery(text)
+        switch mode {
+        case .origin:
+            showResults()
+        case .refine:
+            // ⚠️ POPS RATHER THAN PUSHING A SECOND ANSWER. This screen and the
+            // results screen underneath share ONE view model, so submitting has
+            // already changed the answer that is down there — pushing a fresh
+            // results screen would stack two views of the same state, and going
+            // back would walk through spellings the viewer abandoned. That
+            // property is why the answer was given its own screen at all.
+            navigationController?.popViewController(animated: false)
+        }
+    }
+
+    /// ⚠️ UNANIMATED, and the POP is untouched by that. `animated:` describes
+    /// one transition; nothing on the view controller records it. The back
+    /// button always pops animated, and the edge gesture's begin is decided by
+    /// `NativePopPolicy` — neither reads how the push was drawn. So the answer
+    /// arrives as a cut and leaves as a slide, which is what was asked for.
+    ///
+    /// ⚠️ ONE SCREEN, NOT A STACK OF THEM. Asking again from the results
+    /// screen's own field re-runs in place; only a submit made HERE pushes.
+    /// Otherwise a viewer refining a query three times would have three
+    /// answers to swipe back through, each to a spelling they abandoned.
+    private func showResults() {
+        let results = SearchResultsViewController(
+            viewModel: viewModel,
+            imagePipeline: imagePipeline,
+            postSurfaces: postSurfaces
+        )
+        // ⚠️ UNANIMATED BOTH WAYS ON THIS ONE PATH. The ordinary back button
+        // still slides — that is UIKit's and it is right, because leaving an
+        // answer is a departure. Tapping the QUERY is not a departure: it is
+        // the same field the viewer is already looking at, and animating a
+        // slide between two headers that differ by one control reads as a
+        // glitch rather than as travel.
+        // ⚠️ ASKING AGAIN PUSHES A FRESH SCREEN RATHER THAN POPPING TO THIS
+        // ONE. It used to pop back here, which worked but meant this screen had
+        // to survive underneath the answer for the whole visit — and it is the
+        // screen Back would then land on, which is not where Back belongs (see
+        // the stack replacement below). A refine screen is built on demand,
+        // shares this screen's view model so the filters and the history carry
+        // over, and pops itself when it is done.
+        results.onEditQuery = { [weak results, viewModel, imagePipeline, postSurfaces] in
+            guard let results else { return }
+            let refine = SearchViewController(
+                viewModel: viewModel,
+                imagePipeline: imagePipeline,
+                postSurfaces: postSurfaces,
+                mode: .refine
+            )
+            results.navigationController?.pushViewController(refine, animated: false)
+        }
+
+        // ⚠️ THIS SCREEN LEAVES THE STACK AS THE ANSWER ARRIVES. Back on the
+        // results screen has to reach the ORIGIN — the map or For You — not the
+        // search screen: a viewer who has an answer is done asking, and making
+        // them walk back through the question is a step nobody wants.
+        //
+        // ⚠️ THE VIEW MODEL SURVIVES THIS, and that is the load-bearing part.
+        // The results screen holds it with a `let`, so it is retained by the
+        // screen that is staying rather than by the one that is going. A refine
+        // screen built later is handed the same instance, which is what keeps
+        // the recent history, the sort and the scope continuous across a
+        // question the viewer asks twice.
+        guard let navigation = navigationController else { return }
+        var stack = navigation.viewControllers
+        stack.removeAll { $0 === self }
+        stack.append(results)
+        navigation.setViewControllers(stack, animated: false)
+    }
+
+    /// ⚠️ KEPT AS ITS OWN METHOD WITH ONE CALLER. It reads like something to
+    /// inline back into `textFieldShouldReturn` now that the bar's button is
+    /// gone — but the debug seeder (`-search-submit`) is the second caller, and
+    /// it exists precisely so the instrument runs the viewer's path rather than
+    /// poking the view model behind it.
+
+    /// The one way to write the field programmatically. A viewer typing routes
+    /// through `searchTextChanged`; assigning `searchField.text` raises no
+    /// editing event, so anything that has to follow the text goes here rather
+    /// than beside each assignment.
+    private func setFieldText(_ text: String) {
+        searchField.text = text
+    }
+
+    /// The field's height: the bar's own glass platter, from
+    /// `NavigationBarMetrics.itemPlatterHeight`.
+    ///
+    /// ⚠️ MEASURED TWICE, and the first measurement was wrong. It started at
+    /// 36 (the inbox's constant), then went to 40 off a column profile through
+    /// a screenshot — a technique that reads whatever the anti-aliased capsule
+    /// edge happens to give at the sampled column. Walking the view hierarchy
+    /// instead names the view and its exact bounds: `PlatterGlassView` is
+    /// 44.0pt. The screenshot was measuring the pill's rounded end.
+    private static let fieldHeight = NavigationBarMetrics.itemPlatterHeight
+
+    /// ⚠️ NOT "the viewer typed" on its own. The field also fires this when it
+    /// is cleared programmatically, so the last reported text is compared
+    /// rather than trusted — that comparison is what makes this a text-CHANGE
+    /// callback, and it is what stopped a returning search being replaced by
+    /// the narrowed history a beat after it arrived.
+    @objc private func searchTextChanged() {
+        report(query: searchField.text ?? "")
+    }
+
+    private func report(query text: String) {
+        guard text != lastReportedQuery else { return }
+        lastReportedQuery = text
+        viewModel.queryChanged(text)
+    }
+
 
     private func configureCollectionView() {
         let layout = ExploreLayout.make { [weak self] index in
@@ -448,8 +760,8 @@ final class SearchViewController: UIViewController {
             if model.isEmpty {
                 showStatus(
                     symbolName: "magnifyingglass",
-                    title: "Search people",
-                    subtitle: "Find people by name or @handle. What you search for shows up here."
+                    title: "Find people",
+                    subtitle: "Search by name or @handle. What you search for shows up here."
                 )
             } else {
                 hideStatus()
@@ -464,10 +776,14 @@ final class SearchViewController: UIViewController {
                 // been searched for yet. This is also where the screen teaches
                 // that searching is something you DO, since the flow is
                 // submit-driven and nothing happens while you type.
+                // ⚠️ "ON THE KEYBOARD", since the bar's Search button was
+                // deleted. It was the obvious thing this sentence pointed at
+                // for exactly one round; the keyboard's return key still reads
+                // "Search", and now it is the only thing that does.
                 showStatus(
                     symbolName: "return",
                     title: "Press Search",
-                    subtitle: "Search for “\(query)” to see people."
+                    subtitle: "Press Search on the keyboard to look for “\(query)”."
                 )
             } else {
                 hideStatus()
@@ -479,17 +795,45 @@ final class SearchViewController: UIViewController {
 
         case .results(let models):
             spinner.stopAnimating()
-            hideStatus()
             resultsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             apply(resultsSnapshot(models))
+            // ⚠️ AN EMPTY SCOPE IS NOT AN EMPTY SEARCH, and the two must not
+            // wear the same words. `.empty` means the query matched nothing —
+            // "Nothing matched X. Try different words." Reaching zero rows from
+            // a full answer means the FILTER emptied it, and telling the viewer
+            // to try different words would blame the query for a control they
+            // set themselves.
+            if models.isEmpty {
+                showStatus(
+                    symbolName: "line.3.horizontal.decrease",
+                    title: "Nothing in this scope",
+                    subtitle: "The search found people, but none of them are in "
+                        + "the scope you picked. Widen it to see the rest."
+                )
+            } else {
+                hideStatus()
+            }
 
         case .empty(let query):
             spinner.stopAnimating()
             apply(NSDiffableDataSourceSnapshot<SearchSection, SearchItem>())
+            // ⚠️ NOT "no people", and not a `person.slash` either. This screen
+            // is the app's ONE search: profiles are what `search.v1` answers
+            // for it today, but posts, places and tags are the same box and the
+            // same submit, and copy that names one kind would have to be
+            // rewritten the day a second kind arrives — or, worse, would read
+            // as "there are no PEOPLE called that" to someone who was looking
+            // for a place.
+            //
+            // ⚠️ It also does not promise what is not wired. The request is
+            // `entityTypes = [.profile]` (`SearchRepository`), so a subtitle
+            // listing posts and locations would be a lie the viewer can catch.
+            // Type-NEUTRAL is the honest register: it is true now and stays
+            // true when the other kinds land.
             showStatus(
-                symbolName: "person.slash",
-                title: "No people found",
-                subtitle: "Nothing matched “\(query)”. Try a different name or handle."
+                symbolName: "magnifyingglass",
+                title: "No results",
+                subtitle: "Nothing matched “\(query)”. Try different words."
             )
 
         case .failed(let message):
@@ -591,43 +935,61 @@ final class SearchViewController: UIViewController {
 
     #if DEBUG
     private func applyDebugArguments() {
+        // ⚠️ LAUNCH ARGUMENTS ARE PROCESS-WIDE, AND THIS SCREEN NOW EXISTS
+        // TWICE. A refine screen is a second `SearchViewController` in the same
+        // process, so it read `-search-query … -search-submit` too, seeded
+        // itself and submitted — which in refine mode pops. It closed itself
+        // the instant it was born, and the instrument reported "the push did
+        // not happen" for a push that had happened and been undone.
+        //
+        // The seeding belongs to the screen the argument was written for: the
+        // one reached from a tab header.
+        guard case .origin = mode else { return }
         let arguments = ProcessInfo.processInfo.arguments
         // `-search-query <text>` seeds the field on launch, so the typing path
         // is testable without driving the keyboard.
         guard let index = arguments.firstIndex(of: "-search-query"), index + 1 < arguments.count
         else { return }
+        // `-search-sort <relevance|recency|popularity>` picks the order the
+        // filter tray would pick. The tray is a `UIMenu` and the simulator taps
+        // nothing, so without this the one thing the tray DOES — change what
+        // goes on the wire and therefore what comes back — has no way to be
+        // seen offline.
+        if let sortIndex = arguments.firstIndex(of: "-search-sort"),
+           sortIndex + 1 < arguments.count,
+           let order = SearchSortOrder(rawValue: arguments[sortIndex + 1]) {
+            viewModel.setSortOrder(order)
+        }
+
         let seeded = arguments[index + 1]
         lastReportedQuery = seeded
-        searchController.searchBar.text = seeded
+        setFieldText(seeded)
         viewModel.queryChanged(seeded)
         // `-search-submit`: also press Search. Seeding alone only types, and
         // typing deliberately searches nothing — so without this the results
-        // and history paths have no way to run in-sim, where the Search key
-        // cannot be tapped.
+        // and history paths have no way to run in-sim, where neither the Search
+        // key nor the bar's button can be tapped.
+        //
+        // ⚠️ THROUGH `submitCurrentQuery`, not `viewModel.submitQuery`. Calling
+        // the view model directly skipped the resign, so the instrument left
+        // the keyboard up over results it had just asked for — a state no
+        // viewer can reach, filmed as though it were the real one.
         if arguments.contains("-search-submit") {
-            viewModel.submitQuery(seeded)
+            submitCurrentQuery()
+        }
+        // `-search-scope <everyone|following>` picks the perimeter the sheet
+        // would pick. Applied AFTER the submit, because a scope narrows an
+        // answer rather than asking for one.
+        if let index = arguments.firstIndex(of: "-search-scope"),
+           index + 1 < arguments.count,
+           let scope = SearchScope(rawValue: arguments[index + 1]) {
+            viewModel.setScope(scope)
         }
     }
     #endif
 }
 
-extension SearchViewController: UISearchResultsUpdating {
-    func updateSearchResults(for searchController: UISearchController) {
-        let text = searchController.searchBar.text ?? ""
-        guard text != lastReportedQuery else { return }
-        lastReportedQuery = text
-        viewModel.queryChanged(text)
-    }
-}
 
-extension SearchViewController: UISearchBarDelegate {
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        viewModel.submitQuery(searchBar.text ?? "")
-        // The answer is what the viewer wants to look at now, and the keyboard
-        // is the only thing still covering it.
-        searchBar.resignFirstResponder()
-    }
-}
 
 extension SearchViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -636,7 +998,7 @@ extension SearchViewController: UICollectionViewDelegate {
         switch item {
         case .row(let id):
             viewModel.didSelectRow(id)
-            searchController.searchBar.resignFirstResponder()
+            searchField.resignFirstResponder()
         case .seeMoreRecents:
             viewModel.didRequestMoreRecents()
         case .result(let id):
@@ -652,5 +1014,19 @@ extension SearchViewController: UICollectionViewDelegate {
 private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+/// The dismissal's own choreography. Conformance is UNCONDITIONAL — the pill
+/// fade below is product behaviour, and an earlier revision of this file had
+/// the whole extension behind `#if DEBUG`, which would have shipped the very
+/// animation this exists to remove.
+
+extension SearchViewController: UITextFieldDelegate {
+    /// The keyboard's Search key — the same method the bar's Search button
+    /// runs, so the two cannot come to mean different things.
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        submitCurrentQuery()
+        return true
     }
 }

@@ -6,6 +6,26 @@ public enum SearchError: Error, Equatable, Sendable {
     case transport(message: String)
 }
 
+/// How the engine should order what it returns.
+///
+/// ⚠️ THESE THREE ARE THE WHOLE OF IT, and the ceiling is the contract's, not
+/// this screen's: `search.v1.SearchSort` has exactly `RELEVANCE`, `RECENCY` and
+/// `POPULARITY`. There is no sort for comment counts, no date RANGE on
+/// `SearchRequest`, and nothing that expresses a per-viewer scope — see
+/// `dev/BACKEND_GAPS.md` for what was asked for and what is missing.
+///
+/// ⚠️ AND POPULARITY IS COARSE BY DESIGN. The generated comment says it "reads
+/// the periodically-refreshed popularity signal, never a real-time count", so
+/// it is not "most liked right now" and must not be labelled as if it were.
+public enum SearchSortOrder: String, Equatable, Sendable, CaseIterable {
+    /// What the engine thinks matches the words best. The default.
+    case relevance
+    /// Freshest first, at the cost of text relevance.
+    case recency
+    /// Coarse engagement first, at the cost of text relevance.
+    case popularity
+}
+
 /// A profile match from search.v1, projected to just what the results list
 /// renders. `id` is the profile's id, so a tap routes straight to `.profile`.
 public struct ProfileSearchResult: Equatable, Sendable, Identifiable {
@@ -19,6 +39,43 @@ public struct ProfileSearchResult: Equatable, Sendable, Identifiable {
         self.handle = handle
         self.displayName = displayName
         self.isVerified = isVerified
+    }
+}
+
+/// Whose results the viewer wants to see.
+///
+/// ⚠️ NOT ON THE WIRE, AND THAT IS THE WHOLE POINT OF THE NAME. `SearchRequest`
+/// has no scope field: the only viewer-relative thing it carries is
+/// `exclude_author_ids`, which the EDGE fills from the social graph so that
+/// per-viewer facts stay out of the shared index. So this narrows THE RESULTS
+/// ON SCREEN, not the query — a page of matches, filtered — and the sheet's
+/// footer says so in those words rather than implying a narrower search.
+///
+/// `seen` / `unseen` are absent: nothing in this client or in the contracts
+/// records which entities a viewer has looked at. See `dev/BACKEND_GAPS.md` §19.
+public enum SearchScope: String, Equatable, Sendable, CaseIterable {
+    case everyone
+    case following
+}
+
+/// A post match, as much as `search.v1` knows about one.
+///
+/// ⚠️ `hasMedia` IS THE ONLY THING A HIT SAYS ABOUT THE POST'S SHAPE, and it is
+/// said by omission: an empty `thumbnail_key` means there is no picture. That
+/// is the same signal the map reads for a text pin — an empty `thumbnail_url`
+/// is how `geo_discovery.v1` says "this post is text" — so the two surfaces
+/// agree about what a text post looks like on the wire.
+///
+/// It matters because the results screen has a MEDIA tab. Without this the
+/// gallery drew a tile per text post: a grid of blank rectangles among the
+/// pictures, each one a post that has nothing to show in a gallery.
+public struct PostSearchHit: Equatable, Sendable, Identifiable {
+    public let id: PostID
+    public let hasMedia: Bool
+
+    public init(id: PostID, hasMedia: Bool) {
+        self.id = id
+        self.hasMedia = hasMedia
     }
 }
 
@@ -54,7 +111,27 @@ public struct SearchSuggestion: Equatable, Sendable {
 public protocol SearchProviding: Sendable {
     /// People search. The backend token-matches (whole words, case-insensitive),
     /// so callers pass complete query terms rather than prefixes.
-    func searchProfiles(matching query: String, limit: Int32) async throws -> [ProfileSearchResult]
+    ///
+    /// `sort` is the viewer's pick from the filter tray; it goes on the wire
+    /// rather than being applied to the answer, because the engine ranks the
+    /// whole index and the client only ever sees a page of it.
+    func searchProfiles(
+        matching query: String, sort: SearchSortOrder, limit: Int32
+    ) async throws -> [ProfileSearchResult]
+
+    /// The POSTS a query matched, as ids in the engine's order.
+    ///
+    /// ⚠️ IDS, NOT POSTS, and that is the contract's shape rather than a
+    /// shortcut. `Search_V1_PostHit` carries an author, a thumbnail key and a
+    /// date — no caption, no attachments, no aspect ratio, no counts. The
+    /// generated header says it outright: a hit is "a REFERENCE, not a
+    /// hydrated entity… Callers MUST hydrate volatile/authoritative fields
+    /// from `post`/`profile`." So this answers with what the engine actually
+    /// knows, and whoever draws a card hydrates it.
+    ///
+    /// Default-implemented as empty so a fake written for the people search
+    /// does not have to grow a second method to keep compiling.
+    func searchPosts(matching query: String, sort: SearchSortOrder, limit: Int32) async throws -> [PostSearchHit]
 
     /// Typeahead completions for a partial query.
     ///
@@ -66,6 +143,10 @@ public protocol SearchProviding: Sendable {
     func suggestions(forPrefix prefix: String, limit: Int32) async throws -> [SearchSuggestion]
 }
 
+public extension SearchProviding {
+    func searchPosts(matching query: String, sort: SearchSortOrder, limit: Int32) async throws -> [PostSearchHit] { [] }
+}
+
 /// Reads people results from search.v1. Scoped to the PROFILE entity type; post
 /// and hashtag search can be added as those surfaces land.
 public actor SearchRepository: SearchProviding {
@@ -75,20 +156,66 @@ public actor SearchRepository: SearchProviding {
         self.searchClient = searchClient
     }
 
-    public func searchProfiles(matching query: String, limit: Int32) async throws -> [ProfileSearchResult] {
+    public func searchProfiles(
+        matching query: String, sort: SearchSortOrder, limit: Int32
+    ) async throws -> [ProfileSearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
         var request = Search_V1_SearchRequest()
         request.query = trimmed
         request.entityTypes = [.profile]
-        request.sort = .relevance
+        request.sort = Self.wireSort(sort)
         request.pageSize = limit
 
         let response = await searchClient.search(request: request, headers: [:])
         switch response.result {
         case .success(let body):
             return body.hits.compactMap(Self.makeResult)
+        case .failure(let error):
+            throw SearchError.transport(message: error.message ?? "code \(error.code)")
+        }
+    }
+
+    /// ⚠️ `.unspecified` is NOT passed for relevance. The contract documents
+    /// UNSPECIFIED as *defaulting* to relevance, which makes the two
+    /// interchangeable today and hostage to that default tomorrow. Naming the
+    /// order the viewer picked keeps the request true to the menu.
+    private static func wireSort(_ sort: SearchSortOrder) -> Search_V1_SearchSort {
+        switch sort {
+        case .relevance: .relevance
+        case .recency: .recency
+        case .popularity: .popularity
+        }
+    }
+
+    public func searchPosts(
+        matching query: String, sort: SearchSortOrder, limit: Int32
+    ) async throws -> [PostSearchHit] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        var request = Search_V1_SearchRequest()
+        request.query = trimmed
+        request.entityTypes = [.post]
+        request.sort = Self.wireSort(sort)
+        request.pageSize = limit
+
+        let response = await searchClient.search(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            // ⚠️ A SECOND CALL RATHER THAN ONE FEDERATED PAGE, and the reason
+            // is paging. `page_size` applies to the MERGED list, so one
+            // federated page of 25 can be 25 profiles and zero posts even when
+            // posts match — the tab would be empty for a query that had
+            // answers. Two scoped searches each get their own page.
+            //
+            // `MultiSearch` exists on the contract for exactly this and is
+            // unrouted in the mock, so it is not a path anything can run
+            // offline today. Recorded rather than guessed at.
+            return body.hits
+                .filter { $0.entityType == .post }
+                .map { PostSearchHit(id: PostID($0.id), hasMedia: !$0.post.thumbnailKey.isEmpty) }
         case .failure(let error):
             throw SearchError.transport(message: error.message ?? "code \(error.code)")
         }

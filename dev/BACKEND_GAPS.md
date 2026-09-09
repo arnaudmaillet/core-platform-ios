@@ -733,6 +733,46 @@ the cell-span-vs-viewport rule instead of client-side zoom thresholds.
 
 ---
 
+## 19. `search.v1` has no date filter, no viewer scope, and no engagement sorts
+
+**What the client wants.** The global search screen's filter tray: an order
+(trending / publication date / most liked / most commented), a publication
+window (24h / week / six months / all) and a perimeter (all / seen / unseen /
+followed).
+
+**What `search.v1` offers.** `SearchRequest` has six fields — query,
+entity_types, sort, page_size, page_token, exclude_author_ids — and `SearchSort`
+has three values: RELEVANCE, RECENCY, POPULARITY. So of twelve requested
+entries, exactly one maps cleanly (publication date → RECENCY) and one maps
+approximately (trending → POPULARITY, which the contract itself describes as a
+periodically-refreshed signal rather than a live count). There is no date field,
+no scope field, no like or comment sort, and no PLACE entity kind.
+
+⚠️ Nor is the rest client-derivable. `ProfileHit` carries no timestamp, no
+counts and no viewer state, and this screen sends `entity_types = [PROFILE]`.
+Filtering a PAGE by date would answer a different question from filtering the
+QUERY. And nothing in the fleet or the client records which entities a viewer
+has already seen — "seen / unseen" needs a producer before it needs a filter.
+
+**What ships meanwhile.** A sheet with all three dimensions as segmented
+controls, and four of its twelve segments able to act: Trending (POPULARITY),
+Newest (RECENCY), All time (the absence of a bound), and Everyone. Following is
+a fifth, applied CLIENT-SIDE to the page on screen — it narrows the results, not
+the query, and the sheet's footer says so in those words.
+
+The other seven are drawn and DISABLED, with the reason under each control.
+That reverses the rule the menu shipped under ("a disabled row is still a
+promise"): a segmented control showing two of four options makes the dimension
+itself unreadable, so shown-and-explained beats absent. The `sort` the mock
+accepted and ignored is honoured now too.
+
+**What we need.** The additive contract in `dev/issues/BACKEND_SEARCH_FILTERS.md`
+— `published_after` / `published_before`, a `SearchScope` resolved at the edge
+the way `exclude_author_ids` already is, `MOST_COMMENTED` / `MOST_LIKED` sorts,
+and a `PLACE` entity kind if locations are to be searchable at all.
+
+---
+
 ## Resolved
 
 - **`ProfileService.ListProfilesByAccount` ScyllaDB CQL type bug** (`limit`

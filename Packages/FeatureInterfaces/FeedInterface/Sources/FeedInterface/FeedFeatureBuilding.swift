@@ -235,6 +235,24 @@ public protocol FeedFeatureBuilding {
     /// ⚠️ A PICTURE, not a post. The departing screen here is a GRID: there is
     /// no single post leaving, which is why this is a still and not an id the
     /// way every other departure on this seam is.
+    /// A surface showing an arbitrary SET of posts, in the caller's order.
+    ///
+    /// The two styles are the two For You tabs — cards and a media grid — which
+    /// are one component in this app, so this is one method with a parameter.
+    ///
+    /// ⚠️ IDS IN, HYDRATION INSIDE. The caller has ids and nothing else; Feed
+    /// owns the only path in this repo that turns a bare `[PostID]` into
+    /// complete posts (a fixed-set provider through the For You repository,
+    /// plus one batched counter read). A caller holding search hits could not
+    /// draw a card from them: a `search.v1` hit carries an author, a thumbnail
+    /// key and a date, and no caption, attachments, aspect ratio or counts.
+    ///
+    /// ⚠️ NO VIDEO PLAYBACK IS ATTACHED. The player pool is app-wide and its
+    /// budget is already the tightest thing in the hero suite; a surface that
+    /// is one tab of a pushed screen is not where the remaining loans should
+    /// go. Posts render their posters here.
+    func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface
+
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,
@@ -242,6 +260,33 @@ public protocol FeedFeatureBuilding {
         feed: UIViewController,
         mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?
     ) -> UIViewController
+}
+
+/// A post surface once made: a view controller, and a way to tell it what to
+/// show. See `FeedFeatureBuilding.makePostSetSurface(style:)`.
+@MainActor
+public protocol PostSetSurface: AnyObject {
+    var viewController: UIViewController { get }
+    func show(_ state: PostSetSurfaceState)
+}
+
+/// Which of the two For You shapes the caller wants.
+public enum PostSetSurfaceStyle: Sendable {
+    /// Full-width cards — For You's "Following".
+    case cards
+    /// A media grid — For You's "Discover".
+    case gallery
+}
+
+/// What a post surface is being asked to show.
+public enum PostSetSurfaceState: Equatable, Sendable {
+    case loading
+    /// ⚠️ THE ORDER IS THE CALLER'S ANSWER, not a suggestion. A surface that
+    /// re-ranked what it was handed would show something other than what the
+    /// caller's own sort produced, under the caller's own label.
+    case posts([PostID])
+    case empty(message: String)
+    case failed(message: String)
 }
 
 /// The follow-this-place seam a cluster gallery's header renders: the caller

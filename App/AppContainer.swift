@@ -27,7 +27,6 @@ import ProfileInterface
 import Search
 import SearchInterface
 import Upload
-import UploadInterface
 
 /// Composition root. The only place concrete implementations are chosen and
 /// wired; everything downstream receives protocols via initializer injection.
@@ -641,7 +640,11 @@ final class AppContainer {
         explore: exploreRepository,
         metadata: profileMetadataRepository,
         imagePipeline: imagePipeline,
-        router: routeResolver
+        router: routeResolver,
+        // The results screen's Posts and Media tabs, from Feed — joined HERE
+        // rather than by a dependency, exactly as `explore:` above is. See
+        // `SearchPostSurfaceAdapter`.
+        postSurfaces: SearchPostSurfaceAdapter(feed: feedFeature)
     )
 
     // MARK: - Notifications
@@ -700,7 +703,7 @@ final class AppContainer {
     /// The one place `AppRoute`s become navigation. Features receive it as an
     /// opaque `Router`; the shell binds its `navigator` when it starts.
     private(set) lazy var routeResolver = RouteResolver(
-        uploadFeature: uploadFeature,
+        searchFeature: { [unowned self] in self.searchFeature },
         profileFeature: { [unowned self] in self.profileFeature },
         feedFeature: { [unowned self] in self.feedFeature },
         chatFeature: { [unowned self] in self.chatFeature }
@@ -709,6 +712,14 @@ final class AppContainer {
     var router: any Router { routeResolver }
 
     // MARK: - Compose / upload
+
+    // ⚠️ THE PIPELINE, WITH NO SCREEN IN FRONT OF IT. The compose screen was
+    // deleted with the "+" tab: upload is being rebuilt from scratch, and a
+    // half-designed screen is not a starting point. `PostComposer` is —
+    // IssueUploadTicket → byte upload → CommitUpload → ResolveDelivery →
+    // CreatePost → PublishPost is the same flow whatever picks the media, it
+    // is covered by tests, and `-mock-compose-demo` still drives it end to
+    // end. Whatever the new screen is, it talks to this.
 
     // Computed (not lazy): the PostComposer init is actor-isolated, which a
     // stored-property initializer can't call under default-MainActor isolation.
@@ -744,8 +755,6 @@ final class AppContainer {
         }
         set { cachedPostComposer = newValue }
     }
-
-    private(set) lazy var uploadFeature: any UploadFeatureBuilding = UploadFeatureBuilder(composer: postComposer)
 
     /// Stable per-install identifier for session/device management
     /// (auth.v1.DeviceContext.device_id). Not an advertising identifier.

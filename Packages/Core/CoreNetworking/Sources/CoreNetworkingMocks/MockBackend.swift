@@ -46,7 +46,7 @@ public struct MockBackend: Sendable {
         MockCounterService(store: counterStore).register(on: bff)
         MockMediaService(store: blobStore).register(on: bff)
         MockPostAuthoringService(store: postStore).register(on: bff)
-        MockSearchService(dataset: dataset).register(on: bff)
+        MockSearchService(dataset: dataset, counters: counterStore).register(on: bff)
         MockNotificationService(dataset: dataset).register(on: bff)
         MockCommentService(dataset: dataset).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
