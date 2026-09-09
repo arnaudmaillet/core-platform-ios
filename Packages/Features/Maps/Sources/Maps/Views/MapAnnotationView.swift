@@ -4,6 +4,24 @@ import MediaCore
 import MediaPlayback
 import UIKit
 
+/// A marker that can say whether it has anything to show yet.
+///
+/// ⚠️ THE MAP ADDS ANNOTATIONS FIRST AND FETCHES THEIR PICTURE SECOND, never
+/// awaited: the reconcile ends in one unconditional `addAnnotations`, and the
+/// only fetch is inside `configure`, which MapKit reaches later through
+/// `viewFor` and which fires detached tasks reporting to nobody. Between the
+/// two the marker is a bare square. This is the report that was missing, and
+/// `MapAnnotationPop` holds a marker at zero until it arrives.
+@MainActor
+protocol MapMarkerDressing: MKAnnotationView {
+    /// Whether the marker is showing a picture of its post — a sheet, a cover,
+    /// or a face that needs neither.
+    var isDressed: Bool { get }
+    /// Fired once, the first time `isDressed` becomes true after a `configure`.
+    var onDressed: (() -> Void)? { get set }
+}
+
+
 /// A custom pin: the post's `thumbnail_url` rendered as a small rounded square
 /// on the map surface (UX req #1), its exact center anchored on the coordinate.
 /// A text-only post has no cover, so its marker wears `PinCardView`'s symbol
@@ -15,7 +33,7 @@ import UIKit
 /// A play badge overlays video pins — dormant today because the Radar path
 /// carries no media kind yet (see `GeoDiscoveryRepository`), and it lights up
 /// automatically once field 5 lands.
-final class MapAnnotationView: MKAnnotationView {
+final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing {
     static let reuseIdentifier = "MapAnnotationView"
 
     /// The LARGEST a marker gets — a media pin's square. Text markers are
@@ -27,9 +45,24 @@ final class MapAnnotationView: MKAnnotationView {
     /// The pin's face; also the exact blueprint of the flying card.
     let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
     private let playBadge = UIImageView()
+    #if DEBUG
+    private var representedKind = "-"
+    #endif
     private var imageTask: Task<Void, Never>?
+    /// Separate from `imageTask`: a media pin loads its COVER and its PREVIEW,
+    /// and one task handle for two loads cancels whichever started first.
+    private var previewTask: Task<Void, Never>?
+    /// Separate again, and for the same reason `previewTask` is: an icon pin now
+    /// loads its ICON and, underneath it, its AUTHOR — the floor the card falls
+    /// back to when the artwork never arrives. Sharing `imageTask` between them
+    /// would have the second assignment cancel the first, and which one lost
+    /// would depend on which resolved faster.
+    private var iconTask: Task<Void, Never>?
     /// Guards against a slow image load landing on a recycled view.
     private var representedID: PostID?
+    /// The pin this view is currently showing, so `isDressed` can ask what face
+    /// it wears without the caller having to pass one back in.
+    private var representedPin: MapPin?
 
     /// Set by the view controller so the view can fetch its own thumbnail.
     var imagePipeline: ImagePipeline?
@@ -44,6 +77,25 @@ final class MapAnnotationView: MKAnnotationView {
     /// Invoked when MapKit recycles this view, so the coordinator can return any
     /// player bound to it to the pool before it's reused for another pin.
     var onReuse: (() -> Void)?
+
+    /// See `MapMarkerDressing`. A media marker is dressed once it has a
+    /// picture; every other face carries its own — a text pin's glyph and an
+    /// icon pin's disc are the resting appearance, not a placeholder.
+    var isDressed: Bool {
+        guard let pin = representedPin else { return false }
+        guard PinCardView.Face.of(pin) == .media else { return true }
+        return card.wornPreview != nil || card.imageView.image != nil
+    }
+
+    var onDressed: (() -> Void)?
+
+    /// Called at the end of every path that can dress the card. Fires at most
+    /// once per `configure`, and only when there is something to see.
+    private func reportDressed() {
+        guard isDressed, let report = onDressed else { return }
+        onDressed = nil
+        report()
+    }
 
     /// Fired the instant the pin is tapped — see `installInstantTap`.
     var onSelect: (() -> Void)?
@@ -108,6 +160,21 @@ final class MapAnnotationView: MKAnnotationView {
     /// Not animated: sizing happens on configure, which for a given marker
     /// runs once per post — the arrival is choreographed by
     /// `MapAnnotationPopChoreographer` on top of whatever size this settles.
+    /// The ONE place icon artwork is put on the card.
+    ///
+    /// ⚠️ The shadow lives on THIS view's layer, not on the card, so the card
+    /// cannot keep it honest by itself — and the art arrives on the other side
+    /// of `applyFace`. A pin faces (shadow computed) and only then strips and
+    /// re-dresses the icon; reading `card.wornIcon` inside `applyFace` therefore
+    /// reads the RECYCLED view's previous art and is never revisited when the
+    /// real art lands. Routing every write through here is what makes "no
+    /// shadow under an icon, the text marker's lift under a bare one" true at
+    /// every instant rather than at one.
+    func applyIconArt(_ art: (art: AnimatedIconArt, phase: Int)?) {
+        card.setIcon(art)
+        PinCardView.applyPinShadow(to: layer, face: card.face, hasArt: art != nil)
+    }
+
     private func applyFace(_ face: PinCardView.Face) {
         let side = face.side
         if bounds.width != side {
@@ -115,6 +182,10 @@ final class MapAnnotationView: MKAnnotationView {
         }
         card.frame = bounds
         card.setFace(face)
+        // ⚠️ RE-APPLIED per face, not set once at init: these views are
+        // recycled across faces, so a card that last wore an icon (no shadow)
+        // would hand that setting to the photograph that dequeues it next.
+        PinCardView.applyPinShadow(to: layer, face: face, hasArt: card.wornIcon != nil)
         // The badge hangs off the card's own trailing-bottom corner, so it
         // tracks whichever size the face just chose.
         playBadge.frame = CGRect(x: side - 22, y: side - 22, width: 20, height: 20)
@@ -122,25 +193,89 @@ final class MapAnnotationView: MKAnnotationView {
 
     /// Renders the pin's thumbnail and (dormant) video badge — or, for a
     /// text-only post, the symbol face instead of a cover.
-    func configure(with pin: MapPin, imagePipeline: ImagePipeline) {
+    func configure(
+        with pin: MapPin, imagePipeline: ImagePipeline,
+        iconCatalog: AnimatedIconCatalog? = nil, previewCatalog: AnimatedIconCatalog? = nil
+    ) {
         self.imagePipeline = imagePipeline
         // Idempotent: a reconcile re-configures every surviving marker, so a
         // marker already showing this post must be left exactly as it is —
         // blanking and re-fetching an unchanged thumbnail is what flashes it.
+        #if DEBUG
+        if representedID == pin.postID { MapChurnCounters.skipped += 1 } else { MapChurnCounters.bound += 1 }
+        #endif
         guard representedID != pin.postID else { return }
         representedID = pin.postID
+        representedPin = pin
+        #if DEBUG
+        representedKind = switch pin.kind {
+        case .video: "video"
+        case .photo: "photo"
+        case .text: "text"
+        }
+        #endif
         playBadge.isHidden = pin.kind != .video
         // Set on every configure, not only for text: this view is recycled, so
         // a media pin dequeuing a view that last wore the text face has to take
         // it off again — and get its square back.
-        applyFace(pin.isText ? .text : .media)
+        applyFace(PinCardView.Face.of(pin))
 
         imageTask?.cancel()
+        iconTask?.cancel()
         card.imageView.image = nil
         // ⚠️ CLEARED ON EVERY CONFIGURE, like the cover above it: this view is
         // recycled, and a text marker dequeuing a view that last wore somebody
         // else's face would show that face until its own arrived.
         card.setTextAvatar(nil)
+        applyIconArt(nil)
+        card.setPreviewSheet(nil)
+
+        // A media pin may carry a baked preview of its own footage. It sits OVER
+        // the cover rather than replacing it: the cover is what shows while the
+        // sheet loads, and what remains under Reduce Motion.
+        if pin.hasPreviewSheet, let previewCatalog, let sheetID = pin.previewSheetID {
+            let phase = pin.iconPhase
+            if let art = previewCatalog.cached(sheetID) {
+                card.setPreviewSheet((art, phase))
+            } else {
+                let id = pin.postID
+                previewTask = Task { [weak self] in
+                    guard let art = try? await previewCatalog.art(for: sheetID) else { return }
+                    guard let self, self.representedID == id else { return }
+                    self.card.setPreviewSheet((art, phase))
+                    self.reportDressed()
+                }
+            }
+        }
+
+        // An icon outranks the author's face: it is what the author CHOSE to
+        // say about this post, where the avatar is only who they are.
+        //
+        // ⚠️ The synchronous peek first. An `await` here is a stall under the
+        // finger during a pan, and it is also what would make the hero flight's
+        // frame zero miss — the flying card is built from what the marker is
+        // wearing at staging time, so an icon still in flight is an icon the
+        // transition cannot copy.
+        if pin.hasAnimatedIcon, let iconCatalog, let iconID = pin.animatedIconID {
+            let phase = pin.iconPhase
+            if let art = iconCatalog.cached(iconID) {
+                // In hand: the floor is never seen, so spend nothing on it.
+                applyIconArt((art, phase))
+                return
+            }
+            let id = pin.postID
+            iconTask = Task { [weak self] in
+                guard let art = try? await iconCatalog.art(for: iconID) else { return }
+                guard let self, self.representedID == id else { return }
+                self.applyIconArt((art, phase))
+            }
+            // ⚠️ NO `return` HERE ANY MORE. An icon pin IS a text post, so it
+            // falls through to the author load below — that avatar (or the
+            // glyph without one) is the FLOOR the card shows while the artwork
+            // is in flight, and keeps showing if it never lands. Returning here
+            // is what left a failed icon drawing nothing at all.
+        }
+
         // A text pin has no cover to fetch — it wears its AUTHOR instead, when
         // the pin knows one. Nil is the ordinary answer in production until
         // `RadarPin` carries an author (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`),
@@ -154,12 +289,33 @@ final class MapAnnotationView: MKAnnotationView {
             }
             return
         }
+        // ⚠️ A PIN WITH A PREVIEW FETCHES THE COVER AND HOLDS IT BACK.
+        //
+        // It used to refuse the fetch outright, because the wire's still was a
+        // PHOTOGRAPH OF SOMETHING ELSE and putting it on the marker until the
+        // catalogue answered was a picture of another post. That reasoning was
+        // about the wire's content, and the wire's content has changed: a video
+        // post's thumbnail is now its own clip's frame zero, the same picture
+        // the sheet opens on.
+        //
+        // What the refusal cost was the THIRD RUNG. `hasPreviewSheet` asks
+        // whether an id was SEEDED, not whether art RESOLVED — so a pin whose
+        // sheet never lands (catalogue miss, eviction, `-map-previews-unavailable`)
+        // had nothing at all to fall to, and stood on its ground. Filmed as
+        // black squares on the map.
+        //
+        // So the ladder is honest at last: the sheet wins where it lands, the
+        // thumbnail stands in where it does not, and the two are one picture.
         guard !pin.isText, let url = pin.thumbnailURL else { return }
         let id = pin.postID
         imageTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url) else { return }
             guard let self, self.representedID == id else { return }
+            // The sheet outranks it, and may have landed while this was in
+            // flight — its frame zero is already in the cover.
+            guard self.card.wornPreview == nil else { return }
             self.card.imageView.image = image
+            self.reportDressed()
             // If a live preview started before the thumbnail finished loading,
             // give it a poster now so the pin shows the still until the first
             // video frame — instead of a black square.
@@ -167,6 +323,43 @@ final class MapAnnotationView: MKAnnotationView {
                 self.card.videoRenderView.setPoster(image)
             }
         }
+    }
+
+    #if DEBUG
+    /// Whether this marker is currently wearing baked artwork.
+    var wearsAnimatedIcon: Bool { card.wornIcon != nil }
+
+    /// Whether this marker is DRESSED in its preview sheet — which is a
+    /// different question from whether the sheet is advancing, and the one the
+    /// HUD needs. A paused or off-screen marker wears its sheet and animates
+    /// nothing.
+    var wearsPreviewSheet: Bool { card.wornPreview != nil }
+    var debugFaceName: String { card.debugFaceName }
+    /// The pin's KIND, which the face hides: a photo and a video both wear
+    /// `.media`, and telling them apart is the whole question when asking
+    /// whether the map's corpus reaches it in thirds.
+    var debugKindName: String { representedKind }
+
+    /// The live-preview surface, for the debug readout.
+    var videoSurface: VideoRenderView { card.videoRenderView }
+    var isPlayingPreviewSheet: Bool { card.isPlayingPreviewSheet }
+
+    /// A fingerprint of what the RENDER SERVER is presenting for this icon.
+    ///
+    /// Read from `presentation()`, never the model layer: the model keeps its
+    /// resting value for the whole animation, so probing it would report a
+    /// frozen icon as a running one.
+    var presentedIconTick: Double? { card.presentedIconTick }
+    var presentedPreviewTick: Double? { card.presentedPreviewTick }
+    #endif
+
+    /// Re-installs this marker's icon playback under the current motion policy.
+    ///
+    /// Unconditional: the policy can move in either direction, and a guard that
+    /// checks "is it already animating" only ever handles one of them.
+    func redressIcon() {
+        card.reinstallIconPlayback()
+        card.reinstallPreviewPlayback()
     }
 
     override func prepareForReuse() {
@@ -184,8 +377,15 @@ final class MapAnnotationView: MKAnnotationView {
         endVideoPreview()
         imageTask?.cancel()
         imageTask = nil
+        previewTask?.cancel()
+        previewTask = nil
         representedID = nil
+        card.setPreviewSheet(nil)
         card.imageView.image = nil
+        // Cleared HERE as well as on configure. An animating icon left under a
+        // photograph is worse than a stale avatar: it moves.
+        applyIconArt(nil)
+        card.setTextAvatar(nil)
         applyFace(.media)
         playBadge.isHidden = true
     }

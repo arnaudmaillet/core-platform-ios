@@ -101,6 +101,27 @@ public struct MockSocialDataset: Sendable {
     /// Nine posts on the same three-kind cycle the main corpus uses (video,
     /// image, text), so all three profile tabs have something: the mosaic, the
     /// timeline, and Short.
+
+    /// Whether every post that has media is a VIDEO, or the corpus runs on its
+    /// honest thirds (video, image, text).
+    ///
+    /// Was `true` while the video path was the one under work — photographs set
+    /// aside so the map and the feed exercised video everywhere a post had
+    /// media. Back to `false`: a hero flight's behaviour on a PHOTOGRAPH is not
+    /// deducible from its behaviour on a clip, and a corpus with no photographs
+    /// cannot answer the question at all. The two differ in the one place that
+    /// matters for a transition — a photo surface has no player, no first-frame
+    /// gate and no aspect-fill of a 1280x720 landscape source magnified ~3.9x
+    /// into a portrait card.
+    ///
+    /// The photo branches were deliberately left in place rather than deleted
+    /// while the switch was off, so this is one edit and not an excavation. The
+    /// venue quotas move with it — see `MockGeoDiscoveryService`.
+    ///
+    /// What it does NOT change: `hasMedia`, so text-only posts stay exactly as
+    /// they were and the text/media split is untouched.
+    static let mediaIsAlwaysVideo = false
+
     static func viewerRecords(mediaCatalog: MediaCatalog, after count: Int) -> [PostRecord] {
         let captions = [
             "Testing in production is fine if production is your simulator.",
@@ -117,7 +138,7 @@ public struct MockSocialDataset: Sendable {
         let newestMS: Int64 = 1_780_000_000_000
         return (0..<captions.count).map { index in
             let hasMedia = index % 3 != 2
-            let isVideo = index % 3 == 0
+            let isVideo = Self.mediaIsAlwaysVideo || index % 3 == 0
             let shape = shapes[index % shapes.count]
             let media: (url: String, width: Int, height: Int)? = switch (hasMedia, mediaCatalog) {
             case (false, _):
@@ -502,6 +523,118 @@ public struct MockSocialDataset: Sendable {
         }
     }
 
+    /// Animated pin icons, keyed by post id — **TEXT-ONLY posts, and only
+    /// every other one**.
+    ///
+    /// `RadarPin` carries no `icon_id` yet
+    /// (`dev/issues/BACKEND_ANIMATED_PIN_ICONS.md` proposes field 12), so the
+    /// mock answers what the wire cannot. Text-only is read from the record —
+    /// `media == nil` — never re-derived: the corpus expresses that rule three
+    /// different ways in three places, and a fourth formula would drift from
+    /// all of them.
+    ///
+    /// Two deliberate properties of the seed:
+    ///
+    /// - **Two text posts in three get one**, so the map shows icon markers
+    ///   NEXT TO avatar markers and glyph fallbacks. A field where every text
+    ///   pin animates proves the renderer and hides the mixing; a field where
+    ///   too few do shows nothing at all at city zoom, where a handful of
+    ///   clusters stand in for a hundred posts and their representatives are
+    ///   chosen by like count rather than by kind.
+    /// - **Icons are chosen by the post id's NUMERIC SUFFIX, not by
+    ///   `hashValue`.** ⚠️ Swift seeds its string hash per launch, so hashing
+    ///   would give the same post a different icon on every run: no screenshot
+    ///   diff would ever be stable and no QA recipe could pin a marker's
+    ///   appearance.
+    ///
+    /// `catalogue` is the baked catalogue's ids in manifest order, so the
+    /// caller decides how many distinct icons the map can show.
+    public func animatedIconIDsByPostID(catalogue: [String]) -> [String: String] {
+        guard !catalogue.isEmpty else { return [:] }
+        return posts.reduce(into: [:]) { result, post in
+            guard post.media == nil else { return }
+            guard let index = Self.numericSuffix(of: post.postID) else { return }
+            // Text posts are `index % 3 == 2` in this corpus, so `index / 3`
+            // numbers them 0, 1, 2 … — skipping every third leaves a visible
+            // minority wearing the author's face instead.
+            guard (index / 3) % 3 != 2 else { return }
+            result[post.postID] = catalogue[(index / 3) % catalogue.count]
+        }
+    }
+
+    /// Baked preview sheets, keyed by post id — **MEDIA posts only**, the exact
+    /// complement of `animatedIconIDsByPostID`.
+    ///
+    /// A text post has no footage to preview and a media post has no icon, so
+    /// the two decorations can never land on one marker. That disjointness is
+    /// the product rule, not an implementation detail: a marker answers "what is
+    /// this post" once.
+    ///
+    /// Every media post gets one. Unlike the icons, there is no deliberate
+    /// minority left undressed — the interesting question here is what a field
+    /// where EVERYTHING moves costs, and the still cover is already the fallback
+    /// while a sheet loads.
+    public func previewSheetIDsByPostID(catalogue: [String]) -> [String: String] {
+        guard !catalogue.isEmpty else { return [:] }
+        return posts.reduce(into: [:]) { result, post in
+            // ⚠️ VIDEO POSTS ONLY, and the guard used to be `post.media != nil`.
+            //
+            // A preview sheet is a sample of the post's OWN footage. A
+            // photograph has none — its marker should wear the photograph (or
+            // its first frame), which is what the cover already does. Seeding
+            // every post that merely HAS media gave still photos an animated
+            // marker playing somebody else's clip: the annotation and the post
+            // no longer described the same thing, and opening one showed a page
+            // with nothing moving in it.
+            guard let media = post.media,
+                  MockMediaFixtures.isVideoURL(media.url),
+                  let index = Self.numericSuffix(of: post.postID)
+            else { return }
+            // ⚠️ NIL IS AN ANSWER. A fixture with no baked sheet gets NONE, and
+            // the marker falls back to its cover — which is the ladder. Handing
+            // it an arbitrary clip was the defect a viewer reported: five of the
+            // seven fixtures had no sheet of their own and every one of them
+            // wore somebody else's footage.
+            result[post.postID] = Self.previewSheet(for: media.url, in: catalogue, index: index)
+        }
+    }
+
+    /// The sheet baked from THIS post's clip when one exists.
+    ///
+    /// The catalogue's ids are `<clip>-<segment>` and the fixtures' URLs carry
+    /// the clip's name, so most video posts can wear a preview of their own
+    /// footage rather than of an arbitrary one. Not all of them: the baked set
+    /// covers four clips and the fixture table lists seven, so the remainder
+    /// still falls back to a deterministic pick — a marker that previews the
+    /// wrong clip is a mock-fidelity gap, where a photograph that previews ANY
+    /// clip was a lie about what the post is.
+    /// ⚠️ THE OPENING SEGMENT, NOT ONE PICKED BY POST INDEX.
+    ///
+    /// Spreading posts across a clip's segments made the map look varied and
+    /// made "frame 0" a lie: a marker's cover is the cell 0 of the sheet it
+    /// wears, so a post seeded with segment 7 had a cover that was the first
+    /// frame of the middle of the film, while the page it opened resolved a
+    /// different segment again. Filmed as a marker showing a black title card
+    /// over a post whose flight animated a forest.
+    ///
+    /// The cost is real and deliberate: every post of the same clip now
+    /// previews the same footage. The invariant is worth more than the variety
+    /// — and the variety was fictional anyway, since two clips carry the whole
+    /// corpus.
+    ///
+    /// `index` is kept for the signature's callers and no longer read.
+    static func previewSheet(for url: String, in catalogue: [String], index: Int) -> String? {
+        guard let clip = MockMediaFixtures.bakedClip(for: url) else { return nil }
+        return MockMediaFixtures.openingSegment(ofClip: clip, in: catalogue)
+    }
+
+    /// The trailing digits of `post-0007`. Nil when there are none, which keeps
+    /// a hand-written id out of the seed rather than mapping it to zero.
+    static func numericSuffix(of id: String) -> Int? {
+        let digits = id.reversed().prefix { $0.isNumber }.reversed()
+        return digits.isEmpty ? nil : Int(String(digits))
+    }
+
     /// The viewer's social graph, shared by the social-graph and geo-discovery
     /// mocks so the map's "Friends"/"Following" filters and the following list
     /// agree on one truth. The viewer follows the first four authors; the
@@ -650,7 +783,7 @@ public struct MockSocialDataset: Sendable {
             // One of every three posts is video, one image, one text-only —
             // a mix that exercises all three snap-feed cell paths.
             let hasMedia = index % 3 != 2
-            let isVideo = index % 3 == 0
+            let isVideo = Self.mediaIsAlwaysVideo || index % 3 == 0
             let mediaHost = isVideo ? "video" : "media"
             let shape = mediaShapes[index % mediaShapes.count]
             // Under `.realAssets` a video post takes its dimensions FROM the

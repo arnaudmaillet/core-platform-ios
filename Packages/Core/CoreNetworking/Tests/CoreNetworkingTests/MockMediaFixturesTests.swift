@@ -228,14 +228,46 @@ struct MockMediaFixturesTests {
     /// render. Without `-maps-force-video` the client treats every pin as an
     /// image, so handing it an HLS manifest or an MP4 paints a blank pin —
     /// caught in the simulator, and this is the regression guard.
-    @Test func videoPinsCarryADecodableStillByDefault() throws {
+    ///
+    /// ⚠️ AND IT MUST BE A FRAME OF THE POST'S OWN CLIP. This used to be
+    /// satisfied by a stock photograph chosen from the LENGTH of the video's
+    /// URL, which renders perfectly and is a picture of somewhere else — filmed
+    /// on the map as a marker whose post was a build log flying a photograph of
+    /// a sky. Renderable is necessary and was never sufficient.
+    @Test func videoPinsCarryAFrameOfTheirOwnClip() throws {
         try #require(!MockGeoDiscoveryService.forcesMapVideo,
                      "run without -maps-force-video")
-        let url = MockGeoDiscoveryService.pinURL(
+        // A clip with a baked sheet answers the sheet's own cell 0.
+        let sheeted = MockGeoDiscoveryService.pinURL(
+            forMediaURL: MockMediaFixtures.bigBuckBunny720.url, catalog: .realAssets
+        )
+        #expect(sheeted.hasPrefix(MockMediaFixtures.previewPosterScheme))
+        #expect(sheeted.contains(MockGeoDiscoveryService.videoKindMarker),
+                "the kind stamp is the map's only signal that a pin is a video")
+        #expect(MockMediaFixtures.mimeType(for: sheeted).hasPrefix("image/"))
+        #expect(!MockMediaFixtures.isVideoURL(sheeted))
+
+        // A clip without one answers its own first frame, decoded from the asset.
+        let bare = MockGeoDiscoveryService.pinURL(
             forMediaURL: MockMediaFixtures.appleBipBop16x9.url, catalog: .realAssets
         )
-        #expect(!MockMediaFixtures.isVideoURL(url))
-        #expect(MockMediaFixtures.mimeType(for: url).hasPrefix("image/"))
+        #expect(MockMediaFixtures.frameZeroSource(of: bare) == MockMediaFixtures.appleBipBop16x9.url)
+        #expect(bare.contains(MockGeoDiscoveryService.videoKindMarker))
+        #expect(MockMediaFixtures.mimeType(for: bare).hasPrefix("image/"))
+        #expect(!MockMediaFixtures.isVideoURL(bare),
+                "the encoded source must not make a still look like a clip")
+    }
+
+    /// The synthetic catalog carries renderable `mock://` URLs, but a video is
+    /// still a video: an image pipeline decodes nothing from one, which is the
+    /// empty marker filmed on the map.
+    @Test func syntheticVideoPinsAlsoCarryAFrame() {
+        let url = MockGeoDiscoveryService.pinURL(
+            forMediaURL: MockMediaFixtures.bigBuckBunny720.url, catalog: .synthetic
+        )
+        #expect(url.hasPrefix(MockMediaFixtures.previewPosterScheme))
+        #expect(!url.contains(MockGeoDiscoveryService.videoKindMarker),
+                "the synthetic catalog never stamped, and stamping would reclassify every pin")
     }
 
     @Test func imagePinsAreUntouched() {
@@ -255,4 +287,69 @@ struct MockMediaFixturesTests {
         let second = MockSocialDataset(mediaCatalog: .realAssets)
         #expect(first.posts.compactMap { $0.media?.url } == second.posts.compactMap { $0.media?.url })
     }
+}
+
+/// A marker's preview is a sample of the POST'S OWN footage.
+///
+/// ⚠️ The seed used to guard on `post.media != nil`, so every photograph got a
+/// sprite sheet too — an animated marker playing an unrelated clip in front of a
+/// post that is a still. The annotation and the post stopped describing the same
+/// thing, which is the one thing a preview exists to do.
+
+struct MapPreviewSheetSeedTests {
+    private func dataset() -> MockSocialDataset {
+        MockSocialDataset(postCount: 120, mediaCatalog: .realAssets)
+    }
+
+    private let catalogue = (0..<6).flatMap { segment in
+        ["bigbuckbunny", "sinteltrailer"].map { "\($0)-\(segment)" }
+    }
+
+    @Test func aSheetIsSeededExactlyWhenTheFIXTUREHasOne() {
+        let data = dataset()
+        let sheets = data.previewSheetIDsByPostID(catalogue: catalogue)
+        #expect(!sheets.isEmpty, "a corpus with baked fixtures must seed some previews")
+
+        for post in data.posts {
+            let seeded = sheets[post.postID] != nil
+            guard let media = post.media else {
+                #expect(!seeded, "\(post.postID) is text-only and must not wear a preview")
+                continue
+            }
+            let baked = MockMediaFixtures.bakedClip(for: media.url) != nil
+            #expect(seeded == baked,
+                    "\(post.postID) media=\(media.url) seeded=\(seeded) baked=\(baked)")
+            if let id = sheets[post.postID], let clip = MockMediaFixtures.bakedClip(for: media.url) {
+                #expect(id.hasPrefix("\(clip)-"), "\(post.postID) wears \(id), not a \(clip) sheet")
+            }
+        }
+    }
+
+    /// A fixture with no baked sheet gets NONE, and the marker falls back to its
+    /// cover. Handing it an arbitrary clip is the defect this replaced.
+    @Test func anUnbakedFixtureGetsNoSheetAtAll() {
+        let catalogue = ["bigbuckbunny-0", "sinteltrailer-0"]
+        #expect(MockSocialDataset.previewSheet(
+            for: "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8",
+            in: catalogue, index: 0
+        ) == nil)
+        #expect(MockMediaFixtures.bakedClip(for: "mock://video/square-1?w=1080&h=1080") == nil)
+    }
+
+    /// And it should be a preview of ITS clip where one was baked, not of an
+    /// arbitrary one — the fidelity half of the same idea.
+    @Test func aSheetIsAlwaysItsOwnClip() {
+        let catalogue = ["bigbuckbunny-0", "bigbuckbunny-1", "sinteltrailer-0", "sinteltrailer-1"]
+        let bunny = MockSocialDataset.previewSheet(
+            for: MockMediaFixtures.bigBuckBunny720.url, in: catalogue, index: 0
+        )
+        #expect(bunny?.hasPrefix("bigbuckbunny") == true, "got \(bunny ?? "nil")")
+
+        let sintel = MockSocialDataset.previewSheet(
+            for: MockMediaFixtures.sintelTrailer.url, in: catalogue, index: 1
+        )
+        #expect(sintel?.hasPrefix("sinteltrailer") == true, "got \(sintel ?? "nil")")
+    }
+
+
 }

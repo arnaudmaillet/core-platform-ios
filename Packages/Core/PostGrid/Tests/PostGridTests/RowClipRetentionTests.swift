@@ -56,6 +56,23 @@ struct RowClipRetentionTests {
     // MARK: - With an allowance
 
     /// ⚠️ THE CHANGE: each clip keeps its own surface, on its own page.
+    /// A coordinator that has been told it is on screen.
+    ///
+    /// ⚠️ Construction alone no longer permits playback: `isSurfaceVisible` is
+    /// FALSE at birth, so a coordinator nobody has told about takes no loans on
+    /// the shared pool. Every test below is about what a VISIBLE grid does, so
+    /// they all go through here; the gated cases assert `false` explicitly
+    /// afterwards, which now reads as the state change it is.
+    private func makeVisibleCoordinator(
+        pool: VideoPlaybackController, maxConcurrent: Int? = nil
+    ) -> GridVideoPlaybackCoordinator {
+        let coordinator = maxConcurrent.map {
+            GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: $0)
+        } ?? GridVideoPlaybackCoordinator(pool: pool)
+        coordinator.setSurfaceVisible(true)
+        return coordinator
+    }
+
     @Test func aGrantedRowKeepsEachClipOnItsOwnPage() {
         let cell = row([true, true])
         cell.retainClips(budget: 2)
@@ -272,7 +289,7 @@ struct RowClipRetentionTests {
         let pool = VideoPlaybackController(
             source: StubVideoSource(), poolSize: 6, capacity: 6
         )
-        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 6)
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
         let cell = row([true], id: "post-0")
         coordinator.setSurfaceVisible(true)
         coordinator.update(candidates: [
@@ -300,7 +317,7 @@ struct RowClipRetentionTests {
         let pool = VideoPlaybackController(
             source: StubVideoSource(), poolSize: 6, capacity: 6
         )
-        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 6)
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
         let cell = row([true], id: "post-0")
         coordinator.setSurfaceVisible(true)
         coordinator.update(candidates: [
@@ -343,7 +360,7 @@ struct RowClipRetentionTests {
         let pool = VideoPlaybackController(
             source: StubVideoSource(), poolSize: 6, capacity: 6
         )
-        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 6)
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
         let cell = row([true, true], id: "post-0")
         coordinator.setSurfaceVisible(true)
 
@@ -389,7 +406,7 @@ struct RowClipRetentionTests {
         let pool = VideoPlaybackController(
             source: StubVideoSource(), poolSize: 6, capacity: 6
         )
-        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 6)
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
         let cell = row([true, true], id: "post-0")
         coordinator.setSurfaceVisible(true)
 
@@ -433,7 +450,7 @@ struct RowClipRetentionTests {
         let pool = VideoPlaybackController(
             source: StubVideoSource(), poolSize: 3, capacity: 3
         )
-        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 3)
         let rows = (0..<3).map { row([true, true], id: "post-\($0)") }
         coordinator.setSurfaceVisible(true)
 
@@ -465,7 +482,7 @@ struct RowClipRetentionTests {
         let pool = VideoPlaybackController(
             source: StubVideoSource(), poolSize: 6, capacity: 6
         )
-        let coordinator = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 6)
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
         let cell = row([true, true], id: "post-0")
         coordinator.setSurfaceVisible(true)
 

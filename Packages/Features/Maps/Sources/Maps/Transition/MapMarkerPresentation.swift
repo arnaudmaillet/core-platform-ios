@@ -44,6 +44,10 @@ enum MapMarkerPresentation: Equatable {
     /// landing page are the same post. The rest of the group (photos included)
     /// is a swipe away either way.
     init(face: PinCardView.Face) {
-        self = face == .text ? .reveal : .hero
+        // ⚠️ Written as "is it media" rather than "is it text", so a face
+        // added later routes to the REVEAL by default. An icon pin is a text
+        // post — its page is a text page — and the old form would silently have
+        // flown it as a photograph.
+        self = face == .media ? .hero : .reveal
     }
 }

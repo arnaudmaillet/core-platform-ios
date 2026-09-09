@@ -242,7 +242,8 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         destination?.setZoomContentHidden(true)
 
         let flight = ZoomFlight.build(
-            source: source, destination: destination, sourceFrame: sourceFrame, pageFrame: pageFrame
+            source: source, destination: destination, sourceFrame: sourceFrame,
+            pageFrame: pageFrame, presents: true
         )
         stagedFlightCard = flight.card
         stagedFlightEndpoints = (start: sourceFrame, end: pageFrame)
@@ -324,6 +325,24 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // poster is often a hundred milliseconds nobody can schedule around.
         // Retained by its own display link; it stops itself.
         ZoomLiveMediaRetry.arm(card: flight.card, pageSize: flight.pageFrame.size, source: source)
+        // …and when the departing side has no player to be late WITH, the
+        // arriving one does. A marker flies a sprite sheet, so the page it
+        // opens is the only surface this post can be decoding on — and it is
+        // decoding, from take-off, precisely because nothing is flying its
+        // player. Its first frame still lands mid-air, after `ZoomFlight.build`
+        // asked and was told no.
+        //
+        // Gated on the same answer the destination was given, so a page that
+        // stood its playback down is never asked for a player it deliberately
+        // does not have.
+        let arrivingMedia: ZoomLiveMediaRetry? =
+            if !source.zoomFlightCarriesLivePlayer, let destination {
+                ZoomLiveMediaRetry.arm(
+                    card: flight.card, pageSize: flight.pageFrame.size, mirroring: destination
+                )
+            } else {
+                nil
+            }
 
         #if DEBUG
         Self.debugTrackFlightGeometry(card: flight.card)
@@ -338,6 +357,24 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             initialVelocity: CGVector(dx: 0, dy: ZoomFlight.springVelocity)
         )
         let animator = UIViewPropertyAnimator(duration: duration, timingParameters: spring)
+        // ⚠️ THE LATE PICTURE JOINS THIS ANIMATION rather than chasing it. The
+        // page's player arrives mid-flight, after the pose block below has run,
+        // and a display link posing it from the presentation is a frame behind
+        // by construction — measured at -47.6% of the card's width at the
+        // fastest part of a present. Adding its landing pose here puts it on
+        // the card's own curve, so it can be SEEN to arrive in the window
+        // instead of appearing on the settled page.
+        arrivingMedia?.joinFlight = { [weak animator] work in
+            guard let animator, animator.state != .stopped else { return false }
+            animator.addAnimations(work)
+            return true
+        }
+        #if DEBUG
+        ZoomGeometrySampler.shared.start(card: flight.card, label: "present")
+        animator.addCompletion { _ in
+            MainActor.assumeIsolated { ZoomGeometrySampler.shared.stop() }
+        }
+        #endif
         animator.addAnimations {
             #if DEBUG
             ZoomFlightProfiler.shared.note("pose block >")
@@ -392,73 +429,120 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
                 self.onPresentationReversed?()
                 return
             }
-            // Reveal the page FIRST, then move the surface into it — order that
-            // matters for a measured reason. An `AVPlayerLayer` only renders
-            // inside a visible hierarchy, so installing it into still-hidden
-            // content stops it and drops `isReadyForDisplay` for ~165ms, which
-            // was the flash at the END of the flight. The card is still on top
-            // and still rendering through both steps, so nothing shows in
-            // between.
-            // Wait for the destination to HAVE content before revealing it.
+            // ⚠️ THE TRANSITION ENDS ON THE ANIMATION'S CLOCK, NEVER ON THE
+            // MEDIA'S — and this block used to be the one place in the app
+            // where that was untrue.
             //
-            // Holding the card cannot help here: it is inserted BELOW the
-            // destination view, so the moment `setZoomContentHidden(false)`
-            // runs the destination covers it regardless. What has to wait is
-            // the reveal itself. A screen pushed cold has nothing to lay out —
-            // measured at 1000ms injected latency as 2.18s of empty feed
-            // against a 0.42s flight — and revealing it on schedule is what put
-            // the cell's black floor on screen.
+            // The reveal was gated on `zoomDestinationContentIsReady &&
+            // zoomDestinationMediaIsRendering`, and `completeTransition` sat
+            // INSIDE that gate. So a present took as long as the post took to
+            // arrive. Measured on the map route with `-mock-latency 900`:
             //
-            // BOTH halves of readiness, and the second is the device lesson:
-            // data is not pixels. With posts present the reveal still swapped
-            // the card for a page whose media area was compositing NOTHING
-            // yet — measured on device (run 2, covers-only) as the card
-            // vanishing into a black screen at the exact end of the present.
-            // So the gate also asks whether the active page's media area is
-            // actually rendering (surface or poster), plus one display tick
-            // for the composite to land. Until then the card — the same
-            // cover, full-bleed — stays on screen through the transparent
-            // destination, which is strictly better content than the black
-            // it was being traded for.
+            //     no latency   card removed at +573 ms / +565 ms
+            //     900ms        card removed at +2145 ms  (content=false)
             //
-            // Everything below stays in one block so the ordering note above
-            // still holds: reveal, THEN adopt the surface, then drop the card.
+            // The same gesture, 0.57s or 2.15s. For that whole time the screen
+            // is a still card, the navigation stack is mid-transition, and
+            // nothing can be tapped — the animation LOOKS finished and the app
+            // is not there yet.
+            //
+            // The gate was not wrong about what it protected: a screen pushed
+            // cold has nothing to lay out, and revealing it on schedule puts
+            // the cell's black floor on screen. What was wrong is WHO waits.
+            // The card and the transition are now separated:
+            //
+            //   - the transition finishes on schedule, always. The page is
+            //     revealed, the presenter is reset, `completeTransition` runs.
+            //   - the card stops being the transition's hostage and becomes a
+            //     COVER owned by the destination: re-parented above the page,
+            //     inert, full-bleed, showing exactly what it showed a frame
+            //     ago. It is dropped by the same readiness gate as before,
+            //     under the same ceiling — but nothing waits on it.
+            //
+            // Above the page, and that is the half the old comment said was
+            // impossible: the card was inserted BELOW the destination, so a
+            // reveal covered it. Moving it into the destination's own view
+            // inverts that, and is what lets the reveal happen on time.
+            //
+            // Touches pass THROUGH the cover (`isUserInteractionEnabled =
+            // false`) rather than being shielded: the transition is over, so
+            // the screen belongs to the viewer again.
+            let cover = flight.card
+            let coverToken = LandingCoverToken()
+            for action in ZoomPresentSettlement.onSchedule() {
+                switch action {
+                case .dropShield:
+                    shield.removeFromSuperview()
+                case .revealDestination:
+                    self.destination?.setZoomContentHidden(false)
+                case .parkCardAsCover:
+                    if let host = context.viewController(forKey: .to)?.view {
+                        cover.isUserInteractionEnabled = false
+                        cover.frame = host.bounds
+                        cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                        host.addSubview(cover)
+                    } else {
+                        cover.removeFromSuperview()
+                    }
+                case .clearFlightFurniture:
+                    flight.shadow.removeFromSuperview()
+                    dim.removeFromSuperview()
+                    presentingView?.transform = .identity
+                    ZoomFlight.clearRecededChrome(from: presentingView)
+                    self.destination?.zoomTransitionDidEnd()
+                    self.releaseFlightState()
+                case .completeTransition:
+                    context.completeTransition(!context.transitionWasCancelled)
+                case .adoptSurfaceToDestination, .dropCover:
+                    break // the readiness phase's business, below
+                }
+            }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
+                ZoomFlightProfiler.shared.note("transition completed")
                 let d = self.destination
-                print(String(format: "[zoom] reveal gate armed at +%.1f ms (content=%@ media=%@)",
-                             ZoomFlightProfiler.shared.elapsedMilliseconds,
-                             d?.zoomDestinationContentIsReady.description ?? "-",
-                             d?.zoomDestinationMediaIsRendering.description ?? "-"))
+                print(String(format:
+                    "[zoom] transition completed at +%.1f ms (cover up, content=%@ media=%@)",
+                    ZoomFlightProfiler.shared.elapsedMilliseconds,
+                    d?.zoomDestinationContentIsReady.description ?? "-",
+                    d?.zoomDestinationMediaIsRendering.description ?? "-"))
             }
             #endif
+            // BOTH halves of readiness, and the second is the device lesson:
+            // data is not pixels. With posts present the swap still handed over
+            // to a page whose media area was compositing NOTHING yet — measured
+            // on device as the card vanishing into a black screen at the exact
+            // end of the present. So the cover also asks whether the active
+            // page's media area is actually rendering (surface or poster), plus
+            // one display tick for the composite to land.
             Self.whenReady(ceiling: Self.maximumHydrationHold,
                            afterTicks: 1,
                            condition: { [weak destination = self.destination] in
                                guard let destination else { return true }
                                return destination.zoomDestinationContentIsReady
                                    && destination.zoomDestinationMediaIsRendering
-                           }) {
+                           }) { [weak destination = self.destination] in
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
-                    ZoomFlightProfiler.shared.note("card removed")
-                    print(String(format: "[zoom] card removed at +%.1f ms",
+                    print(String(format: "[zoom] cover dropped at +%.1f ms",
                                  ZoomFlightProfiler.shared.elapsedMilliseconds))
                 }
                 #endif
-                shield.removeFromSuperview()
-                self.destination?.setZoomContentHidden(false)
-                if let surface = flight.card.zoomLiveMediaSurface {
-                    self.destination?.zoomAdoptLiveMediaView(surface)
+                for action in ZoomPresentSettlement.whenDestinationReady(
+                    cardHasLiveSurface: cover.zoomLiveMediaSurface != nil
+                ) {
+                    switch action {
+                    case .adoptSurfaceToDestination:
+                        if let surface = cover.zoomLiveMediaSurface {
+                            destination?.zoomAdoptLiveMediaView(surface)
+                        }
+                    case .dropCover:
+                        cover.removeFromSuperview()
+                    default:
+                        break // the scheduled phase's business, above
+                    }
                 }
-                flight.card.removeFromSuperview()
-                flight.shadow.removeFromSuperview()
-                dim.removeFromSuperview()
-                presentingView?.transform = .identity
-                ZoomFlight.clearRecededChrome(from: presentingView)
-                self.destination?.zoomTransitionDidEnd()
-                self.releaseFlightState()
-                context.completeTransition(!context.transitionWasCancelled)
+                withExtendedLifetime(coverToken) {}
             }
         }
         return animator
@@ -670,6 +754,21 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// frozen over it indefinitely.
     private static let maximumHydrationHold: CFTimeInterval = 3.0
 
+
+    /// Marks the window in which a landing COVER is legitimately on screen
+    /// with no transition alive to be flying it — the audit's stranded-card
+    /// sweep would otherwise convict it. Lives exactly as long as the closure
+    /// that drops the cover.
+    private final class LandingCoverToken {
+        init() {
+            #if DEBUG
+            ZoomDebugCensus.increment(ZoomDebugCensus.Key.landingCover)
+            #endif
+        }
+        #if DEBUG
+        deinit { ZoomDebugCensus.decrement(ZoomDebugCensus.Key.landingCover) }
+        #endif
+    }
 
     private final class LandingHold {
         private let card: UIView

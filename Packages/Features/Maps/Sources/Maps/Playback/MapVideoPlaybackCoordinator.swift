@@ -15,19 +15,48 @@ final class MapVideoPlaybackCoordinator {
     struct Candidate {
         let id: PostID
         let url: URL
-        let view: MapAnnotationView
+        /// ⚠️ ANY host, not `MapAnnotationView`.
+        ///
+        /// Typing this as the lone-pin view excluded every cluster, and on the
+        /// mock corpus that meant the path never ran at all: all three video
+        /// pins in the default viewport were inside clusters. A cluster's face
+        /// is one of its members' posts, and representatives are kind-neutral,
+        /// so a video post leading a group is ordinary rather than exotic.
+        let host: any MapVideoHost
     }
 
     private let pool: VideoPlaybackController
-    private let maxConcurrent: Int
+    private var maxConcurrent: Int
     /// Currently-playing pins → the view their player is bound to.
-    private var playing: [PostID: MapAnnotationView] = [:]
+    private var playing: [PostID: any MapVideoHost] = [:]
     /// AND of the facts that gate playback (tab frontmost, no feed presented,
     /// app foregrounded).
     private var isSurfaceVisible = true
+    /// The one pin `setSurfaceVisible(false, keeping:)` spared, held so the
+    /// reconcile below cannot undo the sparing.
+    ///
+    /// ⚠️ THE EXEMPTION WAS A ONE-SHOT AND NEEDED TO BE A STATE. `update` runs
+    /// on every query result, every annotation add and every pan settle, and
+    /// with the surface hidden it chooses NOTHING — so its "stop everything not
+    /// chosen" sweep stopped the kept pin too. A result landing inside the
+    /// 0.42s flight therefore killed the donor player the flight card was
+    /// mirroring: on screen, the live video in the window going black in
+    /// mid-air, with nothing in any log to say why.
+    private var keptWhileHidden: PostID?
 
     init(pool: VideoPlaybackController, maxConcurrent: Int = 3) {
         self.pool = pool
+        #if DEBUG
+        // `-map-video-concurrency <n>` raises the cap for measurement. The
+        // shipped default stays 3; this exists because "can we play more?" is a
+        // question no amount of reading answers.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-map-video-concurrency"),
+           index + 1 < arguments.count, let value = Int(arguments[index + 1]) {
+            self.maxConcurrent = max(1, value)
+            return
+        }
+        #endif
         self.maxConcurrent = maxConcurrent
     }
 
@@ -38,7 +67,7 @@ final class MapVideoPlaybackCoordinator {
         let chosen = isSurfaceVisible ? Array(candidates.prefix(maxConcurrent)) : []
         let chosenIDs = Set(chosen.map(\.id))
 
-        for (id, view) in playing where !chosenIDs.contains(id) {
+        for (id, view) in playing where !chosenIDs.contains(id) && id != keptWhileHidden {
             stop(id: id, view: view)
         }
         for candidate in chosen where playing[candidate.id] == nil {
@@ -64,10 +93,40 @@ final class MapVideoPlaybackCoordinator {
     func setSurfaceVisible(_ visible: Bool, keeping kept: PostID? = nil) {
         guard visible != isSurfaceVisible else { return }
         isSurfaceVisible = visible
-        guard !visible else { return }
+        guard !visible else {
+            // Back on screen: nothing is spared any more, and `update` decides
+            // afresh from the candidates.
+            keptWhileHidden = nil
+            return
+        }
+        keptWhileHidden = kept
         for (id, view) in playing where id != kept {
             stop(id: id, view: view)
         }
+    }
+
+    /// Whether `id` is previewing live RIGHT NOW — the same fact
+    /// `mirrorLivePreview` acts on, asked without acting on it.
+    ///
+    /// The hero seam needs it one step earlier than the mirror: the destination
+    /// is told whether the card will fly a player while the transition
+    /// controller is still being built, and the only way to answer by mirroring
+    /// would be to mirror onto a card that does not exist yet.
+    ///
+    /// ⚠️ BOTH HALVES, because `playing` means SELECTED, not rendering. A pin
+    /// is entered there the instant it is chosen, before the asynchronous
+    /// `play` has opened anything — and on the default mock corpus that open
+    /// never succeeds at all (`mock://video/...` is not a decodable asset, which
+    /// is what `-rich-media` exists to fix). Asking membership alone would
+    /// answer "live" for three pins that are showing a sprite sheet and nothing
+    /// else, which is precisely the configuration this question was added for.
+    ///
+    /// The pool's answer is the mirror's own precondition, so this is exactly
+    /// "would `mirrorLivePreview` take?" — and the two cannot drift into two
+    /// different ideas of what live means.
+    func isLivePreviewing(_ id: PostID) -> Bool {
+        guard let host = playing[id] else { return false }
+        return pool.hasPlayer(in: host.videoRenderView)
     }
 
     /// Mirrors the live preview of `id` (if it is playing) onto `view` — the
@@ -75,27 +134,46 @@ final class MapVideoPlaybackCoordinator {
     /// frame-synced, instead of a frozen copy. Returns whether a live preview
     /// was actually mirrored.
     func mirrorLivePreview(of id: PostID, to view: VideoRenderView) -> Bool {
-        guard let pinView = playing[id] else { return false }
-        return pool.mirror(from: pinView.videoRenderView, to: view)
+        guard let host = playing[id] else { return false }
+        return pool.mirror(from: host.videoRenderView, to: view)
     }
 
     func stopAll() {
+        // The flight has landed: whatever was spared is spared no longer.
+        keptWhileHidden = nil
         for (id, view) in playing { stop(id: id, view: view) }
     }
 
     // MARK: - Internals
 
     private func start(_ candidate: Candidate) {
-        playing[candidate.id] = candidate.view
-        candidate.view.beginVideoPreview()
-        let view = candidate.view.videoRenderView
+        playing[candidate.id] = candidate.host
+        candidate.host.beginVideoPreview()
+        let view = candidate.host.videoRenderView
         let url = candidate.url
         // Return the player to the pool for this view if the pin scrolls off.
-        candidate.view.onReuse = { [weak self] in self?.stop(view) }
-        Task { await pool.play(url, in: view) }
+        candidate.host.onReuse = { [weak self] in self?.stop(view) }
+        // ⚠️ `scope:` IS NOT OPTIONAL HERE, and passing nil was a real defect.
+        //
+        // The pool shares one player between two surfaces when the asset AND
+        // the scope match — and `nil == nil` matches. Every map marker passed
+        // nil while the mock gave every video pin the same fixture URL, so what
+        // would have looked like three concurrent players was ONE player fanned
+        // out to three surfaces: three views drawing one decoder on one clock.
+        // Any "three videos are fine" reading taken before this line would have
+        // been a measurement of one video.
+        //
+        // The post id is the right scope: two surfaces showing the SAME post — a
+        // marker and the flight card it hands off to — should share, and two
+        // different posts that happen to carry the same file (a repost) must not.
+        //
+        // `peakBitRate` mirrors the grid's cap. A preview loop is contracted at
+        // <=300 KB so this never binds on a well-formed asset; it bounds the
+        // damage when a pin is pointed at something else.
+        Task { await pool.play(url, in: view, peakBitRate: 600_000, scope: candidate.id.rawValue) }
     }
 
-    private func stop(id: PostID, view: MapAnnotationView) {
+    private func stop(id: PostID, view: any MapVideoHost) {
         pool.stop(view.videoRenderView)
         view.endVideoPreview()
         playing[id] = nil

@@ -563,4 +563,29 @@ private final class SceneryBox {
         #expect(release.fill.duration == 1 && release.fill.delay == 0)
         #expect(release.content.duration == 0 && release.content.delay == 1)
     }
+
+    /// **A WINDOW CLOSING ONTO NOTHING MUST LET THE PAGE LEAVE.**
+    ///
+    /// `Pose.pageOpacity` is 1 because an arrival covers, so the page may stay
+    /// whole underneath it and every intermediate frame is an opaque sum of two
+    /// finished drawings. That premise fails for a marker with no ground: a
+    /// dressed icon is a mark and nothing else, it covers nothing, and a page
+    /// held at 1 under it is a block of the page's own ground sitting inside
+    /// the window until the window is gone. Filmed five times, and measured as
+    /// `.secondarySystemBackground` filling the mask while the page's own text
+    /// left over the top of it.
+    ///
+    /// ⚠️ THE POINT OF THE FUNCTION IS THAT THERE ARE TWO DISMISS DRIVERS. The
+    /// rule shipped first as an `if` inside `RevealPopAnimator` — the chevron —
+    /// while a finger goes through `RevealDismissInteractionController`, which
+    /// wrote no page opacity at all. The law was real, correct, and invisible
+    /// on the leg people actually use. Both read this now.
+    @Test func aWindowClosingOntoNoGroundLetsThePageLeave() {
+        #expect(RevealStage.closingPageOpacity(sourceFill: nil) == 0,
+                "a mark on the map covers nothing, so the page must go")
+        #expect(RevealStage.closingPageOpacity(sourceFill: .secondarySystemBackground) == 1,
+                "a disc covers, and a page driven to zero under it is a hole")
+        #expect(RevealStage.closingPageOpacity(sourceFill: .clear) == 1,
+                "a stated colour is a statement, even a transparent one: only ABSENCE means no ground")
+    }
 }

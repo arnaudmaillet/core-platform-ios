@@ -31,6 +31,45 @@ public protocol ZoomFlightCard: UIView {
     /// deliberately does not depend on MediaPlayback — so the card reports it.
     var zoomLiveMediaDebugState: String { get }
 
+    /// The card's OWN picture — the still it draws when live media is not
+    /// drawing, sitting directly beneath the live surface.
+    ///
+    /// ⚠️ IT EXISTS FOR THE SAMPLER, because a probe that watches only the live
+    /// surface can be watching a view the viewer cannot see. Measured on a
+    /// present: a scale sweep on the growing card put the visible content's
+    /// best match at s=1.00 (content rigid in the card's frame) while the
+    /// sampler reported the live surface already presenting the page's full
+    /// width against a card still at 120pt. Both readings were right about
+    /// DIFFERENT objects — during that leg the cover is the picture and the
+    /// surface is not yet — and the disagreement is only legible with the two
+    /// side by side. It also explains a fix that measured clean and was
+    /// reported worse: making the surface animate changes its framing at the
+    /// instant it takes over from the cover, which turns a hand-over nobody
+    /// could see into a jump.
+    ///
+    /// ⚠️ A REQUIREMENT, not an extension-only member, for the reason
+    /// `setZoomContentBlend` states below: through an existential a defaulted
+    /// member with no requirement behind it dispatches STATICALLY, so every
+    /// card would report `nil` and the sampler would go on watching one view
+    /// while claiming to watch two.
+    ///
+    /// Defaults to nil — a card with no still has nothing to report.
+    var zoomCoverSurface: UIView? { get }
+
+    /// Where the live media's picture is drawn INSIDE its surface, in the
+    /// surface's own coordinates — the second half of "is the media attached to
+    /// the window", and the half the bounds cannot answer.
+    ///
+    /// A surface can present exactly the card's rect and still draw its picture
+    /// somewhere else: `prepareZoomLiveMediaForFlight` records that an
+    /// `AVPlayerLayer`'s video rect *snaps* rather than tracking an animation.
+    /// Reported so a defect in the PLAYER can be told apart from a defect in
+    /// its container, which is otherwise a matter of opinion.
+    ///
+    /// Nil when there is no live media, or when the render path publishes no
+    /// such rect. CoreNavigation cannot name a player type, so the card reports.
+    var zoomLiveMediaContentRect: CGRect? { get }
+
     /// The media's NATIVE aspect, if known.
     ///
     /// The flight lays its surface out at this aspect rather than at the
@@ -85,6 +124,49 @@ public protocol ZoomFlightCard: UIView {
     /// module playback-agnostic; cards downcast and ignore what they do not
     /// recognise.
     func adoptZoomLiveMediaView(_ view: UIView)
+
+    /// Brings live media the card has JUST adopted up over the card's own
+    /// picture, across `duration`, instead of swapping to it.
+    ///
+    /// Only the present leg asks for this, and only when the card took off
+    /// with no player: what arrives mid-flight is the destination's picture,
+    /// and the card's cover is the source's. Fading one over the other is the
+    /// same law the reveal transition runs on — nothing fades OUT; the arrival
+    /// comes up over a departure that stays fully drawn.
+    ///
+    /// A card that adopts a surface it was ALREADY flying (the dismiss leg's
+    /// donation, a live-previewing marker mirrored at build time) has no such
+    /// pair and does nothing. Default: nothing — the card's own adopt already
+    /// decided how its media appears.
+    func fadeInAdoptedLiveMedia(over duration: TimeInterval)
+
+    /// Holds a surface adopted MID-FLIGHT invisible until the card has landed.
+    ///
+    /// ⚠️ A SURFACE THAT ARRIVES MID-FLIGHT CANNOT BE POSED EXACTLY, and the
+    /// reason is structural rather than a bug to find. Every pose that is exact
+    /// runs INSIDE the flight's animation block, so CoreAnimation interpolates
+    /// the card and its picture on one curve in one frame. A surface acquired
+    /// after that block has run has missed it: the only driver left is
+    /// `ZoomLiveMediaRetry`'s display link, which is a frame behind by
+    /// construction — measured at -47.6% of the card's width at the fastest
+    /// part of a present, and filmed as a hard vertical seam between sharp
+    /// video and the blurred cover it had not reached.
+    ///
+    /// So it is not shown until it can be right. At the landing the card IS the
+    /// page, the surface's pose is exact by definition, and the fade that
+    /// follows crosses no geometric gap at all. Measured on the present it
+    /// replaces: the arriving video was drawn 263.68pt wider than its window at
+    /// frame 2, and still 79.36pt wider at the frame its cross-dissolve made it
+    /// opaque — two framings of one picture, dissolved into each other, which
+    /// is what "le média se redimensionne" was.
+    ///
+    /// Only the arm that fades applies it: a card adopting its OWN surface
+    /// (`fadesIn == false`) is showing the same picture it already showed, and
+    /// has nothing to hold back.
+    ///
+    /// Default: nothing — a card that cannot hold its media simply arrives as
+    /// it did before.
+    func holdAdoptedLiveMediaUntilLanding()
 
     /// When true the card sizes its own live surface to its bounds, and the
     /// flight leaves the surface's transform alone.
@@ -178,10 +260,14 @@ public protocol ZoomFlightCard: UIView {
 public extension ZoomFlightCard {
     var zoomLiveMediaIsDrawing: Bool { true }
     var zoomLiveMediaDebugState: String { "" }
+    var zoomCoverSurface: UIView? { nil }
+    var zoomLiveMediaContentRect: CGRect? { nil }
     var zoomLiveMediaNativeSize: CGSize? { nil }
     var zoomLiveMediaSurface: UIView? { nil }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
     func adoptZoomLiveMediaView(_ view: UIView) {}
+    func fadeInAdoptedLiveMedia(over duration: TimeInterval) {}
+    func holdAdoptedLiveMediaUntilLanding() {}
     var zoomLiveMediaTracksCardBounds: Bool { false }
     func setZoomContentBlend(_ t: CGFloat) {}
     func setZoomLandingLiveMedia(_ view: UIView) {}

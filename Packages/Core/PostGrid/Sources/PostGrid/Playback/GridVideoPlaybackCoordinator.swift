@@ -116,7 +116,27 @@ public final class GridVideoPlaybackCoordinator {
     /// Posts whose cap is currently lifted (a tile that went full screen), so a
     /// reconcile doesn't quietly re-cap the item mid-flight.
     private var uncappedIDs: Set<PostID> = []
-    private var isSurfaceVisible = true
+    /// ⚠️ FALSE AT BIRTH: "never told" means "not visible", not "visible".
+    ///
+    /// A coordinator holds loans on a shared, scarce decoder pool, and it must
+    /// not take any on an assumption. The `true` default meant a grid that was
+    /// merely CONSTRUCTED could start playing — and the Profile gallery does
+    /// exactly that at launch, because every tab coordinator is started up front
+    /// and `NativePopGestureEnabler` calls `loadViewIfNeeded()` on all five nav
+    /// controllers, so the profile root's `viewDidLoad` runs on a tab nobody
+    /// selected. `ProfileGalleryGridView` then forces a layout off-window and
+    /// reconciles, and the only release is a `viewWillDisappear` that never
+    /// fires for a tab never entered. Measured on develop: launching straight
+    /// onto Messages — no grid, no map ever shown — rested at four players, all
+    /// of them the viewer's own `post-me-*` seeds, with zero stops in 50s.
+    ///
+    /// Both failure modes are silent; they are not equally bad. Forgetting to
+    /// assert visibility now costs autoplay on one screen, which is visible to
+    /// anyone looking at it. The old default cost decoder loans nothing could
+    /// reclaim, app-wide. Every host already asserts on appear:
+    /// `ProfileViewController.viewDidAppear`, `ForYouViewController` (both
+    /// entry points) and `PlaceProfileViewController.viewWillAppear`.
+    private var isSurfaceVisible = false
     /// The post whose player is currently being handed to (or from) a
     /// full-screen page. Inside a handoff this coordinator treats that post as
     /// none of its business: `reconcile` neither starts nor stops it.
@@ -924,6 +944,14 @@ public final class GridVideoPlaybackCoordinator {
 
     /// The URL parked for the current handoff — diagnostics only.
     public var debugParkedURL: URL? { pool.parkedURL }
+    /// Whether the coordinator believes it is on screen.
+    ///
+    /// Exposed for diagnostics only, and it earns its place: since the default
+    /// went false, a grid nobody told about produces a full candidate list that
+    /// `update` then discards, so the "why is nothing playing" log prints
+    /// NOTHING and reads exactly like content with no video. That ambiguity
+    /// cost a wrong conclusion during this fix's own verification.
+    public var debugIsSurfaceVisible: Bool { isSurfaceVisible }
 
     /// The hosted surface for `id`, if its video is rendering outside the cell.
     public func hostedSurface(for id: PostID) -> VideoRenderView? { hostedSurfaces[id] }

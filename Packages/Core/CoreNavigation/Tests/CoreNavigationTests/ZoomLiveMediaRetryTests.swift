@@ -15,6 +15,7 @@ struct ZoomLiveMediaRetryTests {
     /// semantics the real ones have: take the view, keep it, report it.
     private final class StubCard: UIView, ZoomFlightCard {
         private(set) var preparedSize: CGSize?
+        private(set) var wasAskedToFade = false
         var zoomLiveMediaSurface: UIView?
         var zoomRestingCornerRadius: CGFloat { 12 }
         var zoomRestingChrome: UIView? { nil }
@@ -25,6 +26,9 @@ struct ZoomLiveMediaRetryTests {
         }
         func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
             preparedSize = destinationSize
+        }
+        func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+            wasAskedToFade = true
         }
     }
 
@@ -43,9 +47,55 @@ struct ZoomLiveMediaRetryTests {
         }
     }
 
+    /// A card that MIRRORS instead of taking a view — a marker's card, whose
+    /// own render surface is the thing the page's player is attached to.
+    private final class StubMirroringCard: UIView, ZoomFlightCard {
+        let ownSurface = UIView()
+        private(set) var preparedSize: CGSize?
+        /// The duration the card was asked to fade its adopted media in over,
+        /// nil when it was never asked.
+        private(set) var fadeDuration: TimeInterval?
+        private(set) var isHoldingArrival = false
+        private var isLive = false
+        var zoomLiveMediaSurface: UIView? { isLive ? ownSurface : nil }
+        var zoomRestingCornerRadius: CGFloat { 12 }
+        var zoomRestingChrome: UIView? { nil }
+        func setZoomCornerRadius(_ radius: CGFloat) {}
+        func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {
+            guard mirror(ownSurface) else { return }
+            addSubview(ownSurface)
+            isLive = true
+        }
+        func prepareZoomLiveMediaForFlight(destinationSize: CGSize) {
+            preparedSize = destinationSize
+        }
+        func fadeInAdoptedLiveMedia(over duration: TimeInterval) {
+            fadeDuration = duration
+        }
+        func holdAdoptedLiveMediaUntilLanding() { isHoldingArrival = true }
+    }
+
+    /// A page whose player arrives while the card is in the air, which is the
+    /// whole shape of a map present: the marker flew a sheet, so the only
+    /// player this post has is the one the page started at take-off.
+    private final class StubPage: NSObject, ZoomTransitionDestination {
+        var isPlaying = false
+        private(set) var asks = 0
+        func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect { .zero }
+        func zoomFlightChrome() -> UIView? { nil }
+        func setZoomContentHidden(_ hidden: Bool) {}
+        func zoomTransitionDidEnd() {}
+        var isReadyForInteractiveDismissal: Bool { true }
+        func setContentScrollEnabled(_ enabled: Bool) {}
+        func zoomMirrorLiveMedia(onto surface: UIView) -> Bool {
+            asks += 1
+            return isPlaying
+        }
+    }
+
     /// A card must be in a window for the retry to consider it airborne, and a
     /// test has no screen — so it gets one.
-    private func staged(_ card: StubCard) -> UIWindow {
+    private func staged(_ card: UIView) -> UIWindow {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         card.frame = window.bounds
         window.addSubview(card)
@@ -147,4 +197,166 @@ struct ZoomLiveMediaRetryTests {
         #expect(retry?.debugIsAsking == false)
         #expect(source.asks == 0)
     }
+
+    /// ⚠️ THE LATE SIDE OF A MAP PRESENT IS THE ARRIVAL, NOT THE DEPARTURE.
+    ///
+    /// A marker flies a sprite sheet — nothing live leaves with the card — so
+    /// the only surface this post can be decoding on is the page underneath,
+    /// and it starts at take-off precisely because nothing is flying its
+    /// player. Its first frame still lands mid-air, after the flight was built
+    /// and told no. Without this the card wore a 172pt cover blown up sevenfold
+    /// for the whole transition and the sharp picture appeared after the
+    /// landing. Filmed, by the user, twice.
+    @Test func aPageThatStartsPlayingMidFlightReachesTheCard() {
+        let card = StubMirroringCard()
+        let window = staged(card)
+        let page = StubPage()
+        let retry = ZoomLiveMediaRetry.arm(card: card, pageSize: CGSize(width: 402, height: 874),
+                                           mirroring: page, window: 600)
+
+        // Frame 1: the page's `play` has not registered yet — the state
+        // `ZoomFlight.build` reads once and used to take as final.
+        retry?.debugTick()
+        #expect(card.zoomLiveMediaSurface == nil)
+        #expect(retry?.debugIsAsking == true)
+
+        // Frame 2: the player is attached.
+        page.isPlaying = true
+        retry?.debugTick()
+
+        #expect(page.asks == 2, "the page must be asked every frame, not once")
+        #expect(card.zoomLiveMediaSurface === card.ownSurface)
+        // Laid out for the PAGE, not for the card's current tile-sized bounds:
+        // a surface posed at the marker's size shows a crop of a crop.
+        #expect(card.preparedSize == CGSize(width: 402, height: 874))
+        window.isHidden = true
+    }
+
+    /// The same economy as the source arm: a card already flying video asks
+    /// nobody, and a page is never asked to mirror a player the card holds.
+    @Test func aLiveCardAsksThePageNothing() {
+        let card = StubMirroringCard()
+        card.adoptZoomLiveMedia { _ in true }
+        let page = StubPage()
+
+        let retry = ZoomLiveMediaRetry.arm(card: card, pageSize: CGSize(width: 402, height: 874),
+                                           mirroring: page)
+
+        #expect(retry == nil)
+        #expect(page.asks == 0)
+    }
+
+    /// ⚠️ A SURFACE CAN ARRIVE ALREADY ANIMATING, and then posing it moves
+    /// nothing at all.
+    ///
+    /// The surface a page mirrors onto is the card's OWN, and it has been
+    /// inside the card since take-off — so the card's animated bounds gave it
+    /// inherited position/bounds animations through autoresizing, and they are
+    /// still running when the retry adopts. `follow` writes MODEL values with
+    /// actions disabled, which a live animation simply outranks: measured on
+    /// the simulator as a model saying 402x874 at scale 0.42, centred, while
+    /// the presentation was a 34x66 patch at (-92, -244) — the misplaced
+    /// rectangle of video on a black card that was filmed.
+    ///
+    /// A surface donated by the OTHER screen never had this, which is why the
+    /// source arm went years without needing it.
+    @Test func anAlreadyAnimatingSurfaceIsStilled() {
+        let card = StubMirroringCard()
+        let window = staged(card)
+        let page = StubPage()
+        page.isPlaying = true
+        // What the card's animated layout leaves behind on its own subview.
+        let inherited = CABasicAnimation(keyPath: "position")
+        inherited.fromValue = CGPoint(x: 0, y: 0)
+        inherited.toValue = CGPoint(x: 200, y: 400)
+        inherited.duration = 10
+        card.ownSurface.layer.add(inherited, forKey: "position")
+        let poster = CALayer()
+        poster.add(inherited, forKey: "position")
+        card.ownSurface.layer.addSublayer(poster)
+
+        let retry = ZoomLiveMediaRetry.arm(card: card, pageSize: CGSize(width: 402, height: 874),
+                                           mirroring: page, window: 600)
+        retry?.debugTick()
+
+        #expect(card.zoomLiveMediaSurface === card.ownSurface)
+        #expect(card.ownSurface.layer.animationKeys() == nil,
+                "the adopted surface kept the animation that outranks every pose")
+        #expect(poster.animationKeys() == nil,
+                "the poster inside it lags the same way, so it is stilled too")
+        window.isHidden = true
+    }
+
+    /// ⚠️ WHICH SIDE THE PICTURE CAME FROM DECIDES HOW IT APPEARS.
+    ///
+    /// A tile's surface is the card's own picture in motion — same post, same
+    /// crop, already what the card was showing — so it replaces the cover and
+    /// nothing should be seen to happen. A page's is the OTHER end of the
+    /// flight arriving, and it comes up over a departure that stays fully
+    /// drawn: the same law the reveal runs on.
+    /// ⚠️ AND IT ARRIVES AT THE LANDING, NOT MID-FLIGHT. A surface adopted
+    /// while the card is still travelling has missed the only pose that is
+    /// exact — the one inside the flight's own animation block — so it is held
+    /// invisible until the card has stopped. Measured on the present this
+    /// replaces: the arriving video was drawn 263.68pt wider than its window
+    /// when it was adopted, and still 79.36pt wider on the frame its
+    /// cross-dissolve made it opaque.
+    @Test func onlyTheArrivingSideFadesIn() {
+        let arriving = StubMirroringCard()
+        let arrivingWindow = staged(arriving)
+        let page = StubPage()
+        page.isPlaying = true
+        let retry = ZoomLiveMediaRetry.arm(card: arriving,
+                                           pageSize: CGSize(width: 402, height: 874),
+                                           mirroring: page, window: 600)
+        retry?.debugTick()
+        #expect(arriving.isHoldingArrival,
+                "with no animation to join, the arriving picture was not held for the landing")
+        #expect(arriving.fadeDuration == nil, "it faded up mid-flight, where no pose is exact")
+        retry?.debugFinish()
+        let fade = arriving.fadeDuration
+        #expect(fade != nil, "the arriving picture cut in instead of fading")
+        // Floored so a late adoption is still seen to arrive rather than
+        // snapping in over three milliseconds.
+        #expect((fade ?? 0) >= 0.2)
+        arrivingWindow.isHidden = true
+
+        // ⚠️ AND IT IS NOT HELD WHEN THERE IS AN ANIMATION TO JOIN. Holding was
+        // a concession to the display link being a frame behind; handed the
+        // flight's own animator the pose rides the card's curve, so the picture
+        // belongs IN THE WINDOW and fades up there. Held anyway, it appeared on
+        // the settled page instead — reported as "the player is not in the
+        // transition window".
+        let joining = StubMirroringCard()
+        let joiningWindow = staged(joining)
+        let joiningPage = StubPage()
+        joiningPage.isPlaying = true
+        let joiningRetry = ZoomLiveMediaRetry.arm(
+            card: joining, pageSize: CGSize(width: 402, height: 874),
+            mirroring: joiningPage, window: 600
+        )
+        var posedInFlight = 0
+        joiningRetry?.joinFlight = { work in
+            posedInFlight += 1
+            work()
+            return true
+        }
+        joiningRetry?.debugTick()
+        #expect(posedInFlight == 1, "the landing pose was never handed to the flight")
+        #expect(!joining.isHoldingArrival, "it was held back from a window that would have carried it")
+        #expect((joining.fadeDuration ?? 0) >= 0.2, "it arrived as a cut instead of a fade")
+        joiningWindow.isHidden = true
+
+        let departing = StubCard()
+        let departingWindow = staged(departing)
+        let source = StubSource()
+        source.surface = UIView()
+        ZoomLiveMediaRetry.arm(card: departing, pageSize: CGSize(width: 402, height: 874),
+                               source: source, window: 600)?.debugTick()
+        #expect(departing.zoomLiveMediaSurface === source.surface)
+        #expect(departing.wasAskedToFade == false,
+                "the card's own picture in motion was faded in over itself")
+        departingWindow.isHidden = true
+    }
 }
+

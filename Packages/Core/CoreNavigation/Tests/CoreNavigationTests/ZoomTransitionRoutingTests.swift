@@ -10,13 +10,14 @@ import UIKit
 /// pinnable headless — the rule the class header states and nothing asserted.
 @MainActor
 struct ZoomTransitionRoutingTests {
-    private func staged() -> (
+    private func staged(carriesLivePlayer: Bool = true) -> (
         controller: ZoomTransitionController,
         nav: UINavigationController,
         feed: RoutedFeed,
         source: RoutedSource
     ) {
         let source = RoutedSource()
+        source.carriesLivePlayer = carriesLivePlayer
         let feed = RoutedFeed()
         let controller = ZoomTransitionController(source: source, destination: feed)
         let nav = UINavigationController(rootViewController: UIViewController())
@@ -98,6 +99,26 @@ struct ZoomTransitionRoutingTests {
         #expect(feed.willBeginCalls == 1)
     }
 
+    /// ⚠️ WHAT THE CARD CARRIES CROSSES THE SEAM WITH THE WARNING.
+    ///
+    /// The destination stands its playback down because a start would attach a
+    /// newer layer to the player the card is flying and blank it. A source that
+    /// flies no player — a map marker wearing a baked sprite sheet — gives the
+    /// page nothing to steal, and a deferral there is a beat of poster-then-
+    /// black bought against a hazard that cannot happen. The destination is
+    /// pushed by a flight whose other end it cannot see, so the answer has to
+    /// arrive from the source through the controller.
+    @Test func theWarningCarriesWhetherTheCardFliesAPlayer() {
+        let (_, _, live, _) = staged(carriesLivePlayer: true)
+        #expect(live.willBeginLivePlayer == true)
+
+        let (_, _, sheet, _) = staged(carriesLivePlayer: false)
+        #expect(
+            sheet.willBeginLivePlayer == false,
+            "a flight carrying no player still told the page to hold its own back"
+        )
+    }
+
     /// A flight gets a dormant interruptor — created when UIKit asks for the
     /// interaction controller, retained for the flight, and released the
     /// moment `didShow` reports ANY completed transition. Observed through the
@@ -174,6 +195,12 @@ private final class RoutedSource: NSObject, ZoomTransitionSource {
     /// The map pin's own state, recorded rather than swallowed: the push hides
     /// it and the pop is the only thing that ever shows it again.
     private(set) var isHidden = false
+    /// Whether this source's card flies a live player. Settable, because both
+    /// answers are shipping behaviour: a grid tile's does, a sprite-sheet
+    /// marker's does not.
+    var carriesLivePlayer = true
+
+    var zoomFlightCarriesLivePlayer: Bool { carriesLivePlayer }
 
     func zoomHeroFrame(in container: UICoordinateSpace) -> CGRect {
         CGRect(x: 10, y: 10, width: 80, height: 80)
@@ -191,6 +218,9 @@ private final class RoutedCard: UIView, ZoomFlightCard {
 
 private final class RoutedFeed: UIViewController, ZoomTransitionDestination {
     private(set) var willBeginCalls = 0
+    /// What the last warning said the card was carrying. Nil until one arrives,
+    /// so "never told" and "told false" stay distinguishable.
+    private(set) var willBeginLivePlayer: Bool?
     /// Settable per test, and read at the pop rather than at construction —
     /// this screen is a pager, so the post being dismissed is routinely not the
     /// one that opened it. `.hero` is the default every other test here wants.
@@ -203,5 +233,8 @@ private final class RoutedFeed: UIViewController, ZoomTransitionDestination {
     func zoomTransitionDidEnd() {}
     var isReadyForInteractiveDismissal: Bool { true }
     func setContentScrollEnabled(_ enabled: Bool) {}
-    func zoomTransitionWillBegin() { willBeginCalls += 1 }
+    func zoomTransitionWillBegin(flyingLivePlayer: Bool) {
+        willBeginCalls += 1
+        willBeginLivePlayer = flyingLivePlayer
+    }
 }

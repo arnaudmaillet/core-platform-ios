@@ -155,6 +155,45 @@ final class SnapFeedViewController: UIViewController {
     /// realized inside that window inherit the playback deferral, so a page
     /// activating mid-flight cannot steal the render slot from the flying card.
     private var isAwaitingZoomPresentation = false
+    /// Whether the card staging that presentation is flying THIS page's player
+    /// — the source's own answer, handed over by the transition controller.
+    ///
+    /// Defaults to the conservative reading and is RE-STATED on every present,
+    /// for the reason `zoomOwnsInteractiveDismissal` below is: this controller
+    /// is reused, so a leftover `false` from a map flight would silently unarm
+    /// the deferral for the next flight from a grid — where it is load-bearing.
+    private var flightCarriesActivePlayer = true
+    /// The two facts whose AND is the deferral. Read at all three stamping
+    /// sites, so a page realized mid-flight cannot disagree with the one the
+    /// flight staged over.
+    ///
+    /// ⚠️ A MAP FLIGHT DOES NOT DEFER, and the question "could the page start
+    /// sooner so the video is up earlier in the window" is CLOSED. Measured on
+    /// a present from a marker, `-zoom-live-log -media-log`, times relative to
+    /// the flight beginning:
+    ///
+    ///     +0 ms    willBegin flyingPlayer=N defers=N
+    ///     +68 ms   [page-play] start
+    ///     +230 ms  retry ADOPTED mid-flight — the first decoded frame
+    ///     +703 ms  landed
+    ///
+    /// A marker carries no player, so this reads false and the page starts as
+    /// early as there is a page to start. The 162 ms between the start and the
+    /// first frame is a remote asset decoding, not a policy, and the fade
+    /// begins in the same tick the frame exists.
+    ///
+    /// The only two ways to make that frame earlier are both refused: warming a
+    /// player for every visible marker would put an `AVPlayer` behind a 44pt
+    /// pin, spend pool loans the pool is already tight on and decode during
+    /// pan — the map's own invariant forbids the first and
+    /// `prewarmVisiblePosts` deliberately warms POSTS, not players; and a cheap
+    /// preview rendition is the standing contract ask
+    /// (`dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md`). Until that ships the
+    /// card is not empty for those 162 ms: it flies the marker's sprite sheet,
+    /// animating, at the page's own framing.
+    private var defersPlaybackForStagingFlight: Bool {
+        isAwaitingZoomPresentation && flightCarriesActivePlayer
+    }
     /// Set by whoever pushes this screen: true when a flight attached a grab to
     /// it, false when it arrived by an ordinary push and the native edge swipe
     /// should work. Written on BOTH paths rather than defaulted, because this
@@ -3304,7 +3343,7 @@ final class SnapFeedViewController: UIViewController {
             if let snapCell = collectionView.cellForItem(
                 at: IndexPath(item: activate, section: 0)
             ) as? SnapFeedCell {
-                snapCell.defersPlaybackForFlight = isAwaitingZoomPresentation
+                snapCell.defersPlaybackForFlight = defersPlaybackForStagingFlight
             }
             lifecycleCell(at: activate)?.willBecomeActive()
             // The pages either side get ready NOW, at the settle, rather than
@@ -3628,7 +3667,7 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // leg always takes THIS one, because the cell is realized by the very
         // layout pass the presentation triggers. Stamping only in `apply` left
         // the flag false exactly when it mattered.
-        (cell as? SnapFeedCell)?.defersPlaybackForFlight = isAwaitingZoomPresentation
+        (cell as? SnapFeedCell)?.defersPlaybackForFlight = defersPlaybackForStagingFlight
         // The same net, for the picture: a page can be handed the screen while
         // it is still being realized, and the hand-over reaches nothing. The
         // page that owns the viewport is a fact about the SCROLL, so it is
@@ -4405,6 +4444,14 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return true
     }
 
+    /// The seam's name for `prepareForHeroPresentation`, so a presenter that
+    /// holds this screen as `any ZoomTransitionDestination` — which the map
+    /// does, since Maps depends on FeedInterface rather than Feed and cannot
+    /// name this type — can pre-pay the same layout For You pre-pays.
+    public func zoomPrepareForPresentation(in bounds: CGRect) {
+        prepareForHeroPresentation(in: bounds)
+    }
+
     public func prepareForHeroPresentation(in bounds: CGRect) {
         view.frame = bounds
         view.setNeedsLayout()
@@ -4541,12 +4588,30 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
 
     /// A presenting flight is staging. The active page must not start its own
-    /// playback while the card is flying that player, so the flag is set before
+    /// playback while the card is flying THAT PLAYER, so the flag is set before
     /// this controller lays out and activates anything.
-    public func zoomTransitionWillBegin() {
+    ///
+    /// ⚠️ CONDITIONAL SINCE THE MAP LEARNED TO FLY SPRITE SHEETS. The deferral
+    /// used to be unconditional, which is right for every flight that leaves a
+    /// grid tile: the tile and this page share one pooled player (same asset,
+    /// same post-id scope), so a start here attaches a newer layer and blanks
+    /// the card. A marker flying a baked sheet shares nothing — its post has no
+    /// player anywhere yet — and deferring only bought the viewer a beat of
+    /// poster-then-black at the landing. The source says which flight this is.
+    public func zoomTransitionWillBegin(flyingLivePlayer: Bool) {
         isAwaitingZoomPresentation = true
-        activeSnapCell?.defersPlaybackForFlight = true
+        flightCarriesActivePlayer = flyingLivePlayer
+        activeSnapCell?.defersPlaybackForFlight = defersPlaybackForStagingFlight
         activeSnapCell?.setChromeHeldForFlight(true)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            // Read against `[page-play] start` and the landing below: a start
+            // BETWEEN these two lines is the page decoding during the flight.
+            print(String(format: "[zoom-live] %.3f willBegin flyingPlayer=%@ defers=%@",
+                         CACurrentMediaTime(), flyingLivePlayer ? "Y" : "N",
+                         defersPlaybackForStagingFlight ? "Y" : "N"))
+        }
+        #endif
     }
 
     /// **OPTION B.** Opens the thread's window on the same spring the card
@@ -4649,8 +4714,16 @@ extension SnapFeedViewController: ZoomTransitionDestination {
                   + " of \(orderedIDs.prefix(3).map(\.rawValue))")
         }
         #endif
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
+            print(String(format: "[zoom-live] %.3f landed", CACurrentMediaTime()))
+        }
+        #endif
         flightChrome = nil
         isAwaitingZoomPresentation = false
+        // Back to the conservative reading for whatever presents next: this
+        // controller outlives the flight that set it.
+        flightCarriesActivePlayer = true
         // The replica is gone; the page's own chrome comes in rather than
         // simply stopping being covered.
         activeSnapCell?.setChromeHeldForFlight(false)

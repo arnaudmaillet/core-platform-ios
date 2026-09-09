@@ -391,6 +391,21 @@ enum RevealStage {
         /// makes every intermediate frame an opaque sum of two finished
         /// drawings.
         var pageOpacity: CGFloat = 1
+
+        /// Whether `apply` writes `pageOpacity` at all.
+        ///
+        /// ⚠️ FALSE WHEN A STAND-IN OWNS THE FADE, and its absence was a defect
+        /// that read as the rule never having been applied. The opening sets
+        /// `toView.alpha = 0` so the destination can rise over a stand-in that
+        /// stays whole — and then called `apply(closed, …)`, which wrote
+        /// `page.alpha = pose.pageOpacity` (1) two lines later. The page was
+        /// opaque from frame zero, the ramp animated 1 to 1, and what shipped
+        /// was a window that opens with its content already fully there.
+        ///
+        /// Two drivers on one property is the trap this codebase keeps meeting;
+        /// this makes the pose stand down rather than making the caller shout
+        /// louder.
+        var ownsPageOpacity = true
     }
 
     /// The whole page, unmasked and untranslated — the landed pose, identical
@@ -811,6 +826,31 @@ enum RevealStage {
         carriesPage ? 1 : swapFractions(at: progress).content
     }
 
+    /// What the page's opacity must be at the END of a close, given the ground
+    /// the window is closing onto.
+    ///
+    /// `Pose.pageOpacity` is 1 because an arrival covers, so a page that stays
+    /// whole underneath makes every intermediate frame an opaque sum of two
+    /// finished drawings — and driving it to 0 once produced a window that was
+    /// briefly a hole. Both true, and both conditional on there BEING an opaque
+    /// arrival. A marker with no ground is not one: a dressed icon is a mark
+    /// and nothing else (`RevealGeometry.sourceFill == nil` is exactly that
+    /// statement), so it covers nothing, and a page held at 1 under it is a
+    /// block of the page's own ground sitting inside the window until the
+    /// window is gone. No hole to reintroduce either — what the two fades cross
+    /// at is the MAP, which is where this window is going.
+    ///
+    /// ⚠️ A FUNCTION BECAUSE THERE ARE TWO DISMISS DRIVERS AND THEY MUST NOT
+    /// DISAGREE. This rule was first written as an `if` inside
+    /// `RevealPopAnimator` — the chevron — while a finger goes through
+    /// `RevealDismissInteractionController`, which never wrote `pageOpacity` at
+    /// all and applied the default 1 down to the 44pt landing. The law existed
+    /// and was invisible on the leg people actually use. Anything that closes a
+    /// window reads it from here.
+    static func closingPageOpacity(sourceFill: UIColor?) -> CGFloat {
+        sourceFill == nil ? 0 : 1
+    }
+
     private static func ramp(_ value: CGFloat, from start: CGFloat, to end: CGFloat) -> CGFloat {
         guard end > start else { return value >= end ? 1 : 0 }
         return min(max((value - start) / (end - start), 0), 1)
@@ -931,6 +971,20 @@ enum RevealStage {
         around page: UIView, in container: UIView, pageFrame: CGRect
     ) -> (host: UIView, mask: UIView) {
         let host = UIView(frame: container.bounds)
+        // ⚠️ THE HOST SWALLOWS TOUCHES FOR THE LENGTH OF THE TRANSITION, and
+        // its absence was a hole the hero does not have.
+        //
+        // The hero's animator installs a full-container shield for exactly this
+        // reason; the reveal installs none, and was covered only by accident —
+        // this host spans the container, so a tap "on the map" landed on the
+        // arriving PAGE instead. A MASK CLIPS PIXELS, NOT TOUCHES: for the
+        // whole of every opening AND closing, the invisible parts of that page
+        // were live, so a finger over what looked like map hit whatever the
+        // page has at that point.
+        //
+        // Non-interactive rather than hidden: the page must still be drawn, and
+        // `unwrap` hands it back to the container where it becomes live again.
+        host.isUserInteractionEnabled = false
         container.addSubview(host)
         host.addSubview(page)
         // Cleared BEFORE the frame is assigned: `frame` is derived from bounds
@@ -962,7 +1016,7 @@ enum RevealStage {
         page.transform = CGAffineTransform(
             translationX: pose.pageTranslation.x, y: pose.pageTranslation.y
         ).scaledBy(x: pose.pageScale, y: pose.pageScale)
-        page.alpha = pose.pageOpacity
+        if pose.ownsPageOpacity { page.alpha = pose.pageOpacity }
         standIn?.frame = pose.mask
         (standIn as? RevealStandInShaping)?.setCornerRadius(pose.maskRadius)
         // LAID OUT HERE, inside whatever block is applying the pose, and that
@@ -1072,7 +1126,13 @@ func installVeil(geometry: RevealGeometry, anchor: CGRect?) {
     RevealStage.log("veil", "anchorY=\(Int(anchor.minY)) captionEnd=\(Int(end))"
         + " cut=\(Int(anchor.minY + end))")
     #endif
-    geometry.installDestinationVeil(anchor.minY + end, geometry.sourceFill)
+    // ⚠️ NEVER THE BARE `sourceFill`. `installRevealVeil` guards `let tint`, so
+    // a source with no ground would install NO VEIL — silently, on the opening
+    // too, and the window would show the page's sliced sentence instead of the
+    // thing the veil exists to hide. The ground and the veil are two decisions
+    // that happened to share a value; a nil ground is now a real answer, so
+    // they stop sharing it.
+    geometry.installDestinationVeil(anchor.minY + end, geometry.sourceFill ?? .systemBackground)
 }
 
 /// The animation controller UIKit insists on having beside a custom
@@ -1110,6 +1170,12 @@ final class RevealGrabAnimator: NSObject, UIViewControllerAnimatedTransitioning 
 /// post and a media post settle with identical physics.
 @MainActor
 final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+    #if DEBUG
+    /// Counted for the LIFE OF THE TRANSITION — see `ZoomDebugCensus.Key.reveal`.
+    /// Without it the audit cannot tell a reveal in flight from a settled
+    /// screen, and reports the stand-in a reveal legitimately draws as wreckage.
+    private let censusToken = RevealCensusToken()
+    #endif
     private let geometry: RevealGeometry
     /// Source chrome that must LEAVE with the opening rather than before it —
     /// the app's floating tab bar.
@@ -1165,7 +1231,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         let (host, mask) = RevealStage.makeHost(
             around: toView, in: container, pageFrame: pageFrame
         )
-        let open = RevealStage.open(container: container)
+        var open = RevealStage.open(container: container)
         // The window opens AS THE SOURCE when the source's content is not the
         // page's — a marker's face, which the page has nowhere. Added above the
         // masked page and posed on the same closed pose. Nil for a row, whose
@@ -1175,7 +1241,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         // that pose says — the same order, and the same reason, as the pop.
         let standIn = geometry.makePresentStandIn()
         let carries = standIn != nil && geometry.pageFit.carriesPage
-        let closed = RevealStage.closed(
+        var closed = RevealStage.closed(
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
@@ -1202,9 +1268,33 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             fit: geometry.pageFit
         )
         if let standIn {
-            container.addSubview(standIn)
+            // ⚠️ BELOW THE PAGE, and the page starts absent.
+            //
+            // The rule is one rule in both directions: NOTHING FADES OUT. The
+            // arriving side fades in over a departing side that stays fully
+            // drawn, so there is never a frame where both are half-there and the
+            // map washes through the middle of them. The close leg has always
+            // worked this way — its stand-in is the ARRIVAL, added over the page
+            // and faded in. The open leg did the opposite: it faded the marker's
+            // own face out, so the source dissolved instead of the destination
+            // arriving, which is what a viewer filmed.
+            //
+            // Mirroring it means the stand-in goes UNDER the page and simply
+            // stays: opaque, from frame zero, for the whole opening.
+            // ⚠️ BELOW THE HOST, NOT BELOW THE PAGE. `makeHost` has already
+            // moved `toView` inside the masking host, so it is no longer a
+            // sibling in `container` — and `insertSubview(_:belowSubview:)`
+            // against a non-sibling does not place anything below it. The
+            // stand-in landed on TOP of the page: the marker's face drawn over
+            // the destination for the whole opening, which is the reverse of
+            // the rule and was filmed as the icon sitting on the page.
+            container.insertSubview(standIn, belowSubview: host)
             standIn.alpha = 1
             (standIn as? RevealStandInShaping)?.setContentOpacity(1)
+            // The pose must not write this back — see `Pose.ownsPageOpacity`.
+            closed.ownsPageOpacity = false
+            open.ownsPageOpacity = false
+            toView.alpha = 0
         }
         RevealStage.apply(closed, mask: mask, page: toView, standIn: standIn)
         // The page wears the CARD before it wears itself. Set outside the
@@ -1287,21 +1377,18 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             // ⚠️ NOT RUN AT ALL on a carrying fit, rather than run to the same
             // value: `setContentOpacity(1)` above is where it stays, and the
             // face leaves as one unit on the view's own alpha.
-            if schedule.content.duration > 0 {
-                UIView.animate(
-                    withDuration: span * schedule.content.duration,
-                    delay: span * schedule.content.delay,
-                    options: [.curveEaseOut]
-                ) {
-                    shaping?.setContentOpacity(0)
-                }
-            }
+            // The source's content is NOT scheduled any more — it holds at 1
+            // for the whole opening. `shaping` is kept because the completion
+            // below still hands the card back in a known state.
+            _ = shaping
+            // The DESTINATION arrives instead, on the schedule the stand-in's
+            // own fill used to leave on: same span, same curve, opposite sign.
             UIView.animate(
                 withDuration: span * schedule.fill.duration,
                 delay: span * schedule.fill.delay,
                 options: [.curveEaseIn]
             ) {
-                standIn.alpha = 0
+                toView.alpha = 1
             }
         }
         UIView.animate(
@@ -1334,6 +1421,11 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             self.geometry.installDestinationAuthorBand(nil)
             RevealStage.unwrap(toView, from: host, to: container, frame: pageFrame)
             standIn?.removeFromSuperview()
+            // ⚠️ UNCONDITIONALLY, cancelled or not. The page starts the opening
+            // at alpha 0 now, and a cancelled present that left it there would
+            // hand the viewer a blank screen rather than the screen they backed
+            // out to.
+            toView.alpha = 1
             dim.removeFromSuperview()
             // Cleared under the opaque page, where the reset cannot be seen.
             presenting?.transform = .identity
@@ -1419,6 +1511,12 @@ final class RevealTrajectoryProbe {
 /// spring is the driver's own completion curve, not this one's.
 @MainActor
 final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+    #if DEBUG
+    /// Counted for the LIFE OF THE TRANSITION — see `ZoomDebugCensus.Key.reveal`.
+    /// Without it the audit cannot tell a reveal in flight from a settled
+    /// screen, and reports the stand-in a reveal legitimately draws as wreckage.
+    private let censusToken = RevealCensusToken()
+    #endif
     private let geometry: RevealGeometry
     /// Source chrome that comes back with the return (the app's tab bar), so
     /// it is revealed by the hand rather than switched on after the landing.
@@ -1552,7 +1650,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // window as a second copy of the same post. Put back below, in the same
         // transaction as the unwrap.
         geometry.setSourceConcealed(true)
-        let closed = RevealStage.closed(
+        var closed = RevealStage.closed(
             sourceRect: sourceRect,
             radius: geometry.sourceCornerRadius,
             anchor: anchor,
@@ -1561,6 +1659,9 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             ridingFrom: standIn != nil ? open.mask : nil,
             fit: geometry.pageFit
         )
+        // The page leaves on the legs where nothing arrives to cover it — see
+        // `RevealStage.closingPageOpacity`, which both dismiss drivers read.
+        closed.pageOpacity = RevealStage.closingPageOpacity(sourceFill: geometry.sourceFill)
         RevealStage.apply(open, mask: mask, page: fromView, standIn: standIn)
         geometry.setDestinationGround(nil)
         installVeil(geometry: geometry, anchor: anchor)
@@ -1691,3 +1792,14 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         return animator
     }
 }
+
+
+#if DEBUG
+/// Lives exactly as long as the animator holding it, so the census answers
+/// "a reveal is flying" without either animator having to remember to
+/// decrement on the several paths a transition can end on.
+private final class RevealCensusToken {
+    init() { ZoomDebugCensus.increment(ZoomDebugCensus.Key.reveal) }
+    deinit { ZoomDebugCensus.decrement(ZoomDebugCensus.Key.reveal) }
+}
+#endif

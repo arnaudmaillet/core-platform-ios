@@ -88,7 +88,16 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// the animation converges to zero duration exactly as the window closes
     /// and the handoff to direct sets is continuous by construction.
     private var detachDeadline: CFTimeInterval = 0
-    private var isDetachSettling: Bool { CACurrentMediaTime() < detachDeadline }
+    private var isDetachSettling: Bool { CACurrentMediaTime() < detachDeadline && !hasYieldedDip }
+
+    /// Set the moment the finger travels, and never unset for the rest of the
+    /// grab — see the hand-over in `updateDrag`.
+    private var hasYieldedDip = false
+    /// The last translation seen, so a pan event can tell a resting thumb from
+    /// a travelling one. A thumb at rest jitters well under a point; a real
+    /// drag clears this in a single frame.
+    private var lastDragTranslation: CGPoint?
+    private static let dipYieldsAboveTravel: CGFloat = 0.5
 
     /// How long the detach dip takes to settle.
     private static let detachDuration: TimeInterval = 0.18
@@ -241,6 +250,22 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // inherits the error.
         container.layoutIfNeeded()
         source.zoomSourceWillStageDismissal()
+        // ⚠️ THE GRAB ASSERTS THE CONCEALMENT RATHER THAN INHERITING IT.
+        //
+        // The card is the source's twin, so for the length of this gesture the
+        // original must not also be on screen — and until now that was true
+        // only by inheritance: the PUSH hid it (`ZoomAnimator`'s frame-0
+        // handoff) and nothing re-applied it. Inheritance is not enough here.
+        // The hide is an `isHidden` flag on one view instance, and this line is
+        // the first thing that runs after the presenter has been put back in
+        // the window — which is exactly when MapKit re-realizes its annotation
+        // views (`prepareForReuse` resets `isHidden`) and when a settling
+        // region can mint a replacement marker. Either one leaves the twin
+        // showing under the page for the whole drag.
+        //
+        // Idempotent everywhere it is not needed, and the same thing the reveal
+        // driver has always done at its own staging.
+        source.setZoomSourceHidden(true)
         // The presenter can't move under the user while the feed covers it, so
         // this rect is stable for the grab's lifetime — but it is recomputed at
         // release anyway (see `releaseGrab`), because staging can be seconds
@@ -292,6 +317,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         self.context = context
         self.flight = flight
         self.dim = dim
+        #if DEBUG
+        // ⚠️ HERE, AND NOWHERE EARLIER. Armed from `beginGrab` — either before
+        // or after `onBeginDismiss`, both were tried — the sampler read
+        // `flight == nil` and recorded not one frame, with no error and a log
+        // that looked exactly like a passing one. The staging is what makes a
+        // card exist, so the arming belongs where the card is assigned.
+        ZoomGeometrySampler.shared.start(card: flight.card, label: "grab")
+        #endif
         if let nav = context.viewController(forKey: .from)?.navigationController,
            !nav.isToolbarHidden {
             self.toolbar = nav.toolbar
@@ -329,6 +362,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // a UIViewPropertyAnimator: its tracked animations entangled the
         // release spring's completion under the transition, freezing it.)
         detachDeadline = 0
+        hasYieldedDip = false
+        lastDragTranslation = nil
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.detachDeadline = CACurrentMediaTime() + Self.detachDuration
@@ -368,6 +403,18 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// into a capsule halfway through a drag that had decided nothing.
     private static func grabCornerRadius(at progress: CGFloat, screen: CGFloat) -> CGFloat {
         screen * grabScale(at: progress)
+    }
+
+    /// Clears the dip's in-flight animations across the card and everything
+    /// autoresized under it, so the hand-over leaves no residue.
+    ///
+    /// The whole subtree, because the card's live surface and its host are
+    /// sized by autoresizing: they carry their own copy of every `bounds.size`
+    /// animation the card was given, and leaving those behind would keep the
+    /// picture interpolating under a frame that has stopped.
+    private static func stopStackedAnimations(on layer: CALayer) {
+        layer.removeAllAnimations()
+        layer.sublayers?.forEach(stopStackedAnimations)
     }
 
     private func springDetach(_ flight: ZoomFlight, to scale: CGFloat, progress: CGFloat) {
@@ -481,6 +528,40 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // destination that draws alongside the card can be told the same
         // number instead of guessing it.
         let radius = Self.grabCornerRadius(at: progress, screen: screenRadius)
+        // ⚠️ THE DIP OWNS THE SCALE ONLY WHILE THE FINGER IS STILL, and its own
+        // note says why: it "springs to the detached scale on its own curve
+        // WHILE THE FINGER MAY NOT HAVE MOVED AT ALL". That premise is what
+        // makes an animated scale channel acceptable — nothing else is moving,
+        // so there is nothing for it to be out of step with.
+        //
+        // A finger that IS moving breaks it, and the break is visible. Position
+        // is set directly a few lines below, so the card's centre is exact to
+        // the touch; its SIZE is still on the dip's spring. Measured with
+        // `-grab-geometry`, the presented width trailed the model by up to 22pt
+        // through the dip. The card's live media is an aspect-fill of those
+        // bounds and a 1280x720 clip in a portrait card is magnified ~3.9x, so
+        // 22pt of size lag is ~85pt of picture arriving late against a frame
+        // that is tracking perfectly. Reported as the video following the drag
+        // a beat behind, and that is exactly what it is.
+        //
+        // So the dip hands the channel back the moment the drag travels, and
+        // ⚠️ IT ADOPTS WHAT IS ON SCREEN AS IT GOES. Simply switching to direct
+        // posing leaves the spring running — a UIView animation is not cancelled
+        // by writing its property — and the card would keep interpolating
+        // toward a target nothing is aiming at any more. Taking the presented
+        // bounds as the model first makes the hand-over a change of driver
+        // rather than of value: no jump, no residue.
+        let travel = lastDragTranslation.map {
+            hypot(translation.x - $0.x, translation.y - $0.y)
+        } ?? 0
+        lastDragTranslation = translation
+        if isDetachSettling, travel > Self.dipYieldsAboveTravel {
+            if let presented = flight.card.layer.presentation()?.bounds {
+                Self.stopStackedAnimations(on: flight.card.layer)
+                flight.card.bounds = presented
+            }
+            hasYieldedDip = true
+        }
         if isDetachSettling {
             springDetach(flight, to: scale, progress: progress)
         } else {
@@ -715,6 +796,16 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
                                       })
             case .removeCardNow:
                 card?.removeFromSuperview()
+            case .restoreDestinationContent:
+                // The page is staying: bring it back BEFORE anything is taken
+                // from the card. It sits above the card, so this covers the
+                // card in the same commit — see `ZoomGrabSettlement.Action`.
+                destination?.setZoomDismissState(ZoomDismissState(
+                    progress: 0, card: .zero, cornerRadius: 0, isSettling: false
+                ))
+                destination?.setZoomContentHidden(false)
+            case .revealSource, .concealSource:
+                source?.setZoomSourceHidden(action == .concealSource)
             }
         }
         flight?.shadow.removeFromSuperview()
@@ -725,17 +816,25 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // commit the feed's disappearance bookkeeping hides it within this
         // same completeTransition turn, so no restored frame can render.
         toolbar?.alpha = 1
-        // Restore the feed content for the cancel path; moot when finished.
+        // Idempotent on the cancel path — `.restoreDestinationContent` already
+        // ran these, first, for the reason that action documents — and the
+        // only place they run when the dismissal finished.
         destination?.setZoomDismissState(ZoomDismissState(
             progress: 0, card: .zero, cornerRadius: 0, isSettling: false
         ))
         destination?.setZoomContentHidden(false)
         destination?.zoomTransitionDidEnd()
-        // Unconditional, cancel included: a cancelled grab that left the source
-        // hidden strands an invisible tile behind the page, and nothing else
-        // would ever restore it if the feed then left by some other route. On
-        // the cancel path this is covered by the restored page anyway.
-        source?.setZoomSourceHidden(false)
+        // ⚠️ THE SOURCE IS NOT TOUCHED HERE ANY MORE. It was un-hidden
+        // unconditionally, cancel included, on the reasoning that a source left
+        // concealed could be stranded — but a cancelled grab is a page that is
+        // STAYING, so revealing the twin put the tapped marker back on a map
+        // the viewer can see behind the very next grab. The verdict is now part
+        // of the settlement plan (`.revealSource` / `.concealSource`), and the
+        // stranding it guarded against cannot happen: every source surface
+        // restores blanket-fashion when it becomes the screen again.
+        #if DEBUG
+        ZoomGeometrySampler.shared.stop()
+        #endif
         // A cancelled grab has to hand back the hidden state the owner undid
         // when the grab began; a completed one is reported through `didShow`.
         if cancelled {

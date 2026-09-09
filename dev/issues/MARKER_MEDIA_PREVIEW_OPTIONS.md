@@ -1,0 +1,354 @@
+# A moving version of a post's media, inside its map marker — options
+
+**Status:** exploration. No code written. Branch `claude/map-marker-media-preview`.
+
+**Scope:** a media post's own content, moving on its map marker (annotation AND
+cluster). This is NOT the animated-icon feature — that is text-only posts and an
+`icon_id`, and it shipped (`BACKEND_ANIMATED_PIN_ICONS.md`).
+
+---
+
+## 0. The surprise: most of this is already wired
+
+`MediaPlayback` is a complete engine — a bounded player pool, one-decoder→N-surface
+rendering, one process-wide `CADisplayLink`, still capture — production default
+since 2026-08-02, with 9 test files. And the map is already plumbed into it:
+
+| piece | state |
+|---|---|
+| `PinCardView.videoRenderView` | built, layered above the cover and below the ring |
+| selection → playback | built — `MapVideoPlaybackCoordinator`, ranks visible video pins by distance to centre, **cap 3** |
+| visibility gating | built — tab-hidden / feed-pushed / backgrounded |
+| hero flight adopting the LIVE surface | built |
+| `MapPin.previewVideoURL` | built, and **always `nil` in production** |
+
+The blocker is the wire: `RadarPin` carries four fields, none of them a media
+kind or a preview URL, so `kind(for:)` classifies every covered pin as `.photo`
+and `.video` cannot occur. `GeoDiscoveryRepository.previewVideoURL` returns nil
+unconditionally outside DEBUG.
+
+### ⚠️ But "already works" is not verified, and one attempt says otherwise
+
+Launched `-rich-media -maps-force-video` on the simulator: the rich-media
+fixtures load (real photographs on markers) and **nothing moves** — 0.31 mean
+per-pixel difference across a second, against 3.3–16.2 for a marker that is
+genuinely animating. One marker rendered as an empty white square where a video
+surface would be.
+
+Two known reasons, either sufficient:
+
+- `-maps-force-video` hands the **thumbnail URL** to the player as if it were a
+  clip. For a rich-media fixture that is a still image.
+- The synthetic `mock://video` catalogue decodes to **black** through
+  `AVPlayerItemVideoOutput` — recorded in `MockMediaFixturesTests`.
+
+So the correct summary is: **the path is built and has never been exercised
+end-to-end against a real clip on this screen.** Any plan that treats it as
+proven is taking an unmeasured risk.
+
+---
+
+## 0b. Measured 2026-09-05, after repairing the fixture
+
+**The fixture was wrong in two independent ways and the path had never once run.**
+
+- The mock gave every video pin the SAME url, and `MapVideoPlaybackCoordinator`
+  passed **no `scope:`**. The pool shares one player when the asset AND the scope
+  match — and `nil == nil` matches — so N surfaces would have drawn ONE decoder
+  on one clock. Fixed: distinct urls per pin, `scope: postID`, `peakBitRate`.
+- `-maps-force-video` only forced posts whose media was ALREADY a video (a third
+  of the corpus), and after clustering none of those survived as a LONE pin. A
+  cluster never plays, because `Candidate.view` is typed `MapAnnotationView`.
+  So the flag produced **zero** playing videos. Fixed: under the force flag every
+  covered pin becomes a video pin.
+
+With both repaired, on iPhone 17 Pro Max, 8 markers, mock corpus:
+
+| concurrent decoders | app CPU | footprint | frame_mean | hitches |
+|---|---|---|---|---|
+| 0 (video off) | 11.3% | 113 MB | 16.67 ms | 0 |
+| 1 | 16.6% | 103 MB | 16.67 ms | 0 |
+| **3** (`players=3 advancing=3 urls=3`) | **22.2%** | 110 MB | **16.67 ms** | **0** |
+
+≈ **3.6 points of app CPU per decoder**, frame time locked, zero hitches. Three
+genuinely distinct decoders on three distinct urls, all advancing — verified
+through the pool's own `activePlayerCount` and `isAdvancing`, not by looking.
+
+⚠️ **Could not measure past 3, and the cap is not why.** Raising it to 5 and to
+12 both still yielded 3: only 3 lone video pins exist on screen, because
+everything else clusters and clusters never play. The binding constraint is
+geography and the cluster gap, not `maxConcurrent`.
+
+## 0c. Clusters made playable, and the sweep past 3
+
+A cluster hosts the same `PinCardView` and therefore the same surface, but
+`Candidate.view` was typed `MapAnnotationView`, so it could never be a
+candidate. `MapVideoHost` now abstracts "a marker that can host a preview" and
+both views conform; `refreshVideoPlayback` reads a cluster's REPRESENTATIVE.
+
+Measured on iPhone 17 Pro Max, 19 markers (`-maps-mock-density 20`), every
+decoder distinct and advancing, launch window excluded:
+
+| decoders | app CPU | frame_mean | worst frame | hitches | footprint |
+|---|---|---|---|---|---|
+| 1 | 13.0% | 16.67 ms | 16.67 ms | 0 | 108 MB |
+| 3 | 21.2% | 16.67 ms | 16.67 ms | 0 | 124 MB |
+| 5 | 29.4% | 16.67 ms | 16.67 ms | 0 | 146 MB |
+| **8** | **44.4%** | **16.67 ms** | **16.67 ms** | **0** | **147 MB** |
+
+**≈4.5 points of app CPU and ≈5.6 MB per decoder, roughly linear. The frame time
+never moved and there were no hitches at any level** — the cost lands on worker
+threads and `mediaserverd`, not on the main thread. Nothing degraded, no
+`-11839`, no media-services reset.
+
+**8 is where the CORPUS ran out, not the machine.** Raising the cap to 12 and to
+20 both still gave 8: only 8 of the 19 cluster representatives are video posts,
+the rest being text. The cap has still never been the binding constraint at any
+value tested.
+
+⚠️ **And the simulator cannot answer the question this sweep looks like it
+answers.** It does not model the hardware decode-session budget — a phone's
+ceiling is a property of its media hardware, and the 62-session figure below was
+measured against a MAC's decoder, not a phone's. Eight concurrent decoders
+running cleanly here is evidence about the app's own cost and no evidence at all
+about how many a device will admit. That number needs hardware.
+
+## 0d. "Wouldn't a light GIF be cheaper?" — measured, and no
+
+Same source clip, same 2 seconds, same 132px marker crop, encoded three ways:
+
+| | 12 fps | 24 fps |
+|---|---|---|
+| **MP4 (H.264, CRF 23)** | **19.3 KB** | **26.9 KB** |
+| GIF (palette-optimised, `stats_mode=diff`, Bayer dither) | 226 KB — **11.7x** | 328 KB — **12.2x** |
+| HEIC sprite sheet | 167 KB — 8.7x | 336 KB — 12.5x |
+
+**A GIF of this preview is twelve times the bytes of the video it replaces**, and
+at 24 fps it is 328 KB — already over the 300 KB ceiling the preview-loop
+contract negotiates for the whole asset.
+
+And the palette costs more than bytes. Counted on one frame of the same clip:
+
+    H.264 frame:  12,608 distinct RGB values
+    GIF frame:       255 distinct RGB values
+
+**A 49x reduction in colour resolution, on photographic content** — which is the
+worst case for a 256-entry palette and exactly what a post's media is. Banding
+on a 44pt marker is less visible than at full size, but it is not free, and it
+is permanent: the palette is baked at publish.
+
+Three more properties, none of them recoverable by encoding harder:
+
+- **GIF cannot express 30 or 60 fps.** Delays are stored in CENTISECONDS, so the
+  representable rates are exactly 100/k — 100, 50, 33.3, 25, 20 … neither 30 nor
+  60 is among them.
+- **No hardware decode path.** H.264/HEVC decode on dedicated silicon; a GIF is
+  unpacked by ImageIO on the CPU.
+- **Decoding one per marker is the animated-container path already ruled out** —
+  N concurrent ImageIO decodes holding full-size frame buffers, measured at
+  63-81 MB peak for 19 markers and 428-546 MB for 128, peaking on a PAN because a
+  pan is first sighting.
+
+### But the instinct behind the question is right
+
+What "a light GIF" is reaching for is a representation that needs **no decode
+session** — and that is real, it is just not the GIF. It is the sprite sheet:
+one still image, played by `CAKeyframeAnimation` on `contentsRect`, zero decode
+sessions and zero per-frame app CPU, with the machinery already shipped in
+`AnimatedIconSheet`.
+
+The sheet costs about the same on the wire as the GIF (167-336 KB) without the
+palette, the frame-rate limit or the CPU decode. Its price is elsewhere and it is
+the one that matters: **2.65 MB resident per clip** at 56pt/@3x/24 frames, so
+19 markers is 50.4 MB against a 24 MB cache.
+
+**So the axis is not "video versus GIF". It is a decode session per playing
+marker, or resident texture for every marker.** Video is cheap in memory and
+bounded in count; the sheet is unbounded in count and expensive in memory. The
+GIF is the worst of both — palette-limited, CPU-decoded, and 12x the bytes.
+
+## 0e. The sheet path, built and measured head to head
+
+`-maps-preview-sheets`. `Tools/IconBaker` gained a video source
+(`AVAssetImageGenerator`, zero tolerance both sides — the default returns the
+nearest KEYFRAME, which collapses a 24-frame sample into three images repeated
+eight times and looks like a stutter, with nothing erroring). Four real clips
+baked to 24-frame grids at a 172px cell = the 56pt media face at @3x plus the
+contract's 2px gutter.
+
+**Head to head, same field, same 8 moving markers:**
+
+| | preview sheets | live video |
+|---|---|---|
+| markers on screen | 19 | 19 |
+| moving | 8 | 8 |
+| decode sessions | **0** | 8 |
+| **app CPU** | **8.4%** | **44.3%** |
+| frame_mean | 16.67 ms | 16.67 ms |
+| hitches | 0 | 0 |
+| process footprint | 131 MB | 130 MB |
+
+**5.3x less CPU for the same eight moving markers, and no decode session at
+all** — so the count stops being bounded by media hardware.
+
+⚠️ **Read the memory line carefully.** 8.13 MB resident is for **3 distinct
+clips**, not 8 markers: a sheet's cost scales with the number of distinct CLIPS,
+because every marker showing the same clip points at one texture. Nineteen
+markers showing nineteen DIFFERENT clips is 2.71 MB x 19 = **51.5 MB**, which is
+why the preview catalogue is given a 64 MB budget of its own rather than sharing
+the icons' 24 MB — a preview is 2.71 MB against an icon's 0.07, and one budget
+would let the dear one evict the cheap one on every pan.
+
+Wire cost of the four baked clips: 72-372 KB each, against ~27 KB for the same
+2 s as H.264. So the sheet trades **~10x the bytes and memory-per-distinct-clip**
+for **zero decode sessions and 1/5 the CPU**.
+
+## 1. Options, ruled out by mechanism
+
+| # | option | why it lives or dies |
+|---|---|---|
+| 1 | **`PREVIEW_LOOP` MP4, cap 3** — the incumbent | One decode session per playing marker, ~0 resident texture. **27.7 KB for a 2 s 132px H.264 loop** against a ≤300 KB negotiated ceiling. Nothing near a wall at 3. |
+| 2 | **Server-baked preview SHEET** + `contentsRect` keyframes | Zero decode sessions, zero per-frame app CPU, no concurrency limit. Reuses `AnimatedIconSheet` verbatim. Dies on memory: **2.65 MB/clip** at 56pt/@3x/24 frames, **50.4 MB at 19 markers against a 24 MB cache**. |
+| 3 | Client-baked sheet (`AVAssetReader` on device) | Each bake holds a decode session, and **a pan IS first sighting** — it converts a bounded steady-state cost into a burst on the most common interaction. |
+| 4 | Decomposed still + affine track | **Mechanically impossible.** The icon win needs motion that is a rigid mark under scale/rotate/fade. A post's media is pixels changing; there is no track to send. |
+| 5 | One `AVPlayer` per marker at N≈20 | One hardware decode session each against a single-digit device budget, and the arbiter **starves a session already running** rather than refusing the new one. Pin 7 breaks pin 2, with no error at pin 2. |
+| 6 | Animated container per pin (WebP/HEICS/APNG/GIF) | N concurrent ImageIO decodes peaking on a pan; measured 63–81 MB at 19 markers, 428–546 MB at 128. Plus: `CGImageSourceCreateThumbnailAtIndex` **never returns** on HEIC under concurrent load on the iOS 26 simulator; per-file delays fragment the shared clock (10 fps presented for 30 asked); GIF cannot express 30 or 60 fps at all. |
+| 7 | One `CAMetalLayer` over the map, N quads | Fails **architecturally**, not computationally: a Metal quad is not an annotation view — no hit test, no lifecycle, and no view for the hero flight to adopt. Buys nothing over #2, which already costs zero app CPU per frame. |
+
+---
+
+## 2. The recommendation
+
+**Primary: finish the `PREVIEW_LOOP` path at cap 3. Do not build a second
+mechanism.** The remaining client work is small and named:
+
+- pass `scope: postID.rawValue` and a `peakBitRate` at `MapVideoPlaybackCoordinator.swift:95`
+  — it passes **neither** today, and nil is not "no scope": two markers on one
+  URL join a single player
+- widen `Candidate.view` past `MapAnnotationView` so a **cluster face** can play
+  (representatives are kind-neutral, so a video post can lead a cluster and
+  silently never play)
+- re-rank on region-change settle, not only on annotation-set change
+- add `MapVideoPlaybackCoordinatorTests` — there is no test file for it
+- one field mapping the day the wire lands
+
+**Fallback: a server-baked `PREVIEW_SHEET` rendition, if the requirement is
+"every media marker moves."** Take it only with the arithmetic on the table:
+either the cache budget roughly doubles, or the cell drops to ~117px and the
+marker gets visibly softer on photographic content. Both are product decisions.
+
+**The two answer different sentences.** #1 is "the three markers you are looking
+at move". #2 is "the map moves". Pick the sentence before the mechanism.
+
+---
+
+## 3. What the backend would have to produce
+
+`PREVIEW_LOOP`: progressive MP4, **muted, no audio track**, 2–3 s, short edge
+≤480px, ≤300 KB, seamlessly loopable, faststart — denormalised into the pin
+projection at index time, because the pan path must not hydrate. ~100 bytes/pin
+on the wire.
+
+**It would be the pipeline's FIRST video rendition, not an increment.** Rendition
+kinds today are image-only (`ORIGINAL | THUMBNAIL | SMALL | MEDIUM | LARGE`),
+`media.v1.MediaKind` has no `VIDEO`, and nothing is produced at all — committed
+assets sit in `PENDING` forever (`dev/BACKEND_GAPS.md` §2).
+
+⚠️ **The field-number ledger is still blocking**, and this proposal is the fourth
+claimant on 5–6. Renumbering is free today and stops being free the moment any
+one of the four lands.
+
+---
+
+## 4. What to measure first
+
+**The cheapest experiment that would falsify the primary path is a GPU
+measurement of three masked, per-frame-changing 56pt markers, on hardware.**
+
+`PinCardView` puts a 12pt corner radius and `clipsToBounds` over a surface whose
+contents change 30 times a second. The icon face escapes exactly this by taking
+`cornerRadius: 0` — which the icon contract calls the largest cost that feature
+could have had. Nobody has checked it for the media face, because at 3 instances
+nobody had to.
+
+⚠️ **Fix the fixture first or the measurement is 3× optimistic:** every video pin
+currently carries the identical URL and the coordinator passes no scope, so
+"three concurrent pins" is **one decoder**. And do not fall back to the synthetic
+catalogue — it decodes to black, so every visual check judges a black source.
+
+**Kill criterion:** three genuinely distinct decode sessions with masked surfaces
+pushing the map below ~55 fps presented under pan, or showing an offscreen pass
+per marker per frame. Then the mask has to go — a square media marker — before
+anything else is discussed.
+
+**Second experiment, ~1 hour, no backend and no device:** bake one sheet from a
+real clip at 170px/24 frames, load 19 through `AnimatedIconCatalog`, read
+`residentBytes`. It will evict. That is not a surprise — it is a number to hand
+the product owner, and it settles the sheet option before anyone writes a bake.
+
+---
+
+## 4b. Is 3 a ceiling? No — it is an unenforced integer
+
+- **No provenance.** `maxConcurrent: Int = 3` has no comment saying where it came
+  from. The nearest reasoning sits on a DIFFERENT constant and argues for **6**.
+  The rest of the family is 6 (grid), 6/5 (For You — whose own test file calls it
+  *"a judgement rather than a derivation"*), 6/5 (Profile, copied). **3 is the
+  smallest number in the family and the only one with no stated reasoning.**
+- **Nothing below the coordinator enforces it.** `VideoPlaybackController.play`
+  ends in `idlePlayers.popLast() ?? AVPlayer()` — it mints on demand. `poolSize`
+  bounds the idle CACHE, not the working set. `prefix(maxConcurrent)` is the
+  whole mechanism.
+- **The contract doc is drifting.** It states `VideoPlaybackController(poolSize: 3)`
+  twice; shipped code defaults to `poolSize: 6, capacity: 6`.
+- **There are TWO independent pools** (`AppContainer.swift:135` and `:283`), each
+  6/6, which never arbitrate. The map's 3 is ADDITIVE to the feed's 6.
+
+### The real ceilings, and they are two
+
+**A — VideoToolbox session admission.** Measured on M2 / macOS 26.6: session
+creation succeeds **62 times**, #63 fails `-12913 kVTVideoDecoderNotAvailableNowErr`.
+Global, not per-process. **Admission control, not eviction.**
+
+**B — AVFoundation playback arbitration**, which is the one this repo hits since
+it uses `AVPlayer`. The counted resource is the item↔player ASSOCIATION, not the
+object: `player = nil` does not release it, clearing `currentItem` does. Failure
+is `-11839 AVErrorDecoderTemporarilyUnavailable`.
+
+A and B are separate budgets: with 30 `AVPlayer`s actively playing, the direct-VT
+ceiling was still exactly 62 — playback consumes zero VT slots and decodes in
+`mediaserverd` against its own allocation.
+
+⚠️ **Apple documents the error codes and no number, on any chip, for either
+ceiling.** There is no API to ask for remaining capacity. Anything else is
+folklore.
+
+### Resolution does not buy concurrency — measured
+
+132×132, 1080p, 4K and HEVC all failed at the same session #62. **A session is a
+session.** Resolution buys throughput (~13× per-frame cost between 132px and
+1080p), memory (92 MB vs 577 MB) and bandwidth — real headroom against thermals,
+bandwidth and the mask, and **zero** against the session ceiling. The 132px
+preview rendition is the right asset and it does not buy one extra concurrent pin.
+
+### So what would "every marker plays" need?
+
+Not more decoders. Every marker moving means dropping video as the primitive for
+the non-central pins — the sheet path, which has **no decode session at all** —
+and keeping real video for the few in focus. That is the §1 option 2 fallback,
+with the memory arithmetic that comes with it.
+
+## 5. Open questions
+
+1. **Is the ask "three move" or "all move"?** The shipped guarantee is at most 3;
+   the icon feature's requirement was unqualified. Different mechanisms,
+   different backends.
+2. **24 MB or 48 MB?** `AnimatedIconCatalog` defaults to **24**; the icon
+   contract says **48** in four load-bearing sentences. Every eviction projection
+   in that document is 2× optimistic against shipped code. Resolve before any
+   sheet sizing is trusted.
+3. **Every number here is simulator-bound.** The decode-session ceiling is a
+   device property the simulator does not model — it will happily run twenty
+   players and report success. So is the offscreen cost.
+4. **Does the shipped path actually play?** See §0. It has never been seen
+   working end to end.

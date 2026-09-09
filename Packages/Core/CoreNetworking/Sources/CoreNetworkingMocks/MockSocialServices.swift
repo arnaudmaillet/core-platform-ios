@@ -200,9 +200,27 @@ public final class MockSocialServices: @unchecked Sendable {
         // wire. Under the real catalog an HLS manifest is useless as a
         // thumbnail, so video posts get a real photo at the clip's aspect
         // instead of pointing the image pipeline at a manifest.
-        attachment.thumbnailURL = MockMediaFixtures.isVideoURL(url) && !url.hasPrefix("mock://")
-            ? MockMediaFixtures.imageURL(index: width &+ height, width: width, height: height)
-            : url
+        // ⚠️ A CLIP'S POSTER IS ITS OWN FIRST FRAME, when we have one.
+        //
+        // This used to hand every video post a picsum photograph, because an
+        // HLS manifest is useless to an image pipeline. But a poster is what the
+        // page SHOWS until the first frame decodes, so a picture of somewhere
+        // else is what the viewer saw — and after a map flight carrying the
+        // clip's own frame, it read as the post changing its mind. Where the
+        // clip has a baked preview, this points at it instead and the app
+        // resolves the scheme from the sheet it already holds.
+        attachment.thumbnailURL = if let clip = MockMediaFixtures.bakedClip(for: url) {
+            "\(MockMediaFixtures.previewPosterScheme)\(clip)"
+        } else if MockMediaFixtures.isVideoURL(url) {
+            // ⚠️ NOT A PHOTOGRAPH. This branch used to hand a clip with no baked
+            // sheet a stock picture, which is the same lie the map's pin URL
+            // told: a picture of somewhere else standing in for a frame we do
+            // not have from a SHEET — so it comes from the clip itself, which
+            // is the same picture by a slower route.
+            MockMediaFixtures.frameZeroURL(for: url)
+        } else {
+            url
+        }
         return attachment
     }
 

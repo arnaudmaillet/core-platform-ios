@@ -167,6 +167,13 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
            pin.thumbnailURL.contains("video") {
             return .video
         }
+        // The mock's stand-in for field 5, and it needs NO launch argument: a
+        // map on which no pin is ever a video is not a smaller version of the
+        // product, it is a different one. The corpus is an honest third video, a
+        // third photo, a third text, and this is what lets that reach the map.
+        // Release is untouched — every media pin still reads `.photo` there,
+        // which is the truth until field 5 ships.
+        if pin.thumbnailURL.contains("mock-kind=video") { return .video }
         #endif
         return .photo
     }
@@ -175,12 +182,30 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
     /// carries no video URL). Under `-maps-force-video`, the mock's
     /// `mock://video/*` thumbnail doubles as a synthesizable clip, so the pool
     /// has something real to play.
+    /// ⚠️ ALWAYS NIL, AND NOW ON PURPOSE RATHER THAN BY OMISSION.
+    ///
+    /// **An annotation never holds a player.** A marker may wear a baked sprite
+    /// sheet, a lottie mark, or a still — that is the whole of it. Motion on a
+    /// 44pt marker comes from frames the app already has, never from a decoder
+    /// behind it.
+    ///
+    /// This is what production does anyway: `RadarPin` carries no video URL, so
+    /// nil was the only answer the wire could produce. But `-maps-force-video`
+    /// used to hand back the thumbnail here, and that is the single feeder of
+    /// `MapVideoPlaybackCoordinator.playing` — so the flag put a real `AVPlayer`
+    /// behind a marker, measured as `players=1` in the map HUD. It was reached
+    /// for to exercise the marker-playback path; the path itself is the thing
+    /// the product does not want, so exercising it was measuring a feature that
+    /// should not exist.
+    ///
+    /// The flag still earns its name: `kind(for:)` keeps classifying pins as
+    /// `.video`, so a video marker is reachable and wears its sheet. What it no
+    /// longer does is play.
+    ///
+    /// The day `RadarPin` gains a preview rendition
+    /// (`dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §C), it feeds the SHEET
+    /// baker, not a player.
     static func previewVideoURL(for pin: GeoDiscovery_V1_RadarPin, kind: MapPin.Kind, thumbnailURL: URL?) -> URL? {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-maps-force-video"), kind == .video {
-            return thumbnailURL
-        }
-        #endif
-        return nil
+        nil
     }
 }

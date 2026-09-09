@@ -134,7 +134,11 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // Before the destination is pushed, and so before it lays out and
         // activates its first page — the only point early enough for it to
         // suppress its own playback for the duration of the flight.
-        if presents { destination.zoomTransitionWillBegin() }
+        if presents {
+            destination.zoomTransitionWillBegin(
+                flyingLivePlayer: source.zoomFlightCarriesLivePlayer
+            )
+        }
     }
 
     /// Installs the grab-to-dismiss gesture on the pushed feed's view. Called
@@ -326,6 +330,23 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// interaction controller weakly.
     private var flightInterruptor: ZoomFlightInterruptor?
 
+    /// The delegate this controller displaced, so its news is not swallowed.
+    ///
+    /// ⚠️ DISPLACING A DELEGATE TAKES ITS NEWS AS WELL, and `didShow` is news,
+    /// not a choice. `InteractiveSlideDismissal` already keeps this contract
+    /// and says why; this controller did not, and the cost was a whole route
+    /// that never completed.
+    ///
+    /// Traced: a vertical grab off a hierarchy marker lands on the place page,
+    /// and the page installs its OWN controller as the delegate the moment it
+    /// becomes top — before UIKit delivers `didShow`. So the map's controller
+    /// never heard that its dismissal had landed: `onDismissedToIntermediate`
+    /// never fired, `activeTransition` stayed set, the tapped marker stayed
+    /// concealed, and the census showed `drivers=3 controllers=2` alive for the
+    /// rest of the session with `stranded=0` — invisible on screen and fatal to
+    /// the seam, since that controller is the map's re-entrancy lock.
+    public weak var displacedDelegate: (any UINavigationControllerDelegate)?
+
     public func navigationController(
         _ navigationController: UINavigationController,
         didShow viewController: UIViewController,
@@ -336,6 +357,18 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // but a retained one whose pan the container's teardown had already
         // orphaned.
         flightInterruptor = nil
+        // ⚠️ FORWARDED FIRST, and unconditionally — see `displacedDelegate`.
+        displacedDelegate?.navigationController?(
+            navigationController, didShow: viewController, animated: animated
+        )
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+            print("[zoom] didShow \(type(of: viewController))"
+                  + " isFeed=\(viewController === feedViewController ? "Y" : "n")"
+                  + " registered=\(dismissTargets.contains { $0.target === viewController } ? "Y" : "n")"
+                  + " targets=\(dismissTargets.count)")
+        }
+        #endif
         if viewController === feedViewController {
             onDestinationShown?()
             return

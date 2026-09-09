@@ -80,13 +80,36 @@ enum TextRevealInstaller {
 
     /// The geometry both legs read — forwards on the push, backwards on the
     /// pop. One rect calculation, so the two can never disagree.
-    /// The tone of the thing the viewer tapped — one decision, two consumers.
+    /// The tone of the thing the viewer tapped — a marker's disc, a list row's
+    /// card, a tile's own (dark for a video) — or NOTHING, for a source that
+    /// has no ground at all.
     ///
-    /// A marker gives its disc's tint, a list row the card's fill, a tile its
-    /// own (dark for a video). Written once here for the reason the file
-    /// already gives about the fill: three copies of one colour is how two
-    /// surfaces stop matching.
-    static func sourceFill(for origin: TextRevealOrigin) -> UIColor {
+    /// ⚠️ NULLABLE, AND THE `??` THAT USED TO BE HERE WAS THE BUG.
+    ///
+    /// `origin.fill ?? PostGridListRowCell.cardFillColor` looks like a default.
+    /// It is a silent overwrite: the fallback is `.secondarySystemBackground`,
+    /// byte-identical to `PinCardView.textRevealGround`, so a marker that
+    /// deliberately passed `nil` to say "a dressed icon has no ground" got back
+    /// the exact colour it was refusing. `RevealGeometry.sourceFill` was
+    /// therefore NEVER nil on the map route, and every rule downstream that
+    /// reads `sourceFill == nil` — the page-leaves law in `RevealPopAnimator`
+    /// most of all — was dead code from the day it was written. Four fixes
+    /// shipped against a grey block and changed zero pixels because of it.
+    ///
+    /// The row's default now lives on `TextRevealOrigin.init`. Here, absence is
+    /// preserved.
+    static func sourceFill(for origin: TextRevealOrigin) -> UIColor? {
+        origin.fill
+    }
+
+    /// The screen's PRE-DATA floor, which is a different question and is why
+    /// this is a second function rather than the same one.
+    ///
+    /// A cold-opened feed has no cell to lend a ground to, so the window would
+    /// open onto black; this paints the screen itself. That floor must always
+    /// be a colour — "no ground" is not something a bare screen can wear — so
+    /// the row's fallback stays HERE, where a fallback is honest.
+    static func emptyGround(for origin: TextRevealOrigin) -> UIColor {
         origin.fill ?? PostGridListRowCell.cardFillColor
     }
 
@@ -102,7 +125,7 @@ enum TextRevealInstaller {
         // cannot be dropped: the screen's own pre-data ground. All three reveal
         // surfaces funnel through here, so it is one line for the map, For You
         // and the place page alike.
-        (feed as? SnapFeedViewController)?.setEmptyGround(sourceFill(for: origin))
+        (feed as? SnapFeedViewController)?.setEmptyGround(emptyGround(for: origin))
         // …and what is DRAWN on it. The line above says what colour the window
         // is; this puts the screen it is opening onto on top, in the state it
         // is actually in. Reached only by the text-reveal branch, so a

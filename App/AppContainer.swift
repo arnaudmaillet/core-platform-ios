@@ -1,3 +1,4 @@
+import UIKit
 import Auth
 import AuthInterface
 import Chat
@@ -15,6 +16,7 @@ import CoreRealtimeMocks
 import CoreStorage
 import Feed
 import FeedInterface
+import AVFoundation
 import Foundation
 import Maps
 import MapsInterface
@@ -117,7 +119,7 @@ final class AppContainer {
             // Scheme-routing, not plain placeholder: under `-rich-media` the
             // dataset mixes real `https://` photographs with synthesized
             // `mock://` assets, and each has to reach the right fetcher.
-            SchemeRoutingImageFetcher()
+            SchemeRoutingImageFetcher(preferred: Self.bakedPreviewPoster)
         case .localFleet:
             URLSessionImageFetcher(hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000"))
         }
@@ -127,6 +129,91 @@ final class AppContainer {
     /// Snap-feed video playback. Mock mode synthesizes deterministic clips for
     /// `mock://video/…` URLs; fleet mode passes delivery URLs straight to the
     /// player (a no-op today — the backend serves no video renditions yet).
+    /// Resolves `mock://preview/<clip>` from the map's own preview catalogue.
+    ///
+    /// A video post's poster is the frame the page shows until the first frame
+    /// decodes, and the wire has no frame of the clip to give. The marker's
+    /// baked sheet does — its frame zero IS that clip's opening — so the poster
+    /// and the preview are one picture rather than two, and a flight that lands
+    /// on the page does not change the subject.
+    ///
+    /// ⚠️ Whole-sheet decode, then crop, then PNG. It runs once per clip and the
+    /// pipeline caches the result by URL, so the cost is four clips' worth of
+    /// decode over a session rather than one per post.
+    @MainActor
+    private static func bakedPreviewPoster(_ url: URL) async -> Data? {
+        let text = url.absoluteString
+        // A clip with no baked sheet still has a first frame — its own. Decoded
+        // from the asset rather than substituted with a stock photograph, which
+        // is the whole point of both schemes.
+        if let source = MockMediaFixtures.frameZeroSource(of: text) {
+            return await frameZero(ofClipAt: source)
+        }
+        guard text.hasPrefix(MockMediaFixtures.previewPosterScheme) else { return nil }
+        // ⚠️ THE PATH, NOT THE REST OF THE STRING. The map stamps its pin URLs
+        // with `?mock-kind=video`, and taking everything after the scheme made
+        // that query part of the clip's NAME — every lookup missing silently,
+        // every video marker falling through to its ground.
+        let clip = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
+        // ⚠️ THE OPENING SEGMENT, by the SAME rule the seeding uses. `first` is
+        // the bundle's enumeration order, which is not the film's — so the
+        // poster resolved one segment while the marker wore another, and the
+        // two "frame zeros" were two different frames.
+        guard let id = MockMediaFixtures.openingSegment(ofClip: clip, in: mapPreviewCatalog.ids),
+              let art = try? await mapPreviewCatalog.art(for: id),
+              let frame = art.firstFrame()
+        else {
+            // Kept: a miss here is silent otherwise, and the page simply shows
+            // black — which reads as a slow video rather than as a poster that
+            // never resolved. Verified resolving: `bigbuckbunny-0` and
+            // `sinteltrailer-0`, 172x172 each.
+            #if DEBUG
+            print("[poster] MISS clip=\(clip) ids=\(mapPreviewCatalog.ids.count)")
+            #endif
+            return nil
+        }
+        return frame.pngData()
+    }
+
+    /// The first frame of a clip, decoded from the asset.
+    ///
+    /// ⚠️ TOLERANT ON PURPOSE, in both directions. `requestedTimeToleranceAfter`
+    /// is `.positiveInfinity` because an HLS ladder has no frame at exactly
+    /// zero and an exact request simply fails; and the whole thing is wrapped in
+    /// a timeout because these are PUBLIC TEST HOSTS — the same rule the image
+    /// fetcher already keeps, that a fixture convenience must never be the
+    /// reason nothing shows. A miss returns nil and the surface falls to its
+    /// next rung, which is black.
+    private nonisolated static func frameZero(ofClipAt source: String) async -> Data? {
+        guard let url = URL(string: source) else { return nil }
+        let work = Task.detached(priority: .utility) { () -> Data? in
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.appliesPreferredTrackTransform = true
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .positiveInfinity
+            generator.maximumSize = CGSize(width: 1080, height: 1080)
+            guard let frame = try? await generator.image(at: .zero).image else { return nil }
+            return UIImage(cgImage: frame).pngData()
+        }
+        // ⚠️ A DEADLINE, because these are PUBLIC TEST HOSTS. The same rule the
+        // image fetcher already keeps: a fixture convenience must never be the
+        // reason nothing shows.
+        let timeout = Task.detached(priority: .utility) { () -> Data? in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            work.cancel()
+            return nil
+        }
+        let data = await work.value
+        timeout.cancel()
+        guard let data else {
+            #if DEBUG
+            print("[poster] MISS frame0 src=\(source)")
+            #endif
+            return nil
+        }
+        return data
+    }
+
     private(set) lazy var videoPlayback: VideoPlaybackController = {
         let source: any VideoSource = switch environment {
         case .mock: PlaceholderVideoFetcher()
@@ -303,8 +390,100 @@ final class AppContainer {
         // (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`). The mock knows the
         // authorship `RadarPin` omits, so it can answer here; on the fleet this
         // is empty and the marker keeps the glyph.
-        mockAuthorAvatars: environment == .mock ? Self.mockAuthorAvatars(in: mockBackend) : [:]
+        mockAuthorAvatars: environment == .mock ? Self.mockAuthorAvatars(in: mockBackend) : [:],
+        // Same rule again, one field further out: a TEXT-ONLY post may carry an
+        // animated icon, and the wire has no `icon_id` to give it
+        // (`dev/issues/BACKEND_ANIMATED_PIN_ICONS.md`, proposed field 12). The
+        // mock knows which posts are text-only; on the fleet this is empty and
+        // the marker keeps the author's face.
+        mockAnimatedIcons: environment == .mock
+            ? Self.mockAnimatedIcons(in: mockBackend, catalogue: Self.mapIconCatalog) : [:],
+        // Baked previews of a media post's own footage — the decode-free
+        // alternative to a player, and the ONLY animated media the map can show
+        // without a network: the sheets are in the app bundle, so unlike live
+        // playback they owe nothing to `-rich-media`, whose absence leaves every
+        // media post pointing at an unplayable `mock://video/...`.
+        //
+        // No longer behind a launch argument. It was, while the memory cost was
+        // an open question; it is now measured. 24 distinct sheets are 4.8 MB on
+        // the wire and 65.0 MB if every one were resident at once, against a
+        // 64 MB byte-budgeted cache — so full variety GUARANTEES eviction, and
+        // eviction was measured holding at 7-9 resident (19.0-24.4 MB) across
+        // every run including a 464-marker field. The worst case measured 144
+        // markers with 80 sheets advancing at a locked 60fps, and the animation
+        // itself costs +1.6 ms of frame mean against animating nothing at all.
+        mockPreviewSheets: environment == .mock
+            ? Self.mockPreviewSheets(in: mockBackend, catalogue: Self.mapPreviewCatalog) : [:],
+        // ⚠️ The ids above always come from the REAL catalogue, even when the
+        // one handed to the map cannot honour them. That is the whole point of
+        // `-map-icons-unavailable`: seeding from an empty catalogue would give
+        // no pin an icon id at all, so no marker would wear `.icon` and the
+        // fallback would never run — the flag would prove the opposite of what
+        // it claims. Here the pins carry ids and the catalogue answers nothing,
+        // which is exactly a fleet build, an evicted asset, or a decode that
+        // failed.
+        iconCatalog: Self.iconsUnavailable ? Self.unavailableIconCatalog : Self.mapIconCatalog,
+        previewCatalog: Self.previewsUnavailable ? Self.unavailableIconCatalog : Self.mapPreviewCatalog
     )
+
+    #if DEBUG
+    /// `-map-icons-unavailable` / `-map-previews-unavailable`: keep the ids,
+    /// break the resolution. The floor under an icon face is invisible in a
+    /// screenshot of a healthy build, so without these it is only ever pinned by
+    /// unit tests.
+    static let iconsUnavailable =
+        ProcessInfo.processInfo.arguments.contains("-map-icons-unavailable")
+    static let previewsUnavailable =
+        ProcessInfo.processInfo.arguments.contains("-map-previews-unavailable")
+    /// A manifest that does not exist. `AnimatedIconCatalog` answers an absent
+    /// manifest with an empty table rather than trapping, so every lookup misses
+    /// and every async resolve throws — the real failure path, not a stub.
+    private static let unavailableIconCatalog =
+        AnimatedIconCatalog(manifest: "mapicons-deliberately-absent")
+    #else
+    static let iconsUnavailable = false
+    static let previewsUnavailable = false
+    private static let unavailableIconCatalog: AnimatedIconCatalog? = nil
+    #endif
+
+    /// Baked from real clips by `Tools/IconBaker` — 24 frames at a 172px cell,
+    /// which is the 56pt media face at @3x plus the contract's 2px gutter.
+    private static let mapPreviewCatalog = AnimatedIconCatalog(
+        manifest: "mappreviews",
+        // ⚠️ 64 MB, not the icons' 24. A preview is 2.71 MB resident against an
+        // icon's 0.07 — a shared budget would let the dear one evict the cheap
+        // one on every pan. Nineteen previews is 51.5 MB, so this is sized to
+        // hold the measured field rather than to a round number.
+        memoryBudgetMB: 64
+    )
+
+    private static func mockPreviewSheets(
+        in backend: MockBackend, catalogue: AnimatedIconCatalog
+    ) -> [PostID: String] {
+        backend.dataset.previewSheetIDsByPostID(catalogue: catalogue.ids)
+            .reduce(into: [:]) { result, entry in
+                result[PostID(entry.key)] = entry.value
+            }
+    }
+
+    /// The baked animated-icon catalogue that ships in the app bundle.
+    ///
+    /// A stand-in for the CDN the contract describes: production fetches these
+    /// by URL from `AnimatedIcon.still_url` / `sheet_url`. Built by
+    /// `Tools/IconBaker` — 16 decomposed stills and 5 sheets baked from real
+    /// GIFs, every step an integer multiple of a 30 fps base so the whole
+    /// catalogue changes on ONE grid.
+    private static let mapIconCatalog = AnimatedIconCatalog(manifest: "mapicons")
+
+    /// Which mock post wears which icon. Text-only posts, half of them.
+    private static func mockAnimatedIcons(
+        in backend: MockBackend, catalogue: AnimatedIconCatalog
+    ) -> [PostID: String] {
+        backend.dataset.animatedIconIDsByPostID(catalogue: catalogue.ids)
+            .reduce(into: [:]) { result, entry in
+                result[PostID(entry.key)] = entry.value
+            }
+    }
 
     /// Each mock post's author avatar, keyed by post id — the stand-in for the
     /// author `RadarPin` does not carry.

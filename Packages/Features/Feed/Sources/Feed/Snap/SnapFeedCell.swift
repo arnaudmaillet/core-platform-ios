@@ -1555,7 +1555,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
         // The media card selects its surface for the kind and clears any
         // prior frame; a text post's surface simply never receives content.
-        mediaCard.configure(kind: hasMedia ? model.mediaKind : .image)
+        mediaCard.configure(kind: hasMedia ? model.mediaKind : .image, hasMedia: hasMedia)
         // ⚠️ ARMED HERE, ABOVE THE COLLECTION'S EARLY RETURN.
         //
         // It was armed after the single-media loads at the bottom, and a
@@ -1569,7 +1569,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // photograph waits with nothing on screen, the clip waits behind a
         // still standing in for a video that has not started. The first decoded
         // frame retires it either way.
-        mediaCard.renderView.onPictureAvailabilityChange = { [weak self] _ in
+        // ⚠️ ON THE CARD, NOT ON `mediaCard.renderView`. The surface under this
+        // page is re-pointed by every landing, every reclaim and every carousel
+        // page turn; a closure installed on the object that happens to be there
+        // at bind is stranded by all three. See
+        // `SnapMediaCardView.onPictureAvailabilityChange`.
+        mediaCard.onPictureAvailabilityChange = { [weak self] _ in
             self?.refreshMediaLoader()
         }
         refreshMediaLoader()
@@ -1937,6 +1942,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// than of any bookkeeping.
     var debugIsShowingMediaLoader: Bool { mediaCard.isShowingLoader }
 
+    /// The surface the page is CURRENTLY showing — which is not the one it was
+    /// built with once a landing has handed one over. A spec that wants to
+    /// prove the page's picture signal followed the surface has to be able to
+    /// name both.
+    var debugRenderView: VideoRenderView { mediaCard.renderView }
+
     /// WHERE the wait is drawn — the view itself, so a spec can prove it rides
     /// its own picture rather than the post.
     func debugLoaderView(onPage page: Int) -> UIView? {
@@ -2247,6 +2258,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // the start of a dismiss. The sibling is what the viewer is
             // watching, so the card provably flies the same frames.
             let card = VideoRenderView()
+            // ⚠️ NO OPAQUE GROUND ON A FLIGHT CARD'S SURFACE. The card carries
+            // the picture ladder underneath — cover, sheet, thumbnail — and a
+            // black ground on the live rung turns the one frame where this
+            // layer has nothing to show into a black screen. See
+            // `VideoRenderView.paintsOpaqueGround`.
+            card.paintsOpaqueGround = false
             #if DEBUG
             card.debugLabel = "card"
             card.debugTracksFlight = true
@@ -2281,6 +2298,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func adoptLiveRenderView(_ view: VideoRenderView) {
         defersPlaybackForFlight = false
         mediaCard.restoreRenderView(view)
+        // ⚠️ RE-ASKED, because the adopted surface's announcement is IN THE
+        // PAST. It arrives already rendering — that is the point of adopting it
+        // — so `onPictureAvailabilityChange` fired while the flight owned it and
+        // will not fire again: the signal is an edge, and this page missed it.
+        //
+        // That is the second half of the filmed defect and the half that
+        // re-pointing the closure alone does not fix. The flight carries the
+        // live player, so the page defers its own playback; its own surface
+        // therefore sits at zero frames while the 0.25s grace runs out and the
+        // spinner goes up; then the landing hands over a surface that already
+        // has a picture, and nothing ever re-decides. A cold open is exactly
+        // when the landing loses that race — measured at 11 stuck runs in 19,
+        // and 0 in 5 when the grace was widened to 3s so the re-check happened
+        // to land after the adoption.
+        refreshMediaLoader()
         guard let url = activeVideoURL, let videoPlayback else { return }
         videoPlayback.unparkPlayback(to: view, mediaURL: url)
     }
@@ -2297,6 +2329,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return
         }
         mediaCard.restoreRenderView(view)
+        // Same reason as `adoptLiveRenderView`: the surface coming back is the
+        // one that was drawing all along, and its announcement is behind us.
+        refreshMediaLoader()
         guard let url = mediaURL, let videoPlayback else { return }
         videoPlayback.unparkPlayback(to: view, mediaURL: url)
     }

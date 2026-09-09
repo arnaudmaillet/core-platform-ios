@@ -62,6 +62,36 @@ public final class VideoRenderView: UIView {
     public private(set) var enqueuedFrameCount = 0
     public private(set) var lastFrameHostTime: CFTimeInterval = 0
 
+    /// Whether this surface paints an OPAQUE ground behind its layer.
+    ///
+    /// ⚠️ FALSE FOR A FLIGHT CARD'S SURFACE, and that is a filmed one-frame
+    /// black flash in its entirety.
+    ///
+    /// The ground exists so a surface that is drawing owes nothing to whatever
+    /// is behind it. On a flight card there IS something behind it, and it is
+    /// the point of the card: the picture ladder — live media, then the sprite
+    /// sheet, then the thumbnail, then black. An opaque ground on the live rung
+    /// short-circuits the whole ladder to its last step, so the ONE composited
+    /// frame where the layer has nothing to show is black instead of the still
+    /// the card is already carrying.
+    ///
+    /// Measured on the abandoned grab, one line apart on the same build and the
+    /// same scripted gesture: 4 flashes in 16 runs with the ground opaque, 0 in
+    /// 16 with it transparent (14 in 40 against 0 in 44 pooled over the whole
+    /// hunt). No other outlier took its place, because what shows through is
+    /// the card's own cover — the same picture, one decode old.
+    public var paintsOpaqueGround = true {
+        didSet {
+            guard paintsOpaqueGround != oldValue else { return }
+            backgroundColor = groundColour(ready: hasAnnouncedPicture)
+        }
+    }
+
+    private func groundColour(ready: Bool) -> UIColor {
+        guard paintsOpaqueGround else { return .clear }
+        return (posterView.image == nil && !ready) ? .clear : .black
+    }
+
     public init() {
         super.init(frame: .zero)
         backgroundColor = .black
@@ -170,11 +200,28 @@ public final class VideoRenderView: UIView {
         }
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.isCatchingUp else { return }
+            guard !self.suppressesCatchUpIndicator else { return }
             self.installSpinnerIfNeeded()
             self.spinner?.startAnimating()
         }
         catchUpWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.catchUpIndicatorDelay, execute: work)
+    }
+
+    /// Never show the catch-up indicator on this surface.
+    ///
+    /// ⚠️ A TRANSITION IS NOT A WAIT. A spinner says "this is taking longer than
+    /// it should" — true on a page the viewer is sitting on, meaningless on a
+    /// card that is in the air for a third of a second and whose whole job is to
+    /// carry a picture from one place to another. It read as the transition
+    /// stalling. The ARRIVAL page keeps its own indicator; only the marker's
+    /// surface, which is what the flight borrows, is silenced.
+    public var suppressesCatchUpIndicator = false {
+        didSet {
+            guard suppressesCatchUpIndicator else { return }
+            catchUpWorkItem?.cancel()
+            spinner?.stopAnimating()
+        }
     }
 
     /// How long a catch-up must last before it is worth telling the viewer.
@@ -276,7 +323,7 @@ public final class VideoRenderView: UIView {
         // The dark floor is deliberate where it earns its keep — under a poster
         // that fails to render, and under video whose aspect leaves bars — so
         // it comes back the moment there is anything to floor.
-        backgroundColor = (posterView.image == nil && !ready) ? .clear : .black
+        backgroundColor = groundColour(ready: ready)
         #if DEBUG
         if wasVisible != !shouldHide { logPoster(visible: !shouldHide) }
         #endif
@@ -391,9 +438,24 @@ public final class VideoRenderView: UIView {
         #endif
         renderer?.removeSurface(self)
         renderer = nil
-        // A flush empties the layer, so it must be COVERED before it happens or
-        // the surface goes black on the spot. There are two ways to cover it
-        // and the right one depends on whether this surface owns a poster:
+        // ⚠️ A BARE `flush()` DOES NOT EMPTY THE LAYER, and this comment used
+        // to say it did.
+        //
+        // `AVQueuedSampleBufferRendering.flush` is documented as discarding
+        // *pending enqueued* sample buffers and says nothing about the
+        // displayed image; `flushWithRemovalOfDisplayedImage:` is the only call
+        // that removes it, and nothing in this file uses it. So what a detached
+        // surface holds is not black — it is the last frame it decoded, from a
+        // source it no longer owns.
+        //
+        // The covering below is still right, for that reason instead: a frozen
+        // frame belonging to a clip this view has been taken off is a lie of a
+        // different kind, and the two cases below are how it is covered. What
+        // is NOT true is that skipping the cover shows black — it shows a stale
+        // picture, which is harder to notice and was mis-hunted as one.
+        //
+        // Two ways to cover it, and the right one depends on whether this
+        // surface owns a poster:
         //
         //  - With a poster, raise it. The poster is a subview ABOVE the layer,
         //    so the emptied layer is hidden behind the cover and the viewer
@@ -450,6 +512,9 @@ public final class VideoRenderView: UIView {
     /// an invisible surface that then fails `isRenderingVisibly` and holds a
     /// landing card up to its ceiling before popping the cover.
     private var visibilityGeneration = 0
+    /// How long the PENDING first-frame reveal should take, when a caller asked
+    /// for something other than the two-frame default. Consumed by `reveal`.
+    private var pendingRevealDuration: TimeInterval?
 
     /// Reveals this surface now if it already has a frame, otherwise keeps it
     /// hidden and reveals it the instant one arrives.
@@ -502,6 +567,38 @@ public final class VideoRenderView: UIView {
         alpha = 0
     }
 
+    /// Fades this surface up over `duration` when its first frame lands, while
+    /// keeping it VISIBLE — and therefore addressable — in the meantime.
+    ///
+    /// ⚠️ THE DIFFERENCE FROM `revealOnFirstFrame` IS `isHidden`, and it is not
+    /// cosmetic. That method hides the view until a frame exists, which is the
+    /// right rule for a host that owns its surface outright. It is the wrong
+    /// one for a hero card: the flight reads `isHidden` as "there is no live
+    /// media here", so a hidden surface stops being posed each frame and the
+    /// retry that just adopted it goes on asking for one. Transparent says the
+    /// same thing to the viewer — whatever is behind it is what shows — without
+    /// lying to the machinery.
+    ///
+    /// The long fade is the point rather than a side effect: this is the
+    /// arriving page's picture coming up over the departing marker's across a
+    /// transition, not a two-frame swap covering a decode gap.
+    ///
+    /// The caller is expected to have cleared any poster first. A poster here
+    /// is a COPY of what is behind the surface, so fading one over the other
+    /// changes nothing on screen and the arrival never reads as an arrival.
+    public func fadeInOnFirstFrame(over duration: TimeInterval) {
+        pendingRevealDuration = duration
+        visibilityGeneration += 1
+        isHidden = false
+        alpha = 0
+        guard !isReadyForDisplay else {
+            isAwaitingFirstFrameToReveal = false
+            reveal(crossFading: true)
+            return
+        }
+        isAwaitingFirstFrameToReveal = true
+    }
+
     /// How long the surface takes to replace whatever is behind it. Two frames
     /// at 60Hz — long enough that the swap is a blend rather than a cut, short
     /// enough that it reads as instant.
@@ -524,6 +621,8 @@ public final class VideoRenderView: UIView {
     private func reveal(crossFading: Bool) {
         visibilityGeneration += 1
         let wasHidden = isHidden || alpha < 1
+        let duration = pendingRevealDuration ?? Self.revealDuration
+        pendingRevealDuration = nil
         isHidden = false
         guard crossFading, wasHidden else {
             // "opacity" is the key a UIView alpha animation actually lands
@@ -534,7 +633,7 @@ public final class VideoRenderView: UIView {
             alpha = 1
             return
         }
-        UIView.animate(withDuration: Self.revealDuration, delay: 0,
+        UIView.animate(withDuration: duration, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = 1
         }
@@ -685,6 +784,53 @@ public final class VideoRenderView: UIView {
     ///
     /// A short clip loops, so the gap wraps and stays small — which is why this
     /// was reported on a long stream and not on a ten-second one.
+    /// ⚠️ THIS ZEROES THE COUNT WITHOUT ANNOUNCING, AND THAT IS A LATENT TRAP.
+    ///
+    /// `isReadyForDisplay` is `enqueuedFrameCount > 0` on this backing, and
+    /// `updatePosterVisibility` only fires `onPictureAvailabilityChange` on a
+    /// CHANGE. So after this runs on a surface that had already announced a
+    /// picture, `hasAnnouncedPicture` is true while `isReadyForDisplay` is
+    /// false — and the next first frame announces nothing, because the two now
+    /// agree. Any consumer holding the edge rather than re-asking the level is
+    /// then stuck on a stale answer forever.
+    ///
+    /// Not fixed in place, and the obvious fix was designed, reviewed and
+    /// REJECTED — so here is what the next attempt needs to clear.
+    ///
+    /// The count answers two questions at once: "how many frames are pending"
+    /// and "has this surface ever shown one". The proposal was to split them —
+    /// keep the count for the first, add a `hasDisplayedFrame` for the second,
+    /// cleared only by teardown — and it does not survive:
+    ///
+    ///  - ⚠️ **THE COUNT CANNOT ANSWER THE QUESTION THAT MATTERS AT A REBIND.**
+    ///    What a surface needs to know when `attach(_:renderer:)` hands it a
+    ///    new source is "does the frame I am displaying belong to THIS
+    ///    renderer" — and only the renderer can say. Inferring it from
+    ///    `enqueuedFrameCount == 0` after the prime reads "the prime did not
+    ///    land", which is also what a dropped `isReadyForMoreMediaData` looks
+    ///    like right after a flush. On a warm rebind that lands there, the
+    ///    surface would announce a loss and raise its poster over a picture it
+    ///    is still displaying, taking it back a dispatch later — the exact
+    ///    blink the split exists to avoid.
+    ///  - The `guard renderer != nil || enqueuedFrameCount > 0` in
+    ///    `detachFromRenderer` changes meaning under the split and has NO test
+    ///    coverage in either direction: `invalidatingReleasesEverySurface`
+    ///    never calls `attach`, so `renderer` is nil throughout and the guard
+    ///    early-returns today. It stays green either way.
+    ///  - `isRenderingVisibly` feeds `GridVideoPlaybackCoordinator`'s
+    ///    `isShowingItsClip`, whose recency clause is SKIPPED for a paused
+    ///    surface — so a paused, windowless surface holding a stale frame flips
+    ///    from "no" to "yes" under the split. That, not a scrolling grid, is
+    ///    where an acceptance measurement belongs.
+    ///  - Whatever `hasFrame`'s doc says must stay true on the LEGACY
+    ///    `-avplayer-render` backing too, where `isReadyForDisplay` is true on
+    ///    a layer showing a frozen frame it no longer owns. The split improves
+    ///    one branch and must not claim to have fixed both.
+    ///
+    /// It was NOT the cause of the stuck-spinner defect — that was a callback
+    /// stranded on a discarded surface, see
+    /// `SnapMediaCardView.onPictureAvailabilityChange`. Written down so the
+    /// next reader inherits the constraints rather than the conclusion.
     func flushPendingSamples() {
         guard let sampleBufferLayer else { return }
         sampleBufferLayer.sampleBufferRenderer.flush()
@@ -694,12 +840,20 @@ public final class VideoRenderView: UIView {
     private func flushSampleBuffers() {
         guard let sampleBufferLayer else { return }
         #if DEBUG
-        // A flush empties the layer, so a VISIBLE surface that is flushed goes
-        // black on the spot. That is the shape of the remaining dismissal
-        // defect — one black frame on the feed page, chrome still lit — so the
-        // question is whether anything flushes a surface the viewer can see,
-        // and when. Logged with reachability because a flush on an off-screen
-        // surface is ordinary teardown and not interesting.
+        // ⚠️ THIS LOG WAS ADDED TO HUNT A BLACK FRAME A FLUSH CANNOT CAUSE.
+        //
+        // The premise was "a flush empties the layer, so a VISIBLE surface that
+        // is flushed goes black on the spot". `flush` discards PENDING buffers
+        // and leaves the displayed image alone — see the note in
+        // `detachFromRenderer`. A flushed surface holds its last frame; it goes
+        // black only if something else blanks it, and the only call that would
+        // (`flushWithRemovalOfDisplayedImage:`) appears nowhere here.
+        //
+        // Kept because the trace is still the one that says WHO flushes a
+        // surface the viewer can see, and when — which is worth knowing for the
+        // staleness above even though the black frame it was chasing was
+        // somebody else's. Reachability is logged because a flush on an
+        // off-screen surface is ordinary teardown and not interesting.
         if VideoRenderFlags.logsFrameDispatch, enqueuedFrameCount > 0 {
             print(String(format: "[avsbdl] %.3f %@ FLUSH frames=%d onScreen=%@ %@",
                          CACurrentMediaTime(), debugLabel ?? "surface", enqueuedFrameCount,
@@ -739,6 +893,41 @@ public final class VideoRenderView: UIView {
                      superview.map { "\(type(of: $0))" } ?? "nil"))
     }
 
+    // ⚠️ NOT BEHIND `#if DEBUG`, and the fence below is why the distinction
+    // matters. These three are read by `ZoomFlightCard.zoomLiveMediaContentRect`,
+    // which is a protocol REQUIREMENT and therefore compiled in every
+    // configuration — so fencing them compiles in Debug, where the fenced
+    // member and its caller agree, and fails only in Release. CI builds Release
+    // for exactly this reason, and caught it.
+    /// Where the picture is ACTUALLY drawn, in the surface's own coordinates.
+    ///
+    /// The surface's bounds say where the window is; this says where the video
+    /// is inside it, which is the other half of "the media is badly attached to
+    /// the window". `AVPlayerLayer` derives it from the layer's MODEL bounds and
+    /// republishes it in steps — the note on
+    /// `ZoomFlightCard.prepareZoomLiveMediaForFlight` states the consequence
+    /// ("its video rect snaps") — so on an ANIMATED leg the window can travel
+    /// smoothly while the picture inside it lands late, which is a defect no
+    /// reading of the bounds can see.
+    ///
+    /// Nil on the sample-buffer path, which publishes no such rect.
+    public var debugVideoRect: CGRect? { playerLayer?.videoRect }
+
+    /// Which layer is doing the drawing — the two paths fit their content by
+    /// different machinery, so a finding about one says nothing about the other.
+    public var debugLayerClass: String { String(describing: type(of: layer)) }
+
+    /// How the layer fits the decoded picture into its own bounds — the other
+    /// half of "where is the video". A surface can be exactly where the card is
+    /// and still draw its content somewhere else, and `resizeAspectFill`
+    /// recomputes that fit from the layer's bounds on every change.
+    public var debugVideoGravity: String {
+        if let sample = layer as? AVSampleBufferDisplayLayer { return sample.videoGravity.rawValue }
+        if let player = playerLayer { return player.videoGravity.rawValue }
+        return "none"
+    }
+
+
     #if DEBUG
     var isPosterVisible: Bool { !posterView.isHidden && posterView.alpha > 0.01 }
 
@@ -756,6 +945,27 @@ public final class VideoRenderView: UIView {
 
     /// Names this surface in `-zoom-live-log` output (e.g. "tile", "card").
     public var debugLabel: String?
+
+    #if DEBUG
+    /// Puts this surface into the state an ADOPTED one arrives in: a picture on
+    /// screen, and its announcement already made.
+    ///
+    /// A hero landing hands the page a surface that has been rendering for the
+    /// length of the flight, so `onPictureAvailabilityChange` fired while
+    /// somebody else owned it and will never fire again. Any consumer that
+    /// holds that edge instead of re-asking the level is then stuck — which is
+    /// exactly the defect `SnapMediaLoaderSpecTests` pins, and it cannot be
+    /// written without a way to produce this state without a decoder.
+    ///
+    /// Goes through the real announcement path rather than forcing a flag, so a
+    /// spec cannot pass against a surface that would not actually report a
+    /// picture.
+    public func debugSimulateFirstFrame() {
+        let wasFirst = enqueuedFrameCount == 0
+        enqueuedFrameCount += 1
+        if wasFirst { updatePosterVisibility(ready: true) }
+    }
+    #endif
 
     /// Set only on the surfaces taking part in a hero flight. Background
     /// teardowns — the other autoplaying tiles being stopped as the grid is

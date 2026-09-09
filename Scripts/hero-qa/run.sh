@@ -93,6 +93,57 @@ judge_audit() { # $1=case dir — the audit log's own verdict, liveness first
   echo "ok audit ($beats beats, final: ${last#*hero;})"
 }
 
+judge_duty_cycle() { # $1=case dir — how much of the run the main thread MISSED
+  # ⚠️ THE DENOMINATOR A SILENT RUN NEEDS, and it costs nothing to read: the
+  # audit's sampler is a fixed 4 Hz timer on the main runloop, so a healthy run
+  # of D seconds ends with checks ≈ 4D. Missed fires COALESCE — the timer does
+  # not queue up the ticks it slept through — so the SHORTFALL, in seconds, is
+  # the time the main thread was blocked for longer than a quarter of a second.
+  #
+  # It is the cheap complement to `judge_frozen`: that one reads the composited
+  # frames and sees any stall, this one needs no video at all and says how much
+  # of the run was lost. Neither can be replaced by a log line the stalled
+  # thread writes, which is what both are for.
+  local dir="$1" log="$dir/hero-audit.log" budget="${2:-2.0}"
+  [[ -s "$log" ]] || { echo "FAIL duty: no audit log"; return 1; }
+  # ⚠️ THE SAMPLES, NOT THE LAST HEARTBEAT — and the difference was a judge
+  # that failed a healthy run.
+  #
+  # The heartbeat prints every TWENTIETH sample (`sequence % 20 == 0`), so
+  # reading `beat checks=` takes the last MULTIPLE OF TWENTY and throws away
+  # up to nineteen samples — up to 4.75 seconds of phantom blocked time. On
+  # `map-soak` that read 380 where the sampler had reached 391, and reported
+  # "3.50s of the run unaccounted for" on a run with no stall in it at all.
+  # The 41s calibration that set the allowance landed on checks=160, an exact
+  # multiple, which is why the flaw never showed.
+  #
+  # Every sample writes its own `hero;seq=N` line, and `sequence` and
+  # `checksPerformed` are incremented together (`HeroTransitionAudit`), so the
+  # last one IS the count.
+  local checks=$(grep -o "hero;seq=[0-9]*" "$log" | tail -1 | sed 's/.*=//')
+  [[ -n "$checks" ]] || { echo "FAIL duty: no samples to count"; return 1; }
+  # ⚠️ THE ALLOWANCE IS MEASURED, NOT GUESSED. The audit installs early enough
+  # that it accounts for essentially the whole run: over a 41s wall window it
+  # reported checks=160, i.e. 40.0s of sampling at its 0.25s timer. 1.5s covers
+  # the launch it did not see. An allowance of several seconds — the obvious
+  # cautious choice — would swallow the very wedge this is looking for.
+  #
+  # Re-measured on `map-soak` once the count above was honest: 0.75s and
+  # -0.50s unaccounted on two healthy 100s runs. A NEGATIVE number is fine and
+  # informative — the audit sampled more than the allowance predicted, so 1.5s
+  # slightly over-covers a long case's launch. The budget stays at 2.0s rather
+  # than being tightened onto those two samples: CI hardware is not this
+  # machine, and a judge that flakes is worth less than one that is a little
+  # slack.
+  local expected=$(echo "($CASE_DURATION - 1.5) * 4" | bc -l 2>/dev/null || echo 0)
+  local missed=$(echo "scale=2; ($expected - $checks) / 4" | bc -l 2>/dev/null || echo 0)
+  local over=$(echo "$missed > $budget" | bc -l 2>/dev/null || echo 0)
+  (( over == 1 )) && {
+    echo "FAIL duty: ${missed}s of the run unaccounted for (checks=$checks," \
+         "expected ~${expected}) — the main thread was blocked"; return 1; }
+  echo "ok duty cycle (checks=$checks, ${missed}s unaccounted, budget ${budget}s)"
+}
+
 judge_motion() { # $1=case dir — did anything visibly FLY?
   local dir="$1" prev="" best=0
   for f in "$dir"/frames/*.png; do
@@ -111,14 +162,94 @@ judge_motion() { # $1=case dir — did anything visibly FLY?
   echo "ok motion (peak inter-frame MAE x10000 = $best)"
 }
 
-judge_no_black() { # $1=case dir — no full-frame black dip mid-sequence
+judge_frozen() { # $1=case dir, $2=max frozen seconds (default 0.6, per case)
+  # ⚠️ THE EXACT COMPLEMENT OF judge_motion, AND THE ONE IT CANNOT BE.
+  #
+  # judge_motion keeps the MAXIMUM inter-frame difference over a whole run, so
+  # a run that was frozen for 95% of its duration passes on the single moment
+  # something moved. This keeps the LONGEST RUN of adjacent frames that did not
+  # change, which is what a stall looks like from outside.
+  #
+  # From outside is the point: a main-thread stall cannot be measured by
+  # anything the stalled main thread writes. Both in-app channels are written
+  # by it and carry no timestamp, so three seconds of wedge read as three
+  # healthy seconds with fewer lines. `simctl io recordVideo` captures the
+  # COMPOSITED output through backboardd — frames keep arriving while the app
+  # is wedged, they simply stop changing.
+  #
+  # ⚠️ THE BUDGET IS PER CASE, and it has to be, because a healthy recording is
+  # not frame-unique. Measured on a real present: the longest identical run in a
+  # healthy 30-frame window was 0.40s — the map sitting still before the tap,
+  # plus the simulator's own frame duplication. A case that includes deliberate
+  # idle needs a larger budget than one that is all motion; the default 0.6s
+  # suits a window trimmed to the transition. A budget below the measured
+  # baseline is a judge that fails on a working app.
+  #
+  # ⚠️ AND A SOAK IS THAT CASE. `map-soak` failed this judge at 0.90s on a
+  # perfectly healthy run, and the frames name the reason: the longest run
+  # begins at t=29.60s on a PHOTOGRAPH page sitting still, between the moment
+  # the soak opened it and the 2.5s dwell after which it closes it
+  # (`MapsViewController.closeSoakedFeed`). A still image with a paused ticker
+  # composites identical frames for as long as it is left alone, and no
+  # threshold on frames can tell that from a stall of the same length. What CAN
+  # is `judge_duty_cycle`, which reads the app's own sampler rather than the
+  # screen — so on a soak that judge is the one carrying the load, and this one
+  # is set above the case's deliberate idle. `CASE_FROZEN_BUDGET` in the case
+  # file is how a case says so, and it must be justified there, in seconds
+  # taken from that case's own dwell.
+  #
+  # ⚠️ Two conditions make it honest on the map, and both are about liveness:
+  # run with an animated-icon policy that keeps the markers moving (a posed,
+  # static field trips this judge on a healthy screen), and run WITHOUT
+  # `-map-icon-hud` (a sibling of the map that repaints ~6/s makes every frame
+  # differ and defeats any frame-difference judge at all).
+  local dir="$1" budget="${2:-0.6}" prev="" run=0 best=0 fps="${FRAME_FPS:-30}"
+  for f in "$dir"/frames/*.png; do
+    if [[ -n "$prev" ]]; then
+      local norm=$(magick compare -metric MAE "$prev" "$f" null: 2>&1 \
+        | sed -n 's/.*(\([0-9.e-]*\)).*/\1/p')
+      local scaled=$(printf '%.0f' $(echo "${norm:-0} * 1000000" | bc -l 2>/dev/null || echo 0))
+      # Below the noise floor of h264 on a static screen: identical, not similar.
+      if (( scaled < 30 )); then
+        run=$(( run + 1 ))
+        (( run > best )) && best=$run
+      else
+        run=0
+      fi
+    fi
+    prev="$f"
+  done
+  local seconds=$(echo "scale=2; $best / $fps" | bc -l 2>/dev/null || echo 0)
+  local over=$(echo "$seconds > $budget" | bc -l 2>/dev/null || echo 0)
+  (( over == 1 )) && { echo "FAIL frozen: ${seconds}s of identical frames (budget ${budget}s)"; return 1; }
+  echo "ok not frozen (longest identical run ${seconds}s, budget ${budget}s)"
+}
+
+judge_no_black() { # $1=case dir — no single-frame collapse to black mid-sequence
+  # ⚠️ RELATIVE, AND IT USED TO BE ABSOLUTE — which is why it watched the
+  # abandoned grab's black flash go past for as long as that flash existed.
+  #
+  # The old rule was `mean <= 2%` between two frames at `>= 15%`: a FULL-frame
+  # black. The flash a user filmed is not one. The page's furniture is still
+  # drawn over it — the nav bar's platters, the caption, the engagement rail —
+  # so the frame measures 5-6% mean, not 2, and the judge said "ok no-black"
+  # on a recording that contains it. Measured on the filmed frame: 14.4/255.
+  #
+  # What names the defect is not an absolute darkness but a COLLAPSE: one frame
+  # at a fraction of both its neighbours. The floor stays as the noise gate
+  # (dark content dips a few percent all the time and neither neighbour is
+  # bright), and the ratio is what does the work.
   local dir="$1" i=0 dips=0
   local -a means
   for f in "$dir"/frames/*.png; do
     means[$((++i))]=$(magick "$f" -colorspace Gray -format "%[fx:int(mean*100)]" info:)
   done
   for ((j=2; j<i; j++)); do
-    if (( means[j] <= 2 && means[j-1] >= 15 && means[j+1] >= 15 )); then
+    # A third of both neighbours, and both neighbours plainly lit: a page that
+    # is genuinely dark cannot trip this, because the ratio needs a bright
+    # before AND a bright after.
+    if (( means[j] * 3 <= means[j-1] && means[j] * 3 <= means[j+1] \
+          && means[j-1] >= 15 && means[j+1] >= 15 )); then
       dips=$((dips+1))
       echo "  black dip at frame $j (${means[j-1]} -> ${means[j]} -> ${means[j+1]})"
     fi
@@ -150,6 +281,7 @@ for CASE in "${CASES[@]}"; do
   spec="$HERE/cases.d/$CASE.case"
   [[ -f "$spec" ]] || { echo "unknown case: $CASE" | tee -a "$SUMMARY"; FAILED+=("$CASE"); continue; }
   CASE_ARGS=(); CASE_DURATION=30; CASE_CHECKS=(audit); CASE_BASELINE_AT=0; CASE_LEAKS=0
+  CASE_FROZEN_BUDGET=0.6
   source "$spec"
   dir="$OUT/$CASE"; mkdir -p "$dir/frames"
   echo "\n== $CASE (${CASE_DURATION}s) =="
@@ -203,6 +335,8 @@ for CASE in "${CASES[@]}"; do
       audit)           v=$(judge_audit "$dir") || ok=0 ;;
       motion)          v=$(judge_motion "$dir") || ok=0 ;;
       no-black)        v=$(judge_no_black "$dir") || ok=0 ;;
+      not-frozen)      v=$(judge_frozen "$dir" "$CASE_FROZEN_BUDGET") || ok=0 ;;
+      duty-cycle)      v=$(judge_duty_cycle "$dir") || ok=0 ;;
       settle-baseline) v=$(judge_settle_baseline "$dir") || ok=0 ;;
       *) v="FAIL unknown check $check"; ok=0 ;;
     esac

@@ -19,6 +19,20 @@ struct HeroProbe {
     let retries: Int
     let cards: Int
     let pins: Int
+    /// ⚠️ THE OBJECT WHOSE SURVIVAL LOCKS THE MAP. The transition controller is
+    /// the map's re-entrancy handle as well as the owner of the source, the
+    /// animators and the drivers — a retained one is a map that silently
+    /// swallows every marker tap. It was counted from the day it was written
+    /// and never published, so no assertion could see it.
+    let controllers: Int
+    /// Reveals in flight. Zero at a settle; non-zero says the audit's other
+    /// numbers are describing a transition, not a resting screen.
+    let reveals: Int
+    /// Landing COVERS: cards left on screen after a transition has completed,
+    /// while the page catches up. Zero at a settle BY CONSTRUCTION — the audit
+    /// counts a cover as activity — so a settled sample carrying one would mean
+    /// the audit's own liveness rule has drifted from the code that draws them.
+    let covers: Int
     let stranded: Int
     let players: Int
     let idle: Int
@@ -37,6 +51,20 @@ struct HeroProbe {
         animators + interruptors + retries + cards + pins + stranded
     }
 
+    /// ⚠️ NOT PART OF `transitionResidue`, and the measurement says why. A
+    /// transition controller is the stack's delegate for the FEED'S WHOLE LIFE
+    /// — it has to be, or the dismissal has no driver — so it is legitimately
+    /// alive at every settle taken while a post is open. Measured on one map
+    /// round trip: 20 settled samples with `controllers=1` (feed open, healthy)
+    /// and 50 with `controllers=0`.
+    ///
+    /// Folding it into the residue would fail every assertion made from an open
+    /// post. What it IS good for is an assertion taken ON THE MAP, where a
+    /// surviving controller means the map is silently swallowing marker taps —
+    /// which is exactly the defect it was declared for and never published to
+    /// catch. `assertMapAtRest` is that assertion.
+    var controllersAlive: Int { controllers }
+
     init?(_ identifier: String) {
         let fields = identifier.split(separator: ";")
         guard fields.first == "hero" else { return nil }
@@ -51,6 +79,8 @@ struct HeroProbe {
               let animators = int("animators"), let interruptors = int("interruptors"),
               let drivers = int("drivers"), let retries = int("retries"),
               let cards = int("cards"), let pins = int("pins"),
+              let controllers = int("controllers"), let reveals = int("reveals"),
+              let covers = int("covers"),
               let stranded = int("stranded"), let players = int("players"),
               let idle = int("idle"), let duplicates = int("dupes"),
               let anchors = int("anchors"), let stalls = int("stalls"),
@@ -64,6 +94,9 @@ struct HeroProbe {
         self.retries = retries
         self.cards = cards
         self.pins = pins
+        self.controllers = controllers
+        self.reveals = reveals
+        self.covers = covers
         self.stranded = stranded
         self.players = players
         self.idle = idle
@@ -154,6 +187,7 @@ extension XCTestCase {
                        "transition residue after settle (animators=\(probe.animators)"
                        + " interruptors=\(probe.interruptors) retries=\(probe.retries)"
                        + " cards=\(probe.cards) pins=\(probe.pins)"
+                       + " controllers=\(probe.controllers)"
                        + " stranded=\(probe.stranded)) — \(message)",
                        file: file, line: line)
         XCTAssertEqual(probe.duplicates, 0,
@@ -163,6 +197,34 @@ extension XCTestCase {
     /// Screenshot evidence, kept in the result bundle whatever the outcome —
     /// the "affiche pour la confirmation" channel. Named so a montage of a
     /// run reads as a storyboard.
+    /// The checklist a return TO THE MAP owes, on top of the residue.
+    ///
+    /// ⚠️ A SURVIVING CONTROLLER IS A DEAD MAP, and it is invisible to every
+    /// other assertion. `ZoomTransitionController` is the map's re-entrancy
+    /// handle as well as the owner of the source and the animators, so one that
+    /// outlives its round trip means every marker tap from then on is silently
+    /// swallowed — no crash, no stall, markers that simply stop working. A
+    /// reversed present used to leave exactly that.
+    ///
+    /// Asserted only from the MAP, never from an open post: a controller is
+    /// legitimately alive for the whole life of the feed it is driving.
+    func assertMapAtRest(
+        _ probe: HeroProbe?,
+        _ message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let probe else {
+            return XCTFail("no probe to assert on — \(message)", file: file, line: line)
+        }
+        assertHeroResidueClear(probe, message, file: file, line: line)
+        XCTAssertEqual(probe.controllersAlive, 0,
+                       "a transition controller outlived its round trip: the map is"
+                       + " holding its re-entrancy lock and will swallow every marker"
+                       + " tap from here — \(message)",
+                       file: file, line: line)
+    }
+
     func attachHeroEvidence(_ app: XCUIApplication, name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name

@@ -32,6 +32,36 @@ final class MapsViewController: UIViewController {
     /// What the sub-filter row currently shows — the full-list sheet's data.
     private var currentSubFilterOptions: [MapSubFilterOption] = []
     private let imagePipeline: ImagePipeline
+    /// The baked animated-icon catalogue, or `nil` where the surface has none.
+    ///
+    /// Separate from `imagePipeline` on purpose. Icons are decoded WHOLE
+    /// (downsampling a sprite grid lands every frame boundary mid-pixel) and
+    /// budgeted by BYTES rather than by count (a sheet is up to 1.7 MB, so the
+    /// pipeline's `countLimit = 300` would never evict), and they must not go
+    /// through `decodeDownsampled` at all — that call never returns on HEIC
+    /// under concurrent load in the iOS 26 simulator.
+    private let iconCatalog: AnimatedIconCatalog?
+    /// Baked previews of a MEDIA post's own footage — the decode-session-free
+    /// alternative to attaching a player. Separate catalogue from the icons'
+    /// because the two have different cell sizes and very different byte costs
+    /// (2.71 MB resident per preview against 0.07 MB per icon), so one budget
+    /// could not serve both without the cheap one being evicted by the dear one.
+    private let previewCatalog: AnimatedIconCatalog?
+    /// Re-dresses every marker when the device changes its motion policy.
+    ///
+    /// ⚠️ Read at INSTALL time, so this is not optional: without it a field
+    /// dressed before the user enabled Low Power keeps animating at full rate
+    /// for the rest of the session — the exact failure the setting exists to
+    /// prevent. And it must RE-DRESS rather than "reinstall if not running",
+    /// which can only promote a marker and never demote one.
+    private let iconPolicyBag = MapNotificationBag()
+    #if DEBUG
+    /// Kept only so the debug readout can distinguish DECODERS from surfaces.
+    private var videoPool: VideoPlaybackController?
+    #endif
+    #if DEBUG
+    private var iconDebugHUD: MapIconDebugHUD?
+    #endif
     /// Builds the snap feed a pin/cluster tap expands into (reuses the Feed
     /// feature via `FeedFeatureBuilding.makeSnapFeedViewController`).
     private let makeSnapFeed: ([PostID]) -> UIViewController
@@ -98,7 +128,32 @@ final class MapsViewController: UIViewController {
     /// the flight: the instant-tap recognizer and MapKit's own `didSelect` can
     /// both fire for ONE tap, and without a guard the second one pushes a
     /// second copy of the feed.
-    private var isPlainFeedPushed = false
+    /// Whether the map may be touched, and whether a tap may open anything —
+    /// see `MapOpenGate`. It replaces two booleans that were set in three
+    /// branches and released from five unrelated places, and it is the ONLY
+    /// thing that writes the map's interaction.
+    private var openGate = MapOpenGate() {
+        didSet {
+            applyMapInteraction()
+            #if DEBUG
+            // `-maps-log-gate`: every state the map's lock passes through.
+            //
+            // ⚠️ WITHOUT IT, "the map is dead to taps" and "the map is fine" look
+            // identical from outside — which is exactly how a reversed present
+            // bricked it for a whole session without anyone being able to say
+            // what had happened.
+            if oldValue != openGate,
+               ProcessInfo.processInfo.arguments.contains("-maps-log-gate") {
+                print("[gate] \(oldValue.state) -> \(openGate.state) "
+                      + "canOpen=\(openGate.canOpen ? "Y" : "n") "
+                      + "inert=\(openGate.mapIsInert ? "Y" : "n")")
+            }
+            // The soak's clock is the gate, not a timer: "the map is ready
+            // again" has exactly one honest definition and this is it.
+            if oldValue.canOpen == false, openGate.canOpen { advanceSoakIfNeeded() }
+            #endif
+        }
+    }
     /// Chooses which ≤3 visible video pins autoplay.
     private let videoCoordinator: MapVideoPlaybackCoordinator
     /// Runs the pins' staggered pop-in/pop-out and owns the in-flight
@@ -108,6 +163,27 @@ final class MapsViewController: UIViewController {
     private let appObservers = MapNotificationBag()
     #if DEBUG
     private var didDebugOpenPin = false
+    #if DEBUG
+    /// `-maps-soak <cycles>`: opens a marker, closes it, opens the next, N times.
+    ///
+    /// ⚠️ THE MAP WAS THE ONE SURFACE WITH NO SOAK, and the reason was
+    /// mechanical: every `-maps-open-*` hook is a ONE-SHOT LATCH
+    /// (`didDebugOpenPin`), so nothing could iterate this seam at all. Every
+    /// leak, every stuck lock and every retained driver on the map→post→map
+    /// round trip was therefore unmeasurable by construction, whatever the
+    /// census said.
+    ///
+    /// Deterministic order, by post id: MapKit's own annotation order is
+    /// undefined, and a soak that opens a different sequence on every run
+    /// compares two different runs.
+    private var soakCyclesRemaining = 0
+    private var soakCursor = 0
+    /// Bumped every time a cycle starts, so a watchdog can tell "still on the
+    /// cycle I was watching" from "already moved on".
+    private var soakGeneration = 0
+    /// One pending re-check at a time, so a shut gate cannot stack timers.
+    private var soakRetryScheduled = false
+    #endif
     #endif
 
     private let mapView = MKMapView()
@@ -187,6 +263,27 @@ final class MapsViewController: UIViewController {
     /// A diff folded into the model during a transition still owes a layout;
     /// this asks the settle to run one.
     private var layoutPending = false
+    /// The SNAPPED zoom the last settle-driven reconcile ran at, and when it
+    /// ran. Together they tell a pure pan from a zoom.
+    ///
+    /// ⚠️ Snapped zoom, not the region's span. `MKMapView` fits whatever span
+    /// you hand `setRegion` to the view's aspect ratio, so `region.span` is
+    /// never bit-identical to what was set and `==` on it is always false — the
+    /// first version of this throttle fired exactly zero times for that reason,
+    /// and read as "the optimisation does nothing" rather than "the predicate is
+    /// broken". Snapped zoom is also the engine's ACTUAL input, so this asks the
+    /// question that decides the layout instead of a proxy for it.
+    private var lastSettleSnappedZoom: Double?
+    private var lastSettleReconcileAt: CFTimeInterval = 0
+    private var trailingSettleReconcile: DispatchWorkItem?
+    /// The floor between two settle-driven reconciles during a pure pan.
+    /// 100 ms bounds the staleness at six frames, and a pure pan cannot change
+    /// the layout anyway — see `reconcileClustersForSettle`.
+    private static let panReconcileInterval: CFTimeInterval = 0.1
+    #if DEBUG
+    /// Cheap "did the corpus move" probe for the churn readout only.
+    private var lastReconciledPinFingerprint = 0
+    #endif
     /// The annotations THIS reconcile put on the map, awaiting their views.
     ///
     /// ⚠️ `didAdd` IS NOT "SOMETHING NEW HAPPENED". MapKit calls it for every
@@ -208,6 +305,8 @@ final class MapsViewController: UIViewController {
         favoritesRepository: any MapFavoritesProviding,
         pinService: MapProfilePinService,
         imagePipeline: ImagePipeline,
+        iconCatalog: AnimatedIconCatalog? = nil,
+        previewCatalog: AnimatedIconCatalog? = nil,
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
         pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
@@ -229,7 +328,12 @@ final class MapsViewController: UIViewController {
         self.favoritesRepository = favoritesRepository
         self.pinService = pinService
         self.imagePipeline = imagePipeline
+        self.iconCatalog = iconCatalog
+        self.previewCatalog = previewCatalog
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
+        #if DEBUG
+        self.videoPool = videoPlayback
+        #endif
         self.makeSnapFeed = makeSnapFeed
         self.pushPlainSnapFeed = pushPlainSnapFeed
         self.revealSnapFeed = revealSnapFeed
@@ -246,6 +350,12 @@ final class MapsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        installIconPolicyObserver()
+        #if DEBUG
+        installIconDebugHUD()
+        installNavigationSweep()
+        installNavigationDrag()
+        #endif
         // No title, deliberately: the map is the tab's whole surface and
         // names itself; the header band belongs to its controls — the
         // compose "+", the wallet badge, the bell. (The tab bar still says
@@ -469,6 +579,13 @@ final class MapsViewController: UIViewController {
     }
 
     override func viewDidLayoutSubviews() {
+        #if DEBUG
+        // ⚠️ Every pass, not once. `viewDidLoad` adds the map and its chrome
+        // AFTER this HUD, so a single `addSubview` puts the instrument
+        // underneath the thing it is instrumenting — and the failure looks like
+        // the flag not working rather than like a z-order.
+        if let iconDebugHUD { view.bringSubviewToFront(iconDebugHUD) }
+        #endif
         super.viewDidLayoutSubviews()
         syncBarsPosition()
     }
@@ -514,6 +631,12 @@ final class MapsViewController: UIViewController {
         for annotation in mapView.annotations {
             mapView.view(for: annotation)?.isHidden = false
         }
+        // ⚠️ AND THE GATE, for the same reason and in the same place: every
+        // transition is over by here. It is the backstop for endings nobody
+        // wired — a place page popping home, a multi-pop, a cross-tab return —
+        // and it is what makes a forgotten release a frame of dead map rather
+        // than a session of it.
+        openGate.appearedAtRoot()
         // WHEN ON THE MAP, THE TAB BAR IS ALWAYS THERE. The map is a tab ROOT:
         // there is no state in the product where an on-screen map has no dock
         // under it, so it asserts one rather than trusting whichever departing
@@ -541,9 +664,12 @@ final class MapsViewController: UIViewController {
         // is alive — under a push, this fires the moment a pop *begins*, and
         // an interactive grab can cancel; the completed return resumes via
         // the transition's onSourceReturned instead.
-        // The map is on its way back (or arriving for the first time), so a
-        // plainly-pushed feed is behind us and the next tap must open again.
-        isPlainFeedPushed = false
+        // ⚠️ THE GATE IS NOT RELEASED HERE, and it used to be. UIKit runs
+        // `viewWillAppear` at interactive-pop BEGIN, so from the first
+        // millimetre of a grab until it was cancelled the map believed nothing
+        // was open — a tap in that window opened a second post over the first.
+        // `viewDidAppear` is where every transition is genuinely over, and this
+        // file already says so three comments below for the tab bar.
         guard activeTransition == nil else {
             // A hero return, though, does need its bottom chrome put back —
             // invisible, so the flight can fade it in. This is the only chance
@@ -1255,13 +1381,117 @@ final class MapsViewController: UIViewController {
         if isRegionTransitioning {
             layoutPending = true
         } else {
+            #if DEBUG
+            MapChurnCounters.fromDiff += 1
+            #endif
             reconcileClusters()
         }
+    }
+
+    /// The settle path's reconcile, throttled while the camera is purely panning.
+    ///
+    /// A pan at an unchanged span cannot change the layout: `MapClusterEngine`
+    /// grids on ABSOLUTE `MKMapPoint`s with `cell = cellPoints / zoomScale`, so
+    /// the viewport centre is not one of its inputs. Measured under
+    /// `-maps-nav-drag` (60 Hz stepped pan, the cadence a finger produces):
+    /// **55.6 reconciles/s producing 0 arrivals and 0 rebinds, costing 65 ms/s
+    /// of main thread** — 6.5%, against 0.67% under `-maps-nav-sweep`, which
+    /// calls `setRegion(animated:)` and so fires this delegate once per gesture
+    /// instead of once per frame. The scripted sweep could not see this at all,
+    /// and the first version of this analysis concluded there was nothing here.
+    ///
+    /// ⚠️ It DEFERS, it never drops. The trailing item always runs, so the
+    /// layout converges even if the camera stops between two callbacks — a
+    /// throttle that skipped the last callback would leave the map permanently
+    /// wrong wherever the finger happened to lift.
+    ///
+    /// A zoom is never throttled. A changed span is exactly the case where the
+    /// layout does move, and it is also the case the user is watching.
+    private func reconcileClustersForSettle() {
+        // The trailing item can land mid-flight, which the settle path never
+        // could — `regionDidChangeAnimated` has just cleared the flag when it
+        // calls in. Restacking mid-flight is exactly what `isRegionTransitioning`
+        // exists to prevent, so hand it to the settle the same way a mid-flight
+        // diff is handed over.
+        if isRegionTransitioning {
+            layoutPending = true
+            return
+        }
+        // ⚠️ OFF BY DEFAULT — it is a MEASURED REGRESSION, kept only so the
+        // experiment stays reproducible. `-maps-reconcile-throttle` enables it.
+        //
+        // It does exactly what it claims: 3 paired 60-second runs, fresh launch
+        // per arm, under `-maps-nav-drag`.
+        //
+        //            reconcile/s   ms/s    cpu    frame    p95   hitches
+        //   control       37.21   48.83  48.5%   21.13  38.58     20.87
+        //   throttled      7.82   13.30  46.4%   22.01  40.46     28.23
+        //
+        // 79% of reconciles and 73% of their main-thread time removed — tight
+        // across all three reps — and the frame, the p95 and the hitches all got
+        // WORSE, every throttled rep above the control's mean. Removing work
+        // from the main thread made the map stutter more.
+        //
+        // The likely mechanism is WHEN, not how much: the inline reconciles ran
+        // synchronously inside the region-change callback, a moment the frame
+        // had already conceded, while the trailing `asyncAfter` lands at an
+        // arbitrary point that can be mid-frame. At 1.3 ms a piece, scheduling
+        // dominates volume.
+        //
+        // ⚠️ A single earlier pair showed hitches 30.9 -> 17.2 and nearly shipped
+        // as a 44% win. The control arm alone swings 17.4-27.7 between runs.
+        // One pair could not have told these apart.
+        guard ProcessInfo.processInfo.arguments.contains("-maps-reconcile-throttle") else {
+            #if DEBUG
+            MapChurnCounters.fromSettle += 1
+            #endif
+            reconcileClusters()
+            return
+        }
+        let zoom = currentZoomScale
+        guard zoom > 0 else { reconcileClusters(); return }
+        let snapped = MapClusterEngine.snapZoom(zoom)
+        let now = CACurrentMediaTime()
+        let isPurePan = lastSettleSnappedZoom == snapped
+        if isPurePan, now - lastSettleReconcileAt < Self.panReconcileInterval {
+            #if DEBUG
+            MapChurnCounters.settleThrottled += 1
+            #endif
+            // ⚠️ ARM ONCE. Cancel-and-reschedule is a DEBOUNCE, and a debounce
+            // waits for quiet — under a 60 Hz pan the item is cancelled every
+            // 16 ms and never fires at all. The first version did exactly that
+            // and emptied the map: the opening reconcile ran before the first
+            // query returned, every later one was starved, and the readout said
+            // `markers 0.0` while every performance column improved. A throttle
+            // arms on the first deferred call and lets it land.
+            guard trailingSettleReconcile == nil else { return }
+            let work = DispatchWorkItem { [weak self] in
+                self?.trailingSettleReconcile = nil
+                self?.reconcileClustersForSettle()
+            }
+            trailingSettleReconcile = work
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + (Self.panReconcileInterval - (now - lastSettleReconcileAt)),
+                execute: work
+            )
+            return
+        }
+        trailingSettleReconcile?.cancel()
+        trailingSettleReconcile = nil
+        lastSettleSnappedZoom = snapped
+        lastSettleReconcileAt = now
+        #if DEBUG
+        MapChurnCounters.fromSettle += 1
+        #endif
+        reconcileClusters()
     }
 
     private func flushPendingDiffs() {
         guard layoutPending else { return }
         layoutPending = false
+        #if DEBUG
+        MapChurnCounters.fromFlush += 1
+        #endif
         reconcileClusters()
     }
 
@@ -1305,6 +1535,18 @@ final class MapsViewController: UIViewController {
     /// Top-K set shifts and keying off it would fade a settled cluster out and a
     /// near-identical one back in.
     private func reconcileClusters() {
+        #if DEBUG
+        MapChurnCounters.reconciles += 1
+        let reconcileStart = DispatchTime.now().uptimeNanoseconds
+        let pinFingerprint = pins.count &* 31 &+ (pins.keys.first?.rawValue.hashValue ?? 0)
+        if pinFingerprint == lastReconciledPinFingerprint { MapChurnCounters.withUnchangedPins += 1 }
+        lastReconciledPinFingerprint = pinFingerprint
+        defer {
+            MapChurnCounters.recordReconcile(
+                micros: Int((DispatchTime.now().uptimeNanoseconds - reconcileStart) / 1_000)
+            )
+        }
+        #endif
         // ⚠️ A ZERO SCALE IS NOT A ZOOM, IT IS A NOT-YET. The engine's own
         // degenerate path ships EVERY pin as an unclustered single, and this
         // runs from `regionDidChangeAnimated`, which fires when the map is
@@ -1316,23 +1558,55 @@ final class MapsViewController: UIViewController {
             layoutPending = true
             return
         }
-        let items = MapClusterEngine.cluster(
-            // ⚠️ SORTED, because the merge downstream is order-dependent (see
-            // `collide`). A dictionary's values re-order whenever it is
-            // mutated, and every return to this screen re-queries — so the
-            // markers moved on a map nobody had panned.
-            pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue },
-            // Snapped, so an epsilon in the viewport cannot move every grid
-            // line at once — see `MapClusterEngine.snapZoom`.
-            zoomScale: MapClusterEngine.snapZoom(currentZoomScale),
-            cellPoints: Double(Self.clusterCellPoints),
-            // The semantic pre-pass's two banding inputs: the zoom level is
-            // the FALLBACK for an H3-less corpus; the viewport diagonal
-            // drives the dynamic cell-span rule (`MapHierarchyBanding`)
-            // whenever the ladder carries H3 indexes.
-            zoomLevel: MapViewport.zoomLevel(forLongitudeSpan: mapView.region.span.longitudeDelta),
-            viewportDiagonalKm: currentViewportDiagonalKm
-        )
+        #if DEBUG
+        // `-maps-no-clustering`: every pin becomes its own marker.
+        //
+        // ⚠️ It exists because the SHIPPING map cannot produce its own designed
+        // worst case. `MapClusterEngine`'s proximity merge recomputes each
+        // cluster's centroid, so merges CHAIN and a dense uniform field
+        // collapses instead of packing the 64pt lattice — measured invariant at
+        // 19 markers whether the corpus is fed 5x, 15x or 40x. The 128-marker
+        // figure every budget in this feature is sized against is a GEOMETRIC
+        // bound, and this flag is the only way to stand a field of that size in
+        // front of the real renderer.
+        //
+        // It is not a product mode and must never become one: without the merge
+        // the map has no answer for a dense city.
+        let unclustered = ProcessInfo.processInfo.arguments.contains("-maps-no-clustering")
+        #else
+        let unclustered = false
+        #endif
+
+        // ⚠️ SORTED, because the merge downstream is order-dependent (see
+        // `collide`). A dictionary's values re-order whenever it is mutated, and
+        // every return to this screen re-queries — so the markers moved on a map
+        // nobody had panned.
+        let ordered = pins.values.sorted { $0.postID.rawValue < $1.postID.rawValue }
+        // Singles go through the SAME reconciliation below, so what the flag
+        // measures is the real marker lifecycle and not a parallel code path
+        // that happens to look similar.
+        let items: [MapClusterEngine.Item] = unclustered
+            ? ordered.map {
+                MapClusterEngine.Item(
+                    representative: $0, memberIDs: [$0.postID],
+                    latitude: $0.latitude, longitude: $0.longitude, place: $0.place
+                )
+            }
+            : MapClusterEngine.cluster(
+                ordered,
+                // Snapped, so an epsilon in the viewport cannot move every grid
+                // line at once — see `MapClusterEngine.snapZoom`.
+                zoomScale: MapClusterEngine.snapZoom(currentZoomScale),
+                cellPoints: Double(Self.clusterCellPoints),
+                // The semantic pre-pass's two banding inputs: the zoom level is
+                // the FALLBACK for an H3-less corpus; the viewport diagonal
+                // drives the dynamic cell-span rule (`MapHierarchyBanding`)
+                // whenever the ladder carries H3 indexes.
+                zoomLevel: MapViewport.zoomLevel(
+                    forLongitudeSpan: mapView.region.span.longitudeDelta
+                ),
+                viewportDiagonalKm: currentViewportDiagonalKm
+            )
         var target = Set<String>()
         target.reserveCapacity(items.count)
         var toAdd: [MKAnnotation] = []
@@ -1412,6 +1686,10 @@ final class MapsViewController: UIViewController {
         }
         popChoreographer.popOut(departing.map { (id: $0.key, annotation: $0.value) })
 
+        #if DEBUG
+        MapChurnCounters.added += toAdd.count
+        MapChurnCounters.departed += departing.count
+        #endif
         if !toAdd.isEmpty {
             pendingPopIn.formUnion(toAdd.map { ObjectIdentifier($0 as AnyObject) })
             mapView.addAnnotations(toAdd)
@@ -1583,11 +1861,11 @@ final class MapsViewController: UIViewController {
         if let cluster = annotation as? MapComputedCluster {
             cluster.apply(item)
             (mapView.view(for: cluster) as? MapClusterAnnotationView)?
-                .configure(with: cluster, imagePipeline: imagePipeline)
+                .configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
         } else if let single = annotation as? MapAnnotation {
             single.update(pin: item.representative)
             (mapView.view(for: single) as? MapAnnotationView)?
-                .configure(with: item.representative, imagePipeline: imagePipeline)
+                .configure(with: item.representative, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
         }
     }
 
@@ -1622,17 +1900,45 @@ final class MapsViewController: UIViewController {
         let visibleRect = mapView.visibleMapRect
         var scored: [(distance: Double, candidate: MapVideoPlaybackCoordinator.Candidate)] = []
         for annotation in displayed.values {
-            guard let single = annotation as? MapAnnotation,
-                  single.pin.kind == .video,
-                  let url = single.pin.previewVideoURL,
-                  visibleRect.contains(MKMapPoint(single.coordinate)),
-                  let view = mapView.view(for: single) as? MapAnnotationView else { continue }
+            // The pin a marker SPEAKS FOR: itself when it is a lone pin, its
+            // representative when it is a cluster.
+            //
+            // A cluster's face is one of its members' posts and representatives
+            // are kind-neutral, so a video post leading a group is ordinary. It
+            // could never play before, because the candidate's view was typed
+            // to the lone-pin class — and on the mock corpus that meant nothing
+            // ever played at all: every video pin in the default viewport was
+            // inside a cluster.
+            var spokenPin: MapPin?
+            var host: (any MapVideoHost)?
+            if let single = annotation as? MapAnnotation {
+                spokenPin = single.pin
+                host = mapView.view(for: single) as? MapAnnotationView
+            } else if let group = annotation as? MapComputedCluster {
+                spokenPin = group.representative
+                host = mapView.view(for: group) as? MapClusterAnnotationView
+            }
+            guard let pin = spokenPin, let host,
+                  pin.kind == .video,
+                  let url = pin.previewVideoURL,
+                  visibleRect.contains(MKMapPoint(annotation.coordinate))
+            else { continue }
             let candidate = MapVideoPlaybackCoordinator.Candidate(
-                id: single.pin.postID, url: url, view: view
+                id: pin.postID, url: url, host: host
             )
-            scored.append((Self.squaredDistance(single.coordinate, center), candidate))
+            scored.append((Self.squaredDistance(annotation.coordinate, center), candidate))
         }
         let ranked = scored.sorted { $0.distance < $1.distance }.map(\.candidate)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-map-icon-hud-log") {
+            let lone = displayed.values.compactMap { $0 as? MapAnnotation }
+            let groups = displayed.values.compactMap { $0 as? MapComputedCluster }
+            print("MAPVIDEO lone=\(lone.count) clusters=\(groups.count) "
+                  + "loneVideo=\(lone.count { $0.pin.kind == .video }) "
+                  + "clusterVideo=\(groups.count { $0.representative.kind == .video }) "
+                  + "onScreen=\(scored.count) chosen=\(ranked.count)")
+        }
+        #endif
         videoCoordinator.update(candidates: ranked)
     }
 
@@ -1648,6 +1954,149 @@ final class MapsViewController: UIViewController {
     /// a cluster — so a tap opens the snap feed from cache with no metadata
     /// desync. Bounded by clustering (a handful of annotations) and capped;
     /// cancels the prior sweep so a fast pan never piles up speculative fetches.
+    /// The ONLY place in this feature that writes the map's interaction.
+    ///
+    /// ⚠️ ONE WRITE, NOT FOUR FLAGS. `isUserInteractionEnabled` covers both
+    /// halves at once — MapKit's own pan/pinch/rotate AND every marker's
+    /// instant-tap recognizer, which is attached to the annotation VIEW.
+    /// Hit-testing never descends into a view that is not interactive, so one
+    /// write starves both; `isScrollEnabled` and friends would leave the marker
+    /// recognizers live, which is exactly the "a second post opened over the
+    /// first" case. Programmatic `selectAnnotation` is unaffected, so the DEBUG
+    /// openers and any deep link still work.
+    ///
+    /// The map's own bar items go with it: they sit ABOVE the transition
+    /// container, so neither the hero's shield nor the reveal's host covers
+    /// them, and the bell pushes onto the very stack the flight is animating.
+    private func applyMapInteraction() {
+        let inert = openGate.mapIsInert
+        mapView.isUserInteractionEnabled = !inert
+        navigationItem.leftBarButtonItems?.forEach { $0.isEnabled = !inert }
+        navigationItem.rightBarButtonItems?.forEach { $0.isEnabled = !inert }
+    }
+
+    #if DEBUG
+    /// Drives one soak cycle when the map is idle and cycles remain.
+    ///
+    /// Called from the gate's own idle transitions, which is the only honest
+    /// "the map is ready again" signal there is — a fixed delay would race the
+    /// spring's tail, and this file's history is full of measurements ruined by
+    /// exactly that.
+    private func advanceSoakIfNeeded() {
+        guard soakCyclesRemaining > 0 else { return }
+        // ⚠️ EVERY UNMET PRECONDITION RETRIES, and it took two goes to get this
+        // right. The advance is EDGE-TRIGGERED on the gate, so any condition
+        // that is merely not-yet-true at that instant loses the cycle and every
+        // cycle after it — silently, because a soak that stops looks exactly
+        // like a soak that finished.
+        //
+        // The first version retried only on an empty annotation list, which was
+        // a guess. The trace named the real one: after popping home from the
+        // place page the gate opens while the map is still off-window
+        // (`window=n annotations=4`), one runloop turn before UIKit reattaches
+        // it. Retrying on the conjunction covers both, and whatever the third
+        // one turns out to be.
+        guard openGate.canOpen, view.window != nil else { return scheduleSoakRetry() }
+        // ⚠️ HIERARCHY MARKERS FIRST, and the ordering is the only way to reach
+        // the place page at all. That page is carried beneath the feed of a
+        // CITY or COUNTRY cluster and nothing else, and it is uncovered by a
+        // vertical close — so a soak that takes markers in post-id order can
+        // run for eight cycles without ever meeting one, which is what the
+        // first three runs did. Post-id order still decides everything after,
+        // because MapKit's own annotation order is undefined.
+        let ordered = mapView.annotations
+            .compactMap { annotation -> (id: String, hierarchy: Bool, value: any MKAnnotation)? in
+                if let pin = annotation as? MapAnnotation {
+                    (pin.pin.postID.rawValue, false, annotation)
+                } else if let cluster = annotation as? MapComputedCluster {
+                    (cluster.representative.postID.rawValue, cluster.isHierarchyMarker, annotation)
+                } else { nil }
+            }
+            .sorted { ($0.hierarchy ? 0 : 1, $0.id) < ($1.hierarchy ? 0 : 1, $1.id) }
+        // ⚠️ RETRY RATHER THAN DROP. The advance is edge-triggered on the gate,
+        // so a map whose annotations have not been re-added yet — which is the
+        // ordinary state one runloop turn after popping home — would lose that
+        // cycle and every cycle after it, silently. The first place-page soak
+        // ran exactly one of its six cycles this way.
+        guard !ordered.isEmpty else { return scheduleSoakRetry() }
+        let hierarchyCount = ordered.filter(\.hierarchy).count
+        let target = (ordered[soakCursor % ordered.count].id,
+                      ordered[soakCursor % ordered.count].value)
+        soakCursor += 1
+        soakCyclesRemaining -= 1
+        print("[soak] cycle \(soakCursor) opening \(target.0) of \(ordered.count) markers"
+              + " (\(hierarchyCount) hierarchy)")
+        // One runloop turn, so this never runs inside the gate's own didSet.
+        DispatchQueue.main.async { [weak self] in
+            self?.mapView.selectAnnotation(target.1, animated: true)
+        }
+        soakGeneration += 1
+        let generation = soakGeneration
+        // ⚠️ A WATCHDOG PER CYCLE, because a soak that hangs reports nothing at
+        // all — and "the round trip never came back" is the single most
+        // important thing this harness can find. A cycle that has not returned
+        // the map to idle by here is named, counted and force-closed, so the
+        // run continues and the log says which marker did it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+            guard let self, self.soakGeneration == generation, !self.openGate.canOpen else { return }
+            // ⚠️ RESTING ON THE PLACE PAGE IS NOT BEING STUCK. A vertical close
+            // lands there on purpose and the map is one pop away, so the soak
+            // pops and carries on. Calling that a hang is how a working route
+            // gets reported as a broken one — which is exactly what the first
+            // run of this path did, before the landing was even reported.
+            let resting = self.openGate.isAtIntermediate
+            print("[soak] cycle \(generation) \(resting ? "at the place page" : "STUCK")"
+                  + " on \(target.0) — popping home")
+            self.navigationController?.popToViewController(self, animated: false)
+            self.openGate.appearedAtRoot()
+        }
+        // ⚠️ SCHEDULED FROM HERE AND NOT FROM A LANDING CALLBACK, because only
+        // ONE of the three routes has one. `onDestinationShown` belongs to the
+        // hero's transition controller; a reveal and a plain push have no such
+        // hook on this side, and a soak that can only close a hero would stall
+        // on the first text marker it met — which is exactly what the first run
+        // did. The delay is generous rather than tuned: it is a scheduling
+        // convenience, and nothing is measured against it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.closeSoakedFeed()
+        }
+    }
+
+    /// Re-checks shortly, at most one pending check at a time.
+    private func scheduleSoakRetry() {
+        guard !soakRetryScheduled else { return }
+        soakRetryScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.soakRetryScheduled = false
+            self?.advanceSoakIfNeeded()
+        }
+    }
+
+    /// Closes whatever the soak opened, by the same path a finger would take on
+    /// that route.
+    ///
+    /// The hero gets `debugScriptedGrab` — one release below the threshold and
+    /// one above it, so a cycle exercises BOTH dismissal outcomes rather than
+    /// only the happy path. The reveal and the plain push have no interactive
+    /// script on this side, so they are popped, which is the chevron's own path
+    /// through the same animator.
+    private func closeSoakedFeed() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-soak") else { return }
+        if let transition = activeTransition {
+            // ⚠️ ALTERNATING AXES, because the two go to DIFFERENT SCREENS. A
+            // horizontal close lands on the marker; a vertical one lands on the
+            // place page a hierarchy marker carries beneath its feed — the
+            // route that fires `dismissedToIntermediate`, leaves the gate in
+            // `.intermediate`, and is then popped home by a second gesture. A
+            // soak that only ever closes sideways never reaches it, which is
+            // exactly what the first three runs did.
+            transition.debugScriptedGrab(axis: soakCursor % 2 == 0 ? .horizontal : .vertical)
+        } else if navigationController?.topViewController !== self {
+            navigationController?.popViewController(animated: true)
+        }
+    }
+    #endif
+
     private func prewarmVisiblePosts() {
         let visible = mapView.annotations(in: mapView.visibleMapRect)
         var ids: [PostID] = []
@@ -1682,7 +2131,7 @@ extension MapsViewController: MKMapViewDelegate {
         // the settled projection), fold in anything a mid-flight diff staged,
         // then request the next page.
         isRegionTransitioning = false
-        reconcileClusters()
+        reconcileClustersForSettle()
         flushPendingDiffs()
         scheduleQuery()
     }
@@ -1704,7 +2153,15 @@ extension MapsViewController: MKMapViewDelegate {
         for view in batch.arriving {
             view.annotation.map { pendingPopIn.remove(ObjectIdentifier($0 as AnyObject)) }
         }
-        popChoreographer.popIn(batch.arriving)
+        // ⚠️ ONLY WHAT HAS SOMETHING TO SHOW LANDS. The map adds annotations
+        // first and fetches their pictures second, never awaited, so popping
+        // the whole batch lands bare squares that fill in afterwards. A marker
+        // that is not dressed yet is held at zero and let in by its own report
+        // — see `MapMarkerDressing` and `MapAnnotationPop.hold`.
+        let dressed = batch.arriving.filter { ($0 as? any MapMarkerDressing)?.isDressed ?? true }
+        let undressed = batch.arriving.filter { !(($0 as? any MapMarkerDressing)?.isDressed ?? true) }
+        popChoreographer.popIn(dressed)
+        popChoreographer.hold(undressed)
         popChoreographer.settle(batch.settled)
         // Annotation views now exist (clustering is current) → bind autoplay and
         // warm the visible posts so a tap opens instantly.
@@ -1750,6 +2207,38 @@ extension MapsViewController: MKMapViewDelegate {
     /// only reachable by finding one of them by hand on the map.
     private func debugOpenFirstPinIfRequested(among views: [MKAnnotationView]) {
         let arguments = ProcessInfo.processInfo.arguments
+        // `-maps-soak <cycles>`: arm once, then drive from the gate.
+        if soakCyclesRemaining == 0, !didDebugOpenPin,
+           let index = arguments.firstIndex(of: "-maps-soak"), index + 1 < arguments.count,
+           let cycles = Int(arguments[index + 1]), cycles > 0 {
+            didDebugOpenPin = true
+            soakCyclesRemaining = cycles
+            print("[soak] armed for \(cycles) cycles")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.advanceSoakIfNeeded()
+            }
+            return
+        }
+        // `-maps-open-post <id>`: open THAT post, not whichever one happens to
+        // be first.
+        //
+        // ⚠️ `-maps-open-first-pin` picks by kind and then by MapKit's
+        // annotation order, which is undefined — so two runs open two different
+        // posts, and a transition A/B across two builds compares two different
+        // flights. Three such comparisons proved nothing before this existed.
+        if let index = arguments.firstIndex(of: "-maps-open-post"),
+           index + 1 < arguments.count {
+            let wanted = arguments[index + 1]
+            guard !didDebugOpenPin,
+                  let annotation = views.compactMap({ $0.annotation as? MapAnnotation })
+                      .first(where: { $0.pin.postID.rawValue == wanted })
+            else { return }
+            didDebugOpenPin = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.mapView.selectAnnotation(annotation, animated: true)
+            }
+            return
+        }
         let wantsText = arguments.contains("-maps-open-first-text-pin")
         guard !didDebugOpenPin,
               wantsText || arguments.contains("-maps-open-first-pin") else { return }
@@ -1829,15 +2318,22 @@ extension MapsViewController: MKMapViewDelegate {
     #endif
 
     func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
+        #if DEBUG
+        MapChurnCounters.viewFor += 1
+        #endif
         if let cluster = annotation as? MapComputedCluster {
             let view = mapView.dequeueReusableAnnotationView(
                 withIdentifier: MapClusterAnnotationView.reuseIdentifier,
                 for: annotation
             ) as? MapClusterAnnotationView
-            view?.configure(with: cluster, imagePipeline: imagePipeline)
+            view?.configure(with: cluster, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
             // Instant tap — bypasses MapKit's ~0.3s selection delay.
             view?.onSelect = { [weak self, weak view] in
                 self?.openAnnotation(cluster, thumbnail: view?.heroImage)
+            }
+            view?.onDressed = { [weak self, weak view] in
+                guard let self, let view else { return }
+                popChoreographer.release(view)
             }
             return view
         }
@@ -1846,9 +2342,13 @@ extension MapsViewController: MKMapViewDelegate {
             withIdentifier: MapAnnotationView.reuseIdentifier,
             for: annotation
         ) as? MapAnnotationView
-        view?.configure(with: pinAnnotation.pin, imagePipeline: imagePipeline)
+        view?.configure(with: pinAnnotation.pin, imagePipeline: imagePipeline, iconCatalog: iconCatalog, previewCatalog: previewCatalog)
         view?.onSelect = { [weak self, weak view] in
             self?.openAnnotation(pinAnnotation, thumbnail: view?.heroImage)
+        }
+        view?.onDressed = { [weak self, weak view] in
+            guard let self, let view else { return }
+            popChoreographer.release(view)
         }
         return view
     }
@@ -1860,17 +2360,27 @@ extension MapsViewController: MKMapViewDelegate {
     /// `didSelect` (the fallback): whichever lands first wins, the other is a
     /// no-op while the flight is alive.
     private func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
-        guard activeTransition == nil, !isPlainFeedPushed else { return }
+        guard openGate.canOpen else { return }
         let postIDs = Self.postIDs(of: annotation)
         guard !postIDs.isEmpty else { return }
         let face = Self.face(of: annotation)
+        #if DEBUG
+        // Which face a tapped marker wears decides its TRANSITION
+        // (`MapMarkerPresentation`: media flies, everything else reveals), and
+        // a reveal growing from a disc looks like a vertical capsule halfway
+        // through. Without this line, "the present animation is wrong" and
+        // "this marker is not the face you think" are indistinguishable from
+        // outside.
+        print("[maps] tap face=\(face) presentation=\(MapMarkerPresentation(face: face)) "
+              + "posts=\(postIDs.count) first=\(postIDs.first?.rawValue ?? "-")")
+        #endif
         switch MapMarkerPresentation(face: face) {
         case .reveal where navigationController != nil:
             // The disc IS the window. Same seam as the plain push below — the
             // feed owns the pushed screen's gestures either way — with an
             // origin that says where the marker is, what shape and colour it
             // is, and what to draw in the window at each end.
-            isPlainFeedPushed = true
+            guard openGate.openBegan(.reveal) else { return }
             // A HIERARCHY marker always offers its place page, whatever face
             // it wears (a city or country is a place before it is a
             // photograph): the same builder the hero's Case B uses, handed
@@ -1941,7 +2451,7 @@ extension MapsViewController: MKMapViewDelegate {
             // resume through the ordinary appearance callbacks — all of which
             // are keyed on `activeTransition == nil`, which is exactly what
             // this path is.
-            isPlainFeedPushed = true
+            guard openGate.openBegan(.plainPush) else { return }
             pushPlainSnapFeed(postIDs, self)
         case .plainPush, .hero, .reveal:
             // No stack to push onto: the window has nowhere to open, so the
@@ -2005,7 +2515,13 @@ extension MapsViewController: MKMapViewDelegate {
             },
             depthView: { [weak self] in self?.view },
             dismissalDidEnd: { [weak self] committed in
-                guard committed, let self else { return }
+                guard let self else { return }
+                // ⚠️ REPORTED WHATEVER THE OUTCOME. This is the reveal route's
+                // ONLY terminal signal, and the gate needs the cancelled case
+                // as much as the committed one.
+                openGate.dismissalBegan()
+                openGate.dismissalEnded(committed: committed)
+                guard committed else { return }
                 restoreBottomChromeForReturn(alpha: 1)
                 activeTransition = nil
                 videoCoordinator.setSurfaceVisible(true)
@@ -2059,13 +2575,17 @@ extension MapsViewController: MKMapViewDelegate {
     private static func face(of annotation: any MKAnnotation) -> PinCardView.Face {
         let pin = (annotation as? MapAnnotation)?.pin
             ?? (annotation as? MapComputedCluster)?.representative
-        return pin?.isText == true ? .text : .media
+        return pin.map(PinCardView.Face.of) ?? .media
     }
 
     private func presentSnapFeed(postIDs: [PostID], from annotation: any MKAnnotation, thumbnail: UIImage?) {
         let feedVC = makeSnapFeed(postIDs)
         guard let nav = navigationController,
               let destination = feedVC as? any ZoomTransitionDestination else {
+            // ⚠️ THE DEFENSIVE BRANCH TAKES THE LOCK TOO. It set neither flag,
+            // so two taps could `present` twice — and presenting over a
+            // presentation raises rather than degrades.
+            guard openGate.openBegan(.modalFallback) else { return }
             // Defensive: without the hero seam (or a stack), show it plainly.
             if let nav = navigationController {
                 feedVC.hidesBottomBarWhenPushed = true
@@ -2094,6 +2614,12 @@ extension MapsViewController: MKMapViewDelegate {
             mirrorLive: tappedID.map { id in
                 { renderView in coordinator.mirrorLivePreview(of: id, to: renderView) }
             },
+            // Asked while this transition is being constructed — before the
+            // freeze three dozen lines below, which is what makes the answer
+            // hold for the whole flight.
+            isLivePreviewing: tappedID.map { id in
+                { coordinator.isLivePreviewing(id) }
+            },
             // Asked at DISMISSAL staging, so it reports where the viewer
             // actually stopped rather than where they started. The card lands
             // on this marker either way; only its departure face adapts.
@@ -2108,6 +2634,7 @@ extension MapsViewController: MKMapViewDelegate {
         // navigation bar cross-fades "Maps" into the feed's back item + author
         // capsule natively — no second bar to pop in over the first. The
         // transition object is the stack's delegate for the feed's lifetime.
+        guard openGate.openBegan(.hero) else { return }
         let transition = ZoomTransitionController(source: source, destination: destination)
         activeTransition = transition
 
@@ -2150,6 +2677,12 @@ extension MapsViewController: MKMapViewDelegate {
                     // (at alpha 0, for the drag to fade in); the filter bars
                     // are invisible under the gallery either way.
                     self?.restoreBottomChromeForReturn(alpha: 0)
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("-grab-log") {
+                        print("[caseb] splice+pop delegate=\(nav?.delegate.map { "\(type(of: $0))" } ?? "nil")"
+                              + " stack=\(nav?.viewControllers.map { "\(type(of: $0))" } ?? [])")
+                    }
+                    #endif
                     nav?.popViewController(animated: true)
                 }
             }
@@ -2161,13 +2694,36 @@ extension MapsViewController: MKMapViewDelegate {
                 // gallery pops, when `viewWillAppear` finds
                 // `activeTransition == nil` and resumes previews normally).
                 guard let self else { return }
-                self.navigationController?.delegate = nil
+                // ⚠️ ONLY IF IT IS STILL OURS. The page we just landed on has
+                // already installed its own controller as the delegate — that
+                // is how this callback reached us at all — and clearing the
+                // slot here would take the page's map-return with it.
+                if self.navigationController?.delegate === self.activeTransition {
+                    self.navigationController?.delegate = nil
+                }
                 self.activeTransition = nil
+                self.openGate.dismissedToIntermediate()
                 self.barsStack.alpha = 1
                 // The present flight hid the tapped marker; nothing on the
                 // gallery path would ever restore it.
                 source.setZoomSourceHidden(false)
             }
+        }
+
+        // ⚠️ THE FLIGHT CAUGHT MID-AIR AND THROWN BACK, which had no handler
+        // here at all. `activeTransition` stayed set, and since it was both the
+        // lock and the state handle, every marker tap for the rest of the
+        // session did nothing — on screen, broken markers rather than a stuck
+        // animation, which is how it survived. The hook is generic and two
+        // other surfaces already wire it.
+        transition.onPresentationCancelled = { [weak self, weak nav] in
+            guard let self else { return }
+            nav?.delegate = nil
+            self.activeTransition = nil
+            self.openGate.presentationCancelled()
+            self.restoreBottomChromeForReturn(alpha: 1)
+            self.videoCoordinator.setSurfaceVisible(true)
+            self.refreshVideoPlayback()
         }
 
         var didLand = false
@@ -2176,7 +2732,9 @@ extension MapsViewController: MKMapViewDelegate {
             // flight-scoped work must run once): release the donor player.
             guard !didLand else { return }
             didLand = true
+            self?.openGate.destinationShown()
             self?.videoCoordinator.stopAll()
+
             #if DEBUG
             // `[delay]`, for the reason its two siblings grew one: a run that
             // PAGES the feed first cannot be scripted against a hard-coded
@@ -2210,10 +2768,16 @@ extension MapsViewController: MKMapViewDelegate {
             // now (see `restoreBottomChromeForReturn`).
             self.restoreBottomChromeForReturn(alpha: 1)
             self.activeTransition = nil
+            self.openGate.dismissalBegan()
+            self.openGate.dismissalEnded(committed: true)
             self.videoCoordinator.setSurfaceVisible(true)
             self.refreshVideoPlayback()
         }
         transition.onDismissalCancelled = { [weak self, gallery, weak nav, weak feedVC] in
+            // The feed is STAYING, so the gate does not reopen — it goes back to
+            // `.open`, which is what `committed: false` means.
+            self?.openGate.dismissalBegan()
+            self?.openGate.dismissalEnded(committed: false)
             // The feed is staying up: put the bottom chrome back down behind it.
             self?.tabBarController?.setTabBarHidden(true, animated: false)
             self?.tabBarController?.tabBar.alpha = 1
@@ -2286,6 +2850,22 @@ extension MapsViewController: MKMapViewDelegate {
         tabBarController?.setTabBarHidden(true, animated: true)
         setFilterBar(hidden: true)
         nav.delegate = transition
+        // ⚠️ NOT pre-paying the destination's layout here, and the empty space
+        // is deliberate.
+        //
+        // For You calls `zoomPrepareForPresentation` before its own push, and
+        // the same call was added here for parity. It is the wrong trade on
+        // this screen: the map builds a FRESH feed on every tap
+        // (`makeSnapFeed`), so the layout it pre-pays is a cold one, and it
+        // runs synchronously — plus a `CATransaction.flush` — between the
+        // finger coming up and the flight starting. Reported as a long pause
+        // between tapping a marker and the animation beginning, which is worse
+        // than the frame pacing it was buying: a stall the viewer is waiting
+        // through beats one they are watching an animation through.
+        //
+        // The seam is left in place (`ZoomTransitionDestination`), because the
+        // measurement that would justify calling it — a cold feed laid out off
+        // the tap's critical path — is the thing to take before trying again.
         // ⚠️ AN ORDINARY PUSH, WHATEVER CASE THIS IS — and the place page is
         // NOT in it.
         //
@@ -2370,8 +2950,15 @@ extension MapsViewController: MKMapViewDelegate {
             nav.setViewControllers(plan, animated: false)
         }
         var hasPrepared = false
-        slide.prepareForDismissal = { [weak self, weak feed, weak landing] axis in
-            guard let self, let feed else { return }
+        // ⚠️ `slide` WEAKLY, and the strong capture it replaces was a retain
+        // cycle: the driver owns this closure and the closure writes back
+        // through the driver, so every card close ever staged kept its driver
+        // alive for the life of the process — one per opened post, and
+        // invisible to every census, because what leaks is a DRIVER and nothing
+        // counts those. `cardClose = nil` could not help: the cycle holds the
+        // object whether or not this controller still points at it.
+        slide.prepareForDismissal = { [weak self, weak feed, weak landing, weak slide] axis in
+            guard let self, let feed, let slide else { return }
             // ⚠️ A HERO'S POP IS FORWARDED BEFORE ANY OF THIS IS READ, so
             // staging here for a media post would only conceal a marker the
             // flight is about to land on.
@@ -2445,6 +3032,158 @@ extension MapsViewController: MKMapViewDelegate {
             }
         }
         #endif
+    }
+}
+
+#if DEBUG
+extension MapsViewController {
+    /// The animated-icon instrument, over the real map — `-map-icon-hud`.
+    ///
+    /// It replaces the standalone bench screen, and the swap is the point: a
+    /// synthetic lattice could not tell you what MapKit, clustering, tile
+    /// loading and the app's own working set cost around the feature. Only the
+    /// shipping screen can.
+    /// `-maps-nav-sweep`: pan and zoom the map on a fixed schedule, forever.
+    ///
+    /// The static field is the EASY case. Every earlier measurement on this
+    /// feature said the same thing — animation is nearly free and navigation is
+    /// what costs, because a pan re-runs clustering, re-reconciles annotations,
+    /// and re-attaches artwork to recycled views. Reporting "144 markers at
+    /// 16.67 ms" while the map sat still would be reporting the wrong number.
+    ///
+    /// Scripted rather than driven by injected gestures: CGEvent swipes land on
+    /// whichever window is frontmost and vanish silently when one overlaps, so
+    /// a flaky driver would show up as a performance result.
+    /// `-maps-nav-drag`: step the camera in many small NON-animated increments,
+    /// the way a finger does.
+    ///
+    /// `-maps-nav-sweep` uses `setRegion(animated: true)`, which fires
+    /// `regionDidChangeAnimated` exactly ONCE per gesture — so it measured a
+    /// world in which reconcile bursts cannot happen, and reported no duplicate
+    /// reconciles because the workload could not produce one. A real pan fires
+    /// the delegate on every step. Whether coalescing is worth anything is a
+    /// question only this driver can answer.
+    fileprivate func installNavigationDrag() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-nav-drag") else { return }
+        let home = Self.defaultRegion
+        var step = 0
+        // 60 Hz stepping: one region change per display frame, which is the
+        // upper bound of what a finger can generate.
+        Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            // A slow lissajous over the seeded region: never repeats a frame,
+            // never leaves the corpus, and keeps the span fixed so this measures
+            // PAN only — zoom changes the marker population and would confound
+            // the reconcile count with realisation work.
+            // ⚠️ BURSTS, NOT A PERPETUAL PAN. A finger moves and then stops;
+            // this driver did not, and `scheduleQuery`'s cancel-and-reschedule
+            // debounce (by design: do not query while the camera is moving)
+            // therefore never fired, so the map held ZERO markers and every
+            // performance column looked excellent. Worse, the effect appeared
+            // only once the reconcile throttle had made the settles cheap
+            // enough to sustain 60 Hz from launch — the optimisation was fast
+            // enough to starve the app's own query. 1.0s of motion, 0.5s still.
+            let cycle = Double(step) / 60.0
+            if cycle.truncatingRemainder(dividingBy: 1.5) >= 1.0 { step += 1; return }
+            let t = Double(step) / 60.0
+            step += 1
+            let region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(
+                    latitude: home.center.latitude + 0.22 * home.span.latitudeDelta * sin(t * 0.9),
+                    longitude: home.center.longitude + 0.22 * home.span.longitudeDelta * sin(t * 1.4)
+                ),
+                span: home.span
+            )
+            self.mapView.setRegion(region, animated: false)
+        }
+    }
+
+    fileprivate func installNavigationSweep() {
+        guard ProcessInfo.processInfo.arguments.contains("-maps-nav-sweep") else { return }
+        let home = Self.defaultRegion
+        var step = 0
+        Timer.scheduledTimer(withTimeInterval: 1.4, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            // A six-phase cycle: four pans around the seeded region, then a zoom
+            // in and back out. Zoom is included because it changes the marker
+            // POPULATION, which is the expensive half — a pure pan only moves
+            // views that already exist.
+            let dLat = home.span.latitudeDelta, dLon = home.span.longitudeDelta
+            let offsets: [(Double, Double, Double)] = [
+                (0.30, 0, 1), (0, 0.30, 1), (-0.30, 0, 1),
+                (0, -0.30, 1), (0, 0, 0.45), (0, 0, 1)
+            ]
+            let (oLat, oLon, zoom) = offsets[step % offsets.count]
+            step += 1
+            let region = MKCoordinateRegion(
+                center: CLLocationCoordinate2D(
+                    latitude: home.center.latitude + oLat * dLat,
+                    longitude: home.center.longitude + oLon * dLon
+                ),
+                span: MKCoordinateSpan(
+                    latitudeDelta: dLat * zoom, longitudeDelta: dLon * zoom
+                )
+            )
+            self.mapView.setRegion(region, animated: true)
+        }
+    }
+
+    fileprivate func installIconDebugHUD() {
+        // `-map-icon-policy full|reduced|still` pins the motion state from
+        // launch. Read even without the HUD: an A/B that depends on tapping a
+        // control is an A/B whose two arms were run by hand, and the arm you
+        // tapped second is the one whose viewport had already drifted.
+        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-map-icon-policy"),
+           index + 1 < ProcessInfo.processInfo.arguments.count,
+           let policy = AnimatedIconView.MotionPolicy(
+               rawValue: ProcessInfo.processInfo.arguments[index + 1]
+           ) {
+            AnimatedIconView.forcedPolicy = policy
+        }
+        guard ProcessInfo.processInfo.arguments.contains("-map-icon-hud") else { return }
+        let hud = MapIconDebugHUD(
+            mapView: mapView, catalog: iconCatalog, previews: previewCatalog, pool: videoPool
+        )
+        hud.translatesAutoresizingMaskIntoConstraints = false
+        hud.onPolicyChange = { [weak self] in
+            guard let self else { return }
+            for annotation in self.mapView.annotations {
+                (self.mapView.view(for: annotation) as? MapAnnotationView)?.redressIcon()
+                (self.mapView.view(for: annotation) as? MapClusterAnnotationView)?.redressIcon()
+            }
+        }
+        view.addSubview(hud)
+        NSLayoutConstraint.activate([
+            hud.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
+            hud.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            hud.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8)
+        ])
+        iconDebugHUD = hud
+        hud.start()
+    }
+}
+#endif
+
+extension MapsViewController {
+    /// Re-dresses every icon-bearing marker when the device changes its motion
+    /// policy — Low Power on or off, Reduce Motion on or off, thermal pressure.
+    ///
+    /// ⚠️ RE-CONFIGURES rather than reinstalling. A "reinstall if not already
+    /// running" guard can only ever PROMOTE a marker, so it silently ignores
+    /// every change INTO Low Power or Reduce Motion, which is the direction
+    /// that matters. Clearing `representedID` first is what makes `configure`
+    /// do its work instead of early-returning on an unchanged pin.
+    fileprivate func installIconPolicyObserver() {
+        guard iconCatalog != nil else { return }
+        for token in AnimatedIconView.observePolicyChanges({ [weak self] in
+            guard let self else { return }
+            for annotation in self.mapView.annotations {
+                (self.mapView.view(for: annotation) as? MapAnnotationView)?.redressIcon()
+                (self.mapView.view(for: annotation) as? MapClusterAnnotationView)?.redressIcon()
+            }
+        }) {
+            iconPolicyBag.add(token)
+        }
     }
 }
 
