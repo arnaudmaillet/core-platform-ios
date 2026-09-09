@@ -378,7 +378,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 }
             }
         )
-        surface.onOpenPost = { [router] id in router?.route(to: .post(id)) }
+        // ⚠️ A FLIGHT, NOT A PUSH, and this is what it used to be:
+        // `router.route(to: .post(id))`, the platform's plain slide. These two
+        // pages ARE For You's tabs, so a tap on one of them had every reason to
+        // open the way a tap on the other does — and did not, because the host
+        // was new and nobody had handed it the opener.
+        surface.openPost = { [self] presenter, origin, ids in
+            presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+        }
         return surface
     }
 
