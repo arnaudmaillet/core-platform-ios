@@ -42,6 +42,22 @@ public struct ProfileSearchResult: Equatable, Sendable, Identifiable {
     }
 }
 
+/// Whose results the viewer wants to see.
+///
+/// ⚠️ NOT ON THE WIRE, AND THAT IS THE WHOLE POINT OF THE NAME. `SearchRequest`
+/// has no scope field: the only viewer-relative thing it carries is
+/// `exclude_author_ids`, which the EDGE fills from the social graph so that
+/// per-viewer facts stay out of the shared index. So this narrows THE RESULTS
+/// ON SCREEN, not the query — a page of matches, filtered — and the sheet's
+/// footer says so in those words rather than implying a narrower search.
+///
+/// `seen` / `unseen` are absent: nothing in this client or in the contracts
+/// records which entities a viewer has looked at. See `dev/BACKEND_GAPS.md` §19.
+public enum SearchScope: String, Equatable, Sendable, CaseIterable {
+    case everyone
+    case following
+}
+
 /// One typeahead completion from `search.v1.Suggest`.
 public struct SearchSuggestion: Equatable, Sendable {
     /// What the suggestion is a completion *of*. `search.v1` can answer for

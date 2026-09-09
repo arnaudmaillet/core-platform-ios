@@ -104,9 +104,6 @@ final class SearchViewController: UIViewController {
             self?.updateFilterVisibility(for: phase)
             self?.render(phase)
         }
-        viewModel.onSortOrderChange = { [weak self] _ in
-            self?.refreshFilterMenu()
-        }
         viewModel.onQueryTextChange = { [weak self] text in
             // Recorded as already reported BEFORE the assignment: setting the
             // field re-enters `updateSearchResults`, and without this the
@@ -372,7 +369,6 @@ final class SearchViewController: UIViewController {
         // been run there is no order to change.
         navigationItem.titleView = searchField
         navigationItem.rightBarButtonItems = []
-        refreshFilterMenu()
     }
 
     /// Shows the tray only over a submitted answer.
@@ -394,64 +390,107 @@ final class SearchViewController: UIViewController {
         navigationItem.setRightBarButtonItems(wanted, animated: true)
     }
 
-    /// The filter tray: a glyph that opens a menu.
+    /// The filter tray: a glyph that opens a sheet.
     ///
-    /// ⚠️ THE MENU IS REBUILT WHEN THE ORDER CHANGES, not deferred to the
-    /// moment it opens. The map's pills use `UIDeferredMenuElement.uncached`
-    /// and are right to: their mute state changes from anywhere, so a menu
-    /// assembled at configuration time shows whatever was true then. Here the
-    /// order has ONE writer — `SearchViewModel.setSortOrder` — and it
-    /// announces itself, so a rebuild on that announcement cannot go stale.
-    ///
-    /// It is also the difference between a menu a test can read and one it
-    /// cannot: `UIDeferredMenuElement`'s provider is not public, so a deferred
-    /// tray can only be checked by opening it on a device.
+    /// ⚠️ IT WAS A `UIMenu` AND THE SHAPE WAS WRONG FOR WHAT THIS HAS TO
+    /// BECOME. A menu is right for one dimension — one tap to open, one to
+    /// pick, dismisses itself. The tray is meant to carry three, and a menu
+    /// with three single-choice groups is eleven rows deep, has nowhere to say
+    /// what a group means, and closes on every pick, so setting two filters is
+    /// two trips through the same control. See `SearchFilterSheetViewController`.
     private lazy var filterItem = UIBarButtonItem(
         image: UIImage(systemName: "line.3.horizontal.decrease"),
-        menu: UIMenu(children: [])
+        primaryAction: UIAction { [weak self] _ in self?.presentFilters() }
     )
 
-    private func refreshFilterMenu() {
-        filterItem.menu = UIMenu(children: [sortMenu()])
+    private func presentFilters() {
+        // ⚠️ THE KEYBOARD GOES FIRST. The sheet slides up from the bottom into
+        // the space the keyboard is occupying; leaving it up means the sheet
+        // animates over it and the keyboard dismisses underneath, which is two
+        // things moving in the same band for one tap.
+        searchField.resignFirstResponder()
+        present(SearchFilterSheetViewController.inSheet(groups: filterGroups()) {
+            [weak self] group, option in
+            self?.applyFilter(group: group, option: option)
+        }, animated: true)
     }
 
-    /// The order dimension. One choice, checkmarked, applied on pick.
+    /// What the sheet shows: three dimensions, in the order they were asked
+    /// for, with every segment the product named.
     ///
-    /// ⚠️ ONE DIMENSION, AND THE OTHER TWO ARE ABSENT ON PURPOSE. The tray was
-    /// asked for with three: an order, a publication-date window, and a
-    /// per-viewer scope (all / seen / unseen / followed). Only the order has a
-    /// contract behind it — `search.v1.SearchRequest` carries `sort` and
-    /// nothing else of the three. There is no date range on the request and no
-    /// date on a `ProfileHit` to filter locally, and nothing anywhere knows
-    /// which posts this viewer has seen.
-    ///
-    /// They are not shipped greyed out. A disabled row is still a promise, and
-    /// this screen has no idea when it could be kept. What exists instead is
-    /// `dev/BACKEND_GAPS.md` §19 and `dev/issues/BACKEND_SEARCH_FILTERS.md`,
-    /// which is where the missing half is being asked for.
-    ///
-    /// ⚠️ "Most liked" is deliberately NOT the label for `.popularity`. The
-    /// contract's own comment says it "reads the periodically-refreshed
-    /// popularity signal, never a real-time count", so a label promising an
-    /// exact ranking by likes would be describing something the engine does not
-    /// do.
-    private func sortMenu() -> UIMenu {
-        UIMenu(title: "Sort by", options: [.displayInline, .singleSelection], children: [
-            sortAction(.relevance, title: "Top matches", symbol: "sparkles"),
-            sortAction(.recency, title: "Most recent", symbol: "clock"),
-            sortAction(.popularity, title: "Most popular", symbol: "flame")
-        ])
+    /// ⚠️ FOUR OF TWELVE SEGMENTS CAN ACT. `search.v1.SearchRequest` carries
+    /// six fields — query, entity_types, sort, page_size, page_token,
+    /// exclude_author_ids — and `SearchSort` has three values. There is no
+    /// like or comment sort, no date bound, and no viewer scope. The rest are
+    /// drawn and disabled, with the reason in each footer, because a
+    /// segmented control showing two of four options makes the dimension
+    /// itself unreadable. Asked for in `dev/BACKEND_GAPS.md` §19.
+    private func filterGroups() -> [SearchFilterSheetViewController.Group] {
+        [
+            .init(
+                id: Self.rankingGroupID,
+                title: "Rank by",
+                // ⚠️ "Trending" is `SearchSort.POPULARITY`, and the contract's
+                // own comment is why the footer says what it says: it "reads
+                // the periodically-refreshed popularity signal, never a
+                // real-time count".
+                footer: "Trending reads a periodically-refreshed popularity signal, "
+                    + "not a live count. Likes and comments need a sort search.v1 "
+                    + "does not have yet.",
+                segments: [
+                    .init(SearchSortOrder.popularity.rawValue, "Trending"),
+                    .init(SearchSortOrder.recency.rawValue, "Newest"),
+                    .init("mostLiked", "Liked", isEnabled: false),
+                    .init("mostCommented", "Commented", isEnabled: false)
+                ],
+                selectedID: viewModel.sortOrder.rawValue
+            ),
+            .init(
+                id: Self.publishedGroupID,
+                title: "Published",
+                footer: "A date window needs a bound on the request, and a date on "
+                    + "each result. search.v1 has neither for people.",
+                segments: [
+                    .init("day", "24h", isEnabled: false),
+                    .init("week", "Week", isEnabled: false),
+                    .init("halfYear", "6 months", isEnabled: false),
+                    .init("all", "All time")
+                ],
+                selectedID: "all"
+            ),
+            .init(
+                id: Self.scopeGroupID,
+                title: "Scope",
+                footer: "Following narrows the results on screen. Nothing records "
+                    + "which of them you have already seen, so those two cannot be "
+                    + "offered yet.",
+                segments: [
+                    .init(SearchScope.everyone.rawValue, "Everyone"),
+                    .init("seen", "Seen", isEnabled: false),
+                    .init("unseen", "Unseen", isEnabled: false),
+                    .init(SearchScope.following.rawValue, "Following")
+                ],
+                selectedID: viewModel.scope.rawValue
+            )
+        ]
     }
 
-    private func sortAction(
-        _ order: SearchSortOrder, title: String, symbol: String
-    ) -> UIAction {
-        UIAction(
-            title: title,
-            image: UIImage(systemName: symbol),
-            state: viewModel.sortOrder == order ? .on : .off
-        ) { [weak self] _ in
-            self?.viewModel.setSortOrder(order)
+    private static let rankingGroupID = "ranking"
+    private static let publishedGroupID = "published"
+    private static let scopeGroupID = "scope"
+
+    private func applyFilter(group: String, option: String) {
+        switch group {
+        case Self.rankingGroupID:
+            guard let order = SearchSortOrder(rawValue: option) else { return }
+            viewModel.setSortOrder(order)
+        case Self.scopeGroupID:
+            guard let scope = SearchScope(rawValue: option) else { return }
+            viewModel.setScope(scope)
+        default:
+            // `published` reaches here only if a disabled segment is picked
+            // programmatically, which the sheet already refuses.
+            break
         }
     }
 
@@ -728,9 +767,24 @@ final class SearchViewController: UIViewController {
 
         case .results(let models):
             spinner.stopAnimating()
-            hideStatus()
             resultsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             apply(resultsSnapshot(models))
+            // ⚠️ AN EMPTY SCOPE IS NOT AN EMPTY SEARCH, and the two must not
+            // wear the same words. `.empty` means the query matched nothing —
+            // "Nothing matched X. Try different words." Reaching zero rows from
+            // a full answer means the FILTER emptied it, and telling the viewer
+            // to try different words would blame the query for a control they
+            // set themselves.
+            if models.isEmpty {
+                showStatus(
+                    symbolName: "line.3.horizontal.decrease",
+                    title: "Nothing in this scope",
+                    subtitle: "The search found people, but none of them are in "
+                        + "the scope you picked. Widen it to see the rest."
+                )
+            } else {
+                hideStatus()
+            }
 
         case .empty(let query):
             spinner.stopAnimating()
@@ -884,6 +938,22 @@ final class SearchViewController: UIViewController {
         // viewer can reach, filmed as though it were the real one.
         if arguments.contains("-search-submit") {
             submitCurrentQuery()
+        }
+        // `-search-scope <everyone|following>` picks the perimeter the sheet
+        // would pick. Applied AFTER the submit, because a scope narrows an
+        // answer rather than asking for one.
+        if let index = arguments.firstIndex(of: "-search-scope"),
+           index + 1 < arguments.count,
+           let scope = SearchScope(rawValue: arguments[index + 1]) {
+            viewModel.setScope(scope)
+        }
+        // `-search-filters-open` raises the filter sheet a beat after the
+        // answer lands. The tray only exists over results, and the simulator
+        // taps nothing — without this the sheet has no way to be seen at all.
+        if arguments.contains("-search-filters-open") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.presentFilters()
+            }
         }
     }
     #endif

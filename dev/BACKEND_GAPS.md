@@ -754,10 +754,17 @@ Filtering a PAGE by date would answer a different question from filtering the
 QUERY. And nothing in the fleet or the client records which entities a viewer
 has already seen — "seen / unseen" needs a producer before it needs a filter.
 
-**What ships meanwhile.** The order dimension only, wired end to end (including
-the mock, which accepted `sort` and ignored it). The other two dimensions are
-absent from the tray rather than present and inert: a greyed-out row is still a
-promise, and this screen cannot say when it would be kept.
+**What ships meanwhile.** A sheet with all three dimensions as segmented
+controls, and four of its twelve segments able to act: Trending (POPULARITY),
+Newest (RECENCY), All time (the absence of a bound), and Everyone. Following is
+a fifth, applied CLIENT-SIDE to the page on screen — it narrows the results, not
+the query, and the sheet's footer says so in those words.
+
+The other seven are drawn and DISABLED, with the reason under each control.
+That reverses the rule the menu shipped under ("a disabled row is still a
+promise"): a segmented control showing two of four options makes the dimension
+itself unreadable, so shown-and-explained beats absent. The `sort` the mock
+accepted and ignored is honoured now too.
 
 **What we need.** The additive contract in `dev/issues/BACKEND_SEARCH_FILTERS.md`
 — `published_after` / `published_before`, a `SearchScope` resolved at the edge

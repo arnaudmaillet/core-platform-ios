@@ -89,14 +89,14 @@ struct SearchFilterTrayTests {
             for _ in 0..<80 where item == nil { await Task.yield() }
         }
 
-        /// The tray's contents. Readable because the menu is rebuilt when the
-        /// order changes rather than deferred to the moment it opens —
-        /// `UIDeferredMenuElement`'s provider is not public, so a deferred tray
-        /// could only be checked by opening it on a device.
-        var trayActions: [UIAction] {
-            (item?.menu?.children ?? []).flatMap { element -> [UIAction] in
-                (element as? UIMenu)?.children.compactMap { $0 as? UIAction } ?? []
-            }
+        /// The sheet the tray would present, built the way the screen builds
+        /// it. Reached by firing the bar item's own action and catching what
+        /// gets presented — the same path a tap takes.
+        func openFilters() -> SearchFilterSheetViewController? {
+            item?.primaryAction?.performWithSender(nil, target: nil)
+            let presented = (screen.presentedViewController as? UINavigationController)?
+                .viewControllers.first
+            return presented as? SearchFilterSheetViewController
         }
 
         func submit(_ text: String) {
@@ -118,43 +118,66 @@ struct SearchFilterTrayTests {
     @Test func theTrayArrivesWithTheResults() async {
         let host = Host()
         await host.showResults("haddad")
-        #expect(host.item?.menu != nil)
-        // A submit button had a title and an action; this has neither.
+        // A glyph with an action, not a word: a submit button had a title.
+        #expect(host.item != nil)
         #expect(host.item?.title == nil)
-        #expect(host.item?.action == nil)
+        #expect(host.item?.image != nil)
     }
 
-    @Test func theTrayOffersTheThreeOrdersTheContractSupports() async {
+    @Test func theSheetCarriesTheThreeDimensionsAsked() async {
         let host = Host()
         await host.showResults("haddad")
-        let titles = host.trayActions.map(\.title)
-        #expect(titles == ["Top matches", "Most recent", "Most popular"])
+        let sheet = host.openFilters()
+        #expect(sheet?.groupsForTesting.map(\.title) == ["Rank by", "Published", "Scope"])
     }
 
-    /// ⚠️ Not "most liked". `search.v1` documents POPULARITY as reading a
-    /// periodically-refreshed signal rather than a live count, so a label
-    /// promising an exact ranking by likes would describe something the engine
-    /// does not do.
-    @Test func popularityIsNotLabelledAsALikeCount() async {
+    /// ⚠️ EVERY SEGMENT THE PRODUCT NAMED IS DRAWN, and the ones nothing can
+    /// honour are DISABLED rather than missing: a segmented control showing two
+    /// of four options makes the dimension itself unreadable.
+    @Test func everySegmentIsDrawnAndOnlyTheImpossibleOnesAreDisabled() async {
         let host = Host()
         await host.showResults("haddad")
-        let titles = host.trayActions.map(\.title)
-        #expect(!titles.contains { $0.localizedCaseInsensitiveContains("like") })
+        let groups = host.openFilters()?.groupsForTesting ?? []
+
+        #expect(groups.first { $0.title == "Rank by" }?.segments.map(\.title)
+                == ["Trending", "Newest", "Liked", "Commented"])
+        #expect(groups.first { $0.title == "Published" }?.segments.map(\.title)
+                == ["24h", "Week", "6 months", "All time"])
+        #expect(groups.first { $0.title == "Scope" }?.segments.map(\.title)
+                == ["Everyone", "Seen", "Unseen", "Following"])
+
+        let enabled = groups.flatMap(\.segments).filter(\.isEnabled).map(\.title)
+        #expect(enabled == ["Trending", "Newest", "All time", "Everyone", "Following"])
     }
 
-    @Test func theCheckmarkStartsOnRelevance() async {
+    /// Each dimension says why its dead segments are dead, which is the thing a
+    /// menu had nowhere to put and is the reason this became a sheet.
+    @Test func everyDimensionWithADeadSegmentExplainsItself() async {
         let host = Host()
         await host.showResults("haddad")
-        let on = host.trayActions.filter { $0.state == .on }.map(\.title)
-        #expect(on == ["Top matches"])
+        let groups = host.openFilters()?.groupsForTesting ?? []
+        for group in groups where group.segments.contains(where: { !$0.isEnabled }) {
+            #expect(group.footer?.isEmpty == false)
+        }
     }
 
-    @Test func theCheckmarkFollowsTheOrderInEffect() async {
+    @Test func theSheetOpensOnWhatIsInEffect() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let groups = host.openFilters()?.groupsForTesting ?? []
+        #expect(groups.first { $0.title == "Scope" }?.selectedID == SearchScope.everyone.rawValue)
+        #expect(groups.first { $0.title == "Published" }?.selectedID == "all")
+    }
+
+    /// ⚠️ Built at PRESENTATION, not once. A sheet assembled when the screen
+    /// loaded would open on whatever was true then.
+    @Test func theSheetFollowsAChoiceMadeEarlier() async {
         let host = Host()
         await host.showResults("haddad")
         host.viewModel.setSortOrder(.recency)
-        let on = host.trayActions.filter { $0.state == .on }.map(\.title)
-        #expect(on == ["Most recent"])
+        host.screen.dismiss(animated: false)
+        #expect(host.openFilters()?.groupsForTesting.first?.selectedID
+                == SearchSortOrder.recency.rawValue)
     }
 
     // MARK: - What the order does
@@ -177,7 +200,7 @@ struct SearchFilterTrayTests {
 
         host.viewModel.setSortOrder(.recency)
         for _ in 0..<50 where await host.box.sorts.count < 2 { await Task.yield() }
-        #expect(await host.box.sorts == [.relevance, .recency])
+        #expect(await host.box.sorts == [.popularity, .recency])
     }
 
     /// Nothing has been searched for yet, so there is nothing to re-run — the
@@ -195,9 +218,9 @@ struct SearchFilterTrayTests {
         host.submit("haddad")
         for _ in 0..<50 where await host.box.sorts.isEmpty { await Task.yield() }
 
-        host.viewModel.setSortOrder(.relevance)
+        host.viewModel.setSortOrder(.popularity)
         for _ in 0..<20 { await Task.yield() }
-        #expect(await host.box.sorts == [.relevance])
+        #expect(await host.box.sorts == [.popularity])
     }
 
     // MARK: - The keyboard is still the way to submit

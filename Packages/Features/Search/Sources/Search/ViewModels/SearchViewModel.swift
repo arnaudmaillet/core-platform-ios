@@ -170,11 +170,43 @@ public final class SearchViewModel {
     /// How the engine is asked to order results. Owned here rather than by the
     /// view controller because it is part of the REQUEST, not of the bar: the
     /// screen can be rebuilt around it and the pick has to survive.
-    public private(set) var sortOrder: SearchSortOrder = .relevance
+    /// ⚠️ `.popularity`, NOT `.relevance`, AND THAT IS A PRODUCT DECISION
+    /// RATHER THAN A DEFAULT LEFT ALONE.
+    ///
+    /// `search.v1` defaults to RELEVANCE — best text match — and that was this
+    /// screen's default until the filter tray got its ranking dimension. The
+    /// tray's four segments are Trending / Newest / Most liked / Most
+    /// commented: relevance is not one of them, so leaving it in effect meant
+    /// the sheet opened showing "Trending" selected while the engine was
+    /// ranking by something else. A control that misreports the state it
+    /// controls is worse than a coarser default.
+    ///
+    /// So the first segment is true: Trending is POPULARITY, and it is what
+    /// runs until the viewer picks otherwise. Relevance is unreachable from the
+    /// tray by design — if best-text-match should be offered, it needs a fifth
+    /// segment, not a silent default.
+    public private(set) var sortOrder: SearchSortOrder = .popularity
 
-    /// Fires when the order changes, so the bar can redraw its checkmark
-    /// without owning the state.
-    public var onSortOrderChange: ((SearchSortOrder) -> Void)?
+    /// Whose results are shown. See `SearchScope` — this filters the answer on
+    /// screen, never the query.
+    public private(set) var scope: SearchScope = .everyone
+
+    /// The answer as it came back, before the scope narrowed it.
+    ///
+    /// ⚠️ KEPT SEPARATELY BECAUSE THE FILTER IS NOT DESTRUCTIVE. Narrowing to
+    /// Following and back has to give the same list, and the follow state each
+    /// row is judged on ARRIVES LATE — `search.v1` says nothing about the
+    /// viewer's relationship to a hit, so it is a second read. Filtering the
+    /// published list in place would have thrown away the rows that had not
+    /// been judged yet.
+    private var unfilteredResults: [SearchResultDisplayModel] = []
+
+    // ⚠️ THERE IS NO `onSortOrderChange`, AND THERE WAS. It existed so the
+    // bar could redraw a menu's checkmark when the order changed from
+    // elsewhere. The tray is a sheet now: it is built at PRESENTATION from
+    // `sortOrder`, and it is the only thing that changes the order while it is
+    // open — so it already knows. An unread callback is a subscription nobody
+    // holds, and this file kept firing it.
 
     /// Picks an order and, if there is a search on screen, runs it again.
     ///
@@ -186,10 +218,46 @@ public final class SearchViewModel {
     /// ⚠️ AND IT DOES NOT RE-RECORD THE QUERY. Going through `submitQuery`
     /// would write the same text to the recent searches once per filter
     /// change; the search is re-run directly for that reason.
+    /// Narrows what is on screen. No round trip: the scope is not on the wire.
+    ///
+    /// ⚠️ RE-PUBLISHES RATHER THAN RE-SEARCHES, which is the opposite of
+    /// `setSortOrder`. An order is a question for the engine — it ranks the
+    /// whole index and answers with a page. A scope is a question about the
+    /// page already held, and asking the server again would return the same
+    /// rows in the same order to filter identically.
+    public func setScope(_ scope: SearchScope) {
+        guard scope != self.scope else { return }
+        self.scope = scope
+        guard case .results = phase else { return }
+        publishResults()
+    }
+
+    /// Publishes `unfilteredResults` through the current scope.
+    ///
+    /// ⚠️ AN EMPTY SCOPE IS NOT AN EMPTY SEARCH. "Following" matching nobody
+    /// still means the search found people — so it keeps the `.results` phase
+    /// with no rows rather than falling into `.empty`, whose copy says nothing
+    /// matched the query. The screen tells the two apart; conflating them would
+    /// blame the query for a filter.
+    private func publishResults() {
+        phase = .results(filtered(unfilteredResults))
+    }
+
+    private func filtered(_ models: [SearchResultDisplayModel]) -> [SearchResultDisplayModel] {
+        switch scope {
+        case .everyone:
+            models
+        case .following:
+            // ⚠️ Unresolved metadata is NOT "not followed". A row whose second
+            // read has not landed is unjudged, and dropping it would make the
+            // list shrink and grow as answers trickle in.
+            models.filter { resolvedMetadata[$0.id]?.isFollowed ?? false }
+        }
+    }
+
     public func setSortOrder(_ order: SearchSortOrder) {
         guard order != sortOrder else { return }
         sortOrder = order
-        onSortOrderChange?(order)
 
         // Nothing has been searched for yet — the pick is remembered and takes
         // effect on the next submit. Re-running here would search for "".
@@ -432,8 +500,13 @@ public final class SearchViewModel {
             phase = .explore(exploreModel())
         case .suggesting(let query, let rows):
             phase = .suggesting(query: query, rows: withResolvedAvatars(rows))
-        case .results(let models):
-            phase = .results(models.map(withResolvedMetadata))
+        case .results:
+            // ⚠️ Re-filtered, not just re-decorated. Under a Following scope the
+            // metadata that just landed is what DECIDES whether a row belongs
+            // on screen at all, so re-publishing through the scope is what lets
+            // the list fill in as the second reads answer.
+            unfilteredResults = unfilteredResults.map(withResolvedMetadata)
+            publishResults()
         case .loading, .empty, .failed:
             break
         }
@@ -590,7 +663,8 @@ public final class SearchViewModel {
                 // nothing about the viewer's relationship — so a result starts
                 // bare and is completed by `ProfileMetadataProviding`.
                 let models = results.map { withResolvedMetadata(SearchResultDisplayModel(result: $0)) }
-                phase = .results(models)
+                unfilteredResults = models
+                publishResults()
                 resolveAvatars(for: models.filter { resolvedMetadata[$0.id] == nil }.map(\.id))
             }
         } catch {
