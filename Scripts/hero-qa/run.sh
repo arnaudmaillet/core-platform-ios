@@ -106,13 +106,35 @@ judge_duty_cycle() { # $1=case dir — how much of the run the main thread MISSE
   # thread writes, which is what both are for.
   local dir="$1" log="$dir/hero-audit.log" budget="${2:-2.0}"
   [[ -s "$log" ]] || { echo "FAIL duty: no audit log"; return 1; }
-  local checks=$(grep -o "beat checks=[0-9]*" "$log" | tail -1 | sed 's/.*=//')
-  [[ -n "$checks" ]] || { echo "FAIL duty: no heartbeat to count"; return 1; }
+  # ⚠️ THE SAMPLES, NOT THE LAST HEARTBEAT — and the difference was a judge
+  # that failed a healthy run.
+  #
+  # The heartbeat prints every TWENTIETH sample (`sequence % 20 == 0`), so
+  # reading `beat checks=` takes the last MULTIPLE OF TWENTY and throws away
+  # up to nineteen samples — up to 4.75 seconds of phantom blocked time. On
+  # `map-soak` that read 380 where the sampler had reached 391, and reported
+  # "3.50s of the run unaccounted for" on a run with no stall in it at all.
+  # The 41s calibration that set the allowance landed on checks=160, an exact
+  # multiple, which is why the flaw never showed.
+  #
+  # Every sample writes its own `hero;seq=N` line, and `sequence` and
+  # `checksPerformed` are incremented together (`HeroTransitionAudit`), so the
+  # last one IS the count.
+  local checks=$(grep -o "hero;seq=[0-9]*" "$log" | tail -1 | sed 's/.*=//')
+  [[ -n "$checks" ]] || { echo "FAIL duty: no samples to count"; return 1; }
   # ⚠️ THE ALLOWANCE IS MEASURED, NOT GUESSED. The audit installs early enough
   # that it accounts for essentially the whole run: over a 41s wall window it
   # reported checks=160, i.e. 40.0s of sampling at its 0.25s timer. 1.5s covers
   # the launch it did not see. An allowance of several seconds — the obvious
   # cautious choice — would swallow the very wedge this is looking for.
+  #
+  # Re-measured on `map-soak` once the count above was honest: 0.75s and
+  # -0.50s unaccounted on two healthy 100s runs. A NEGATIVE number is fine and
+  # informative — the audit sampled more than the allowance predicted, so 1.5s
+  # slightly over-covers a long case's launch. The budget stays at 2.0s rather
+  # than being tightened onto those two samples: CI hardware is not this
+  # machine, and a judge that flakes is worth less than one that is a little
+  # slack.
   local expected=$(echo "($CASE_DURATION - 1.5) * 4" | bc -l 2>/dev/null || echo 0)
   local missed=$(echo "scale=2; ($expected - $checks) / 4" | bc -l 2>/dev/null || echo 0)
   local over=$(echo "$missed > $budget" | bc -l 2>/dev/null || echo 0)
@@ -140,7 +162,7 @@ judge_motion() { # $1=case dir — did anything visibly FLY?
   echo "ok motion (peak inter-frame MAE x10000 = $best)"
 }
 
-judge_frozen() { # $1=case dir, $2=max frozen seconds (default 0.6)
+judge_frozen() { # $1=case dir, $2=max frozen seconds (default 0.6, per case)
   # ⚠️ THE EXACT COMPLEMENT OF judge_motion, AND THE ONE IT CANNOT BE.
   #
   # judge_motion keeps the MAXIMUM inter-frame difference over a whole run, so
@@ -162,6 +184,19 @@ judge_frozen() { # $1=case dir, $2=max frozen seconds (default 0.6)
   # idle needs a larger budget than one that is all motion; the default 0.6s
   # suits a window trimmed to the transition. A budget below the measured
   # baseline is a judge that fails on a working app.
+  #
+  # ⚠️ AND A SOAK IS THAT CASE. `map-soak` failed this judge at 0.90s on a
+  # perfectly healthy run, and the frames name the reason: the longest run
+  # begins at t=29.60s on a PHOTOGRAPH page sitting still, between the moment
+  # the soak opened it and the 2.5s dwell after which it closes it
+  # (`MapsViewController.closeSoakedFeed`). A still image with a paused ticker
+  # composites identical frames for as long as it is left alone, and no
+  # threshold on frames can tell that from a stall of the same length. What CAN
+  # is `judge_duty_cycle`, which reads the app's own sampler rather than the
+  # screen — so on a soak that judge is the one carrying the load, and this one
+  # is set above the case's deliberate idle. `CASE_FROZEN_BUDGET` in the case
+  # file is how a case says so, and it must be justified there, in seconds
+  # taken from that case's own dwell.
   #
   # ⚠️ Two conditions make it honest on the map, and both are about liveness:
   # run with an animated-icon policy that keeps the markers moving (a posed,
@@ -246,6 +281,7 @@ for CASE in "${CASES[@]}"; do
   spec="$HERE/cases.d/$CASE.case"
   [[ -f "$spec" ]] || { echo "unknown case: $CASE" | tee -a "$SUMMARY"; FAILED+=("$CASE"); continue; }
   CASE_ARGS=(); CASE_DURATION=30; CASE_CHECKS=(audit); CASE_BASELINE_AT=0; CASE_LEAKS=0
+  CASE_FROZEN_BUDGET=0.6
   source "$spec"
   dir="$OUT/$CASE"; mkdir -p "$dir/frames"
   echo "\n== $CASE (${CASE_DURATION}s) =="
@@ -299,7 +335,7 @@ for CASE in "${CASES[@]}"; do
       audit)           v=$(judge_audit "$dir") || ok=0 ;;
       motion)          v=$(judge_motion "$dir") || ok=0 ;;
       no-black)        v=$(judge_no_black "$dir") || ok=0 ;;
-      not-frozen)      v=$(judge_frozen "$dir") || ok=0 ;;
+      not-frozen)      v=$(judge_frozen "$dir" "$CASE_FROZEN_BUDGET") || ok=0 ;;
       duty-cycle)      v=$(judge_duty_cycle "$dir") || ok=0 ;;
       settle-baseline) v=$(judge_settle_baseline "$dir") || ok=0 ;;
       *) v="FAIL unknown check $check"; ok=0 ;;
