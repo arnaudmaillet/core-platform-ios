@@ -65,7 +65,11 @@ final class ProfileRelationshipsViewController: UIViewController {
     )
     private var restingRightItems: [UIBarButtonItem] = []
     private var isSearching = false
-    private static let searchFieldHeight: CGFloat = 36
+    /// The Cancel PILL's height, not the button's — see
+    /// `NavigationBarMetrics.itemPlatterHeight`. This was 36 for the same
+    /// reason the inbox's was, and looked short beside Cancel for the same
+    /// reason.
+    private static let searchFieldHeight = NavigationBarMetrics.itemPlatterHeight
 
     /// Segment order, so index ↔ direction never drifts.
     ///
@@ -237,8 +241,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         // this is the one part that had to wait.
         let caretTint = searchField.tintColor
         searchField.tintColor = .clear
-        morphBar(duration: 0.3) {
-            self.setBarOpaque(true)
+        morphNavigationBar(duration: 0.3) {
             // ⚠️ The back button goes too, so the field has the full width and
             // this header reads exactly like the inbox's. Cancel is the way out
             // while searching — and it restores the button, which restores the
@@ -279,8 +282,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         searchField.resignFirstResponder()
         searchField.text = nil
         applyQuery("")
-        morphBar(duration: 0.26) {
-            self.setBarOpaque(false)
+        morphNavigationBar(duration: 0.26) {
             self.navigationItem.setHidesBackButton(false, animated: false)
             self.navigationItem.titleView = self.tabBar
             self.navigationItem.rightBarButtonItems = self.restingRightItems
@@ -293,29 +295,9 @@ final class ProfileRelationshipsViewController: UIViewController {
         viewModel.searchQueryChanged(text)
     }
 
-    private func morphBar(duration: TimeInterval, _ change: @escaping () -> Void) {
-        guard let bar = navigationController?.navigationBar else { change(); return }
-        UIView.transition(with: bar, duration: duration,
-                          options: [.transitionCrossDissolve, .allowUserInteraction],
-                          animations: change)
-    }
-
-    /// Opaque while searching so the list does not read through the field.
-    private func setBarOpaque(_ opaque: Bool) {
-        guard opaque else {
-            navigationItem.standardAppearance = nil
-            navigationItem.scrollEdgeAppearance = nil
-            navigationItem.compactAppearance = nil
-            return
-        }
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = .systemBackground
-        appearance.shadowColor = nil
-        navigationItem.standardAppearance = appearance
-        navigationItem.scrollEdgeAppearance = appearance
-        navigationItem.compactAppearance = appearance
-    }
+    // The dissolve is `DesignSystem`'s now, and the opaque-while-searching
+    // appearance is gone with the inbox's — see the note there. This screen
+    // wears the same header as the inbox by design, so it changes with it.
 
     #if DEBUG
     /// Continues the search QA sequence after typing: optionally clear, then
