@@ -187,6 +187,15 @@ public final class SearchViewModel {
     /// segment, not a silent default.
     public private(set) var sortOrder: SearchSortOrder = .popularity
 
+    /// What the screen is showing right now, for a view that arrives AFTER the
+    /// phase it needs. The results screen is pushed once the answer is already
+    /// in flight, so it has to ask rather than wait to be told.
+    public var currentPhase: Phase { phase }
+
+    /// The text that was actually searched for, for a header that has to show
+    /// it. Not `query`, which follows the field — see `submittedQuery`.
+    public var submittedQueryText: String { submittedQuery }
+
     /// Whose results are shown. See `SearchScope` — this filters the answer on
     /// screen, never the query.
     public private(set) var scope: SearchScope = .everyone
@@ -638,6 +647,93 @@ public final class SearchViewModel {
         case .suggesting(let query, _):
             phase = .suggesting(query: query, rows: suggestionRows(for: query))
         case .loading, .results, .empty, .failed:
+            break
+        }
+    }
+
+
+    // MARK: - The filter tray's vocabulary
+    //
+    // ⚠️ HERE RATHER THAN ON A SCREEN, because two screens read it now: the
+    // search screen used to own both the tray and the answer, and the answer
+    // moved to `SearchResultsViewController`. State and the words describing
+    // it belong together, and this way the tray is testable without a view.
+
+    /// What the sheet shows: three dimensions, in the order they were asked
+    /// for, with every segment the product named.
+    ///
+    /// ⚠️ FOUR OF TWELVE SEGMENTS CAN ACT. `search.v1.SearchRequest` carries
+    /// six fields — query, entity_types, sort, page_size, page_token,
+    /// exclude_author_ids — and `SearchSort` has three values. There is no
+    /// like or comment sort, no date bound, and no viewer scope. The rest are
+    /// drawn and disabled, with the reason in each footer, because a
+    /// segmented control showing two of four options makes the dimension
+    /// itself unreadable. Asked for in `dev/BACKEND_GAPS.md` §19.
+    func filterGroups() -> [SearchFilterSheetViewController.Group] {
+        [
+            .init(
+                id: Self.rankingGroupID,
+                title: "Rank by",
+                // ⚠️ "Trending" is `SearchSort.POPULARITY`, and the contract's
+                // own comment is why the footer says what it says: it "reads
+                // the periodically-refreshed popularity signal, never a
+                // real-time count".
+                footer: "Trending reads a periodically-refreshed popularity signal, "
+                    + "not a live count. Likes and comments need a sort search.v1 "
+                    + "does not have yet.",
+                segments: [
+                    .init(SearchSortOrder.popularity.rawValue, "Trending"),
+                    .init(SearchSortOrder.recency.rawValue, "Newest"),
+                    .init("mostLiked", "Liked", isEnabled: false),
+                    .init("mostCommented", "Commented", isEnabled: false)
+                ],
+                selectedID: sortOrder.rawValue
+            ),
+            .init(
+                id: Self.publishedGroupID,
+                title: "Published",
+                footer: "A date window needs a bound on the request, and a date on "
+                    + "each result. search.v1 has neither for people.",
+                segments: [
+                    .init("day", "24h", isEnabled: false),
+                    .init("week", "Week", isEnabled: false),
+                    .init("halfYear", "6 months", isEnabled: false),
+                    .init("all", "All time")
+                ],
+                selectedID: "all"
+            ),
+            .init(
+                id: Self.scopeGroupID,
+                title: "Scope",
+                footer: "Following narrows the results on screen. Nothing records "
+                    + "which of them you have already seen, so those two cannot be "
+                    + "offered yet.",
+                segments: [
+                    .init(SearchScope.everyone.rawValue, "Everyone"),
+                    .init("seen", "Seen", isEnabled: false),
+                    .init("unseen", "Unseen", isEnabled: false),
+                    .init(SearchScope.following.rawValue, "Following")
+                ],
+                selectedID: scope.rawValue
+            )
+        ]
+    }
+
+    static let rankingGroupID = "ranking"
+    static let publishedGroupID = "published"
+    static let scopeGroupID = "scope"
+
+    func applyFilter(group: String, option: String) {
+        switch group {
+        case Self.rankingGroupID:
+            guard let order = SearchSortOrder(rawValue: option) else { return }
+            setSortOrder(order)
+        case Self.scopeGroupID:
+            guard let scope = SearchScope(rawValue: option) else { return }
+            setScope(scope)
+        default:
+            // `published` reaches here only if a disabled segment is picked
+            // programmatically, which the sheet already refuses.
             break
         }
     }

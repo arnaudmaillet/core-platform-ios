@@ -23,6 +23,9 @@ import UIKit
 final class SearchViewController: UIViewController {
     private let viewModel: SearchViewModel
     private let imagePipeline: ImagePipeline
+    /// Filled by the composition root; `nil` in a composition without Feed —
+    /// see `SearchPostSurfaceProviding`.
+    private let postSurfaces: (any SearchPostSurfaceProviding)?
 
     /// The field. It is the bar's title view for the life of the screen.
     private let searchField = UISearchTextField()
@@ -44,9 +47,14 @@ final class SearchViewController: UIViewController {
     private var resultsByID: [ProfileID: SearchResultDisplayModel] = [:]
     private var creatorsByID: [ProfileID: ExploreCreator] = [:]
 
-    init(viewModel: SearchViewModel, imagePipeline: ImagePipeline) {
+    init(
+        viewModel: SearchViewModel,
+        imagePipeline: ImagePipeline,
+        postSurfaces: (any SearchPostSurfaceProviding)? = nil
+    ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
+        self.postSurfaces = postSurfaces
         super.init(nibName: nil, bundle: nil)
         // ⚠️ IN THE INITIALISER, not `viewDidLoad`. A navigation controller
         // reads this when the push BEGINS, and `viewDidLoad` can run inside
@@ -101,7 +109,6 @@ final class SearchViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in
-            self?.updateFilterVisibility(for: phase)
             self?.render(phase)
         }
         viewModel.onQueryTextChange = { [weak self] text in
@@ -364,135 +371,14 @@ final class SearchViewController: UIViewController {
         // one-line menu is not worth a permanent seat over a screen that is
         // usually showing a history and a keyboard.
         //
-        // It belongs where it means something: over an answer. Nothing on the
-        // resting screen or the typeahead can be sorted, and until a search has
-        // been run there is no order to change.
+        // ⚠️ NOTHING TRAILING, AND THE TRAY THAT WAS HERE IS NOT MISSING. It
+        // moved to the results screen's TOOLBAR, because that is the only
+        // screen with an answer to filter — this one shows a history and a
+        // typeahead, and neither has an order.
         navigationItem.titleView = searchField
         navigationItem.rightBarButtonItems = []
     }
 
-    /// Shows the tray only over a submitted answer.
-    ///
-    /// ⚠️ NOT over `.empty` or `.failed`. Sort changes the ORDER of an answer,
-    /// never its membership — so on a search that matched nothing, every
-    /// option leads to the same empty screen. A control that provably cannot
-    /// change what the viewer is looking at should not be offered to them.
-    ///
-    /// ⚠️ AND NOT over `.loading`, because the tray would appear a beat before
-    /// the rows and slide the field's width twice for one search.
-    private func updateFilterVisibility(for phase: SearchViewModel.Phase) {
-        let wanted: [UIBarButtonItem] = if case .results = phase { [filterItem] } else { [] }
-        let current = navigationItem.rightBarButtonItems ?? []
-        guard current.count != wanted.count else { return }
-        // Animated, because the field's width moves with it: the title slot
-        // takes what the bar has left over, so an item arriving is the input
-        // getting shorter.
-        navigationItem.setRightBarButtonItems(wanted, animated: true)
-    }
-
-    /// The filter tray: a glyph that opens a sheet.
-    ///
-    /// ⚠️ IT WAS A `UIMenu` AND THE SHAPE WAS WRONG FOR WHAT THIS HAS TO
-    /// BECOME. A menu is right for one dimension — one tap to open, one to
-    /// pick, dismisses itself. The tray is meant to carry three, and a menu
-    /// with three single-choice groups is eleven rows deep, has nowhere to say
-    /// what a group means, and closes on every pick, so setting two filters is
-    /// two trips through the same control. See `SearchFilterSheetViewController`.
-    private lazy var filterItem = UIBarButtonItem(
-        image: UIImage(systemName: "line.3.horizontal.decrease"),
-        primaryAction: UIAction { [weak self] _ in self?.presentFilters() }
-    )
-
-    private func presentFilters() {
-        // ⚠️ THE KEYBOARD GOES FIRST. The sheet slides up from the bottom into
-        // the space the keyboard is occupying; leaving it up means the sheet
-        // animates over it and the keyboard dismisses underneath, which is two
-        // things moving in the same band for one tap.
-        searchField.resignFirstResponder()
-        present(SearchFilterSheetViewController.inSheet(groups: filterGroups()) {
-            [weak self] group, option in
-            self?.applyFilter(group: group, option: option)
-        }, animated: true)
-    }
-
-    /// What the sheet shows: three dimensions, in the order they were asked
-    /// for, with every segment the product named.
-    ///
-    /// ⚠️ FOUR OF TWELVE SEGMENTS CAN ACT. `search.v1.SearchRequest` carries
-    /// six fields — query, entity_types, sort, page_size, page_token,
-    /// exclude_author_ids — and `SearchSort` has three values. There is no
-    /// like or comment sort, no date bound, and no viewer scope. The rest are
-    /// drawn and disabled, with the reason in each footer, because a
-    /// segmented control showing two of four options makes the dimension
-    /// itself unreadable. Asked for in `dev/BACKEND_GAPS.md` §19.
-    private func filterGroups() -> [SearchFilterSheetViewController.Group] {
-        [
-            .init(
-                id: Self.rankingGroupID,
-                title: "Rank by",
-                // ⚠️ "Trending" is `SearchSort.POPULARITY`, and the contract's
-                // own comment is why the footer says what it says: it "reads
-                // the periodically-refreshed popularity signal, never a
-                // real-time count".
-                footer: "Trending reads a periodically-refreshed popularity signal, "
-                    + "not a live count. Likes and comments need a sort search.v1 "
-                    + "does not have yet.",
-                segments: [
-                    .init(SearchSortOrder.popularity.rawValue, "Trending"),
-                    .init(SearchSortOrder.recency.rawValue, "Newest"),
-                    .init("mostLiked", "Liked", isEnabled: false),
-                    .init("mostCommented", "Commented", isEnabled: false)
-                ],
-                selectedID: viewModel.sortOrder.rawValue
-            ),
-            .init(
-                id: Self.publishedGroupID,
-                title: "Published",
-                footer: "A date window needs a bound on the request, and a date on "
-                    + "each result. search.v1 has neither for people.",
-                segments: [
-                    .init("day", "24h", isEnabled: false),
-                    .init("week", "Week", isEnabled: false),
-                    .init("halfYear", "6 months", isEnabled: false),
-                    .init("all", "All time")
-                ],
-                selectedID: "all"
-            ),
-            .init(
-                id: Self.scopeGroupID,
-                title: "Scope",
-                footer: "Following narrows the results on screen. Nothing records "
-                    + "which of them you have already seen, so those two cannot be "
-                    + "offered yet.",
-                segments: [
-                    .init(SearchScope.everyone.rawValue, "Everyone"),
-                    .init("seen", "Seen", isEnabled: false),
-                    .init("unseen", "Unseen", isEnabled: false),
-                    .init(SearchScope.following.rawValue, "Following")
-                ],
-                selectedID: viewModel.scope.rawValue
-            )
-        ]
-    }
-
-    private static let rankingGroupID = "ranking"
-    private static let publishedGroupID = "published"
-    private static let scopeGroupID = "scope"
-
-    private func applyFilter(group: String, option: String) {
-        switch group {
-        case Self.rankingGroupID:
-            guard let order = SearchSortOrder(rawValue: option) else { return }
-            viewModel.setSortOrder(order)
-        case Self.scopeGroupID:
-            guard let scope = SearchScope(rawValue: option) else { return }
-            viewModel.setScope(scope)
-        default:
-            // `published` reaches here only if a disabled segment is picked
-            // programmatically, which the sheet already refuses.
-            break
-        }
-    }
 
     /// ⚠️ **Submitting is what fills the list.** Typing only narrows the
     /// history — `queryChanged` moves the view model to `.suggesting`, which is
@@ -504,10 +390,34 @@ final class SearchViewController: UIViewController {
     /// suggestions go because the snapshot that replaces them is the results
     /// snapshot.
     private func submitCurrentQuery() {
-        viewModel.submitQuery(searchField.text ?? "")
-        // The answer is what the viewer wants to look at now, and the keyboard
-        // is the only thing still covering it.
+        let text = searchField.text ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // ⚠️ THE KEYBOARD GOES BEFORE THE PUSH, not after. With no push
+        // animation the destination arrives instantly, so a keyboard dismissed
+        // afterwards would be sliding down under a screen that is already
+        // there.
         searchField.resignFirstResponder()
+        viewModel.submitQuery(text)
+        pushResults()
+    }
+
+    /// ⚠️ UNANIMATED, and the POP is untouched by that. `animated:` describes
+    /// one transition; nothing on the view controller records it. The back
+    /// button always pops animated, and the edge gesture's begin is decided by
+    /// `NativePopPolicy` — neither reads how the push was drawn. So the answer
+    /// arrives as a cut and leaves as a slide, which is what was asked for.
+    ///
+    /// ⚠️ ONE SCREEN, NOT A STACK OF THEM. Asking again from the results
+    /// screen's own field re-runs in place; only a submit made HERE pushes.
+    /// Otherwise a viewer refining a query three times would have three
+    /// answers to swipe back through, each to a spelling they abandoned.
+    private func pushResults() {
+        let results = SearchResultsViewController(
+            viewModel: viewModel,
+            imagePipeline: imagePipeline,
+            postSurfaces: postSurfaces
+        )
+        navigationController?.pushViewController(results, animated: false)
     }
 
     /// ⚠️ KEPT AS ITS OWN METHOD WITH ONE CALLER. It reads like something to
@@ -946,14 +856,6 @@ final class SearchViewController: UIViewController {
            index + 1 < arguments.count,
            let scope = SearchScope(rawValue: arguments[index + 1]) {
             viewModel.setScope(scope)
-        }
-        // `-search-filters-open` raises the filter sheet a beat after the
-        // answer lands. The tray only exists over results, and the simulator
-        // taps nothing — without this the sheet has no way to be seen at all.
-        if arguments.contains("-search-filters-open") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.presentFilters()
-            }
         }
     }
     #endif

@@ -73,6 +73,9 @@ struct SearchFilterTrayTests {
                 viewModel: viewModel,
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
             )
+            // ⚠️ A REAL NAVIGATION CONTROLLER, because submitting now PUSHES.
+            // A screen with no navigation controller would swallow the push and
+            // every assertion about the results screen would read nil.
             window.rootViewController = UINavigationController(rootViewController: screen)
             window.makeKeyAndVisible()
             screen.loadViewIfNeeded()
@@ -80,23 +83,25 @@ struct SearchFilterTrayTests {
         }
 
         var field: UITextField? { screen.navigationItem.titleView as? UITextField }
-        var item: UIBarButtonItem? { screen.navigationItem.rightBarButtonItems?.first }
 
-        /// Submits and waits for the answer, because the tray only exists over
-        /// one — see `updateFilterVisibility`.
+        /// ⚠️ THE TRAY IS ON THE RESULTS SCREEN'S TOOLBAR NOW, not the search
+        /// screen's bar. The search screen shows a history and a typeahead;
+        /// neither has an order to change.
+        var item: UIBarButtonItem? {
+            (screen.navigationController?.topViewController as? SearchResultsViewController)?
+                .toolbarItems?.last
+        }
+
+        /// Submits, which PUSHES the results screen, and waits for it.
         func showResults(_ text: String) async {
             submit(text)
             for _ in 0..<80 where item == nil { await Task.yield() }
         }
 
-        /// The sheet the tray would present, built the way the screen builds
-        /// it. Reached by firing the bar item's own action and catching what
-        /// gets presented — the same path a tap takes.
-        func openFilters() -> SearchFilterSheetViewController? {
-            item?.primaryAction?.performWithSender(nil, target: nil)
-            let presented = (screen.presentedViewController as? UINavigationController)?
-                .viewControllers.first
-            return presented as? SearchFilterSheetViewController
+        /// The groups the sheet would be built from. They live on the view
+        /// model — two screens read them — so this needs no presentation.
+        var filterGroups: [SearchFilterSheetViewController.Group] {
+            viewModel.filterGroups()
         }
 
         func submit(_ text: String) {
@@ -115,20 +120,22 @@ struct SearchFilterTrayTests {
         #expect(Host().item == nil)
     }
 
-    @Test func theTrayArrivesWithTheResults() async {
+    /// ⚠️ IN THE TOOLBAR, TRAILING. The navigation bar carries a back button
+    /// and a full-width query field; a third item there would take width off
+    /// the query the viewer is reading.
+    @Test func theTrayIsTheResultsScreenTrailingToolbarItem() async {
         let host = Host()
         await host.showResults("haddad")
-        // A glyph with an action, not a word: a submit button had a title.
         #expect(host.item != nil)
         #expect(host.item?.title == nil)
         #expect(host.item?.image != nil)
+        #expect(host.item?.accessibilityLabel == "Filters")
     }
 
     @Test func theSheetCarriesTheThreeDimensionsAsked() async {
         let host = Host()
         await host.showResults("haddad")
-        let sheet = host.openFilters()
-        #expect(sheet?.groupsForTesting.map(\.title) == ["Rank by", "Published", "Scope"])
+        #expect(host.filterGroups.map(\.title) == ["Rank by", "Published", "Scope"])
     }
 
     /// ⚠️ EVERY SEGMENT THE PRODUCT NAMED IS DRAWN, and the ones nothing can
@@ -137,7 +144,7 @@ struct SearchFilterTrayTests {
     @Test func everySegmentIsDrawnAndOnlyTheImpossibleOnesAreDisabled() async {
         let host = Host()
         await host.showResults("haddad")
-        let groups = host.openFilters()?.groupsForTesting ?? []
+        let groups = host.filterGroups
 
         #expect(groups.first { $0.title == "Rank by" }?.segments.map(\.title)
                 == ["Trending", "Newest", "Liked", "Commented"])
@@ -155,7 +162,7 @@ struct SearchFilterTrayTests {
     @Test func everyDimensionWithADeadSegmentExplainsItself() async {
         let host = Host()
         await host.showResults("haddad")
-        let groups = host.openFilters()?.groupsForTesting ?? []
+        let groups = host.filterGroups
         for group in groups where group.segments.contains(where: { !$0.isEnabled }) {
             #expect(group.footer?.isEmpty == false)
         }
@@ -164,7 +171,7 @@ struct SearchFilterTrayTests {
     @Test func theSheetOpensOnWhatIsInEffect() async {
         let host = Host()
         await host.showResults("haddad")
-        let groups = host.openFilters()?.groupsForTesting ?? []
+        let groups = host.filterGroups
         #expect(groups.first { $0.title == "Scope" }?.selectedID == SearchScope.everyone.rawValue)
         #expect(groups.first { $0.title == "Published" }?.selectedID == "all")
     }
@@ -175,9 +182,7 @@ struct SearchFilterTrayTests {
         let host = Host()
         await host.showResults("haddad")
         host.viewModel.setSortOrder(.recency)
-        host.screen.dismiss(animated: false)
-        #expect(host.openFilters()?.groupsForTesting.first?.selectedID
-                == SearchSortOrder.recency.rawValue)
+        #expect(host.filterGroups.first?.selectedID == SearchSortOrder.recency.rawValue)
     }
 
     // MARK: - What the order does
