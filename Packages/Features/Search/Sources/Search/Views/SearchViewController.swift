@@ -112,28 +112,15 @@ final class SearchViewController: UIViewController {
     /// there would fight the viewer who just came back to read a result.
     private var hasClaimedField = false
 
-    /// Takes the field's WHITE PILL out of the closing animation.
-    ///
-    /// ⚠️ THE STATE THE VIEWER COMPLAINED ABOUT, and it is not a placement.
-    /// `navigationItem.searchBarPlacement` reads `integratedButton` at every
-    /// stage of the dismissal — configure / willPresent / didPresent /
-    /// willDismiss / +6 ticks / didDismiss — so UIKit is not passing through
-    /// the wide `.integrated` look. What it does is animate the field's WIDTH
-    /// down while holding its background at full opacity: filmed at 30fps,
-    /// roughly six frames (~200ms) of a wide, empty white pill before the
-    /// collapse to the magnifier even starts to fade. Emptying the placeholder
-    /// made those frames worse, not better — there is nothing in the pill now.
-    ///
-    /// Fading the TEXT FIELD rather than the search bar: the bar is also what
-    /// carries the magnifier that has to survive, so taking the whole bar down
-    /// would take the destination of the animation with it.
-    private func fadeFieldPill(to alpha: CGFloat, duration: TimeInterval) {
-        let field = searchController.searchBar.searchTextField
-        guard field.alpha != alpha else { return }
-        UIView.animate(withDuration: duration, delay: 0, options: [.beginFromCurrentState]) {
-            field.alpha = alpha
-        }
-    }
+    // ⚠️ THREE WAYS OF SUPPRESSING UIKIT'S COLLAPSE WERE MEASURED, AND NONE
+    // BELONGS HERE. Recorded so the next reader does not spend the evening on
+    // them: hiding the field's background left a lone icon drifting over an
+    // empty bar; setting the search bar's own alpha to 0 was simply overridden
+    // by UIKit's animation on it; and `.integrated` without a placeholder
+    // collapses to a small pill beside the back chevron with the whole bar
+    // empty to its right. The artefact was never the container — it was that
+    // the container had been emptied. See the placeholder note above.
+
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -286,14 +273,21 @@ final class SearchViewController: UIViewController {
         // No dimming: the results land in THIS collection view, so there is
         // nothing above to obscure and a scrim would only grey out the answer.
         searchController.obscuresBackgroundDuringPresentation = false
-        // ⚠️ NO PLACEHOLDER. The resting representation is the magnifier
-        // button (`.integratedButton`), and the field is only ever seen with a
-        // caret already in it — the screen activates on arrival. A grey
-        // "Search people" would therefore appear for exactly the fraction of a
-        // second between the field opening and the caret landing, and again
-        // behind the caret while the viewer types nothing. The icon says what
-        // the field is; the words repeat it.
-        searchController.searchBar.placeholder = nil
+        // ⚠️ THE PLACEHOLDER IS NOT THE RESTING STATE, and removing it for
+        // that reason was a mistake worth recording.
+        //
+        // With `.integratedButton` the resting representation is the magnifier
+        // BUTTON: no field, no placeholder, nothing to read. The placeholder is
+        // only ever on screen while the field is open — and, crucially, while
+        // it CLOSES. Taking it away left UIKit collapsing an empty pill, and an
+        // empty pill shrinking across the bar is the "big empty space" the
+        // closing animation was reported for. Filmed both ways: with the text
+        // the collapse reads as a field shrinking to its icon; without it, as a
+        // blank slab drifting.
+        //
+        // So it stays. It costs nothing at rest, because at rest it does not
+        // exist.
+        searchController.searchBar.placeholder = "Search people"
         searchController.searchBar.autocapitalizationType = .none
         searchController.searchBar.autocorrectionType = .no
         searchController.searchBar.returnKeyType = .search
@@ -755,7 +749,6 @@ private extension Array {
 /// animation this exists to remove.
 extension SearchViewController: UISearchControllerDelegate {
     func willPresentSearchController(_ searchController: UISearchController) {
-        fadeFieldPill(to: 1, duration: 0)
         logPlacement("willPresent")
     }
 
@@ -764,20 +757,10 @@ extension SearchViewController: UISearchControllerDelegate {
     }
 
     func willDismissSearchController(_ searchController: UISearchController) {
-        // ⚠️ INSTANT, not a fade. The pill carries nothing — no placeholder,
-        // and the text is cleared by the dismissal — so there is nothing in it
-        // worth watching leave. Fading it still showed a ghost on the first
-        // frame or two, because `willDismiss` already lands a frame into
-        // UIKit's collapse. Taking it out at once leaves exactly one thing
-        // moving: the magnifier travelling to its bubble.
-        fadeFieldPill(to: 0, duration: 0)
         logPlacement("willDismiss")
     }
 
     func didDismissSearchController(_ searchController: UISearchController) {
-        // Back for the next activation; the button is already in place, so
-        // nothing of the pill can be seen while this lands.
-        fadeFieldPill(to: 1, duration: 0)
         logPlacement("didDismiss")
     }
 
