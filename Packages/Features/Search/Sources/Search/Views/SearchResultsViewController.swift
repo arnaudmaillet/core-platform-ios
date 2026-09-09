@@ -13,26 +13,32 @@ import UIKit
 /// is three: posts as cards, media as a grid, people as rows are three
 /// LAYOUTS, and the search screen's list has exactly one.
 ///
-/// # The header, and why it is not the one that was asked for
+/// # The header
 ///
-/// The ask was `[back][tab selector][the query]` in one row. A navigation
-/// bar's `titleView` hosts ONE view, so the selector and the field cannot both
-/// be in it, and the two ways out are both closed:
+/// `[back][selector][query]`, one row, the selector and the field splitting
+/// what the back button leaves down the middle.
 ///
-///   - putting the selector in the LEADING group kills the interactive pop —
-///     `NativePopPolicy` refuses the edge gesture when a custom leading item
-///     sits beside the back button and `leftItemsSupplementBackButton` is
-///     false — and `ProfileRelationshipsViewController` records the measurement
-///     that back + selector in one leading group collapses the whole group
-///     into a `•••` on an iPhone SE.
-///   - swapping them, which is what the relationships screen does, means the
-///     query is invisible while the tabs are showing.
+/// ⚠️ ONE VIEW IN THE TITLE SLOT — WHICH IS NOT THE SAME AS ONE CONTROL, and
+/// getting that wrong cost this screen a revision. `navigationItem.titleView`
+/// takes a single view, so the selector and the field cannot be two ITEMS; but
+/// a view can contain both, and a composite in the title slot is one view by
+/// UIKit's reckoning. The first build stacked them — field in the title,
+/// selector on a floating strip beneath — on the conclusion that a row was
+/// impossible. It was not.
 ///
-/// So the field keeps the title slot — it is the subject of the screen, and it
-/// is what the viewer edits to ask again — and the selector takes the row
-/// beneath it, which is what `PagedTabBar.floating` is documented for: "a
-/// free-floating strip under the navigation bar, on the screen's own margins".
-/// Same two controls, stacked, because UIKit will not put them side by side.
+/// ⚠️ THE LEADING GROUP IS STILL BARRED, and that part was right.
+/// `NativePopPolicy` refuses the edge-swipe pop when a custom leading item sits
+/// beside the back button and `leftItemsSupplementBackButton` is false, and
+/// `ProfileRelationshipsViewController` records that back + selector in one
+/// leading group collapses into a `•••` on an iPhone SE. The composite keeps
+/// the leading group to the back button alone, so the pop survives.
+///
+/// ⚠️ THE SELECTOR SCROLLS WHEN IT DOES NOT FIT, and at half of a narrow bar it
+/// often will not. That is `PagedTabBar`'s documented behaviour for a title
+/// host — its minimums are required and the strip overflows and scrolls rather
+/// than truncating a title, with `keepLensVisible` bringing the selected tab
+/// back. Three tabs in ~150pt degrades by hiding a tab reachably instead of by
+/// rendering an unreadable word.
 ///
 /// # The three pages
 ///
@@ -54,7 +60,11 @@ final class SearchResultsViewController: UIViewController {
     /// through.
     private let searchField = UISearchTextField()
 
-    private let tabBar = PagedTabBar(titles: ["Posts", "Media", "Users"], style: .floating)
+    /// ⚠️ `.navigationTitle`, because it lives IN the bar now. That style is
+    /// documented as "compact, marginless, and BARE: the navigation bar
+    /// supplies the backdrop" — a `.floating` bar carries its own glass, which
+    /// inside the bar's platter would draw a second lens over the first.
+    private let tabBar = PagedTabBar(titles: ["Posts", "Media", "Users"], style: .navigationTitle)
     private var pager: HorizontalPagerView!
 
     private let peoplePage: SearchPeoplePage
@@ -111,6 +121,14 @@ final class SearchResultsViewController: UIViewController {
                 self?.pager.setActivePage(tab, animated: false)
             }
         }
+        // `-search-filters-open` raises the filter sheet. The tray is a toolbar
+        // item and the simulator taps nothing, so without this the sheet has no
+        // way to be seen offline.
+        if arguments.contains("-search-filters-open") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.presentFilters()
+            }
+        }
         #endif
     }
 
@@ -123,17 +141,35 @@ final class SearchResultsViewController: UIViewController {
         searchField.autocorrectionType = .no
         searchField.returnKeyType = .search
         searchField.delegate = self
+
+        tabBar.translatesAutoresizingMaskIntoConstraints = false
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.heightAnchor
-            .constraint(equalToConstant: NavigationBarMetrics.itemPlatterHeight)
-            .isActive = true
-        navigationItem.titleView = searchField
+
+        let row = UIStackView(arrangedSubviews: [tabBar, searchField])
+        row.axis = .horizontal
+        row.spacing = 8
+        row.alignment = .center
+        // ⚠️ HALVES, and stated as a constraint rather than as
+        // `.fillEqually`. A stack's equal fill divides the space it is GIVEN,
+        // and a title view is given whatever the bar has left over — which
+        // UIKit decides after measuring intrinsic sizes. Tying the two widths
+        // to each other makes the split hold at whatever width the bar lands
+        // on, including when the field grows a clear button mid-edit.
+        tabBar.widthAnchor.constraint(equalTo: searchField.widthAnchor).isActive = true
+        NSLayoutConstraint.activate([
+            tabBar.heightAnchor.constraint(
+                equalToConstant: NavigationBarMetrics.itemPlatterHeight
+            ),
+            searchField.heightAnchor.constraint(
+                equalToConstant: NavigationBarMetrics.itemPlatterHeight
+            )
+        ])
+        navigationItem.titleView = row
     }
 
     // MARK: - Pages
 
     private func configurePages() {
-        tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabBar.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             self.pager.setActivePage(self.tabBar.selectedIndex, animated: true)
@@ -154,14 +190,9 @@ final class SearchResultsViewController: UIViewController {
         pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
         pager.onSettled = { [weak self] index in self?.tabBar.select(index) }
 
-        view.addSubview(tabBar)
         view.addSubview(pager)
         NSLayoutConstraint.activate([
-            tabBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
-            tabBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            tabBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-
-            pager.topAnchor.constraint(equalTo: tabBar.bottomAnchor, constant: 8),
+            pager.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             pager.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             pager.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             pager.bottomAnchor.constraint(equalTo: view.bottomAnchor)

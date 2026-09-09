@@ -61,6 +61,13 @@ final class SearchFilterSheetViewController: UIViewController {
     }
 
     private var groups: [Group]
+    /// What was in effect when the sheet opened, so Cancel can put it back.
+    ///
+    /// ⚠️ TAKEN AT INIT, NOT AT `viewDidLoad`. A sheet presented, cancelled and
+    /// presented again is a NEW instance each time, but a `viewDidLoad` capture
+    /// would also re-run on a view reload and quietly re-baseline to whatever
+    /// was picked in between.
+    private let openingSelection: [String: String]
     private let onPick: (_ groupID: String, _ segmentID: String) -> Void
 
     /// What the sheet is showing, for tests. The groups are built by the screen
@@ -74,6 +81,9 @@ final class SearchFilterSheetViewController: UIViewController {
     init(groups: [Group], onPick: @escaping (_ groupID: String, _ segmentID: String) -> Void) {
         self.groups = groups
         self.onPick = onPick
+        openingSelection = Dictionary(
+            groups.map { ($0.id, $0.selectedID) }, uniquingKeysWith: { first, _ in first }
+        )
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -93,11 +103,15 @@ final class SearchFilterSheetViewController: UIViewController {
             // ⚠️ A CUSTOM DETENT SIZED TO THE CONTENT, with `.large` behind it.
             // The tray grows as dimensions land; a fixed `.medium` would leave
             // half a sheet of white under it today and clip it later.
+            // ⚠️ ONE DETENT, AND `.large()` IS GONE ON PURPOSE. This sheet is
+            // three rows of controls; dragged to full height it left most of
+            // the screen empty and hid the results the filters act on, which
+            // are the only reason to look at it. Its own content is the
+            // ceiling.
             presentation.detents = [
                 .custom(identifier: .init("filters")) { context in
                     min(sheet.contentHeight, context.maximumDetentValue)
-                },
-                .large()
+                }
             ]
             presentation.prefersGrabberVisible = true
             presentation.prefersScrollingExpandsWhenScrolledToEdge = false
@@ -117,23 +131,32 @@ final class SearchFilterSheetViewController: UIViewController {
         super.viewDidLoad()
         title = "Filters"
         view.backgroundColor = .systemGroupedBackground
-        // ⚠️ LEADING, AND SPELLED OUT — both on precedent, not preference.
+        // ⚠️ CANCEL REVERTS, DONE ACCEPTS — and the pair only makes sense
+        // because the picks apply LIVE. The results underneath change as the
+        // viewer moves a segment, which is the point of a sheet over a menu; so
+        // "Cancel" cannot mean "discard an uncommitted buffer" (there is none)
+        // and instead means "put back what was in effect when this opened".
+        // `openingSelection` is that snapshot.
         //
-        // Leading because there is nothing to commit: every pick applies to the
-        // results underneath as it is made, so this sheet has a dismiss and no
-        // affirmative. A trailing "Done" would be the second half of a
-        // Cancel/Done pair whose first half does not exist, and would read as
-        // "apply these" over filters that are already applied.
-        //
-        // Spelled out because `systemItem: .close` and `.done` draw as a
-        // WORDLESS ✕ and ✓ on a sheet under iOS 26 — measured in-sim and
+        // ⚠️ SPELLED OUT, NOT `systemItem`. iOS 26 draws the system Done and
+        // Cancel items as a WORDLESS ✓ and ✕ on a sheet — measured in-sim and
         // recorded on `MapSubFilterSheetViewController`, which spells its own
-        // items out for the same reason: a bare checkmark on a screen full of
-        // selections reads as one more selection.
+        // out for the same reason: on a screen made of selections, a bare
+        // checkmark reads as one more selection.
         navigationItem.leftBarButtonItem = UIBarButtonItem(
-            title: "Close",
+            title: "Cancel",
+            primaryAction: UIAction { [weak self] _ in self?.revertAndDismiss() }
+        )
+        let done = UIBarButtonItem(
+            title: "Done",
             primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
         )
+        // `.prominent` (iOS 26's rename of `.done`) gives the affirmative its
+        // filled accent capsule — the same weight the map's filter sheet gives
+        // its own commit, and the same reason: abandoning should never be the
+        // more prominent of the two.
+        done.style = .prominent
+        navigationItem.rightBarButtonItem = done
         configureStack()
     }
 
@@ -179,6 +202,19 @@ final class SearchFilterSheetViewController: UIViewController {
             guard let self, let control else { return }
             self.pick(groupID: group.id, index: control.selectedSegmentIndex)
         }, for: .valueChanged)
+        // ⚠️ THE SHEET'S DRAG AND THE SEGMENT'S DRAG ARE THE SAME GESTURE UNTIL
+        // ONE OF THEM YIELDS. A segmented control tracks a finger sliding
+        // ACROSS it — that is how you scrub between options without lifting —
+        // and a sheet tracks a finger dragging it DOWN. A diagonal drag on a
+        // segment is both, and the sheet wins because its recognizer sits above
+        // in the hierarchy: the sheet slides away while the viewer is still
+        // choosing.
+        //
+        // So the sheet's own pan stands down for the length of the touch.
+        control.addAction(UIAction { [weak self] _ in self?.setSheetDragEnabled(false) },
+                          for: [.touchDown, .touchDragInside, .touchDragOutside])
+        control.addAction(UIAction { [weak self] _ in self?.setSheetDragEnabled(true) },
+                          for: [.touchUpInside, .touchUpOutside, .touchCancel])
         controls[group.id] = control
 
         let column = UIStackView(arrangedSubviews: [title, control])
@@ -196,6 +232,62 @@ final class SearchFilterSheetViewController: UIViewController {
         column.addArrangedSubview(footer)
         column.setCustomSpacing(8, after: control)
         return column
+    }
+
+    /// Puts every dimension back to what it was when this opened, then closes.
+    ///
+    /// ⚠️ THROUGH `onPick`, the same channel a tap uses. Reverting by writing
+    /// the controls and skipping the callback would leave the sheet showing one
+    /// thing and the results underneath showing another — the exact split this
+    /// sheet exists to avoid.
+    private func revertAndDismiss() {
+        revertForTesting()
+        dismiss(animated: true)
+    }
+
+    /// Turns the sheet's drag-to-dismiss off while a segment is being touched.
+    ///
+    /// ⚠️ FOUND BY RELATIONSHIP, NOT BY CLASS NAME, and guarded at every step.
+    /// `UISheetPresentationController` exposes no pan of its own, so the
+    /// recognizer is reached where UIKit installs it — on the presented view
+    /// and the container above it. Anything unexpected there is simply left
+    /// alone: the failure mode of this not finding the gesture is the conflict
+    /// it was written to remove, which is what shipped before it existed. The
+    /// failure mode of it disabling the wrong thing would be a sheet that
+    /// cannot be dismissed, so it only ever touches `UIPanGestureRecognizer`
+    /// and always turns them back on.
+    private func setSheetDragEnabled(_ isEnabled: Bool) {
+        let hosts = [
+            navigationController?.presentationController?.presentedView,
+            navigationController?.presentationController?.containerView
+        ]
+        for host in hosts.compactMap({ $0 }) {
+            for gesture in host.gestureRecognizers ?? [] where gesture is UIPanGestureRecognizer {
+                gesture.isEnabled = isEnabled
+            }
+        }
+    }
+
+    /// Picks a segment the way a tap does. The controls are private and a
+    /// segmented control's selection cannot be driven through `sendActions`
+    /// (measured on `UISearchTextField`'s editing events, same class of
+    /// problem), so the seam is the pick itself rather than the touch.
+    func pickForTesting(groupID: String, segmentID: String) {
+        guard let position = groups.firstIndex(where: { $0.id == groupID }),
+              let index = groups[position].segments.firstIndex(where: { $0.id == segmentID })
+        else { return }
+        pick(groupID: groupID, index: index)
+    }
+
+    /// Cancel, without the dismissal a test has no presenter for.
+    func revertForTesting() {
+        for (position, group) in groups.enumerated() {
+            guard let original = openingSelection[group.id], original != group.selectedID
+            else { continue }
+            groups[position].selectedID = original
+            controls[group.id]?.selectedSegmentIndex = groups[position].selectedIndex
+            onPick(group.id, original)
+        }
     }
 
     private func pick(groupID: String, index: Int) {

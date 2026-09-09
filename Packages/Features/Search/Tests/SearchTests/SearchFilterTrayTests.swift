@@ -228,6 +228,53 @@ struct SearchFilterTrayTests {
         #expect(await host.box.sorts == [.popularity])
     }
 
+    // MARK: - Cancel and Done
+
+    /// ⚠️ CANCEL MEANS "PUT BACK WHAT WAS IN EFFECT", not "discard a buffer".
+    /// The picks apply live — that is the point of a sheet over a menu — so
+    /// there is no uncommitted state to throw away, and reverting has to go
+    /// back out through the same channel a tap uses or the sheet and the
+    /// results underneath would disagree.
+    @Test func cancellingPutsBackWhatWasInEffectWhenTheSheetOpened() async {
+        let host = Host()
+        await host.showResults("haddad")
+        #expect(host.viewModel.sortOrder == .popularity)
+
+        let sheet = SearchFilterSheetViewController(groups: host.filterGroups) { group, option in
+            host.viewModel.applyFilter(group: group, option: option)
+        }
+        sheet.loadViewIfNeeded()
+        sheet.pickForTesting(groupID: SearchViewModel.rankingGroupID,
+                             segmentID: SearchSortOrder.recency.rawValue)
+        #expect(host.viewModel.sortOrder == .recency)
+
+        sheet.revertForTesting()
+        #expect(host.viewModel.sortOrder == .popularity)
+    }
+
+    @Test func cancellingAfterNoChangeChangesNothing() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let sheet = SearchFilterSheetViewController(groups: host.filterGroups) { group, option in
+            host.viewModel.applyFilter(group: group, option: option)
+        }
+        sheet.loadViewIfNeeded()
+        sheet.revertForTesting()
+        #expect(host.viewModel.sortOrder == .popularity)
+        #expect(host.viewModel.scope == .everyone)
+    }
+
+    /// ⚠️ ONE DETENT. Dragged to full height the sheet hid the results its
+    /// filters act on, which are the only reason to look at it.
+    @Test func theSheetCannotBeExpandedPastItsContent() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let wrapped = SearchFilterSheetViewController.inSheet(groups: host.filterGroups) { _, _ in }
+        let detents = wrapped.sheetPresentationController?.detents ?? []
+        #expect(detents.count == 1)
+        #expect(detents.first?.identifier != .large)
+    }
+
     // MARK: - The keyboard is still the way to submit
 
     @Test func theKeyboardSearchKeyStillSubmitsAndGetsOutOfTheWay() throws {
