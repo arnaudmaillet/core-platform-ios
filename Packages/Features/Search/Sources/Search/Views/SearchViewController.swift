@@ -112,6 +112,29 @@ final class SearchViewController: UIViewController {
     /// there would fight the viewer who just came back to read a result.
     private var hasClaimedField = false
 
+    /// Takes the field's WHITE PILL out of the closing animation.
+    ///
+    /// ⚠️ THE STATE THE VIEWER COMPLAINED ABOUT, and it is not a placement.
+    /// `navigationItem.searchBarPlacement` reads `integratedButton` at every
+    /// stage of the dismissal — configure / willPresent / didPresent /
+    /// willDismiss / +6 ticks / didDismiss — so UIKit is not passing through
+    /// the wide `.integrated` look. What it does is animate the field's WIDTH
+    /// down while holding its background at full opacity: filmed at 30fps,
+    /// roughly six frames (~200ms) of a wide, empty white pill before the
+    /// collapse to the magnifier even starts to fade. Emptying the placeholder
+    /// made those frames worse, not better — there is nothing in the pill now.
+    ///
+    /// Fading the TEXT FIELD rather than the search bar: the bar is also what
+    /// carries the magnifier that has to survive, so taking the whole bar down
+    /// would take the destination of the animation with it.
+    private func fadeFieldPill(to alpha: CGFloat, duration: TimeInterval) {
+        let field = searchController.searchBar.searchTextField
+        guard field.alpha != alpha else { return }
+        UIView.animate(withDuration: duration, delay: 0, options: [.beginFromCurrentState]) {
+            field.alpha = alpha
+        }
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         guard !hasClaimedField else { return }
@@ -726,28 +749,47 @@ private extension Array {
     }
 }
 
-#if DEBUG
+/// The dismissal's own choreography. Conformance is UNCONDITIONAL — the pill
+/// fade below is product behaviour, and an earlier revision of this file had
+/// the whole extension behind `#if DEBUG`, which would have shipped the very
+/// animation this exists to remove.
 extension SearchViewController: UISearchControllerDelegate {
-    func willPresentSearchController(_ searchController: UISearchController) { logPlacement("willPresent") }
-    func didPresentSearchController(_ searchController: UISearchController) { logPlacement("didPresent") }
-    func willDismissSearchController(_ searchController: UISearchController) {
-        logPlacement("willDismiss")
-        for tick in 1...6 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(tick) * 0.06) { [weak self] in
-                self?.logPlacement("dismiss+\(tick)")
-            }
-        }
+    func willPresentSearchController(_ searchController: UISearchController) {
+        fadeFieldPill(to: 1, duration: 0)
+        logPlacement("willPresent")
     }
-    func didDismissSearchController(_ searchController: UISearchController) { logPlacement("didDismiss") }
 
+    func didPresentSearchController(_ searchController: UISearchController) {
+        logPlacement("didPresent")
+    }
+
+    func willDismissSearchController(_ searchController: UISearchController) {
+        // ⚠️ INSTANT, not a fade. The pill carries nothing — no placeholder,
+        // and the text is cleared by the dismissal — so there is nothing in it
+        // worth watching leave. Fading it still showed a ghost on the first
+        // frame or two, because `willDismiss` already lands a frame into
+        // UIKit's collapse. Taking it out at once leaves exactly one thing
+        // moving: the magnifier travelling to its bubble.
+        fadeFieldPill(to: 0, duration: 0)
+        logPlacement("willDismiss")
+    }
+
+    func didDismissSearchController(_ searchController: UISearchController) {
+        // Back for the next activation; the button is already in place, so
+        // nothing of the pill can be seen while this lands.
+        fadeFieldPill(to: 1, duration: 0)
+        logPlacement("didDismiss")
+    }
+
+    /// No-op unless `-search-layout-audit` is passed.
     func logPlacement(_ stage: String) {
+        #if DEBUG
         guard ProcessInfo.processInfo.arguments.contains("-search-layout-audit") else { return }
         let names = ["automatic", "integrated", "stacked", "integratedCentered", "integratedButton"]
         let raw = navigationItem.searchBarPlacement.rawValue
         print("[placement] \(stage): realized=\(names[safe: raw] ?? String(raw))"
             + " active=\(navigationItem.searchController?.isActive == true)")
+        #endif
     }
 }
-#else
-extension SearchViewController: UISearchControllerDelegate {}
-#endif
+
