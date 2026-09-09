@@ -329,10 +329,20 @@ final class SearchViewController: UIViewController {
         //   .integratedCentered same as integrated on iPhone; its centring is
         //                       an iPad regular-width rule.
         //
-        // None of them lands a collapse directly on a trailing bubble: the
-        // active field is the bar's width and only `.integratedButton` puts the
-        // resting affordance at the edge, so with that one something must
-        // cross. That is UIKit's animation, not a setting.
+        // ⚠️ THE TWO COMPLAINTS ARE ONE CHOICE, and this is the whole of it.
+        // `.integrated` rests as a FIELD and `.integratedButton` rests as a
+        // BUTTON — that is the difference, and everything else follows:
+        //
+        //   a field is laid out at field width whatever is in it, so with no
+        //   placeholder the space to the right of the magnifier is empty and
+        //   there is no width knob to close it; a button is laid out to its
+        //   icon, so it hugs it — but it lives at the trailing edge, and the
+        //   active field is the bar's width, so the collapse has to cross.
+        //
+        // Empty space at rest, or a crossing on the way out. There is no third
+        // shape in this API, and no setting that mixes them: a bubble that
+        // hugs its icon AND a collapse that lands straight on it needs a bar
+        // this app draws itself.
         //
         // `navigationItem.searchBarPlacement` — the REALIZED value — was logged
         // at configure / willPresent / didPresent / willDismiss / six ticks /
@@ -341,7 +351,7 @@ final class SearchViewController: UIViewController {
         //
         // `.inline` is `.integrated` under its pre-iOS-26 name and is
         // deprecated; write `.integrated`.
-        navigationItem.preferredSearchBarPlacement = .integrated
+        navigationItem.preferredSearchBarPlacement = .integratedButton
         // ⚠️ NO TOOLBAR NEGOTIATION. Defaults to YES, and the enum's own note
         // warns that on iPhone "the search bar may be integrated into the
         // toolbar" under a navigation controller. This screen has no toolbar,
