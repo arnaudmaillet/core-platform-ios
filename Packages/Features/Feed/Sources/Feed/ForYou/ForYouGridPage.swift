@@ -296,6 +296,15 @@ final class ForYouGridPage: UIView {
     /// order.
     var landsByAdoption: Bool { style == .grid }
     private let collectionView: UICollectionView
+
+    /// The scroll view whose offset drives the tab bar's minimize.
+    ///
+    /// ⚠️ NAMED FOR ITS JOB, not opened up. Reading an offset through this is
+    /// what `verticalOffset` is for; this exists because
+    /// `UIViewController.setContentScrollView(_:for:)` needs the object itself
+    /// and UIKit's own heuristic search does NOT find a scroll view nested in a
+    /// horizontal pager — measured, see `ForYouSelectorAccessory`.
+    var minimizeScrollView: UIScrollView { collectionView }
     /// The centred "nothing here" block, shared with every other surface that
     /// has to say it. Hidden unless the page is genuinely empty or failed.
     private let emptyState = EmptyStateView()

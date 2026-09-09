@@ -302,7 +302,13 @@ final class NavigationStressTest {
         for controller in stack.viewControllers where view.isDescendant(of: controller.view) {
             return true
         }
-        // The bar and the tab bar are legitimate answers too.
+        // The bar, the tab bar, and anything in the tab bar's accessory are
+        // legitimate answers too — a docked selector is chrome, not a view a
+        // finished transition forgot.
+        if let accessory = tabBarController.bottomAccessory?.contentView,
+           view.isDescendant(of: accessory) {
+            return true
+        }
         return view.isDescendant(of: stack.navigationBar)
             || view.isDescendant(of: tabBarController.tabBar)
     }

@@ -118,6 +118,17 @@ final class HeaderSelectorAudit {
             dumpBarTree()
         }
         guard let selector = firstPagedTabBar(in: bar) else {
+            // ⚠️ THE BAR IS NOT THE ONLY PLACE A SELECTOR MAY LIVE. Under
+            // `-foryou-dock-selector` For You's strip rides the tab bar
+            // controller's `bottomAccessory`, and this lookup only ever walks
+            // `nav.navigationBar` — so without this the audit prints "NO
+            // SELECTOR on a surface that must have one", plus an inventory and
+            // a bar tree, for a screen that is working exactly as asked.
+            if let accessory = tabBarController.bottomAccessory?.contentView,
+               firstPagedTabBar(in: accessory) != nil {
+                print("[header-audit] \(surface): selector is in the BOTTOM ACCESSORY")
+                return finding
+            }
             if let tab = AppTab(rawValue: surface), mustHaveSelector.contains(tab) {
                 finding.problems.append("NO SELECTOR on a surface that must have one")
                 // The inventory, because "it is not on the bar" has several
