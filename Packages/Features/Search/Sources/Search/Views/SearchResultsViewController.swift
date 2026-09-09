@@ -65,6 +65,11 @@ final class SearchResultsViewController: UIViewController {
     /// supplies the backdrop" — a `.floating` bar carries its own glass, which
     /// inside the bar's platter would draw a second lens over the first.
     private let tabBar = PagedTabBar(titles: ["Posts", "Media", "Users"], style: .navigationTitle)
+
+    /// The header's two shapes. Typing wants room to read what is being typed;
+    /// not typing wants to see where the answer is coming from.
+    private var restingSplit: NSLayoutConstraint?
+    private var focusedSplit: NSLayoutConstraint?
     private var pager: HorizontalPagerView!
 
     private let peoplePage: SearchPeoplePage
@@ -124,6 +129,13 @@ final class SearchResultsViewController: UIViewController {
         // `-search-filters-open` raises the filter sheet. The tray is a toolbar
         // item and the simulator taps nothing, so without this the sheet has no
         // way to be seen offline.
+        // `-search-focus-input` puts the caret in the field, so the focused
+        // 30/70 split can be seen offline — the simulator taps nothing.
+        if arguments.contains("-search-focus-input") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                self?.searchField.becomeFirstResponder()
+            }
+        }
         if arguments.contains("-search-filters-open") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.presentFilters()
@@ -155,7 +167,16 @@ final class SearchResultsViewController: UIViewController {
         // UIKit decides after measuring intrinsic sizes. Tying the two widths
         // to each other makes the split hold at whatever width the bar lands
         // on, including when the field grows a clear button mid-edit.
-        tabBar.widthAnchor.constraint(equalTo: searchField.widthAnchor).isActive = true
+        // ⚠️ TWO CONSTRAINTS, TOGGLED — a multiplier is immutable once a
+        // constraint is made, so a "resting" and a "focused" one are built here
+        // and swapped. Both tie the selector's width to the FIELD's rather than
+        // to the row's: the row is whatever the bar leaves over, and only a
+        // relation between the two survives that being decided late.
+        restingSplit = tabBar.widthAnchor.constraint(equalTo: searchField.widthAnchor)
+        focusedSplit = tabBar.widthAnchor.constraint(
+            equalTo: searchField.widthAnchor, multiplier: 30.0 / 70.0
+        )
+        restingSplit?.isActive = true
         NSLayoutConstraint.activate([
             tabBar.heightAnchor.constraint(
                 equalToConstant: NavigationBarMetrics.itemPlatterHeight
@@ -192,7 +213,28 @@ final class SearchResultsViewController: UIViewController {
 
         view.addSubview(pager)
         NSLayoutConstraint.activate([
-            pager.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // ⚠️ TO THE TOP OF THE VIEW, NOT THE SAFE AREA, and that is what
+            // makes the header look like the app's other headers. A navigation
+            // bar is translucent: it blurs whatever passes UNDER it. Pinned
+            // below the safe area the pages start where the bar ends, so
+            // nothing ever passes under it and the glass has nothing to work
+            // with — it reads as a flat slab, which is exactly what was
+            // reported. The pages' own scroll views keep their first row clear
+            // through their safe-area insets, so nothing is hidden by this.
+            //
+            // The inbox's search results are pinned the same way for the same
+            // reason, and say so in the same words.
+            //
+            // Measured after the change, on the Media tab:
+            //
+            //     UICollectionView insetTop=116.0 frameY=0.0 offsetY=-116.0
+            //     safeAreaTop=116.0  pagerY=0.0
+            //
+            // The list starts at the top of the SCREEN and is inset by exactly
+            // the bar's height, so the first row rests below it and every row
+            // after passes under it. A static screenshot at the top of a list
+            // cannot tell that from the flat version — the numbers can.
+            pager.topAnchor.constraint(equalTo: view.topAnchor),
             pager.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             pager.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             pager.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -284,6 +326,24 @@ final class SearchResultsViewController: UIViewController {
     /// subset with a picture. Handing the gallery the full set drew a blank
     /// tile per text post — filmed, a grid of empty rectangles among the
     /// photographs.
+    /// Gives the field 70% of the row while it is being typed in, and half of
+    /// it the rest of the time.
+    ///
+    /// ⚠️ ANIMATED ON THE BAR, not on the row. The stack lives inside the
+    /// navigation bar's own layout, and animating the arranged views alone
+    /// leaves the bar's platter to jump to its new size on the next pass — the
+    /// glass and its contents arriving at different times. Laying the BAR out
+    /// inside the animation carries both.
+    private func setSplitFocused(_ isFocused: Bool) {
+        guard focusedSplit?.isActive != isFocused else { return }
+        restingSplit?.isActive = !isFocused
+        focusedSplit?.isActive = isFocused
+        guard let bar = navigationController?.navigationBar else { return }
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseInOut]) {
+            bar.layoutIfNeeded()
+        }
+    }
+
     private func showPosts(_ state: SearchPostSurfaceState) {
         postsPage.show(state)
         mediaPage.show(mediaState(from: state))
@@ -297,6 +357,14 @@ final class SearchResultsViewController: UIViewController {
 }
 
 extension SearchResultsViewController: UITextFieldDelegate {
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        setSplitFocused(true)
+    }
+
+    func textFieldDidEndEditing(_ textField: UITextField) {
+        setSplitFocused(false)
+    }
+
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         viewModel.submitQuery(textField.text ?? "")
         textField.resignFirstResponder()
