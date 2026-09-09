@@ -112,14 +112,28 @@ final class SearchViewController: UIViewController {
     /// there would fight the viewer who just came back to read a result.
     private var hasClaimedField = false
 
-    // ⚠️ THREE WAYS OF SUPPRESSING UIKIT'S COLLAPSE WERE MEASURED, AND NONE
-    // BELONGS HERE. Recorded so the next reader does not spend the evening on
-    // them: hiding the field's background left a lone icon drifting over an
-    // empty bar; setting the search bar's own alpha to 0 was simply overridden
-    // by UIKit's animation on it; and `.integrated` without a placeholder
-    // collapses to a small pill beside the back chevron with the whole bar
-    // empty to its right. The artefact was never the container — it was that
-    // the container had been emptied. See the placeholder note above.
+    /// Takes the field out of its own closing animation.
+    ///
+    /// ⚠️ THE FIELD OUTLIVES ITS CONTENT, and that is the artefact. Filmed at
+    /// 20fps: once the clear button has gone and the caret with it, the search
+    /// field stays at FULL WIDTH for another ten to twelve frames — half a
+    /// second of a wide, empty pill with the magnifier sliding across the
+    /// inside of it — before UIKit finally collapses it onto the trailing
+    /// button. Nothing is in it for that whole stretch.
+    ///
+    /// So it is taken out at once, on `willDismiss`. Not faded: `willDismiss`
+    /// already lands a frame or two into UIKit's collapse, so a fade only
+    /// makes the first frames translucent instead of absent.
+    ///
+    /// ⚠️ THE TEXT FIELD, NOT THE SEARCH BAR. The bar also carries the
+    /// magnifier that has to survive and become the button — setting the bar's
+    /// own alpha was tried and is simply overridden by UIKit's animation on it.
+    ///
+    /// Restored unanimated on `willPresent` and `didDismiss`, both moments
+    /// where nothing of it can be seen landing.
+    private func hideFieldForCollapse(_ hidden: Bool) {
+        searchController.searchBar.searchTextField.alpha = hidden ? 0 : 1
+    }
 
 
     override func viewDidAppear(_ animated: Bool) {
@@ -761,6 +775,7 @@ private extension Array {
 /// animation this exists to remove.
 extension SearchViewController: UISearchControllerDelegate {
     func willPresentSearchController(_ searchController: UISearchController) {
+        hideFieldForCollapse(false)
         logPlacement("willPresent")
     }
 
@@ -769,10 +784,12 @@ extension SearchViewController: UISearchControllerDelegate {
     }
 
     func willDismissSearchController(_ searchController: UISearchController) {
+        hideFieldForCollapse(true)
         logPlacement("willDismiss")
     }
 
     func didDismissSearchController(_ searchController: UISearchController) {
+        hideFieldForCollapse(false)
         logPlacement("didDismiss")
     }
 
