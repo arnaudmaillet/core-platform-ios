@@ -343,9 +343,15 @@ final class SearchViewController: UIViewController {
         applyRestingBar()
     }
 
-    /// The field's height, and also the Cancel item's touch height, so the two
-    /// share a centre line with nothing left over above or below.
-    private static let fieldHeight: CGFloat = 36
+    /// The field's height, matched to the bar's own glass platters.
+    ///
+    /// ⚠️ MEASURED OFF THE SCREEN, not inherited. This started at 36 — the
+    /// inbox's constant, where it is right because that bar has no back button
+    /// beside the field to disagree with. Here the field sits between a back
+    /// chevron and Cancel, and a column profile through the rendered bar reads
+    /// 40.0pt for a bar-button platter against 36.0pt for the field: four
+    /// points short, which is exactly the mismatch you can see.
+    private static let fieldHeight: CGFloat = 40
 
     private func applyRestingBar() {
         navigationItem.rightBarButtonItems = [searchItem]
@@ -366,8 +372,11 @@ final class SearchViewController: UIViewController {
     private func presentSearch() {
         guard !isSearching else { return }
         isSearching = true
+        // ⚠️ THE BAR STAYS TRANSLUCENT, unlike the inbox's, which turns opaque
+        // while searching so its rows do not read through the text. Every other
+        // header in this app is the blurred, see-through treatment, and a
+        // search screen that alone goes flat white reads as a different app.
         morphNavigationBar {
-            self.setNavigationBarOpaque(true)
             self.applySearchingBar()
         }
         searchField.becomeFirstResponder()
@@ -380,7 +389,6 @@ final class SearchViewController: UIViewController {
         searchField.text = nil
         report(query: "")
         morphNavigationBar {
-            self.setNavigationBarOpaque(false)
             self.applyRestingBar()
         }
     }
