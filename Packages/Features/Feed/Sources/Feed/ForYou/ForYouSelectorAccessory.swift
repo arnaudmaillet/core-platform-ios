@@ -190,6 +190,24 @@ final class ForYouSelectorAccessoryHost: UIView {
     /// animated, and each pass would chase the last one.
     private var lastCentre: CGPoint?
 
+    /// The width this view was last laid out at.
+    ///
+    /// ⚠️ **A PURE WIDTH CHANGE MOVES NO CENTRE, AND THAT IS WHY THE EXPAND WAS
+    /// STILL JUMPING.** The two directions do not run their passes in the same
+    /// order. Collapsing, the width and x land first and the y last:
+    ///
+    ///     360x48@21,735 → 234x48@84,735 → 234x48@84,798
+    ///
+    /// Expanding, the y goes first and the width last:
+    ///
+    ///     234x48@84,798 → 234x48@84,735 → 360x48@21,735
+    ///
+    /// A catch-up watching only the centre therefore caught the whole collapse
+    /// — its last event was the 63pt drop — and the first two thirds of the
+    /// expand, leaving the 126pt widening, the event a viewer actually sees, to
+    /// land in one frame. The centre is 201 before and after it.
+    private var lastWidth: CGFloat?
+
     /// Carries the strip from where it WAS to where UIKit just put it.
     ///
     /// ⚠️ **THIS EXISTS BECAUSE UIKIT DOES NOT ANIMATE THE MOVE, and it is a
@@ -208,16 +226,28 @@ final class ForYouSelectorAccessoryHost: UIView {
     private func playCatchUpIfMoved() {
         guard let window, let superview else { return }
         let centreNow = superview.convert(center, to: window)
-        defer { lastCentre = centreNow }
-        guard ForYouSelectorDock.animatesCatchUp, let was = lastCentre else { return }
+        let widthNow = bounds.width
+        defer { lastCentre = centreNow; lastWidth = widthNow }
+        guard ForYouSelectorDock.animatesCatchUp,
+              let was = lastCentre, let wasWidth = lastWidth, widthNow > 1
+        else { return }
         let dx = was.x - centreNow.x
         let dy = was.y - centreNow.y
-        // A pass that did not move it, or moved it a hair, is not a journey.
-        guard abs(dx) > 1 || abs(dy) > 1 else { return }
+        let scale = wasWidth / widthNow
+        // A pass that did not move or resize it, or did either by a hair, is
+        // not a journey.
+        guard abs(dx) > 1 || abs(dy) > 1 || abs(wasWidth - widthNow) > 1 else { return }
         if ForYouSelectorDock.isTracing {
-            print(String(format: "[dock] catchup dx=%.0f dy=%.0f", dx, dy))
+            print(String(format: "[dock] catchup dx=%.0f dy=%.0f scaleX=%.2f", dx, dy, scale))
         }
-        transform = CGAffineTransform(translationX: dx, y: dy)
+        // ⚠️ SCALED IN X ONLY, and the type does stretch for the length of the
+        // spring — 0.65 to 1 on the expand. Weighed against a 126pt capsule
+        // appearing between two frames, a third of a second of narrow text is
+        // the cheaper artefact. The honest alternative is driving a width
+        // CONSTRAINT instead, which does not distort but cannot start until the
+        // pass after the one that resized us — a frame of stillness at the head
+        // of a six-frame animation.
+        transform = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: 1)
         UIView.animate(
             withDuration: 0.32, delay: 0,
             usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
