@@ -313,33 +313,35 @@ final class SearchViewController: UIViewController {
         // `.inline` is the same value under its pre-iOS-26 name and is
         // deprecated; `.integrated` is the one to write.
         //
-        // ⚠️ ITS DISMISSAL ANIMATION IS UIKIT'S, AND IT HAS A SEAM. Filmed at
-        // 15fps: the active field shrinks to a magnifier-only button, HOLDS
-        // there for ~4 frames (~270ms), and the wide placeholder field then
-        // appears in a single frame — a cut, not an animation.
+        // ⚠️ WHAT EACH PLACEMENT ACTUALLY GIVES, ALL FOUR MEASURED ON THIS
+        // SCREEN, so the next change starts from evidence rather than from the
+        // enum's names:
         //
-        // It is not a placement flip: `navigationItem.searchBarPlacement`
-        // (the REALIZED value) reads `integrated` at every stage —
-        // configure / willPresent / didPresent / willDismiss / +6 ticks /
-        // didDismiss — so nothing is choosing the button representation. The
-        // seam is inside UIKit's own animation of the bar.
+        //   .stacked            a second row under the bar — the vertical band
+        //                       this screen was rebuilt to reclaim.
+        //   .integratedButton   at rest a magnifier BUBBLE at the trailing
+        //                       edge; the collapse travels the width of the bar
+        //                       to reach it.
+        //   .integrated         at rest a WIDE PILL holding only the magnifier
+        //                       (there is no placeholder), beside the back
+        //                       chevron; nothing travels, because the field
+        //                       simply deactivates where it is.
+        //   .integratedCentered same as integrated on iPhone; its centring is
+        //                       an iPad regular-width rule.
         //
-        // Two knobs were tried and neither touches it:
-        //   - `searchBarPlacementAllowsToolbarIntegration = false` (below):
-        //     no change, though it is kept because this screen has no toolbar
-        //     and the enum's own note warns UIKit may reach for one;
-        //   - `.integratedButton`: the seam GOES, because the button is then
-        //     the resting state and the collapse has somewhere coherent to
-        //     land.
+        // None of them lands a collapse directly on a trailing bubble: the
+        // active field is the bar's width and only `.integratedButton` puts the
+        // resting affordance at the edge, so with that one something must
+        // cross. That is UIKit's animation, not a setting.
         //
-        // `.integratedButton` is what ships, and its one cost — a bare
-        // magnifier where a placeholder field used to sit — is paid off by
-        // activating on arrival: the viewer never meets the button on the way
-        // IN, only on the way out, where it is the thing the field collapses
-        // onto. Filmed at 15fps: one continuous slide-and-fade, no hold, no
-        // cut. Keeping the placeholder field at rest instead would need a bar
-        // this app draws itself.
-        navigationItem.preferredSearchBarPlacement = .integratedButton
+        // `navigationItem.searchBarPlacement` — the REALIZED value — was logged
+        // at configure / willPresent / didPresent / willDismiss / six ticks /
+        // didDismiss for both integrated variants and never changed within a
+        // run, so none of this is a placement flip mid-animation.
+        //
+        // `.inline` is `.integrated` under its pre-iOS-26 name and is
+        // deprecated; write `.integrated`.
+        navigationItem.preferredSearchBarPlacement = .integrated
         // ⚠️ NO TOOLBAR NEGOTIATION. Defaults to YES, and the enum's own note
         // warns that on iPhone "the search bar may be integrated into the
         // toolbar" under a navigation controller. This screen has no toolbar,
