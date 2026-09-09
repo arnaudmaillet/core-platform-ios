@@ -626,8 +626,8 @@ final class SearchViewController: UIViewController {
             if model.isEmpty {
                 showStatus(
                     symbolName: "magnifyingglass",
-                    title: "Search people",
-                    subtitle: "Find people by name or @handle. What you search for shows up here."
+                    title: "Search",
+                    subtitle: "Search by name or @handle. What you search for shows up here."
                 )
             } else {
                 hideStatus()
@@ -645,7 +645,7 @@ final class SearchViewController: UIViewController {
                 showStatus(
                     symbolName: "return",
                     title: "Press Search",
-                    subtitle: "Search for “\(query)” to see people."
+                    subtitle: "Search for “\(query)” to see results."
                 )
             } else {
                 hideStatus()
@@ -664,10 +664,23 @@ final class SearchViewController: UIViewController {
         case .empty(let query):
             spinner.stopAnimating()
             apply(NSDiffableDataSourceSnapshot<SearchSection, SearchItem>())
+            // ⚠️ NOT "no people", and not a `person.slash` either. This screen
+            // is the app's ONE search: profiles are what `search.v1` answers
+            // for it today, but posts, places and tags are the same box and the
+            // same submit, and copy that names one kind would have to be
+            // rewritten the day a second kind arrives — or, worse, would read
+            // as "there are no PEOPLE called that" to someone who was looking
+            // for a place.
+            //
+            // ⚠️ It also does not promise what is not wired. The request is
+            // `entityTypes = [.profile]` (`SearchRepository`), so a subtitle
+            // listing posts and locations would be a lie the viewer can catch.
+            // Type-NEUTRAL is the honest register: it is true now and stays
+            // true when the other kinds land.
             showStatus(
-                symbolName: "person.slash",
-                title: "No people found",
-                subtitle: "Nothing matched “\(query)”. Try a different name or handle."
+                symbolName: "magnifyingglass",
+                title: "No results",
+                subtitle: "Nothing matched “\(query)”. Try different words."
             )
 
         case .failed(let message):

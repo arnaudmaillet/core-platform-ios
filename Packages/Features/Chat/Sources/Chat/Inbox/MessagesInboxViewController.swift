@@ -400,7 +400,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     private func configureSearchAffordance() {
         searchItem.accessibilityLabel = "Search"
-        searchField.placeholder = "Search"
+        searchField.placeholder = "Search..."
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no
         searchField.returnKeyType = .search

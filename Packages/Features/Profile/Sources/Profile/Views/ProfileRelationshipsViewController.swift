@@ -413,7 +413,7 @@ final class ProfileRelationshipsViewController: UIViewController {
 
     /// The field itself; where the magnifier goes is `applySearchAvailability`'s job.
     private func configureSearch() {
-        searchField.placeholder = "Search"
+        searchField.placeholder = "Search..."
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no
         searchField.returnKeyType = .search
