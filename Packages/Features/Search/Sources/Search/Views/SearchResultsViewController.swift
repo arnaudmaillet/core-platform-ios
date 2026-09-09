@@ -172,7 +172,14 @@ final class SearchResultsViewController: UIViewController {
             searchField.heightAnchor.constraint(
                 equalToConstant: NavigationBarMetrics.itemPlatterHeight
             ),
-            queryWidth
+            queryWidth,
+            // ⚠️ THE FLOOR IS REQUIRED even though the width above is not: a
+            // field allowed to compress to nothing is not a control. One
+            // perfect bubble is the least it may be — the same floor
+            // `LeadingSelectorItem.ceiling(bubbleWidth:)` uses for the strip.
+            searchField.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: NavigationBarMetrics.itemPlatterHeight
+            )
         ])
 
         // ⚠️ TRAILING FIRST, THEN THE SELECTOR. `installLeadingSelector`
@@ -201,10 +208,26 @@ final class SearchResultsViewController: UIViewController {
     /// Restated on every layout, because a bar item's custom view is measured
     /// before it has a bar to measure against — the constraint is created with
     /// a placeholder and corrected as soon as there is a width to read.
-    private lazy var queryWidth: NSLayoutConstraint =
-        searchField.widthAnchor.constraint(
+    /// ⚠️ NOT REQUIRED, AND THAT IS WHAT STOPS THE `•••`. A required width
+    /// cannot compress, so when the bar is momentarily narrower than the two
+    /// halves want — which is what a POP does, carrying the departing screen's
+    /// back-button title beside the arriving items — UIKit has no way to fit
+    /// them and sweeps the trailing group into an overflow. It returns a few
+    /// frames later when the bar settles: the flicker reported as "the input
+    /// turns into three dots and then widens again".
+    ///
+    /// Neither a smaller share nor refusing to resize mid-transition fixed it —
+    /// both were tried and filmed — because neither addresses a width that is
+    /// transiently smaller than any settled arithmetic can predict. Letting the
+    /// field YIELD does: it asks for its half and gives ground rather than
+    /// overflowing.
+    private lazy var queryWidth: NSLayoutConstraint = {
+        let width = searchField.widthAnchor.constraint(
             equalToConstant: NavigationBarMetrics.itemPlatterHeight
         )
+        width.priority = .defaultHigh
+        return width
+    }()
 
     /// ⚠️ THE FIELD IS SIZED BEFORE THE SELECTOR IS INSTALLED, and the order is
     /// the whole fix. `installLeadingSelector` caps the strip against the room
@@ -219,6 +242,13 @@ final class SearchResultsViewController: UIViewController {
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         guard let bar = navigationController?.navigationBar, bar.bounds.width > 0 else { return }
+        // ⚠️ NOT WHILE A TRANSITION IS RUNNING. This fires during a push and a
+        // pop too, and the bar's width is not settled there — resizing an item
+        // mid-flight makes UIKit re-measure the groups at a moment when the
+        // destination's own items are half installed, which is the other half
+        // of the `•••` flicker. The width that matters is the settled one, and
+        // the next layout after the transition is where it arrives.
+        guard transitionCoordinator == nil else { return }
         let wanted = NavigationBarShare.halfBesideBackButton(
             inBarOfWidth: bar.bounds.width,
             bubble: NavigationBarMetrics.itemPlatterHeight

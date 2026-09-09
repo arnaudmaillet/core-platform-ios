@@ -40,8 +40,22 @@ public enum NavigationBarShare {
             + LeadingSelectorBudget.platterGap         // back ↔ selector
             + LeadingSelectorBudget.interGroupGap      // leading ↔ trailing
             + LeadingSelectorBudget.platterPadding
-        return max(bubble, (barWidth - claimed) / 2)
+        return max(bubble, (barWidth - claimed) * share)
     }
+
+    /// ⚠️ 48%, NOT 50%, AND THE TWO PERCENT IS THE WHOLE POINT. Exact halves
+    /// put the two groups on the boundary: their sum is the bar's usable width
+    /// to the point, and anything that shaves a point off it during a
+    /// transition — a destination's back-button title being measured, a
+    /// rounding — puts them over. UIKit's answer to over is an overflow, so the
+    /// trailing item collapsed to a `•••` for a few frames mid-animation and
+    /// re-expanded when the bar settled. Reported from a recording as "the
+    /// input transitions to the three dots and then widens again".
+    ///
+    /// Slack rather than a smaller constant: a percentage keeps the halves
+    /// halves on every width, and the two points is what keeps them off the
+    /// edge on all of them.
+    private static let share: CGFloat = 0.48
 }
 
 struct LeadingSelectorBudget {
