@@ -20,41 +20,21 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
+      count: ${{ steps.list.outputs.count }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the lane selection diffs against the pull request's
+          # base commit, and a shallow clone has nothing to diff against.
+          fetch-depth: 0
 
-      - name: List packages under test
+      - name: Choose test lanes
         id: list
-        run: |
-          set -euo pipefail
-
-          entries=()
-
-          # Every local package that has a test target (a Tests/ dir with sources).
-          for manifest in $(find Packages -name Package.swift -not -path '*/.build/*' | sort); do
-            dir=$(dirname "$manifest")
-            ls "$dir"/Tests/*/*.swift >/dev/null 2>&1 || continue
-            name=$(grep -m1 -E 'name:[[:space:]]*"' "$dir/Package.swift" | sed -E 's/.*name:[[:space:]]*"([^"]+)".*/\1/')
-            entries+=("{\"label\":\"$name\",\"name\":\"$name\",\"dir\":\"$dir\",\"scheme\":\"\",\"avsbdl\":\"\"}")
-          done
-
-          # MediaPlayback's AVSampleBufferDisplayLayer backing is the process
-          # default, and layerClass resolves once per process — so the entry
-          # above only ever covers the new path. This second entry forwards
-          # AVSBDL_RENDER=0 to the test runner to cover the legacy
-          # AVPlayerLayer backing; the suite prints which backing it actually
-          # got ("[avsbdl-test] backing = ..."), so a forwarding regression is
-          # visible in the log rather than a silent double-run of one path.
-          # It pins the product scheme deliberately: the -Package scheme would
-          # drag in siblings this pass does not need.
-          entries+=('{"label":"MediaPlayback (legacy AVPlayerLayer)","name":"MediaPlayback","dir":"Packages/Core/MediaPlayback","scheme":"MediaPlayback","avsbdl":"0"}')
-
-          matrix=$(printf '%s\n' "${entries[@]}" | paste -sd, - )
-          matrix="[$matrix]"
-          echo "$matrix" | python3 -m json.tool > /dev/null   # fail loudly on malformed JSON
-          echo "Packages under test:"
-          echo "$matrix" | python3 -c 'import json,sys; [print(" -", e["label"]) for e in json.load(sys.stdin)]'
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+        env:
+          # Empty on a push to develop, which is what makes that run the full
+          # set — the backstop for a closure this script got wrong.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 .github/scripts/select_packages.py
 
   # ── The app itself ───────────────────────────────────────────────────────
   # Off the critical path: this runs alongside the test lanes.
@@ -138,6 +118,9 @@ jobs:
   test:
     name: test ${{ matrix.pkg.label }}
     needs: discover
+    # A change that cannot reach any package (app sources, docs) selects no
+    # lanes. Guard on the count rather than handing GitHub an empty matrix.
+    if: ${{ needs.discover.outputs.count != '0' }}
     runs-on: macos-latest
     timeout-minutes: 45
     strategy:
@@ -256,9 +239,19 @@ jobs:
           FAILED=()
           [ "${{ needs.discover.result }}"  = "success" ] || FAILED+=("discover")
           [ "${{ needs.build-app.result }}" = "success" ] || FAILED+=("build-app")
-          [ "${{ needs.test.result }}"      = "success" ] || FAILED+=("test")
+          # "skipped" is a pass here: it means the change could not reach any
+          # package. Without this the required check fails on a docs-only or
+          # app-only pull request.
+          case "${{ needs.test.result }}" in
+            success|skipped) ;;
+            *) FAILED+=("test") ;;
+          esac
           if [ ${#FAILED[@]} -ne 0 ]; then
             echo "::error::Failed: ${FAILED[*]} — open the job list above for the failing lane"
             exit 1
           fi
-          echo "App builds (Debug + Release) and all package tests passed."
+          if [ "${{ needs.test.result }}" = "skipped" ]; then
+            echo "App builds (Debug + Release) passed. No package could be reached by this change, so no lane ran."
+          else
+            echo "App builds (Debug + Release) and every selected package test passed."
+          fi
