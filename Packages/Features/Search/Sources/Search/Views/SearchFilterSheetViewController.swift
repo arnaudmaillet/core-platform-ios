@@ -202,13 +202,19 @@ final class SearchFilterSheetViewController: UIViewController {
             guard let self, let control else { return }
             self.pick(groupID: group.id, index: control.selectedSegmentIndex)
         }, for: .valueChanged)
-        // ⚠️ THE SHEET'S DRAG AND THE SEGMENT'S DRAG ARE THE SAME GESTURE UNTIL
-        // ONE OF THEM YIELDS. A segmented control tracks a finger sliding
-        // ACROSS it — that is how you scrub between options without lifting —
-        // and a sheet tracks a finger dragging it DOWN. A diagonal drag on a
-        // segment is both, and the sheet wins because its recognizer sits above
-        // in the hierarchy: the sheet slides away while the viewer is still
-        // choosing.
+        // ⚠️ THE CONFLICT IS MOSTLY THE DISABLED SEGMENTS, and that is worth
+        // knowing because it dates this code. A segmented control tracks a
+        // finger sliding ACROSS it — that is how you scrub between options
+        // without lifting — and a sheet tracks a finger dragging it DOWN. An
+        // ENABLED segment consumes the touch and the two never meet; a DISABLED
+        // one does not, so the sheet's pan takes it and the sheet slides away
+        // under a finger that was aiming at an option.
+        //
+        // Seven of twelve segments are disabled today because `search.v1`
+        // cannot honour them (see `filterGroups`). When it can, they are either
+        // enabled or gone, and this guard has almost nothing left to do — it
+        // stays for the diagonal drag on an enabled segment, which is the same
+        // race with a much smaller window.
         //
         // So the sheet's own pan stands down for the length of the touch.
         control.addAction(UIAction { [weak self] _ in self?.setSheetDragEnabled(false) },
