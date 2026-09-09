@@ -373,8 +373,8 @@ struct SearchFilterTrayTests {
         await host.showResults("haddad")
         await host.settleAnswer()
         let results = try? #require(host.results)
-        let field = results?.navigationItem.titleView?
-            .subviews.compactMap { $0 as? UITextField }.first
+        let field = results?.navigationItem.rightBarButtonItems?
+            .compactMap { $0.customView as? UITextField }.first
         #expect(field?.text == "haddad")
 
         // A refine screen submits something else, then goes.
@@ -426,28 +426,32 @@ struct SearchFilterTrayTests {
         var asked = 0
         results?.onEditQuery = { asked += 1 }
 
-        let field = try? #require(results?.navigationItem.titleView?
-            .subviews.compactMap { $0 as? UITextField }.first)
+        let field = try? #require(
+            results?.navigationItem.rightBarButtonItems?
+                .compactMap { $0.customView as? UITextField }.first
+        )
         #expect(field?.becomeFirstResponder() == false)
         #expect(field?.isFirstResponder == false)
         #expect(asked == 1)
     }
 
-    /// The header keeps one shape: the two halves are tied to each other, so
-    /// the split holds at whatever width the bar hands the title view.
-    @Test func theHeaderSplitsTheRowInHalf() async {
+    /// ⚠️ REAL BAR ITEMS, NOT A COMPOSITE TITLE VIEW. A title view is one view
+    /// to UIKit: a push snapshots it and cross-fades the picture, so the glass
+    /// bubbles cannot interpolate into the destination's. Items do.
+    @Test func theHeaderIsBuiltFromBarItems() async {
         let host = Host()
         await host.showResults("haddad")
         let results = host.results
-        let row = try? #require(results?.navigationItem.titleView as? UIStackView)
-        #expect(row?.arrangedSubviews.count == 2)
-        let equal = row?.arrangedSubviews.first?.constraints.contains { constraint in
-            constraint.firstAttribute == .width && constraint.multiplier == 1
-        }
-        // The constraint is installed on the tab bar against the field, so it
-        // is held by their common ancestor rather than by either view.
-        let held = row?.constraints.contains { $0.firstAttribute == .width } ?? false
-        #expect(held || equal == true)
+
+        // The query is a trailing item...
+        #expect(results?.navigationItem.rightBarButtonItems?
+            .compactMap { $0.customView as? UITextField }.count == 1)
+        // ...and the selector SUPPLEMENTS the back button rather than replacing
+        // it, which is what keeps the interactive pop alive — `NativePopPolicy`
+        // refuses the edge gesture for a custom leading item without this, and
+        // refuses it outright for a hidden back button.
+        #expect(results?.navigationItem.leftItemsSupplementBackButton == true)
+        #expect(results?.navigationItem.hidesBackButton == false)
     }
 
     // MARK: - Cancel and Done

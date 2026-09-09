@@ -11,6 +11,39 @@ import UIKit
 /// left. It is a horizontal scroller, so "what is left" is always enough: down
 /// to `bubbleWidth` it is a perfect circle showing one tab and swiping to the
 /// rest.
+/// How wide a control beside a leading selector may be.
+///
+/// ⚠️ **A HALF WITH A BUBBLE FLOOR, which is why a `•••` should be impossible.**
+/// UIKit sweeps a group into an overflow when its items ask for more than the
+/// bar has. Both controls asking for HALF of what is actually left can never do
+/// that — and floored at their own height, the worst case is a bar holding
+/// three perfect bubbles, which is narrower than any device this app runs on.
+///
+/// It exists because the first version of the search results header stated
+/// 150pt a side by hand: ten points over the budget on a 402pt bar, and UIKit
+/// answered with a `•••`. A number can be wrong for a device nobody tested; a
+/// proportion with a floor cannot.
+///
+/// The arithmetic lives here, beside the constants it is made of, rather than
+/// in the screen that needs it — the same reason `LeadingSelectorBudget` does.
+public enum NavigationBarShare {
+    /// Half of what `barWidth` has left beside a back button and one other
+    /// control, never less than `bubble`.
+    ///
+    /// - `bubble`: the control's own height. A control as wide as it is tall is
+    ///   one perfect bubble, which is the least a control can be and still be a
+    ///   control — the floor `LeadingSelectorItem.ceiling(bubbleWidth:)` uses
+    ///   for the same reason.
+    public static func halfBesideBackButton(inBarOfWidth barWidth: CGFloat, bubble: CGFloat) -> CGFloat {
+        let claimed = LeadingSelectorBudget.barMargin * 2
+            + LeadingSelectorBudget.itemWidth          // the back button
+            + LeadingSelectorBudget.platterGap         // back ↔ selector
+            + LeadingSelectorBudget.interGroupGap      // leading ↔ trailing
+            + LeadingSelectorBudget.platterPadding
+        return max(bubble, (barWidth - claimed) / 2)
+    }
+}
+
 struct LeadingSelectorBudget {
     /// The width UIKit draws a bar item's platter at — the standard 44pt touch
     /// target, which is also the least room a glyph item occupies.

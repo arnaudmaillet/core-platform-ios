@@ -15,29 +15,28 @@ import UIKit
 ///
 /// # The header
 ///
-/// `[back][selector][query]`, one row, the selector and the field splitting
-/// what the back button leaves down the middle.
+/// `[back][selector]` in the LEADING group, `[query]` in the trailing one.
 ///
-/// ⚠️ ONE VIEW IN THE TITLE SLOT — WHICH IS NOT THE SAME AS ONE CONTROL, and
-/// getting that wrong cost this screen a revision. `navigationItem.titleView`
-/// takes a single view, so the selector and the field cannot be two ITEMS; but
-/// a view can contain both, and a composite in the title slot is one view by
-/// UIKit's reckoning. The first build stacked them — field in the title,
-/// selector on a floating strip beneath — on the conclusion that a row was
-/// impossible. It was not.
+/// ⚠️ REAL BAR ITEMS, AND THE COMPOSITE THEY REPLACE IS WHY. This was one
+/// `UIStackView` in `navigationItem.titleView` holding both controls, which
+/// looked identical at rest and animated wrongly: a title view is ONE view to
+/// UIKit, so a push snapshots it and cross-fades the picture. The individual
+/// glass bubbles cannot interpolate into the destination's, because as far as
+/// the bar is concerned there are no individual bubbles. Bar ITEMS do
+/// interpolate, which is what every other header in this app relies on.
 ///
-/// ⚠️ THE LEADING GROUP IS STILL BARRED, and that part was right.
-/// `NativePopPolicy` refuses the edge-swipe pop when a custom leading item sits
-/// beside the back button and `leftItemsSupplementBackButton` is false, and
-/// `ProfileRelationshipsViewController` records that back + selector in one
-/// leading group collapses into a `•••` on an iPhone SE. The composite keeps
-/// the leading group to the back button alone, so the pop survives.
+/// ⚠️ `leftItemsSupplementBackButton = true` IS LOAD-BEARING, not tidiness.
+/// `NativePopPolicy` refuses the interactive edge pop when a custom leading
+/// item sits beside the back button and that flag is false — which is exactly
+/// why an earlier revision here concluded the leading group was unusable and
+/// reached for the title slot instead. The flag is the answer that policy is
+/// asking for: the system back button stays the back button, and the selector
+/// beside it is a supplement.
 ///
-/// ⚠️ THE SELECTOR SCROLLS WHEN IT DOES NOT FIT, and at half of a narrow bar it
-/// often will not. That is `PagedTabBar`'s documented behaviour for a title
-/// host — its minimums are required and the strip overflows and scrolls rather
-/// than truncating a title, with `keepLensVisible` bringing the selected tab
-/// back. Three tabs in ~150pt degrades by hiding a tab reachably instead of by
+/// ⚠️ THE SELECTOR SCROLLS WHEN IT DOES NOT FIT — `PagedTabBar`'s documented
+/// behaviour for a bar host. Its minimums are required, so the strip overflows
+/// and scrolls rather than truncating a title, with `keepLensVisible` bringing
+/// the selected tab back: it degrades by hiding a tab reachably instead of by
 /// rendering an unreadable word.
 ///
 /// # The three pages
@@ -168,39 +167,72 @@ final class SearchResultsViewController: UIViewController {
         searchField.returnKeyType = .search
         searchField.delegate = self
 
-        tabBar.translatesAutoresizingMaskIntoConstraints = false
         searchField.translatesAutoresizingMaskIntoConstraints = false
-
-        let row = UIStackView(arrangedSubviews: [tabBar, searchField])
-        row.axis = .horizontal
-        row.spacing = 8
-        row.alignment = .center
-        // ⚠️ HALVES, and stated as a constraint rather than as
-        // `.fillEqually`. A stack's equal fill divides the space it is GIVEN,
-        // and a title view is given whatever the bar has left over — which
-        // UIKit decides after measuring intrinsic sizes. Tying the two widths
-        // to each other makes the split hold at whatever width the bar lands
-        // on, including when the field grows a clear button mid-edit.
-        // ⚠️ HALVES, tied to each OTHER rather than to the row. The row is
-        // whatever the bar leaves over, which UIKit decides after measuring
-        // intrinsic sizes; a relation between the two survives that being
-        // decided late, and `.fillEqually` on a stack of unknown width does
-        // not.
-        //
-        // It briefly widened to 70% while the field was focused. The field
-        // cannot be focused any more — see `textFieldShouldBeginEditing` — so
-        // there is one shape and no reason to animate between two.
-        tabBar.widthAnchor.constraint(equalTo: searchField.widthAnchor).isActive = true
         NSLayoutConstraint.activate([
-            tabBar.heightAnchor.constraint(
-                equalToConstant: NavigationBarMetrics.itemPlatterHeight
-            ),
             searchField.heightAnchor.constraint(
                 equalToConstant: NavigationBarMetrics.itemPlatterHeight
-            )
+            ),
+            queryWidth
         ])
-        navigationItem.titleView = row
+
+        // ⚠️ TRAILING FIRST, THEN THE SELECTOR. `installLeadingSelector`
+        // measures the room the rest of the bar has already claimed, so the
+        // field has to be in place before it is asked. Its own note says the
+        // same: "add the trailing actions BEFORE calling this".
+        navigationItem.rightBarButtonItems = [UIBarButtonItem(customView: searchField)]
+
+        // ⚠️ `leftItemsSupplementBackButton` KEEPS THE INTERACTIVE POP ALIVE
+        // beside a custom leading item — `NativePopPolicy` refuses the edge
+        // gesture without it, which is why an earlier revision here concluded
+        // the leading group was unusable and reached for the title slot.
+        navigationItem.leftItemsSupplementBackButton = true
     }
+
+    /// What the query field asks for: HALF of what the bar has left beside the
+    /// back button and the selector, floored at one perfect bubble.
+    ///
+    /// ⚠️ A PROPORTION, NOT A NUMBER, and the first version here was a number.
+    /// 150pt a side was ten points over the budget on a 402pt bar and UIKit
+    /// answered with a `•••` — a stated width can be wrong for a device nobody
+    /// tested, and this one would have been wrong on every one of them. Floored
+    /// at the control's own height, the worst case is a bar holding three
+    /// bubbles, which no device is narrower than.
+    ///
+    /// Restated on every layout, because a bar item's custom view is measured
+    /// before it has a bar to measure against — the constraint is created with
+    /// a placeholder and corrected as soon as there is a width to read.
+    private lazy var queryWidth: NSLayoutConstraint =
+        searchField.widthAnchor.constraint(
+            equalToConstant: NavigationBarMetrics.itemPlatterHeight
+        )
+
+    /// ⚠️ THE FIELD IS SIZED BEFORE THE SELECTOR IS INSTALLED, and the order is
+    /// the whole fix. `installLeadingSelector` caps the strip against the room
+    /// the TRAILING group is asking for AT THAT MOMENT. Installed in
+    /// `viewDidLoad`, it measured a field still holding its one-bubble
+    /// placeholder, handed the selector nearly the whole bar, and then the field
+    /// grew to its half — two groups over the bar's width, and UIKit answered
+    /// with a `•••`. Nudging the bar to re-measure afterwards did not help: the
+    /// cap had already been taken.
+    ///
+    /// So nothing is installed until there is a real bar width to divide.
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        guard let bar = navigationController?.navigationBar, bar.bounds.width > 0 else { return }
+        let wanted = NavigationBarShare.halfBesideBackButton(
+            inBarOfWidth: bar.bounds.width,
+            bubble: NavigationBarMetrics.itemPlatterHeight
+        )
+        if queryWidth.constant != wanted {
+            queryWidth.constant = wanted
+            searchField.superview?.layoutIfNeeded()
+        }
+        guard !hasInstalledSelector else { return }
+        hasInstalledSelector = true
+        navigationItem.installLeadingSelector(tabBar)
+    }
+
+    private var hasInstalledSelector = false
 
     // MARK: - Pages
 
