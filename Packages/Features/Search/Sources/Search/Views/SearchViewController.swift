@@ -273,21 +273,21 @@ final class SearchViewController: UIViewController {
         // No dimming: the results land in THIS collection view, so there is
         // nothing above to obscure and a scrim would only grey out the answer.
         searchController.obscuresBackgroundDuringPresentation = false
-        // ⚠️ THE PLACEHOLDER IS NOT THE RESTING STATE, and removing it for
-        // that reason was a mistake worth recording.
+        // ⚠️ NO PLACEHOLDER AT ALL.
         //
-        // With `.integratedButton` the resting representation is the magnifier
-        // BUTTON: no field, no placeholder, nothing to read. The placeholder is
-        // only ever on screen while the field is open — and, crucially, while
-        // it CLOSES. Taking it away left UIKit collapsing an empty pill, and an
-        // empty pill shrinking across the bar is the "big empty space" the
-        // closing animation was reported for. Filmed both ways: with the text
-        // the collapse reads as a field shrinking to its icon; without it, as a
-        // blank slab drifting.
+        // The previous revision of this file argued the opposite, from frame
+        // sheets: with `.integratedButton` the placeholder is never on screen
+        // at rest, and emptying the field made UIKit's collapse read as a
+        // blank slab crossing the bar rather than a field shrinking to its
+        // icon. That reasoning is sound about what the FRAMES contain and was
+        // still overruled — by the person watching it move, twice, which is
+        // the authority that matters for an animation.
         //
-        // So it stays. It costs nothing at rest, because at rest it does not
-        // exist.
-        searchController.searchBar.placeholder = "Search people"
+        // Recorded rather than deleted so the next reader knows the trade was
+        // examined and decided, not missed: if the closing ever needs to be
+        // revisited, the placeholder is the one thing that changes what is in
+        // the field while UIKit plays that animation.
+        searchController.searchBar.placeholder = nil
         searchController.searchBar.autocapitalizationType = .none
         searchController.searchBar.autocorrectionType = .no
         searchController.searchBar.returnKeyType = .search
