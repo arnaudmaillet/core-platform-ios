@@ -26,6 +26,34 @@ enum ForYouSelectorDock {
         #endif
     }
 
+    /// `-foryou-minimize-only`: arm the minimize with NO accessory at all.
+    ///
+    /// ⚠️ **THE BASELINE, AND IT IS WHAT ACQUITS THE ACCESSORY.** Measured on
+    /// the simulator, inter-frame difference over the chrome band alone:
+    ///
+    ///     Apple Music, real device @120fps   24 frames = 200ms, peak 28
+    ///     this app WITH the accessory        5 frames  =  83ms, peak 87
+    ///     this app WITHOUT it (this flag)    1 frame   =  17ms, peak 93
+    ///
+    /// The bare bar snaps HARDER and FASTER than the accessory does, so nothing
+    /// about the accessory introduced it. Ruled out along the way, each by its
+    /// own run: the foot-cover re-publish from `layoutSubviews`, the
+    /// `fillsWidth` toggle in the trait callback, the shell's per-layout
+    /// overlay alignment, a slow finger instead of a flick (the collapse is not
+    /// tracked to the drag), Reduce Motion, and Slow Animations.
+    ///
+    /// ⚠️ AND THE COMPARISON IS DEVICE-VERSUS-SIMULATOR. The reference is a
+    /// 1320x2868 120fps device recording; every measurement here is a
+    /// simulator. Settling it needs a device, which this instrument cannot
+    /// reach — so do not "fix" the accessory for it.
+    static var isMinimizeOnly: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-foryou-minimize-only")
+        #else
+        false
+        #endif
+    }
+
     /// `-foryou-dock-trace`: one line per layout and per environment change.
     static var isTracing: Bool {
         #if DEBUG
@@ -72,8 +100,19 @@ enum ForYouSelectorDock {
 /// (`PagedTabBar`'s segment widths are required, and its content is `>=` the
 /// frame guide).
 final class ForYouSelectorAccessoryHost: UIView {
+    /// The gap between the strip and the container, on EVERY side.
+    ///
+    /// ⚠️ ONE NUMBER, FOUR EDGES, AND THAT IS THE POINT. Pinned flush
+    /// horizontally and centred vertically, the selection lens touched the
+    /// container's left and right edges while sitting 6pt clear of its top and
+    /// bottom — a selected first or last tab read as spilling out of the band.
+    /// The lens fills its segment when the backdrop is suppressed, so the
+    /// strip's inset IS the lens's margin, and pinning all four edges to the
+    /// same constant makes them equal by construction rather than by
+    /// arithmetic that goes stale when the container's height changes.
+    private static let contentInset: CGFloat = 4
+
     private let strip: PagedTabBar
-    private let stripHeight: CGFloat
 
     /// Fired from `layoutSubviews`, because there is no other signal.
     ///
@@ -85,30 +124,19 @@ final class ForYouSelectorAccessoryHost: UIView {
 
     init(strip: PagedTabBar) {
         self.strip = strip
-        // Bare, the capsule's padding and lens inset are zero, so the strip is
-        // its segments and nothing more; with its own glass it wants the full
-        // 44 the capsule is drawn for.
-        self.stripHeight = ForYouSelectorDock.keepsOwnGlass ? 44 : 36
         super.init(frame: .zero)
 
         strip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(strip)
 
-        let height = strip.heightAnchor.constraint(equalToConstant: stripHeight)
-        // ⚠️ 999, NOT REQUIRED. The container is 48pt today in both
-        // environments, but a required equality would break constraints
-        // outright the first time UIKit hands out a shorter band — where the
-        // `<=` below simply makes the strip shorter, which is the direction
-        // that still renders.
-        height.priority = .init(999)
-
+        let inset = Self.contentInset
         NSLayoutConstraint.activate([
-            // No width constraint. See the note above.
-            strip.leadingAnchor.constraint(equalTo: leadingAnchor),
-            strip.trailingAnchor.constraint(equalTo: trailingAnchor),
-            strip.centerYAnchor.constraint(equalTo: centerYAnchor),
-            height,
-            strip.heightAnchor.constraint(lessThanOrEqualTo: heightAnchor)
+            // ⚠️ NO WIDTH CONSTRAINT — see the note above. These are edge pins,
+            // which say where the strip is, not how wide it may be.
+            strip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            strip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            strip.topAnchor.constraint(equalTo: topAnchor, constant: inset),
+            strip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
         ])
 
         // The one appearance property that may change after init, and the only
@@ -126,7 +154,7 @@ final class ForYouSelectorAccessoryHost: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: stripHeight + 8)
+        CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
     }
 
     override func layoutSubviews() {
@@ -140,6 +168,7 @@ final class ForYouSelectorAccessoryHost: UIView {
     }
 
     private var lastTrace = ""
+    private var traceCount = 0
 
     private func trace(_ reason: String) {
         guard ForYouSelectorDock.isTracing else { return }
@@ -152,15 +181,28 @@ final class ForYouSelectorAccessoryHost: UIView {
         @unknown default: environment = "?"
         }
         let wanted = strip.intrinsicContentSize.width
+        // ⚠️ THE POSITION, NOT ONLY THE SIZE. A collapse that reads as a
+        // teleport is either a frame that snaps or a frame that travels while
+        // its CONTENTS snap, and only the origin tells them apart.
+        let inWindow = window.map { convert(bounds, to: $0) } ?? .zero
+        // ⚠️ READ AFTER THE PASS, NOT DURING IT. `layoutSubviews` runs before
+        // Core Animation attaches anything, so a presentation layer read here
+        // is nil whether or not an animation is coming — a measurement that
+        // can only ever return "no animation". The animation KEYS answer the
+        // same question honestly.
+        let keys = layer.animationKeys()?.joined(separator: "+") ?? "none"
         let line = String(
-            format: "env=%@ host=%.0fx%.0f strip=%.0fx%.0f wants=%.0f overflow=%.0f",
-            environment, bounds.width, bounds.height,
+            format: "env=%@ host=%.0fx%.0f@%.0f,%.0f anim=%@ "
+                + "strip=%.0fx%.0f wants=%.0f overflow=%.0f",
+            environment, bounds.width, bounds.height, inWindow.minX, inWindow.minY,
+            keys,
             strip.bounds.width, strip.bounds.height,
             wanted, max(0, wanted - strip.bounds.width)
         )
         guard line != lastTrace else { return }
         lastTrace = line
-        print("[dock] \(reason) \(line)")
+        traceCount += 1
+        print("[dock] #\(traceCount) \(reason) \(line)")
     }
 }
 
@@ -188,7 +230,16 @@ final class ForYouSelectorAccessory {
     }
 
     func install(into controller: UITabBarController?) {
-        guard let controller, controller.bottomAccessory?.contentView !== hostView else { return }
+        guard let controller else { return }
+        if ForYouSelectorDock.isMinimizeOnly {
+            if savedMinimizeBehavior == nil {
+                savedMinimizeBehavior = controller.tabBarMinimizeBehavior
+            }
+            controller.tabBarMinimizeBehavior = .onScrollDown
+            print("[dock] installed BASELINE - minimize armed, no accessory")
+            return
+        }
+        guard controller.bottomAccessory?.contentView !== hostView else { return }
 
         // Belt and braces, and the reason is written down in
         // `LeadingSelectorHost.sizeToOwnContent()`: a custom view keeps its
