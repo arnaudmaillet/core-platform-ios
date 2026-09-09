@@ -221,6 +221,8 @@ final class SearchResultsViewController: UIViewController {
     ///                                     settled one)
     ///   - field required, SELECTOR left
     ///     to absorb the shortfall       → `•••`
+    ///   - the field replaced by a bare
+    ///     `UILabel`, still required     → `•••`
     ///   - field yielding                → no `•••`
     ///
     /// ⚠️ THE THIRD IS THE INTERESTING ONE, because it is the better model on
@@ -230,6 +232,12 @@ final class SearchResultsViewController: UIViewController {
     /// its OWN layout pass, which does not come in time; the field's constraint
     /// priority is read by the very pass that decides whether to overflow. Only
     /// one of those two is in the room when the decision is made.
+    ///
+    /// ⚠️ AND THE FOURTH RULES OUT THE FIELD ITSELF. `UISearchTextField` was
+    /// swapped for a bare `UILabel` at the same required half, on the
+    /// suspicion that the field's own intrinsic behaviour — its clear button,
+    /// its glyph — was what would not fit. Same `•••`, same frames. The control
+    /// type does not decide this; the constraint's priority does.
     ///
     /// So the field yields, and the cost is written down where it shows: it
     /// narrows towards its bubble as the profile leaves and is back at full
