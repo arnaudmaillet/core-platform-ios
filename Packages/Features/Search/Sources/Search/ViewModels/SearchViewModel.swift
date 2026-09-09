@@ -405,7 +405,33 @@ public final class SearchViewModel {
         )
         // Only a name we actually have becomes a stub — see
         // `SearchRowDisplayModel.Action.openProfile`.
-        let stub = displayName.map { ProfileIdentityStub(handle: handle, displayName: $0) }
+        //
+        // ⚠️ THE FOLLOW STATE TRAVELS WITH IT, and leaving it out was a visible
+        // defect rather than a missing nicety. The stub's own note says why:
+        // without it "the router can only build the stranger variant, which
+        // then relabels itself when the relationship read comes back — a
+        // visible flicker".
+        //
+        // Measured with `-profile-navbar-audit`, opening a person from the
+        // results screen:
+        //
+        //     rebuild items=3 custom=1 state=edit   idle
+        //     rebuild items=1 custom=0 state=follow DURING-TRANSITION
+        //
+        // Two builds, the second one mid-push — and a bar rebuilt during a
+        // transition cannot interpolate, so the header's bubbles appeared
+        // instead of arriving. Opening the viewer's own profile, which needs no
+        // relationship read, logs one idle build and animates correctly.
+        //
+        // This screen has known the answer the whole time: it is the same
+        // `isFollowed` the row draws its "Following" context from.
+        let stub = displayName.map {
+            ProfileIdentityStub(
+                handle: handle,
+                displayName: $0,
+                isFollowing: resolvedMetadata[id]?.isFollowed
+            )
+        }
         router?.route(to: .profile(id, stub: stub))
         // The resting screen is what they come back to, and it now has one
         // more row in it.
