@@ -24,20 +24,9 @@ final class SearchViewController: UIViewController {
     private let viewModel: SearchViewModel
     private let imagePipeline: ImagePipeline
 
-    /// The classic magnifier, trailing, at rest.
-    private lazy var searchItem = UIBarButtonItem(
-        image: UIImage(systemName: "magnifyingglass"),
-        primaryAction: UIAction { [weak self] _ in self?.presentSearch() }
-    )
-
-    private lazy var cancelItem = UIBarButtonItem(
-        title: "Cancel",
-        primaryAction: UIAction { [weak self] _ in self?.dismissSearch() }
-    )
-
-    /// The field that takes the bar over while searching.
+    /// The field. It is the bar's title view for the life of the screen.
     private let searchField = UISearchTextField()
-    private var isSearching = false
+
     private var collectionView: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let statusView = EmptyStateView()
@@ -159,7 +148,7 @@ final class SearchViewController: UIViewController {
         hasClaimedField = true
         let claim = { [weak self] in
             guard let self else { return }
-            self.presentSearch()
+            self.searchField.becomeFirstResponder()
         }
         if let coordinator = transitionCoordinator {
             coordinator.animate(alongsideTransition: nil) { _ in claim() }
@@ -297,31 +286,30 @@ final class SearchViewController: UIViewController {
 
     // MARK: - Setup
 
-    /// The bar's two states, swapped by hand.
+    /// The bar, which has ONE state: `[ back ][ field ———————————————— ]`.
     ///
-    /// ⚠️ NO `UISearchController`, AND THAT IS THE WHOLE POINT. A search
-    /// controller owns its own activation animation: on iOS 26 it collapses
-    /// the active field into the navigation bar's glass PLATTER, and that
-    /// platter is not this app's to remove, resize or opt out of. Measured
+    /// ⚠️ NO `UISearchController`, AND NOW NO SWAP EITHER.
+    ///
+    /// A search controller owns its own activation animation: on iOS 26 it
+    /// collapses the active field into the navigation bar's glass PLATTER, and
+    /// that platter is not this app's to remove, resize or opt out of. Measured
     /// frame by frame through every placement (`.stacked`, `.integrated`,
     /// `.integratedButton`, `.integratedCentered`), with and without a
-    /// placeholder, with the text field hidden and with the search bar hidden:
-    /// the platter's width animation survives all of it, and the closing reads
-    /// as a wide empty capsule crossing the bar.
+    /// placeholder, with the field hidden and with the bar hidden: the
+    /// platter's width animation survives all of it, and the closing reads as a
+    /// wide empty capsule crossing the bar.
     ///
-    /// `MessagesInboxViewController` never had that problem because it never
-    /// used a search controller — it swaps the bar itself and dissolves
-    /// between the two states. This screen now does the same thing, which is
-    /// where it should have started.
+    /// `MessagesInboxViewController` avoided that by swapping the bar itself
+    /// and dissolving between a resting magnifier and a searching field. This
+    /// screen went one step further and has no resting state at all: it IS the
+    /// search, so the field is simply always there. The magnifier that opens it
+    /// lives on the Maps and For You headers, which is where the choice to
+    /// search is actually made.
     ///
-    ///     resting    [ selector-less bar ]              [ 🔍 ]
-    ///     searching  [ field ——————————————————————— ]  [ Cancel ]
-    ///
-    /// At rest the magnifier is an ordinary `UIBarButtonItem`, so it is a
-    /// bubble that hugs its glyph — a bar button is laid out to its icon,
-    /// which is exactly the resting shape this header asked for.
+    /// The closing animation that took a dozen attempts to tame therefore does
+    /// not exist here any more. There is nothing to close: the way out is the
+    /// back button.
     private func configureSearchAffordance() {
-        searchItem.accessibilityLabel = "Search"
         searchField.placeholder = nil
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no
@@ -335,63 +323,27 @@ final class SearchViewController: UIViewController {
         // ⚠️ A BARE `UISearchTextField`, not a `UISearchBar` — the inbox's note
         // verbatim, and for the same reason: a search bar carries its own
         // chrome (a background, its own layout margins, a field inset within
-        // them) and sits the input off the Cancel item's centre line whatever
+        // them) and sits the input off the back button's centre line whatever
         // the title slot does. A bare field IS the input, so it centres on the
         // slot's axis, which is the axis UIKit centres a bar item on.
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight).isActive = true
-        applyRestingBar()
+        // ⚠️ NO TRAILING ITEM, which is what lets the field run to the edge.
+        // The title slot takes whatever the bar has left over, so an empty
+        // trailing group is the width.
+        navigationItem.rightBarButtonItems = []
+        navigationItem.titleView = searchField
     }
 
     /// The field's height, matched to the bar's own glass platters.
     ///
     /// ⚠️ MEASURED OFF THE SCREEN, not inherited. This started at 36 — the
     /// inbox's constant, where it is right because that bar has no back button
-    /// beside the field to disagree with. Here the field sits between a back
-    /// chevron and Cancel, and a column profile through the rendered bar reads
-    /// 40.0pt for a bar-button platter against 36.0pt for the field: four
-    /// points short, which is exactly the mismatch you can see.
+    /// beside the field to disagree with. Here the field sits next to a back
+    /// chevron, and a column profile through the rendered bar reads 40.0pt for
+    /// a bar-button platter against 36.0pt for the field: four points short,
+    /// which is exactly the mismatch that was visible.
     private static let fieldHeight: CGFloat = 40
-
-    private func applyRestingBar() {
-        navigationItem.rightBarButtonItems = [searchItem]
-        // ⚠️ AN EMPTY VIEW, not nil — the same claim the leading selector makes
-        // on other screens. Left nil, UIKit keeps a central title reservation
-        // that the bar's own items cannot grow into.
-        let emptyTitle = UIView()
-        emptyTitle.frame = .zero
-        navigationItem.titleView = emptyTitle
-    }
-
-    /// `[ field ————————————————— ][ Cancel ]`
-    private func applySearchingBar() {
-        navigationItem.rightBarButtonItems = [cancelItem]
-        navigationItem.titleView = searchField
-    }
-
-    private func presentSearch() {
-        guard !isSearching else { return }
-        isSearching = true
-        // ⚠️ THE BAR STAYS TRANSLUCENT, unlike the inbox's, which turns opaque
-        // while searching so its rows do not read through the text. Every other
-        // header in this app is the blurred, see-through treatment, and a
-        // search screen that alone goes flat white reads as a different app.
-        morphNavigationBar {
-            self.applySearchingBar()
-        }
-        searchField.becomeFirstResponder()
-    }
-
-    private func dismissSearch() {
-        guard isSearching else { return }
-        isSearching = false
-        searchField.resignFirstResponder()
-        searchField.text = nil
-        report(query: "")
-        morphNavigationBar {
-            self.applyRestingBar()
-        }
-    }
 
     /// ⚠️ NOT "the viewer typed" on its own. The field also fires this when it
     /// is cleared programmatically, so the last reported text is compared
@@ -407,6 +359,7 @@ final class SearchViewController: UIViewController {
         lastReportedQuery = text
         viewModel.queryChanged(text)
     }
+
 
     private func configureCollectionView() {
         let layout = ExploreLayout.make { [weak self] index in
