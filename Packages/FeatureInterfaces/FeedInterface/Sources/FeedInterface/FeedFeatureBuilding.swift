@@ -268,6 +268,16 @@ public protocol FeedFeatureBuilding {
 public protocol PostSetSurface: AnyObject {
     var viewController: UIViewController { get }
     func show(_ state: PostSetSurfaceState)
+
+    /// Whether this surface is the one the viewer is looking at.
+    ///
+    /// ⚠️ THE CALLER OWNS THIS, and it is not the same question as "is my view
+    /// in a window". A surface can be laid out, loaded and one swipe away
+    /// while another is on screen — which is exactly what a pager does — and a
+    /// surface that started playing on being loaded would have two or three
+    /// grids borrowing players for tabs nobody is reading. The host knows which
+    /// page is active; the surface cannot.
+    func setPlaybackActive(_ active: Bool)
 }
 
 /// Which of the two For You shapes the caller wants.

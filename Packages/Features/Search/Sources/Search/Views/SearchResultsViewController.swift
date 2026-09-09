@@ -210,6 +210,21 @@ final class SearchResultsViewController: UIViewController {
             self.pager.setActivePage(self.tabBar.selectedIndex, animated: true)
         }, for: .valueChanged)
 
+        // ⚠️ THE USERS TAB HAD NO HANDLER AT ALL. `SearchPeoplePage.onSelect`
+        // was declared and never assigned, so a tap on a person did nothing —
+        // and "nothing" on a row that highlights and deselects under the finger
+        // is indistinguishable from a screen that has stopped responding.
+        //
+        // A PLAIN PUSH, deliberately, and not the flight the post tabs get. A
+        // person row has no picture to carry: the avatar is a 48pt disc that a
+        // profile header does not open out of, and this app already reserves
+        // the flight for a media surface that the destination redraws at full
+        // size. `SearchViewModel.didSelectResult` is the same path the inline
+        // results used before this screen existed — it records the visit and
+        // routes with the identity stub the row already holds, so the profile
+        // opens on a name and a face rather than on a spinner.
+        peoplePage.onSelect = { [weak self] id in self?.viewModel.didSelectResult(id) }
+
         for page in [postsPage.viewController, mediaPage.viewController, peoplePage] {
             addChild(page)
             page.didMove(toParent: self)
@@ -223,7 +238,10 @@ final class SearchResultsViewController: UIViewController {
         // moved on its own taps would sit on "Posts" while the viewer read the
         // gallery, which is the bug this channel exists to prevent.
         pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
-        pager.onSettled = { [weak self] index in self?.tabBar.select(index) }
+        pager.onSettled = { [weak self] index in
+            self?.tabBar.select(index)
+            self?.updatePlayback()
+        }
 
         view.addSubview(pager)
         NSLayoutConstraint.activate([
@@ -297,8 +315,22 @@ final class SearchResultsViewController: UIViewController {
         navigationController?.setToolbarHidden(false, animated: animated)
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // ⚠️ HERE, NOT `viewWillAppear`. The window is what
+        // `updatePlayback` reads, and a screen arriving has none until it has
+        // appeared — asked earlier it would decide "not visible" and leave
+        // every clip frozen on the screen the viewer is looking at.
+        updatePlayback()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Anything pushed over this screen — a post, a profile, a refine — gets
+        // the pool. A grid under another screen holding players is the leak
+        // this call exists to prevent.
+        postsPage.setPlaybackActive(false)
+        mediaPage.setPlaybackActive(false)
         guard isMovingFromParent else { return }
         navigationController?.setToolbarHidden(true, animated: animated)
     }
@@ -362,6 +394,21 @@ final class SearchResultsViewController: UIViewController {
             guard let self else { return }
             self.showPosts(self.postState(for: self.viewModel.currentPhase))
         }
+    }
+
+    /// Exactly ONE surface plays: the tab that is showing, and only while this
+    /// screen is.
+    ///
+    /// ⚠️ THE OTHER TABS ARE LAID OUT AND MUST BE SILENT. A pager builds every
+    /// page; without this, two grids would hold players for tabs nobody is
+    /// reading, out of a pool the whole app shares. For You's pager applies the
+    /// same rule at the same granularity — the page at the active index, and no
+    /// other.
+    private func updatePlayback() {
+        let active = isViewLoaded && view.window != nil
+        let index = tabBar.selectedIndex
+        postsPage.setPlaybackActive(active && index == 0)
+        mediaPage.setPlaybackActive(active && index == 1)
     }
 
     private func showPosts(_ state: SearchPostSurfaceState) {

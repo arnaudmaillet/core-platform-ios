@@ -46,6 +46,8 @@ struct SearchPostSurfaceAdapter: SearchPostSurfaceProviding {
 
         var viewController: UIViewController { surface.viewController }
 
+        func setPlaybackActive(_ active: Bool) { surface.setPlaybackActive(active) }
+
         func show(_ state: SearchPostSurfaceState) {
             let translated: PostSetSurfaceState = switch state {
             case .loading: .loading

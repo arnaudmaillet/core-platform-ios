@@ -20,6 +20,9 @@ final class SearchPendingSurfaceViewController: UIViewController, SearchPostSurf
     /// rather than branching on whether a provider was wired.
     func show(_ state: SearchPostSurfaceState) {}
 
+    /// Nothing here plays.
+    func setPlaybackActive(_ active: Bool) {}
+
     enum Kind {
         case posts
         case media

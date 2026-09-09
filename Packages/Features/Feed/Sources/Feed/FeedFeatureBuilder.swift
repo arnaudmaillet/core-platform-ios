@@ -354,6 +354,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let surface = PostSetSurfaceViewController(
             style: style,
             imagePipeline: imagePipeline,
+            // The app's one pool, the same instance For You's tabs borrow from.
+            videoPlayback: videoPlayback,
             hydrate: { ids in
                 // The place profile's hydration, verbatim in shape: a fixed-set
                 // provider through the For You repository so every member is a

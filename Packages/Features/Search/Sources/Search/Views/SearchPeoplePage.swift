@@ -103,6 +103,29 @@ final class SearchPeoplePage: UIViewController {
     /// observe about this page without reaching into cells.
     var rowCountForTesting: Int { dataSource.snapshot().numberOfItems }
 
+    #if DEBUG
+    /// `-search-tap-user <index>` selects a row the way a finger would — the
+    /// simulator injects no touches, and the only way to see what a tap does
+    /// is to take the same path a tap takes.
+    private var didTapForQA = false
+
+    private func tapRowForQAIfRequested() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let position = arguments.firstIndex(of: "-search-tap-user"),
+              position + 1 < arguments.count,
+              let row = Int(arguments[position + 1]),
+              !didTapForQA
+        else { return }
+        didTapForQA = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self,
+                  self.dataSource.snapshot().numberOfItems > row
+            else { return }
+            self.collectionView(self.collectionView, didSelectItemAt: IndexPath(item: row, section: 0))
+        }
+    }
+    #endif
+
     func render(_ state: State) {
         switch state {
         case .loading:
@@ -125,6 +148,9 @@ final class SearchPeoplePage: UIViewController {
             let surviving = snapshot.itemIdentifiers.filter(carried.contains)
             if !surviving.isEmpty { snapshot.reconfigureItems(surviving) }
             dataSource.apply(snapshot, animatingDifferences: true)
+            #if DEBUG
+            tapRowForQAIfRequested()
+            #endif
             // ⚠️ AN EMPTY LIST HERE IS THE FILTER'S DOING, not the query's —
             // `.empty` is the phase for a query that matched nothing. Saying
             // "try different words" would blame the search for a scope the
