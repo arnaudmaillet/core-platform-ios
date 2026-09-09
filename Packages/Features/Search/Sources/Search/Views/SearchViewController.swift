@@ -99,62 +99,41 @@ final class SearchViewController: UIViewController {
     /// and saves a tap. The suggestions are one keyboard-dismiss away, which is
     /// the opposite of the old trade rather than a repeat of it.
     ///
-    /// It also buys the header's animation back. With `.integratedButton` the
-    /// RESTING representation is a magnifier, which is what makes the
-    /// dismissal coherent — the field collapses onto something instead of
-    /// cutting to a wide placeholder (see `preferredSearchBarPlacement`). The
-    /// cost of that placement was the bare button on arrival; activating on
-    /// appearance means the arrival is never that button.
-    ///
-    /// ⚠️ ONCE, and after the push has SETTLED. Activating a search controller
-    /// inside an appearance transition is how the field ends up half-presented
-    /// with no keyboard; the coordinator's completion is the first moment the
-    /// screen is genuinely on screen. `viewDidAppear` also fires again after
-    /// anything this screen pushed pops back, and re-claiming the keyboard
-    /// there would fight the viewer who just came back to read a result.
     private var hasClaimedField = false
 
-    // ⚠️ THE WHITE CAPSULE IS NOT THIS SCREEN'S TO REMOVE, and that is the
-    // end of what the native API allows here.
-    //
-    // Hiding `searchBar.searchTextField` for the collapse was tried — twice,
-    // because it is the obvious lever and it is what the shape of the artefact
-    // suggests. Filmed at 30fps, every frame, it does the opposite of what it
-    // looks like it should:
-    //
-    //     604-607  active field: magnifier, caret, clear button
-    //     608-611  magnifier and caret GONE — a wide empty capsule with only
-    //              the clear button in it, a state that did not exist before
-    //     612-627  the wide capsule collapses exactly as it did anyway
-    //
-    // So the capsule survives hiding the text field, which means it is not the
-    // text field's background: on iOS 26 it is the navigation bar's own glass
-    // PLATTER, the same one that hosts bar-button bubbles. The app can change
-    // what is INSIDE that platter — icon, caret, placeholder — and cannot
-    // remove it, resize it, or opt out of the width animation UIKit plays on
-    // it. `searchBar.alpha = 0` is likewise overridden by that animation.
-    //
-    // Everything that CAN be reached from here has now been measured:
-    // `.stacked`, `.integrated`, `.integratedButton`, `.integratedCentered`,
-    // with and without a placeholder, with the field hidden and with the bar
-    // hidden. A closing that lands straight on an icon-only bubble is not
-    // among them. It needs a navigation bar this app draws itself.
+    // ⚠️ THE HISTORY OF THIS BAR, kept because it is the reason it looks
+    // nothing like a `UISearchController`. A search controller owns its own
+    // activation animation, and on iOS 26 it collapses the active field into
+    // the navigation bar's glass PLATTER — which is not the app's to remove,
+    // resize or opt out of. Measured frame by frame through every placement
+    // (`.stacked`, `.integrated`, `.integratedButton`, `.integratedCentered`),
+    // with and without a placeholder, with the text field hidden and with the
+    // search bar hidden: the platter's width animation survives all of it.
+    // What removed the artefact was removing the resting state, not fighting
+    // the animation.
 
-
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
+    /// ⚠️ `viewWillAppear`, WHICH IS AS EARLY AS THIS CAN BE ASKED FOR.
+    ///
+    /// A view must be IN A WINDOW to become first responder, and the earliest
+    /// moment that is true on a push is here: the navigation controller has
+    /// already put this view into the transition's container. `viewDidLoad` is
+    /// too early — the field is not in a window yet and the call is simply
+    /// refused — and `viewDidAppear` is a whole push too late, which is what
+    /// this used to do (and, deferred to the transition coordinator's
+    /// completion on top of that, later still).
+    ///
+    /// Claiming it here means the keyboard rises ALONGSIDE the push rather
+    /// than after it: the screen arrives already focused instead of arriving
+    /// and then focusing.
+    ///
+    /// ⚠️ ONCE. `viewWillAppear` fires again when anything this screen pushed
+    /// pops back, and re-claiming the keyboard there would fight a viewer who
+    /// has just come back to read a result.
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
         guard !hasClaimedField else { return }
         hasClaimedField = true
-        let claim = { [weak self] in
-            guard let self else { return }
-            self.searchField.becomeFirstResponder()
-        }
-        if let coordinator = transitionCoordinator {
-            coordinator.animate(alongsideTransition: nil) { _ in claim() }
-        } else {
-            claim()
-        }
+        searchField.becomeFirstResponder()
     }
 
     /// ⚠️ THIS SCREEN NO LONGER TOUCHES THE BOTTOM CHROME, and the three hooks
@@ -310,7 +289,7 @@ final class SearchViewController: UIViewController {
     /// not exist here any more. There is nothing to close: the way out is the
     /// back button.
     private func configureSearchAffordance() {
-        searchField.placeholder = nil
+        searchField.placeholder = "Search..."
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no
         searchField.returnKeyType = .search
