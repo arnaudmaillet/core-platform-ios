@@ -27,7 +27,6 @@ import ProfileInterface
 import Search
 import SearchInterface
 import Upload
-import UploadInterface
 
 /// Composition root. The only place concrete implementations are chosen and
 /// wired; everything downstream receives protocols via initializer injection.
@@ -710,6 +709,14 @@ final class AppContainer {
 
     // MARK: - Compose / upload
 
+    // ⚠️ THE PIPELINE, WITH NO SCREEN IN FRONT OF IT. The compose screen was
+    // deleted with the "+" tab: upload is being rebuilt from scratch, and a
+    // half-designed screen is not a starting point. `PostComposer` is —
+    // IssueUploadTicket → byte upload → CommitUpload → ResolveDelivery →
+    // CreatePost → PublishPost is the same flow whatever picks the media, it
+    // is covered by tests, and `-mock-compose-demo` still drives it end to
+    // end. Whatever the new screen is, it talks to this.
+
     // Computed (not lazy): the PostComposer init is actor-isolated, which a
     // stored-property initializer can't call under default-MainActor isolation.
     private var cachedPostComposer: PostComposer?
@@ -744,8 +751,6 @@ final class AppContainer {
         }
         set { cachedPostComposer = newValue }
     }
-
-    private(set) lazy var uploadFeature: any UploadFeatureBuilding = UploadFeatureBuilder(composer: postComposer)
 
     /// Stable per-install identifier for session/device management
     /// (auth.v1.DeviceContext.device_id). Not an advertising identifier.

@@ -3,7 +3,6 @@ import NotificationsInterface
 import ProfileInterface
 import UIKit
 #if DEBUG
-import UploadInterface
 #endif
 
 /// The authenticated app shell: a `UITabBarController` composed of one child
