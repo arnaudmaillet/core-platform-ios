@@ -226,19 +226,35 @@ final class ForYouSelectorAccessoryHost: UIView {
     /// that view's class or its subviews; it is transformed as any `UIView`
     /// may be, and returned to identity by the animation that set it.
     ///
-    /// ⚠️ **ONE SPRING FOR THE WHOLE BURST, AND THAT IS THE THIRD CORRECTION.**
-    /// The two directions do not deliver their changes in one pass:
+    /// ⚠️ **EACH PASS COMPOSES ONTO THE ONE IN FLIGHT, AND THAT IS WHAT MAKES
+    /// IT SURVIVE REPETITION.** Neither direction delivers its change in one
+    /// pass:
     ///
     ///     collapsing   width and x, then the 63pt drop
     ///     expanding    the 63pt rise, then the 126pt widening
     ///
-    /// Animating each pass as it arrived therefore fired TWO springs back to
-    /// back, and on the expand the second one — the widening — began only as
-    /// the first was ending. "The container only grows at the end" is exactly
-    /// that. So a change starts no animation: it moves the container back to
-    /// where the burst began and leaves it there, un-animated, and a single
-    /// spring is played once the passes stop. Nothing is ever shown at its
-    /// final geometry un-carried, and there is only ever one animation.
+    /// Animating each pass on its own fired two springs back to back, and on
+    /// the expand the second — the one carrying the capsule's width — began
+    /// only as the first was ending. Coalescing them behind a
+    /// `DispatchQueue.main.async` fixed that MOST of the time and is why it
+    /// degraded after a few iterations: whether that hop lands between the two
+    /// passes or after both is a property of where the runloop turn happens to
+    /// fall, not of this code. It was a race, and a race dressed as a fix comes
+    /// back.
+    ///
+    /// So there is no hop and no burst to coalesce. A pass computes the
+    /// compensation for ITS OWN delta and CONCATENATES it onto whatever the
+    /// presentation layer is currently showing:
+    ///
+    ///     want   geometryNew ∘ Tnew  ==  geometryOld ∘ Tpresented
+    ///     given  geometryNew ∘ delta ==  geometryOld
+    ///     so     Tnew = Tpresented.concatenating(delta)
+    ///
+    /// The extra factor cancels the geometry change exactly, so the pixels do
+    /// not move at the instant it is applied, and the same spring carries on to
+    /// identity. A first pass finds an identity presentation and reduces to the
+    /// simple case. There is no state that can be stale between iterations
+    /// because there is no state: the presentation layer IS the memory.
     private func playCatchUpIfMoved() {
         guard let window, let container = superview,
               let containerHost = container.superview
@@ -253,47 +269,29 @@ final class ForYouSelectorAccessoryHost: UIView {
         guard ForYouSelectorDock.animatesCatchUp,
               let was = lastCentre, let wasWidth = lastWidth, widthNow > 1
         else { return }
-        guard abs(was.x - centreNow.x) > 1 || abs(was.y - centreNow.y) > 1
-                || abs(wasWidth - widthNow) > 1
-        else { return }
+        let delta = catchUp(from: (centre: was, width: wasWidth),
+                            to: centreNow, width: widthNow)
+        guard delta != .identity else { return }
 
-        // The burst's origin is the state BEFORE its first change, not before
-        // this one.
-        let anchor = burstAnchor ?? (centre: was, width: wasWidth)
-        if burstAnchor == nil {
-            burstAnchor = anchor
-            DispatchQueue.main.async { [weak self] in self?.settleCatchUp() }
-        }
-        container.transform = catchUp(from: anchor, to: centreNow, width: widthNow)
-    }
-
-    /// Plays the burst, once the passes have stopped arriving.
-    private func settleCatchUp() {
-        guard let anchor = burstAnchor else { return }
-        burstAnchor = nil
-        guard let window, let container = superview,
-              let containerHost = container.superview
-        else { return }
-        let centreNow = containerHost.convert(container.center, to: window)
-        let widthNow = container.bounds.width
-        let carry = catchUp(from: anchor, to: centreNow, width: widthNow)
-        guard carry != .identity else { return }
+        let presented = container.layer.presentation()?.affineTransform() ?? .identity
         if ForYouSelectorDock.isTracing {
-            print(String(format: "[dock] catchup dx=%.0f dy=%.0f scaleX=%.2f",
-                         carry.tx, carry.ty, carry.a))
+            print(String(format: "[dock] catchup dx=%.0f dy=%.0f scaleX=%.2f onto=%.2f",
+                         delta.tx, delta.ty, delta.a, presented.a))
         }
-        container.transform = carry
+        container.transform = presented.concatenating(delta)
         UIView.animate(
             withDuration: 0.32, delay: 0,
             usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
-            // ⚠️ The scroll that caused this is still under the finger.
+            // ⚠️ The scroll that caused this is still under the finger, and
+            // `.beginFromCurrentState` is what lets a second pass join the
+            // first one's flight instead of restarting it.
             options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
             container.transform = .identity
         }
     }
 
-    /// The transform that makes the container look like it did at `anchor`.
+    /// The transform that makes the container LOOK like it did at `anchor`.
     ///
     /// ⚠️ THE SCALE IS FOR A GROW ONLY. Carrying the width in both directions
     /// was a regression on the collapse, which was already right: there the
@@ -305,18 +303,17 @@ final class ForYouSelectorAccessoryHost: UIView {
         from anchor: (centre: CGPoint, width: CGFloat),
         to centre: CGPoint, width: CGFloat
     ) -> CGAffineTransform {
+        let dx = anchor.centre.x - centre.x
+        let dy = anchor.centre.y - centre.y
         let scale = width > anchor.width + 1 ? anchor.width / width : 1
-        return CGAffineTransform(
-            translationX: anchor.centre.x - centre.x,
-            y: anchor.centre.y - centre.y
-        ).scaledBy(x: scale, y: 1)
+        // A pass that moved it a hair, or only narrowed it, is not a journey.
+        guard abs(dx) > 1 || abs(dy) > 1 || scale != 1 else { return .identity }
+        return CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: 1)
     }
 
-    private var burstAnchor: (centre: CGPoint, width: CGFloat)?
-
-    /// Forgets an in-flight burst — see `ForYouSelectorAccessory.clearCatchUp`.
+    /// Forgets what it last saw, so the next pass starts a journey rather than
+    /// measuring against geometry from before the accessory was taken down.
     func cancelCatchUp() {
-        burstAnchor = nil
         lastCentre = nil
         lastWidth = nil
     }
@@ -429,12 +426,13 @@ final class ForYouSelectorAccessory {
         print("[dock] removed")
     }
 
-    /// ⚠️ A BURST INTERRUPTED BY A REMOVAL WOULD LEAVE A TRANSFORM BEHIND.
-    /// Between a layout pass and the hop that plays it, the container sits
-    /// carried — and if the accessory goes in that window, `settleCatchUp` can
-    /// no longer reach it. UIKit discards the container with the accessory, so
-    /// nothing is stranded on screen, but a view handed back transformed is not
-    /// a thing to leave to chance.
+    /// ⚠️ A FLIGHT INTERRUPTED BY A REMOVAL WOULD LEAVE A TRANSFORM BEHIND.
+    /// The container is carried for the length of a spring, and if the
+    /// accessory goes mid-flight the animation has nothing to land on. UIKit
+    /// discards the container with the accessory, so nothing is stranded on
+    /// screen, but a view handed back transformed is not a thing to leave to
+    /// chance — and the next install must measure from scratch rather than
+    /// against geometry from before the accessory was taken down.
     private func clearCatchUp() {
         hostView.superview?.transform = .identity
         hostView.cancelCatchUp()
