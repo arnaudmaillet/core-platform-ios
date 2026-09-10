@@ -209,67 +209,80 @@ final class ForYouSelectorAccessoryHost: UIView {
     /// land in one frame. The centre is 201 before and after it.
     private var lastWidth: CGFloat?
 
-    /// Carries the strip from where it WAS to where UIKit just put it.
+    /// Carries the accessory from where it WAS to where UIKit just put it.
     ///
     /// ⚠️ **THIS EXISTS BECAUSE UIKIT DOES NOT ANIMATE THE MOVE, and it is a
-    /// spike's answer, not a good one.** Measured with the trace below, a whole
-    /// collapse is THREE layout passes: 360x48@21,735 → 234x48@84,735 →
-    /// 234x48@84,798. The width and the x land in one step and the y in
-    /// another, with no animation attached to the layer either time — which is
-    /// what "teleported over the tab bar" is.
+    /// spike's answer, not a good one.** A whole collapse is three layout
+    /// passes — 360x48@21,735 → 234x48@84,735 → 234x48@84,798 — with no
+    /// animation attached to the layer at any of them. So the change is
+    /// inverted and played back: the view is put back where it was with a
+    /// transform, and the transform is animated to identity.
     ///
-    /// So the move is inverted and played back: the view is put back where it
-    /// was with a transform, and the transform is animated to identity. It is
-    /// the standard trick for a layout change you do not own. What it does NOT
-    /// carry is the width change — a scale would stretch the type — so the
-    /// strip still narrows in one step while it travels. Half of Apple's
-    /// motion, which is more than none.
+    /// ⚠️ **THE CONTAINER, NOT US.** The glass capsule a viewer sees is not
+    /// ours — the strip's backdrop is suppressed — it is drawn by UIKit's
+    /// `_UITabAccessoryContainer`, our superview. Transforming ourselves scaled
+    /// the TITLES inside a pill that had already snapped, which is what "it
+    /// takes its final width from the start" looks like. Nothing here reads
+    /// that view's class or its subviews; it is transformed as any `UIView`
+    /// may be, and returned to identity by the animation that set it.
+    ///
+    /// ⚠️ **ONE SPRING FOR THE WHOLE BURST, AND THAT IS THE THIRD CORRECTION.**
+    /// The two directions do not deliver their changes in one pass:
+    ///
+    ///     collapsing   width and x, then the 63pt drop
+    ///     expanding    the 63pt rise, then the 126pt widening
+    ///
+    /// Animating each pass as it arrived therefore fired TWO springs back to
+    /// back, and on the expand the second one — the widening — began only as
+    /// the first was ending. "The container only grows at the end" is exactly
+    /// that. So a change starts no animation: it moves the container back to
+    /// where the burst began and leaves it there, un-animated, and a single
+    /// spring is played once the passes stop. Nothing is ever shown at its
+    /// final geometry un-carried, and there is only ever one animation.
     private func playCatchUpIfMoved() {
-        // ⚠️ **THE CONTAINER, NOT US, AND THAT IS THE WHOLE CORRECTION.** The
-        // glass capsule a viewer sees in this band is NOT ours — the strip's
-        // own backdrop is suppressed — it is drawn by UIKit's
-        // `_UITabAccessoryContainer`, which is our superview. Transforming
-        // ourselves therefore scaled the TITLES inside a capsule that had
-        // already snapped to its final width, which is exactly what "it takes
-        // its final width from the start of the animation" looks like.
-        //
-        // Apple Music's own expand, filmed on a device: the capsule itself
-        // widens frame by frame. So the capsule is what has to be carried.
+        guard let window, let container = superview,
+              let containerHost = container.superview
+        else { return }
+        // ⚠️ A POINT CONVERTED THROUGH THE HOST, so neither reading passes
+        // through the transform being animated: `center` mirrors
+        // `layer.position`, which a view's own transform does not move.
+        let centreNow = containerHost.convert(container.center, to: window)
+        let widthNow = container.bounds.width
+        defer { lastCentre = centreNow; lastWidth = widthNow }
+
+        guard ForYouSelectorDock.animatesCatchUp,
+              let was = lastCentre, let wasWidth = lastWidth, widthNow > 1
+        else { return }
+        guard abs(was.x - centreNow.x) > 1 || abs(was.y - centreNow.y) > 1
+                || abs(wasWidth - widthNow) > 1
+        else { return }
+
+        // The burst's origin is the state BEFORE its first change, not before
+        // this one.
+        let anchor = burstAnchor ?? (centre: was, width: wasWidth)
+        if burstAnchor == nil {
+            burstAnchor = anchor
+            DispatchQueue.main.async { [weak self] in self?.settleCatchUp() }
+        }
+        container.transform = catchUp(from: anchor, to: centreNow, width: widthNow)
+    }
+
+    /// Plays the burst, once the passes have stopped arriving.
+    private func settleCatchUp() {
+        guard let anchor = burstAnchor else { return }
+        burstAnchor = nil
         guard let window, let container = superview,
               let containerHost = container.superview
         else { return }
         let centreNow = containerHost.convert(container.center, to: window)
         let widthNow = container.bounds.width
-        defer { lastCentre = centreNow; lastWidth = widthNow }
-        guard ForYouSelectorDock.animatesCatchUp,
-              let was = lastCentre, let wasWidth = lastWidth, widthNow > 1
-        else { return }
-        let dx = was.x - centreNow.x
-        let dy = was.y - centreNow.y
-        // ⚠️ **WIDENING ONLY, AND THE ASYMMETRY IS THE WHOLE POINT.** Carrying
-        // the width in BOTH directions was a regression on the collapse, which
-        // was already right: there the width lands FIRST, under tab items that
-        // are still fading out, so nothing needs carrying and a scale only adds
-        // a stretch nobody asked for. Expanding, the width lands LAST, alone,
-        // in front of a settled bar — and that is the frame a viewer sees.
-        //
-        // So the collapse takes the same translate-only path it took when it
-        // was approved, and only the grow is scaled. A trace of a collapse
-        // shows no `scaleX` at all; if one appears there, this guard broke.
-        let isWidening = widthNow > wasWidth + 1
-        let scale = isWidening ? wasWidth / widthNow : 1
-        // A pass that did not move it, or moved it a hair, is not a journey.
-        guard abs(dx) > 1 || abs(dy) > 1 || isWidening else { return }
+        let carry = catchUp(from: anchor, to: centreNow, width: widthNow)
+        guard carry != .identity else { return }
         if ForYouSelectorDock.isTracing {
-            print(String(format: "[dock] catchup dx=%.0f dy=%.0f scaleX=%.2f", dx, dy, scale))
+            print(String(format: "[dock] catchup dx=%.0f dy=%.0f scaleX=%.2f",
+                         carry.tx, carry.ty, carry.a))
         }
-        // The type stretches for the length of the spring on a grow, 0.65 to 1.
-        // Against a 126pt capsule appearing between two frames, a third of a
-        // second of narrow text is the cheaper artefact; the alternative that
-        // does not distort is a width CONSTRAINT, which cannot start until the
-        // pass after the one that resized us.
-        container.transform = CGAffineTransform(translationX: dx, y: dy)
-            .scaledBy(x: scale, y: 1)
+        container.transform = carry
         UIView.animate(
             withDuration: 0.32, delay: 0,
             usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
@@ -278,6 +291,34 @@ final class ForYouSelectorAccessoryHost: UIView {
         ) {
             container.transform = .identity
         }
+    }
+
+    /// The transform that makes the container look like it did at `anchor`.
+    ///
+    /// ⚠️ THE SCALE IS FOR A GROW ONLY. Carrying the width in both directions
+    /// was a regression on the collapse, which was already right: there the
+    /// width lands FIRST, under tab items still fading out, so nothing needs
+    /// carrying and a scale only adds a stretch nobody asked for. Expanding, it
+    /// lands LAST, alone, in front of a settled bar. A trace of a collapse must
+    /// show `scaleX=1.00`.
+    private func catchUp(
+        from anchor: (centre: CGPoint, width: CGFloat),
+        to centre: CGPoint, width: CGFloat
+    ) -> CGAffineTransform {
+        let scale = width > anchor.width + 1 ? anchor.width / width : 1
+        return CGAffineTransform(
+            translationX: anchor.centre.x - centre.x,
+            y: anchor.centre.y - centre.y
+        ).scaledBy(x: scale, y: 1)
+    }
+
+    private var burstAnchor: (centre: CGPoint, width: CGFloat)?
+
+    /// Forgets an in-flight burst — see `ForYouSelectorAccessory.clearCatchUp`.
+    func cancelCatchUp() {
+        burstAnchor = nil
+        lastCentre = nil
+        lastWidth = nil
     }
 
     private var lastTrace = ""
@@ -377,6 +418,7 @@ final class ForYouSelectorAccessory {
 
     func remove(from controller: UITabBarController?) {
         guard let controller, controller.bottomAccessory != nil else { return }
+        clearCatchUp()
         controller.setBottomAccessory(nil, animated: true)
         // ⚠️ RESTORED, or the other four tabs inherit a minimizing bar. The
         // behaviour is shell-wide; only the accessory is ours.
@@ -385,6 +427,17 @@ final class ForYouSelectorAccessory {
             savedMinimizeBehavior = nil
         }
         print("[dock] removed")
+    }
+
+    /// ⚠️ A BURST INTERRUPTED BY A REMOVAL WOULD LEAVE A TRANSFORM BEHIND.
+    /// Between a layout pass and the hop that plays it, the container sits
+    /// carried — and if the accessory goes in that window, `settleCatchUp` can
+    /// no longer reach it. UIKit discards the container with the accessory, so
+    /// nothing is stranded on screen, but a view handed back transformed is not
+    /// a thing to leave to chance.
+    private func clearCatchUp() {
+        hostView.superview?.transform = .identity
+        hostView.cancelCatchUp()
     }
 
     /// The strip's content changed width — a badge appeared, a count grew.
