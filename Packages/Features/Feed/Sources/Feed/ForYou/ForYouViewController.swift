@@ -2149,7 +2149,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // idempotent with the one in `viewDidAppear`, which stays as the
         // backstop for the paths the policy declines (a scrub that has not
         // committed, a flight that owns the chrome).
-        installBottomChromeWhenAppearing(hasActiveFlight: activeTransition != nil) { [weak self] in
+        installBottomChromeWhenAppearing(hasActiveFlight: activeTransition != nil,
+                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
                                        alongside: transitionCoordinator)

@@ -104,11 +104,13 @@ struct SearchFilterTrayTests {
         /// because none of those places has an index to read.
         var bandHost: SelectorAccessoryHost? { results?.selectorAccessory?.hostView }
 
-        var tray: InlineFilterTrayView? {
-            results?.view.subviews.compactMap { $0 as? InlineFilterTrayView }.first
+        /// ⚠️ IT IS A LEADING BAR ITEM NOW — a plain system one, so there is no
+        /// custom view to walk to. It sits beside the chevron, which is what
+        /// `leftItemsSupplementBackButton` is for.
+        var item: UIBarButtonItem? {
+            results?.navigationItem.leftBarButtonItems?
+                .first { $0.accessibilityLabel == "Filters" }
         }
-
-        var item: UIButton? { results?.view.map(Self.filterButton(in:)) ?? nil }
 
         static func filterButton(in view: UIView) -> UIButton? {
             if let button = view as? UIButton, button.accessibilityLabel == "Filters" {
@@ -185,37 +187,37 @@ struct SearchFilterTrayTests {
         #expect(Host().item == nil)
     }
 
-    /// ⚠️ IN ITS OWN CAPSULE ABOVE THE BAND. The navigation bar carries a back
-    /// button and a full-width query field; a third item there would take width
-    /// off the query the viewer is reading.
-    @Test func theTrayFloatsAboveTheBand() async {
+    /// ⚠️ BESIDE THE CHEVRON, AND THE FIELD PAYS FOR IT — see
+    /// `SearchResultsWalletBadgeTests.theFieldPaysForALeadingItemAsWell` for
+    /// the arithmetic, and `queryWidth`'s own comment for the bar UIKit drew.
+    @Test func theFilterLeadsTheBarBesideTheChevron() async {
         let host = Host()
         await host.showResults("haddad")
         #expect(host.item != nil)
-        #expect(host.item?.configuration?.title == nil)
-        #expect(host.item?.configuration?.image != nil)
+        #expect(host.item?.title == nil)
+        #expect(host.item?.image != nil)
         #expect(host.item?.accessibilityLabel == "Filters")
     }
 
-    /// ⚠️ **BARE, OR IT IS A BUBBLE INSIDE A BUBBLE.** `InlineFilterTrayView`
-    /// supplies exactly one `UIGlassEffect` capsule around its control, and it
-    /// says so in as many words: "the capsules are supplied here, and only
-    /// here". A filter carrying its own background would draw a second one
-    /// inside the first.
-    @Test func theTrayCarriesNoBackgroundOfItsOwn() async {
+    /// ⚠️ **A SYSTEM ITEM, AND THE SHAPE IS THE REASON.** Wrapped in a
+    /// `UIButton`, the glyph came out in a 59x44 platter — an OVAL, beside a
+    /// chevron that is a 44pt circle, because
+    /// `UIButton.Configuration.plain()` carries its own content insets and
+    /// UIKit sizes the platter around whatever it is given. A system item has
+    /// no view of its own to inflate it.
+    @Test func theFilterHasNoCustomViewToInflateItsPlatter() async {
         let host = Host()
         await host.showResults("haddad")
-        // ⚠️ TRANSPARENT, NOT NIL. `UIButton.Configuration.plain()` does not
-        // leave the background unset — it sets it to a CLEAR colour, which
-        // reads as "there is a background" to a nil check and passed a test
-        // that meant the opposite. Alpha is the thing that decides whether a
-        // second capsule is drawn.
-        var alpha: CGFloat = -1
-        host.item?.configuration?.background.backgroundColor?.getWhite(nil, alpha: &alpha)
-        #expect(alpha == 0, "a filled filter would draw a bubble inside the band's bubble")
-        var hostAlpha: CGFloat = 0
-        host.item?.backgroundColor?.getWhite(nil, alpha: &hostAlpha)
-        #expect(hostAlpha == 0)
+        #expect(host.item?.customView == nil)
+    }
+
+    /// ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
+    /// disables the interactive pop along with it, silently.
+    @Test func theFilterSupplementsTheBackButtonRatherThanReplacingIt() async {
+        let host = Host()
+        await host.showResults("haddad")
+        #expect(host.results?.navigationItem.leftItemsSupplementBackButton == true)
+        #expect(host.results?.navigationItem.hidesBackButton == false)
     }
 
     @Test func theSheetCarriesTheThreeDimensionsAsked() async {
@@ -506,7 +508,8 @@ struct SearchFilterTrayTests {
             .compactMap { $0.customView as? UITextField }.count == 1)
         // ...the navigation bar's leading group is empty, so the back button is
         // the back button and there is nothing to supplement...
-        #expect(results?.navigationItem.leftBarButtonItems?.isEmpty != false)
+        #expect(results?.navigationItem.leftBarButtonItems?.count == 1,
+                "the filter, and only the filter")
         #expect(results?.navigationItem.hidesBackButton == false)
         // ...the band at the foot carries the selector and NOTHING else, since
         // one accessory is one capsule...
@@ -516,27 +519,9 @@ struct SearchFilterTrayTests {
         #expect(band?.subviews.compactMap { $0 as? PagedTabBar }.count == 1)
         #expect((band.map { Host.filterButton(in: $0) } ?? nil) == nil,
                 "a filter inside the band could not have a capsule of its own")
-        // ...and the filter is a tray in the screen's own view, which is what
-        // keeps it clear of the band without any arithmetic.
-        #expect(host.tray != nil)
-        #expect(host.tray.map { Host.filterButton(in: $0) != nil } == true)
-    }
-
-    /// ⚠️ **THE SAFE AREA IS WHAT CLEARS THE BAND, SO THE PIN MUST BE ON IT.**
-    /// `safeAreaLayoutGuide.bottom` already excludes the accessory — measured,
-    /// `safeAreaInsets.bottom = 69` in an 874pt window with the band's top edge
-    /// at exactly 805. Pinned to `view.bottomAnchor` instead, the tray would
-    /// land inside the band and this screen would be back where it started.
-    @Test func theTrayIsPinnedToTheSafeAreaAndNotToTheViewsEdge() async {
-        let host = Host()
-        await host.showResults("haddad")
-        let tray = try? #require(host.tray)
-        let pinnedToSafeArea = host.results?.view.constraints.contains { constraint in
-            (constraint.firstItem === tray && constraint.firstAttribute == .bottom)
-                && (constraint.secondItem as? UILayoutGuide)
-                    === host.results?.view.safeAreaLayoutGuide
-        }
-        #expect(pinnedToSafeArea == true)
+        // ...and NOTHING floats over the screen either: the filter went to the
+        // navigation bar, so there is no second thing at the foot at all.
+        #expect(results?.view.subviews.contains { $0 is InlineFilterTrayView } != true)
     }
 
     /// ⚠️ REAL BAR ITEMS, NOT A COMPOSITE TITLE VIEW. A title view is one view

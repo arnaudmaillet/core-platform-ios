@@ -241,28 +241,13 @@ final class SearchResultsViewController: UIViewController {
         configureWalletBadge()
         applyTrailingItems()
 
-        #if DEBUG
-        // `-search-filter-in-bar` — the filter as a LEADING item beside the
-        // chevron, giving `[back][filter][credit][field]`. Behind a flag
-        // because the only thing that can answer whether it fits is a 375pt
-        // device, and the failure mode is a `•••` that takes the whole group.
-        if Self.wantsFilterInBar {
-            navigationItem.leftBarButtonItems = [UIBarButtonItem(customView: barFilterButton)]
-            // ⚠️ WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON, and UIKit
-            // silently disables the interactive pop with it — the failure this
-            // flag exists to guard.
-            navigationItem.leftItemsSupplementBackButton = true
-        } else {
-            // ⚠️ NO `leftItemsSupplementBackButton`, because there is no leading
-            // custom item to supplement. That flag exists so an item that
-            // REPLACES the back button cannot silently disable the interactive
-            // pop; with the leading group empty the back button is the back
-            // button and `NativePopPolicy` has nothing to refuse.
-            navigationItem.leftItemsSupplementBackButton = false
-        }
-        #else
-        navigationItem.leftItemsSupplementBackButton = false
-        #endif
+        // `[back][filter][credit][field]`.
+        navigationItem.leftBarButtonItems = [barFilterItem]
+        // ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
+        // disables the interactive pop along with it, silently. The flag is not
+        // decoration: it is the difference between a leading item that
+        // SUPPLEMENTS the chevron and one that stands in its place.
+        navigationItem.leftItemsSupplementBackButton = true
     }
 
 
@@ -375,14 +360,16 @@ final class SearchResultsViewController: UIViewController {
     /// against the narrowest supported bar, 375. The field's own width stays
     /// `.defaultHigh`, so a `claimed` that drifts low costs a narrower field
     /// and never an overflow.
-    /// The width a custom leading item wants, or 0 when the leading group is
-    /// empty.
+    /// The width a custom leading item's own view wants, or 0 when the leading
+    /// group is empty or holds a system item.
+    ///
+    /// ⚠️ ZERO IS NOT "NOTHING THERE" FOR A SYSTEM ITEM — it means "charge the
+    /// bare platter". A system glyph has no view to measure and comes out at
+    /// the 44pt touch target, which `queryWidth` already knows as its floor.
     private func leadingWanted() -> CGFloat {
-        guard let item = navigationItem.leftBarButtonItems?.first,
-              let custom = item.customView
-        else { return 0 }
-        return max(NavigationBarMetrics.itemPlatterHeight,
-                   custom.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width)
+        guard let item = navigationItem.leftBarButtonItems?.first else { return 0 }
+        guard let custom = item.customView else { return 1 }
+        return custom.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
     }
 
     private func applyHeaderWidths() {
@@ -481,14 +468,19 @@ final class SearchResultsViewController: UIViewController {
             // chevron and a custom leading item wear their OWN platters, so the
             // spacing between items inside one pill does not apply here.
             //
-            // ⚠️ **AND THE PLATTER IS WIDER THAN THE VIEW IN IT.** A glyph
-            // button's `systemLayoutSizeFitting` answers under the 44pt touch
-            // target, and UIKit drew it 59 wide — so charging what the VIEW
-            // wants under-charges by 15, which is the direction that ends in a
-            // `•••`. A test caught it: the arithmetic said 90 and the bar drew
-            // 105, and the two only agreed because the badge's own charge
-            // happens to over-state by about the same amount.
-            claimed += max(Self.glyphItemPlatterWidth, leadingWanted + 16) + 12
+            // ⚠️ **THE PLATTER IS WIDER THAN THE VIEW IN IT — for a CUSTOM
+            // view.** A glyph button's `systemLayoutSizeFitting` answers under
+            // the 44pt touch target while UIKit drew its platter 59 wide, so
+            // charging what the VIEW wants under-charges by 15 — the direction
+            // that ends in a `•••`. A test caught it: the arithmetic said 90
+            // and the bar drew 105, and the two only agreed because the badge's
+            // own charge over-states by about the same amount.
+            //
+            // A SYSTEM item is the other case and the cheap one: no view to
+            // inflate the platter, so it comes out at the 44pt touch target —
+            // which is also why it is a circle rather than an oval.
+            claimed += max(NavigationBarMetrics.itemPlatterHeight,
+                           leadingWanted > 1 ? leadingWanted + 16 : 0) + 12
         }
         return max(NavigationBarMetrics.itemPlatterHeight, barWidth - claimed)
     }
@@ -605,17 +597,6 @@ final class SearchResultsViewController: UIViewController {
     /// arithmetic and nothing to keep in step. Two separate glass capsules, the
     /// selector's and the filter's, and neither drawn over the other.
     private func configureToolbar() {
-        // A BARE control: `InlineFilterTrayView` supplies the one glass capsule
-        // around it, and a button carrying its own background would be a bubble
-        // inside a bubble.
-        var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: "line.3.horizontal.decrease")
-        configuration.contentInsets = NSDirectionalEdgeInsets(
-            top: 0, leading: 10, bottom: 0, trailing: 10
-        )
-        let filter = UIButton(configuration: configuration,
-                              primaryAction: UIAction { [weak self] _ in self?.presentFilters() })
-        filter.accessibilityLabel = "Filters"
 
         // ⚠️ **NO WIDTH CAP HERE, AND A TOOLBAR IS WHY.** The cap that used to
         // exist did so because a UINavigationBar sweeps a leading group it
@@ -637,33 +618,8 @@ final class SearchResultsViewController: UIViewController {
         // screen still shows it on the way in and hides it on the way out.
         selectorAccessory = SelectorAccessory(strip: tabBar)
 
-        #if DEBUG
-        if Self.wantsFilterInBar {
-            // The bar's own copy — configured in `configureHeader`, which runs
-            // BEFORE this. Nothing else to place: no tray, no accessory
-            // trailing item.
-            return
-        }
-        #endif
-        let tray = InlineFilterTrayView(trailing: filter)
-        view.addSubview(tray)
-        NSLayoutConstraint.activate([
-            // ⚠️ **LEADING AS WELL AS TRAILING, AND A UITEST HAD TO FIND OUT
-            // WHY.** The tray takes its width from its subviews, and its one
-            // capsule is pinned to the TRAILING edge — so pinned on that side
-            // alone the tray resolved to zero width. It still drew, because
-            // nothing clips, and it was perfectly legible in a screenshot; but
-            // hit-testing and the accessibility tree are both bounded by the
-            // view's own frame, so the filter answered nothing and
-            // `app.buttons["Filters"]` could not find it at all. This is the
-            // trap already recorded for cell accessories — draws, never
-            // receives — in a second place.
-            tray.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
-            tray.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
-            tray.heightAnchor.constraint(equalToConstant: InlineFilterTrayView.height),
-            tray.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor,
-                                         constant: -InlineFilterTrayView.spacingBelow)
-        ])
+        // Nothing to place at the foot: the band is the selector alone, and the
+        // filter is a leading bar item (`configureHeader`, which runs first).
 
         // ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER. Docked at the foot of the
         // screen the selector sits over a pager of scrolling grids, and a drag
@@ -811,7 +767,9 @@ final class SearchResultsViewController: UIViewController {
         // `minimizesOnScroll: false` — there is no tab bar under this screen to
         // minimize, and arming a shell-wide behaviour from a screen that cannot
         // use it is how every other tab inherits a collapsing bar.
-        installBottomChromeWhenAppearing { [weak self] in
+        installBottomChromeWhenAppearing(
+            handsOver: tabBarController?.bottomAccessory != nil
+        ) { [weak self] in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController,
                                        alongside: transitionCoordinator)
@@ -877,25 +835,23 @@ final class SearchResultsViewController: UIViewController {
     /// that quietly stops being true.
     private(set) var selectorAccessory: SelectorAccessory?
 
-    #if DEBUG
-    static var wantsFilterInBar: Bool {
-        ProcessInfo.processInfo.arguments.contains("-search-filter-in-bar")
-    }
-
-    /// The filter as a bar item's custom view.
+    /// The filter, as a plain system bar item.
     ///
-    /// ⚠️ A CUSTOM VIEW, NOT `UIBarButtonItem(image:)`, because the budget has
-    /// to be able to ASK how wide it wants to be — `leadingWanted()` reads
-    /// `systemLayoutSizeFitting`, and a system item has no view to ask.
-    private lazy var barFilterButton: UIButton = {
-        var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: "line.3.horizontal.decrease")
-        let button = UIButton(configuration: configuration,
-                              primaryAction: UIAction { [weak self] _ in self?.presentFilters() })
-        button.accessibilityLabel = "Filters"
-        return button
+    /// ⚠️ **A SYSTEM ITEM, NOT A CUSTOM VIEW, AND THE SHAPE IS WHY.** Wrapped
+    /// in a `UIButton`, the glyph came out in a 59x44 platter — an OVAL, beside
+    /// a chevron that is a 44pt circle. The width is the button's, not the
+    /// glyph's: `UIButton.Configuration.plain()` carries its own content insets,
+    /// and UIKit sizes the platter around whatever it is given. A system item
+    /// has no view of its own to inflate it, so the platter comes out at the
+    /// 44pt touch target — the same circle the map's bell and magnifier wear.
+    private lazy var barFilterItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "line.3.horizontal.decrease"),
+            primaryAction: UIAction { [weak self] _ in self?.presentFilters() }
+        )
+        item.accessibilityLabel = "Filters"
+        return item
     }()
-    #endif
 
     #if DEBUG
     /// What the spike actually produced, in numbers — whether the accessory was

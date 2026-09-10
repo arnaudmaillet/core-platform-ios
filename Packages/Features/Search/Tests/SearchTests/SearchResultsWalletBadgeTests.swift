@@ -57,14 +57,16 @@ struct SearchResultsWalletBadgeTests {
         #expect(screen.navigationItem.rightBarButtonItems?.allSatisfy { !$0.sharesBackground } == true)
     }
 
-    /// ⚠️ THE LEADING GROUP STAYS EMPTY, and that is what keeps the interactive
-    /// edge pop alive: a custom leading item makes `NativePopPolicy` refuse the
-    /// begin unless `leftItemsSupplementBackButton` is true, and the failure is
-    /// silent because the chevron still works.
-    @Test func theBadgeDoesNotTouchThePopPolicy() {
+    /// ⚠️ **THE LEADING GROUP HAS AN ITEM NOW, SO THE FLAG IS WHAT KEEPS THE
+    /// INTERACTIVE POP ALIVE.** A custom leading item makes `NativePopPolicy`
+    /// refuse the begin unless `leftItemsSupplementBackButton` is true, and the
+    /// failure is silent because the chevron itself still works. The group used
+    /// to be empty and this test asserted that; the filter moved in, and what
+    /// it has to assert is the flag that makes the filter safe.
+    @Test func theLeadingFilterDoesNotTakeThePopWithIt() {
         let screen = makeScreen(wallet: isolatedWallet())
-        #expect(screen.navigationItem.leftBarButtonItems?.isEmpty != false)
-        #expect(screen.navigationItem.leftItemsSupplementBackButton == false)
+        #expect(screen.navigationItem.leftBarButtonItems?.count == 1)
+        #expect(screen.navigationItem.leftItemsSupplementBackButton == true)
         #expect(screen.navigationItem.hidesBackButton == false)
     }
 

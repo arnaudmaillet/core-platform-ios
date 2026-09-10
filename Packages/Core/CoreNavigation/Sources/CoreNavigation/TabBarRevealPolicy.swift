@@ -101,10 +101,25 @@ public extension UIViewController {
     ///
     /// - Parameter hasActiveFlight: whether a hero flight owns the chrome right
     ///   now. Screens without flights pass the default.
+    /// - Parameter handsOver: whether a band is ALREADY up, so this is a
+    ///   change of contents rather than an arrival.
+    ///
+    ///   ⚠️ **IT DECIDES WHETHER A SCRUB MAY BE TRUSTED, AND THE REASON IS THE
+    ///   FLASH THAT IS NOT THERE.** `.whenTransitionCommits` exists because a
+    ///   back-swipe released below the threshold would otherwise show chrome
+    ///   over a screen that springs back. That is a real hazard when the chrome
+    ///   is arriving from nothing — and no hazard at all when the screen being
+    ///   left has a band of its own: something is at the foot either way, and
+    ///   deferring only guarantees the gap. Filmed popping the search results
+    ///   back to For You: the outgoing band removed at pop-begin and the
+    ///   incoming one installed at the release, with empty screen in between.
+    ///   A cancelled scrub is covered by the other screen's own
+    ///   `viewDidAppear`, which re-claims the slot.
     /// - Parameter install: idempotent, and called at most once — a caller
     ///   keeps its `viewDidAppear` install as the backstop for the paths this
     ///   deliberately declines.
     func installBottomChromeWhenAppearing(hasActiveFlight: Bool = false,
+                                          handsOver: Bool = false,
                                           _ install: @escaping () -> Void) {
         let coordinator = transitionCoordinator
         switch TabBarRevealPolicy.timing(
@@ -114,6 +129,10 @@ public extension UIViewController {
         ) {
         case .immediately:
             // The tab switch — the case this exists for.
+            install()
+        case .whenTransitionCommits where handsOver:
+            // A hand-over, not an arrival: claim the slot now and let the
+            // screen being left find it already spoken for.
             install()
         case .whenTransitionCommits:
             guard let coordinator else { return install() }

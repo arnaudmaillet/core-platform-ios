@@ -612,7 +612,18 @@ public final class SelectorAccessory {
                         minimizesOnScroll: Bool = false,
                         alongside coordinator: UIViewControllerTransitionCoordinator? = nil) {
         guard let controller else { return }
-        guard controller.bottomAccessory?.contentView !== hostView else { return }
+        // ⚠️ **"ALREADY OURS" IS NOT THE SAME AS "ALREADY WORKING", AND THE
+        // GUARD USED TO CONFLATE THEM.** Setting `bottomAccessory` during a
+        // PUSH that hides the tab bar leaves the accessory assigned and never
+        // hosted: measured on the search results, `env=unspecified w=0
+        // container=nanxnan` with the strip's own segments present and correct.
+        // The `viewDidAppear` backstop then returned early — the slot held our
+        // content view, so there was nothing to do — and the band stayed
+        // invisible for the life of the screen. An unhosted accessory is a
+        // failed install, and this is the line that says so.
+        if controller.bottomAccessory?.contentView === hostView, hostView.window != nil {
+            return
+        }
 
         // Belt and braces, and the reason came from the navigation bar: a
         // custom view keeps its autoresizing mask, so the size UIKit reads at
@@ -631,10 +642,21 @@ public final class SelectorAccessory {
         // property and one initialiser, there is no delegate, no
         // `willMinimize`, and Apple's reference page for the method carries no
         // Discussion at all. Symmetry is the whole of what can be asked for.
-        let accessory = UITabAccessory(contentView: hostView)
-        ride(coordinator) { animated in
-            controller.setBottomAccessory(accessory, animated: animated)
-        }
+        // ⚠️ **CLAIMED SYNCHRONOUSLY, AND NOT INSIDE THE COORDINATOR.** Riding
+        // the transition looks right and breaks the hand-over: an
+        // `animate(alongsideTransition:)` block runs when the transition sets
+        // its animations up, which is AFTER the screen being left has had its
+        // `viewWillDisappear`. So the slot still held the old band when the
+        // outgoing screen checked it, the identity guard let the removal
+        // through, and the deferred install then put a new one back —
+        // remove-then-install, which is the gap this was meant to close.
+        // Traced: `installed` at +0.499s, `removed` at +0.604s, on a push where
+        // nothing should have been removed at all.
+        //
+        // The claim has to be a fact by the time anyone else looks. The
+        // animation is UIKit's own from here; with a hand-over there is no
+        // appearance to animate anyway, because the band never leaves.
+        controller.setBottomAccessory(UITabAccessory(contentView: hostView), animated: true)
         if minimizesOnScroll, !holdsMinimize {
             holdsMinimize = true
             MinimizeBehaviourStore.arm(controller)
@@ -644,7 +666,8 @@ public final class SelectorAccessory {
         // like a passing one. This line is what tells "it never installed" from
         // "it installed and nothing moved".
         SelectorAccessoryHost.emit(
-            "installed minimize=\(minimizesOnScroll) host=\(hostView.bounds.size)",
+            "installed minimize=\(minimizesOnScroll) host=\(hostView.bounds.size)"
+                + " me=\(Self.shortID(hostView)) hosted=\(hostView.window != nil)",
             options: options
         )
     }
@@ -674,17 +697,29 @@ public final class SelectorAccessory {
             // Somebody else's band is up. That is the hand-over working: the
             // incoming screen claimed the slot before we were asked to leave,
             // so there is nothing to take down and no gap to leave behind.
-            SelectorAccessoryHost.emit("handed over", options: options)
+            SelectorAccessoryHost.emit(
+                "handed over me=\(Self.shortID(hostView))"
+                    + " slot=\(controller.bottomAccessory.map { Self.shortID($0.contentView) } ?? "nil")",
+                options: options)
             return
         }
         clearCatchUp()
         ride(coordinator) { animated in
             controller.setBottomAccessory(nil, animated: animated)
         }
-        SelectorAccessoryHost.emit("removed", options: options)
+        SelectorAccessoryHost.emit(
+            "removed me=\(Self.shortID(hostView))",
+            options: options)
     }
 
-    /// Runs a band change on the right clock.
+    /// A short, stable name for a host view, so a trace can say WHICH band
+    /// moved. Two screens' bands are the same size and the same shape; without
+    /// an identity a hand-over and a remove-then-install read identically.
+    private static func shortID(_ view: UIView) -> String {
+        String(UInt(bitPattern: ObjectIdentifier(view).hashValue) % 10000)
+    }
+
+    /// Runs a band REMOVAL on the right clock.
     ///
     /// With a transition in flight the change goes INSIDE
     /// `animate(alongsideTransition:)` and asks UIKit for no animation of its
@@ -699,6 +734,12 @@ public final class SelectorAccessory {
     /// With no transition (a tab switch, the place page pushed over a bar that
     /// never moves) there is nothing to ride, so it animates on its own. That
     /// case is not a desync, only the abruptness.
+    ///
+    /// ⚠️ **REMOVALS ONLY.** The install used to come through here too, and
+    /// deferring the CLAIM is what broke the hand-over — see the note at the
+    /// call site. A removal can be deferred safely: its identity check has
+    /// already happened, and by then the band is either ours to take down or
+    /// somebody else's to keep.
     private func ride(_ coordinator: UIViewControllerTransitionCoordinator?,
                       _ change: @escaping (_ animated: Bool) -> Void) {
         guard let coordinator else {
