@@ -536,7 +536,21 @@ final class SearchResultsViewController: UIViewController {
         // the navigation controller's, so the selector cannot leak onto another
         // screen. What IS shared is the toolbar's visibility, which is why this
         // screen still shows it on the way in and hides it on the way out.
-        toolbarItems = [UIBarButtonItem(customView: tabBar), .flexibleSpace(), filter]
+        // `-search-selector-accessory` — A SPIKE, not a decision. It asks one
+        // question this screen is the only place to ask: can a
+        // `UITabAccessory` exist while the app's tab bar is HIDDEN? This screen
+        // sets `hidesBottomBarWhenPushed`, so it is the only accessory
+        // candidate with no bar under it. `UITabAccessory.h` says the answer
+        // should be yes — the `.regular` environment is defined as "above the
+        // bottom tab bar when it is visible; **or, at the bottom of the
+        // UITabBarController's view**" — and this measures it rather than
+        // trusting it.
+        if Self.wantsAccessorySpike {
+            selectorAccessory = SelectorAccessory(strip: tabBar)
+            toolbarItems = [.flexibleSpace(), filter]
+        } else {
+            toolbarItems = [UIBarButtonItem(customView: tabBar), .flexibleSpace(), filter]
+        }
 
         // ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER. Docked at the foot of the
         // screen the selector sits over a pager of scrolling grids, and a drag
@@ -681,6 +695,14 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // `minimizesOnScroll: false` — there is no tab bar under this screen to
+        // minimize, and arming a shell-wide behaviour from a screen that cannot
+        // use it is how every other tab inherits a collapsing bar.
+        installBottomChromeWhenAppearing { [weak self] in
+            guard let self else { return }
+            selectorAccessory?.install(into: tabBarController,
+                                       alongside: transitionCoordinator)
+        }
         // ⚠️ RE-SUBSCRIBED EVERY TIME, and this is not belt and braces.
         // `SearchViewModel`'s callbacks are single-assignment slots, and a
         // refine screen pushed over this one takes `onPhaseChange` in its own
@@ -712,6 +734,10 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        selectorAccessory?.install(into: tabBarController)
+        #if DEBUG
+        if Self.wantsAccessorySpike { reportAccessorySpike() }
+        #endif
         // ⚠️ HERE, NOT `viewWillAppear`. The window is what
         // `updatePlayback` reads, and a screen arriving has none until it has
         // appeared — asked earlier it would decide "not visible" and leave
@@ -724,6 +750,7 @@ final class SearchResultsViewController: UIViewController {
         // ⚠️ NOTHING OF OURS OUTLIVES THIS SCREEN'S TURN ON TOP. A suspended
         // pan is stack-wide state; carrying one into a pushed screen's
         // dismissal is how a gesture that should pop one level pops two.
+        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         setPageScrollEnabled(true)
         Self.traceNavigation(
             "results willDisappear movingFromParent=\(isMovingFromParent) "
@@ -737,6 +764,39 @@ final class SearchResultsViewController: UIViewController {
         guard isMovingFromParent else { return }
         navigationController?.setToolbarHidden(true, animated: animated)
     }
+
+    /// The spike's band, when it is running. Nil on the shipping path, where
+    /// the strip is a `toolbarItems` entry.
+    private var selectorAccessory: SelectorAccessory?
+
+    private static var wantsAccessorySpike: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-search-selector-accessory")
+        #else
+        return false
+        #endif
+    }
+
+    #if DEBUG
+    /// What the spike actually produced, in numbers — whether the accessory was
+    /// accepted at all, where UIKit put it, and whether the tab bar it is
+    /// nominally attached to is even on screen.
+    private func reportAccessorySpike() {
+        let host = selectorAccessory?.hostView
+        let container = host?.superview
+        let bar = tabBarController?.tabBar
+        print("[search-accessory] hosted=\(host?.window != nil)"
+            + " accessorySet=\(tabBarController?.bottomAccessory != nil)"
+            + " env=\(host.map { String(describing: $0.traitCollection.tabAccessoryEnvironment) } ?? "nil")"
+            + String(format: " container=%.0fx%.0f at %.0f,%.0f",
+                     container?.bounds.width ?? -1, container?.bounds.height ?? -1,
+                     container.map { $0.convert($0.bounds, to: nil).minX } ?? -1,
+                     container.map { $0.convert($0.bounds, to: nil).minY } ?? -1)
+            + " tabBarHidden=\(tabBarController?.isTabBarHidden ?? false)"
+            + String(format: " barY=%.0f", bar.map { $0.convert($0.bounds, to: nil).minY } ?? -1)
+            + String(format: " windowH=%.0f", view.window?.bounds.height ?? -1))
+    }
+    #endif
 
     private func presentFilters() {
         present(SearchFilterSheetViewController.inSheet(groups: viewModel.filterGroups()) {
