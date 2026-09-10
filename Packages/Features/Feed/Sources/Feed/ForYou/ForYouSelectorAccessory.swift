@@ -282,10 +282,16 @@ final class ForYouSelectorAccessoryHost: UIView {
         UIView.animate(
             withDuration: 0.32, delay: 0,
             usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
-            // ⚠️ The scroll that caused this is still under the finger, and
-            // `.beginFromCurrentState` is what lets a second pass join the
-            // first one's flight instead of restarting it.
-            options: [.allowUserInteraction, .beginFromCurrentState]
+            // ⚠️ **NO `.beginFromCurrentState`, AND IT IS THE OPTION THAT LOOKS
+            // RIGHT HERE.** It makes the animation take its FROM-value from the
+            // presentation layer instead of from the model — which would
+            // discard the transform seeded on the line above, in proportion to
+            // how much of the previous spring is left. The composition IS the
+            // continuity: the seeded value already renders exactly what the
+            // presentation was showing a moment ago, so the from-value must be
+            // the model, and reading the presentation instead throws the carry
+            // away in precisely the case it exists for.
+            options: [.allowUserInteraction]
         ) {
             container.transform = .identity
         }
