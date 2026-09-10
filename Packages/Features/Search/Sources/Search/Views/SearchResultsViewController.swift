@@ -579,7 +579,23 @@ final class SearchResultsViewController: UIViewController {
     }
     #endif
 
+    /// `-search-no-gesture-gate`: leave the stack's recognisers alone.
+    ///
+    /// ⚠️ AN A/B SWITCH, BECAUSE THE FAILING GESTURE CANNOT BE INJECTED. A real
+    /// finger is the only thing that drives
+    /// `_UIParallaxTransitionPanGestureRecognizer` here, so whether this gate
+    /// is behind a two-level pop cannot be settled from this machine. One run
+    /// with the flag and one without settles it in a minute on a device.
+    private static var gestureGateIsOff: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-search-no-gesture-gate")
+        #else
+        false
+        #endif
+    }
+
     @objc private func selectorTouchChanged(_ probe: UILongPressGestureRecognizer) {
+        guard !Self.gestureGateIsOff else { return }
         #if DEBUG
         if probe.state == .began { auditGestures("selector touch began") }
         if probe.state == .changed { auditGestures("selector touch moved") }
@@ -655,11 +671,24 @@ final class SearchResultsViewController: UIViewController {
     /// enabled on release would hand back a state this screen never
     /// established.
     private func setPopGestureEnabled(_ isEnabled: Bool) {
+        Self.traceNavigation(
+            "pans \(isEnabled ? "restored" : "suspended") "
+            + "depth=\(navigationController?.viewControllers.count ?? -1) "
+            + "top=\(navigationController?.topViewController === self ? "results" : "other")"
+        )
         if isEnabled {
             for (recogniser, wasEnabled) in suspendedPans { recogniser.isEnabled = wasEnabled }
             suspendedPans = []
             return
         }
+        // ⚠️ **ONLY WHILE THIS SCREEN IS THE TOP ONE.** These recognisers belong
+        // to the STACK, not to this screen: suspending them is reaching outside
+        // our own lifetime, and a suspend left open while something is pushed
+        // over us would be arbitrating another screen's dismissal. The probe
+        // should not fire off-window — the strip is in a toolbar this screen
+        // owns — but "should not" is not a guarantee worth betting a back
+        // gesture on, and `viewWillDisappear` closes the window either way.
+        guard navigationController?.topViewController === self else { return }
         guard suspendedPans.isEmpty, let host = navigationController?.view else { return }
         let pans = (host.gestureRecognizers ?? []).filter { $0 is UIPanGestureRecognizer }
         suspendedPans = pans.map { ($0, $0.isEnabled) }
@@ -713,6 +742,14 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // ⚠️ NOTHING OF OURS OUTLIVES THIS SCREEN'S TURN ON TOP. A suspended
+        // pan is stack-wide state; carrying one into a pushed screen's
+        // dismissal is how a gesture that should pop one level pops two.
+        setPageScrollEnabled(true)
+        Self.traceNavigation(
+            "results willDisappear movingFromParent=\(isMovingFromParent) "
+            + "depth=\(navigationController?.viewControllers.count ?? -1)"
+        )
         // Anything pushed over this screen — a post, a profile, a refine — gets
         // the pool. A grid under another screen holding players is the leak
         // this call exists to prevent.
@@ -833,6 +870,33 @@ extension SearchResultsViewController: UIGestureRecognizerDelegate {
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool {
         true
+    }
+}
+
+extension SearchResultsViewController {
+    /// ⚠️ A FILE, NOT ONLY A CONSOLE. The defect this records — a back gesture
+    /// that pops two levels — needs a real finger, so it happens on a device or
+    /// in a hand-driven simulator run where nobody is attached to stdout. Every
+    /// line is appended to `search-nav-trace.log` in the app's Documents
+    /// directory, read afterwards with
+    /// `xcrun simctl get_app_container <udid> <bundle> data`.
+    static func traceNavigation(_ line: String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-search-nav-trace") else { return }
+        print("[search-nav] \(line)")
+        guard let directory = FileManager.default.urls(
+            for: .documentDirectory, in: .userDomainMask
+        ).first else { return }
+        let url = directory.appendingPathComponent("search-nav-trace.log")
+        guard let data = (line + "\n").data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url)
+        }
+        #endif
     }
 }
 
