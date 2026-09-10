@@ -46,6 +46,10 @@ final class SearchViewController: UIViewController {
     /// Filled by the composition root; `nil` in a composition without Feed —
     /// see `SearchPostSurfaceProviding`.
     private let postSurfaces: (any SearchPostSurfaceProviding)?
+    /// Carried, not worn: this screen's own field is its `titleView` and has no
+    /// room beside it. The RESULTS screen it builds wears the badge.
+    private let wallet: WalletStore?
+    private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     /// The field. It is the bar's title view for the life of the screen.
     private let searchField = UISearchTextField()
@@ -71,11 +75,15 @@ final class SearchViewController: UIViewController {
         viewModel: SearchViewModel,
         imagePipeline: ImagePipeline,
         postSurfaces: (any SearchPostSurfaceProviding)? = nil,
+        wallet: WalletStore? = nil,
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         mode: Mode = .origin
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.postSurfaces = postSurfaces
+        self.wallet = wallet
+        self.makeWalletSheet = makeWalletSheet
         self.mode = mode
         super.init(nibName: nil, bundle: nil)
         // ⚠️ IN THE INITIALISER, not `viewDidLoad`. A navigation controller
@@ -494,7 +502,9 @@ final class SearchViewController: UIViewController {
         let results = SearchResultsViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
-            postSurfaces: postSurfaces
+            postSurfaces: postSurfaces,
+            wallet: wallet,
+            makeWalletSheet: makeWalletSheet
         )
         // ⚠️ UNANIMATED BOTH WAYS ON THIS ONE PATH. The ordinary back button
         // still slides — that is UIKit's and it is right, because leaving an

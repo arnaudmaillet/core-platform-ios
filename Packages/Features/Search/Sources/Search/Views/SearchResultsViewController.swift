@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import UIKit
@@ -15,7 +16,7 @@ import UIKit
 ///
 /// # The chrome, top and bottom
 ///
-///     navigation bar   [back] ……………………………… [query field]
+///     navigation bar   [back] ………… [credit][query field]
 ///     bottom toolbar   [selector] ………………………… [filter tray]
 ///
 /// ⚠️ REAL BAR ITEMS, AND THE COMPOSITE THEY REPLACE IS WHY. The header was one
@@ -34,7 +35,10 @@ import UIKit
 /// the field was cut to a 44pt glyph to save the arrangement, and the header
 /// stopped showing what had been searched for. Moving the strip to the toolbar
 /// buys that back — a toolbar has no item groups and no overflow control, so
-/// the failure the navigation bar has is not available to it.
+/// the failure the navigation bar has is not available to it. The credit badge
+/// then fits beside the field with room to spare: on a 402pt bar a 250-point
+/// balance leaves the field ~188pt, and the required minimums come to ~273
+/// against the narrowest bar the app supports.
 ///
 /// ⚠️ AND `leftItemsSupplementBackButton` IS FALSE NOW, where it used to be
 /// load-bearing. That flag exists because `NativePopPolicy` refuses the
@@ -85,6 +89,28 @@ final class SearchResultsViewController: UIViewController {
     /// inter-group − 8 padding = 294pt for a field that needs nothing like it.
     private let searchField = UISearchTextField()
 
+    /// The viewer's spendable points, beside the query.
+    ///
+    /// ⚠️ BUILT HERE, NOT THROUGH THE SHELL'S `WalletBadgeInstaller`, for the
+    /// reason the post screen and the place page give: a PUSHED screen owns its
+    /// own navigation item, and what that installer exists to share — the
+    /// freshness rules — is two closures here. Every installer the app holds
+    /// belongs to a tab coordinator and is documented as living "as long as the
+    /// process"; it removes no observer and re-arms a timer, so one per pushed
+    /// results screen would leave a registration behind per query.
+    ///
+    /// ⚠️ AND IT IS THIS SCREEN'S OWN BADGE. A badge is a view and a view lives
+    /// in one bar — borrowing the map's or For You's would strip it from there.
+    /// Only the `WalletStore` is shared, which is all that has to be.
+    private let walletBadge = WalletBadgeButton()
+    private var walletItem: UIBarButtonItem?
+    private var fieldItem: UIBarButtonItem?
+    private let wallet: WalletStore?
+    /// Nil in a composition without the shell's claim sheet — the badge is then
+    /// a read-out, not a control.
+    private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    private let walletObservers = SearchNotificationObserverBag()
+
     /// What the field asks for: everything the bar has left beside the back
     /// button, floored at one perfect bubble.
     ///
@@ -123,11 +149,15 @@ final class SearchResultsViewController: UIViewController {
     init(
         viewModel: SearchViewModel,
         imagePipeline: ImagePipeline,
-        postSurfaces: (any SearchPostSurfaceProviding)?
+        postSurfaces: (any SearchPostSurfaceProviding)?,
+        wallet: WalletStore? = nil,
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.postSurfaces = postSurfaces
+        self.wallet = wallet
+        self.makeWalletSheet = makeWalletSheet
         peoplePage = SearchPeoplePage(imagePipeline: imagePipeline)
         postsPage = postSurfaces?.makePostSurface(style: .cards)
             ?? SearchPendingSurfaceViewController(kind: .posts)
@@ -207,7 +237,9 @@ final class SearchResultsViewController: UIViewController {
                 greaterThanOrEqualToConstant: NavigationBarMetrics.itemPlatterHeight
             )
         ])
-        navigationItem.rightBarButtonItems = [UIBarButtonItem(customView: searchField)]
+        fieldItem = UIBarButtonItem(customView: searchField)
+        configureWalletBadge()
+        applyTrailingItems()
 
         // ⚠️ NO `leftItemsSupplementBackButton` ANY MORE, because there is no
         // leading custom item to supplement. That flag exists so an item that
@@ -234,8 +266,107 @@ final class SearchResultsViewController: UIViewController {
         // pop too, and the bar's width is not settled there — resizing an item
         // mid-flight makes UIKit re-measure the groups at a moment when the
         // destination's own items are half installed.
+        _ = bar
+        applyHeaderWidths()
+    }
+
+    /// ⚠️ **`[0]` IS THE SCREEN EDGE, so this array renders left-to-right as
+    /// `[back] … [credit][query]`** — the order every other host of this badge
+    /// wears, and the one that was asked for. The credit sits immediately left
+    /// of the field rather than against the chevron with 190pt of air between
+    /// them, which is what a LEADING item would have given.
+    ///
+    /// ⚠️ AND IT KEEPS THE LEADING GROUP EMPTY, which is not a detail. A custom
+    /// leading item makes `NativePopPolicy.shouldBegin` return false unless
+    /// `leftItemsSupplementBackButton` is flipped back to true, and the failure
+    /// is silent: the chevron still pops, so only a real edge swipe shows it —
+    /// and injected touches cannot produce one here.
+    ///
+    /// ⚠️ `sharesBackground = false` ON BOTH, or iOS 26 draws one pill around
+    /// them and a balance welded to a search field reads as a segmented
+    /// control.
+    private func applyTrailingItems() {
+        let items = [fieldItem, walletItem].compactMap { $0 }
+        for item in items { item.sharesBackground = false }
+        navigationItem.rightBarButtonItems = items
+    }
+
+    /// The badge, and the rules that keep it true.
+    private func configureWalletBadge() {
+        guard let wallet else { return }
+        // A badge with no sheet behind it is a read-out, not a control.
+        walletBadge.isUserInteractionEnabled = makeWalletSheet != nil
+        walletBadge.addAction(
+            UIAction { [weak self] _ in
+                guard let self, let sheet = self.makeWalletSheet?() else { return }
+                self.present(sheet, animated: true)
+            },
+            for: .primaryActionTriggered
+        )
+        // ⚠️ A GROWN COUNT NEEDS A FRESH WRAPPER. Re-assigning the same item
+        // hands the bar the same wrapper at the same frozen size (measured on
+        // the post screen: "120" still came back wrapped), so a new item is the
+        // only thing a bar measures anew — and the FIELD is refitted in the
+        // same pass, because the badge takes its points off the same run.
+        walletBadge.onFittedWidthChange = { [weak self] in
+            guard let self else { return }
+            self.walletItem = self.makeWalletItem()
+            self.applyTrailingItems()
+            self.applyHeaderWidths()
+        }
+        walletItem = makeWalletItem()
+        refreshWalletBadge()
+        // Spends and claims wherever they happen — a boost in a feed pushed
+        // over this screen, a claim taken on the map beneath it.
+        walletObservers.add(NotificationCenter.default.addObserver(
+            forName: WalletStore.didChangeNotification, object: wallet, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshWalletBadge() }
+        })
+    }
+
+    private func makeWalletItem() -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: walletBadge)
+        item.accessibilityLabel = "Points balance"
+        return item
+    }
+
+    private func refreshWalletBadge() {
+        guard let wallet else { return }
+        let snapshot = wallet.snapshot()
+        walletBadge.update(
+            balance: snapshot.balance,
+            // A badge with no sheet to open must not advertise a claim the
+            // viewer has no way to take from here.
+            claimAvailable: makeWalletSheet != nil && snapshot.claimAvailable,
+            claimProgress: snapshot.claimCountdown.map {
+                WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
+            }
+        )
+    }
+
+    /// What the badge is asking for, or 0 when there is none.
+    private func walletWanted() -> CGFloat {
+        guard walletItem != nil else { return 0 }
+        return walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+    }
+
+    /// ⚠️ CANNOT REACH THE `•••`, and this is an invariant rather than a
+    /// reassurance. UIKit sweeps a group when the items' REQUIRED minimums
+    /// exceed the bar, and both burns on this screen were required-width burns
+    /// (a stated 150 a side, then two halves each required at 141 on 402). The
+    /// required minimums here are the fixed 116, the spacing, the field's
+    /// required 44 floor and the badge's widest realistic intrinsic — about 273
+    /// against the narrowest supported bar, 375. The field's own width stays
+    /// `.defaultHigh`, so a `claimed` that drifts low costs a narrower field
+    /// and never an overflow.
+    private func applyHeaderWidths() {
+        guard let bar = navigationController?.navigationBar, bar.bounds.width > 0 else { return }
+        // ⚠️ NOT WHILE A TRANSITION IS RUNNING: the bar's width is not settled
+        // there, and rebuilding the trailing run mid-flight is its own flash.
         guard transitionCoordinator == nil else { return }
-        let wanted = Self.queryWidth(inBarOfWidth: bar.bounds.width)
+        let wanted = Self.queryWidth(inBarOfWidth: bar.bounds.width,
+                                     walletWanted: walletWanted())
         guard queryWidth.constant != wanted else { return }
         queryWidth.constant = wanted
         searchField.superview?.layoutIfNeeded()
@@ -247,7 +378,8 @@ final class SearchResultsViewController: UIViewController {
     /// screen stated 150pt a side and was ten points over the budget on a 402pt
     /// bar, which UIKit answered with a `•••` — a stated width can be wrong for
     /// a device nobody tested, and that one was wrong on every one of them.
-    private static func queryWidth(inBarOfWidth barWidth: CGFloat) -> CGFloat {
+    static func queryWidth(inBarOfWidth barWidth: CGFloat,
+                           walletWanted: CGFloat) -> CGFloat {
         // 16 a side, the back button's platter, the gap between the leading and
         // trailing groups, and the trailing platter's own inset.
         //
@@ -265,7 +397,18 @@ final class SearchResultsViewController: UIViewController {
         // has no leading custom view, so if UIKit ever gives the chevron its
         // word back the field is 44pt too generous — and yields, rather than
         // overflowing.
-        let claimed: CGFloat = 16 * 2 + 44 + 24 + 8
+        var claimed: CGFloat = 16 * 2 + 44 + 24 + 8
+        if walletWanted > 0 {
+            // The badge opts out of the shared background, so it wears its OWN
+            // platter: that platter's inset, its width — charged
+            // `max(44, wanted)` because UIKit draws no platter narrower than
+            // the touch target — and the spacing to the field.
+            //
+            // ⚠️ 27 IS CHARGED ON PURPOSE, though two separate platters are
+            // likely 12 apart. Over-charging costs the field a few points;
+            // under-charging costs an overflow, and only the field can yield.
+            claimed += 8 + max(44, walletWanted) + 27
+        }
         return max(NavigationBarMetrics.itemPlatterHeight, barWidth - claimed)
     }
 
@@ -691,4 +834,14 @@ extension SearchResultsViewController: UIGestureRecognizerDelegate {
     ) -> Bool {
         true
     }
+}
+
+/// ⚠️ A BOX, BECAUSE A `@MainActor` SCREEN'S `deinit` MAY NOT READ ITS OWN
+/// STORED TOKENS under Swift 6. Feed keeps one of these for the same reason and
+/// it is internal to Feed, so Search carries its own rather than reaching
+/// across a package for five lines.
+final class SearchNotificationObserverBag: @unchecked Sendable {
+    private var tokens: [any NSObjectProtocol] = []
+    func add(_ token: any NSObjectProtocol) { tokens.append(token) }
+    deinit { tokens.forEach(NotificationCenter.default.removeObserver) }
 }
