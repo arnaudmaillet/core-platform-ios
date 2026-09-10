@@ -168,7 +168,14 @@ final class SearchResultsViewController: UIViewController {
         // push BEGINS, and `viewDidLoad` can run inside that same push — set
         // there it is a coin toss whether the bar goes. The screen underneath
         // hides it too, so this only keeps it hidden rather than hiding it.
-        hidesBottomBarWhenPushed = true
+        //
+        // `-search-results-tab-bar` KEEPS the bar, to see what this screen
+        // looks like wearing the same collapse/expand the tab roots have. It is
+        // a flag because it is a product question, not a technical one: the
+        // band works either way — measured, an accessory is hosted with the bar
+        // hidden just as it is with the bar showing — and what changes is
+        // whether a pushed screen offers a way out of itself.
+        hidesBottomBarWhenPushed = !Self.wantsTabBar
     }
 
     @available(*, unavailable)
@@ -408,9 +415,19 @@ final class SearchResultsViewController: UIViewController {
     ///   in its own platter, or 0 for none. It was called `walletWanted` while
     ///   the badge was the only such item; the global search screen's Cancel is
     ///   the second, and the arithmetic never cared which.
+    /// - Parameter hasBackButton: whether the bar carries a back chevron at
+    ///   all.
+    ///
+    ///   ⚠️ **CHARGING ONE THAT IS NOT THERE LEAVES A HOLE.** The global
+    ///   search screen hides its back button in refine mode
+    ///   (`setHidesBackButton(true)`), and the field was still being charged
+    ///   the 44pt chevron plus the 24pt gap to a leading group that does not
+    ///   exist — 68pt of empty bar, visible at the LEADING edge because the
+    ///   field is trailing and the shortfall collects behind it.
     static func queryWidth(inBarOfWidth barWidth: CGFloat,
                            trailingSiblingWanted: CGFloat,
-                           leadingWanted: CGFloat = 0) -> CGFloat {
+                           leadingWanted: CGFloat = 0,
+                           hasBackButton: Bool = true) -> CGFloat {
         // 16 a side, the back button's platter, the gap between the leading and
         // trailing groups, and the trailing platter's own inset.
         //
@@ -447,7 +464,9 @@ final class SearchResultsViewController: UIViewController {
         // platter. This screen has no leading custom view, so if UIKit ever
         // gives the chevron its word back the field is 44pt too generous — and
         // yields, rather than overflowing.
-        var claimed: CGFloat = 16 * 2 + 44 + 24 + 8
+        // Margins either end, the field platter's own inset, and — only when
+        // there is one — the back chevron plus the gap to the trailing group.
+        var claimed: CGFloat = 16 * 2 + 8 + (hasBackButton ? 44 + 24 : 0)
         if trailingSiblingWanted > 0 {
             // The badge opts out of the shared background, so it wears its OWN
             // platter: that platter's inset, its width — charged
@@ -516,6 +535,14 @@ final class SearchResultsViewController: UIViewController {
         for page in [postsPage.viewController, mediaPage.viewController, peoplePage] {
             addChild(page)
             page.didMove(toParent: self)
+        }
+        // The band's minimize rides whichever page is in front — the pager is
+        // what knows, and it is what says so. Wired unconditionally: naming a
+        // scroll view costs nothing when the minimize is not armed.
+        defer {
+            pager.onActiveScrollViewChanged = { [weak self] scroller in
+                self?.setContentScrollView(scroller, for: .bottom)
+            }
         }
         pager = HorizontalPagerView(
             pages: [postsPage.viewController.view, mediaPage.viewController.view, peoplePage.view],
@@ -771,11 +798,22 @@ final class SearchResultsViewController: UIViewController {
         // `minimizesOnScroll: false` — there is no tab bar under this screen to
         // minimize, and arming a shell-wide behaviour from a screen that cannot
         // use it is how every other tab inherits a collapsing bar.
+        #if DEBUG
+        // ⚠️ **UN-SETTING `hidesBottomBarWhenPushed` DOES NOT BRING THE BAR
+        // BACK.** The screen underneath — the global search — hides it too, so
+        // by the time this one is pushed the bar is already gone and the flag
+        // only decides whether it would have hidden it again. Filmed: the band
+        // at the foot and no tab bar under it. Asking for it is a separate act.
+        if Self.wantsTabBar {
+            tabBarController?.setTabBarHidden(false, animated: animated)
+        }
+        #endif
         installBottomChromeWhenAppearing(
             handsOver: tabBarController?.bottomAccessory != nil
         ) { [weak self] in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController,
+                                       minimizesOnScroll: Self.wantsTabBar,
                                        alongside: transitionCoordinator)
         }
         // ⚠️ RE-SUBSCRIBED EVERY TIME, and this is not belt and braces.
@@ -804,7 +842,8 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        selectorAccessory?.install(into: tabBarController)
+        selectorAccessory?.install(into: tabBarController,
+                                   minimizesOnScroll: Self.wantsTabBar)
         #if DEBUG
         reportAccessorySpike()
         #endif
@@ -820,6 +859,13 @@ final class SearchResultsViewController: UIViewController {
         // ⚠️ NOTHING OF OURS OUTLIVES THIS SCREEN'S TURN ON TOP. A suspended
         // pan is stack-wide state; carrying one into a pushed screen's
         // dismissal is how a gesture that should pop one level pops two.
+        #if DEBUG
+        // Put it back the way it was found: the bar is shell-wide state, and
+        // the screen underneath is the one that wanted it hidden.
+        if Self.wantsTabBar, isMovingFromParent {
+            tabBarController?.setTabBarHidden(true, animated: animated)
+        }
+        #endif
         selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         setPageScrollEnabled(true)
         Self.traceNavigation(
@@ -838,6 +884,16 @@ final class SearchResultsViewController: UIViewController {
     /// into a content view UIKit owns, and a rule nothing can see is a rule
     /// that quietly stops being true.
     private(set) var selectorAccessory: SelectorAccessory?
+
+    /// `-search-results-tab-bar`: keep the app's tab bar under this screen and
+    /// let the band minimize into it on scroll, the way a tab root does.
+    static var wantsTabBar: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-search-results-tab-bar")
+        #else
+        return false
+        #endif
+    }
 
     /// The filter, as a plain system bar item.
     ///

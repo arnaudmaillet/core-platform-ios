@@ -97,6 +97,26 @@ struct SearchResultsWalletBadgeTests {
         #expect(squeezed >= NavigationBarMetrics.itemPlatterHeight)
     }
 
+    /// ⚠️ **A CHEVRON THAT IS NOT THERE MUST NOT BE CHARGED.** The global
+    /// search screen hides its back button in refine mode, and charging it
+    /// anyway left 68pt of empty bar — the chevron's 44 plus the 24pt gap to a
+    /// leading group that does not exist. It shows at the LEADING edge, because
+    /// the field is trailing and the shortfall collects behind it.
+    @Test func aHiddenBackButtonIsNotChargedForItsPlatterOrItsGap() {
+        let withChevron = SearchResultsViewController.queryWidth(
+            inBarOfWidth: 402, trailingSiblingWanted: 0
+        )
+        let without = SearchResultsViewController.queryWidth(
+            inBarOfWidth: 402, trailingSiblingWanted: 0, hasBackButton: false
+        )
+        #expect(without == withChevron + 44 + 24)
+        // And the two are the same bar otherwise: margins and the field
+        // platter's own inset. Compared with a tolerance, not for equality:
+        // this repo has failed CI once already on `==` between fractional
+        // CGFloats that agreed to the eye.
+        #expect(abs(without - CGFloat(402 - (16 * 2 + 8))) < 0.5)
+    }
+
     /// ⚠️ **A LEADING ITEM IS CHARGED TOO, AND THE FIELD PAYS FOR IT AS WELL.**
     /// The bar can read `[back][filter][credit][field]`, and a leading glyph
     /// that was not charged is a `•••` on the narrow device — the failure this

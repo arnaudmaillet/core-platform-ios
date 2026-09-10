@@ -116,7 +116,16 @@ final class SearchViewController: UIViewController {
         // the Maps and For You headers, and the bar it would sit under belongs
         // to the screen it came from. UIKit puts that bar back on the pop; the
         // fade below is only about HOW it leaves and returns.
-        hidesBottomBarWhenPushed = true
+        //
+        // ⚠️ **AND THIS SCREEN'S FLAG DECIDES THE RESULTS SCREEN'S BAR TOO.**
+        // `MainTabCoordinator.syncTabBarVisibility` keeps the bar hidden while
+        // ANY pushed controller on the stack asked for it — deliberately, so a
+        // flagged screen with an unflagged one above it does not get the bar
+        // slid back over it. So `-search-results-tab-bar` has to reach here as
+        // well: with this one still flagged, the results screen un-setting its
+        // own flag and calling `setTabBarHidden(false)` was undone by the next
+        // reconciliation, and the band sat at the foot with no bar under it.
+        hidesBottomBarWhenPushed = !SearchResultsViewController.wantsTabBar
         #if DEBUG
         installKeyboardTraceIfRequested()
         #endif
@@ -510,7 +519,11 @@ final class SearchViewController: UIViewController {
                 ?? NavigationBarMetrics.itemPlatterHeight * 2
         }
         let wanted = SearchResultsViewController.queryWidth(
-            inBarOfWidth: bar.bounds.width, trailingSiblingWanted: sibling
+            inBarOfWidth: bar.bounds.width,
+            trailingSiblingWanted: sibling,
+            // Refine hides the chevron, and charging one that is not there is
+            // what left a hole at the leading edge.
+            hasBackButton: !navigationItem.hidesBackButton
         )
         guard fieldWidth.constant != wanted else { return }
         fieldWidth.constant = wanted
