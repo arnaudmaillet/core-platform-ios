@@ -96,40 +96,46 @@ struct SearchFilterTrayTests {
             navigation.topViewController as? SearchResultsViewController
         }
 
-        /// ⚠️ THE FILTER LEFT `toolbarItems` FOR THE ACCESSORY'S CONTENT VIEW,
-        /// so it is found by walking rather than by index. A toolbar and an
-        /// accessory both claim the bottom of the screen and neither yields —
-        /// filmed with the selector in the band and the filter left behind, the
-        /// glyph sat underneath it, half-hidden by its trailing edge.
+        /// ⚠️ THE FILTER IS IN NEITHER THE TOOLBAR NOR THE BAND. A toolbar and
+        /// an accessory both claim the bottom of the screen and UIKit
+        /// coordinates neither, and one accessory is one capsule — so the
+        /// filter is a tray in the SCREEN'S OWN VIEW, pinned above its safe
+        /// area, which the band is already excluded from. Found by walking,
+        /// because none of those places has an index to read.
         var bandHost: SelectorAccessoryHost? { results?.selectorAccessory?.hostView }
 
-        var item: UIButton? {
-            guard let bandHost else { return nil }
-            func walk(_ view: UIView) -> UIButton? {
-                if let button = view as? UIButton, button.accessibilityLabel == "Filters" {
-                    return button
-                }
-                for subview in view.subviews {
-                    if let found = walk(subview) { return found }
-                }
-                return nil
+        var tray: InlineFilterTrayView? {
+            results?.view.subviews.compactMap { $0 as? InlineFilterTrayView }.first
+        }
+
+        var item: UIButton? { results?.view.map(Self.filterButton(in:)) ?? nil }
+
+        static func filterButton(in view: UIView) -> UIButton? {
+            if let button = view as? UIButton, button.accessibilityLabel == "Filters" {
+                return button
             }
-            return walk(bandHost)
+            for subview in view.subviews {
+                if let found = filterButton(in: subview) { return found }
+            }
+            return nil
         }
 
-        /// The band, laid out at the width UIKit hands an accessory, so the
-        /// order of what is inside it can be read off real frames.
-        func laidOutBand() -> SelectorAccessoryHost? {
-            guard let bandHost else { return nil }
-            bandHost.frame = CGRect(x: 0, y: 0, width: 360, height: 48)
-            bandHost.layoutIfNeeded()
-            return bandHost
-        }
-
-        /// Submits, which PUSHES the results screen, and waits for it.
+        /// Submits, which PUSHES the results screen, and waits for it to be ON
+        /// SCREEN.
+        ///
+        /// ⚠️ **THE CONDITION USED TO BE AN ACCESSOR'S SIDE EFFECT, AND IT
+        /// MATTERED.** This waited for `item` — a chain that did not force the
+        /// view to load, so it spun its full 80 yields while the push completed
+        /// underneath. Rewriting the accessor to reach through `results.view`
+        /// (which DOES force a load) made the loop exit on the first turn, and
+        /// `theResultsQueryRefusesTheKeyboardAndAsksToGoBack` began failing:
+        /// `becomeFirstResponder()` returns false WITHOUT consulting the
+        /// delegate when the field is not in a window, so the callback it
+        /// asserts never fired. The wait is on the window now, which is what
+        /// every test after this line actually assumes.
         func showResults(_ text: String) async {
             submit(text)
-            for _ in 0..<80 where item == nil { await Task.yield() }
+            for _ in 0..<80 where results?.viewIfLoaded?.window == nil { await Task.yield() }
         }
 
         /// ⚠️ THE PUSH IS SYNCHRONOUS AND THE ANSWER IS NOT. `showResults`
@@ -179,10 +185,10 @@ struct SearchFilterTrayTests {
         #expect(Host().item == nil)
     }
 
-    /// ⚠️ IN THE BAND, TRAILING. The navigation bar carries a back button and a
-    /// full-width query field; a third item there would take width off the
-    /// query the viewer is reading.
-    @Test func theTrayRidesTheBandsTrailingEdge() async {
+    /// ⚠️ IN ITS OWN CAPSULE ABOVE THE BAND. The navigation bar carries a back
+    /// button and a full-width query field; a third item there would take width
+    /// off the query the viewer is reading.
+    @Test func theTrayFloatsAboveTheBand() async {
         let host = Host()
         await host.showResults("haddad")
         #expect(host.item != nil)
@@ -191,10 +197,11 @@ struct SearchFilterTrayTests {
         #expect(host.item?.accessibilityLabel == "Filters")
     }
 
-    /// ⚠️ **BARE, OR IT IS A BUBBLE INSIDE A BUBBLE.** UIKit draws exactly one
-    /// capsule per accessory, around the whole content view — the same reason
-    /// the strip sets `suppressesBackdrop`. A filter carrying its own
-    /// background would draw a second one inside the first.
+    /// ⚠️ **BARE, OR IT IS A BUBBLE INSIDE A BUBBLE.** `InlineFilterTrayView`
+    /// supplies exactly one `UIGlassEffect` capsule around its control, and it
+    /// says so in as many words: "the capsules are supplied here, and only
+    /// here". A filter carrying its own background would draw a second one
+    /// inside the first.
     @Test func theTrayCarriesNoBackgroundOfItsOwn() async {
         let host = Host()
         await host.showResults("haddad")
@@ -501,19 +508,35 @@ struct SearchFilterTrayTests {
         // the back button and there is nothing to supplement...
         #expect(results?.navigationItem.leftBarButtonItems?.isEmpty != false)
         #expect(results?.navigationItem.hidesBackButton == false)
-        // ...and the band at the foot carries the selector with the filter to
-        // its right, with NO toolbar items left behind to fight it for the
-        // bottom of the screen.
+        // ...the band at the foot carries the selector and NOTHING else, since
+        // one accessory is one capsule...
         #expect(results?.toolbarItems?.isEmpty != false,
                 "a toolbar and an accessory both claim the bottom and neither yields")
-        let band = try? #require(host.laidOutBand())
-        let strip = band?.subviews.compactMap { $0 as? PagedTabBar }.first
-        #expect(strip != nil, "the selector is in the band")
-        if let strip, let filter = host.item {
-            #expect(filter.frame.minX >= strip.frame.maxX,
-                    "the filter rides the trailing edge, after the selector")
-            #expect(band?.bounds.maxX ?? 0 >= filter.frame.maxX)
+        let band = try? #require(host.bandHost)
+        #expect(band?.subviews.compactMap { $0 as? PagedTabBar }.count == 1)
+        #expect((band.map { Host.filterButton(in: $0) } ?? nil) == nil,
+                "a filter inside the band could not have a capsule of its own")
+        // ...and the filter is a tray in the screen's own view, which is what
+        // keeps it clear of the band without any arithmetic.
+        #expect(host.tray != nil)
+        #expect(host.tray.map { Host.filterButton(in: $0) != nil } == true)
+    }
+
+    /// ⚠️ **THE SAFE AREA IS WHAT CLEARS THE BAND, SO THE PIN MUST BE ON IT.**
+    /// `safeAreaLayoutGuide.bottom` already excludes the accessory — measured,
+    /// `safeAreaInsets.bottom = 69` in an 874pt window with the band's top edge
+    /// at exactly 805. Pinned to `view.bottomAnchor` instead, the tray would
+    /// land inside the band and this screen would be back where it started.
+    @Test func theTrayIsPinnedToTheSafeAreaAndNotToTheViewsEdge() async {
+        let host = Host()
+        await host.showResults("haddad")
+        let tray = try? #require(host.tray)
+        let pinnedToSafeArea = host.results?.view.constraints.contains { constraint in
+            (constraint.firstItem === tray && constraint.firstAttribute == .bottom)
+                && (constraint.secondItem as? UILayoutGuide)
+                    === host.results?.view.safeAreaLayoutGuide
         }
+        #expect(pinnedToSafeArea == true)
     }
 
     /// ⚠️ REAL BAR ITEMS, NOT A COMPOSITE TITLE VIEW. A title view is one view

@@ -516,17 +516,35 @@ final class SearchResultsViewController: UIViewController {
     /// 874pt window, laid out exactly as it is on a tab root.
     ///
     /// ⚠️ **AND THE TOOLBAR HAD TO GO, NOT MOVE OVER.** A toolbar and an
-    /// accessory both claim the bottom of the screen and neither yields:
-    /// filmed with the selector in the accessory and the filter left behind in
-    /// `toolbarItems`, the glyph sat UNDERNEATH the band, half-hidden by its
-    /// trailing edge. So the filter rides inside the accessory and this screen
-    /// presents no toolbar items at all — which also gives
+    /// accessory both claim the bottom of the screen and UIKit coordinates
+    /// neither — the accessory belongs to the `UITabBarController` and the
+    /// toolbar to a `UINavigationController` descendant, and the two headers do
+    /// not mention each other. Filmed: the toolbar's filter glyph drawn
+    /// UNDERNEATH the band, half-hidden by its trailing edge. This screen
+    /// therefore presents no toolbar items at all — which also gives
     /// `SnapFeedViewController.successorUsesToolbar` the right answer when a
     /// post pushed from here is popped back.
+    ///
+    /// ⚠️ **AND THE FILTER IS NOT IN THE BAND EITHER, BECAUSE ONE ACCESSORY IS
+    /// ONE CAPSULE.** `_UITabAccessoryContainer` draws its glass around the
+    /// WHOLE content view whatever is inside it — measured twice: an accessory
+    /// built with a nil content view still draws its bubble around nothing, and
+    /// a strip given its own glass came back as a pill inside a pill. So a
+    /// filter sharing the band cannot have a capsule of its own, and side by
+    /// side is not available either: UIKit fixes the band at 360pt centred in a
+    /// 402pt window, leaving 21pt at each edge.
+    ///
+    /// What IS available is the arrangement the profile tab root already uses,
+    /// and for the same reason: a tray in the SCREEN'S OWN VIEW, pinned above
+    /// its `safeAreaLayoutGuide.bottom`. The safe area already accounts for the
+    /// band — measured, `safeAreaInsets.bottom = 69` in an 874pt window with the
+    /// band's top edge at exactly 805 — so the tray clears it for free, with no
+    /// arithmetic and nothing to keep in step. Two separate glass capsules, the
+    /// selector's and the filter's, and neither drawn over the other.
     private func configureToolbar() {
-        // A BARE control: the accessory's container draws one capsule around
-        // the whole content view, so a button carrying its own background
-        // would be a bubble inside a bubble.
+        // A BARE control: `InlineFilterTrayView` supplies the one glass capsule
+        // around it, and a button carrying its own background would be a bubble
+        // inside a bubble.
         var configuration = UIButton.Configuration.plain()
         configuration.image = UIImage(systemName: "line.3.horizontal.decrease")
         configuration.contentInsets = NSDirectionalEdgeInsets(
@@ -554,7 +572,27 @@ final class SearchResultsViewController: UIViewController {
         // the navigation controller's, so the selector cannot leak onto another
         // screen. What IS shared is the toolbar's visibility, which is why this
         // screen still shows it on the way in and hides it on the way out.
-        selectorAccessory = SelectorAccessory(strip: tabBar, trailing: filter)
+        selectorAccessory = SelectorAccessory(strip: tabBar)
+
+        let tray = InlineFilterTrayView(trailing: filter)
+        view.addSubview(tray)
+        NSLayoutConstraint.activate([
+            // ⚠️ **LEADING AS WELL AS TRAILING, AND A UITEST HAD TO FIND OUT
+            // WHY.** The tray takes its width from its subviews, and its one
+            // capsule is pinned to the TRAILING edge — so pinned on that side
+            // alone the tray resolved to zero width. It still drew, because
+            // nothing clips, and it was perfectly legible in a screenshot; but
+            // hit-testing and the accessibility tree are both bounded by the
+            // view's own frame, so the filter answered nothing and
+            // `app.buttons["Filters"]` could not find it at all. This is the
+            // trap already recorded for cell accessories — draws, never
+            // receives — in a second place.
+            tray.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+            tray.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+            tray.heightAnchor.constraint(equalToConstant: InlineFilterTrayView.height),
+            tray.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                                         constant: -InlineFilterTrayView.spacingBelow)
+        ])
 
         // ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER. Docked at the foot of the
         // screen the selector sits over a pager of scrolling grids, and a drag
