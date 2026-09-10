@@ -187,7 +187,8 @@ final class ForYouSelectorAccessoryHost: UIView {
     /// ⚠️ MEASURED FROM `center`, NOT FROM `frame`. `center` mirrors
     /// `layer.position`, which a transform does not move; a frame read back
     /// while the catch-up is mid-flight would include the very offset being
-    /// animated, and each pass would chase the last one.
+    /// animated, and each pass would chase the last one. Both this and
+    /// `lastWidth` describe the CONTAINER, since that is what is carried.
     private var lastCentre: CGPoint?
 
     /// The width this view was last laid out at.
@@ -224,9 +225,21 @@ final class ForYouSelectorAccessoryHost: UIView {
     /// strip still narrows in one step while it travels. Half of Apple's
     /// motion, which is more than none.
     private func playCatchUpIfMoved() {
-        guard let window, let superview else { return }
-        let centreNow = superview.convert(center, to: window)
-        let widthNow = bounds.width
+        // ⚠️ **THE CONTAINER, NOT US, AND THAT IS THE WHOLE CORRECTION.** The
+        // glass capsule a viewer sees in this band is NOT ours — the strip's
+        // own backdrop is suppressed — it is drawn by UIKit's
+        // `_UITabAccessoryContainer`, which is our superview. Transforming
+        // ourselves therefore scaled the TITLES inside a capsule that had
+        // already snapped to its final width, which is exactly what "it takes
+        // its final width from the start of the animation" looks like.
+        //
+        // Apple Music's own expand, filmed on a device: the capsule itself
+        // widens frame by frame. So the capsule is what has to be carried.
+        guard let window, let container = superview,
+              let containerHost = container.superview
+        else { return }
+        let centreNow = containerHost.convert(container.center, to: window)
+        let widthNow = container.bounds.width
         defer { lastCentre = centreNow; lastWidth = widthNow }
         guard ForYouSelectorDock.animatesCatchUp,
               let was = lastCentre, let wasWidth = lastWidth, widthNow > 1
@@ -255,14 +268,15 @@ final class ForYouSelectorAccessoryHost: UIView {
         // second of narrow text is the cheaper artefact; the alternative that
         // does not distort is a width CONSTRAINT, which cannot start until the
         // pass after the one that resized us.
-        transform = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: 1)
+        container.transform = CGAffineTransform(translationX: dx, y: dy)
+            .scaledBy(x: scale, y: 1)
         UIView.animate(
             withDuration: 0.32, delay: 0,
             usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
             // ⚠️ The scroll that caused this is still under the finger.
             options: [.allowUserInteraction, .beginFromCurrentState]
         ) {
-            self.transform = .identity
+            container.transform = .identity
         }
     }
 
