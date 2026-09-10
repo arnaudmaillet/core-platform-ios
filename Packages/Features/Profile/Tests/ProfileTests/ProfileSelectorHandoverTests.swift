@@ -1,18 +1,20 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import PostGrid
 import Testing
 import UIKit
 @testable import Profile
 
-/// The hand-over between the profile's two selectors.
+/// Where a pushed profile's selector ends up, and what else is in the bar
+/// with it.
 ///
-/// There are two of them — one filling the page's column, one hugging in the
-/// navigation bar's title slot — because the change between them is a crossfade,
-/// and a single re-parented view cannot fade out of one place while fading into
-/// another. Two views means two things to keep straight, and both of them have
-/// already been wrong once: which is visible at rest, and whether they agree on
-/// the selected tab.
+/// ⚠️ **THERE IS ONE SELECTOR NOW.** This file was about the hand-over between
+/// two — one filling the page's column, one hugging the navigation bar's title
+/// slot, cross-fading as the identity block scrolled away. The strip sits in
+/// the navigation controller's bottom toolbar for this screen's whole life, so
+/// what is left to get wrong is not which copy is visible but whether the one
+/// copy is in the bar at all.
 @MainActor
 struct ProfileSelectorHandoverTests {
     private struct SilentFetcher: ImageFetching {
@@ -81,6 +83,25 @@ struct ProfileSelectorHandoverTests {
         screen.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         screen.view.layoutIfNeeded()
         return screen
+    }
+
+    /// ⚠️ **THE SELECTOR AND THE SOURCE FILTER SHARE ONE BAR, AND THEY USED TO
+    /// FIGHT OVER IT.** `placeSelectors` prepended the strip to `toolbarItems`
+    /// and `placeSourceTray` assigned the tray outright; last writer won, and
+    /// it was the tray. Filmed on a pushed profile at 375pt: a bottom bar with
+    /// the filter glyph on the right and an empty space where the format tabs
+    /// belong. Nothing failed — the screen simply had no selector, which is
+    /// exactly the class of defect this suite exists for.
+    @Test func aPushedProfileCarriesBothTheSelectorAndTheSourceFilter() async {
+        guard let screen = await loadedScreen() else { return }
+        let hosted = (screen.toolbarItems ?? []).compactMap(\.customView)
+        #expect(hosted.contains { $0 is PagedTabBar },
+                "the format selector is not in the toolbar")
+        #expect(hosted.count == 2,
+                "expected the selector and the source filter, got \(hosted.count)")
+        // Leading, ahead of the flexible space — the strip is the item the
+        // viewer reaches for, and it reads first.
+        #expect(screen.toolbarItems?.first?.customView is PagedTabBar)
     }
 
     // MARK: - Which one is on screen

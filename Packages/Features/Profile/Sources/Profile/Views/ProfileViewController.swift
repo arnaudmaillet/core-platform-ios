@@ -2150,9 +2150,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // overflow control, so the `•••` that drove this strip into the
             // navigation bar's leading group is not available to it.
             selectorBar.suppressesBackdrop = true
-            selectorBar.fillsWidth = true
-            toolbarItems = [UIBarButtonItem(customView: selectorBar), .flexibleSpace()]
-                + (toolbarItems ?? [])
+            // ⚠️ **AND IT MUST NOT FILL.** `fillsWidth` was carried over from
+            // the inline column, where the strip spread itself across the
+            // page. It makes the bar take its width FROM ITS HOST and report
+            // `noIntrinsicMetric` — and a toolbar item has no host width to
+            // take, so UIKit sized the custom view at its unlaid frame:
+            // measured at 375pt, a 38x38 bubble holding three segments whose
+            // first one alone wants 71. The other two toolbar hosts (search
+            // results, relationships) never set it and come out 178 and 295.
+            applyToolbarItems()
         }
     }
 
@@ -2201,10 +2207,32 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             ])
             return
         }
-        // The items must exist by the time a push starts — the feed's handover
-        // rule reads the incoming screen's `toolbarItems` in its own
-        // viewWillDisappear.
-        toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: sourceMenuButton)]
+        applyToolbarItems()
+    }
+
+    /// The pushed profile's bottom toolbar: the format selector leading, the
+    /// source filter trailing.
+    ///
+    /// ⚠️ **ONE WRITER, AND IT TOOK A 375pt AUDIT TO NOTICE THERE WERE TWO.**
+    /// `placeSelectors` PREPENDED the strip to whatever was there and
+    /// `placeSourceTray` then ASSIGNED the tray outright, so whichever ran last
+    /// won — and the one that ran last was the tray. Measured on a pushed
+    /// profile: `toolbarItems` holding two, no `PagedTabBar` anywhere in the
+    /// window, and a bottom bar with a filter glyph on the right and nothing on
+    /// the left. Both halves looked correct in isolation, which is why neither
+    /// call site is the place this belongs.
+    ///
+    /// The items must exist by the time a push starts — the feed's hand-over
+    /// rule reads the incoming screen's `toolbarItems` in its own
+    /// `viewWillDisappear` — so this is called from both, and is cheap enough
+    /// to be called again.
+    private func applyToolbarItems() {
+        guard trayPlacement == .navigationToolbar else { return }
+        var items: [UIBarButtonItem] = []
+        if viewModel.hasGallery { items.append(UIBarButtonItem(customView: selectorBar)) }
+        items.append(.flexibleSpace())
+        items.append(UIBarButtonItem(customView: sourceMenuButton))
+        toolbarItems = items
     }
 
     /// What content actually passes under at the top.

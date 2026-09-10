@@ -309,7 +309,14 @@ final class NavigationStressTest {
            view.isDescendant(of: accessory) {
             return true
         }
+        // ⚠️ **AND THE TOOLBAR, WHICH THIS DID NOT LIST.** A pushed screen has no
+        // tab bar to hang an accessory from, so its selector rides the
+        // navigation controller's bottom toolbar instead — search results,
+        // profile relationships, a pushed profile. Every one of those strips is
+        // chrome the stack owns, and without this line the sweep would report
+        // them as views a finished transition forgot.
         return view.isDescendant(of: stack.navigationBar)
+            || view.isDescendant(of: stack.toolbar)
             || view.isDescendant(of: tabBarController.tabBar)
     }
 

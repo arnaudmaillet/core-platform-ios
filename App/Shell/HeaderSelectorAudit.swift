@@ -105,21 +105,58 @@ final class HeaderSelectorAudit {
         case navigationBar = "navigation bar"
         case bottomAccessory = "bottom accessory"
         case bottomToolbar = "bottom toolbar"
+        case elsewhere = "somewhere else"
     }
 
+    /// ⚠️ **SEARCHED FROM THE WINDOW DOWN, THEN CLASSIFIED — not looked for
+    /// inside each candidate host.** Searching `nav.toolbar` finds nothing for a
+    /// strip that is visibly in the bottom toolbar: measured on the search
+    /// results and the relationships screen, `toolbarItems` held 3 and 2 items,
+    /// `isToolbarHidden` was false, and `nav.toolbar.bounds` came back **375x667**
+    /// — the whole screen, which is not a toolbar's geometry. UIKit hosts a
+    /// bottom bar item's custom view in its own container, the same way it hosts
+    /// an accessory in `_UITabAccessoryContainer` rather than in the tab bar. So
+    /// both screens were reported bare while a screenshot showed their strips
+    /// hosted perfectly.
+    ///
+    /// Finding the view first and asking what is ABOVE it needs no knowledge of
+    /// UIKit's private containers, and the ancestor chain is printed anyway.
+    ///
+    /// ⚠️ **AND THE TOOLBAR IS RECOGNISED BY ITS ITEM, NOT BY ITS ANCESTRY.**
+    /// The chain above a toolbar-hosted strip has no toolbar in it either:
+    ///
+    ///     CustomViewWrapper
+    ///       ← UICorePlatformViewHost<PlatformViewRepresentableAdaptor<…>>
+    ///       ← _UIInheritedView
+    ///       ← UIPlatformGlassInteractionView
+    ///
+    /// iOS 26 draws the bottom bar out of a platform-glass hierarchy that is
+    /// not under `UIToolbar` at all, which is the same reason `nav.toolbar`
+    /// answers 375x667. So the question asked is the one with an exact answer:
+    /// is this view the custom view of one of the screen's own `toolbarItems`?
     private func locateSelector() -> (bar: PagedTabBar, host: SelectorHost)? {
-        guard let nav = topNavigationController else { return nil }
-        if let found = firstPagedTabBar(in: nav.navigationBar) {
-            return (found, .navigationBar)
-        }
-        if let accessory = tabBarController.bottomAccessory?.contentView,
-           let found = firstPagedTabBar(in: accessory) {
-            return (found, .bottomAccessory)
-        }
-        if let found = firstPagedTabBar(in: nav.toolbar) {
+        guard let window = tabBarController.view.window,
+              let found = firstPagedTabBar(in: window)
+        else { return nil }
+        let nav = topNavigationController
+        let toolbarHosts = (nav?.topViewController?.toolbarItems ?? []).compactMap(\.customView)
+        if toolbarHosts.contains(where: { found === $0 || found.isDescendant(of: $0) }) {
             return (found, .bottomToolbar)
         }
-        return nil
+        var node: UIView? = found
+        while let current = node {
+            if current === nav?.navigationBar { return (found, .navigationBar) }
+            if current === tabBarController.bottomAccessory?.contentView {
+                return (found, .bottomAccessory)
+            }
+            let name = String(describing: type(of: current))
+            if current === nav?.toolbar || name.contains("Toolbar") {
+                return (found, .bottomToolbar)
+            }
+            if name.contains("TabAccessory") { return (found, .bottomAccessory) }
+            node = current.superview
+        }
+        return (found, .elsewhere)
     }
 
     /// The visible selector's frame in its window, or `.null` if there is none —
@@ -194,6 +231,21 @@ final class HeaderSelectorAudit {
             } else {
                 print("[header-audit] \(surface): no selector on this bar")
             }
+            // ⚠️ WHERE IT LOOKED, ALWAYS. "No selector" has two causes that read
+            // identically — the screen has none, or the audit is holding the
+            // wrong stack — and it cost two false readings before the second was
+            // suspected: the search results and the relationships screen were
+            // both reported bare and both photographed the same minute with
+            // their strips hosted in the bottom toolbar.
+            let presented = tabBarController.selectedViewController?.presentedViewController
+            print("[header-audit] \(surface) LOOKED-IN"
+                + " tab=\(tabBarController.selectedViewController.map { String(describing: type(of: $0)) } ?? "nil")"
+                + " presented=\(presented.map { String(describing: type(of: $0)) } ?? "none")"
+                + " stack=[\(nav.viewControllers.map { String(describing: type(of: $0)) }.joined(separator: ","))]"
+                + " toolbarHidden=\(nav.isToolbarHidden)"
+                + String(format: " toolbar=%.0fx%.0f", nav.toolbar.bounds.width, nav.toolbar.bounds.height)
+                + " toolbarItems=\(nav.topViewController?.toolbarItems?.count ?? -1)"
+                + " accessory=\(tabBarController.bottomAccessory == nil ? "none" : "set")")
             return finding
         }
         guard let window = bar.window else {
@@ -228,7 +280,22 @@ final class HeaderSelectorAudit {
             }
         }
 
-        // 2. Does it have a real size, and does it fit?
+        // 2. A BAR ITEM'S custom view has to state a width.
+        //
+        // ⚠️ Only a bar item. An accessory host pins the strip with constraints
+        // and WANTS it to fill, so `noIntrinsicMetric` is correct there. In a
+        // navigation bar or a toolbar there is no host width to take, and UIKit
+        // falls back to the view's own frame — measured on the pushed profile,
+        // a 38x38 bubble holding three segments whose first one wants 71. Every
+        // other check on this list passed it as clean.
+        if located?.host != .bottomAccessory,
+           selector.intrinsicContentSize.width == UIView.noIntrinsicMetric {
+            finding.problems.append(
+                "hosted as a BAR ITEM with no intrinsic width — it will be sized "
+                + "at its own frame (fillsWidth left on?)")
+        }
+
+        // 3. Does it have a real size, and does it fit?
         if frame.width < 1 || frame.height < 1 {
             finding.problems.append(String(format: "zero size %.0fx%.0f — draws nothing, takes nothing",
                                           frame.width, frame.height))
@@ -239,7 +306,7 @@ final class HeaderSelectorAudit {
                                           frame.maxX, window.bounds.width))
         }
 
-        // 3. Does it answer touches, at every segment?
+        // 4. Does it answer touches, at every segment?
         let segments = max(1, selector.debugSegmentCount)
         for index in 0..<segments {
             let x = frame.minX + frame.width * (CGFloat(index) + 0.5) / CGFloat(segments)
@@ -252,7 +319,7 @@ final class HeaderSelectorAudit {
             }
         }
 
-        // 4. THE ABSOLUTE RULE: no overflow control anywhere on this bar. UIKit
+        // 5. THE ABSOLUTE RULE: no overflow control anywhere on this bar. UIKit
         // labels its own "More", so the label is the signal rather than the glyph;
         // a class-name check catches the private container too.
         let overflow = overflowControls(in: bar)
@@ -271,9 +338,18 @@ final class HeaderSelectorAudit {
             finding.problems.append(narrow)
         }
 
-        // 5. On a pushed surface, is the back button still there and reachable?
+        // 6. On a pushed surface, is the back button still there and reachable?
+        //
+        // ⚠️ **AT THE NAVIGATION BAR'S OWN MIDLINE, NOT THE SELECTOR'S.** This
+        // probed `frame.midY` — the selector's — which was the same line while
+        // the selector lived in the bar. It does not any more: on the place
+        // page the strip is at y=532 in a bottom accessory, so the probe
+        // hit-tested the tab bar band and reported "back button point does not
+        // reach the navigation bar" for a page whose chevron is exactly where
+        // it belongs.
         if nav.viewControllers.count > 1 {
-            let backPoint = CGPoint(x: 28, y: frame.midY)
+            let barFrame = bar.convert(bar.bounds, to: window)
+            let backPoint = CGPoint(x: 28, y: barFrame.midY)
             let hit = window.hitTest(backPoint, with: nil)
             let reachesBar = hit?.isDescendant(of: bar) ?? false
             if !reachesBar {
@@ -325,7 +401,16 @@ final class HeaderSelectorAudit {
         if let nav = candidate as? UINavigationController {
             // A nav inside a nav (a pushed profile's own stack) is not a thing
             // here, but a presented one is: audit what the viewer can touch.
-            candidate = nav.presentedViewController ?? nav
+            //
+            // ⚠️ **ONLY WHEN THE PRESENTED THING IS A STACK.** It used to take
+            // `presentedViewController` whatever it was, and the simulator's
+            // camera-permission alert is a `UIAlertController` — which has no
+            // navigation controller, so the audit lost the stack underneath and
+            // reported "no selector on this bar" for the search results and the
+            // relationships screen. Both were photographed the same minute with
+            // their strips hosted perfectly in the bottom toolbar. An alert is
+            // not the screen under audit; it is something on top of it.
+            candidate = (nav.presentedViewController as? UINavigationController) ?? nav
         }
         if let nav = candidate as? UINavigationController { return nav }
         return candidate?.navigationController
@@ -450,7 +535,10 @@ final class HeaderSelectorAudit {
     }
 
     private func firstPagedTabBar(in root: UIView) -> PagedTabBar? {
-        if let bar = root as? PagedTabBar { return bar }
+        // Visible ones only: a strip mid-teardown, or one belonging to a screen
+        // the viewer has left, is not what is being audited.
+        if let bar = root as? PagedTabBar, !bar.isHidden, bar.alpha > 0.01 { return bar }
+        if root.isHidden || root.alpha < 0.01 { return nil }
         for subview in root.subviews {
             if let found = firstPagedTabBar(in: subview) { return found }
         }
