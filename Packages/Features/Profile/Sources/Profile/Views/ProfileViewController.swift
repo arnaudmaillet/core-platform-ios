@@ -133,31 +133,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             self.sourceMenuItem.accessibilityValue = action.title
         }
     }
-    /// The person's name, in the bar, as the first thing to give way.
-    ///
-    /// The identity block says it in full a finger's width below; up here it is
-    /// a reminder of whose page this is once that block has scrolled away, and
-    /// every other item in the bar is a control the viewer can press.
-    private lazy var titleLabel: UILabel = {
-        let label = UILabel()
-        label.font = .preferredFont(forTextStyle: .headline)
-        label.adjustsFontForContentSizeCategory = true
-        label.lineBreakMode = .byTruncatingTail
-        label.textAlignment = .center
-        // ⚠️ **`.defaultHigh`, NOT `.defaultLow` — LOW MEANS "SQUEEZE ME TO
-        // NOTHING".** A bar item that cannot fit is swept into a `•••` with its
-        // whole group; a label that cannot fit just gets shorter, which is what
-        // is wanted. But compression resistance is not a ranking, it is a
-        // FLOOR: at `.defaultLow` the label yields all the way to zero width
-        // and renders nothing at all — measured, and indistinguishable in a
-        // screenshot from the plain `title` UIKit had already refused to draw.
-        // `.defaultHigh` still loses to a bar item (those are required), so the
-        // name is still the first thing to give — it just gives by truncating.
-        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        return label
-    }()
-
     /// The pull indicator, above the header rather than inside a list — see
     /// `ProfilePullToRefreshView` for why the stock control could not be used.
     private let pullIndicator = ProfilePullToRefreshView()
@@ -1760,47 +1735,25 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // tab root, which has no back button to supplement.
         navigationItem.leftItemsSupplementBackButton = true
 
-        // ⚠️ **THE NAME AND THE LEADING FILTER CANNOT BOTH BE IN THIS BAR, and
-        // the isolation is what says so.** With the filter leading, no title
-        // renders — not truncated, ABSENT: `-header-bar-tree` shows the three
-        // platters and an empty `HostedViewContainer`. Drop the leading item
-        // and the same label draws immediately, left-aligned, at its full 106pt
-        // (`labelW=106`). It is this bar's crowding, not a rule about leading
-        // items: For You wears a leading glyph AND a title, and its trailing
-        // group is ~115pt against this one's 223.
+        // ⚠️ **NO NAME IN THIS BAR, AND THE ISOLATION IS WHY.** It was asked
+        // for and it does not fit: with the filter leading, no title renders at
+        // all — not truncated, ABSENT. `-header-bar-tree` showed the three
+        // platters and an empty `HostedViewContainer`; dropping the leading
+        // item made the same label draw immediately, left-aligned, at its full
+        // 106pt. This bar's trailing group is 223pt (gear+switcher share a
+        // 115pt pill, the wallet wears its own 80pt platter) against For You's
+        // ~115, and For You wears a leading glyph AND a title perfectly well.
+        // So it is crowding here, not a rule about leading items.
         //
-        // Three other explanations were tried against the same symptom before
-        // the isolation, and all three were wrong: `largeTitleDisplayMode`
-        // (`.never` changed nothing), the compression priority
-        // (`.defaultLow` → `.defaultHigh`, nothing), and the unlaid-frame trap
-        // the accessory host records (`sizeToFit`, nothing).
+        // Three other explanations were tried against that symptom first and
+        // all three were wrong: `largeTitleDisplayMode` (`.never` changed
+        // nothing), the compression priority (`.defaultLow` → `.defaultHigh`,
+        // nothing), and the unlaid-frame trap the accessory host records
+        // (`sizeToFit`, nothing). Recorded so the next person does not spend
+        // the same three builds on it.
         //
-        // ⚠️ The `titleView` warning in this repo is about REQUIRED widths, not
-        // about title views. Every `•••` recorded came from one that INSISTED
-        // on a size. This one insists on nothing.
-        titleLabel.text = viewModel.displayName
-        // ⚠️ **`sizeToFit`, OR IT DRAWS NOTHING — the same trap the accessory
-        // host records.** A bar's custom view keeps its autoresizing mask, so
-        // the size UIKit reads at hand-over is the FRAME, not the intrinsic
-        // content size — and an unlaid label's frame is zero. Measured:
-        // `labelW=0`, an empty `HostedViewContainer` in `-header-bar-tree`, and
-        // a bar with three platters and no name, which is indistinguishable
-        // from the plain `title` UIKit had already refused to draw. Two
-        // different explanations were tried against that one symptom
-        // (`largeTitleDisplayMode`, then the compression priority) before the
-        // frame was suspected.
-        titleLabel.sizeToFit()
-        if navigationItem.titleView !== titleLabel {
-            navigationItem.titleView = titleLabel
-        }
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-profile-navbar-audit") {
-            print("[profile-title] name=\(titleLabel.text ?? "nil")"
-                + String(format: " labelW=%.0f", titleLabel.bounds.width)
-                + " leading=\(navigationItem.leftBarButtonItems?.count ?? -1)"
-                + " trailing=\(navigationItem.rightBarButtonItems?.count ?? -1)")
-        }
-        #endif
+        // The identity block says the name in full a finger's width below, and
+        // every item up here is a control.
         updateActionBarItem(followButtonState)
     }
 

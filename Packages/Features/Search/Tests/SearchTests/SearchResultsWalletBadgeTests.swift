@@ -83,9 +83,9 @@ struct SearchResultsWalletBadgeTests {
     /// with a required 44 floor, so a badge that grows narrows the field rather
     /// than overflowing the bar.
     @Test func theFieldYieldsWidthToTheBadgeAndNeverBelowABubble() {
-        let bare = SearchResultsViewController.queryWidth(inBarOfWidth: 402, walletWanted: 0)
-        let withBadge = SearchResultsViewController.queryWidth(inBarOfWidth: 402, walletWanted: 71)
-        let wider = SearchResultsViewController.queryWidth(inBarOfWidth: 402, walletWanted: 86)
+        let bare = SearchResultsViewController.queryWidth(inBarOfWidth: 402, trailingSiblingWanted: 0)
+        let withBadge = SearchResultsViewController.queryWidth(inBarOfWidth: 402, trailingSiblingWanted: 71)
+        let wider = SearchResultsViewController.queryWidth(inBarOfWidth: 402, trailingSiblingWanted: 86)
 
         #expect(bare == 294)
         #expect(withBadge == 188)
@@ -93,7 +93,7 @@ struct SearchResultsWalletBadgeTests {
 
         // The narrowest bar the app supports, with the widest count the compact
         // spelling can produce, still leaves a control rather than a stub.
-        let squeezed = SearchResultsViewController.queryWidth(inBarOfWidth: 375, walletWanted: 86)
+        let squeezed = SearchResultsViewController.queryWidth(inBarOfWidth: 375, trailingSiblingWanted: 86)
         #expect(squeezed >= NavigationBarMetrics.itemPlatterHeight)
     }
 
@@ -116,9 +116,9 @@ struct SearchResultsWalletBadgeTests {
     /// charge over-states by about the same amount — two errors cancelling,
     /// which is not a budget.
     @Test func theFieldPaysForALeadingItemAsWell() {
-        let without = SearchResultsViewController.queryWidth(inBarOfWidth: 375, walletWanted: 71)
+        let without = SearchResultsViewController.queryWidth(inBarOfWidth: 375, trailingSiblingWanted: 71)
         let with = SearchResultsViewController.queryWidth(
-            inBarOfWidth: 375, walletWanted: 71, leadingWanted: 43
+            inBarOfWidth: 375, trailingSiblingWanted: 71, leadingWanted: 43
         )
         #expect(with == without - (SearchResultsViewController.glyphItemPlatterWidth + 12))
 
@@ -126,14 +126,14 @@ struct SearchResultsWalletBadgeTests {
         // it wants, plus the platter's own inset either side. Asked on a 402pt
         // bar, because at 375 this lands under the 44pt floor and the floor —
         // correctly — answers instead of the arithmetic.
-        let wide = SearchResultsViewController.queryWidth(inBarOfWidth: 402, walletWanted: 71)
+        let wide = SearchResultsViewController.queryWidth(inBarOfWidth: 402, trailingSiblingWanted: 71)
         #expect(SearchResultsViewController.queryWidth(
-            inBarOfWidth: 402, walletWanted: 71, leadingWanted: 90
+            inBarOfWidth: 402, trailingSiblingWanted: 71, leadingWanted: 90
         ) == wide - (90 + 16 + 12))
 
         // And the floor still holds at the narrowest bar with everything on it.
         #expect(SearchResultsViewController.queryWidth(
-            inBarOfWidth: 375, walletWanted: 86, leadingWanted: 43
+            inBarOfWidth: 375, trailingSiblingWanted: 86, leadingWanted: 43
         ) >= NavigationBarMetrics.itemPlatterHeight)
     }
 }

@@ -346,7 +346,7 @@ final class SearchResultsViewController: UIViewController {
     }
 
     /// What the badge is asking for, or 0 when there is none.
-    private func walletWanted() -> CGFloat {
+    private func trailingSiblingWanted() -> CGFloat {
         guard walletItem != nil else { return 0 }
         return walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
     }
@@ -378,7 +378,7 @@ final class SearchResultsViewController: UIViewController {
         // there, and rebuilding the trailing run mid-flight is its own flash.
         guard transitionCoordinator == nil else { return }
         let wanted = Self.queryWidth(inBarOfWidth: bar.bounds.width,
-                                     walletWanted: walletWanted(),
+                                     trailingSiblingWanted: trailingSiblingWanted(),
                                      leadingWanted: leadingWanted())
         guard queryWidth.constant != wanted else { return }
         queryWidth.constant = wanted
@@ -404,8 +404,12 @@ final class SearchResultsViewController: UIViewController {
     ///   its own platter beside the chevron's, `max(44, wanted)` because UIKit
     ///   draws no platter narrower than the touch target, and the wider of the
     ///   two measured gaps between it and the back button.
+    /// - Parameter trailingSiblingWanted: the width of ONE other trailing item
+    ///   in its own platter, or 0 for none. It was called `walletWanted` while
+    ///   the badge was the only such item; the global search screen's Cancel is
+    ///   the second, and the arithmetic never cared which.
     static func queryWidth(inBarOfWidth barWidth: CGFloat,
-                           walletWanted: CGFloat,
+                           trailingSiblingWanted: CGFloat,
                            leadingWanted: CGFloat = 0) -> CGFloat {
         // 16 a side, the back button's platter, the gap between the leading and
         // trailing groups, and the trailing platter's own inset.
@@ -444,7 +448,7 @@ final class SearchResultsViewController: UIViewController {
         // gives the chevron its word back the field is 44pt too generous — and
         // yields, rather than overflowing.
         var claimed: CGFloat = 16 * 2 + 44 + 24 + 8
-        if walletWanted > 0 {
+        if trailingSiblingWanted > 0 {
             // The badge opts out of the shared background, so it wears its OWN
             // platter: that platter's inset, its width — charged
             // `max(44, wanted)` because UIKit draws no platter narrower than
@@ -453,7 +457,7 @@ final class SearchResultsViewController: UIViewController {
             // ⚠️ 27 IS CHARGED ON PURPOSE, though two separate platters are
             // likely 12 apart. Over-charging costs the field a few points;
             // under-charging costs an overflow, and only the field can yield.
-            claimed += 8 + max(44, walletWanted) + 27
+            claimed += 8 + max(44, trailingSiblingWanted) + 27
         }
         if leadingWanted > 0 {
             // Read off the bar rather than reasoned out — `-header-bar-tree` at

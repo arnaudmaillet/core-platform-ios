@@ -87,7 +87,15 @@ struct SearchFilterTrayTests {
             window.layoutIfNeeded()
         }
 
-        var field: UITextField? { screen.navigationItem.titleView as? UITextField }
+        /// ⚠️ A TRAILING BAR ITEM, NOT THE TITLE VIEW. It was the title view,
+        /// which is centred and sized to the whole slot — so it filled the bar
+        /// with no platter of its own, while the results screen it pushes wears
+        /// the same field as a real item. `-header-bar-tree` showed the
+        /// difference plainly: one platter on this screen, four on that one.
+        var field: UITextField? {
+            screen.navigationItem.rightBarButtonItems?
+                .compactMap { $0.customView as? UITextField }.first
+        }
 
         /// ⚠️ THE TRAY IS ON THE RESULTS SCREEN'S TOOLBAR NOW, not the search
         /// screen's bar. The search screen shows a history and a typeahead;
@@ -358,8 +366,11 @@ struct SearchFilterTrayTests {
         )
         refine.loadViewIfNeeded()
         #expect(refine.navigationItem.hidesBackButton)
-        #expect(refine.navigationItem.rightBarButtonItems?.map(\.title) == ["Cancel"])
-        #expect(refine.navigationItem.titleView is UITextField)
+        // `[0]` IS THE SCREEN EDGE: Cancel leads the array so it renders
+        // TRAILING of the field — `[ field ][ Cancel ]`.
+        #expect(refine.navigationItem.rightBarButtonItems?.first?.title == "Cancel")
+        #expect(refine.navigationItem.rightBarButtonItems?.last?.customView is UITextField)
+        #expect(refine.navigationItem.titleView == nil, "the field is a bar item now")
     }
 
     /// It exists to change an answer that already exists, so starting empty
@@ -373,7 +384,7 @@ struct SearchFilterTrayTests {
             mode: .refine
         )
         refine.loadViewIfNeeded()
-        #expect((refine.navigationItem.titleView as? UITextField)?.text == "haddad")
+        #expect((refine.navigationItem.rightBarButtonItems?.compactMap { $0.customView as? UITextField }.first)?.text == "haddad")
     }
 
     /// ⚠️ ONE VIEW MODEL, TWO SCREENS, AND ONE CALLBACK SLOT. A refine screen
