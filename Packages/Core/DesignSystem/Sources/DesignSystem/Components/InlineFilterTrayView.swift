@@ -1,4 +1,3 @@
-import DesignSystem
 import UIKit
 
 /// One glass capsule around one bare control.
@@ -69,6 +68,22 @@ public enum GlassCapsule {
 /// itself — pinned above its own `safeAreaLayoutGuide.bottom`, which inside a
 /// tab bar controller IS the top of the bar. The owner supplies that pin; this
 /// view supplies the contents.
+///
+/// ⚠️ **AND IT IS THE ANSWER FOR A `UITabAccessory` TOO — same reason, one
+/// layer down.** A toolbar and an accessory both claim the bottom of the
+/// screen and UIKit coordinates neither: the accessory belongs to the
+/// `UITabBarController` and the toolbar to a `UINavigationController`
+/// descendant, and the two headers do not mention each other. Filmed on the
+/// search results: the toolbar's filter glyph drawn UNDERNEATH the band, half
+/// hidden by its trailing edge. The safe area, however, already accounts for
+/// the band — measured, `safeAreaInsets.bottom = 69` in an 874pt window and the
+/// band's top edge at exactly 805 — so a tray pinned above it clears the
+/// accessory for free, with no arithmetic and nothing to keep in step.
+///
+/// ⚠️ **IT MOVED HERE FROM `PostGrid` WHEN IT GAINED A SECOND HOST.** It sizes
+/// and shapes shared chrome and knows nothing about grids; leaving it there
+/// would have meant a feature depending on a grid package to draw one filter
+/// button.
 public final class InlineFilterTrayView: UIView {
     /// `GlassSegmentRow`'s resting height — the inline tray's own height.
     ///

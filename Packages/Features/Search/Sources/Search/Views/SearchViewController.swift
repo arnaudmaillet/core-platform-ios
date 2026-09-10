@@ -46,9 +46,35 @@ final class SearchViewController: UIViewController {
     /// Filled by the composition root; `nil` in a composition without Feed —
     /// see `SearchPostSurfaceProviding`.
     private let postSurfaces: (any SearchPostSurfaceProviding)?
+    /// Carried, not worn: the RESULTS screen this one builds wears the badge.
+    private let wallet: WalletStore?
+    private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
-    /// The field. It is the bar's title view for the life of the screen.
+    /// The field. A TRAILING BAR ITEM, like the results screen's.
+    ///
+    /// ⚠️ **IT WAS THE `titleView`, AND THAT IS NOT A BAR ITEM.** A title view
+    /// is centred and sized to the whole slot, so it filled the bar from the
+    /// chevron to the trailing margin with no platter of its own — read off
+    /// `-header-bar-tree`, which showed exactly ONE platter on this screen (the
+    /// back chevron) where the results screen shows four. The two screens wear
+    /// the same field and the same query; they should host it the same way, and
+    /// only one of them was in a bar item.
     private let searchField = UISearchTextField()
+
+    /// The field's bar item, so the width can be re-stated as the bar changes.
+    private lazy var fieldItem = UIBarButtonItem(customView: searchField)
+
+    /// What the field is currently asking for, held so it can be re-stated —
+    /// a bar item has no slot to fill, so its custom view has to say how wide
+    /// it is.
+    private lazy var fieldWidth: NSLayoutConstraint = {
+        let constraint = searchField.widthAnchor.constraint(equalToConstant: 240)
+        // ⚠️ THE FIELD IS THE THING THAT YIELDS — the same rule the results
+        // screen states: both of that screen's `•••` burns were REQUIRED
+        // widths, so this one is beatable and floored at a bubble.
+        constraint.priority = .defaultHigh
+        return constraint
+    }()
 
     private var collectionView: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .medium)
@@ -71,11 +97,15 @@ final class SearchViewController: UIViewController {
         viewModel: SearchViewModel,
         imagePipeline: ImagePipeline,
         postSurfaces: (any SearchPostSurfaceProviding)? = nil,
+        wallet: WalletStore? = nil,
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         mode: Mode = .origin
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.postSurfaces = postSurfaces
+        self.wallet = wallet
+        self.makeWalletSheet = makeWalletSheet
         self.mode = mode
         super.init(nibName: nil, bundle: nil)
         // ⚠️ IN THE INITIALISER, not `viewDidLoad`. A navigation controller
@@ -390,7 +420,11 @@ final class SearchViewController: UIViewController {
         // the title slot does. A bare field IS the input, so it centres on the
         // slot's axis, which is the axis UIKit centres a bar item on.
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight).isActive = true
+        NSLayoutConstraint.activate([
+            searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight),
+            fieldWidth,
+            searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.fieldHeight)
+        ])
         // ⚠️ THE TRAILING SLOT IS EMPTY UNTIL THERE ARE RESULTS, and it has
         // now been wrong twice in the other direction.
         //
@@ -401,14 +435,16 @@ final class SearchViewController: UIViewController {
         // one-line menu is not worth a permanent seat over a screen that is
         // usually showing a history and a keyboard.
         //
-        navigationItem.titleView = searchField
+        navigationItem.titleView = nil
         switch mode {
         case .origin:
             // ⚠️ NOTHING TRAILING, AND THE TRAY THAT WAS HERE IS NOT MISSING.
             // It moved to the results screen's TOOLBAR, because that is the
             // only screen with an answer to filter — this one shows a history
             // and a typeahead, and neither has an order.
-            navigationItem.rightBarButtonItems = []
+            // `[0]` IS THE SCREEN EDGE, so one item renders hard against it —
+            // the same place the results screen's field sits.
+            navigationItem.rightBarButtonItems = [fieldItem]
         case .refine:
             // ⚠️ THE FIELD OPENS CARRYING THE QUERY. This screen exists to
             // change an answer that already exists, so starting empty would
@@ -427,24 +463,94 @@ final class SearchViewController: UIViewController {
             // the same reason: the field wants the width, and Cancel is the way
             // back to what it is refining.
             navigationItem.setHidesBackButton(true, animated: false)
+            // `[0]` IS THE SCREEN EDGE, so Cancel leads this array to render
+            // TRAILING of the field: `[ field ][ Cancel ]`.
             navigationItem.rightBarButtonItems = [
                 UIBarButtonItem(
                     title: "Cancel",
-                    primaryAction: UIAction { [weak self] _ in
-                        guard let self else { return }
-                        // ⚠️ RESTORES BEFORE IT POPS. This screen shares its
-                        // view model with the answer underneath, so the typing
-                        // that happened here has already driven the phase to
-                        // `.suggesting` — a typeahead, on a screen whose whole
-                        // content is an answer. Cancelling means "forget I
-                        // asked", and forgetting has to include putting the
-                        // answer back.
-                        self.viewModel.restoreSubmittedAnswer()
-                        self.navigationController?.popViewController(animated: false)
-                    }
-                )
+                    primaryAction: UIAction { [weak self] _ in self?.cancelRefine() }
+                ),
+                fieldItem
             ]
         }
+        applyFieldWidth()
+        #if DEBUG
+        driveRefineCycleIfRequested()
+        #endif
+    }
+
+    /// Cancelling a refine: put the answer back, then leave.
+    private func cancelRefine() {
+        // ⚠️ RESTORES BEFORE IT POPS. This screen shares its view model with
+        // the answer underneath, so the typing that happened here has already
+        // driven the phase to `.suggesting` — a typeahead, on a screen whose
+        // whole content is an answer. Cancelling means "forget I asked", and
+        // forgetting has to include putting the answer back.
+        viewModel.restoreSubmittedAnswer()
+        // ⚠️ **ANIMATED, AND THE BAR IS THE REASON.** This was
+        // `animated: false`, with no reason recorded, and the asymmetry
+        // showed: the push into refine reads as a change of bar and the way
+        // back did not — the results bar simply reappeared, fully formed, in
+        // one frame. Bar items are not individually animatable, so the only
+        // cross-dissolve available is the one UIKit runs for the whole bar
+        // during a transition, and an unanimated pop has no transition to run
+        // it in.
+        navigationController?.popViewController(animated: true)
+    }
+
+    #if DEBUG
+    /// `-search-refine-cycle`: opens the refine screen and cancels it on a
+    /// timer, so the bar's transition can be FILMED. XCUITest cannot: its
+    /// `tap()` waits for the app to idle before returning, so a burst of
+    /// stills taken after one shows only the settled state — measured, all
+    /// eight frames identical and after the fact.
+    private func driveRefineCycleIfRequested() {
+        guard case .refine = mode,
+              ProcessInfo.processInfo.arguments.contains("-search-refine-cycle")
+        else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.cancelRefine()
+        }
+    }
+    #endif
+
+    /// The field takes what the bar has left.
+    ///
+    /// ⚠️ A PROPORTION OF WHAT IS LEFT, NOT A NUMBER — the rule the results
+    /// screen learned the hard way: it stated 150pt a side and was ten points
+    /// over on a 402pt bar, which UIKit answered with a `•••`. The arithmetic
+    /// is that screen's, reused rather than restated, because a second copy of
+    /// a measured budget is a second thing to drift.
+    private func applyFieldWidth() {
+        guard let bar = navigationController?.navigationBar, bar.bounds.width > 0 else { return }
+        guard transitionCoordinator == nil else { return }
+        // In `.refine` the back button is hidden and Cancel takes a platter of
+        // its own; in `.origin` there is nothing beside the field at all.
+        let sibling: CGFloat
+        switch mode {
+        case .origin:
+            sibling = 0
+        case .refine:
+            sibling = navigationItem.rightBarButtonItems?
+                .first { $0 !== fieldItem }?
+                .customView?.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+                ?? NavigationBarMetrics.itemPlatterHeight * 2
+        }
+        let wanted = SearchResultsViewController.queryWidth(
+            inBarOfWidth: bar.bounds.width,
+            trailingSiblingWanted: sibling,
+            // Refine hides the chevron, and charging one that is not there is
+            // what left a hole at the leading edge.
+            hasBackButton: !navigationItem.hidesBackButton
+        )
+        guard fieldWidth.constant != wanted else { return }
+        fieldWidth.constant = wanted
+        searchField.superview?.layoutIfNeeded()
+    }
+
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        applyFieldWidth()
     }
 
 
@@ -494,7 +600,9 @@ final class SearchViewController: UIViewController {
         let results = SearchResultsViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
-            postSurfaces: postSurfaces
+            postSurfaces: postSurfaces,
+            wallet: wallet,
+            makeWalletSheet: makeWalletSheet
         )
         // ⚠️ UNANIMATED BOTH WAYS ON THIS ONE PATH. The ordinary back button
         // still slides — that is UIKit's and it is right, because leaving an

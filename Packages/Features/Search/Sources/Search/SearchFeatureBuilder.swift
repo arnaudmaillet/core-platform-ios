@@ -17,6 +17,12 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     /// Where the results screen's Posts and Media tabs come from. `nil` in a
     /// composition without Feed — see `SearchPostSurfaceProviding`.
     private let postSurfaces: (any SearchPostSurfaceProviding)?
+    /// The viewer's point balance, for the results screen's header. `nil` in a
+    /// composition without a wallet — the badge simply does not appear.
+    private let wallet: WalletStore?
+    /// The shell owns the claim sheet (`WalletClaimViewController` lives in
+    /// App/Shell), so it arrives as a closure rather than a type.
+    private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     public init(
         repository: any SearchProviding,
@@ -25,7 +31,9 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         metadata: (any ProfileMetadataProviding)? = nil,
         imagePipeline: ImagePipeline,
         router: (any Router)? = nil,
-        postSurfaces: (any SearchPostSurfaceProviding)? = nil
+        postSurfaces: (any SearchPostSurfaceProviding)? = nil,
+        wallet: WalletStore? = nil,
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
     ) {
         self.repository = repository
         self.recentSearches = recentSearches
@@ -34,6 +42,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         self.imagePipeline = imagePipeline
         self.router = router
         self.postSurfaces = postSurfaces
+        self.wallet = wallet
+        self.makeWalletSheet = makeWalletSheet
     }
 
     public func makeSearchViewController() -> UIViewController {
@@ -46,7 +56,9 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
                 metadata: metadata
             ),
             imagePipeline: imagePipeline,
-            postSurfaces: postSurfaces
+            postSurfaces: postSurfaces,
+            wallet: wallet,
+            makeWalletSheet: makeWalletSheet
         )
     }
 }

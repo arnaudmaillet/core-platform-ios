@@ -302,8 +302,21 @@ final class NavigationStressTest {
         for controller in stack.viewControllers where view.isDescendant(of: controller.view) {
             return true
         }
-        // The bar and the tab bar are legitimate answers too.
+        // The bar, the tab bar, and anything in the tab bar's accessory are
+        // legitimate answers too — a docked selector is chrome, not a view a
+        // finished transition forgot.
+        if let accessory = tabBarController.bottomAccessory?.contentView,
+           view.isDescendant(of: accessory) {
+            return true
+        }
+        // ⚠️ **AND THE TOOLBAR, WHICH THIS DID NOT LIST.** A pushed screen has no
+        // tab bar to hang an accessory from, so its selector rides the
+        // navigation controller's bottom toolbar instead — search results,
+        // profile relationships, a pushed profile. Every one of those strips is
+        // chrome the stack owns, and without this line the sweep would report
+        // them as views a finished transition forgot.
         return view.isDescendant(of: stack.navigationBar)
+            || view.isDescendant(of: stack.toolbar)
             || view.isDescendant(of: tabBarController.tabBar)
     }
 

@@ -284,7 +284,10 @@ final class ProfileRelationshipsViewController: UIViewController {
         applyQuery("")
         morphNavigationBar(duration: 0.26) {
             self.navigationItem.setHidesBackButton(false, animated: false)
-            self.navigationItem.titleView = self.tabBar
+            // The morph is title ↔ field now, not selector ↔ field: the strip
+            // is not in this bar to be swapped out.
+            self.navigationItem.titleView = nil
+            self.navigationItem.title = self.viewModel.title
             self.navigationItem.rightBarButtonItems = self.restingRightItems
         }
         tabBarController?.setTabBarHidden(false, animated: true)
@@ -326,6 +329,21 @@ final class ProfileRelationshipsViewController: UIViewController {
         }
     }
     #endif
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.setToolbarHidden(false, animated: animated)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // ⚠️ NOTHING OF OURS OUTLIVES THIS SCREEN'S TURN ON TOP: a suspended pan
+        // is stack-wide state, and carrying one into a pushed screen's
+        // dismissal is how a gesture that should pop one level pops two.
+        setStackGesturesEnabled(true)
+        guard isMovingFromParent else { return }
+        navigationController?.setToolbarHidden(true, animated: animated)
+    }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -397,19 +415,74 @@ final class ProfileRelationshipsViewController: UIViewController {
         // the back button and the search glyph, and the bar sizes the slot from
         // the bar's intrinsic width — see `PagedTabBar`'s `intrinsicContentSize`.
         // ⚠️ **The TITLE slot here, not the leading group** — unlike the inbox.
-        // This screen is PUSHED, so its leading group already holds a back button,
-        // and two leading items collapse into a `•••` on a narrow bar: measured on
-        // the SE, back + selector took the whole group down. The inbox gets away
-        // with the leading group because its selector is alone there. The title
-        // slot hosts what it is given at every width, which is also where the
-        // search field goes when this header morphs.
-        navigationItem.titleView = tabBar
+        // ⚠️ **THE STRIP IS AT THE FOOT OF THE SCREEN NOW, NOT IN THE TITLE
+        // SLOT.** The paragraph this replaces was about a navigation bar's
+        // arithmetic — this screen is pushed, its leading group already holds a
+        // back button, and back + selector took the whole group into a `•••` on
+        // an SE, so the title slot was the only place left. A toolbar has
+        // neither item groups nor an overflow control, so the strip is simply
+        // put there, and the freed title slot goes back to the @handle it was
+        // surrendered for.
+        navigationItem.title = viewModel.title
         navigationItem.largeTitleDisplayMode = .never
-        // The @handle is gone from the bar, so it survives as the screen's
-        // accessibility label rather than being lost with the title.
         navigationItem.backButtonTitle = "Back"
         navigationItem.accessibilityLabel = viewModel.title
+        configureToolbar()
     }
+
+    /// The strip, at the foot of the screen.
+    ///
+    /// ⚠️ **THIS SCREEN HIDES THE TAB BAR, SO THE TOOLBAR IS WHAT OWNS THE
+    /// BOTTOM.** `hidesBottomBarWhenPushed` is true here, so there is no tab
+    /// bar to hang an accessory over — the navigation controller's own toolbar
+    /// is the band, and the selector leads it exactly as it does on the search
+    /// results screen.
+    ///
+    /// ⚠️ AND IT MUST RAISE AND HIDE THE TOOLBAR ITSELF. `toolbarItems` is per
+    /// view controller, but the toolbar's VISIBILITY belongs to the stack: left
+    /// up it follows the pop back onto a profile that has its own tray in that
+    /// band, and never raised it would simply not appear. Its parent cannot do
+    /// it either — a tab-root profile's `concealFilterToolbar` returns early.
+    private func configureToolbar() {
+        // ⚠️ NO WIDTH ARITHMETIC. A toolbar has no item groups and no overflow
+        // control, so the `•••` that drove this strip into the title slot is
+        // not available to it. The app already hosts a wide custom view in this
+        // same shared toolbar with no width math at all — the chat composer's
+        // sticker strip.
+        selectorTouchProbe.attach(to: tabBar)
+        toolbarItems = [UIBarButtonItem(customView: tabBar), .flexibleSpace()]
+    }
+
+    /// ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER — see `SelectorTouchProbe`.
+    private lazy var selectorTouchProbe = SelectorTouchProbe { [weak self] isTouching in
+        self?.setStackGesturesEnabled(!isTouching)
+    }
+
+    /// Suspends every pan on the navigation controller's own container view for
+    /// the length of a touch on the strip.
+    ///
+    /// ⚠️ **THE STACK HAS TWO BACK-SWIPE RECOGNISERS AND
+    /// `interactivePopGestureRecognizer` VENDS ONLY ONE** — audited on the
+    /// search results screen, where gating the vended one looked right and left
+    /// the screen anyway. Every pan on the container is suspended, each
+    /// restored to the value it had rather than to `true`, and only while this
+    /// screen is the top one.
+    private func setStackGesturesEnabled(_ isEnabled: Bool) {
+        if isEnabled {
+            for (recogniser, wasEnabled) in suspendedPans { recogniser.isEnabled = wasEnabled }
+            suspendedPans = []
+            return
+        }
+        guard navigationController?.topViewController === self,
+              suspendedPans.isEmpty,
+              let host = navigationController?.view
+        else { return }
+        let pans = (host.gestureRecognizers ?? []).filter { $0 is UIPanGestureRecognizer }
+        suspendedPans = pans.map { ($0, $0.isEnabled) }
+        for recogniser in pans { recogniser.isEnabled = false }
+    }
+
+    private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
 
     /// The field itself; where the magnifier goes is `applySearchAvailability`'s job.
     private func configureSearch() {

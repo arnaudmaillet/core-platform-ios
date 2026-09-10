@@ -644,7 +644,14 @@ final class AppContainer {
         // The results screen's Posts and Media tabs, from Feed — joined HERE
         // rather than by a dependency, exactly as `explore:` above is. See
         // `SearchPostSurfaceAdapter`.
-        postSurfaces: SearchPostSurfaceAdapter(feed: feedFeature)
+        postSurfaces: SearchPostSurfaceAdapter(feed: feedFeature),
+        // The balance in the results header. The STORE is shared — one wallet,
+        // one claim countdown — and the sheet is the shell's, so it crosses as
+        // a closure. Same wiring as the two pushed hosts in Feed.
+        wallet: walletStore,
+        makeWalletSheet: { [unowned self] in
+            WalletClaimViewController(wallet: self.walletStore)
+        }
     )
 
     // MARK: - Notifications

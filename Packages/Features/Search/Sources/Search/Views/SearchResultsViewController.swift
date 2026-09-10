@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import UIKit
@@ -13,11 +14,12 @@ import UIKit
 /// is three: posts as cards, media as a grid, people as rows are three
 /// LAYOUTS, and the search screen's list has exactly one.
 ///
-/// # The header
+/// # The chrome, top and bottom
 ///
-/// `[back][selector]` in the LEADING group, `[query]` in the trailing one.
+///     navigation bar   [back] ………… [credit][query field]
+///     bottom toolbar   [selector] ………………………… [filter tray]
 ///
-/// ⚠️ REAL BAR ITEMS, AND THE COMPOSITE THEY REPLACE IS WHY. This was one
+/// ⚠️ REAL BAR ITEMS, AND THE COMPOSITE THEY REPLACE IS WHY. The header was one
 /// `UIStackView` in `navigationItem.titleView` holding both controls, which
 /// looked identical at rest and animated wrongly: a title view is ONE view to
 /// UIKit, so a push snapshots it and cross-fades the picture. The individual
@@ -25,19 +27,32 @@ import UIKit
 /// the bar is concerned there are no individual bubbles. Bar ITEMS do
 /// interpolate, which is what every other header in this app relies on.
 ///
-/// ⚠️ `leftItemsSupplementBackButton = true` IS LOAD-BEARING, not tidiness.
-/// `NativePopPolicy` refuses the interactive edge pop when a custom leading
-/// item sits beside the back button and that flag is false — which is exactly
-/// why an earlier revision here concluded the leading group was unusable and
-/// reached for the title slot instead. The flag is the answer that policy is
-/// asking for: the system back button stays the back button, and the selector
-/// beside it is a supplement.
+/// ⚠️ **THE SELECTOR IS NOT IN THIS BAR, AND ARITHMETIC IS WHY.** With both it
+/// and the query field up there, each asking for half of what was left, the two
+/// halves paved a 402pt bar EXACTLY — 120pt of fixed cost, 141 each — and iOS
+/// 26 answers items that will not fit by sweeping the whole trailing group into
+/// a `•••`. A pop briefly narrows the bar, so there was no margin to be had:
+/// the field was cut to a 44pt glyph to save the arrangement, and the header
+/// stopped showing what had been searched for. Moving the strip to the toolbar
+/// buys that back — a toolbar has no item groups and no overflow control, so
+/// the failure the navigation bar has is not available to it. The credit badge
+/// then fits beside the field with room to spare: on a 402pt bar a 250-point
+/// balance leaves the field ~188pt, and the required minimums come to ~273
+/// against the narrowest bar the app supports.
+///
+/// ⚠️ AND `leftItemsSupplementBackButton` IS FALSE NOW, where it used to be
+/// load-bearing. That flag exists because `NativePopPolicy` refuses the
+/// interactive edge pop when a custom leading item sits beside the back button
+/// without it — which is why an earlier revision concluded the leading group
+/// was unusable and reached for the title slot. With nothing in the leading
+/// group the back button is the back button and the policy has nothing to
+/// refuse.
 ///
 /// ⚠️ THE SELECTOR SCROLLS WHEN IT DOES NOT FIT — `PagedTabBar`'s documented
-/// behaviour for a bar host. Its minimums are required, so the strip overflows
-/// and scrolls rather than truncating a title, with `keepLensVisible` bringing
-/// the selected tab back: it degrades by hiding a tab reachably instead of by
-/// rendering an unreadable word.
+/// behaviour. Its minimums are required, so the strip overflows and scrolls
+/// rather than truncating a title, with `keepLensVisible` bringing the selected
+/// tab back: it degrades by hiding a tab reachably instead of by rendering an
+/// unreadable word.
 ///
 /// # The three pages
 ///
@@ -53,42 +68,63 @@ final class SearchResultsViewController: UIViewController {
     private let imagePipeline: ImagePipeline
     private let postSurfaces: (any SearchPostSurfaceProviding)?
 
-    /// The way back to asking: a magnifier, and nothing else.
+    /// The query, shown and tappable — a `UISearchTextField` that is never
+    /// edited here.
     ///
-    /// ⚠️ IT IS A DOOR, AND IT NO LONGER PRETENDS TO BE AN INPUT. Tapping it
-    /// takes the viewer BACK to the search screen with its own field already
-    /// focused, rather than opening a keyboard here. The search screen owns
-    /// asking — it has the history, the typeahead, and a field the viewer has
-    /// already used once — so a second, lesser field in this header would give
-    /// the same gesture two different answers depending on which screen you
-    /// were standing on.
+    /// ⚠️ IT LOOKS LIKE AN INPUT AND IS A DOOR. Tapping it takes the viewer
+    /// BACK to the search screen with its own field already focused, rather
+    /// than opening a keyboard here. The refusal happens in
+    /// `textFieldShouldBeginEditing`, which is UIKit's own hook for exactly
+    /// this: the field never becomes first responder, so no keyboard is ever
+    /// summoned and none has to be dismissed on the way out.
     ///
-    /// ⚠️ **IT WAS A `UISearchTextField` CLAIMING HALF THE BAR, AND THE HALVES
-    /// LEFT NO MARGIN.** Measured on iPhone 17 Pro with `-leading-room`: a
-    /// 402pt bar, 120pt of fixed costs, 141pt to each of the selector and the
-    /// field — which paves the bar EXACTLY, to the point. A pop briefly
-    /// narrows the bar (it carries the departing screen's back-button title
-    /// beside the arriving items), and UIKit's one answer to items that will
-    /// not fit is to sweep the whole group into a `•••`. Every arrangement
-    /// tried bought margin somewhere and paid for it somewhere else.
+    /// ⚠️ **IT WAS A GLYPH, AND THE SELECTOR IS WHY.** With both in this bar,
+    /// each asking for half of what was left, the two halves paved a 402pt bar
+    /// EXACTLY — 120pt of fixed cost, 141 each — and iOS 26's answer to items
+    /// that will not fit is to sweep the whole trailing group into a `•••`. A
+    /// pop briefly narrows the bar, so there was no margin to be had and the
+    /// field had to go (edf4f78). The selector now lives in the BOTTOM toolbar,
+    /// which leaves this bar holding a back button and one trailing item, and
+    /// the arithmetic is no longer tight: 402 − 32 margins − 44 back − 24
+    /// inter-group − 8 padding = 294pt for a field that needs nothing like it.
+    private let searchField = UISearchTextField()
+
+    /// The viewer's spendable points, beside the query.
     ///
-    /// A glyph asks for 44pt. That is the same shape For You's header has —
-    /// `[lens][selector] … [coins][search]` — and it is the arrangement the
-    /// budget in `LeadingSelectorBudget` was written for: one elastic claimant,
-    /// the selector, taking whatever is left and scrolling for the rest.
+    /// ⚠️ BUILT HERE, NOT THROUGH THE SHELL'S `WalletBadgeInstaller`, for the
+    /// reason the post screen and the place page give: a PUSHED screen owns its
+    /// own navigation item, and what that installer exists to share — the
+    /// freshness rules — is two closures here. Every installer the app holds
+    /// belongs to a tab coordinator and is documented as living "as long as the
+    /// process"; it removes no observer and re-arms a timer, so one per pushed
+    /// results screen would leave a registration behind per query.
     ///
-    /// ⚠️ THE COST, WRITTEN DOWN: the header no longer shows what was searched
-    /// for. The empty states still name the query; a populated result set does
-    /// not.
-    private lazy var queryDoorItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "magnifyingglass"),
-            style: .plain,
-            target: self,
-            action: #selector(editQueryTapped)
+    /// ⚠️ AND IT IS THIS SCREEN'S OWN BADGE. A badge is a view and a view lives
+    /// in one bar — borrowing the map's or For You's would strip it from there.
+    /// Only the `WalletStore` is shared, which is all that has to be.
+    private let walletBadge = WalletBadgeButton()
+    private var walletItem: UIBarButtonItem?
+    private var fieldItem: UIBarButtonItem?
+    private let wallet: WalletStore?
+    /// Nil in a composition without the shell's claim sheet — the badge is then
+    /// a read-out, not a control.
+    private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    private let walletObservers = SearchNotificationObserverBag()
+
+    /// What the field asks for: everything the bar has left beside the back
+    /// button, floored at one perfect bubble.
+    ///
+    /// ⚠️ YIELDING, NOT REQUIRED, and the reason is the same measurement that
+    /// cost the field its place the first time: a required width cannot give,
+    /// and UIKit's answer to a width it cannot honour is the overflow, not a
+    /// narrower control. The floor IS required — a field allowed to compress to
+    /// nothing is not a control — which is the pairing that filmed clean.
+    private lazy var queryWidth: NSLayoutConstraint = {
+        let width = searchField.widthAnchor.constraint(
+            equalToConstant: NavigationBarMetrics.itemPlatterHeight
         )
-        item.accessibilityLabel = "Search"
-        return item
+        width.priority = .defaultHigh
+        return width
     }()
 
     /// ⚠️ `.navigationTitle`, because it lives IN the bar now. That style is
@@ -113,11 +149,15 @@ final class SearchResultsViewController: UIViewController {
     init(
         viewModel: SearchViewModel,
         imagePipeline: ImagePipeline,
-        postSurfaces: (any SearchPostSurfaceProviding)?
+        postSurfaces: (any SearchPostSurfaceProviding)?,
+        wallet: WalletStore? = nil,
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.postSurfaces = postSurfaces
+        self.wallet = wallet
+        self.makeWalletSheet = makeWalletSheet
         peoplePage = SearchPeoplePage(imagePipeline: imagePipeline)
         postsPage = postSurfaces?.makePostSurface(style: .cards)
             ?? SearchPendingSurfaceViewController(kind: .posts)
@@ -159,11 +199,14 @@ final class SearchResultsViewController: UIViewController {
         // `-search-filters-open` raises the filter sheet. The tray is a toolbar
         // item and the simulator taps nothing, so without this the sheet has no
         // way to be seen offline.
-        // `-search-tap-query` taps the door the way a viewer would, which is
-        // the only way to reach the way BACK to the search screen offline.
+        // `-search-tap-query` taps the query the way a viewer would, which is
+        // the only way to reach the way BACK to the search screen offline. It
+        // goes through `becomeFirstResponder` on purpose: the refusal it meets
+        // in `textFieldShouldBeginEditing` is the thing being tested, so an
+        // instrument calling `onEditQuery` directly would prove nothing.
         if arguments.contains("-search-tap-query") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.editQueryTapped()
+                _ = self?.searchField.becomeFirstResponder()
             }
         }
         if arguments.contains("-search-filters-open") {
@@ -177,49 +220,287 @@ final class SearchResultsViewController: UIViewController {
     // MARK: - Header
 
     private func configureHeader() {
-        // ⚠️ TRAILING FIRST, THEN THE SELECTOR. `installLeadingSelector`
-        // measures the room the rest of the bar has already claimed, so the
-        // door has to be in place before it is asked. Its own note says the
-        // same: "add the trailing actions BEFORE calling this".
-        navigationItem.rightBarButtonItems = [queryDoorItem]
+        searchField.text = viewModel.submittedQueryText
+        searchField.placeholder = "Search..."
+        searchField.autocapitalizationType = .none
+        searchField.autocorrectionType = .no
+        searchField.returnKeyType = .search
+        searchField.delegate = self
 
-        // ⚠️ `leftItemsSupplementBackButton` KEEPS THE INTERACTIVE POP ALIVE
-        // beside a custom leading item — `NativePopPolicy` refuses the edge
-        // gesture without it, which is why an earlier revision here concluded
-        // the leading group was unusable and reached for the title slot.
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            searchField.heightAnchor.constraint(
+                equalToConstant: NavigationBarMetrics.itemPlatterHeight
+            ),
+            queryWidth,
+            searchField.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: NavigationBarMetrics.itemPlatterHeight
+            )
+        ])
+        fieldItem = UIBarButtonItem(customView: searchField)
+        configureWalletBadge()
+        applyTrailingItems()
+
+        // `[back][filter][credit][field]`.
+        navigationItem.leftBarButtonItems = [barFilterItem]
+        // ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
+        // disables the interactive pop along with it, silently. The flag is not
+        // decoration: it is the difference between a leading item that
+        // SUPPLEMENTS the chevron and one that stands in its place.
         navigationItem.leftItemsSupplementBackButton = true
     }
 
 
     /// ⚠️ THE SELECTOR IS INSTALLED WHEN THERE IS A REAL BAR TO MEASURE, not in
-    /// `viewDidLoad`. `LeadingSelectorHost` caps the strip against the room the
-    /// rest of the bar claims, and takes that measurement ONCE, in
-    /// `sizeToOwnContent()`, before the item is offered to UIKit — a cap
-    /// applied later arrives on a view that no longer has anywhere to be. So
-    /// the install waits for a bar with a width.
+    /// `viewDidLoad`. A bar-item host has to take its measurement ONCE, before
+    /// the item is offered to UIKit — a cap applied later arrives on a view that
+    /// no longer has anywhere to be. So the install waits for a bar with a
+    /// width.
     ///
     /// ⚠️ NOT WHILE A TRANSITION IS RUNNING: this fires during a push and a pop
     /// too, and the bar's width is not settled there.
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         guard let bar = navigationController?.navigationBar, bar.bounds.width > 0 else { return }
-        guard transitionCoordinator == nil else { return }
-        guard !hasInstalledSelector else { return }
-        hasInstalledSelector = true
-        navigationItem.installLeadingSelector(tabBar)
+        // ⚠️ NOT WHILE A TRANSITION IS RUNNING. This fires during a push and a
+        // pop too, and the bar's width is not settled there — resizing an item
+        // mid-flight makes UIKit re-measure the groups at a moment when the
+        // destination's own items are half installed.
+        _ = bar
+        applyHeaderWidths()
     }
 
-    /// The door's action, and the one the `-search-tap-query` instrument fires.
+    /// ⚠️ **`[0]` IS THE SCREEN EDGE, so this array renders left-to-right as
+    /// `[back] … [credit][query]`** — the order every other host of this badge
+    /// wears, and the one that was asked for. The credit sits immediately left
+    /// of the field rather than against the chevron with 190pt of air between
+    /// them, which is what a LEADING item would have given.
     ///
-    /// ⚠️ THERE IS NO REFUSAL TO TEST ANY MORE. While the door was a field, the
-    /// instrument went through `becomeFirstResponder` on purpose — the refusal
-    /// in `textFieldShouldBeginEditing` was the thing being measured. A button
-    /// has nothing to refuse, so the instrument invokes what a tap invokes.
-    @objc private func editQueryTapped() {
-        onEditQuery?()
+    /// ⚠️ AND IT KEEPS THE LEADING GROUP EMPTY, which is not a detail. A custom
+    /// leading item makes `NativePopPolicy.shouldBegin` return false unless
+    /// `leftItemsSupplementBackButton` is flipped back to true, and the failure
+    /// is silent: the chevron still pops, so only a real edge swipe shows it —
+    /// and injected touches cannot produce one here.
+    ///
+    /// ⚠️ `sharesBackground = false` ON BOTH, or iOS 26 draws one pill around
+    /// them and a balance welded to a search field reads as a segmented
+    /// control.
+    private func applyTrailingItems() {
+        let items = [fieldItem, walletItem].compactMap { $0 }
+        for item in items { item.sharesBackground = false }
+        navigationItem.rightBarButtonItems = items
     }
 
-    private var hasInstalledSelector = false
+    /// The badge, and the rules that keep it true.
+    private func configureWalletBadge() {
+        guard let wallet else { return }
+        // A badge with no sheet behind it is a read-out, not a control.
+        walletBadge.isUserInteractionEnabled = makeWalletSheet != nil
+        walletBadge.addAction(
+            UIAction { [weak self] _ in
+                guard let self, let sheet = self.makeWalletSheet?() else { return }
+                self.present(sheet, animated: true)
+            },
+            for: .primaryActionTriggered
+        )
+        // ⚠️ A GROWN COUNT NEEDS A FRESH WRAPPER. Re-assigning the same item
+        // hands the bar the same wrapper at the same frozen size (measured on
+        // the post screen: "120" still came back wrapped), so a new item is the
+        // only thing a bar measures anew — and the FIELD is refitted in the
+        // same pass, because the badge takes its points off the same run.
+        walletBadge.onFittedWidthChange = { [weak self] in
+            guard let self else { return }
+            self.walletItem = self.makeWalletItem()
+            self.applyTrailingItems()
+            self.applyHeaderWidths()
+        }
+        walletItem = makeWalletItem()
+        refreshWalletBadge()
+        // Spends and claims wherever they happen — a boost in a feed pushed
+        // over this screen, a claim taken on the map beneath it.
+        walletObservers.add(NotificationCenter.default.addObserver(
+            forName: WalletStore.didChangeNotification, object: wallet, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshWalletBadge() }
+        })
+    }
+
+    private func makeWalletItem() -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: walletBadge)
+        item.accessibilityLabel = "Points balance"
+        return item
+    }
+
+    private func refreshWalletBadge() {
+        guard let wallet else { return }
+        let snapshot = wallet.snapshot()
+        walletBadge.update(
+            balance: snapshot.balance,
+            // A badge with no sheet to open must not advertise a claim the
+            // viewer has no way to take from here.
+            claimAvailable: makeWalletSheet != nil && snapshot.claimAvailable,
+            claimProgress: snapshot.claimCountdown.map {
+                WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
+            }
+        )
+    }
+
+    /// What the badge is asking for, or 0 when there is none.
+    private func trailingSiblingWanted() -> CGFloat {
+        guard walletItem != nil else { return 0 }
+        return walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+    }
+
+    /// ⚠️ CANNOT REACH THE `•••`, and this is an invariant rather than a
+    /// reassurance. UIKit sweeps a group when the items' REQUIRED minimums
+    /// exceed the bar, and both burns on this screen were required-width burns
+    /// (a stated 150 a side, then two halves each required at 141 on 402). The
+    /// required minimums here are the fixed 116, the spacing, the field's
+    /// required 44 floor and the badge's widest realistic intrinsic — about 273
+    /// against the narrowest supported bar, 375. The field's own width stays
+    /// `.defaultHigh`, so a `claimed` that drifts low costs a narrower field
+    /// and never an overflow.
+    /// The width a custom leading item's own view wants, or 0 when the leading
+    /// group is empty or holds a system item.
+    ///
+    /// ⚠️ ZERO IS NOT "NOTHING THERE" FOR A SYSTEM ITEM — it means "charge the
+    /// bare platter". A system glyph has no view to measure and comes out at
+    /// the 44pt touch target, which `queryWidth` already knows as its floor.
+    private func leadingWanted() -> CGFloat {
+        guard let item = navigationItem.leftBarButtonItems?.first else { return 0 }
+        guard let custom = item.customView else { return 1 }
+        return custom.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+    }
+
+    private func applyHeaderWidths() {
+        guard let bar = navigationController?.navigationBar, bar.bounds.width > 0 else { return }
+        // ⚠️ NOT WHILE A TRANSITION IS RUNNING: the bar's width is not settled
+        // there, and rebuilding the trailing run mid-flight is its own flash.
+        guard transitionCoordinator == nil else { return }
+        let wanted = Self.queryWidth(inBarOfWidth: bar.bounds.width,
+                                     trailingSiblingWanted: trailingSiblingWanted(),
+                                     leadingWanted: leadingWanted())
+        guard queryWidth.constant != wanted else { return }
+        queryWidth.constant = wanted
+        searchField.superview?.layoutIfNeeded()
+    }
+
+    /// Everything the bar has left beside the back button.
+    ///
+    /// ⚠️ A PROPORTION OF WHAT IS LEFT, NOT A NUMBER. The first version of this
+    /// screen stated 150pt a side and was ten points over the budget on a 402pt
+    /// bar, which UIKit answered with a `•••` — a stated width can be wrong for
+    /// a device nobody tested, and that one was wrong on every one of them.
+    /// The width UIKit gives a glyph bar item's platter, measured — `59`, where
+    /// the button inside it fits under the 44pt touch target.
+    ///
+    /// ⚠️ NOT `itemWidth`. 44 is the least a platter can be, not what a glyph
+    /// item comes out at, and the 15pt between them is the whole margin
+    /// this screen has on a 375pt bar.
+    static let glyphItemPlatterWidth: CGFloat = 59
+
+    /// - Parameter leadingWanted: the width a custom LEADING item wants, or 0
+    ///   when the leading group is empty. Charged the same way the badge is —
+    ///   its own platter beside the chevron's, `max(44, wanted)` because UIKit
+    ///   draws no platter narrower than the touch target, and the wider of the
+    ///   two measured gaps between it and the back button.
+    /// - Parameter trailingSiblingWanted: the width of ONE other trailing item
+    ///   in its own platter, or 0 for none. It was called `walletWanted` while
+    ///   the badge was the only such item; the global search screen's Cancel is
+    ///   the second, and the arithmetic never cared which.
+    /// - Parameter hasBackButton: whether the bar carries a back chevron at
+    ///   all.
+    ///
+    ///   ⚠️ **CHARGING ONE THAT IS NOT THERE LEAVES A HOLE.** The global
+    ///   search screen hides its back button in refine mode
+    ///   (`setHidesBackButton(true)`), and the field was still being charged
+    ///   the 44pt chevron plus the 24pt gap to a leading group that does not
+    ///   exist — 68pt of empty bar, visible at the LEADING edge because the
+    ///   field is trailing and the shortfall collects behind it.
+    static func queryWidth(inBarOfWidth barWidth: CGFloat,
+                           trailingSiblingWanted: CGFloat,
+                           leadingWanted: CGFloat = 0,
+                           hasBackButton: Bool = true) -> CGFloat {
+        // 16 a side, the back button's platter, the gap between the leading and
+        // trailing groups, and the trailing platter's own inset.
+        //
+        // ⚠️ **THIS IS NOW THE ONLY COPY OF THESE MEASUREMENTS.** They were
+        // `LeadingSelectorBudget`'s, measured on iPhone 17 Pro / iOS 26.5 and
+        // pinned by tests; that type went with the leading-selector machinery
+        // when every selector moved to an accessory or a toolbar, and these are
+        // what is left of it. Measured, so they can be checked again:
+        //
+        //     barMargin           16   the bar's own margin, each end
+        //     itemWidth           44   a bar item's platter — the touch target,
+        //                              and the least a glyph item can occupy
+        //     interGroupGap       24   leading group → trailing group. A FLOOR:
+        //                              at a 20pt gap both groups drew, at 5 the
+        //                              trailing pair became a `•••`
+        //     platterPadding       8   a platter's inset around its content —
+        //                              a 267pt capsule rides a 275pt platter
+        //     sharedItemSpacing   27   between two items INSIDE one shared
+        //                              pill. Two trailing glyphs measure 115pt
+        //                              together, not 88 — charging 44 each is
+        //                              what swept the profile's actions into a
+        //                              `•••`
+        //     platterGap          12   between two ADJACENT platters
+        //     titledItemPadding   34   what a titled item's platter adds to its
+        //                              word ("Following": 72pt of text, 106pt
+        //                              platter)
+        //
+        // They are a floor, not a ceiling: the field YIELDS, so a number that
+        // has drifted low costs a narrower field and never an overflow — the
+        // direction that stays safe.
+        //
+        // ⚠️ AND THE BACK BUTTON IS CHARGED A BARE 44pt CHEVRON, measured
+        // beside a leading custom view: iOS 26 draws it as a bare 44pt chevron
+        // platter. This screen has no leading custom view, so if UIKit ever
+        // gives the chevron its word back the field is 44pt too generous — and
+        // yields, rather than overflowing.
+        // Margins either end, the field platter's own inset, and — only when
+        // there is one — the back chevron plus the gap to the trailing group.
+        var claimed: CGFloat = 16 * 2 + 8 + (hasBackButton ? 44 + 24 : 0)
+        if trailingSiblingWanted > 0 {
+            // The badge opts out of the shared background, so it wears its OWN
+            // platter: that platter's inset, its width — charged
+            // `max(44, wanted)` because UIKit draws no platter narrower than
+            // the touch target — and the spacing to the field.
+            //
+            // ⚠️ 27 IS CHARGED ON PURPOSE, though two separate platters are
+            // likely 12 apart. Over-charging costs the field a few points;
+            // under-charging costs an overflow, and only the field can yield.
+            claimed += 8 + max(44, trailingSiblingWanted) + 27
+        }
+        if leadingWanted > 0 {
+            // Read off the bar rather than reasoned out — `-header-bar-tree` at
+            // 375pt, the four platters left to right:
+            //
+            //     back    16..60   (44 wide)
+            //     filter  72..131  (59)
+            //     credit  162..242 (80)
+            //     field   254..359 (105)
+            //
+            // ⚠️ **THE GAP IS 12, NOT THE SHARED-PILL 27.** 60 → 72: the
+            // chevron and a custom leading item wear their OWN platters, so the
+            // spacing between items inside one pill does not apply here.
+            //
+            // ⚠️ **THE PLATTER IS WIDER THAN THE VIEW IN IT — for a CUSTOM
+            // view.** A glyph button's `systemLayoutSizeFitting` answers under
+            // the 44pt touch target while UIKit drew its platter 59 wide, so
+            // charging what the VIEW wants under-charges by 15 — the direction
+            // that ends in a `•••`. A test caught it: the arithmetic said 90
+            // and the bar drew 105, and the two only agreed because the badge's
+            // own charge over-states by about the same amount.
+            //
+            // A SYSTEM item is the other case and the cheap one: no view to
+            // inflate the platter, so it comes out at the 44pt touch target —
+            // which is also why it is a circle rather than an oval.
+            claimed += max(NavigationBarMetrics.itemPlatterHeight,
+                           leadingWanted > 1 ? leadingWanted + 16 : 0) + 12
+        }
+        return max(NavigationBarMetrics.itemPlatterHeight, barWidth - claimed)
+    }
+
 
     // MARK: - Pages
 
@@ -247,6 +528,14 @@ final class SearchResultsViewController: UIViewController {
         for page in [postsPage.viewController, mediaPage.viewController, peoplePage] {
             addChild(page)
             page.didMove(toParent: self)
+        }
+        // The band's minimize rides whichever page is in front — the pager is
+        // what knows, and it is what says so. Wired unconditionally: naming a
+        // scroll view costs nothing when the minimize is not armed.
+        defer {
+            pager.onActiveScrollViewChanged = { [weak self] scroller in
+                self?.setContentScrollView(scroller, for: .bottom)
+            }
         }
         pager = HorizontalPagerView(
             pages: [postsPage.viewController.view, mediaPage.viewController.view, peoplePage.view],
@@ -294,24 +583,221 @@ final class SearchResultsViewController: UIViewController {
 
     // MARK: - Toolbar
 
-    /// The filter tray, bottom-trailing, in the system toolbar.
+    /// The band at the foot of the screen: the format selector, and the filter
+    /// riding its trailing edge inside the same glass.
     ///
-    /// ⚠️ IT MOVED OUT OF THE NAVIGATION BAR, and the bar is why. That bar now
-    /// carries a back button and a full-width field; a third item would take
-    /// the width straight off the query the viewer is reading. The toolbar is
-    /// empty on this screen and within thumb reach, which is where a control
-    /// used mid-scroll belongs.
+    /// ⚠️ **AN ACCESSORY, ON A SCREEN WITH NO TAB BAR UNDER IT.** This screen
+    /// sets `hidesBottomBarWhenPushed`, which made it the one place the
+    /// question could be asked — and the answer is yes. `UITabAccessory.h`
+    /// defines `.regular` as "above the bottom tab bar when it is visible; or,
+    /// at the bottom of the UITabBarController's view", and that is what it
+    /// does. Measured here: `env=.regular`, container 360x48 at y=805 of an
+    /// 874pt window, laid out exactly as it is on a tab root.
+    ///
+    /// ⚠️ **AND THE TOOLBAR HAD TO GO, NOT MOVE OVER.** A toolbar and an
+    /// accessory both claim the bottom of the screen and UIKit coordinates
+    /// neither — the accessory belongs to the `UITabBarController` and the
+    /// toolbar to a `UINavigationController` descendant, and the two headers do
+    /// not mention each other. Filmed: the toolbar's filter glyph drawn
+    /// UNDERNEATH the band, half-hidden by its trailing edge. This screen
+    /// therefore presents no toolbar items at all — which also gives
+    /// `SnapFeedViewController.successorUsesToolbar` the right answer when a
+    /// post pushed from here is popped back.
+    ///
+    /// ⚠️ **AND THE FILTER IS NOT IN THE BAND EITHER, BECAUSE ONE ACCESSORY IS
+    /// ONE CAPSULE.** `_UITabAccessoryContainer` draws its glass around the
+    /// WHOLE content view whatever is inside it — measured twice: an accessory
+    /// built with a nil content view still draws its bubble around nothing, and
+    /// a strip given its own glass came back as a pill inside a pill. So a
+    /// filter sharing the band cannot have a capsule of its own, and side by
+    /// side is not available either: UIKit fixes the band at 360pt centred in a
+    /// 402pt window, leaving 21pt at each edge.
+    ///
+    /// What IS available is the arrangement the profile tab root already uses,
+    /// and for the same reason: a tray in the SCREEN'S OWN VIEW, pinned above
+    /// its `safeAreaLayoutGuide.bottom`. The safe area already accounts for the
+    /// band — measured, `safeAreaInsets.bottom = 69` in an 874pt window with the
+    /// band's top edge at exactly 805 — so the tray clears it for free, with no
+    /// arithmetic and nothing to keep in step. Two separate glass capsules, the
+    /// selector's and the filter's, and neither drawn over the other.
     private func configureToolbar() {
-        let filter = UIBarButtonItem(
-            image: UIImage(systemName: "line.3.horizontal.decrease"),
-            primaryAction: UIAction { [weak self] _ in self?.presentFilters() }
-        )
-        filter.accessibilityLabel = "Filters"
-        toolbarItems = [.flexibleSpace(), filter]
+
+        // ⚠️ **NO WIDTH CAP HERE, AND A TOOLBAR IS WHY.** The cap that used to
+        // exist did so because a UINavigationBar sweeps a leading group it
+        // cannot fit into a `•••`; a toolbar has no item groups and no overflow
+        // control, so that failure is not available to it. The app already hosts a wide
+        // custom view in this same shared toolbar with no arithmetic at all —
+        // the chat composer's sticker strip — and that is the precedent
+        // followed here.
+        //
+        // ⚠️ BARE, THOUGH. UIKit wraps a bar item's custom view in its own
+        // glass capsule wherever the item lives, so a bar carrying its own
+        // backdrop draws a lens inside a lens. `SelectorAccessoryHost` sets the
+        // same flag for the same reason on the screens that use an accessory.
+        tabBar.suppressesBackdrop = true
+
+        // ⚠️ `toolbarItems` IS PER VIEW CONTROLLER even though the toolbar is
+        // the navigation controller's, so the selector cannot leak onto another
+        // screen. What IS shared is the toolbar's visibility, which is why this
+        // screen still shows it on the way in and hides it on the way out.
+        selectorAccessory = SelectorAccessory(strip: tabBar)
+
+        // Nothing to place at the foot: the band is the selector alone, and the
+        // filter is a leading bar item (`configureHeader`, which runs first).
+
+        // ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER. Docked at the foot of the
+        // screen the selector sits over a pager of scrolling grids, and a drag
+        // that starts on it was scrolling the page underneath at the same time.
+        // The strip is the thing the finger is on, so it takes priority.
+        // ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER — see `SelectorTouchProbe`,
+        // which carries the two traps this needed: `.touchDown` on the control
+        // never fires (the strip's inner scroller eats the touch), and a
+        // recogniser that does not recognise simultaneously silences the very
+        // control it was added to watch.
+        selectorTouchProbe.attach(to: tabBar)
     }
+
+    #if DEBUG
+    /// ⚠️ NAMES WHAT IS ACTUALLY LISTENING, because two gates aimed at guesses
+    /// have now missed. Walks from the selector up to the window and prints
+    /// every recogniser on the way, with its class, its state and the view it
+    /// is attached to — the one that leaves this screen is in that list.
+    private func auditGestures(_ reason: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-search-gesture-audit") else { return }
+        var lines: [String] = []
+        var node: UIView? = tabBar
+        while let current = node {
+            for recogniser in current.gestureRecognizers ?? [] {
+                lines.append("\(type(of: recogniser)) on \(type(of: current)) "
+                             + "state=\(recogniser.state.rawValue) enabled=\(recogniser.isEnabled)")
+            }
+            node = current.superview
+        }
+        for recogniser in navigationController?.view.gestureRecognizers ?? [] {
+            lines.append("NAV \(type(of: recogniser)) state=\(recogniser.state.rawValue) "
+                         + "enabled=\(recogniser.isEnabled)")
+        }
+        print("[gesture-audit] \(reason)\n  " + lines.joined(separator: "\n  "))
+    }
+    #endif
+
+    private lazy var selectorTouchProbe = SelectorTouchProbe { [weak self] isTouching in
+        guard let self, !Self.gestureGateIsOff else { return }
+        #if DEBUG
+        self.auditGestures(isTouching ? "selector touch" : "after release")
+        #endif
+        self.setPageScrollEnabled(!isTouching)
+    }
+
+    /// `-search-no-gesture-gate`: leave the stack's recognisers alone.
+    ///
+    /// ⚠️ AN A/B SWITCH, BECAUSE THE FAILING GESTURE CANNOT BE INJECTED. A real
+    /// finger is the only thing that drives
+    /// `_UIParallaxTransitionPanGestureRecognizer` here, so whether this gate
+    /// is behind a two-level pop cannot be settled from this machine. One run
+    /// with the flag and one without settles it in a minute on a device.
+    private static var gestureGateIsOff: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-search-no-gesture-gate")
+        #else
+        false
+        #endif
+    }
+
+    /// Stops the FINGER driving anything under the pager while the selector is
+    /// in use, without stopping the pager itself.
+    ///
+    /// ⚠️ **THE PAN, NOT `isScrollEnabled`, AND THE DIFFERENCE BROKE TAB
+    /// SELECTION.** The first cut set `isScrollEnabled = false` on every
+    /// scroller under the pager, which reads as the same thing and is not: a
+    /// disabled scroll view also ignores `setContentOffset(_:animated:)`, and
+    /// that is exactly how `setActivePage` moves the pages. Measured — tapping
+    /// "Media" left the content byte-identical (MAE 0), so the selector still
+    /// lit the new tab and the pager never followed. Disabling the PAN
+    /// recogniser takes the gesture away and leaves the programmatic move
+    /// alone.
+    ///
+    /// ⚠️ FOUND BY WALKING, because the pager keeps its pages laid out side by
+    /// side and vends none of their scrollers. The walk stops at the pager, so
+    /// the strip's own scroller — which lives in the toolbar, not here — is
+    /// never touched and goes on scrolling under the finger, which is the whole
+    /// point.
+    private func setPageScrollEnabled(_ isEnabled: Bool) {
+        guard isEnabled != isPageScrollEnabled else { return }
+        isPageScrollEnabled = isEnabled
+        func walk(_ view: UIView) {
+            (view as? UIScrollView)?.panGestureRecognizer.isEnabled = isEnabled
+            view.subviews.forEach(walk)
+        }
+        walk(pager)
+        setPopGestureEnabled(isEnabled)
+    }
+
+    /// ⚠️ **THE STACK HAS TWO BACK-SWIPE RECOGNISERS AND
+    /// `interactivePopGestureRecognizer` VENDS ONLY ONE.** Audited on the
+    /// simulator by walking from the strip to the window while a rightward
+    /// swipe was in flight (`-search-gesture-audit`):
+    ///
+    ///     began   _UIParallaxTransitionPanGestureRecognizer  enabled=true
+    ///             _UIParallaxTransitionPanGestureRecognizer  enabled=true
+    ///     moved   _UIParallaxTransitionPanGestureRecognizer  enabled=FALSE  ← gated
+    ///             _UIParallaxTransitionPanGestureRecognizer  state=began    ← drove it
+    ///
+    /// So gating the vended one looked right, printed right, and left the
+    /// screen anyway: the second recogniser — the full-surface back swipe, not
+    /// the edge one — is what carried the dismissal. Two fixes aimed at guesses
+    /// missed before this was measured rather than reasoned about.
+    ///
+    /// Every pan on the navigation controller's own container view is
+    /// suspended for the length of the touch instead of one named recogniser.
+    ///
+    /// ⚠️ AND EACH IS RESTORED TO WHAT IT WAS, not to `true`.
+    /// `NativePopGestureEnabler` owns the vended recogniser's delegate and
+    /// `NativePopPolicy` decides whether a begin is allowed; forcing them
+    /// enabled on release would hand back a state this screen never
+    /// established.
+    private func setPopGestureEnabled(_ isEnabled: Bool) {
+        Self.traceNavigation(
+            "pans \(isEnabled ? "restored" : "suspended") "
+            + "depth=\(navigationController?.viewControllers.count ?? -1) "
+            + "top=\(navigationController?.topViewController === self ? "results" : "other")"
+        )
+        if isEnabled {
+            for (recogniser, wasEnabled) in suspendedPans { recogniser.isEnabled = wasEnabled }
+            suspendedPans = []
+            return
+        }
+        // ⚠️ **ONLY WHILE THIS SCREEN IS THE TOP ONE.** These recognisers belong
+        // to the STACK, not to this screen: suspending them is reaching outside
+        // our own lifetime, and a suspend left open while something is pushed
+        // over us would be arbitrating another screen's dismissal. The probe
+        // should not fire off-window — the strip is in a toolbar this screen
+        // owns — but "should not" is not a guarantee worth betting a back
+        // gesture on, and `viewWillDisappear` closes the window either way.
+        guard navigationController?.topViewController === self else { return }
+        guard suspendedPans.isEmpty, let host = navigationController?.view else { return }
+        let pans = (host.gestureRecognizers ?? []).filter { $0 is UIPanGestureRecognizer }
+        suspendedPans = pans.map { ($0, $0.isEnabled) }
+        for recogniser in pans { recogniser.isEnabled = false }
+    }
+
+    private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
+
+
+    private var isPageScrollEnabled = true
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // `minimizesOnScroll: false` — there is no tab bar under this screen to
+        // minimize, and arming a shell-wide behaviour from a screen that cannot
+        // use it is how every other tab inherits a collapsing bar.
+        installBottomChromeWhenAppearing(
+            handsOver: tabBarController?.bottomAccessory != nil
+        ) { [weak self] in
+            guard let self else { return }
+            selectorAccessory?.install(into: tabBarController,
+                                       alongside: transitionCoordinator)
+        }
         // ⚠️ RE-SUBSCRIBED EVERY TIME, and this is not belt and braces.
         // `SearchViewModel`'s callbacks are single-assignment slots, and a
         // refine screen pushed over this one takes `onPhaseChange` in its own
@@ -320,17 +806,39 @@ final class SearchResultsViewController: UIViewController {
         // would keep showing the OLD answer while the post tabs — driven by a
         // different callback — showed the new one. One screen, two answers.
         subscribe()
+        // ⚠️ **THE QUERY IS RE-READ HERE, AND HERE ONLY.** A refine screen
+        // pushed over this one shares this screen's view model and POPS on
+        // submit, so the words change while this screen is off-window and
+        // nothing tells it. Assigning the field in `configureHeader` covers the
+        // first appearance and no other: searching "test", refining to "test2"
+        // and coming back left "test" in the bar over an answer about "test2".
+        //
+        // ⚠️ AND IT WAS WRITTEN INTO `viewDidLoad` BY MISTAKE, one line below a
+        // `subscribe()` that appears in both methods — where it did nothing at
+        // all, because `configureHeader` had already set the same value two
+        // lines earlier.
+        searchField.text = viewModel.submittedQueryText
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
-        // ⚠️ SHOWN HERE AND HIDDEN ON THE WAY OUT, because a navigation
-        // controller's toolbar is SHARED: left visible, it would follow the pop
-        // back onto the search screen, which has no toolbar items and would
-        // show an empty bar.
-        navigationController?.setToolbarHidden(false, animated: animated)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        selectorAccessory?.install(into: tabBarController)
+        #if DEBUG
+        // `-search-refine-cycle`: ask for the refine screen on a timer, so the
+        // bar transition in BOTH directions can be filmed.
+        if ProcessInfo.processInfo.arguments.contains("-search-refine-cycle"),
+           !hasDrivenRefineCycle {
+            hasDrivenRefineCycle = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.onEditQuery?()
+            }
+        }
+        #endif
+        #if DEBUG
+        reportAccessorySpike()
+        #endif
         // ⚠️ HERE, NOT `viewWillAppear`. The window is what
         // `updatePlayback` reads, and a screen arriving has none until it has
         // appeared — asked earlier it would decide "not visible" and leave
@@ -340,14 +848,71 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // ⚠️ NOTHING OF OURS OUTLIVES THIS SCREEN'S TURN ON TOP. A suspended
+        // pan is stack-wide state; carrying one into a pushed screen's
+        // dismissal is how a gesture that should pop one level pops two.
+        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
+        setPageScrollEnabled(true)
+        Self.traceNavigation(
+            "results willDisappear movingFromParent=\(isMovingFromParent) "
+            + "depth=\(navigationController?.viewControllers.count ?? -1)"
+        )
         // Anything pushed over this screen — a post, a profile, a refine — gets
         // the pool. A grid under another screen holding players is the leak
         // this call exists to prevent.
         postsPage.setPlaybackActive(false)
         mediaPage.setPlaybackActive(false)
-        guard isMovingFromParent else { return }
-        navigationController?.setToolbarHidden(true, animated: animated)
     }
+
+    /// Internal, not private, so the tests can assert what is IN the band.
+    /// The arrangement moved out of `toolbarItems` — which a test could read —
+    /// into a content view UIKit owns, and a rule nothing can see is a rule
+    /// that quietly stops being true.
+    private(set) var selectorAccessory: SelectorAccessory?
+
+    #if DEBUG
+    private var hasDrivenRefineCycle = false
+    #endif
+
+
+    /// The filter, as a plain system bar item.
+    ///
+    /// ⚠️ **A SYSTEM ITEM, NOT A CUSTOM VIEW, AND THE SHAPE IS WHY.** Wrapped
+    /// in a `UIButton`, the glyph came out in a 59x44 platter — an OVAL, beside
+    /// a chevron that is a 44pt circle. The width is the button's, not the
+    /// glyph's: `UIButton.Configuration.plain()` carries its own content insets,
+    /// and UIKit sizes the platter around whatever it is given. A system item
+    /// has no view of its own to inflate it, so the platter comes out at the
+    /// 44pt touch target — the same circle the map's bell and magnifier wear.
+    private lazy var barFilterItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "line.3.horizontal.decrease"),
+            primaryAction: UIAction { [weak self] _ in self?.presentFilters() }
+        )
+        item.accessibilityLabel = "Filters"
+        return item
+    }()
+
+    #if DEBUG
+    /// What the spike actually produced, in numbers — whether the accessory was
+    /// accepted at all, where UIKit put it, and whether the tab bar it is
+    /// nominally attached to is even on screen.
+    private func reportAccessorySpike() {
+        let host = selectorAccessory?.hostView
+        let container = host?.superview
+        let bar = tabBarController?.tabBar
+        print("[search-accessory] hosted=\(host?.window != nil)"
+            + " accessorySet=\(tabBarController?.bottomAccessory != nil)"
+            + " env=\(host.map { String(describing: $0.traitCollection.tabAccessoryEnvironment) } ?? "nil")"
+            + String(format: " container=%.0fx%.0f at %.0f,%.0f",
+                     container?.bounds.width ?? -1, container?.bounds.height ?? -1,
+                     container.map { $0.convert($0.bounds, to: nil).minX } ?? -1,
+                     container.map { $0.convert($0.bounds, to: nil).minY } ?? -1)
+            + " tabBarHidden=\(tabBarController?.isTabBarHidden ?? false)"
+            + String(format: " barY=%.0f", bar.map { $0.convert($0.bounds, to: nil).minY } ?? -1)
+            + String(format: " windowH=%.0f", view.window?.bounds.height ?? -1))
+    }
+    #endif
 
     private func presentFilters() {
         present(SearchFilterSheetViewController.inSheet(groups: viewModel.filterGroups()) {
@@ -435,4 +1000,54 @@ final class SearchResultsViewController: UIViewController {
         let media = viewModel.mediaResults
         return media.isEmpty ? .empty(query: viewModel.submittedQueryText) : .posts(media)
     }
+}
+
+extension SearchResultsViewController: UITextFieldDelegate {
+    /// ⚠️ ALWAYS FALSE, AND THE TAP IS NOT LOST. Returning false is what stops
+    /// the field becoming first responder — no keyboard is summoned, so none
+    /// has to be dismissed on the way out, which is the difference between this
+    /// and hiding the field behind a transparent button. The gesture still
+    /// arrives, and it means "let me ask again": that is the search screen's
+    /// job, so it goes back there.
+    func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
+        onEditQuery?()
+        return false
+    }
+}
+
+extension SearchResultsViewController {
+    /// ⚠️ A FILE, NOT ONLY A CONSOLE. The defect this records — a back gesture
+    /// that pops two levels — needs a real finger, so it happens on a device or
+    /// in a hand-driven simulator run where nobody is attached to stdout. Every
+    /// line is appended to `search-nav-trace.log` in the app's Documents
+    /// directory, read afterwards with
+    /// `xcrun simctl get_app_container <udid> <bundle> data`.
+    static func traceNavigation(_ line: String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-search-nav-trace") else { return }
+        print("[search-nav] \(line)")
+        guard let directory = FileManager.default.urls(
+            for: .documentDirectory, in: .userDomainMask
+        ).first else { return }
+        let url = directory.appendingPathComponent("search-nav-trace.log")
+        guard let data = (line + "\n").data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url)
+        }
+        #endif
+    }
+}
+
+/// ⚠️ A BOX, BECAUSE A `@MainActor` SCREEN'S `deinit` MAY NOT READ ITS OWN
+/// STORED TOKENS under Swift 6. Feed keeps one of these for the same reason and
+/// it is internal to Feed, so Search carries its own rather than reaching
+/// across a package for five lines.
+final class SearchNotificationObserverBag: @unchecked Sendable {
+    private var tokens: [any NSObjectProtocol] = []
+    func add(_ token: any NSObjectProtocol) { tokens.append(token) }
+    deinit { tokens.forEach(NotificationCenter.default.removeObserver) }
 }

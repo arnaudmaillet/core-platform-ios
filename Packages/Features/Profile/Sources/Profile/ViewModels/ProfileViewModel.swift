@@ -310,6 +310,14 @@ public final class ProfileViewModel {
     /// The loaded profile's `@handle`, for naming it in confirmations.
     public var handle: String? { profile.map { "@" + $0.handle } }
 
+    /// The loaded profile's name, for the navigation bar's title.
+    ///
+    /// ⚠️ THE NAME, NOT THE HANDLE. The bar carried the handle once and it said
+    /// again what the identity block says in full a finger's width below it;
+    /// the name is what a person is called, and the title is the only place it
+    /// survives once the header has scrolled away.
+    public var displayName: String? { profile?.displayName }
+
     /// Whether this screen shows a gallery at all — drives the filter tray's
     /// existence, not just its state.
     public var hasGallery: Bool { gallery != nil }

@@ -1,5 +1,6 @@
 import CoreModels
 import CoreStorage
+import DesignSystem
 import Foundation
 import MediaCore
 import Testing
@@ -86,7 +87,15 @@ struct SearchFilterTrayTests {
             window.layoutIfNeeded()
         }
 
-        var field: UITextField? { screen.navigationItem.titleView as? UITextField }
+        /// ⚠️ A TRAILING BAR ITEM, NOT THE TITLE VIEW. It was the title view,
+        /// which is centred and sized to the whole slot — so it filled the bar
+        /// with no platter of its own, while the results screen it pushes wears
+        /// the same field as a real item. `-header-bar-tree` showed the
+        /// difference plainly: one platter on this screen, four on that one.
+        var field: UITextField? {
+            screen.navigationItem.rightBarButtonItems?
+                .compactMap { $0.customView as? UITextField }.first
+        }
 
         /// ⚠️ THE TRAY IS ON THE RESULTS SCREEN'S TOOLBAR NOW, not the search
         /// screen's bar. The search screen shows a history and a typeahead;
@@ -95,12 +104,48 @@ struct SearchFilterTrayTests {
             navigation.topViewController as? SearchResultsViewController
         }
 
-        var item: UIBarButtonItem? { results?.toolbarItems?.last }
+        /// ⚠️ THE FILTER IS IN NEITHER THE TOOLBAR NOR THE BAND. A toolbar and
+        /// an accessory both claim the bottom of the screen and UIKit
+        /// coordinates neither, and one accessory is one capsule — so the
+        /// filter is a tray in the SCREEN'S OWN VIEW, pinned above its safe
+        /// area, which the band is already excluded from. Found by walking,
+        /// because none of those places has an index to read.
+        var bandHost: SelectorAccessoryHost? { results?.selectorAccessory?.hostView }
 
-        /// Submits, which PUSHES the results screen, and waits for it.
+        /// ⚠️ IT IS A LEADING BAR ITEM NOW — a plain system one, so there is no
+        /// custom view to walk to. It sits beside the chevron, which is what
+        /// `leftItemsSupplementBackButton` is for.
+        var item: UIBarButtonItem? {
+            results?.navigationItem.leftBarButtonItems?
+                .first { $0.accessibilityLabel == "Filters" }
+        }
+
+        static func filterButton(in view: UIView) -> UIButton? {
+            if let button = view as? UIButton, button.accessibilityLabel == "Filters" {
+                return button
+            }
+            for subview in view.subviews {
+                if let found = filterButton(in: subview) { return found }
+            }
+            return nil
+        }
+
+        /// Submits, which PUSHES the results screen, and waits for it to be ON
+        /// SCREEN.
+        ///
+        /// ⚠️ **THE CONDITION USED TO BE AN ACCESSOR'S SIDE EFFECT, AND IT
+        /// MATTERED.** This waited for `item` — a chain that did not force the
+        /// view to load, so it spun its full 80 yields while the push completed
+        /// underneath. Rewriting the accessor to reach through `results.view`
+        /// (which DOES force a load) made the loop exit on the first turn, and
+        /// `theResultsQueryRefusesTheKeyboardAndAsksToGoBack` began failing:
+        /// `becomeFirstResponder()` returns false WITHOUT consulting the
+        /// delegate when the field is not in a window, so the callback it
+        /// asserts never fired. The wait is on the window now, which is what
+        /// every test after this line actually assumes.
         func showResults(_ text: String) async {
             submit(text)
-            for _ in 0..<80 where item == nil { await Task.yield() }
+            for _ in 0..<80 where results?.viewIfLoaded?.window == nil { await Task.yield() }
         }
 
         /// ⚠️ THE PUSH IS SYNCHRONOUS AND THE ANSWER IS NOT. `showResults`
@@ -150,16 +195,37 @@ struct SearchFilterTrayTests {
         #expect(Host().item == nil)
     }
 
-    /// ⚠️ IN THE TOOLBAR, TRAILING. The navigation bar carries a back button
-    /// and a full-width query field; a third item there would take width off
-    /// the query the viewer is reading.
-    @Test func theTrayIsTheResultsScreenTrailingToolbarItem() async {
+    /// ⚠️ BESIDE THE CHEVRON, AND THE FIELD PAYS FOR IT — see
+    /// `SearchResultsWalletBadgeTests.theFieldPaysForALeadingItemAsWell` for
+    /// the arithmetic, and `queryWidth`'s own comment for the bar UIKit drew.
+    @Test func theFilterLeadsTheBarBesideTheChevron() async {
         let host = Host()
         await host.showResults("haddad")
         #expect(host.item != nil)
         #expect(host.item?.title == nil)
         #expect(host.item?.image != nil)
         #expect(host.item?.accessibilityLabel == "Filters")
+    }
+
+    /// ⚠️ **A SYSTEM ITEM, AND THE SHAPE IS THE REASON.** Wrapped in a
+    /// `UIButton`, the glyph came out in a 59x44 platter — an OVAL, beside a
+    /// chevron that is a 44pt circle, because
+    /// `UIButton.Configuration.plain()` carries its own content insets and
+    /// UIKit sizes the platter around whatever it is given. A system item has
+    /// no view of its own to inflate it.
+    @Test func theFilterHasNoCustomViewToInflateItsPlatter() async {
+        let host = Host()
+        await host.showResults("haddad")
+        #expect(host.item?.customView == nil)
+    }
+
+    /// ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
+    /// disables the interactive pop along with it, silently.
+    @Test func theFilterSupplementsTheBackButtonRatherThanReplacingIt() async {
+        let host = Host()
+        await host.showResults("haddad")
+        #expect(host.results?.navigationItem.leftItemsSupplementBackButton == true)
+        #expect(host.results?.navigationItem.hidesBackButton == false)
     }
 
     @Test func theSheetCarriesTheThreeDimensionsAsked() async {
@@ -300,8 +366,11 @@ struct SearchFilterTrayTests {
         )
         refine.loadViewIfNeeded()
         #expect(refine.navigationItem.hidesBackButton)
-        #expect(refine.navigationItem.rightBarButtonItems?.map(\.title) == ["Cancel"])
-        #expect(refine.navigationItem.titleView is UITextField)
+        // `[0]` IS THE SCREEN EDGE: Cancel leads the array so it renders
+        // TRAILING of the field — `[ field ][ Cancel ]`.
+        #expect(refine.navigationItem.rightBarButtonItems?.first?.title == "Cancel")
+        #expect(refine.navigationItem.rightBarButtonItems?.last?.customView is UITextField)
+        #expect(refine.navigationItem.titleView == nil, "the field is a bar item now")
     }
 
     /// It exists to change an answer that already exists, so starting empty
@@ -315,7 +384,7 @@ struct SearchFilterTrayTests {
             mode: .refine
         )
         refine.loadViewIfNeeded()
-        #expect((refine.navigationItem.titleView as? UITextField)?.text == "haddad")
+        #expect((refine.navigationItem.rightBarButtonItems?.compactMap { $0.customView as? UITextField }.first)?.text == "haddad")
     }
 
     /// ⚠️ ONE VIEW MODEL, TWO SCREENS, AND ONE CALLBACK SLOT. A refine screen
@@ -411,41 +480,59 @@ struct SearchFilterTrayTests {
 
     // MARK: - The query on the results screen is a door
 
-    /// ⚠️ NO KEYBOARD IS EVER SUMMONED HERE, and now that is structural rather
-    /// than refused. The door used to be a `UISearchTextField` that said no in
-    /// `textFieldShouldBeginEditing`; it is a glyph, so there is no responder
-    /// to become. What is still worth pinning is that the tap ASKS — a door
-    /// that leads nowhere is indistinguishable from a screen that has stopped
-    /// responding.
-    @Test func theResultsQueryDoorAsksToGoBack() async {
+    /// ⚠️ THE REFUSAL IS THE FEATURE. Returning false from
+    /// `textFieldShouldBeginEditing` is what stops the field becoming first
+    /// responder — no keyboard is summoned, so none has to be dismissed on the
+    /// way out. A transparent button over the field would have let the keyboard
+    /// start rising before the pop.
+    @Test func theResultsQueryRefusesTheKeyboardAndAsksToGoBack() async {
         let host = Host()
         await host.showResults("haddad")
         let results = host.results
         var asked = 0
         results?.onEditQuery = { asked += 1 }
 
-        let door = try? #require(results?.navigationItem.rightBarButtonItems?.first)
-        #expect(door?.customView == nil)
-        _ = door?.target?.perform(door?.action, with: door)
+        let field = try? #require(
+            results?.navigationItem.rightBarButtonItems?
+                .compactMap { $0.customView as? UITextField }.first
+        )
+        #expect(field?.becomeFirstResponder() == false)
+        #expect(field?.isFirstResponder == false)
         #expect(asked == 1)
     }
 
-    /// ⚠️ **A GLYPH, NOT A FIELD, AND THE WIDTH IS THE REASON.** Measured with
-    /// `-leading-room` on a 402pt bar: 120pt of fixed costs leaves 282 to
-    /// share, and a selector and a field each taking half paves the bar EXACTLY
-    /// — no margin at all. A pop briefly narrows the bar, and UIKit's one
-    /// answer to items that will not fit is to sweep the group into a `•••`.
-    /// A 44pt glyph leaves the selector 141pt of ceiling and ~100pt of slack.
-    @Test func theQueryDoorIsAGlyphAndNotACustomView() async {
+    /// ⚠️ **THE SELECTOR IS IN THE BOTTOM TOOLBAR, AND THAT IS WHAT BUYS THE
+    /// FIELD ITS PLACE BACK.** With both in the navigation bar, each asking for
+    /// half of what was left, the two halves paved a 402pt bar EXACTLY — 120pt
+    /// of fixed cost, 141 each — and iOS 26 answered a transient narrowing by
+    /// sweeping the whole trailing group into a `•••`, which is why the field
+    /// became a glyph. A toolbar has no item groups and no overflow control, so
+    /// the selector cannot fail that way there, and the bar is left holding a
+    /// back button and one trailing item.
+    @Test func theSelectorIsInTheBandAndTheQueryIsInTheBar() async {
         let host = Host()
         await host.showResults("haddad")
-        let items = host.results?.navigationItem.rightBarButtonItems
+        let results = try? #require(host.results)
 
-        #expect(items?.count == 1)
-        // No custom view means no width of its own to negotiate: UIKit sizes it
-        // at the platter, the same as For You's search glyph.
-        #expect(items?.first?.customView == nil)
-        #expect(items?.compactMap { $0.customView as? UITextField }.isEmpty == true)
+        // The query is a trailing bar item with a real field in it...
+        #expect(results?.navigationItem.rightBarButtonItems?
+            .compactMap { $0.customView as? UITextField }.count == 1)
+        // ...the navigation bar's leading group is empty, so the back button is
+        // the back button and there is nothing to supplement...
+        #expect(results?.navigationItem.leftBarButtonItems?.count == 1,
+                "the filter, and only the filter")
+        #expect(results?.navigationItem.hidesBackButton == false)
+        // ...the band at the foot carries the selector and NOTHING else, since
+        // one accessory is one capsule...
+        #expect(results?.toolbarItems?.isEmpty != false,
+                "a toolbar and an accessory both claim the bottom and neither yields")
+        let band = try? #require(host.bandHost)
+        #expect(band?.subviews.compactMap { $0 as? PagedTabBar }.count == 1)
+        #expect((band.map { Host.filterButton(in: $0) } ?? nil) == nil,
+                "a filter inside the band could not have a capsule of its own")
+        // ...and NOTHING floats over the screen either: the filter went to the
+        // navigation bar, so there is no second thing at the foot at all.
+        #expect(results?.view.subviews.contains { $0 is InlineFilterTrayView } != true)
     }
 
     /// ⚠️ REAL BAR ITEMS, NOT A COMPOSITE TITLE VIEW. A title view is one view
@@ -456,14 +543,8 @@ struct SearchFilterTrayTests {
         await host.showResults("haddad")
         let results = host.results
 
-        // The query door is a trailing item...
         #expect(results?.navigationItem.rightBarButtonItems?.count == 1)
-        // ...and the selector SUPPLEMENTS the back button rather than replacing
-        // it, which is what keeps the interactive pop alive — `NativePopPolicy`
-        // refuses the edge gesture for a custom leading item without this, and
-        // refuses it outright for a hidden back button.
-        #expect(results?.navigationItem.leftItemsSupplementBackButton == true)
-        #expect(results?.navigationItem.hidesBackButton == false)
+        #expect(results?.navigationItem.titleView == nil)
     }
 
     // MARK: - Cancel and Done

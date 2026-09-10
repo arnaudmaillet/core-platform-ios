@@ -71,6 +71,33 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// why the lens is a tint rather than a second material.
     private let tabBar = PagedTabBar(titles: tabTitles, style: .navigationTitle)
 
+    /// The strip's home: a `UITabAccessory` at the foot of the screen, above
+    /// the tab bar, which collapses into it as the grid scrolls.
+    ///
+    /// ⚠️ IT EXISTS ONLY BETWEEN `viewDidAppear` AND `viewWillDisappear`.
+    /// `bottomAccessory` is a property of the TAB BAR CONTROLLER with no
+    /// per-tab scope, so a band left installed floats over whatever is pushed
+    /// on top and over whichever tab is selected next — measured, not feared.
+    private var selectorAccessory: SelectorAccessory?
+
+    /// ⚠️ BOTH DEFAULT OFF, AND THE CATCH-UP MUST STAY OFF. It hand-animates a
+    /// geometry change UIKit does not animate IN THE SIMULATOR — on a device
+    /// the accessory animates itself, and the hand-animation fights it. The
+    /// full measurement is on `SelectorAccessoryHost.playCatchUpIfMoved`. These
+    /// are what is left of the spike's flags; the gate they hid behind is gone.
+    private static var accessoryOptions: SelectorAccessoryOptions {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        return SelectorAccessoryOptions(
+            keepsOwnGlass: arguments.contains("-foryou-dock-glass"),
+            animatesCatchUp: arguments.contains("-foryou-dock-catchup"),
+            isTracing: arguments.contains("-foryou-dock-trace")
+        )
+        #else
+        return SelectorAccessoryOptions()
+        #endif
+    }
+
     /// Search. The trailing EDGE item — an action, so a plain glyph with a
     /// target and no menu.
     ///
@@ -472,24 +499,54 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        // No title. The large left-aligned title was the convention for a root
-        // tab here, and removing it also removes the large-title content-area
-        // layout from the transition's path — which is the second reason for
-        // this change, see below.
-        // No title, because the tabs ARE the title: the capsule occupies the
-        // slot a title string would have. Removing the large title also keeps
-        // the large-title content-area layout out of the hero flight's path,
-        // which is the second reason for it — see below.
-        navigationItem.title = nil
+        // The tab's own name, in the bar — the screen says where it is.
+        //
+        // The slot was empty because the selector used to live in it; the
+        // selector is at the foot of the screen in a `UITabAccessory` now, and
+        // an empty centre is just an empty centre.
+        //
+        // ⚠️ **THE STATIC WORD, NOT THE LIVE LENS NAME.** This tab renames
+        // ITSELF from the active content lens — the `UITab` reads "For You",
+        // "Entertainment", "Work", "Focus" or "Gaming" (see
+        // `publishTabPresentation`). Mirroring that here is the one width risk
+        // in this change: "Entertainment" is ~104pt of text against a centre
+        // this bar leaves ~102-117pt of at 375pt, and it is the bar that
+        // already carries a leading glyph plus two trailing items. The static
+        // word costs ~56 and cannot collide.
+        //
+        // `largeTitleDisplayMode` stays `.never`: the large-title content-area
+        // layout is kept out of the hero flight's path, which is a separate
+        // reason from the title string and still holds.
+        navigationItem.title = "For You"
         navigationItem.largeTitleDisplayMode = .never
-        // Native bar items on both sides; the selector joins the LEADING group
-        // behind the compose glyph, so the centre stays empty and flexible.
-        // ⚠️ BEFORE `installLeadingSelector`, which APPENDS: whatever is here
-        // keeps its place at the front, so the lens glyph leads and the
-        // selector follows it.
+        // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
+        // screen pushed from it a WORDED back button, and two pushed bars were
+        // budgeted against a bare 44pt chevron: `SearchResultsViewController`
+        // says in as many words that its field would then be "44pt too
+        // generous", and the chat thread's identity view is capped at 240pt on
+        // the same assumption — 32 margins + 44 chevron + 24 gap + 8 padding +
+        // 240 = 348 fits 375, while a "Messages" label (~98pt with its platter)
+        // makes it ~402 and does not. `.minimal` keeps the title for this
+        // screen and the chevron bare for the next one.
+        navigationItem.backButtonDisplayMode = .minimal
+
+        // The bar keeps the lens glyph leading and search + wallet trailing.
+        // The centre is empty and stays empty: the selector is not in this bar.
         navigationItem.leftBarButtonItems = [contextItem]
         applyTrailingItems()
-        navigationItem.installLeadingSelector(tabBar)
+
+        // ⚠️ **THE STRIP LIVES AT THE FOOT OF THE SCREEN, IN A `UITabAccessory`.**
+        // It was a leading bar item, capped against the room the rest of the bar
+        // claimed — machinery that existed only because iOS 26 sweeps a
+        // navigation-bar group it cannot fit into a `•••`. An accessory has no
+        // item groups and no overflow control, so none of it is needed: of the
+        // five coupled mutations that install performed, four were
+        // nav-bar-only, and the fifth — the backdrop suppression — is
+        // `SelectorAccessoryHost`'s now. The whole file is deleted.
+        selectorAccessory = SelectorAccessory(strip: tabBar, options: Self.accessoryOptions)
+        selectorAccessory?.hostView.onLayoutChanged = { [weak self] in
+            self?.chromeDidMove()
+        }
         contextItem.menu = makeContextMenu()
 
         pager.pin(to: view)
@@ -517,6 +574,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // Dragging the capsule IS dragging the pages: the bar reports a
         // fractional page position and the pager is scrubbed to it, so the same
         // `onProgress` loop that answers a content swipe answers this too.
+        // ⚠️ THE RECEIVER IS THE VIEW CONTROLLER, and the scroll view is the
+        // ACTIVE PAGE's — UIKit's own heuristic search does not find a scroller
+        // nested in a horizontal pager, so without this the tab bar never
+        // minimizes and nothing says why.
+        pager.onActiveScrollViewChanged = { [weak self] scroller in
+            self?.setContentScrollView(scroller, for: .bottom)
+        }
         pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
         pager.onPageSettled = { [weak self] format in
             self?.viewModel.setFormat(format)
@@ -624,9 +688,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         for (index, format) in ForYouPagerView.pageOrder.enumerated() {
             tabBar.setBadge(Self.badgeStyle(forUnread: counts[format] ?? 0), at: index)
         }
-        tabBar.sizeToFit()
-        navigationController?.navigationBar.setNeedsLayout()
-        navigationController?.navigationBar.layoutIfNeeded()
+        // ⚠️ THE NAVIGATION BAR'S CACHED TITLE-VIEW SIZE IS NO LONGER THE
+        // PROBLEM, and the paragraph above is kept as the record of one: a
+        // badge changed the capsule's width, the bar resized the slot to the
+        // new intrinsic width, the row inside kept the old one, and the leading
+        // title rendered as "tivity". An accessory sizes by constraint and
+        // re-reads the intrinsic height, so it is told rather than forced.
+        selectorAccessory?.contentWidthDidChange()
     }
 
     /// Opens the post composer.
@@ -1984,6 +2052,25 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // push takes the bar down, and `applyPendingReveal` runs on the way
         // out. Taken here, when the screen is at rest and the bar is where the
         // viewer sees it.
+        // ⚠️ ABOVE THE COVER, AND THE ORDER IS LOAD-BEARING: the cover is
+        // measured once per appearance and cached, so the chrome has to be at
+        // its final height before it is taken.
+        //
+        // ⚠️ AND `viewDidAppear`, NOT `viewWillAppear`. UIKit runs
+        // `viewWillAppear` at interactive-pop BEGIN, and this screen's
+        // `viewWillAppear` also calls `restoreChromeAfterTransition()`, which
+        // force-writes alpha/isHidden/transform over the strip and every part
+        // of it. Harmless while the strip is unhosted; docked, it would fight
+        // the flight. A cancelled pop delivers `viewDidDisappear`, not
+        // `viewDidAppear`, so that path needs no cleanup.
+        // ⚠️ FOR YOU IS THE ONE HOST THAT ARMS THE MINIMIZE, because it is
+        // the one that registers a scroll view with
+        // `setContentScrollView(_:for: .bottom)`. The behaviour is shell-wide;
+        // arming it from a host with no scroller registered would give every
+        // other tab a collapsing bar and this one nothing.
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+                                   alongside: transitionCoordinator)
+        tabBarController?.view.layoutIfNeeded()
         pager.setFootChromeCover(floatingBarCover)
         sweepAbandonedTransition()
         // ⚠️ NOTHING ON THIS SCREEN MAY BE INVISIBLE ONCE IT IS BACK.
@@ -2030,6 +2117,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // ⚠️ ABOVE THE GUARD BELOW, WHICH IS TAB-SWITCH-ONLY. On a push
+        // `topViewController` is already the pushed screen, so anything under
+        // the guard never runs for one — and the accessory is shell-lifetime
+        // state: measured, it survives `hidesBottomBarWhenPushed` and floats
+        // over the pushed profile, and over whichever tab you switch to. One
+        // line here covers a push, a tab switch, and the un-appearance after a
+        // cancelled interactive pop.
+        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         guard navigationController?.topViewController === self else { return }
         // The hosted surface lives in the TAB BAR CONTROLLER's view, one level
         // above the navigation controller — deliberately, so a push cannot
@@ -2047,6 +2142,20 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
+        // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
+        // +36ms, `viewDidAppear` at +947ms — nine hundred milliseconds of empty
+        // band under a screen already fully on display. The call below is
+        // idempotent with the one in `viewDidAppear`, which stays as the
+        // backstop for the paths the policy declines (a scrub that has not
+        // committed, a flight that owns the chrome).
+        installBottomChromeWhenAppearing(hasActiveFlight: activeTransition != nil,
+                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
+            guard let self else { return }
+            selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+                                       alongside: transitionCoordinator)
+        }
+
         // The segment row and the view model hold two copies of one fact — which
         // format is active — and the row's copy is the one nothing persists. Two
         // paths write it (a tap, and a settled pager swipe reported through
@@ -2194,12 +2303,44 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
         else { return view.safeAreaInsets.bottom }
         let inPage = view.convert(bar.frame, from: host)
-        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
+        var top = inPage.minY
+        // ⚠️ THE HIGHER OF THE TWO TOPS. Docked, the strip sits ABOVE the bar,
+        // so a cover measured from the bar alone understates the chrome by the
+        // strip's height — and this file has filmed what that costs twice: a
+        // reveal parks the landing tile under chrome it was told was not there.
+        if let host = selectorAccessory?.hostView, host.window != nil {
+            top = min(top, view.convert(host.bounds, from: host).minY)
+        }
+        return max(view.safeAreaInsets.bottom, view.bounds.maxY - top)
     }
+
+    /// The bottom chrome moved at rest — the bar collapsed, or the strip
+    /// re-sized — so the cached cover is stale.
+    ///
+    /// ⚠️ AT REST ONLY. Mid-flight and mid-grab the chrome is being animated by
+    /// a driver that will put it back, and re-publishing then would hand the
+    /// pager a number from the middle of an animation.
+    private func chromeDidMove() {
+        guard view.window != nil,
+              navigationController?.topViewController === self,
+              transitionCoordinator == nil
+        else { return }
+        let cover = floatingBarCover
+        guard abs(cover - lastPublishedFootCover) > 0.5 else { return }
+        lastPublishedFootCover = cover
+        pager.setFootChromeCover(cover)
+    }
+
+    private var lastPublishedFootCover: CGFloat = -1
 
     private func showTabBar(alpha: CGFloat) {
         guard let tabBarController else { return }
         tabBarController.tabBar.alpha = alpha
+        // ⚠️ `selectorAccessory?.hostView`, NEVER a bare `tabBar.alpha`: inside
+        // this class `tabBar` is the SELECTOR and the system bar is always
+        // `tabBarController?.tabBar`. Once both live in the same band, a line
+        // written for one silently targets the other.
+        selectorAccessory?.hostView.alpha = alpha
         guard tabBarController.isTabBarHidden else { return }
         tabBarController.setTabBarHidden(false, animated: false)
         // Force the layout the change implies now, so nothing downstream reads

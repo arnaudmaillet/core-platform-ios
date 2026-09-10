@@ -42,7 +42,12 @@ final class HeaderSelectorAudit {
     /// Surfaces that MUST carry a selector. Without this list a vanished
     /// capsule reads as "nothing to audit here" and the run passes — which is
     /// exactly what happened when the inbox's selector was clobbered off the bar.
-    private let mustHaveSelector: Set<AppTab> = [.forYou, .messages]
+    ///
+    /// ⚠️ `.profile` IS ON THIS LIST NOW. The viewer's own profile carries a
+    /// selector too, and it was left off while the strip lived in the scroll
+    /// view — where this audit could never have found it anyway. It is in the
+    /// bottom accessory now, which is somewhere the audit looks.
+    private let mustHaveSelector: Set<AppTab> = [.forYou, .messages, .profile]
 
     func run(tabs: [AppTab]) async {
         print("[header-audit] begin: \(tabs.count) surfaces")
@@ -67,7 +72,11 @@ final class HeaderSelectorAudit {
                 }
                 previous = frame
             }
-            findings.append(audit(surface: tab.rawValue))
+            var finding = audit(surface: tab.rawValue)
+            if let problem = await collapseProblem(surface: tab.rawValue) {
+                finding.problems.append(problem)
+            }
+            findings.append(finding)
         }
         for finding in findings {
             if finding.isClean {
@@ -82,23 +91,88 @@ final class HeaderSelectorAudit {
         print("[header-audit] done: \(findings.count - failed.count)/\(findings.count) clean")
     }
 
+    /// Where the visible selector is, and which chrome is carrying it.
+    ///
+    /// ⚠️ **THREE PLACES NOW, NOT ONE.** A selector used to be a navigation-bar
+    /// item and this audit only ever walked `nav.navigationBar`. Selectors are
+    /// moving to the tab bar controller's `bottomAccessory` (a screen with the
+    /// tab bar under it) and to the navigation controller's bottom TOOLBAR (a
+    /// screen without one), so a lookup that reads the bar alone reports "NO
+    /// SELECTOR on a surface that must have one" for a screen working exactly
+    /// as designed — and, worse, the settle loops below wait out their whole
+    /// timeout for a capsule that arrived somewhere else.
+    private enum SelectorHost: String {
+        case navigationBar = "navigation bar"
+        case bottomAccessory = "bottom accessory"
+        case bottomToolbar = "bottom toolbar"
+        case elsewhere = "somewhere else"
+    }
+
+    /// ⚠️ **SEARCHED FROM THE WINDOW DOWN, THEN CLASSIFIED — not looked for
+    /// inside each candidate host.** Searching `nav.toolbar` finds nothing for a
+    /// strip that is visibly in the bottom toolbar: measured on the search
+    /// results and the relationships screen, `toolbarItems` held 3 and 2 items,
+    /// `isToolbarHidden` was false, and `nav.toolbar.bounds` came back **375x667**
+    /// — the whole screen, which is not a toolbar's geometry. UIKit hosts a
+    /// bottom bar item's custom view in its own container, the same way it hosts
+    /// an accessory in `_UITabAccessoryContainer` rather than in the tab bar. So
+    /// both screens were reported bare while a screenshot showed their strips
+    /// hosted perfectly.
+    ///
+    /// Finding the view first and asking what is ABOVE it needs no knowledge of
+    /// UIKit's private containers, and the ancestor chain is printed anyway.
+    ///
+    /// ⚠️ **AND THE TOOLBAR IS RECOGNISED BY ITS ITEM, NOT BY ITS ANCESTRY.**
+    /// The chain above a toolbar-hosted strip has no toolbar in it either:
+    ///
+    ///     CustomViewWrapper
+    ///       ← UICorePlatformViewHost<PlatformViewRepresentableAdaptor<…>>
+    ///       ← _UIInheritedView
+    ///       ← UIPlatformGlassInteractionView
+    ///
+    /// iOS 26 draws the bottom bar out of a platform-glass hierarchy that is
+    /// not under `UIToolbar` at all, which is the same reason `nav.toolbar`
+    /// answers 375x667. So the question asked is the one with an exact answer:
+    /// is this view the custom view of one of the screen's own `toolbarItems`?
+    private func locateSelector() -> (bar: PagedTabBar, host: SelectorHost)? {
+        guard let window = tabBarController.view.window,
+              let found = firstPagedTabBar(in: window)
+        else { return nil }
+        let nav = topNavigationController
+        let toolbarHosts = (nav?.topViewController?.toolbarItems ?? []).compactMap(\.customView)
+        if toolbarHosts.contains(where: { found === $0 || found.isDescendant(of: $0) }) {
+            return (found, .bottomToolbar)
+        }
+        var node: UIView? = found
+        while let current = node {
+            if current === nav?.navigationBar { return (found, .navigationBar) }
+            if current === tabBarController.bottomAccessory?.contentView {
+                return (found, .bottomAccessory)
+            }
+            let name = String(describing: type(of: current))
+            if current === nav?.toolbar || name.contains("Toolbar") {
+                return (found, .bottomToolbar)
+            }
+            if name.contains("TabAccessory") { return (found, .bottomAccessory) }
+            node = current.superview
+        }
+        return (found, .elsewhere)
+    }
+
     /// The visible selector's frame in its window, or `.null` if there is none —
     /// the value the current-surface mode watches until it stops changing.
     var selectorFrameOnScreen: CGRect {
-        guard let nav = topNavigationController,
-              let selector = firstPagedTabBar(in: nav.navigationBar),
+        guard let selector = locateSelector()?.bar,
               let window = selector.window,
               selector.bounds.width > 1
         else { return .null }
         return selector.convert(selector.bounds, to: window)
     }
 
-    /// Whether a selector is on the visible bar yet — what the current-surface
-    /// mode waits for, so a slow load is not read as a missing capsule.
+    /// Whether a selector is on screen yet — what the current-surface mode
+    /// waits for, so a slow load is not read as a missing capsule.
     var hasSelectorOnScreen: Bool {
-        guard let nav = topNavigationController,
-              let selector = firstPagedTabBar(in: nav.navigationBar)
-        else { return false }
+        guard let selector = locateSelector()?.bar else { return false }
         return selector.window != nil && selector.bounds.width > 1
     }
 
@@ -117,7 +191,17 @@ final class HeaderSelectorAudit {
             print("[bar-tree] ---- \(surface) ----")
             dumpBarTree()
         }
-        guard let selector = firstPagedTabBar(in: bar) else {
+        let located = locateSelector()
+        // ⚠️ **A HOST LABEL, NOT AN EARLY RETURN.** The first cut of this
+        // branch printed "selector is in the BOTTOM ACCESSORY" and returned a
+        // clean finding — which stopped the audit checking anything at all
+        // about a strip that had merely moved. Everything below except the
+        // `•••` rule is host-agnostic (a real size, a hit-testable segment, an
+        // on-screen frame), so the host is named and the checks continue.
+        if let located, located.host != .navigationBar {
+            print("[header-audit] \(surface): selector is in the \(located.host.rawValue)")
+        }
+        guard let selector = located?.bar else {
             if let tab = AppTab(rawValue: surface), mustHaveSelector.contains(tab) {
                 finding.problems.append("NO SELECTOR on a surface that must have one")
                 // The inventory, because "it is not on the bar" has several
@@ -147,6 +231,21 @@ final class HeaderSelectorAudit {
             } else {
                 print("[header-audit] \(surface): no selector on this bar")
             }
+            // ⚠️ WHERE IT LOOKED, ALWAYS. "No selector" has two causes that read
+            // identically — the screen has none, or the audit is holding the
+            // wrong stack — and it cost two false readings before the second was
+            // suspected: the search results and the relationships screen were
+            // both reported bare and both photographed the same minute with
+            // their strips hosted in the bottom toolbar.
+            let presented = tabBarController.selectedViewController?.presentedViewController
+            print("[header-audit] \(surface) LOOKED-IN"
+                + " tab=\(tabBarController.selectedViewController.map { String(describing: type(of: $0)) } ?? "nil")"
+                + " presented=\(presented.map { String(describing: type(of: $0)) } ?? "none")"
+                + " stack=[\(nav.viewControllers.map { String(describing: type(of: $0)) }.joined(separator: ","))]"
+                + " toolbarHidden=\(nav.isToolbarHidden)"
+                + String(format: " toolbar=%.0fx%.0f", nav.toolbar.bounds.width, nav.toolbar.bounds.height)
+                + " toolbarItems=\(nav.topViewController?.toolbarItems?.count ?? -1)"
+                + " accessory=\(tabBarController.bottomAccessory == nil ? "none" : "set")")
             return finding
         }
         guard let window = bar.window else {
@@ -156,23 +255,47 @@ final class HeaderSelectorAudit {
         let item = nav.topViewController?.navigationItem
         let frame = selector.convert(selector.bounds, to: window)
 
-        // 1. WHERE is it? Reported, not assumed. One surface keeps the title
-        // slot on purpose (the inbox — see `MessagesInboxViewController`), and an
-        // audit that treats the leading group as the only correct answer would
-        // fail a deliberate decision while passing a vanished capsule.
+        // 1. WHERE is it? Reported, not assumed — and only asked of a selector
+        // that is actually IN the navigation bar. A strip in the bottom
+        // accessory or the toolbar is in neither the title slot nor a leading
+        // group by design, and judging it against those would fail every
+        // screen this audit is being taught about.
+        //
+        // ⚠️ THE NOTE HERE NAMED THE WRONG SURFACE. It said the inbox keeps the
+        // title slot on purpose; the inbox moved its selector to the leading
+        // group, and the title-slot host is
+        // `ProfileRelationshipsViewController`. A comment naming the wrong
+        // screen is worse than none — it is the one a reader trusts.
         let inTitleSlot = item?.titleView === selector
             || (item?.titleView.map { selector.isDescendant(of: $0) } ?? false)
         let leadingCount = item?.leftBarButtonItems?.count ?? 0
-        if !inTitleSlot {
-            if leadingCount == 0 {
-                finding.problems.append("not in the title slot and no leading items — nowhere")
-            }
-            if item?.leftItemsSupplementBackButton != true {
-                finding.problems.append("leftItemsSupplementBackButton is false — pop gesture at risk")
+        if located?.host == .navigationBar {
+            if !inTitleSlot {
+                if leadingCount == 0 {
+                    finding.problems.append("not in the title slot and no leading items — nowhere")
+                }
+                if item?.leftItemsSupplementBackButton != true {
+                    finding.problems.append("leftItemsSupplementBackButton is false — pop gesture at risk")
+                }
             }
         }
 
-        // 2. Does it have a real size, and does it fit?
+        // 2. A BAR ITEM'S custom view has to state a width.
+        //
+        // ⚠️ Only a bar item. An accessory host pins the strip with constraints
+        // and WANTS it to fill, so `noIntrinsicMetric` is correct there. In a
+        // navigation bar or a toolbar there is no host width to take, and UIKit
+        // falls back to the view's own frame — measured on the pushed profile,
+        // a 38x38 bubble holding three segments whose first one wants 71. Every
+        // other check on this list passed it as clean.
+        if located?.host != .bottomAccessory,
+           selector.intrinsicContentSize.width == UIView.noIntrinsicMetric {
+            finding.problems.append(
+                "hosted as a BAR ITEM with no intrinsic width — it will be sized "
+                + "at its own frame (fillsWidth left on?)")
+        }
+
+        // 3. Does it have a real size, and does it fit?
         if frame.width < 1 || frame.height < 1 {
             finding.problems.append(String(format: "zero size %.0fx%.0f — draws nothing, takes nothing",
                                           frame.width, frame.height))
@@ -183,20 +306,44 @@ final class HeaderSelectorAudit {
                                           frame.maxX, window.bounds.width))
         }
 
-        // 3. Does it answer touches, at every segment?
-        let segments = max(1, selector.debugSegmentCount)
-        for index in 0..<segments {
-            let x = frame.minX + frame.width * (CGFloat(index) + 0.5) / CGFloat(segments)
-            let point = CGPoint(x: x, y: frame.midY)
-            let hit = window.hitTest(point, with: nil)
+        // 4. Does it answer touches, at every segment?
+        //
+        // ⚠️ **EACH SEGMENT'S REAL FRAME, NOT THE BAR DIVIDED BY `count`.** The
+        // old probe hit `frame.width * (i + 0.5) / count`, which is only the
+        // centre of segment `i` while every segment is the same width. A
+        // collapsed accessory hands out NATURAL widths — "All" narrower than
+        // "Suggestions" — and those points then land off the outer segments and
+        // report a working strip as blocked.
+        // ⚠️ **AND ONLY THE SEGMENTS THAT ARE ON SCREEN.** The strip is a scroll
+        // view: a crowded one keeps every title whole and scrolls the rest out
+        // of sight, which is the design, not a fault. The profile's five
+        // segments overrun their 325pt slot at 375pt, so segment 4's centre
+        // sits at x=352 against a strip that ends at 350 — hit-testing it finds
+        // the host, and the old probe only avoided reporting that because it
+        // was not testing segment centres at all: it divided the bar by `count`,
+        // which lands inside the strip however far the content overflows.
+        let segmentFrames = selector.debugSegmentFrames
+        var scrolledOut = 0
+        for (index, segment) in segmentFrames.enumerated() {
+            let centre = selector.convert(CGPoint(x: segment.midX, y: segment.midY), to: window)
+            guard frame.insetBy(dx: 1, dy: 1).contains(centre) else {
+                scrolledOut += 1
+                continue
+            }
+            let hit = window.hitTest(centre, with: nil)
             if hit?.isDescendant(of: selector) != true {
                 finding.problems.append(String(format: "segment %d at %.0f,%.0f blocked by %@",
-                                              index, point.x, point.y,
+                                              index, centre.x, centre.y,
                                               hit.map { String(describing: type(of: $0)) } ?? "nil"))
             }
         }
+        if scrolledOut > 0 {
+            print("[header-audit] \(surface): \(scrolledOut) of \(segmentFrames.count) "
+                + "segments scrolled out of the strip — crowded, by design")
+        }
+        let segments = max(1, selector.debugSegmentCount)
 
-        // 4. THE ABSOLUTE RULE: no overflow control anywhere on this bar. UIKit
+        // 5. THE ABSOLUTE RULE: no overflow control anywhere on this bar. UIKit
         // labels its own "More", so the label is the signal rather than the glyph;
         // a class-name check catches the private container too.
         let overflow = overflowControls(in: bar)
@@ -215,9 +362,18 @@ final class HeaderSelectorAudit {
             finding.problems.append(narrow)
         }
 
-        // 5. On a pushed surface, is the back button still there and reachable?
+        // 6. On a pushed surface, is the back button still there and reachable?
+        //
+        // ⚠️ **AT THE NAVIGATION BAR'S OWN MIDLINE, NOT THE SELECTOR'S.** This
+        // probed `frame.midY` — the selector's — which was the same line while
+        // the selector lived in the bar. It does not any more: on the place
+        // page the strip is at y=532 in a bottom accessory, so the probe
+        // hit-tested the tab bar band and reported "back button point does not
+        // reach the navigation bar" for a page whose chevron is exactly where
+        // it belongs.
         if nav.viewControllers.count > 1 {
-            let backPoint = CGPoint(x: 28, y: frame.midY)
+            let barFrame = bar.convert(bar.bounds, to: window)
+            let backPoint = CGPoint(x: 28, y: barFrame.midY)
             let hit = window.hitTest(backPoint, with: nil)
             let reachesBar = hit?.isDescendant(of: bar) ?? false
             if !reachesBar {
@@ -239,10 +395,14 @@ final class HeaderSelectorAudit {
             node = current.superview
             depth += 1
         }
-        let inHost = chain.contains { $0.contains("LeadingSelectorHost") }
-        print(String(format: "[header-audit] %@: HOSTING inHost=%@ intrinsic=%.0f "
+        // ⚠️ THE `inHost=` FLAG IS GONE WITH THE CLASS IT LOOKED FOR. It asked
+        // whether the strip was inside `LeadingSelectorHost`, which no longer
+        // exists — every selector is in an accessory or a toolbar now, so the
+        // answer was NO everywhere and read as a finding. The CHAIN is still
+        // printed, and it is what actually says where a strip ended up.
+        print(String(format: "[header-audit] %@: HOSTING intrinsic=%.0f "
                      + "hostFrame=%.0fx%.0f chain=%@",
-                     surface, inHost ? "YES" : "NO",
+                     surface,
                      selector.intrinsicContentSize.width,
                      selector.superview?.frame.width ?? -1,
                      selector.superview?.frame.height ?? -1,
@@ -251,11 +411,12 @@ final class HeaderSelectorAudit {
                      surface, window.bounds.width, selector.firstSegmentWidth,
                      overflow.isEmpty ? "no-collapse" : "COLLAPSED"))
         print(String(format: "[header-audit] %@: selector %.0f,%.0f %.0fx%.0f segments=%d "
-                     + "leading=%d pushed=%@ placement=%@",
+                     + "leading=%d pushed=%@ host=%@ placement=%@",
                      surface, frame.minX, frame.minY, frame.width, frame.height,
                      segments, leadingCount,
                      nav.viewControllers.count > 1 ? "yes" : "no",
-                     inTitleSlot ? "TITLE-SLOT" : "empty"))
+                     located?.host.rawValue ?? "none",
+                     inTitleSlot ? "TITLE-SLOT" : "leading-or-elsewhere"))
         return finding
     }
 
@@ -264,7 +425,16 @@ final class HeaderSelectorAudit {
         if let nav = candidate as? UINavigationController {
             // A nav inside a nav (a pushed profile's own stack) is not a thing
             // here, but a presented one is: audit what the viewer can touch.
-            candidate = nav.presentedViewController ?? nav
+            //
+            // ⚠️ **ONLY WHEN THE PRESENTED THING IS A STACK.** It used to take
+            // `presentedViewController` whatever it was, and the simulator's
+            // camera-permission alert is a `UIAlertController` — which has no
+            // navigation controller, so the audit lost the stack underneath and
+            // reported "no selector on this bar" for the search results and the
+            // relationships screen. Both were photographed the same minute with
+            // their strips hosted perfectly in the bottom toolbar. An alert is
+            // not the screen under audit; it is something on top of it.
+            candidate = (nav.presentedViewController as? UINavigationController) ?? nav
         }
         if let nav = candidate as? UINavigationController { return nav }
         return candidate?.navigationController
@@ -343,8 +513,56 @@ final class HeaderSelectorAudit {
         return found
     }
 
+    /// The two prerequisites of the collapse, both of which fail SILENTLY.
+    ///
+    ///   1. `tabBarMinimizeBehavior` has to be armed. It is SHELL-WIDE, so it
+    ///      is opt-in per screen — and a screen that forgets looks perfect
+    ///      standing still.
+    ///   2. The screen has to have NAMED its scroll view, and named the page
+    ///      that is actually in front. UIKit's own heuristic does not find one
+    ///      nested in a horizontal pager, and naming page 0 while the viewer
+    ///      reads page 1 is indistinguishable from naming none: the offset
+    ///      never moves, so the band never moves.
+    ///
+    /// ⚠️ **IT DOES NOT TRY TO PROVE THE COLLAPSE, AND THAT IS DELIBERATE.**
+    /// The first version scrolled the registered scroll view with
+    /// `setContentOffset` and read the band afterwards. Measured on all three
+    /// accessory surfaces, For You included — the one already confirmed
+    /// collapsing on a real iPhone:
+    ///
+    ///     env=regular accessory=360 barH=83 → env=regular accessory=360 barH=83
+    ///
+    /// UIKit drives the minimize off a DRAG, so a scripted scroll reports three
+    /// working screens as broken. The proof lives in
+    /// `AccessoryCollapseUITests`, which has a real finger. (`tabBar.frame` is
+    /// no use either: 402x83 minimized and 402x83 not.)
+    private func collapseProblem(surface: String) async -> String? {
+        guard locateSelector()?.host == .bottomAccessory else { return nil }
+        guard let top = topNavigationController?.topViewController,
+              tabBarController.bottomAccessory?.contentView.window != nil
+        else { return "accessory selector but no accessory in a window" }
+
+        if tabBarController.tabBarMinimizeBehavior != .onScrollDown {
+            return "minimize NOT ARMED (behavior=\(tabBarController.tabBarMinimizeBehavior.rawValue))"
+        }
+        guard let named = top.contentScrollView(for: .bottom) else {
+            return "no content scroll view registered for .bottom — the band has nothing to ride"
+        }
+        if let onScreen = OnScreenScroller.candidate(in: top.view), named !== onScreen {
+            return "registered the WRONG scroller: \(type(of: named)) at "
+                + String(format: "%.0f", named.convert(named.bounds, to: nil).minX)
+                + " while the visible page is \(type(of: onScreen)) at "
+                + String(format: "%.0f", onScreen.convert(onScreen.bounds, to: nil).minX)
+        }
+        print("[header-audit] \(surface): collapse armed, riding \(type(of: named))")
+        return nil
+    }
+
     private func firstPagedTabBar(in root: UIView) -> PagedTabBar? {
-        if let bar = root as? PagedTabBar { return bar }
+        // Visible ones only: a strip mid-teardown, or one belonging to a screen
+        // the viewer has left, is not what is being audited.
+        if let bar = root as? PagedTabBar, !bar.isHidden, bar.alpha > 0.01 { return bar }
+        if root.isHidden || root.alpha < 0.01 { return nil }
         for subview in root.subviews {
             if let found = firstPagedTabBar(in: subview) { return found }
         }

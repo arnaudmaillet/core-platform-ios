@@ -56,6 +56,20 @@ final class ForYouPagerView: UIView {
     /// paging scroll view rather than a `UIPageViewController` — the latter
     /// exposes no continuous position at all.
     var onProgress: ((CGFloat) -> Void)?
+
+    /// The active page's scroll view, whenever it changes.
+    ///
+    /// ⚠️ **NOT `self.scrollView`, WHICH IS HORIZONTAL.** Handing the pager's
+    /// own scroller to `setContentScrollView(_:for: .bottom)` is a SILENT
+    /// no-op: it pages sideways and `alwaysBounceVertical` is false, so the
+    /// tab bar simply never minimizes and nothing logs or errors.
+    ///
+    /// ⚠️ AND NOT FROM `onProgress`. That fires every frame of a horizontal
+    /// swipe — during which the finger is horizontal, so nothing could
+    /// minimize anyway — and would hand UIKit a different scroller, at a
+    /// different offset, while a touch is down. The interval it would cover
+    /// ends at `settle()`, which is the instant the page is committed.
+    var onActiveScrollViewChanged: ((UIScrollView) -> Void)?
     var onNearEnd: (() -> Void)?
     var onRefresh: (() -> Void)?
 
@@ -223,8 +237,10 @@ final class ForYouPagerView: UIView {
             // Gallery — the default — could not reproduce it, because there
             // the guard above returns first and neither index moves.
             reportedIndex = index
+            publishActiveScrollView()
             return
         }
+        publishActiveScrollView()
         scrollView.setContentOffset(CGPoint(x: offsetX(for: index), y: 0), animated: animated)
         syncAutoplay()
         if !animated {
@@ -272,6 +288,18 @@ final class ForYouPagerView: UIView {
         }
     }
 
+    /// The scroll view last handed out, so an unchanged page publishes nothing.
+    private var publishedScrollView: UIScrollView?
+
+    /// Says which scroll view is live, at the four moments a page is COMMITTED.
+    private func publishActiveScrollView() {
+        guard pages.indices.contains(activeIndex) else { return }
+        let scroller = pages[activeIndex].minimizeScrollView
+        guard scroller !== publishedScrollView else { return }
+        publishedScrollView = scroller
+        onActiveScrollViewChanged?(scroller)
+    }
+
     private var lastLayoutWidth: CGFloat = 0
 
     override func layoutSubviews() {
@@ -281,6 +309,7 @@ final class ForYouPagerView: UIView {
         guard bounds.width != lastLayoutWidth, bounds.width > 0 else { return }
         lastLayoutWidth = bounds.width
         scrollView.contentOffset = CGPoint(x: offsetX(for: activeIndex), y: 0)
+        publishActiveScrollView()
         onProgress?(CGFloat(activeIndex))
     }
 
@@ -337,6 +366,7 @@ extension ForYouPagerView: UIScrollViewDelegate {
         guard pages.indices.contains(landed), landed != reportedIndex else { return }
         activeIndex = landed
         reportedIndex = landed
+        publishActiveScrollView()
         syncAutoplay()
         onPageSettled?(Self.pageOrder[landed])
     }
