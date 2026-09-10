@@ -70,14 +70,32 @@ enum ForYouSelectorDock {
         #endif
     }
 
-    /// `-foryou-dock-no-catchup`: leave the strip where UIKit puts it, in one
-    /// step. On by default in the spike — see
-    /// `ForYouSelectorAccessoryHost.playCatchUpIfMoved`.
+    /// `-foryou-dock-catchup`: hand-animate the accessory's geometry change.
+    ///
+    /// ⚠️ **OFF BY DEFAULT NOW, AND THE MEASUREMENT IS WHY.** Asked with an
+    /// empty content view and not one line of ours running, NOT ONE view
+    /// between the accessory and the window carries an animation at any pass of
+    /// a collapse:
+    ///
+    ///     #3 layout env=regular  360x48@21,735  anim=none
+    ///     #4 trait  env=inline   234x48@84,735  anim=none
+    ///     #5 layout env=inline   234x48@84,798  anim=none
+    ///
+    /// UIKit writes the geometry in two steps and animates nothing, anywhere.
+    /// So the API is being used as documented — `UITabAccessory` has one
+    /// property and no animation surface — and there is simply nothing to ride.
+    ///
+    /// ⚠️ AND THE CARRY IS WHAT MADE IT UNSTABLE. Every spring it ran was on a
+    /// view UIKit re-lays out underneath it, which takes the animation with it;
+    /// under a fast flip the springs overlap on that same view and each pass
+    /// clobbers the one before. "The capsule does anything and struggles to
+    /// keep up" is that, and it is ours, not UIKit's. A snap is worse to look
+    /// at and it is stable; the carry stays reachable for comparison.
     static var animatesCatchUp: Bool {
         #if DEBUG
-        !ProcessInfo.processInfo.arguments.contains("-foryou-dock-no-catchup")
+        ProcessInfo.processInfo.arguments.contains("-foryou-dock-catchup")
         #else
-        true
+        false
         #endif
     }
 
@@ -389,6 +407,20 @@ final class ForYouSelectorAccessoryHost: UIView {
         }
     }
 
+    /// Which views between here and the window are currently animating, named
+    /// by class, or "none".
+    private func animatedAncestors() -> String {
+        var found: [String] = []
+        var node: UIView? = self
+        while let current = node {
+            if let keys = current.layer.animationKeys(), !keys.isEmpty {
+                found.append("\(type(of: current)):\(keys.joined(separator: ","))")
+            }
+            node = current.superview
+        }
+        return found.isEmpty ? "none" : found.joined(separator: " | ")
+    }
+
     private var lastTrace = ""
     private var traceCount = 0
 
@@ -407,13 +439,14 @@ final class ForYouSelectorAccessoryHost: UIView {
         // teleport is either a frame that snaps or a frame that travels while
         // its CONTENTS snap, and only the origin tells them apart.
         let inWindow = window.map { convert(bounds, to: $0) } ?? .zero
-        // ⚠️ **THE CONTAINER'S KEYS, NOT OURS, AND THIS READ THE WRONG LAYER
-        // FOR FOUR COMMITS.** The carry moved onto the container and this line
-        // did not follow it, so `anim=` reported the host — a view nothing
-        // animates — and printed `none` on every pass of every run whatever
-        // was happening. The second instrument in this investigation to
-        // measure the wrong object.
-        let keys = superview?.layer.animationKeys()?.joined(separator: "+") ?? "none"
+        // ⚠️ **THE WHOLE ANCESTOR CHAIN, BECAUSE ASKING ONE VIEW HAS TWICE
+        // ANSWERED THE WRONG QUESTION.** This read the host (which nothing
+        // animates) for four commits, then the container. But UIKit need not
+        // animate the view whose geometry changed — it may animate a parent and
+        // let the children ride, and a probe pointed at one layer cannot tell
+        // "nobody is animating" from "not this one". So every ancestor up to
+        // the window is asked, and each that carries keys is named.
+        let keys = animatedAncestors()
         let line = String(
             format: "env=%@ host=%.0fx%.0f@%.0f,%.0f anim=%@ "
                 + "strip=%.0fx%.0f wants=%.0f overflow=%.0f",
