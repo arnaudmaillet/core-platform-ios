@@ -195,9 +195,24 @@ final class ForYouSelectorAccessoryHost: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// ⚠️ A HEIGHT IS STATED, A WIDTH IS NOT, and the asymmetry is the
+    /// documented contract. `UITabAccessory` has exactly ONE property — its
+    /// content view — and NO animation API of any kind (verified in
+    /// `UITabAccessory.h`): UIKit owns the transition, and all an app supplies
+    /// is a view that can say how big it wants to be. Saying nothing, which is
+    /// what `noIntrinsicMetric` on both axes said, is not a neutral answer.
+    ///
+    /// The width stays unstated because the accessory's slot is UIKit's to
+    /// decide — 360 in `.regular`, 234 in `.inline`, measured — and a content
+    /// view that argued about it would be arguing with the environment.
     override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
+        CGSize(width: UIView.noIntrinsicMetric, height: Self.contentHeight)
     }
+
+    /// The height UIKit has handed this accessory in BOTH environments,
+    /// measured: `.regular` 360x48 and `.inline` 234x48. Stated rather than
+    /// inferred so the content view is well-formed even before it is hosted.
+    private static let contentHeight: CGFloat = 48
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -392,12 +407,13 @@ final class ForYouSelectorAccessoryHost: UIView {
         // teleport is either a frame that snaps or a frame that travels while
         // its CONTENTS snap, and only the origin tells them apart.
         let inWindow = window.map { convert(bounds, to: $0) } ?? .zero
-        // ⚠️ READ AFTER THE PASS, NOT DURING IT. `layoutSubviews` runs before
-        // Core Animation attaches anything, so a presentation layer read here
-        // is nil whether or not an animation is coming — a measurement that
-        // can only ever return "no animation". The animation KEYS answer the
-        // same question honestly.
-        let keys = layer.animationKeys()?.joined(separator: "+") ?? "none"
+        // ⚠️ **THE CONTAINER'S KEYS, NOT OURS, AND THIS READ THE WRONG LAYER
+        // FOR FOUR COMMITS.** The carry moved onto the container and this line
+        // did not follow it, so `anim=` reported the host — a view nothing
+        // animates — and printed `none` on every pass of every run whatever
+        // was happening. The second instrument in this investigation to
+        // measure the wrong object.
+        let keys = superview?.layer.animationKeys()?.joined(separator: "+") ?? "none"
         let line = String(
             format: "env=%@ host=%.0fx%.0f@%.0f,%.0f anim=%@ "
                 + "strip=%.0fx%.0f wants=%.0f overflow=%.0f",
