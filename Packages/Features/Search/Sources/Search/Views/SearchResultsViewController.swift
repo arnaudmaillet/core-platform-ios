@@ -504,18 +504,36 @@ final class SearchResultsViewController: UIViewController {
 
     // MARK: - Toolbar
 
-    /// The filter tray, bottom-trailing, in the system toolbar.
+    /// The band at the foot of the screen: the format selector, and the filter
+    /// riding its trailing edge inside the same glass.
     ///
-    /// ⚠️ IT MOVED OUT OF THE NAVIGATION BAR, and the bar is why. That bar now
-    /// carries a back button and a full-width field; a third item would take
-    /// the width straight off the query the viewer is reading. The toolbar is
-    /// empty on this screen and within thumb reach, which is where a control
-    /// used mid-scroll belongs.
+    /// ⚠️ **AN ACCESSORY, ON A SCREEN WITH NO TAB BAR UNDER IT.** This screen
+    /// sets `hidesBottomBarWhenPushed`, which made it the one place the
+    /// question could be asked — and the answer is yes. `UITabAccessory.h`
+    /// defines `.regular` as "above the bottom tab bar when it is visible; or,
+    /// at the bottom of the UITabBarController's view", and that is what it
+    /// does. Measured here: `env=.regular`, container 360x48 at y=805 of an
+    /// 874pt window, laid out exactly as it is on a tab root.
+    ///
+    /// ⚠️ **AND THE TOOLBAR HAD TO GO, NOT MOVE OVER.** A toolbar and an
+    /// accessory both claim the bottom of the screen and neither yields:
+    /// filmed with the selector in the accessory and the filter left behind in
+    /// `toolbarItems`, the glyph sat UNDERNEATH the band, half-hidden by its
+    /// trailing edge. So the filter rides inside the accessory and this screen
+    /// presents no toolbar items at all — which also gives
+    /// `SnapFeedViewController.successorUsesToolbar` the right answer when a
+    /// post pushed from here is popped back.
     private func configureToolbar() {
-        let filter = UIBarButtonItem(
-            image: UIImage(systemName: "line.3.horizontal.decrease"),
-            primaryAction: UIAction { [weak self] _ in self?.presentFilters() }
+        // A BARE control: the accessory's container draws one capsule around
+        // the whole content view, so a button carrying its own background
+        // would be a bubble inside a bubble.
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: "line.3.horizontal.decrease")
+        configuration.contentInsets = NSDirectionalEdgeInsets(
+            top: 0, leading: 10, bottom: 0, trailing: 10
         )
+        let filter = UIButton(configuration: configuration,
+                              primaryAction: UIAction { [weak self] _ in self?.presentFilters() })
         filter.accessibilityLabel = "Filters"
 
         // ⚠️ **NO WIDTH CAP HERE, AND A TOOLBAR IS WHY.** The cap that used to
@@ -536,21 +554,7 @@ final class SearchResultsViewController: UIViewController {
         // the navigation controller's, so the selector cannot leak onto another
         // screen. What IS shared is the toolbar's visibility, which is why this
         // screen still shows it on the way in and hides it on the way out.
-        // `-search-selector-accessory` — A SPIKE, not a decision. It asks one
-        // question this screen is the only place to ask: can a
-        // `UITabAccessory` exist while the app's tab bar is HIDDEN? This screen
-        // sets `hidesBottomBarWhenPushed`, so it is the only accessory
-        // candidate with no bar under it. `UITabAccessory.h` says the answer
-        // should be yes — the `.regular` environment is defined as "above the
-        // bottom tab bar when it is visible; **or, at the bottom of the
-        // UITabBarController's view**" — and this measures it rather than
-        // trusting it.
-        if Self.wantsAccessorySpike {
-            selectorAccessory = SelectorAccessory(strip: tabBar)
-            toolbarItems = [.flexibleSpace(), filter]
-        } else {
-            toolbarItems = [UIBarButtonItem(customView: tabBar), .flexibleSpace(), filter]
-        }
+        selectorAccessory = SelectorAccessory(strip: tabBar, trailing: filter)
 
         // ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER. Docked at the foot of the
         // screen the selector sits over a pager of scrolling grids, and a drag
@@ -725,18 +729,13 @@ final class SearchResultsViewController: UIViewController {
         searchField.text = viewModel.submittedQueryText
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
-        // ⚠️ SHOWN HERE AND HIDDEN ON THE WAY OUT, because a navigation
-        // controller's toolbar is SHARED: left visible, it would follow the pop
-        // back onto the search screen, which has no toolbar items and would
-        // show an empty bar.
-        navigationController?.setToolbarHidden(false, animated: animated)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         selectorAccessory?.install(into: tabBarController)
         #if DEBUG
-        if Self.wantsAccessorySpike { reportAccessorySpike() }
+        reportAccessorySpike()
         #endif
         // ⚠️ HERE, NOT `viewWillAppear`. The window is what
         // `updatePlayback` reads, and a screen arriving has none until it has
@@ -761,21 +760,13 @@ final class SearchResultsViewController: UIViewController {
         // this call exists to prevent.
         postsPage.setPlaybackActive(false)
         mediaPage.setPlaybackActive(false)
-        guard isMovingFromParent else { return }
-        navigationController?.setToolbarHidden(true, animated: animated)
     }
 
-    /// The spike's band, when it is running. Nil on the shipping path, where
-    /// the strip is a `toolbarItems` entry.
-    private var selectorAccessory: SelectorAccessory?
-
-    private static var wantsAccessorySpike: Bool {
-        #if DEBUG
-        return ProcessInfo.processInfo.arguments.contains("-search-selector-accessory")
-        #else
-        return false
-        #endif
-    }
+    /// Internal, not private, so the tests can assert what is IN the band.
+    /// The arrangement moved out of `toolbarItems` — which a test could read —
+    /// into a content view UIKit owns, and a rule nothing can see is a rule
+    /// that quietly stops being true.
+    private(set) var selectorAccessory: SelectorAccessory?
 
     #if DEBUG
     /// What the spike actually produced, in numbers — whether the accessory was

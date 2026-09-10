@@ -96,7 +96,35 @@ struct SearchFilterTrayTests {
             navigation.topViewController as? SearchResultsViewController
         }
 
-        var item: UIBarButtonItem? { results?.toolbarItems?.last }
+        /// ⚠️ THE FILTER LEFT `toolbarItems` FOR THE ACCESSORY'S CONTENT VIEW,
+        /// so it is found by walking rather than by index. A toolbar and an
+        /// accessory both claim the bottom of the screen and neither yields —
+        /// filmed with the selector in the band and the filter left behind, the
+        /// glyph sat underneath it, half-hidden by its trailing edge.
+        var bandHost: SelectorAccessoryHost? { results?.selectorAccessory?.hostView }
+
+        var item: UIButton? {
+            guard let bandHost else { return nil }
+            func walk(_ view: UIView) -> UIButton? {
+                if let button = view as? UIButton, button.accessibilityLabel == "Filters" {
+                    return button
+                }
+                for subview in view.subviews {
+                    if let found = walk(subview) { return found }
+                }
+                return nil
+            }
+            return walk(bandHost)
+        }
+
+        /// The band, laid out at the width UIKit hands an accessory, so the
+        /// order of what is inside it can be read off real frames.
+        func laidOutBand() -> SelectorAccessoryHost? {
+            guard let bandHost else { return nil }
+            bandHost.frame = CGRect(x: 0, y: 0, width: 360, height: 48)
+            bandHost.layoutIfNeeded()
+            return bandHost
+        }
 
         /// Submits, which PUSHES the results screen, and waits for it.
         func showResults(_ text: String) async {
@@ -151,16 +179,36 @@ struct SearchFilterTrayTests {
         #expect(Host().item == nil)
     }
 
-    /// ⚠️ IN THE TOOLBAR, TRAILING. The navigation bar carries a back button
-    /// and a full-width query field; a third item there would take width off
-    /// the query the viewer is reading.
-    @Test func theTrayIsTheResultsScreenTrailingToolbarItem() async {
+    /// ⚠️ IN THE BAND, TRAILING. The navigation bar carries a back button and a
+    /// full-width query field; a third item there would take width off the
+    /// query the viewer is reading.
+    @Test func theTrayRidesTheBandsTrailingEdge() async {
         let host = Host()
         await host.showResults("haddad")
         #expect(host.item != nil)
-        #expect(host.item?.title == nil)
-        #expect(host.item?.image != nil)
+        #expect(host.item?.configuration?.title == nil)
+        #expect(host.item?.configuration?.image != nil)
         #expect(host.item?.accessibilityLabel == "Filters")
+    }
+
+    /// ⚠️ **BARE, OR IT IS A BUBBLE INSIDE A BUBBLE.** UIKit draws exactly one
+    /// capsule per accessory, around the whole content view — the same reason
+    /// the strip sets `suppressesBackdrop`. A filter carrying its own
+    /// background would draw a second one inside the first.
+    @Test func theTrayCarriesNoBackgroundOfItsOwn() async {
+        let host = Host()
+        await host.showResults("haddad")
+        // ⚠️ TRANSPARENT, NOT NIL. `UIButton.Configuration.plain()` does not
+        // leave the background unset — it sets it to a CLEAR colour, which
+        // reads as "there is a background" to a nil check and passed a test
+        // that meant the opposite. Alpha is the thing that decides whether a
+        // second capsule is drawn.
+        var alpha: CGFloat = -1
+        host.item?.configuration?.background.backgroundColor?.getWhite(nil, alpha: &alpha)
+        #expect(alpha == 0, "a filled filter would draw a bubble inside the band's bubble")
+        var hostAlpha: CGFloat = 0
+        host.item?.backgroundColor?.getWhite(nil, alpha: &hostAlpha)
+        #expect(hostAlpha == 0)
     }
 
     @Test func theSheetCarriesTheThreeDimensionsAsked() async {
@@ -441,7 +489,7 @@ struct SearchFilterTrayTests {
     /// became a glyph. A toolbar has no item groups and no overflow control, so
     /// the selector cannot fail that way there, and the bar is left holding a
     /// back button and one trailing item.
-    @Test func theSelectorIsInTheToolbarAndTheQueryIsInTheBar() async {
+    @Test func theSelectorIsInTheBandAndTheQueryIsInTheBar() async {
         let host = Host()
         await host.showResults("haddad")
         let results = try? #require(host.results)
@@ -453,10 +501,19 @@ struct SearchFilterTrayTests {
         // the back button and there is nothing to supplement...
         #expect(results?.navigationItem.leftBarButtonItems?.isEmpty != false)
         #expect(results?.navigationItem.hidesBackButton == false)
-        // ...and the selector leads the bottom toolbar, ahead of the tray.
-        let selectors = results?.toolbarItems?.compactMap { $0.customView as? PagedTabBar }
-        #expect(selectors?.count == 1)
-        #expect(results?.toolbarItems?.first?.customView is PagedTabBar)
+        // ...and the band at the foot carries the selector with the filter to
+        // its right, with NO toolbar items left behind to fight it for the
+        // bottom of the screen.
+        #expect(results?.toolbarItems?.isEmpty != false,
+                "a toolbar and an accessory both claim the bottom and neither yields")
+        let band = try? #require(host.laidOutBand())
+        let strip = band?.subviews.compactMap { $0 as? PagedTabBar }.first
+        #expect(strip != nil, "the selector is in the band")
+        if let strip, let filter = host.item {
+            #expect(filter.frame.minX >= strip.frame.maxX,
+                    "the filter rides the trailing edge, after the selector")
+            #expect(band?.bounds.maxX ?? 0 >= filter.frame.maxX)
+        }
     }
 
     /// ⚠️ REAL BAR ITEMS, NOT A COMPOSITE TITLE VIEW. A title view is one view

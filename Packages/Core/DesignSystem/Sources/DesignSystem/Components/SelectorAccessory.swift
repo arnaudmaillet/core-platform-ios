@@ -76,7 +76,22 @@ public final class SelectorAccessoryHost: UIView {
     /// arithmetic that goes stale when the container's height changes.
     private static let contentInset: CGFloat = 4
 
+    /// Between the strip and a trailing control sharing its glass. Wider than
+    /// the content inset on purpose: the strip's lens runs to its own edge when
+    /// the backdrop is suppressed, so a 4pt gap would put a selected segment
+    /// against the glyph.
+    private static let trailingGap: CGFloat = 10
+
     private let strip: PagedTabBar?
+    /// An optional control riding the band's trailing edge, INSIDE the same
+    /// glass — the search results' filter is the first.
+    ///
+    /// ⚠️ **IT SHARES THE CONTAINER'S CAPSULE, IT DOES NOT GET ONE.** UIKit
+    /// draws exactly one capsule per accessory, around the whole content view;
+    /// a trailing control that brought its own backdrop would be a bubble
+    /// inside a bubble, the same fault `suppressesBackdrop` exists to prevent
+    /// for the strip. Hand it a bare control.
+    private let trailing: UIView?
 
     /// Fired from `layoutSubviews`, because there is no other signal.
     ///
@@ -86,9 +101,14 @@ public final class SelectorAccessoryHost: UIView {
     /// hears it here.
     public var onLayoutChanged: (() -> Void)?
 
-    public init(strip: PagedTabBar?, options: Options = Options()) {
+    /// - Parameter trailing: a control for the band's trailing edge, sharing
+    ///   the container's glass. It keeps its own intrinsic width and the strip
+    ///   takes what is left.
+    public init(strip: PagedTabBar?, trailing: UIView? = nil,
+                options: Options = Options()) {
         self.options = options
         self.strip = strip
+        self.trailing = trailing
         super.init(frame: .zero)
 
         guard let strip else {
@@ -118,10 +138,31 @@ public final class SelectorAccessoryHost: UIView {
             // ⚠️ NO WIDTH CONSTRAINT — see the note above. These are edge pins,
             // which say where the strip is, not how wide it may be.
             strip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            strip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
             strip.topAnchor.constraint(equalTo: topAnchor, constant: inset),
             strip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
         ])
+
+        if let trailing {
+            trailing.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(trailing)
+            // ⚠️ THE STRIP YIELDS AND THE CONTROL DOES NOT. The strip reports
+            // `noIntrinsicMetric` when it is filling, so without these
+            // priorities Auto Layout is free to squeeze the glyph instead of
+            // the scrolling capsule that is built to give.
+            trailing.setContentHuggingPriority(.required, for: .horizontal)
+            trailing.setContentCompressionResistancePriority(.required, for: .horizontal)
+            NSLayoutConstraint.activate([
+                trailing.leadingAnchor.constraint(
+                    equalTo: strip.trailingAnchor, constant: Self.trailingGap
+                ),
+                trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+                trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
+                trailing.heightAnchor.constraint(lessThanOrEqualTo: heightAnchor,
+                                                 constant: -inset * 2)
+            ])
+        } else {
+            strip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset).isActive = true
+        }
 
         // ⚠️ **FILLED IN BOTH ENVIRONMENTS, AND `.inline` IS WHY.** Hugging
         // was the obvious answer for the docked state — ask only for what the
@@ -545,9 +586,10 @@ public final class SelectorAccessory {
     /// - Parameter strip: `nil` builds the accessory EMPTY — the container
     ///   still draws its bubble around nothing, which is how "does UIKit
     ///   animate this at all" was answered.
-    public init(strip: PagedTabBar?, options: Options = Options()) {
+    public init(strip: PagedTabBar?, trailing: UIView? = nil,
+                options: Options = Options()) {
         self.options = options
-        hostView = SelectorAccessoryHost(strip: strip, options: options)
+        hostView = SelectorAccessoryHost(strip: strip, trailing: trailing, options: options)
     }
 
     /// - Parameter minimizesOnScroll: arms the tab bar's scroll-driven
