@@ -530,6 +530,17 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
         // Searching is a mode, not a place: the tab bar is a way OUT of it that
         // would take the query with it, and the results deserve the height.
+        //
+        // ⚠️ **AND THE ACCESSORY GOES WITH IT — IT DOES NOT FOLLOW ON ITS OWN.**
+        // This is the one path that hides the bar with NO view-controller
+        // transition, so `viewWillDisappear` never runs and the bracket that
+        // takes the band down never fires. Filmed: the tab bar left, the strip
+        // stayed, and UIKit re-laid it out at the foot of the tab bar
+        // controller's view — over the search results. That is documented
+        // behaviour rather than a UIKit fault: `.regular` covers "above the
+        // bottom tab bar when it is visible; OR, at the bottom of the
+        // UITabBarController's view".
+        selectorAccessory?.remove(from: tabBarController)
         tabBarController?.setTabBarHidden(true, animated: true)
         morphNavigationBar(duration: 0.3) {
             self.applySearchingBar()
@@ -573,6 +584,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             self.applyRestingBar()
         }
         tabBarController?.setTabBarHidden(false, animated: true)
+        // The band comes back with the bar it left with. `minimizesOnScroll`
+        // is re-armed here for the same reason it is armed on appearing: the
+        // remove restored the shell's own behaviour on the way out.
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
         UIView.animate(withDuration: 0.2) {
             results?.view.alpha = 0
         } completion: { _ in
