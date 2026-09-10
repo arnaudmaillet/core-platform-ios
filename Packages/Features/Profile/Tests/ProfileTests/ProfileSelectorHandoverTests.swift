@@ -86,101 +86,24 @@ struct ProfileSelectorHandoverTests {
     // MARK: - Which one is on screen
 
     /// At the top of the profile the selector is the inline one, and the
-    /// navigation bar carries nothing.
-    @Test func atRestOnlyTheInlineSelectorShows() async {
-        guard let screen = await loadedScreen() else { return }
-        let state = screen.debugSelectorState
-        #expect(state.inline.hidden == false)
-        #expect(state.inline.alpha == 1)
-        #expect(state.docked.hidden == true)
-    }
-
-    /// ⚠️ **The resting selector is HIDDEN, not merely transparent — and this
-    /// is a shipped bug, not a hypothetical.** A navigation bar owns its title
-    /// view's alpha: it fades the slot through every push and pop and sets it
-    /// back to 1 on the way out. A docked bar parked at `alpha = 0` therefore
-    /// came back at FULL STRENGTH, sitting in the chrome above an un-scrolled
-    /// profile with the banner and avatar still on screen. `isHidden` is not a
-    /// property UIKit touches there.
+    /// ⚠️ **SIX TESTS WENT WITH THE MECHANISM THEY DROVE.** There were two
+    /// selector copies — an inline one in the header's slot and a docked one in
+    /// the navigation bar — crossfading at a threshold, and four tests pushed
+    /// `debugSetBarDocked` across it while two more checked that selecting on
+    /// one copy mirrored to the other without feeding back. The strip lives at
+    /// the foot of the screen now and never moves: no threshold, no crossfade,
+    /// no second copy to mirror into.
     ///
-    /// Asserted as "UIKit can set alpha to whatever it likes and the bar stays
-    /// gone", which is the property that actually matters.
-    @Test func theRestingSelectorSurvivesTheBarRewritingItsAlpha() async {
-        guard let screen = await loadedScreen() else { return }
-        screen.debugSetBarDocked(false)
-        // Exactly what a completed push or pop leaves behind.
-        screen.navigationItem.titleView?.alpha = 1
-        #expect(screen.debugSelectorState.docked.hidden == true)
-    }
-
-    /// Docked, the two swap: the navigation bar carries the selector and the
-    /// column's copy is gone.
-    @Test func dockedOnlyTheNavigationBarSelectorShows() async {
-        guard let screen = await loadedScreen() else { return }
-        screen.debugSetBarDocked(true)
-        let state = screen.debugSelectorState
-        #expect(state.docked.hidden == false)
-        #expect(state.docked.alpha == 1)
-        #expect(state.inline.hidden == true)
-    }
-
-    /// And back again — the hand-over is reversible, which a one-way setup
-    /// that only ever hid things would fail.
-    @Test func undockingBringsTheInlineSelectorBack() async {
-        guard let screen = await loadedScreen() else { return }
-        screen.debugSetBarDocked(true)
-        screen.debugSetBarDocked(false)
-        let state = screen.debugSelectorState
-        #expect(state.inline.hidden == false)
-        #expect(state.inline.alpha == 1)
-        #expect(state.docked.hidden == true)
-    }
-
-    // MARK: - Keeping them in step
-
-    /// Both start on the same tab, so the first hand-over has nothing to
-    /// reconcile.
-    @Test func bothSelectorsStartOnTheSameTab() async {
-        guard let screen = await loadedScreen() else { return }
-        let indices = screen.debugSelectedIndices
-        #expect(indices.allSatisfy { $0 == indices.first })
-    }
-
-    /// ⚠️ A tap on either one carries to the other. This is the cost of having
-    /// two: the invisible one is what the viewer sees NEXT, so a selection that
-    /// reached only the visible bar would render as the tab silently changing
-    /// back the moment the header docked.
-    @Test(arguments: [false, true])
-    func choosingOnEitherSelectorReachesBoth(onDocked: Bool) async {
-        guard let screen = await loadedScreen() else { return }
-        screen.debugSelect(2, onDocked: onDocked)
-        #expect(screen.debugSelectedIndices == [2, 2])
-    }
-
-    /// ⚠️ And mirroring terminates. `select` announces itself exactly as a tap
-    /// does — there is deliberately no silent variant — so carrying a choice to
-    /// the other bar re-enters the handler that started it. Without the guard
-    /// this recurses until the stack gives out; the test that catches it is
-    /// simply one that returns.
-    @Test func mirroringDoesNotFeedItself() async {
-        guard let screen = await loadedScreen() else { return }
-        screen.debugSelect(1, onDocked: false)
-        screen.debugSelect(2, onDocked: true)
-        screen.debugSelect(0, onDocked: false)
-        #expect(screen.debugSelectedIndices == [0, 0])
-    }
-
-    // MARK: - The toolbar button survives a tab change
-
-    /// Under the toolbar placement the source menu button IS the bar item's
-    /// `customView`. The INLINE tray — the other placement's home for that same
-    /// button — wraps it in a glass capsule and adopts it as a subview, so
-    /// merely BUILDING the tray takes it off the toolbar. It is a `lazy var`,
-    /// so touching it is building it, and `adoptTab` touched it on every tab
-    /// change whatever the placement.
+    /// ⚠️ AND ONE OF THEM WAS ALREADY VACUOUS.
+    /// `theRestingSelectorSurvivesTheBarRewritingItsAlpha` poked
+    /// `navigationItem.titleView?.alpha` — but on this screen the title view
+    /// was the ZERO-SIZED empty view `installLeadingSelector` planted, never
+    /// the docked bar. It would have passed unchanged after the selector left
+    /// the bar entirely. Deleting it removes a test that proved nothing.
     ///
-    /// What the viewer saw: a full-width blank capsule at the bottom of the
-    /// screen, and only after changing tab — which is why the first tab always
+    /// What survives below is the pair that was never about the hand-over: the
+    /// source button keeping its place in the trailing run across a tab change.
+
     /// looked right and the second did not.
     @Test func theSourceButtonKeepsItsPlaceAfterChangingTab() async {
         guard let screen = await loadedScreen() else { return }
