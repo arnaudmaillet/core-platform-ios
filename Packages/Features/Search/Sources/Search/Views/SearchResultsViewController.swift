@@ -412,7 +412,43 @@ final class SearchResultsViewController: UIViewController {
         return probe
     }()
 
+    #if DEBUG
+    /// ⚠️ NAMES WHAT IS ACTUALLY LISTENING, because two gates aimed at guesses
+    /// have now missed. Walks from the selector up to the window and prints
+    /// every recogniser on the way, with its class, its state and the view it
+    /// is attached to — the one that leaves this screen is in that list.
+    private func auditGestures(_ reason: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-search-gesture-audit") else { return }
+        var lines: [String] = []
+        var node: UIView? = tabBar
+        while let current = node {
+            for recogniser in current.gestureRecognizers ?? [] {
+                lines.append("\(type(of: recogniser)) on \(type(of: current)) "
+                             + "state=\(recogniser.state.rawValue) enabled=\(recogniser.isEnabled)")
+            }
+            node = current.superview
+        }
+        for recogniser in navigationController?.view.gestureRecognizers ?? [] {
+            lines.append("NAV \(type(of: recogniser)) state=\(recogniser.state.rawValue) "
+                         + "enabled=\(recogniser.isEnabled)")
+        }
+        print("[gesture-audit] \(reason)\n  " + lines.joined(separator: "\n  "))
+    }
+    #endif
+
     @objc private func selectorTouchChanged(_ probe: UILongPressGestureRecognizer) {
+        #if DEBUG
+        if probe.state == .began { auditGestures("selector touch began") }
+        if probe.state == .changed { auditGestures("selector touch moved") }
+        // ⚠️ AFTER THE RESTORE, NOT BEFORE IT. A gate that suspends recognisers
+        // and fails to put them back leaves the screen unable to leave at all,
+        // and that looks exactly like "synthetic touches cannot drive the
+        // dismissal" — which is true of this simulator too. Only a reading
+        // taken once the finger is up separates them.
+        if probe.state == .ended || probe.state == .cancelled || probe.state == .failed {
+            DispatchQueue.main.async { [weak self] in self?.auditGestures("after release") }
+        }
+        #endif
         switch probe.state {
         case .began, .changed:
             setPageScrollEnabled(false)
@@ -449,7 +485,46 @@ final class SearchResultsViewController: UIViewController {
             view.subviews.forEach(walk)
         }
         walk(pager)
+        setPopGestureEnabled(isEnabled)
     }
+
+    /// ⚠️ **THE STACK HAS TWO BACK-SWIPE RECOGNISERS AND
+    /// `interactivePopGestureRecognizer` VENDS ONLY ONE.** Audited on the
+    /// simulator by walking from the strip to the window while a rightward
+    /// swipe was in flight (`-search-gesture-audit`):
+    ///
+    ///     began   _UIParallaxTransitionPanGestureRecognizer  enabled=true
+    ///             _UIParallaxTransitionPanGestureRecognizer  enabled=true
+    ///     moved   _UIParallaxTransitionPanGestureRecognizer  enabled=FALSE  ← gated
+    ///             _UIParallaxTransitionPanGestureRecognizer  state=began    ← drove it
+    ///
+    /// So gating the vended one looked right, printed right, and left the
+    /// screen anyway: the second recogniser — the full-surface back swipe, not
+    /// the edge one — is what carried the dismissal. Two fixes aimed at guesses
+    /// missed before this was measured rather than reasoned about.
+    ///
+    /// Every pan on the navigation controller's own container view is
+    /// suspended for the length of the touch instead of one named recogniser.
+    ///
+    /// ⚠️ AND EACH IS RESTORED TO WHAT IT WAS, not to `true`.
+    /// `NativePopGestureEnabler` owns the vended recogniser's delegate and
+    /// `NativePopPolicy` decides whether a begin is allowed; forcing them
+    /// enabled on release would hand back a state this screen never
+    /// established.
+    private func setPopGestureEnabled(_ isEnabled: Bool) {
+        if isEnabled {
+            for (recogniser, wasEnabled) in suspendedPans { recogniser.isEnabled = wasEnabled }
+            suspendedPans = []
+            return
+        }
+        guard suspendedPans.isEmpty, let host = navigationController?.view else { return }
+        let pans = (host.gestureRecognizers ?? []).filter { $0 is UIPanGestureRecognizer }
+        suspendedPans = pans.map { ($0, $0.isEnabled) }
+        for recogniser in pans { recogniser.isEnabled = false }
+    }
+
+    private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
+
 
     private var isPageScrollEnabled = true
 
