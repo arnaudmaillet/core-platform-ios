@@ -53,42 +53,41 @@ final class SearchResultsViewController: UIViewController {
     private let imagePipeline: ImagePipeline
     private let postSurfaces: (any SearchPostSurfaceProviding)?
 
-    /// The way back to asking: a magnifier, and nothing else.
+    /// The query, shown and tappable — a `UISearchTextField` that is never
+    /// edited here.
     ///
-    /// ⚠️ IT IS A DOOR, AND IT NO LONGER PRETENDS TO BE AN INPUT. Tapping it
-    /// takes the viewer BACK to the search screen with its own field already
-    /// focused, rather than opening a keyboard here. The search screen owns
-    /// asking — it has the history, the typeahead, and a field the viewer has
-    /// already used once — so a second, lesser field in this header would give
-    /// the same gesture two different answers depending on which screen you
-    /// were standing on.
+    /// ⚠️ IT LOOKS LIKE AN INPUT AND IS A DOOR. Tapping it takes the viewer
+    /// BACK to the search screen with its own field already focused, rather
+    /// than opening a keyboard here. The refusal happens in
+    /// `textFieldShouldBeginEditing`, which is UIKit's own hook for exactly
+    /// this: the field never becomes first responder, so no keyboard is ever
+    /// summoned and none has to be dismissed on the way out.
     ///
-    /// ⚠️ **IT WAS A `UISearchTextField` CLAIMING HALF THE BAR, AND THE HALVES
-    /// LEFT NO MARGIN.** Measured on iPhone 17 Pro with `-leading-room`: a
-    /// 402pt bar, 120pt of fixed costs, 141pt to each of the selector and the
-    /// field — which paves the bar EXACTLY, to the point. A pop briefly
-    /// narrows the bar (it carries the departing screen's back-button title
-    /// beside the arriving items), and UIKit's one answer to items that will
-    /// not fit is to sweep the whole group into a `•••`. Every arrangement
-    /// tried bought margin somewhere and paid for it somewhere else.
+    /// ⚠️ **IT WAS A GLYPH, AND THE SELECTOR IS WHY.** With both in this bar,
+    /// each asking for half of what was left, the two halves paved a 402pt bar
+    /// EXACTLY — 120pt of fixed cost, 141 each — and iOS 26's answer to items
+    /// that will not fit is to sweep the whole trailing group into a `•••`. A
+    /// pop briefly narrows the bar, so there was no margin to be had and the
+    /// field had to go (edf4f78). The selector now lives in the BOTTOM toolbar,
+    /// which leaves this bar holding a back button and one trailing item, and
+    /// the arithmetic is no longer tight: 402 − 32 margins − 44 back − 24
+    /// inter-group − 8 padding = 294pt for a field that needs nothing like it.
+    private let searchField = UISearchTextField()
+
+    /// What the field asks for: everything the bar has left beside the back
+    /// button, floored at one perfect bubble.
     ///
-    /// A glyph asks for 44pt. That is the same shape For You's header has —
-    /// `[lens][selector] … [coins][search]` — and it is the arrangement the
-    /// budget in `LeadingSelectorBudget` was written for: one elastic claimant,
-    /// the selector, taking whatever is left and scrolling for the rest.
-    ///
-    /// ⚠️ THE COST, WRITTEN DOWN: the header no longer shows what was searched
-    /// for. The empty states still name the query; a populated result set does
-    /// not.
-    private lazy var queryDoorItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "magnifyingglass"),
-            style: .plain,
-            target: self,
-            action: #selector(editQueryTapped)
+    /// ⚠️ YIELDING, NOT REQUIRED, and the reason is the same measurement that
+    /// cost the field its place the first time: a required width cannot give,
+    /// and UIKit's answer to a width it cannot honour is the overflow, not a
+    /// narrower control. The floor IS required — a field allowed to compress to
+    /// nothing is not a control — which is the pairing that filmed clean.
+    private lazy var queryWidth: NSLayoutConstraint = {
+        let width = searchField.widthAnchor.constraint(
+            equalToConstant: NavigationBarMetrics.itemPlatterHeight
         )
-        item.accessibilityLabel = "Search"
-        return item
+        width.priority = .defaultHigh
+        return width
     }()
 
     /// ⚠️ `.navigationTitle`, because it lives IN the bar now. That style is
@@ -141,6 +140,11 @@ final class SearchResultsViewController: UIViewController {
         configurePages()
         configureToolbar()
         subscribe()
+        // ⚠️ THE HEADER'S QUERY IS RE-READ, not set once. A refine screen can
+        // change what was searched for while this screen sits underneath it,
+        // and the field was assigned in `configureHeader` — so after a refine
+        // submit the tabs showed the new answer under the OLD words.
+        searchField.text = viewModel.submittedQueryText
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
         #if DEBUG
@@ -159,11 +163,14 @@ final class SearchResultsViewController: UIViewController {
         // `-search-filters-open` raises the filter sheet. The tray is a toolbar
         // item and the simulator taps nothing, so without this the sheet has no
         // way to be seen offline.
-        // `-search-tap-query` taps the door the way a viewer would, which is
-        // the only way to reach the way BACK to the search screen offline.
+        // `-search-tap-query` taps the query the way a viewer would, which is
+        // the only way to reach the way BACK to the search screen offline. It
+        // goes through `becomeFirstResponder` on purpose: the refusal it meets
+        // in `textFieldShouldBeginEditing` is the thing being tested, so an
+        // instrument calling `onEditQuery` directly would prove nothing.
         if arguments.contains("-search-tap-query") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.editQueryTapped()
+                _ = self?.searchField.becomeFirstResponder()
             }
         }
         if arguments.contains("-search-filters-open") {
@@ -177,17 +184,31 @@ final class SearchResultsViewController: UIViewController {
     // MARK: - Header
 
     private func configureHeader() {
-        // ⚠️ TRAILING FIRST, THEN THE SELECTOR. `installLeadingSelector`
-        // measures the room the rest of the bar has already claimed, so the
-        // door has to be in place before it is asked. Its own note says the
-        // same: "add the trailing actions BEFORE calling this".
-        navigationItem.rightBarButtonItems = [queryDoorItem]
+        searchField.text = viewModel.submittedQueryText
+        searchField.placeholder = "Search..."
+        searchField.autocapitalizationType = .none
+        searchField.autocorrectionType = .no
+        searchField.returnKeyType = .search
+        searchField.delegate = self
 
-        // ⚠️ `leftItemsSupplementBackButton` KEEPS THE INTERACTIVE POP ALIVE
-        // beside a custom leading item — `NativePopPolicy` refuses the edge
-        // gesture without it, which is why an earlier revision here concluded
-        // the leading group was unusable and reached for the title slot.
-        navigationItem.leftItemsSupplementBackButton = true
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            searchField.heightAnchor.constraint(
+                equalToConstant: NavigationBarMetrics.itemPlatterHeight
+            ),
+            queryWidth,
+            searchField.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: NavigationBarMetrics.itemPlatterHeight
+            )
+        ])
+        navigationItem.rightBarButtonItems = [UIBarButtonItem(customView: searchField)]
+
+        // ⚠️ NO `leftItemsSupplementBackButton` ANY MORE, because there is no
+        // leading custom item to supplement. That flag exists so an item that
+        // REPLACES the back button cannot silently disable the interactive pop;
+        // with the leading group empty the back button is the back button and
+        // `NativePopPolicy` has nothing to refuse.
+        navigationItem.leftItemsSupplementBackButton = false
     }
 
 
@@ -203,23 +224,31 @@ final class SearchResultsViewController: UIViewController {
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         guard let bar = navigationController?.navigationBar, bar.bounds.width > 0 else { return }
+        // ⚠️ NOT WHILE A TRANSITION IS RUNNING. This fires during a push and a
+        // pop too, and the bar's width is not settled there — resizing an item
+        // mid-flight makes UIKit re-measure the groups at a moment when the
+        // destination's own items are half installed.
         guard transitionCoordinator == nil else { return }
-        guard !hasInstalledSelector else { return }
-        hasInstalledSelector = true
-        navigationItem.installLeadingSelector(tabBar)
+        let wanted = Self.queryWidth(inBarOfWidth: bar.bounds.width)
+        guard queryWidth.constant != wanted else { return }
+        queryWidth.constant = wanted
+        searchField.superview?.layoutIfNeeded()
     }
 
-    /// The door's action, and the one the `-search-tap-query` instrument fires.
+    /// Everything the bar has left beside the back button.
     ///
-    /// ⚠️ THERE IS NO REFUSAL TO TEST ANY MORE. While the door was a field, the
-    /// instrument went through `becomeFirstResponder` on purpose — the refusal
-    /// in `textFieldShouldBeginEditing` was the thing being measured. A button
-    /// has nothing to refuse, so the instrument invokes what a tap invokes.
-    @objc private func editQueryTapped() {
-        onEditQuery?()
+    /// ⚠️ A PROPORTION OF WHAT IS LEFT, NOT A NUMBER. The first version of this
+    /// screen stated 150pt a side and was ten points over the budget on a 402pt
+    /// bar, which UIKit answered with a `•••` — a stated width can be wrong for
+    /// a device nobody tested, and that one was wrong on every one of them.
+    private static func queryWidth(inBarOfWidth barWidth: CGFloat) -> CGFloat {
+        // 16 a side, the back button's platter, the gap between the leading and
+        // trailing groups, and the trailing platter's own inset. The numbers
+        // are `LeadingSelectorBudget`'s, measured on iPhone 17 Pro.
+        let claimed: CGFloat = 16 * 2 + 44 + 24 + 8
+        return max(NavigationBarMetrics.itemPlatterHeight, barWidth - claimed)
     }
 
-    private var hasInstalledSelector = false
 
     // MARK: - Pages
 
@@ -307,7 +336,26 @@ final class SearchResultsViewController: UIViewController {
             primaryAction: UIAction { [weak self] _ in self?.presentFilters() }
         )
         filter.accessibilityLabel = "Filters"
-        toolbarItems = [.flexibleSpace(), filter]
+
+        // ⚠️ **NO WIDTH CAP HERE, AND A TOOLBAR IS WHY.** `LeadingSelectorHost`
+        // exists because a UINavigationBar sweeps a leading group it cannot fit
+        // into a `•••`; a toolbar has no item groups and no overflow control,
+        // so that failure is not available to it. The app already hosts a wide
+        // custom view in this same shared toolbar with no arithmetic at all —
+        // the chat composer's sticker strip — and that is the precedent
+        // followed here.
+        //
+        // ⚠️ BARE, THOUGH. UIKit wraps a bar item's custom view in its own
+        // glass capsule wherever the item lives, so a bar carrying its own
+        // backdrop draws a lens inside a lens. Same reason
+        // `installLeadingSelector` sets this.
+        tabBar.suppressesBackdrop = true
+
+        // ⚠️ `toolbarItems` IS PER VIEW CONTROLLER even though the toolbar is
+        // the navigation controller's, so the selector cannot leak onto another
+        // screen. What IS shared is the toolbar's visibility, which is why this
+        // screen still shows it on the way in and hides it on the way out.
+        toolbarItems = [UIBarButtonItem(customView: tabBar), .flexibleSpace(), filter]
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -434,5 +482,18 @@ final class SearchResultsViewController: UIViewController {
         guard case .posts = state else { return state }
         let media = viewModel.mediaResults
         return media.isEmpty ? .empty(query: viewModel.submittedQueryText) : .posts(media)
+    }
+}
+
+extension SearchResultsViewController: UITextFieldDelegate {
+    /// ⚠️ ALWAYS FALSE, AND THE TAP IS NOT LOST. Returning false is what stops
+    /// the field becoming first responder — no keyboard is summoned, so none
+    /// has to be dismissed on the way out, which is the difference between this
+    /// and hiding the field behind a transparent button. The gesture still
+    /// arrives, and it means "let me ask again": that is the search screen's
+    /// job, so it goes back there.
+    func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
+        onEditQuery?()
+        return false
     }
 }
