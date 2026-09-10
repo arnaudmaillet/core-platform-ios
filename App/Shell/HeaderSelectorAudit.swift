@@ -82,23 +82,51 @@ final class HeaderSelectorAudit {
         print("[header-audit] done: \(findings.count - failed.count)/\(findings.count) clean")
     }
 
+    /// Where the visible selector is, and which chrome is carrying it.
+    ///
+    /// ⚠️ **THREE PLACES NOW, NOT ONE.** A selector used to be a navigation-bar
+    /// item and this audit only ever walked `nav.navigationBar`. Selectors are
+    /// moving to the tab bar controller's `bottomAccessory` (a screen with the
+    /// tab bar under it) and to the navigation controller's bottom TOOLBAR (a
+    /// screen without one), so a lookup that reads the bar alone reports "NO
+    /// SELECTOR on a surface that must have one" for a screen working exactly
+    /// as designed — and, worse, the settle loops below wait out their whole
+    /// timeout for a capsule that arrived somewhere else.
+    private enum SelectorHost: String {
+        case navigationBar = "navigation bar"
+        case bottomAccessory = "bottom accessory"
+        case bottomToolbar = "bottom toolbar"
+    }
+
+    private func locateSelector() -> (bar: PagedTabBar, host: SelectorHost)? {
+        guard let nav = topNavigationController else { return nil }
+        if let found = firstPagedTabBar(in: nav.navigationBar) {
+            return (found, .navigationBar)
+        }
+        if let accessory = tabBarController.bottomAccessory?.contentView,
+           let found = firstPagedTabBar(in: accessory) {
+            return (found, .bottomAccessory)
+        }
+        if let found = firstPagedTabBar(in: nav.toolbar) {
+            return (found, .bottomToolbar)
+        }
+        return nil
+    }
+
     /// The visible selector's frame in its window, or `.null` if there is none —
     /// the value the current-surface mode watches until it stops changing.
     var selectorFrameOnScreen: CGRect {
-        guard let nav = topNavigationController,
-              let selector = firstPagedTabBar(in: nav.navigationBar),
+        guard let selector = locateSelector()?.bar,
               let window = selector.window,
               selector.bounds.width > 1
         else { return .null }
         return selector.convert(selector.bounds, to: window)
     }
 
-    /// Whether a selector is on the visible bar yet — what the current-surface
-    /// mode waits for, so a slow load is not read as a missing capsule.
+    /// Whether a selector is on screen yet — what the current-surface mode
+    /// waits for, so a slow load is not read as a missing capsule.
     var hasSelectorOnScreen: Bool {
-        guard let nav = topNavigationController,
-              let selector = firstPagedTabBar(in: nav.navigationBar)
-        else { return false }
+        guard let selector = locateSelector()?.bar else { return false }
         return selector.window != nil && selector.bounds.width > 1
     }
 
@@ -117,18 +145,17 @@ final class HeaderSelectorAudit {
             print("[bar-tree] ---- \(surface) ----")
             dumpBarTree()
         }
-        guard let selector = firstPagedTabBar(in: bar) else {
-            // ⚠️ THE BAR IS NOT THE ONLY PLACE A SELECTOR MAY LIVE. Under
-            // `-foryou-dock-selector` For You's strip rides the tab bar
-            // controller's `bottomAccessory`, and this lookup only ever walks
-            // `nav.navigationBar` — so without this the audit prints "NO
-            // SELECTOR on a surface that must have one", plus an inventory and
-            // a bar tree, for a screen that is working exactly as asked.
-            if let accessory = tabBarController.bottomAccessory?.contentView,
-               firstPagedTabBar(in: accessory) != nil {
-                print("[header-audit] \(surface): selector is in the BOTTOM ACCESSORY")
-                return finding
-            }
+        let located = locateSelector()
+        // ⚠️ **A HOST LABEL, NOT AN EARLY RETURN.** The first cut of this
+        // branch printed "selector is in the BOTTOM ACCESSORY" and returned a
+        // clean finding — which stopped the audit checking anything at all
+        // about a strip that had merely moved. Everything below except the
+        // `•••` rule is host-agnostic (a real size, a hit-testable segment, an
+        // on-screen frame), so the host is named and the checks continue.
+        if let located, located.host != .navigationBar {
+            print("[header-audit] \(surface): selector is in the \(located.host.rawValue)")
+        }
+        guard let selector = located?.bar else {
             if let tab = AppTab(rawValue: surface), mustHaveSelector.contains(tab) {
                 finding.problems.append("NO SELECTOR on a surface that must have one")
                 // The inventory, because "it is not on the bar" has several
@@ -167,19 +194,28 @@ final class HeaderSelectorAudit {
         let item = nav.topViewController?.navigationItem
         let frame = selector.convert(selector.bounds, to: window)
 
-        // 1. WHERE is it? Reported, not assumed. One surface keeps the title
-        // slot on purpose (the inbox — see `MessagesInboxViewController`), and an
-        // audit that treats the leading group as the only correct answer would
-        // fail a deliberate decision while passing a vanished capsule.
+        // 1. WHERE is it? Reported, not assumed — and only asked of a selector
+        // that is actually IN the navigation bar. A strip in the bottom
+        // accessory or the toolbar is in neither the title slot nor a leading
+        // group by design, and judging it against those would fail every
+        // screen this audit is being taught about.
+        //
+        // ⚠️ THE NOTE HERE NAMED THE WRONG SURFACE. It said the inbox keeps the
+        // title slot on purpose; the inbox moved its selector to the leading
+        // group, and the title-slot host is
+        // `ProfileRelationshipsViewController`. A comment naming the wrong
+        // screen is worse than none — it is the one a reader trusts.
         let inTitleSlot = item?.titleView === selector
             || (item?.titleView.map { selector.isDescendant(of: $0) } ?? false)
         let leadingCount = item?.leftBarButtonItems?.count ?? 0
-        if !inTitleSlot {
-            if leadingCount == 0 {
-                finding.problems.append("not in the title slot and no leading items — nowhere")
-            }
-            if item?.leftItemsSupplementBackButton != true {
-                finding.problems.append("leftItemsSupplementBackButton is false — pop gesture at risk")
+        if located?.host == .navigationBar {
+            if !inTitleSlot {
+                if leadingCount == 0 {
+                    finding.problems.append("not in the title slot and no leading items — nowhere")
+                }
+                if item?.leftItemsSupplementBackButton != true {
+                    finding.problems.append("leftItemsSupplementBackButton is false — pop gesture at risk")
+                }
             }
         }
 
@@ -262,11 +298,12 @@ final class HeaderSelectorAudit {
                      surface, window.bounds.width, selector.firstSegmentWidth,
                      overflow.isEmpty ? "no-collapse" : "COLLAPSED"))
         print(String(format: "[header-audit] %@: selector %.0f,%.0f %.0fx%.0f segments=%d "
-                     + "leading=%d pushed=%@ placement=%@",
+                     + "leading=%d pushed=%@ host=%@ placement=%@",
                      surface, frame.minX, frame.minY, frame.width, frame.height,
                      segments, leadingCount,
                      nav.viewControllers.count > 1 ? "yes" : "no",
-                     inTitleSlot ? "TITLE-SLOT" : "empty"))
+                     located?.host.rawValue ?? "none",
+                     inTitleSlot ? "TITLE-SLOT" : "leading-or-elsewhere"))
         return finding
     }
 
