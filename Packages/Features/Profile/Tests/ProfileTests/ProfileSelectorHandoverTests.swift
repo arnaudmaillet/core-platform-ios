@@ -85,23 +85,50 @@ struct ProfileSelectorHandoverTests {
         return screen
     }
 
-    /// ⚠️ **THE SELECTOR AND THE SOURCE FILTER SHARE ONE BAR, AND THEY USED TO
-    /// FIGHT OVER IT.** `placeSelectors` prepended the strip to `toolbarItems`
-    /// and `placeSourceTray` assigned the tray outright; last writer won, and
-    /// it was the tray. Filmed on a pushed profile at 375pt: a bottom bar with
-    /// the filter glyph on the right and an empty space where the format tabs
-    /// belong. Nothing failed — the screen simply had no selector, which is
-    /// exactly the class of defect this suite exists for.
-    @Test func aPushedProfileCarriesBothTheSelectorAndTheSourceFilter() async {
+    /// ⚠️ **A PUSHED PROFILE PRESENTS NO TOOLBAR AT ALL NOW.** The selector and
+    /// the source filter shared one, and fought over it — `placeSelectors`
+    /// prepended the strip and `placeSourceTray` assigned the tray outright,
+    /// last writer won, and the screen shipped with a filter glyph on the right
+    /// and an empty space where the format tabs belong. Neither is in a toolbar
+    /// any more: the strip is in a `UITabAccessory` (which a pushed screen CAN
+    /// host — measured on the search results, `env=regular`, a 360x48 container
+    /// at the foot, with `hidesBottomBarWhenPushed` set) and the filter leads
+    /// the navigation bar.
+    ///
+    /// The empty `toolbarItems` is load-bearing rather than incidental:
+    /// `SnapFeedViewController.successorUsesToolbar` reads it to decide whether
+    /// to leave the shared toolbar up when a post pushed from here is popped.
+    @Test func aPushedProfilePresentsNoToolbarItems() async {
         guard let screen = await loadedScreen() else { return }
-        let hosted = (screen.toolbarItems ?? []).compactMap(\.customView)
-        #expect(hosted.contains { $0 is PagedTabBar },
-                "the format selector is not in the toolbar")
-        #expect(hosted.count == 2,
-                "expected the selector and the source filter, got \(hosted.count)")
-        // Leading, ahead of the flexible space — the strip is the item the
-        // viewer reaches for, and it reads first.
-        #expect(screen.toolbarItems?.first?.customView is PagedTabBar)
+        #expect(screen.toolbarItems?.isEmpty != false,
+                "a toolbar and an accessory both claim the bottom and neither yields")
+        let band = try? #require(screen.selectorAccessory?.hostView)
+        #expect(band?.subviews.compactMap { $0 as? PagedTabBar }.count == 1,
+                "the format selector is not in the band")
+        #expect(screen.navigationItem.leftBarButtonItems?
+            .contains { $0.accessibilityLabel == "Content source" } == true,
+            "the source filter is not leading the bar")
+    }
+
+    /// ⚠️ **WITHOUT THIS THE FILTER REPLACES THE BACK BUTTON**, and UIKit
+    /// disables the interactive pop along with it, silently — on the one screen
+    /// in this pair that has a back button to lose.
+    @Test func theLeadingFilterSupplementsTheBackButton() async {
+        guard let screen = await loadedScreen() else { return }
+        #expect(screen.navigationItem.leftItemsSupplementBackButton == true)
+        #expect(screen.navigationItem.hidesBackButton == false)
+    }
+
+    /// ⚠️ **A SYSTEM ITEM, AND THE SHAPE IS THE REASON.** Wrapped in a button
+    /// the glyph came out in a 59x44 platter — an OVAL beside a chevron that is
+    /// a 44pt circle — because the button carries its own content insets and
+    /// UIKit sizes the platter around whatever it is given.
+    @Test func theSourceFilterHasNoCustomViewToInflateItsPlatter() async {
+        guard let screen = await loadedScreen() else { return }
+        let filter = screen.navigationItem.leftBarButtonItems?
+            .first { $0.accessibilityLabel == "Content source" }
+        #expect(filter?.customView == nil)
+        #expect(filter?.menu != nil, "the item is the menu host; nothing wraps it")
     }
 
     // MARK: - Which one is on screen
@@ -123,37 +150,34 @@ struct ProfileSelectorHandoverTests {
     /// the bar entirely. Deleting it removes a test that proved nothing.
     ///
     /// What survives below is the pair that was never about the hand-over: the
-    /// source button keeping its place in the trailing run across a tab change.
+    /// source filter keeping its place across a tab change.
 
-    /// looked right and the second did not.
-    @Test func theSourceButtonKeepsItsPlaceAfterChangingTab() async {
+    /// ⚠️ **THE DEFECT THESE TWO WERE WRITTEN FOR IS GONE WITH ITS
+    /// MECHANISM.** They watched a bar item's custom view being STOLEN: the
+    /// inline tray was lazy, its initialiser wrapped the source button in a
+    /// glass capsule and adopted it as a subview, and building the tray
+    /// therefore took the button off the toolbar — leaving a bar item with an
+    /// empty custom view, a full-width blank capsule at the foot. It only
+    /// showed after a tab change, because that was the only thing that built
+    /// the tray, which is why the first tab looked right and the second did
+    /// not. There is no tray and no custom view now; the filter is a system bar
+    /// item and nothing can adopt it.
+    ///
+    /// What is still worth pinning is what the tab change was always supposed
+    /// to do to it: the filter belongs to a FORMAT tab, so it goes when there
+    /// is no format to filter and comes back when there is.
+    @Test func theSourceFilterFollowsWhetherTheTabHasAFormat() async {
         guard let screen = await loadedScreen() else { return }
-        guard let button = screen.toolbarItems?.compactMap(\.customView).last else {
-            Issue.record("the toolbar had no item to lose")
-            return
+        let filter = screen.navigationItem.leftBarButtonItems?
+            .first { $0.accessibilityLabel == "Content source" }
+        #expect(filter != nil)
+
+        for index in [1, 2, 0, 1] {
+            screen.selectTab(at: index)
+            #expect(screen.navigationItem.leftBarButtonItems?
+                .contains { $0 === filter } == true,
+                "the filter left the bar on tab \(index)")
+            #expect(filter?.customView == nil, "something wrapped the filter")
         }
-        // Headless, a bar item's custom view has NO superview — nothing has
-        // displayed the toolbar. That is what makes this observable: if the
-        // inline tray gets built it adopts the button into a glass capsule,
-        // and the superview becomes non-nil. Nil here means nobody took it.
-        #expect(button.superview == nil, "something already owns the button")
-
-        screen.selectTab(at: 1)
-
-        #expect(button.superview == nil,
-                "the tab change built the inline tray, which adopted the button off the toolbar")
-        #expect(screen.toolbarItems?.compactMap(\.customView).last === button,
-                "the bar item lost its custom view")
-    }
-
-    /// …and through several changes: the theft happens once, and everything
-    /// after it looks stable while staying broken.
-    @Test func theSourceButtonSurvivesRepeatedTabChanges() async {
-        guard let screen = await loadedScreen() else { return }
-        guard let button = screen.toolbarItems?.compactMap(\.customView).last else { return }
-
-        for index in [1, 2, 0, 1] { screen.selectTab(at: index) }
-
-        #expect(button.superview == nil)
     }
 }

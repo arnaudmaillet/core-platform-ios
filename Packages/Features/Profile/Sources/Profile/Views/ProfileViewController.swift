@@ -69,7 +69,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// ⚠️ INSTALLED ON APPEAR, REMOVED ON DISAPPEAR. `bottomAccessory` belongs
     /// to the tab bar controller with no per-tab scope, so a band left up
     /// floats over whatever is pushed on top and over the next tab.
-    private var selectorAccessory: SelectorAccessory?
+    /// Internal, not private, so the tests can assert what is IN the band —
+    /// the arrangement moved out of `toolbarItems`, which a test could read,
+    /// into a content view UIKit owns.
+    private(set) var selectorAccessory: SelectorAccessory?
     /// The gallery's format selector — the SAME `PagedTabBar` For You and
     /// Messages wear, so a viewer meets one selector in three places rather
     /// than three selectors doing one job.
@@ -85,15 +88,32 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// The source filter: one drop-down button — the native single-selection
     /// menu carries the options (checkmark on the active one), and the button
     /// shows the pick's glyph. Lazy: the menu actions capture self.
-    private lazy var sourceMenuButton = GlassMenuButton(
-        menu: UIMenu(options: .singleSelection, children: [
-            makeSourceAction(.all, title: "All", symbol: "rectangle.stack"),
-            makeSourceAction(.posts, title: "Posts", symbol: "square.and.pencil"),
-            makeSourceAction(.reposts, title: "Reposts", symbol: "arrow.2.squarepath"),
-            makeSourceAction(.tagged, title: "Tagged", symbol: "at")
-        ]),
-        accessibilityLabel: "Content source"
-    )
+    /// The content-source filter, leading in the navigation bar.
+    ///
+    /// ⚠️ **A SYSTEM ITEM, NOT A CUSTOM VIEW, AND THE SHAPE IS WHY.** Wrapped
+    /// in a button, a glyph comes out in a 59x44 platter — an OVAL beside a
+    /// chevron that is a 44pt circle — because the button carries its own
+    /// content insets and UIKit sizes the platter around whatever it is given.
+    /// A system item has no view of its own to inflate it, so the platter is
+    /// the 44pt touch target. Measured on the search results, which made the
+    /// same move: `-header-bar-tree` drew 59x44 for the button and 44x44 for
+    /// the item.
+    ///
+    /// It carries the `UIMenu` directly — a bar item is a menu host, so there
+    /// is nothing for a wrapper view to add.
+    private lazy var sourceMenuItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "rectangle.stack"),
+            menu: UIMenu(options: .singleSelection, children: [
+                makeSourceAction(.all, title: "All", symbol: "rectangle.stack"),
+                makeSourceAction(.posts, title: "Posts", symbol: "square.and.pencil"),
+                makeSourceAction(.reposts, title: "Reposts", symbol: "arrow.2.squarepath"),
+                makeSourceAction(.tagged, title: "Tagged", symbol: "at")
+            ])
+        )
+        item.accessibilityLabel = "Content source"
+        return item
+    }()
 
     private func makeSourceAction(
         _ source: GalleryFilter.Source, title: String, symbol: String
@@ -107,12 +127,37 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         ) { [weak self] action in
             guard let self else { return }
             self.viewModel.setGallerySource(source)
-            // The icon-only button carries no system mirroring: adopt the
+            // The icon-only item carries no system mirroring: adopt the
             // picked action's glyph (and its title for VoiceOver) by hand.
-            self.sourceMenuButton.button.configuration?.image = action.image
-            self.sourceMenuButton.button.accessibilityValue = action.title
+            self.sourceMenuItem.image = action.image
+            self.sourceMenuItem.accessibilityValue = action.title
         }
     }
+    /// The person's name, in the bar, as the first thing to give way.
+    ///
+    /// The identity block says it in full a finger's width below; up here it is
+    /// a reminder of whose page this is once that block has scrolled away, and
+    /// every other item in the bar is a control the viewer can press.
+    private lazy var titleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .preferredFont(forTextStyle: .headline)
+        label.adjustsFontForContentSizeCategory = true
+        label.lineBreakMode = .byTruncatingTail
+        label.textAlignment = .center
+        // ⚠️ **`.defaultHigh`, NOT `.defaultLow` — LOW MEANS "SQUEEZE ME TO
+        // NOTHING".** A bar item that cannot fit is swept into a `•••` with its
+        // whole group; a label that cannot fit just gets shorter, which is what
+        // is wanted. But compression resistance is not a ranking, it is a
+        // FLOOR: at `.defaultLow` the label yields all the way to zero width
+        // and renders nothing at all — measured, and indistinguishable in a
+        // screenshot from the plain `title` UIKit had already refused to draw.
+        // `.defaultHigh` still loses to a bar item (those are required), so the
+        // name is still the first thing to give — it just gives by truncating.
+        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return label
+    }()
+
     /// The pull indicator, above the header rather than inside a list — see
     /// `ProfilePullToRefreshView` for why the stock control could not be used.
     private let pullIndicator = ProfilePullToRefreshView()
@@ -253,16 +298,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         /// as separate objects rather than one stack.
         static let inlineTraySpacing = InlineFilterTrayView.spacingBelow
     }
-
-    /// The bottom tray, holding the source filter and nothing else now that the
-    /// format tabs have moved to the top of the screen.
-    ///
-    /// The two filters answer different questions and are asked at different
-    /// rates: the format tabs are navigation — tapped and swiped constantly —
-    /// while the source is a setting, chosen once and then left alone. Splitting
-    /// them puts each where its traffic is, and leaves the source where this
-    /// screen's viewers have always reached for it.
-    private lazy var inlineTrayView: UIView = InlineFilterTrayView(trailing: sourceMenuButton)
 
     init(
         viewModel: ProfileViewModel,
@@ -608,9 +643,17 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // idempotent with the one in `viewDidAppear`, which stays as the
         // backstop for the paths the policy declines (a scrub that has not
         // committed, a flight that owns the chrome).
-        installBottomChromeWhenAppearing(hasActiveFlight: false) { [weak self] in
+        installBottomChromeWhenAppearing(hasActiveFlight: false,
+                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
             guard let self else { return }
-            selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+            selectorAccessory?.install(into: tabBarController,
+                                   // ⚠️ THE TAB ROOT ONLY. A pushed profile keeps
+                                   // `hidesBottomBarWhenPushed`, so there is no bar
+                                   // under it to collapse — and the behaviour is
+                                   // SHELL-WIDE, so arming it from a screen that
+                                   // cannot use it gives every other tab a
+                                   // minimizing bar and this one nothing.
+                                   minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
                                        alongside: transitionCoordinator)
         }
 
@@ -653,7 +696,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // so the title and Follow item ride the push natively instead of
         // popping in after it.
         applyNavigationState()
-        presentFilterToolbar()
         // ⚠️ On every appearance, not once. The saved pile is mutable from
         // outside this screen — the feed's bookmark button writes to the same
         // store — so a Saved tab bound at load would be stale the first time
@@ -702,7 +744,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // Stops as this screen is covered — including by the post it just
         // opened, whose own player is what should be heard.
         galleryPager.setAutoplayActive(false)
-        concealFilterToolbar()
     }
 
     /// The post has finished covering this screen, so the tapped tile can be
@@ -716,7 +757,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+        selectorAccessory?.install(into: tabBarController,
+                                   minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
                                    alongside: transitionCoordinator)
         #if DEBUG
         verifyRevealClearsSelector()
@@ -1086,23 +1128,25 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // toolbar while it shows — is re-added by hand, plus breathing room
         // so the grid's last row scrolls clear of the transparent bar's glass
         // capsules.
-        // Inline placement puts the tray inside this view rather than in the
-        // navigation toolbar, so its height is ours to clear as well — the
-        // toolbar's was already folded into `safeAreaInsets.bottom` by UIKit.
-        let trayClearance = trayPlacement == .aboveBottomSafeArea && viewModel.hasGallery
-            ? Metrics.inlineTrayHeight + Metrics.inlineTraySpacing
-            : 0
+        // ⚠️ **THERE IS NO TRAY TO CLEAR ANY MORE, AND THAT USED TO BE LOAD-
+        // BEARING BY ACCIDENT.** A `trayClearance` term added the inline tray's
+        // own height here, because that tray lived inside this view rather than
+        // in a bar UIKit insets for. The source filter is a navigation-bar item
+        // now and there is nothing at the foot but the accessory, whose height
+        // IS in `safeAreaInsets.bottom` — measured on the search results, an
+        // inset of 69 in an 874pt window with the band's top edge at exactly
+        // 805.
+        //
         // ⚠️ AND NEVER LESS THAN THE BAR ACTUALLY COVERS. The tab bar FLOATS —
         // it draws over these pages without insetting them — so
         // `safeAreaInsets.bottom` understates it by the bar's own height. The
-        // tray clearance happened to bridge most of that gap when a tray was
-        // inline, which is why nothing was ever reported; with no tray it did
-        // not, and a tile revealed at the foot stayed part-way behind the bar.
-        // Since the landing on this surface deliberately does not scroll, where
-        // the departure reveal leaves a tile is where the card comes back to.
+        // tray clearance happened to bridge most of that gap, which is why
+        // nothing was ever reported for it; `floatingBarCover` is what covers
+        // it on purpose, and it is the reason removing the tray does not put a
+        // revealed tile back behind the bar.
         let bottom = max(
             floatingBarCover,
-            view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0) + trayClearance
+            view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0)
         )
         galleryPager.setContentBottomInset(bottom)
         // The pages are inset by the header floating over them, so their content
@@ -1696,22 +1740,67 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // makes it ~402 and does not. `.minimal` keeps the title for this
         // screen and the chevron bare for the next one.
         navigationItem.backButtonDisplayMode = .minimal
+        // ⚠️ **`.never`, OR THE TITLE IS NOT DRAWN AT ALL.** With the mode left
+        // `.automatic` the bar rendered three platters and NO title label —
+        // read straight off `-header-bar-tree`, which is how this was told from
+        // a width problem: the string was set (`navItem=Demo Viewer`) and
+        // simply had no label anywhere in the bar. For You and Messages both
+        // state `.never` for their own reasons; this screen needs it because a
+        // large title has nowhere to go under an immersive banner.
+        navigationItem.largeTitleDisplayMode = .never
 
-        // ⚠️ **THE TAB'S NAME, NOT THE @HANDLE — and the difference is the
-        // whole reason this is allowed now.** The bar used to carry the handle,
-        // which said again what the identity block says in full a finger's
-        // width below it. "Profile" duplicates nothing. The other half of the
-        // old rule — that a docked format selector would be competing for this
-        // slot — is simply gone: on the tab root the selector is a
-        // `UITabAccessory`, on a pushed profile it is a bottom-toolbar item,
-        // and neither is in the navigation bar.
+        // The content-source filter leads the bar on BOTH profiles:
+        //   tab root  [source][name][credits][switcher gear]
+        //   pushed    [back][source][name][Follow]
+        if navigationItem.leftBarButtonItems?.first !== sourceMenuItem {
+            navigationItem.leftBarButtonItems = [sourceMenuItem]
+        }
+        // ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
+        // disables the interactive pop along with it, silently. Harmless on the
+        // tab root, which has no back button to supplement.
+        navigationItem.leftItemsSupplementBackButton = true
+
+        // ⚠️ **THE NAME AND THE LEADING FILTER CANNOT BOTH BE IN THIS BAR, and
+        // the isolation is what says so.** With the filter leading, no title
+        // renders — not truncated, ABSENT: `-header-bar-tree` shows the three
+        // platters and an empty `HostedViewContainer`. Drop the leading item
+        // and the same label draws immediately, left-aligned, at its full 106pt
+        // (`labelW=106`). It is this bar's crowding, not a rule about leading
+        // items: For You wears a leading glyph AND a title, and its trailing
+        // group is ~115pt against this one's 223.
         //
-        // ⚠️ THE TAB ROOT ONLY. A pushed profile is a person, not a section of
-        // the app, and titling it "Profile" would label somebody else's page
-        // with the viewer's own tab. `trayPlacement` is the only thing that
-        // knows which this is.
-        let wanted = trayPlacement == .aboveBottomSafeArea ? "Profile" : nil
-        if title != wanted { title = wanted }
+        // Three other explanations were tried against the same symptom before
+        // the isolation, and all three were wrong: `largeTitleDisplayMode`
+        // (`.never` changed nothing), the compression priority
+        // (`.defaultLow` → `.defaultHigh`, nothing), and the unlaid-frame trap
+        // the accessory host records (`sizeToFit`, nothing).
+        //
+        // ⚠️ The `titleView` warning in this repo is about REQUIRED widths, not
+        // about title views. Every `•••` recorded came from one that INSISTED
+        // on a size. This one insists on nothing.
+        titleLabel.text = viewModel.displayName
+        // ⚠️ **`sizeToFit`, OR IT DRAWS NOTHING — the same trap the accessory
+        // host records.** A bar's custom view keeps its autoresizing mask, so
+        // the size UIKit reads at hand-over is the FRAME, not the intrinsic
+        // content size — and an unlaid label's frame is zero. Measured:
+        // `labelW=0`, an empty `HostedViewContainer` in `-header-bar-tree`, and
+        // a bar with three platters and no name, which is indistinguishable
+        // from the plain `title` UIKit had already refused to draw. Two
+        // different explanations were tried against that one symptom
+        // (`largeTitleDisplayMode`, then the compression priority) before the
+        // frame was suspected.
+        titleLabel.sizeToFit()
+        if navigationItem.titleView !== titleLabel {
+            navigationItem.titleView = titleLabel
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-profile-navbar-audit") {
+            print("[profile-title] name=\(titleLabel.text ?? "nil")"
+                + String(format: " labelW=%.0f", titleLabel.bounds.width)
+                + " leading=\(navigationItem.leftBarButtonItems?.count ?? -1)"
+                + " trailing=\(navigationItem.rightBarButtonItems?.count ?? -1)")
+        }
+        #endif
         updateActionBarItem(followButtonState)
     }
 
@@ -1987,7 +2076,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         galleryPager.setActivePage(tab, animated: false)
 
-        placeSourceTray()
     }
 
     /// A tap on either selector: record the format, page the gallery, and carry
@@ -2075,23 +2163,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         if let format = tab.format {
             viewModel.setGalleryFormat(format)
         }
-        // ⚠️ Only the INLINE placement has a tray to hide, and this must not
-        // ask under the toolbar placement — not because the answer is wrong,
-        // but because the question builds it.
-        //
-        // `inlineTrayView` is lazy, and its initialiser wraps
-        // `sourceMenuButton` in a glass capsule and adopts it as a subview.
-        // The button is the toolbar item's `customView`, so building the tray
-        // takes it OFF the toolbar — and under this placement the tray is
-        // never added to the hierarchy, so the button does not reappear
-        // anywhere. What is left is a bar item with an empty custom view: a
-        // full-width blank capsule at the bottom of the screen.
-        //
-        // It only showed after a TAB CHANGE, because that is the only thing
-        // that reaches this line — which is why the first tab looked fine and
-        // the second did not.
-        guard trayPlacement != .navigationToolbar else { return }
-        inlineTrayView.isHidden = tab.format == nil
+        // The source filter only means something on a format tab — it filters
+        // WITHIN one — so it goes when there is no format to filter.
+        sourceMenuItem.isHidden = tab.format == nil
     }
 
     /// Selects a tab the way a selector tap does — the shared path behind the
@@ -2157,9 +2231,17 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
 
 
-    /// Puts the selector at the foot of the screen — in a `UITabAccessory`
-    /// when the tab bar is under this screen, in the navigation controller's
-    /// bottom toolbar when it is not.
+    /// Puts the selector at the foot of the screen, in a `UITabAccessory` —
+    /// on BOTH profiles.
+    ///
+    /// ⚠️ **A PUSHED SCREEN CAN HOST ONE, AND THE COMMIT THAT SAID OTHERWISE
+    /// WAS WRONG.** "A pushed screen has no tab bar to hang an accessory from"
+    /// is the sentence that sent this branch to the toolbar; the search
+    /// results — which also sets `hidesBottomBarWhenPushed` — then measured the
+    /// opposite: `env=regular`, a 360x48 container at the foot, laid out
+    /// exactly as on a tab root. `UITabAccessory.h` says so too, defining
+    /// `.regular` as "above the bottom tab bar when it is visible; **or, at the
+    /// bottom of the UITabBarController's view**".
     ///
     /// ⚠️ **`trayPlacement` IS THE ONLY THING THAT CAN ANSWER THIS, and it is
     /// injected for that reason.** Its own note says why: "the host knows, and
@@ -2175,24 +2257,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private func placeSelectors() {
         guard viewModel.hasGallery else { return }
         selectorTouchProbe.attach(to: selectorBar)
-        switch trayPlacement {
-        case .aboveBottomSafeArea:
-            selectorAccessory = SelectorAccessory(strip: selectorBar)
-        case .navigationToolbar:
-            // No width arithmetic: a toolbar has neither item groups nor an
-            // overflow control, so the `•••` that drove this strip into the
-            // navigation bar's leading group is not available to it.
-            selectorBar.suppressesBackdrop = true
-            // ⚠️ **AND IT MUST NOT FILL.** `fillsWidth` was carried over from
-            // the inline column, where the strip spread itself across the
-            // page. It makes the bar take its width FROM ITS HOST and report
-            // `noIntrinsicMetric` — and a toolbar item has no host width to
-            // take, so UIKit sized the custom view at its unlaid frame:
-            // measured at 375pt, a 38x38 bubble holding three segments whose
-            // first one alone wants 71. The other two toolbar hosts (search
-            // results, relationships) never set it and come out 178 and 295.
-            applyToolbarItems()
-        }
+        // `suppressesBackdrop` and `fillsWidth` are the host's to set — see
+        // `SelectorAccessoryHost`, which is where the reasons for both live.
+        selectorAccessory = SelectorAccessory(strip: selectorBar)
     }
 
     /// ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER — see `SelectorTouchProbe`.
@@ -2222,51 +2289,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     }
 
     private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
-
-    /// Puts the source filter back at the bottom of the screen — in this view
-    /// above the safe area when this is the Profile tab, or in the navigation
-    /// controller's shared toolbar when the screen was pushed.
-    private func placeSourceTray() {
-        guard trayPlacement == .navigationToolbar else {
-            view.addSubview(inlineTrayView)
-            NSLayoutConstraint.activate([
-                inlineTrayView.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
-                inlineTrayView.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
-                inlineTrayView.heightAnchor.constraint(equalToConstant: Metrics.inlineTrayHeight),
-                inlineTrayView.bottomAnchor.constraint(
-                    equalTo: view.safeAreaLayoutGuide.bottomAnchor,
-                    constant: -Metrics.inlineTraySpacing
-                )
-            ])
-            return
-        }
-        applyToolbarItems()
-    }
-
-    /// The pushed profile's bottom toolbar: the format selector leading, the
-    /// source filter trailing.
-    ///
-    /// ⚠️ **ONE WRITER, AND IT TOOK A 375pt AUDIT TO NOTICE THERE WERE TWO.**
-    /// `placeSelectors` PREPENDED the strip to whatever was there and
-    /// `placeSourceTray` then ASSIGNED the tray outright, so whichever ran last
-    /// won — and the one that ran last was the tray. Measured on a pushed
-    /// profile: `toolbarItems` holding two, no `PagedTabBar` anywhere in the
-    /// window, and a bottom bar with a filter glyph on the right and nothing on
-    /// the left. Both halves looked correct in isolation, which is why neither
-    /// call site is the place this belongs.
-    ///
-    /// The items must exist by the time a push starts — the feed's hand-over
-    /// rule reads the incoming screen's `toolbarItems` in its own
-    /// `viewWillDisappear` — so this is called from both, and is cheap enough
-    /// to be called again.
-    private func applyToolbarItems() {
-        guard trayPlacement == .navigationToolbar else { return }
-        var items: [UIBarButtonItem] = []
-        if viewModel.hasGallery { items.append(UIBarButtonItem(customView: selectorBar)) }
-        items.append(.flexibleSpace())
-        items.append(UIBarButtonItem(customView: sourceMenuButton))
-        toolbarItems = items
-    }
 
     /// What content actually passes under at the top.
     ///
@@ -2468,69 +2490,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         bar.layoutIfNeeded()
     }
 
-    /// Shows the shared toolbar for this screen, riding the transition. The
-    /// mechanics mirror the feed's `presentToolbar`: shown non-animated so the
-    /// safe area is final immediately; the *visual* entrance is an alpha fade
-    /// on the transition coordinator — but only when the bar was hidden. When
-    /// it arrives from another toolbar owner (pushed from the feed), the bar
-    /// is already up and UIKit cross-fades the items natively.
-    private func presentFilterToolbar() {
-        // Inline trays are not the shared toolbar's business: nothing to show,
-        // and nothing to hand off to or take from the feed.
-        guard trayPlacement == .navigationToolbar else { return }
-        guard viewModel.hasGallery, let nav = navigationController else { return }
-        // Transparent BAR background (exactly what the feed's toolbar uses,
-        // so handoffs between the two never restyle a visible bar); the
-        // items' glass comes from the system's per-item capsules.
-        let appearance = UIToolbarAppearance()
-        appearance.configureWithTransparentBackground()
-        nav.toolbar.standardAppearance = appearance
-        nav.toolbar.compactAppearance = appearance
-        nav.toolbar.scrollEdgeAppearance = appearance
 
-        let wasHidden = nav.isToolbarHidden
-        nav.setToolbarHidden(false, animated: false)
-        nav.toolbar.alpha = 1
-        if wasHidden, let coordinator = transitionCoordinator {
-            nav.toolbar.alpha = 0
-            coordinator.animate(alongsideTransition: { _ in
-                nav.toolbar.alpha = 1
-            }, completion: { _ in
-                // A push cannot cancel; pin the end state either way.
-                nav.toolbar.alpha = 1
-            })
-        }
-    }
-
-    /// The exit leg, fading the bar with whatever transition is carrying this
-    /// screen away — unless the successor is a toolbar owner itself (the feed
-    /// on pop-back), in which case the bar is handed over intact and the
-    /// successor's own presentation reconfigures it. A cancelled interactive
-    /// pop restores the alpha and keeps the bar.
-    private func concealFilterToolbar() {
-        // Never ours to conceal under inline placement — the bar we would be
-        // hiding belongs to whichever screen actually put it up.
-        guard trayPlacement == .navigationToolbar else { return }
-        guard viewModel.hasGallery, let nav = navigationController, !nav.isToolbarHidden else { return }
-        if let successor = nav.topViewController, successor !== self,
-           successor.toolbarItems?.isEmpty == false {
-            return
-        }
-        guard let coordinator = transitionCoordinator else {
-            nav.setToolbarHidden(true, animated: false)
-            return
-        }
-        coordinator.animate(alongsideTransition: { _ in
-            nav.toolbar.alpha = 0
-        }, completion: { context in
-            if context.isCancelled {
-                nav.toolbar.alpha = 1
-            } else {
-                nav.setToolbarHidden(true, animated: false)
-                nav.toolbar.alpha = 1
-            }
-        })
-    }
 
     // MARK: - Render
 
