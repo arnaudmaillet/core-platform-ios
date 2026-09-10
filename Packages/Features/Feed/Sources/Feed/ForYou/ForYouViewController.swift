@@ -73,7 +73,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// The strip's home when `-foryou-dock-selector` moves it to the foot of
     /// the screen. Nil in every other build — see `ForYouSelectorDock`.
-    private var selectorAccessory: ForYouSelectorAccessory?
+    private var selectorAccessory: SelectorAccessory?
 
     /// Search. The trailing EDGE item — an action, so a plain glyph with a
     /// target and no menu.
@@ -503,8 +503,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // leading item cannot disable the interactive pop, and this screen
             // is a tab root that is never pushed. Only the backdrop decision
             // carries over, and the accessory host owns it now.
-            tabBar.suppressesBackdrop = !ForYouSelectorDock.keepsOwnGlass
-            selectorAccessory = ForYouSelectorAccessory(strip: tabBar)
+            // The backdrop decision moved INTO the host with the component:
+            // it is the one mutation `installLeadingSelector` performed that an
+            // accessory still needs, and four hosts is three too many to leave
+            // it to each of them.
+            selectorAccessory = SelectorAccessory(
+                strip: ForYouSelectorDock.isEmpty ? nil : tabBar,
+                options: ForYouSelectorDock.options
+            )
             selectorAccessory?.hostView.onLayoutChanged = { [weak self] in
                 self?.chromeDidMove()
             }
@@ -2033,7 +2039,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // of it. Harmless while the strip is unhosted; docked, it would fight
         // the flight. A cancelled pop delivers `viewDidDisappear`, not
         // `viewDidAppear`, so that path needs no cleanup.
-        selectorAccessory?.install(into: tabBarController)
+        // ⚠️ FOR YOU IS THE ONE HOST THAT ARMS THE MINIMIZE, because it is
+        // the one that registers a scroll view with
+        // `setContentScrollView(_:for: .bottom)`. The behaviour is shell-wide;
+        // arming it from a host with no scroller registered would give every
+        // other tab a collapsing bar and this one nothing.
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
         tabBarController?.view.layoutIfNeeded()
         pager.setFootChromeCover(floatingBarCover)
         sweepAbandonedTransition()

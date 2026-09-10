@@ -524,36 +524,13 @@ final class SearchResultsViewController: UIViewController {
         // screen the selector sits over a pager of scrolling grids, and a drag
         // that starts on it was scrolling the page underneath at the same time.
         // The strip is the thing the finger is on, so it takes priority.
-        tabBar.addGestureRecognizer(selectorTouchProbe)
+        // ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER — see `SelectorTouchProbe`,
+        // which carries the two traps this needed: `.touchDown` on the control
+        // never fires (the strip's inner scroller eats the touch), and a
+        // recogniser that does not recognise simultaneously silences the very
+        // control it was added to watch.
+        selectorTouchProbe.attach(to: tabBar)
     }
-
-    /// Reports a touch on the selector without taking it.
-    ///
-    /// ⚠️ **NOT `.touchDown` ON THE CONTROL, AND `PagedTabBar` BEING A
-    /// `UIControl` IS THE TRAP.** The obvious spelling is the filter sheet's —
-    /// `addAction(for: [.touchDown, …])`, which is how the sheet stops its own
-    /// drag while a segment is being used. It cannot work here: the strip fills
-    /// itself with a horizontal scroller (`delaysContentTouches = false`), so
-    /// touches land in that scroller and the control's own tracking never
-    /// begins. The actions would be wired, correct-looking and silent.
-    ///
-    /// ⚠️ AND IT MUST NOT SWALLOW WHAT IT WATCHES. `cancelsTouchesInView` is
-    /// false and the delegate recognises simultaneously, so the strip still
-    /// scrolls and still selects — this only observes. A recogniser added
-    /// without both of those silences the control it was meant to watch, which
-    /// this codebase has already paid for once: a tap with no action still
-    /// prevents an ancestor's.
-    private lazy var selectorTouchProbe: UILongPressGestureRecognizer = {
-        let probe = UILongPressGestureRecognizer(
-            target: self, action: #selector(selectorTouchChanged)
-        )
-        probe.minimumPressDuration = 0
-        probe.cancelsTouchesInView = false
-        probe.delaysTouchesBegan = false
-        probe.delaysTouchesEnded = false
-        probe.delegate = self
-        return probe
-    }()
 
     #if DEBUG
     /// ⚠️ NAMES WHAT IS ACTUALLY LISTENING, because two gates aimed at guesses
@@ -579,6 +556,14 @@ final class SearchResultsViewController: UIViewController {
     }
     #endif
 
+    private lazy var selectorTouchProbe = SelectorTouchProbe { [weak self] isTouching in
+        guard let self, !Self.gestureGateIsOff else { return }
+        #if DEBUG
+        self.auditGestures(isTouching ? "selector touch" : "after release")
+        #endif
+        self.setPageScrollEnabled(!isTouching)
+    }
+
     /// `-search-no-gesture-gate`: leave the stack's recognisers alone.
     ///
     /// ⚠️ AN A/B SWITCH, BECAUSE THE FAILING GESTURE CANNOT BE INJECTED. A real
@@ -592,30 +577,6 @@ final class SearchResultsViewController: UIViewController {
         #else
         false
         #endif
-    }
-
-    @objc private func selectorTouchChanged(_ probe: UILongPressGestureRecognizer) {
-        guard !Self.gestureGateIsOff else { return }
-        #if DEBUG
-        if probe.state == .began { auditGestures("selector touch began") }
-        if probe.state == .changed { auditGestures("selector touch moved") }
-        // ⚠️ AFTER THE RESTORE, NOT BEFORE IT. A gate that suspends recognisers
-        // and fails to put them back leaves the screen unable to leave at all,
-        // and that looks exactly like "synthetic touches cannot drive the
-        // dismissal" — which is true of this simulator too. Only a reading
-        // taken once the finger is up separates them.
-        if probe.state == .ended || probe.state == .cancelled || probe.state == .failed {
-            DispatchQueue.main.async { [weak self] in self?.auditGestures("after release") }
-        }
-        #endif
-        switch probe.state {
-        case .began, .changed:
-            setPageScrollEnabled(false)
-        case .ended, .cancelled, .failed:
-            setPageScrollEnabled(true)
-        default:
-            break
-        }
     }
 
     /// Stops the FINGER driving anything under the pager while the selector is
@@ -857,19 +818,6 @@ extension SearchResultsViewController: UITextFieldDelegate {
     func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
         onEditQuery?()
         return false
-    }
-}
-
-extension SearchResultsViewController: UIGestureRecognizerDelegate {
-    /// ⚠️ ALWAYS TRUE, AND THAT IS WHAT KEEPS THE PROBE A PROBE. The recogniser
-    /// on the selector exists to be TOLD about a touch, not to win it; refusing
-    /// simultaneous recognition would make it compete with the strip's own
-    /// scroller and with its segment taps.
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
-    ) -> Bool {
-        true
     }
 }
 
