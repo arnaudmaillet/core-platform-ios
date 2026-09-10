@@ -161,19 +161,17 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // hosted its selector. Measured here: with compose leading, 402pt hosts and
         // 375pt collapses the whole group into a `•••`; with compose trailing, both
         // host. Width is not the trigger, so a narrower selector does not help.
-        navigationItem.leftBarButtonItem = nil
-        // ⚠️ AFTER `configureSearchAffordance`, which is what puts the magnifier
-        // in the trailing group — and that order is what the width arithmetic
-        // reads. The selector's ceiling is the bar's width less what everything
-        // ELSE on this item wants, so an action added afterwards is an action the
-        // first measurement did not know about. It is re-measured on the next
-        // layout regardless; the order only saves a pass.
-        selectorItem = navigationItem.installLeadingSelector(categoryBar)
+        // ⚠️ **THE STRIP IS NOT IN THIS BAR ANY MORE.** It lives at the foot of
+        // the screen in a `UITabAccessory`, above the tab bar. Everything above
+        // — the compose-item ordering, the width ceiling, the "install after
+        // the search affordance" rule — was arithmetic against a navigation
+        // bar that sweeps a group it cannot fit into a `•••`. An accessory has
+        // no item groups and no overflow control, so the whole calculation is
+        // gone rather than restated.
+        selectorAccessory = SelectorAccessory(strip: categoryBar)
 
-        // NO `additionalSafeAreaInsets.top`, and no constraints for the capsule:
-        // it lives INSIDE the navigation bar, whose height already covers it.
-        // Every page's list insets under the header through the standard safe
-        // area, with nothing of ours to keep in step with it.
+        // NO `additionalSafeAreaInsets`: the pages inset under the header
+        // through the standard safe area, and UIKit owns the band at the foot.
 
         // Wired like any system control: the bar carries the chosen segment as
         // its value and announces it, rather than handing back a closure.
@@ -207,6 +205,14 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// Fires at the START of a pop — including the interactive one, before any
     /// frame is drawn — so what the transition reveals is already in agreement:
     /// the page shown and the lens over it.
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // ⚠️ ABOVE ANY OTHER GUARD, and covering a push as well as a tab
+        // switch: the accessory is shell-lifetime state, and this is the only
+        // moment that reliably precedes something else owning the band.
+        selectorAccessory?.remove(from: tabBarController)
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         pagerView?.reassertActivePage()
@@ -214,6 +220,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     }
 
     override func viewDidAppear(_ animated: Bool) {
+        selectorAccessory?.install(into: tabBarController)
         super.viewDidAppear(animated)
         // The pager's horizontal pan yields to the stack's edge-swipe pop, so
         // a back gesture is never stolen by a page change. Wired once the view
@@ -386,7 +393,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private let searchField = TracedSearchTextField()
 
     /// The selector's item, kept so the bar can be put back exactly as it was.
-    private var selectorItem: UIBarButtonItem?
+    /// ⚠️ INSTALLED ON APPEAR, REMOVED ON DISAPPEAR, and that bracket is the
+    /// whole reason it is safe. `bottomAccessory` is a property of the TAB BAR
+    /// CONTROLLER with no per-tab scope: a band left up floats over whatever is
+    /// pushed on top of this screen and over whichever tab is chosen next.
+    private var selectorAccessory: SelectorAccessory?
     private var isSearching = false
 
     /// The field's height, which is the Cancel PILL's height — see
@@ -419,12 +430,18 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     }
 
     /// `[ selector ] ———— [ compose ][ search ]`
+    /// The resting bar is one item: the magnifier.
+    ///
+    /// ⚠️ AND THE EMPTY `titleView` IS GONE WITH THE SELECTOR. It was there
+    /// because a nil title view leaves UIKit a central reservation the LEADING
+    /// group cannot grow into — measured: below 440pt the capsule crossed that
+    /// invisible threshold and the whole leading group became a `•••`. With no
+    /// leading group there is nothing to make room for, and claiming the slot
+    /// with a zero-sized view would now be cargo.
     private func applyRestingBar() {
         navigationItem.rightBarButtonItems = [searchItem]
-        navigationItem.leftBarButtonItems = [selectorItem].compactMap { $0 }
-        let emptyTitle = UIView()
-        emptyTitle.frame = .zero
-        navigationItem.titleView = emptyTitle
+        navigationItem.leftBarButtonItems = []
+        navigationItem.titleView = nil
     }
 
     /// `[ field ————————————————— ][ Cancel ]`
@@ -630,9 +647,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// nothing had to be told about it.
     private func setBadge(_ count: Int, at index: Int) {
         categoryBar.setBadge(count, at: index)
-        categoryBar.sizeToFit()
-        navigationController?.navigationBar.setNeedsLayout()
-        navigationController?.navigationBar.layoutIfNeeded()
+        // ⚠️ TOLD, NOT FORCED. The paragraph above records what the forcing was
+        // for — a navigation bar caches its title view's size, so a badge that
+        // changed the capsule's width left the frame and the content
+        // disagreeing. An accessory sizes by constraint.
+        selectorAccessory?.contentWidthDidChange()
     }
 
 }
