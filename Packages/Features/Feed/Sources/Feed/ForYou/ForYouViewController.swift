@@ -71,9 +71,32 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// why the lens is a tint rather than a second material.
     private let tabBar = PagedTabBar(titles: tabTitles, style: .navigationTitle)
 
-    /// The strip's home when `-foryou-dock-selector` moves it to the foot of
-    /// the screen. Nil in every other build — see `ForYouSelectorDock`.
+    /// The strip's home: a `UITabAccessory` at the foot of the screen, above
+    /// the tab bar, which collapses into it as the grid scrolls.
+    ///
+    /// ⚠️ IT EXISTS ONLY BETWEEN `viewDidAppear` AND `viewWillDisappear`.
+    /// `bottomAccessory` is a property of the TAB BAR CONTROLLER with no
+    /// per-tab scope, so a band left installed floats over whatever is pushed
+    /// on top and over whichever tab is selected next — measured, not feared.
     private var selectorAccessory: SelectorAccessory?
+
+    /// ⚠️ BOTH DEFAULT OFF, AND THE CATCH-UP MUST STAY OFF. It hand-animates a
+    /// geometry change UIKit does not animate IN THE SIMULATOR — on a device
+    /// the accessory animates itself, and the hand-animation fights it. The
+    /// full measurement is on `SelectorAccessoryHost.playCatchUpIfMoved`. These
+    /// are what is left of the spike's flags; the gate they hid behind is gone.
+    private static var accessoryOptions: SelectorAccessoryOptions {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        return SelectorAccessoryOptions(
+            keepsOwnGlass: arguments.contains("-foryou-dock-glass"),
+            animatesCatchUp: arguments.contains("-foryou-dock-catchup"),
+            isTracing: arguments.contains("-foryou-dock-trace")
+        )
+        #else
+        return SelectorAccessoryOptions()
+        #endif
+    }
 
     /// Search. The trailing EDGE item — an action, so a plain glyph with a
     /// target and no menu.
@@ -486,36 +509,22 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // which is the second reason for it — see below.
         navigationItem.title = nil
         navigationItem.largeTitleDisplayMode = .never
-        // Native bar items on both sides; the selector joins the LEADING group
-        // behind the compose glyph, so the centre stays empty and flexible.
-        // ⚠️ BEFORE `installLeadingSelector`, which APPENDS: whatever is here
-        // keeps its place at the front, so the lens glyph leads and the
-        // selector follows it.
+        // The bar keeps the lens glyph leading and search + wallet trailing.
+        // The centre is empty and stays empty: the selector is not in this bar.
         navigationItem.leftBarButtonItems = [contextItem]
         applyTrailingItems()
-        if ForYouSelectorDock.isRequested {
-            // ⚠️ **`installLeadingSelector` IS NOT CALLED FOR ITS SIDE EFFECTS.**
-            // It performs five coupled mutations and four are nav-bar-only: a
-            // width cap against a slot that no longer exists (and whose
-            // upper-bound-with-no-floor is how that host once settled at zero),
-            // a zero-sized `titleView` claiming a slot nothing needs, and
-            // `leftItemsSupplementBackButton` — which exists so a replacing
-            // leading item cannot disable the interactive pop, and this screen
-            // is a tab root that is never pushed. Only the backdrop decision
-            // carries over, and the accessory host owns it now.
-            // The backdrop decision moved INTO the host with the component:
-            // it is the one mutation `installLeadingSelector` performed that an
-            // accessory still needs, and four hosts is three too many to leave
-            // it to each of them.
-            selectorAccessory = SelectorAccessory(
-                strip: ForYouSelectorDock.isEmpty ? nil : tabBar,
-                options: ForYouSelectorDock.options
-            )
-            selectorAccessory?.hostView.onLayoutChanged = { [weak self] in
-                self?.chromeDidMove()
-            }
-        } else {
-            navigationItem.installLeadingSelector(tabBar)
+
+        // ⚠️ **THE STRIP LIVES AT THE FOOT OF THE SCREEN, IN A `UITabAccessory`.**
+        // It was a leading bar item, capped by `LeadingSelectorHost` against the
+        // room the rest of the bar claimed — machinery that existed only because
+        // iOS 26 sweeps a navigation-bar group it cannot fit into a `•••`. An
+        // accessory has no item groups and no overflow control, so none of that
+        // is needed and none of it is called: `installLeadingSelector` performed
+        // five coupled mutations and four were nav-bar-only. The fifth, the
+        // backdrop suppression, is `SelectorAccessoryHost`'s now.
+        selectorAccessory = SelectorAccessory(strip: tabBar, options: Self.accessoryOptions)
+        selectorAccessory?.hostView.onLayoutChanged = { [weak self] in
+            self?.chromeDidMove()
         }
         contextItem.menu = makeContextMenu()
 
@@ -549,11 +558,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // nested in a horizontal pager, so without this the tab bar never
         // minimizes and nothing says why.
         pager.onActiveScrollViewChanged = { [weak self] scroller in
-            guard let self, ForYouSelectorDock.isRequested else { return }
-            self.setContentScrollView(scroller, for: .bottom)
-            if ForYouSelectorDock.isTracing {
-                print("[dock] observing \(type(of: scroller))")
-            }
+            self?.setContentScrollView(scroller, for: .bottom)
         }
         pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
         pager.onPageSettled = { [weak self] format in
@@ -662,15 +667,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         for (index, format) in ForYouPagerView.pageOrder.enumerated() {
             tabBar.setBadge(Self.badgeStyle(forUnread: counts[format] ?? 0), at: index)
         }
-        if let selectorAccessory {
-            // The accessory sizes by constraint and re-reads the intrinsic
-            // height; there is no cached title-view slot to defeat.
-            selectorAccessory.contentWidthDidChange()
-        } else {
-            tabBar.sizeToFit()
-            navigationController?.navigationBar.setNeedsLayout()
-            navigationController?.navigationBar.layoutIfNeeded()
-        }
+        // ⚠️ THE NAVIGATION BAR'S CACHED TITLE-VIEW SIZE IS NO LONGER THE
+        // PROBLEM, and the paragraph above is kept as the record of one: a
+        // badge changed the capsule's width, the bar resized the slot to the
+        // new intrinsic width, the row inside kept the old one, and the leading
+        // title rendered as "tivity". An accessory sizes by constraint and
+        // re-reads the intrinsic height, so it is told rather than forced.
+        selectorAccessory?.contentWidthDidChange()
     }
 
     /// Opens the post composer.
