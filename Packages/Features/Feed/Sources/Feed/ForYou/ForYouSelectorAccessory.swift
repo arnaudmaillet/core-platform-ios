@@ -89,8 +89,20 @@ enum ForYouSelectorDock {
     /// view UIKit re-lays out underneath it, which takes the animation with it;
     /// under a fast flip the springs overlap on that same view and each pass
     /// clobbers the one before. "The capsule does anything and struggles to
-    /// keep up" is that, and it is ours, not UIKit's. A snap is worse to look
-    /// at and it is stable; the carry stays reachable for comparison.
+    /// keep up" is that, and it is ours, not UIKit's.
+    ///
+    /// ⚠️ **AND ON A DEVICE THE ACCESSORY ANIMATES BY ITSELF.** Arnaud ran the
+    /// same build on an iPhone: the collapse and the expand are smooth with
+    /// nothing hand-animated. So `anim=none` on every ancestor is a SIMULATOR
+    /// fact, not an iOS one, and the whole hand-animation existed to replace an
+    /// animation that is there on real hardware. The premise was checkable from
+    /// the first hour — the reference clip was always a device recording and
+    /// every measurement here a simulator — and it was written down early, then
+    /// argued past for six commits.
+    ///
+    /// **So do not turn this on to "fix" the simulator.** On a device it fights
+    /// a real animation; in the simulator it is the instability it was meant to
+    /// cure. It stays only as a comparison instrument.
     static var animatesCatchUp: Bool {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("-foryou-dock-catchup")
