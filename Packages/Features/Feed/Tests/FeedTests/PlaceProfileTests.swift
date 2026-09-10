@@ -520,7 +520,7 @@ struct PlaceProfileTests {
     /// is, and repeating it was a taxonomy label competing with an identity.
     ///
     /// ⚠️ It does not dock, and that is a consequence rather than a taste:
-    /// `installLeadingSelector` must overwrite `titleView` with a zero-sized
+    /// a leading selector had to overwrite `titleView` with a zero-sized
     /// view (a sized one keeps a central reservation that collapses the
     /// leading group into a `•••` on a narrow bar), so the docked name and
     /// the docked selector cannot both exist. The profile screen made the

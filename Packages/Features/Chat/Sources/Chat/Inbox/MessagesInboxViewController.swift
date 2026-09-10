@@ -23,12 +23,13 @@ import UIKit
 /// A cold launch builds new view models and with them new watermarks, and that
 /// is the only reset there is — see `InboxTabWatermark`.
 ///
-/// **The bar is written once and never again.** Leading is Compose, trailing is
-/// the search magnifier, and both belong to the inbox as a whole rather than to
-/// any page — which is the whole point: a title view gets what the side items
-/// leave it, so a page publishing its own word there would re-measure the
-/// capsule on every tab change. What a page contributes rides its own tab: a
-/// badge, and the menu its long press offers.
+/// **The bar is written once and never again.** It holds the search magnifier
+/// and nothing else — the selector moved to a `UITabAccessory` at the foot of
+/// the screen, and compose went with the leading group. What is left belongs to
+/// the inbox as a whole rather than to any page, which was always the point: a
+/// title view gets what the side items leave it, so a page publishing its own
+/// word there would re-measure the capsule on every tab change. What a page
+/// contributes rides its own tab: a badge, and the menu its long press offers.
 final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting {
     /// The inbox's surfaces, in paging order.
     private let surfaces: [any InboxSurface]
@@ -48,14 +49,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// Latches the launch-argument QA sequence to one run per screen.
     private var hasRunDebugSequence = false
     #endif
-    /// Compose belongs to the inbox, not to a page: it starts a new message
-    /// regardless of which surface is showing, and rides the same route seam
-    /// as row selection so the contact-selection flow lands resolver-side.
-    ///
-    /// It holds the leading slot permanently — no page can displace it.
-
-    /// Wired by the feature builder to the router, so this view controller
-
     /// Every tab's badge added together, for the shell's own bar item.
     ///
     /// Published from here rather than computed in the shell because this is
@@ -437,7 +430,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         applyRestingBar()
     }
 
-    /// `[ selector ] ———— [ compose ][ search ]`
+    /// `[ ————————————————————————— ][ search ]`
+    ///
     /// The resting bar is one item: the magnifier.
     ///
     /// ⚠️ AND THE EMPTY `titleView` IS GONE WITH THE SELECTOR. It was there

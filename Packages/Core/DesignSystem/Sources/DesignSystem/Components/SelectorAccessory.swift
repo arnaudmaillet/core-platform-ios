@@ -49,12 +49,12 @@ public struct SelectorAccessoryOptions: Sendable {
 ///
 /// # Why there is no width cap here
 ///
-/// The navigation bar needed one — `LeadingSelectorHost` exists because UIKit
-/// silently declines to host an over-wide leading custom view and sweeps the
-/// group into a `•••`. **An accessory has no item groups and no overflow
-/// control, so that failure cannot happen here.** The analogous one can: a
-/// width bounded only from above, with nothing requiring it positive, is how
-/// `LeadingSelectorHost` once settled at zero and was not hosted at all. So the
+/// The navigation bar needed one — the deleted `LeadingSelectorHost` existed
+/// because UIKit silently declines to host an over-wide leading custom view and
+/// sweeps the group into a `•••`. **An accessory has no item groups and no
+/// overflow control, so that failure cannot happen here.** The analogous one
+/// can: a width bounded only from above, with nothing requiring it positive, is
+/// how that host once settled at zero and was not hosted at all. So the
 /// strip is pinned leading and trailing with `equalTo` and given no width
 /// constraint of any kind — under-width it SCROLLS, keeping every title whole
 /// (`PagedTabBar`'s segment widths are required, and its content is `>=` the
@@ -101,8 +101,8 @@ public final class SelectorAccessoryHost: UIView {
         }
 
         // ⚠️ **THE HOST SETS THIS, NOT THE SCREEN, AND A TEST HAD TO FIND IT.**
-        // Of the five coupled mutations `installLeadingSelector` performed, this
-        // is the ONE that carries over to an accessory: UIKit's
+        // Of the five coupled mutations the deleted `installLeadingSelector`
+        // performed, this is the ONE that carries over: UIKit's
         // `_UITabAccessoryContainer` draws the capsule the viewer sees, so a
         // strip carrying its own backdrop draws a lens inside a lens. It lived
         // on the one adopting screen while there was one adopting screen; with
@@ -437,10 +437,10 @@ public final class SelectorAccessory {
         guard let controller else { return }
         guard controller.bottomAccessory?.contentView !== hostView else { return }
 
-        // Belt and braces, and the reason is written down in
-        // `LeadingSelectorHost.sizeToOwnContent()`: a custom view keeps its
-        // autoresizing mask, so the size UIKit reads at hand-over is the
-        // frame, and an unlaid host's frame is zero. The accessory sizes by
+        // Belt and braces, and the reason came from the navigation bar: a
+        // custom view keeps its autoresizing mask, so the size UIKit reads at
+        // hand-over is the FRAME, and an unlaid host's frame is zero — which is
+        // how a perfectly configured strip drew nothing. The accessory sizes by
         // constraint — this only guarantees the first pass is not measured on
         // a zero-sized view.
         hostView.setNeedsLayout()

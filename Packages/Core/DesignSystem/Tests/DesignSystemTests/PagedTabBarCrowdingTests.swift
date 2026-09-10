@@ -228,7 +228,7 @@ struct PagedTabBarStripScrollTests {
         bar.layoutIfNeeded()
         #expect(abs(bar.debugStripOffset) < 0.5, "nothing to reveal while it fits")
 
-        // Second pass: the host caps it, exactly as `LeadingSelectorHost` does.
+        // Second pass: the host caps it, as a bar-item host used to.
         bar.frame.size.width = bar.intrinsicContentSize.width - 50
         bar.setNeedsLayout()
         bar.layoutIfNeeded()

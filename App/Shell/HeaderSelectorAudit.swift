@@ -295,10 +295,14 @@ final class HeaderSelectorAudit {
             node = current.superview
             depth += 1
         }
-        let inHost = chain.contains { $0.contains("LeadingSelectorHost") }
-        print(String(format: "[header-audit] %@: HOSTING inHost=%@ intrinsic=%.0f "
+        // ⚠️ THE `inHost=` FLAG IS GONE WITH THE CLASS IT LOOKED FOR. It asked
+        // whether the strip was inside `LeadingSelectorHost`, which no longer
+        // exists — every selector is in an accessory or a toolbar now, so the
+        // answer was NO everywhere and read as a finding. The CHAIN is still
+        // printed, and it is what actually says where a strip ended up.
+        print(String(format: "[header-audit] %@: HOSTING intrinsic=%.0f "
                      + "hostFrame=%.0fx%.0f chain=%@",
-                     surface, inHost ? "YES" : "NO",
+                     surface,
                      selector.intrinsicContentSize.width,
                      selector.superview?.frame.width ?? -1,
                      selector.superview?.frame.height ?? -1,

@@ -251,11 +251,10 @@ final class SearchResultsViewController: UIViewController {
 
 
     /// ⚠️ THE SELECTOR IS INSTALLED WHEN THERE IS A REAL BAR TO MEASURE, not in
-    /// `viewDidLoad`. `LeadingSelectorHost` caps the strip against the room the
-    /// rest of the bar claims, and takes that measurement ONCE, in
-    /// `sizeToOwnContent()`, before the item is offered to UIKit — a cap
-    /// applied later arrives on a view that no longer has anywhere to be. So
-    /// the install waits for a bar with a width.
+    /// `viewDidLoad`. A bar-item host has to take its measurement ONCE, before
+    /// the item is offered to UIKit — a cap applied later arrives on a view that
+    /// no longer has anywhere to be. So the install waits for a bar with a
+    /// width.
     ///
     /// ⚠️ NOT WHILE A TRANSITION IS RUNNING: this fires during a push and a pop
     /// too, and the bar's width is not settled there.
@@ -383,20 +382,39 @@ final class SearchResultsViewController: UIViewController {
         // 16 a side, the back button's platter, the gap between the leading and
         // trailing groups, and the trailing platter's own inset.
         //
-        // ⚠️ THESE ARE COPIES. The originals are `LeadingSelectorBudget`'s,
-        // measured on iPhone 17 Pro and pinned by tests — but that type is
-        // internal to DesignSystem, so a caller outside it can only restate
-        // them. They are a floor, not a ceiling: the field YIELDS, so a copy
-        // that has drifted low costs a narrower field and never an overflow,
-        // which is the direction that stays safe. If the budget ever goes
-        // public, delete these.
+        // ⚠️ **THIS IS NOW THE ONLY COPY OF THESE MEASUREMENTS.** They were
+        // `LeadingSelectorBudget`'s, measured on iPhone 17 Pro / iOS 26.5 and
+        // pinned by tests; that type went with the leading-selector machinery
+        // when every selector moved to an accessory or a toolbar, and these are
+        // what is left of it. Measured, so they can be checked again:
         //
-        // ⚠️ AND THE BACK BUTTON IS CHARGED A BARE 44pt CHEVRON, which is what
-        // `LeadingSelectorHost` measured beside a leading custom view: "iOS 26
-        // draws the back button as a bare 44pt chevron platter". This screen
-        // has no leading custom view, so if UIKit ever gives the chevron its
-        // word back the field is 44pt too generous — and yields, rather than
-        // overflowing.
+        //     barMargin           16   the bar's own margin, each end
+        //     itemWidth           44   a bar item's platter — the touch target,
+        //                              and the least a glyph item can occupy
+        //     interGroupGap       24   leading group → trailing group. A FLOOR:
+        //                              at a 20pt gap both groups drew, at 5 the
+        //                              trailing pair became a `•••`
+        //     platterPadding       8   a platter's inset around its content —
+        //                              a 267pt capsule rides a 275pt platter
+        //     sharedItemSpacing   27   between two items INSIDE one shared
+        //                              pill. Two trailing glyphs measure 115pt
+        //                              together, not 88 — charging 44 each is
+        //                              what swept the profile's actions into a
+        //                              `•••`
+        //     platterGap          12   between two ADJACENT platters
+        //     titledItemPadding   34   what a titled item's platter adds to its
+        //                              word ("Following": 72pt of text, 106pt
+        //                              platter)
+        //
+        // They are a floor, not a ceiling: the field YIELDS, so a number that
+        // has drifted low costs a narrower field and never an overflow — the
+        // direction that stays safe.
+        //
+        // ⚠️ AND THE BACK BUTTON IS CHARGED A BARE 44pt CHEVRON, measured
+        // beside a leading custom view: iOS 26 draws it as a bare 44pt chevron
+        // platter. This screen has no leading custom view, so if UIKit ever
+        // gives the chevron its word back the field is 44pt too generous — and
+        // yields, rather than overflowing.
         var claimed: CGFloat = 16 * 2 + 44 + 24 + 8
         if walletWanted > 0 {
             // The badge opts out of the shared background, so it wears its OWN
@@ -500,18 +518,18 @@ final class SearchResultsViewController: UIViewController {
         )
         filter.accessibilityLabel = "Filters"
 
-        // ⚠️ **NO WIDTH CAP HERE, AND A TOOLBAR IS WHY.** `LeadingSelectorHost`
-        // exists because a UINavigationBar sweeps a leading group it cannot fit
-        // into a `•••`; a toolbar has no item groups and no overflow control,
-        // so that failure is not available to it. The app already hosts a wide
+        // ⚠️ **NO WIDTH CAP HERE, AND A TOOLBAR IS WHY.** The cap that used to
+        // exist did so because a UINavigationBar sweeps a leading group it
+        // cannot fit into a `•••`; a toolbar has no item groups and no overflow
+        // control, so that failure is not available to it. The app already hosts a wide
         // custom view in this same shared toolbar with no arithmetic at all —
         // the chat composer's sticker strip — and that is the precedent
         // followed here.
         //
         // ⚠️ BARE, THOUGH. UIKit wraps a bar item's custom view in its own
         // glass capsule wherever the item lives, so a bar carrying its own
-        // backdrop draws a lens inside a lens. Same reason
-        // `installLeadingSelector` sets this.
+        // backdrop draws a lens inside a lens. `SelectorAccessoryHost` sets the
+        // same flag for the same reason on the screens that use an accessory.
         tabBar.suppressesBackdrop = true
 
         // ⚠️ `toolbarItems` IS PER VIEW CONTROLLER even though the toolbar is

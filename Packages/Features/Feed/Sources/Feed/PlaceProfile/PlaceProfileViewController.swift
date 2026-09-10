@@ -86,7 +86,7 @@ final class PlaceProfileViewController: UIViewController {
     /// TITLE on the banner, and nowhere else.
     ///
     /// ⚠️ THE NAME DOES NOT DOCK, and that is a consequence rather than a
-    /// preference. `installLeadingSelector` must overwrite `titleView` with a
+    /// preference. A leading selector had to overwrite `titleView` with a
     /// zero-sized view: a nil or sized title keeps a central reservation that
     /// collapses the leading group into a `•••` below 440pt. So the docked
     /// name and the docked selector cannot both exist, and the profile screen
@@ -1251,7 +1251,7 @@ final class PlaceProfileViewController: UIViewController {
         configureFollowButton()
         configureWalletBadge()
         applyTrailingItems()
-        // ⚠️ THE ORDERING RULE WENT WITH THE CAP. `installLeadingSelector`
+        // ⚠️ THE ORDERING RULE WENT WITH THE CAP. The leading-selector install
         // measured the bar's whole budget to size its capsule, so the trailing
         // group had to be in place first. An accessory has no budget to
         // measure against and no group to be swept into.
@@ -1342,7 +1342,7 @@ final class PlaceProfileViewController: UIViewController {
     /// ⚠️ A PLAIN BAR ITEM, where this was a custom view carrying a label.
     /// The word is gone on purpose — the state is already in the fill, and a
     /// titled item is charged its whole word against the bar's budget
-    /// (`LeadingSelectorBudget.wantedWidth`), which is width the docked
+    /// (34pt of platter around it, measured), which is width the docked
     /// selector then does not have: measured, "Activity" came back clipped to
     /// "Activi" on a 402pt device with the label up. A glyph item costs the
     /// 44pt every glyph costs, and UIKit draws it as the same bubble the

@@ -8,7 +8,7 @@ import UIKit
 /// shows. A custom-view bar item (an image-only item can't carry the
 /// count), so iOS 26 wraps it in its own glass capsule; hosts keep it out
 /// of shared platters with `sharesBackground = false` or a fixed-space
-/// spacer (`LeadingSelectorItem`'s doctrine).
+/// spacer.
 ///
 /// # Built from SUBVIEWS, not `UIButton.Configuration` — deliberately
 /// A configuration button re-renders its content on a DEFERRED pass, so at

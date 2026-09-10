@@ -515,13 +515,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         applyTrailingItems()
 
         // ⚠️ **THE STRIP LIVES AT THE FOOT OF THE SCREEN, IN A `UITabAccessory`.**
-        // It was a leading bar item, capped by `LeadingSelectorHost` against the
-        // room the rest of the bar claimed — machinery that existed only because
-        // iOS 26 sweeps a navigation-bar group it cannot fit into a `•••`. An
-        // accessory has no item groups and no overflow control, so none of that
-        // is needed and none of it is called: `installLeadingSelector` performed
-        // five coupled mutations and four were nav-bar-only. The fifth, the
-        // backdrop suppression, is `SelectorAccessoryHost`'s now.
+        // It was a leading bar item, capped against the room the rest of the bar
+        // claimed — machinery that existed only because iOS 26 sweeps a
+        // navigation-bar group it cannot fit into a `•••`. An accessory has no
+        // item groups and no overflow control, so none of it is needed: of the
+        // five coupled mutations that install performed, four were
+        // nav-bar-only, and the fifth — the backdrop suppression — is
+        // `SelectorAccessoryHost`'s now. The whole file is deleted.
         selectorAccessory = SelectorAccessory(strip: tabBar, options: Self.accessoryOptions)
         selectorAccessory?.hostView.onLayoutChanged = { [weak self] in
             self?.chromeDidMove()

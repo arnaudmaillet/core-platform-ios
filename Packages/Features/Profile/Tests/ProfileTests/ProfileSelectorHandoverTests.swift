@@ -97,7 +97,7 @@ struct ProfileSelectorHandoverTests {
     /// ⚠️ AND ONE OF THEM WAS ALREADY VACUOUS.
     /// `theRestingSelectorSurvivesTheBarRewritingItsAlpha` poked
     /// `navigationItem.titleView?.alpha` — but on this screen the title view
-    /// was the ZERO-SIZED empty view `installLeadingSelector` planted, never
+    /// was the ZERO-SIZED empty view the leading-selector install planted, never
     /// the docked bar. It would have passed unchanged after the selector left
     /// the bar entirely. Deleting it removes a test that proved nothing.
     ///
