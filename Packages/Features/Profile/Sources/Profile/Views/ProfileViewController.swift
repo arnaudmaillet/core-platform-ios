@@ -684,7 +684,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        selectorAccessory?.remove(from: tabBarController)
+        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         setStackGesturesEnabled(true)
         // Stops as this screen is covered — including by the post it just
         // opened, whose own player is what should be heard.
@@ -703,7 +703,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+                                   alongside: transitionCoordinator)
         #if DEBUG
         verifyRevealClearsSelector()
         #endif
@@ -1672,13 +1673,32 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// composition), viewWillAppear (synchronous pre-transition bind), and the
     /// async data callbacks (via `alongsideTransition`).
     private func applyNavigationState() {
-        // ⚠️ **No title.** The bar used to carry the @handle, which said again
-        // what the identity block says in full a finger's width below it — and
-        // once the format selector docks into the title slot, a name there
-        // would be competing with the one control this screen's chrome exists
-        // to hold. The handle is not lost: it is on the profile, where the
-        // viewer is already looking.
-        if title != nil { title = nil }
+        // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
+        // screen pushed from it a WORDED back button, and two pushed bars were
+        // budgeted against a bare 44pt chevron: `SearchResultsViewController`
+        // says in as many words that its field would then be "44pt too
+        // generous", and the chat thread's identity view is capped at 240pt on
+        // the same assumption — 32 margins + 44 chevron + 24 gap + 8 padding +
+        // 240 = 348 fits 375, while a "Messages" label (~98pt with its platter)
+        // makes it ~402 and does not. `.minimal` keeps the title for this
+        // screen and the chevron bare for the next one.
+        navigationItem.backButtonDisplayMode = .minimal
+
+        // ⚠️ **THE TAB'S NAME, NOT THE @HANDLE — and the difference is the
+        // whole reason this is allowed now.** The bar used to carry the handle,
+        // which said again what the identity block says in full a finger's
+        // width below it. "Profile" duplicates nothing. The other half of the
+        // old rule — that a docked format selector would be competing for this
+        // slot — is simply gone: on the tab root the selector is a
+        // `UITabAccessory`, on a pushed profile it is a bottom-toolbar item,
+        // and neither is in the navigation bar.
+        //
+        // ⚠️ THE TAB ROOT ONLY. A pushed profile is a person, not a section of
+        // the app, and titling it "Profile" would label somebody else's page
+        // with the viewer's own tab. `trayPlacement` is the only thing that
+        // knows which this is.
+        let wanted = trayPlacement == .aboveBottomSafeArea ? "Profile" : nil
+        if title != wanted { title = wanted }
         updateActionBarItem(followButtonState)
     }
 

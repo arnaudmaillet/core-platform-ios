@@ -195,7 +195,8 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+                                   alongside: transitionCoordinator)
         assertAppTabBar()
         // ⚠️ THE ONE INSTANT THE BAR IS BOTH PRESENT AND LAID OUT on this
         // screen: `assertAppTabBar` has just restored it synchronously. The
@@ -547,7 +548,7 @@ final class PlaceProfileViewController: UIViewController {
         // ⚠️ ABOVE ANY OTHER GUARD. The accessory belongs to the tab bar
         // controller, not to this screen: a band left up floats over the feed
         // pushed on top of this page and over whichever tab comes next.
-        selectorAccessory?.remove(from: tabBarController)
+        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         // Off screen, this page holds no claim on the shared player pool —
         // the feed pushed above it is about to want every loan.
         for hosted in hostedPages { (hosted as? ForYouGridPage)?.setAutoplayActive(false) }

@@ -8,12 +8,32 @@ import UIKit
 @MainActor
 struct SelectorAccessoryTests {
 
-    private func makeHost() -> (SelectorAccessoryHost, PagedTabBar) {
-        let strip = PagedTabBar(titles: ["One", "Two", "Three"], style: .navigationTitle)
+    private func makeHost(
+        titles: [String] = ["One", "Two", "Three"],
+        environment: UITabAccessory.Environment? = nil,
+        width: CGFloat = 360
+    ) -> (SelectorAccessoryHost, PagedTabBar) {
+        let strip = PagedTabBar(titles: titles, style: .navigationTitle)
         let host = SelectorAccessoryHost(strip: strip)
-        host.frame = CGRect(x: 0, y: 0, width: 360, height: 48)
+        // ⚠️ THE ENVIRONMENT IS DRIVABLE WITHOUT A `UITabBarController`.
+        // `UITraitOverrides` conforms to `UIMutableTraits`, which carries a
+        // settable `tabAccessoryEnvironment` — so the collapsed arrangement is
+        // a unit test rather than a UITest with a real finger.
+        if let environment {
+            host.traitOverrides.tabAccessoryEnvironment = environment
+            host.updateTraitsIfNeeded()
+        }
+        host.frame = CGRect(x: 0, y: 0, width: width, height: 48)
         host.layoutIfNeeded()
         return (host, strip)
+    }
+
+    /// Each segment's laid-out width, largest-minus-smallest — the number that
+    /// says which arrangement is running.
+    private func widthSpread(_ strip: PagedTabBar) -> CGFloat {
+        let widths = strip.debugSegmentWidths
+        guard let low = widths.min(), let high = widths.max() else { return 0 }
+        return high - low
     }
 
     /// ⚠️ A HEIGHT IS STATED AND A WIDTH IS NOT. `UITabAccessory` has one
@@ -54,13 +74,72 @@ struct SelectorAccessoryTests {
         #expect(host.bounds.maxY - strip.frame.maxY == 4)
     }
 
-    /// ⚠️ FILLED IN BOTH ENVIRONMENTS. Hugging is the obvious answer for the
-    /// docked state and it is the one that leaves a hole on each side: the
-    /// accessory hands out 226pt, three titles want less, and the capsule
-    /// centres itself in the difference.
-    @Test func theStripSpansTheSlotRatherThanHugging() {
-        let (_, strip) = makeHost()
-        #expect(strip.fillsWidth)
+    /// ⚠️ **THE BAR ALWAYS SPANS; ONLY THE SEGMENTS CHANGE.** `fillsWidth` says
+    /// "the host owns my width", which is true in both environments — the
+    /// accessory's slot is UIKit's and it does not negotiate (measured: a
+    /// REQUIRED width constraint on the content view is inert, no conflict
+    /// logged). What the collapse changes is how the segments divide that slot.
+    @Test func theStripTakesItsWidthFromTheHostInEveryEnvironment() {
+        #expect(makeHost().1.fillsWidth)
+        #expect(makeHost(environment: .regular).1.fillsWidth)
+        #expect(makeHost(environment: .inline, width: 234).1.fillsWidth)
+    }
+
+    /// ⚠️ **THIS TEST USED TO PASS FOR THE WRONG REASON.** It was named "spans
+    /// rather than hugs" and asserted one Bool on a DETACHED host — whose
+    /// environment is `.unspecified` — so it would have gone on passing after
+    /// the collapsed arrangement changed underneath it. What it should have
+    /// been measuring is the segments.
+    @Test func expandedSegmentsShareTheSlotEqually() {
+        let (_, strip) = makeHost(titles: ["All", "Requests", "Suggestions"],
+                                  environment: .regular)
+        #expect(strip.segmentSizing == .equalSlots)
+        #expect(widthSpread(strip) < 0.5,
+                "expanded, every segment is as wide as the widest: \(strip.debugSegmentWidths)")
+    }
+
+    /// ⚠️ **AND COLLAPSED THEY ARE NOT.** Equal slots price every segment at
+    /// the LONGEST title, so in a 234pt inline slot "All" wears "Suggestions"'
+    /// box — 41pt of word in a 98pt box — and the strip scrolls to show three
+    /// titles it would otherwise fit. Natural widths are what the inline
+    /// environment asks for, and Apple's only sizing sentence about the
+    /// accessory says the same thing: "When the accessory is inline with the
+    /// tab bar, there is less space available to display it."
+    @Test func collapsedSegmentsTakeTheirOwnWidths() {
+        let (_, strip) = makeHost(titles: ["All", "Requests", "Suggestions"],
+                                  environment: .inline, width: 234)
+        #expect(strip.segmentSizing == .naturalWidths)
+        #expect(widthSpread(strip) > 0.5,
+                "collapsed, a short title gets a short box: \(strip.debugSegmentWidths)")
+    }
+
+    /// The collapse is a round trip, and coming back must restore the shape
+    /// exactly — not approximately.
+    @Test func comingBackFromInlineRestoresTheExpandedShape() {
+        let (host, strip) = makeHost(titles: ["All", "Requests", "Suggestions"],
+                                     environment: .regular)
+        let expanded = strip.debugSegmentWidths
+        host.traitOverrides.tabAccessoryEnvironment = .inline
+        host.updateTraitsIfNeeded()
+        host.frame = CGRect(x: 0, y: 0, width: 234, height: 48)
+        host.layoutIfNeeded()
+        #expect(strip.segmentSizing == .naturalWidths)
+
+        host.traitOverrides.tabAccessoryEnvironment = .regular
+        host.updateTraitsIfNeeded()
+        host.frame = CGRect(x: 0, y: 0, width: 360, height: 48)
+        host.layoutIfNeeded()
+        #expect(strip.segmentSizing == .equalSlots)
+        #expect(strip.debugSegmentWidths == expanded)
+    }
+
+    /// ⚠️ **`.unspecified` IS THE DEFAULT, AND IT MUST MEAN "LEAVE IT ALONE".**
+    /// Every non-accessory host reports it — a navigation bar's title slot, the
+    /// stack's bottom toolbar — so a rule written as `!= .regular` would
+    /// silently re-arrange all of them.
+    @Test func aStripOutsideAnyAccessoryKeepsTheExpandedArrangement() {
+        let (_, strip) = makeHost(titles: ["All", "Requests", "Suggestions"])
+        #expect(strip.segmentSizing == .equalSlots)
     }
 
     /// ⚠️ BARE, OR A LENS INSIDE A LENS. The container draws the capsule the

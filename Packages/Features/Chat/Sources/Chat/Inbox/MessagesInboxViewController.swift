@@ -12,24 +12,27 @@ import UIKit
 /// about how a page renders; every surface arrives as an `InboxSurface` and is
 /// otherwise opaque.
 ///
-/// **The capsule is the title.** It is `navigationItem.titleView`, the same
-/// arrangement `ForYouViewController` uses, so this screen reserves no safe
-/// area of its own: the navigation bar's height already accounts for it, and
-/// each page's list insets itself through the standard safe area. Nothing
-/// floats over the content, so there is no header geometry to maintain here.
+/// **The capsule WAS the title, and is not any more.** It sat in
+/// `navigationItem.titleView`; it is in a `UITabAccessory` at the foot of the
+/// screen now, and the title slot carries the word "Messages". Either way this
+/// screen reserves no safe area of its own — the navigation bar accounts for
+/// its own height, UIKit accounts for the accessory's, and each page's list
+/// insets itself through the standard safe area. Nothing floats over the
+/// content, so there is no header geometry to maintain here.
 ///
 /// **Badges are a fact about the session.** Nothing here retires one: not
 /// paging between tabs, not pushing a thread, not leaving for another root tab.
 /// A cold launch builds new view models and with them new watermarks, and that
 /// is the only reset there is — see `InboxTabWatermark`.
 ///
-/// **The bar is written once and never again.** It holds the search magnifier
-/// and nothing else — the selector moved to a `UITabAccessory` at the foot of
-/// the screen, and compose went with the leading group. What is left belongs to
-/// the inbox as a whole rather than to any page, which was always the point: a
-/// title view gets what the side items leave it, so a page publishing its own
-/// word there would re-measure the capsule on every tab change. What a page
+/// **The bar is written once and never again.** The tab's name in the centre
+/// and the search magnifier trailing — the selector moved to the accessory and
+/// compose went with the leading group. Both belong to the inbox as a whole
+/// rather than to any page, which was always the point: a page publishing its
+/// own word up there would re-measure the bar on every tab change. What a page
 /// contributes rides its own tab: a badge, and the menu its long press offers.
+/// The one exception is search, which takes the title slot for its field —
+/// a `titleView` outranks a `title`, so the name hides and returns by itself.
 final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting {
     /// The inbox's surfaces, in paging order.
     private let surfaces: [any InboxSurface]
@@ -99,11 +102,27 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // No title string: the capsule occupies the slot one would have taken.
-        // The tab's own name still reads "Messages" — that lives on the `UITab`,
-        // not here.
-        navigationItem.title = nil
+        // The tab's own name, in the bar. The slot was empty because the
+        // capsule used to occupy it; the capsule is in a `UITabAccessory` at
+        // the foot of the screen now.
+        //
+        // ⚠️ SET ONCE, AND THE SEARCH MORPH IS LEFT ALONE. `applySearchingBar`
+        // puts a `UISearchTextField` in `titleView`, which OUTRANKS `title` —
+        // so the word hides itself while searching and comes back on Cancel,
+        // with nothing to write in either direction.
+        navigationItem.title = "Messages"
         navigationItem.largeTitleDisplayMode = .never
+        // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
+        // screen pushed from it a WORDED back button, and two pushed bars were
+        // budgeted against a bare 44pt chevron: `SearchResultsViewController`
+        // says in as many words that its field would then be "44pt too
+        // generous", and the chat thread's identity view is capped at 240pt on
+        // the same assumption — 32 margins + 44 chevron + 24 gap + 8 padding +
+        // 240 = 348 fits 375, while a "Messages" label (~98pt with its platter)
+        // makes it ~402 and does not. `.minimal` keeps the title for this
+        // screen and the chevron bare for the next one.
+        navigationItem.backButtonDisplayMode = .minimal
+
         view.backgroundColor = .systemBackground
         if let searchResults {
             // A picked row takes the search UI down BEFORE the thread goes up.
@@ -209,7 +228,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // ⚠️ ABOVE ANY OTHER GUARD, and covering a push as well as a tab
         // switch: the accessory is shell-lifetime state, and this is the only
         // moment that reliably precedes something else owning the band.
-        selectorAccessory?.remove(from: tabBarController)
+        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -221,7 +240,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     override func viewDidAppear(_ animated: Bool) {
         // ⚠️ THE MINIMIZE NEEDS A SCROLLER NAMED, or arming it does nothing
         // here and gives every other tab a collapsing bar for free.
-        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+                                   alongside: transitionCoordinator)
         super.viewDidAppear(animated)
         // The pager's horizontal pan yields to the stack's edge-swipe pop, so
         // a back gesture is never stolen by a page change. Wired once the view

@@ -62,14 +62,17 @@ final class AccessoryCollapseUITests: XCTestCase {
     /// page named, and the band minimizing on a scroll down — and the way back
     /// is printed for whoever is reading the run.
     private var expandReport: [String] = []
+    private var sizingReport: [String] = []
 
     func testEveryAccessorySelectorRidesTheScroll() {
         expandReport = []
-        // An ACTIVITY, not a `print`: test-process stdout does not survive into
+        sizingReport = []
+        // ACTIVITIES, not `print`s: test-process stdout does not survive into
         // the xcresult in any readable form, and a report nobody can find is
         // the same as no report.
         defer {
             XCTContext.runActivity(named: "way back — " + expandReport.joined(separator: " | ")) { _ in }
+            XCTContext.runActivity(named: "segments — " + sizingReport.joined(separator: " | ")) { _ in }
         }
         for surface in Self.accessorySurfaces {
             let app = XCUIApplication()
@@ -120,6 +123,16 @@ final class AccessoryCollapseUITests: XCTestCase {
             expandReport.append(expanded == nil
                 ? "\(surface.name): DID NOT expand in 3 drags"
                 : "\(surface.name): expanded after \(drags) drag\(drags == 1 ? "" : "s")")
+
+            // ⚠️ **THE SEGMENT WIDTHS ARE THE ONLY THING THAT SAYS WHICH
+            // ARRANGEMENT RAN.** Every arrangement looks plausible in a
+            // screenshot of a bar that fits; what separates them is whether a
+            // short title got a short box. Recorded rather than asserted here —
+            // the gate for that is `SelectorAccessoryTests`, which drives the
+            // environment directly — but recorded against the REAL accessory,
+            // at the width UIKit actually hands out, which no unit test can.
+            sizingReport.append("\(surface.name) regular \(resting.segments)"
+                + " → inline \(minimized?.segments ?? "?")")
             app.terminate()
         }
     }
@@ -132,6 +145,8 @@ final class AccessoryCollapseUITests: XCTestCase {
         let isArmed: Bool
         let hasNamedScroller: Bool
         let namedTheVisibleOne: Bool
+        /// Each segment's width, in order — "41/89/98" reads at a glance.
+        let segments: String
 
         init?(_ identifier: String) {
             guard identifier.hasPrefix("accessory;") else { return nil }
@@ -145,6 +160,7 @@ final class AccessoryCollapseUITests: XCTestCase {
             isArmed = fields["armed"] == "1"
             hasNamedScroller = fields["named"] == "1"
             namedTheVisibleOne = fields["onscreen"] == "1"
+            segments = fields["segments"] ?? "?"
         }
     }
 

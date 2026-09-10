@@ -75,20 +75,26 @@ final class AccessoryCollapseAudit {
         let onScreen = top?.view.flatMap { OnScreenScroller.candidate(in: $0) }
         let line = "accessory;seq=\(sequence)"
             + ";env=\(environment(of: content))"
-            + String(format: ";w=%.0f;barH=%.0f",
-                     content?.bounds.width ?? -1, tabBarController.tabBar.bounds.height)
+            + String(format: ";w=%.0f;container=%.0fx%.0f;containerX=%.0f;barH=%.0f",
+                     content?.bounds.width ?? -1,
+                     content?.superview?.bounds.width ?? -1,
+                     content?.superview?.bounds.height ?? -1,
+                     content?.superview.map { view in
+                         view.convert(view.bounds, to: nil).minX
+                     } ?? -1,
+                     tabBarController.tabBar.bounds.height)
             + ";armed=\(tabBarController.tabBarMinimizeBehavior == .onScrollDown ? 1 : 0)"
             + ";named=\(named == nil ? 0 : 1)"
             + ";onscreen=\(named != nil && named === onScreen ? 1 : 0)"
             + String(format: ";offset=%.0f;room=%.0f", named?.contentOffset.y ?? -9999,
                      named.map { $0.contentSize.height - $0.bounds.height
                          + $0.adjustedContentInset.top + $0.adjustedContentInset.bottom } ?? -1)
+            + ";segments=\(segmentWidths(in: content))"
             + ";surface=\(top.map { String(describing: type(of: $0)) } ?? "none")"
         probe.accessibilityIdentifier = line
         // Only transitions, so the sink is readable: 4Hz for a whole test run is
-        // thousands of identical lines, and the one line that matters is the
-        // one where `env` changed.
-        // Compared with the volatile numbers stripped out: `seq` bumps every
+        // thousands of identical lines, and the one that matters is the one
+        // where `env` changed. Compared with the volatile numbers stripped out: `seq` bumps every
         // sample and `offset` moves every frame of a drag, so leaving either in
         // makes "only transitions" mean "every sample".
         let comparable = line.split(separator: ";")
@@ -98,6 +104,20 @@ final class AccessoryCollapseAudit {
             lastLine = comparable
             emit(line)
         }
+    }
+
+    /// Each segment's width, in order — the number that says whether "All" is
+    /// wearing "Requests"' box.
+    private func segmentWidths(in content: UIView?) -> String {
+        guard let content else { return "-" }
+        var strip: PagedTabBar?
+        func walk(_ view: UIView) {
+            if let bar = view as? PagedTabBar { strip = strip ?? bar }
+            view.subviews.forEach(walk)
+        }
+        walk(content)
+        guard let strip else { return "-" }
+        return strip.debugSegmentWidths.map { String(format: "%.0f", $0) }.joined(separator: "/")
     }
 
     private func environment(of content: UIView?) -> String {

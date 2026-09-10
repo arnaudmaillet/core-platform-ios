@@ -8,11 +8,17 @@ import UIKit
 /// either — it takes titles and reports an index, so a third host is a `titles`
 /// array and two closures.
 ///
-/// All three hosts wear it as `navigationItem.titleView` (`.navigationTitle`)
-/// — Messages, For You, and the profile's relationship lists — which is why
-/// that style carries the measured constants. `.floating` is the original
-/// arrangement and still complete, but has no host today, so treat its numbers
-/// as unverified against real content.
+/// ⚠️ **NO HOST WEARS IT AS `navigationItem.titleView` ANY MORE.** This said
+/// "all three hosts" do, and named Messages, For You and the relationship
+/// lists; every selector left the navigation bar in the migration that ended
+/// on 2026-09-10. They are in a `UITabAccessory` above the tab bar (For You,
+/// Messages, the profile tab root, the place page) or a `UIBarButtonItem` in
+/// the stack's bottom toolbar (search results, relationship lists, a pushed
+/// profile). `.navigationTitle` still carries the measured constants and is
+/// still the right style for both — it is the HUGGING style, and the name is
+/// now historical. `.floating` is the original arrangement, still complete, and
+/// has no host today, so treat its numbers as unverified against real
+/// content.
 ///
 /// ⚠️ **A title view scrolls its overflow.** An earlier revision of this file
 /// said it could not, and pinned the content width with `==` to force
@@ -413,6 +419,26 @@ public final class PagedTabBar: UIControl {
     /// How many segments the bar carries, so an audit can hit-test each one
     /// without reaching into the private row.
     public var debugSegmentCount: Int { segments.count }
+
+    /// Every segment's laid-out frame, in THIS BAR's coordinate space, in order.
+    ///
+    /// ⚠️ **AN AUDIT THAT DIVIDES THE BAR BY `count` IS ASSUMING AN
+    /// ARRANGEMENT.** That was true while every segment was as wide as the
+    /// widest; it stops being true the moment the bar hands out natural widths,
+    /// and the probe points then drift off the outer segments and report a
+    /// working strip as blocked. Real frames are the only thing that survives a
+    /// distribution change.
+    public var debugSegmentFrames: [CGRect] {
+        segments.map { $0.convert($0.bounds, to: self) }
+    }
+
+    /// Every segment's laid-out width, in order.
+    ///
+    /// ⚠️ THE DISTRIBUTION IS INVISIBLE IN A SCREENSHOT OF A FITTING BAR — every
+    /// arrangement looks plausible until a title is long enough to inflate the
+    /// short ones. These are the widths that say which arrangement is actually
+    /// running.
+    public var debugSegmentWidths: [CGFloat] { debugSegmentFrames.map(\.width) }
     #endif
 
     public var suppressesBackdrop: Bool = false {
@@ -449,24 +475,73 @@ public final class PagedTabBar: UIControl {
     public var fillsWidth: Bool = false {
         didSet {
             guard fillsWidth != oldValue, style.hugsContent else { return }
-            row.distribution = activeDistribution
-            NSLayoutConstraint.deactivate(fillsWidth ? rowHugsConstraints : rowFillsConstraints)
-            NSLayoutConstraint.activate(fillsWidth ? rowFillsConstraints : rowHugsConstraints)
-            invalidateIntrinsicContentSize()
-            setNeedsLayout()
+            applyRowArrangement()
         }
     }
 
+    /// How the segments divide the room the bar has.
+    ///
+    /// ⚠️ **A THIRD AXIS, BECAUSE `fillsWidth` WAS CARRYING TWO ANSWERS.** That
+    /// Bool means "the host owns my width now" — it is what makes the bar
+    /// report `noIntrinsicMetric` — and it was ALSO deciding that the segments
+    /// share the room equally. The two came apart the moment one host wanted
+    /// the second answer changed without the first: an accessory's width is
+    /// UIKit's in both environments (measured: a required width constraint on
+    /// the content view is inert), so the bar must go on spanning while the
+    /// segments stop being uniform.
+    public enum SegmentSizing: Sendable {
+        /// Every segment as wide as the widest — one balanced control, and the
+        /// right answer whenever the bar has room to spare.
+        case equalSlots
+        /// Every segment as wide as its own title: "All" narrower than
+        /// "Requests". What the `.inline` accessory asks for, where the slot is
+        /// 234pt and equal slots price every title at the longest one's width.
+        case naturalWidths
+    }
+
+    /// Defaults to `.equalSlots`, which is what every host had before this
+    /// existed — so a host that never sets it is unchanged by construction.
+    public var segmentSizing: SegmentSizing = .equalSlots {
+        didSet {
+            guard segmentSizing != oldValue else { return }
+            applyRowArrangement()
+        }
+    }
 
     /// Whether the bar is currently taking its width from its host rather than
     /// stating one — true for a floating bar always, and for a hugging bar that
     /// has been told to fill.
     private var spansItsHost: Bool { !style.hugsContent || fillsWidth }
 
-    /// How the row divides itself RIGHT NOW, which is the style's answer only
-    /// while the bar is hugging.
+    /// Whether the row is pinned to both content edges with its segments
+    /// sharing the width equally — the arrangement `fillsWidth` alone used to
+    /// imply.
+    ///
+    /// ⚠️ THE TWO HALVES MUST MOVE TOGETHER. `.fill` with the row pinned at
+    /// BOTH ends hands all the slack to one arbitrary segment: measured, "All"
+    /// came out 52pt wide where its content needed 36, and its selection read
+    /// as an oval instead of a disk. Natural widths therefore centre the row
+    /// (`rowHugsConstraints`) rather than stretching it.
+    private var spreadsSegments: Bool { spansItsHost && segmentSizing == .equalSlots }
+
+    /// How the row divides itself RIGHT NOW.
     private var activeDistribution: UIStackView.Distribution {
-        spansItsHost ? .fillEqually : style.segmentDistribution
+        spreadsSegments ? .fillEqually : style.segmentDistribution
+    }
+
+    /// Re-states the row's distribution and its pinning together.
+    ///
+    /// ⚠️ THROUGH `setNeedsLayout()`, NEVER A DIRECT `applyProgress()`. The lens
+    /// is built from `segments[i].frame`, and every path except
+    /// `SegmentRow.layoutSubviews` reads those one pass stale — the shipped
+    /// defect was a badge arriving while the segments still carried their old
+    /// frames, which drew "99" permanently outside its own pill.
+    private func applyRowArrangement() {
+        row.distribution = activeDistribution
+        NSLayoutConstraint.deactivate(spreadsSegments ? rowHugsConstraints : rowFillsConstraints)
+        NSLayoutConstraint.activate(spreadsSegments ? rowFillsConstraints : rowHugsConstraints)
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
     }
 
     private var rowHugsConstraints: [NSLayoutConstraint] = []
@@ -650,7 +725,7 @@ public final class PagedTabBar: UIControl {
         // which is half a change and looks like a bug.
         paddedLeadingConstraints = [hugsLeading, fillsLeading]
         paddedTrailingConstraints = [hugsTrailing, fillsTrailing]
-        NSLayoutConstraint.activate(spansItsHost ? rowFillsConstraints : rowHugsConstraints)
+        NSLayoutConstraint.activate(spreadsSegments ? rowFillsConstraints : rowHugsConstraints)
 
         // How the content relates to the capsule's width — and this is what
         // decides whether "too much content" becomes SCROLLING or TRUNCATION.

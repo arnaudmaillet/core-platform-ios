@@ -307,17 +307,41 @@ final class HeaderSelectorAudit {
         }
 
         // 4. Does it answer touches, at every segment?
-        let segments = max(1, selector.debugSegmentCount)
-        for index in 0..<segments {
-            let x = frame.minX + frame.width * (CGFloat(index) + 0.5) / CGFloat(segments)
-            let point = CGPoint(x: x, y: frame.midY)
-            let hit = window.hitTest(point, with: nil)
+        //
+        // ⚠️ **EACH SEGMENT'S REAL FRAME, NOT THE BAR DIVIDED BY `count`.** The
+        // old probe hit `frame.width * (i + 0.5) / count`, which is only the
+        // centre of segment `i` while every segment is the same width. A
+        // collapsed accessory hands out NATURAL widths — "All" narrower than
+        // "Suggestions" — and those points then land off the outer segments and
+        // report a working strip as blocked.
+        // ⚠️ **AND ONLY THE SEGMENTS THAT ARE ON SCREEN.** The strip is a scroll
+        // view: a crowded one keeps every title whole and scrolls the rest out
+        // of sight, which is the design, not a fault. The profile's five
+        // segments overrun their 325pt slot at 375pt, so segment 4's centre
+        // sits at x=352 against a strip that ends at 350 — hit-testing it finds
+        // the host, and the old probe only avoided reporting that because it
+        // was not testing segment centres at all: it divided the bar by `count`,
+        // which lands inside the strip however far the content overflows.
+        let segmentFrames = selector.debugSegmentFrames
+        var scrolledOut = 0
+        for (index, segment) in segmentFrames.enumerated() {
+            let centre = selector.convert(CGPoint(x: segment.midX, y: segment.midY), to: window)
+            guard frame.insetBy(dx: 1, dy: 1).contains(centre) else {
+                scrolledOut += 1
+                continue
+            }
+            let hit = window.hitTest(centre, with: nil)
             if hit?.isDescendant(of: selector) != true {
                 finding.problems.append(String(format: "segment %d at %.0f,%.0f blocked by %@",
-                                              index, point.x, point.y,
+                                              index, centre.x, centre.y,
                                               hit.map { String(describing: type(of: $0)) } ?? "nil"))
             }
         }
+        if scrolledOut > 0 {
+            print("[header-audit] \(surface): \(scrolledOut) of \(segmentFrames.count) "
+                + "segments scrolled out of the strip — crowded, by design")
+        }
+        let segments = max(1, selector.debugSegmentCount)
 
         // 5. THE ABSOLUTE RULE: no overflow control anywhere on this bar. UIKit
         // labels its own "More", so the label is the signal rather than the glyph;

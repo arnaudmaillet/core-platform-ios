@@ -136,8 +136,40 @@ public final class SelectorAccessoryHost: UIView {
 
         registerForTraitChanges([UITraitTabAccessoryEnvironment.self]) {
             (self: SelectorAccessoryHost, _) in
+            self.applyEnvironment()
             self.trace("trait")
         }
+        // ⚠️ ONCE FROM `init` AS WELL. `registerForTraitChanges` fires on a
+        // CHANGE, and an accessory can be installed onto a bar that is ALREADY
+        // minimized — a screen entered while the previous one was scrolled
+        // down. Without this the strip would wear its regular arrangement in an
+        // inline slot until the viewer happened to scroll.
+        applyEnvironment()
+    }
+
+    /// The strip's arrangement follows the environment UIKit put it in.
+    ///
+    /// ⚠️ **`== .inline`, NOT `!= .regular`.** The trait's default is
+    /// `.unspecified` (stated in `UITabAccessory.h`), and that is what every
+    /// non-accessory host reports — a navigation bar's title slot, the bottom
+    /// toolbar, and every detached unit test. Written as `!= .regular` this
+    /// rule would silently re-arrange all of them; written as `== .inline` it
+    /// is inert everywhere but in a collapsed accessory, which is what makes
+    /// "leave the expanded state exactly as it was" true by construction rather
+    /// than by care.
+    ///
+    /// ⚠️ **AND IT REVERSES A MEASURED DECISION, DELIBERATELY.** The note on
+    /// `fillsWidth` below records that filling was chosen for BOTH
+    /// environments because hugging in `.inline` leaves a hole: the accessory
+    /// hands out 226pt, For You's two titles want 173, and a centred row leaves
+    /// ~26pt of dead glass at each end INSIDE UIKit's capsule. That hole is
+    /// real and comes back here. It is accepted because the other side of the
+    /// trade is worse where it bites hardest: equal slots price every segment
+    /// at the WIDEST title, so on the inbox "All" wears "Suggestions"' box —
+    /// 41pt of word in a 98pt slot — and the strip scrolls to show three.
+    private func applyEnvironment() {
+        strip?.segmentSizing =
+            traitCollection.tabAccessoryEnvironment == .inline ? .naturalWidths : .equalSlots
     }
 
     @available(*, unavailable)
@@ -150,9 +182,28 @@ public final class SelectorAccessoryHost: UIView {
     /// is a view that can say how big it wants to be. Saying nothing, which is
     /// what `noIntrinsicMetric` on both axes said, is not a neutral answer.
     ///
-    /// The width stays unstated because the accessory's slot is UIKit's to
-    /// decide — 360 in `.regular`, 234 in `.inline`, measured — and a content
-    /// view that argued about it would be arguing with the environment.
+    /// ⚠️ **AND THE WIDTH CANNOT BE STATED — MEASURED, NOT ASSUMED.** The slot
+    /// is UIKit's to decide, and it does not negotiate. Driven by UITest on
+    /// For You, six runs on one build:
+    ///
+    ///     stated intrinsic width  240 → container 360x48 regular, 234x48 inline
+    ///     stated intrinsic width  120 → container 360x48 regular, 234x48 inline
+    ///     REQUIRED width constraint 240 → 360x48 / 234x48
+    ///     REQUIRED width constraint 120 → 360x48 / 234x48
+    ///     nothing stated (control)     → 360x48 / 234x48
+    ///
+    /// Identical to the point, including the container's x (21 regular, 84
+    /// inline), and — the telling part — **no constraint conflict was logged**.
+    /// UIKit does not lay this view out against our constraints at all; it sets
+    /// the frame. A required constraint on it is not overridden, it is inert.
+    ///
+    /// So there is no narrow accessory to be had. Apple's API agrees by
+    /// omission: `UITabAccessory` is one property and one initialiser, and
+    /// Apple publishes no sizing contract anywhere — the word "accessory" does
+    /// not appear in the HIG's Layout, Materials or Tab views pages. The only
+    /// width sentence Apple writes is inline-scoped and tells the APP to adapt:
+    /// "When the accessory is inline with the tab bar, there is less space
+    /// available to display it." That adaptation is `segmentSizing`, below.
     public override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: Self.contentHeight)
     }
@@ -432,8 +483,17 @@ public final class SelectorAccessory {
     ///   collapse only means anything on a host that has registered a scroll
     ///   view with `setContentScrollView(_:for: .bottom)`. A host that arms it
     ///   without one arms a behaviour for every other tab and gets nothing back.
+    /// - Parameter alongside: the transition the band should move WITH.
+    ///
+    ///   ⚠️ **THE ACCESSORY WAS ON A CLOCK NOBODY ELSE SHARED.** The tab bar is
+    ///   deliberately put on the transition's clock everywhere (see
+    ///   `TabBarRevealPolicy`, and `returningSourceChrome` for the flights);
+    ///   the accessory was not, and it showed twice over. Pass the screen's
+    ///   `transitionCoordinator` and the change rides the push or pop that is
+    ///   already running instead of starting a second animation against it.
     public func install(into controller: UITabBarController?,
-                        minimizesOnScroll: Bool = false) {
+                        minimizesOnScroll: Bool = false,
+                        alongside coordinator: UIViewControllerTransitionCoordinator? = nil) {
         guard let controller else { return }
         guard controller.bottomAccessory?.contentView !== hostView else { return }
 
@@ -446,7 +506,18 @@ public final class SelectorAccessory {
         hostView.setNeedsLayout()
         hostView.layoutIfNeeded()
 
-        controller.bottomAccessory = UITabAccessory(contentView: hostView)
+        // ⚠️ **THIS WAS THE PLAIN PROPERTY SETTER, WHICH IS UIKIT'S UNANIMATED
+        // FORM** — while the remove has always used `setBottomAccessory(_:
+        // animated: true)`. So the band faded out and then SNAPPED back in, and
+        // no comment on either line said why. `setBottomAccessory(_:animated:)`
+        // is the only animation hook `UITabAccessory` has: the class is one
+        // property and one initialiser, there is no delegate, no
+        // `willMinimize`, and Apple's reference page for the method carries no
+        // Discussion at all. Symmetry is the whole of what can be asked for.
+        let accessory = UITabAccessory(contentView: hostView)
+        ride(coordinator) { animated in
+            controller.setBottomAccessory(accessory, animated: animated)
+        }
         if minimizesOnScroll {
             if savedMinimizeBehavior == nil {
                 savedMinimizeBehavior = controller.tabBarMinimizeBehavior
@@ -470,12 +541,15 @@ public final class SelectorAccessory {
     /// incoming host's `viewDidAppear`, and an unchecked remove would then
     /// delete the newcomer's accessory and restore a minimize behaviour it had
     /// captured from somewhere else.
-    public func remove(from controller: UITabBarController?) {
+    public func remove(from controller: UITabBarController?,
+                       alongside coordinator: UIViewControllerTransitionCoordinator? = nil) {
         guard let controller,
               controller.bottomAccessory?.contentView === hostView
         else { return }
         clearCatchUp()
-        controller.setBottomAccessory(nil, animated: true)
+        ride(coordinator) { animated in
+            controller.setBottomAccessory(nil, animated: animated)
+        }
         // ⚠️ RESTORED, or the other four tabs inherit a minimizing bar. The
         // behaviour is shell-wide; only the accessory is ours.
         if let saved = savedMinimizeBehavior {
@@ -483,6 +557,30 @@ public final class SelectorAccessory {
             savedMinimizeBehavior = nil
         }
         SelectorAccessoryHost.emit("removed", options: options)
+    }
+
+    /// Runs a band change on the right clock.
+    ///
+    /// With a transition in flight the change goes INSIDE
+    /// `animate(alongsideTransition:)` and asks UIKit for no animation of its
+    /// own: the enclosing context already has the push's duration and curve,
+    /// and a second animation started against it is exactly the mismatch this
+    /// exists to remove. The push path is where it matters —
+    /// `hidesBottomBarWhenPushed` slides the bar out on the transition's curve
+    /// while `viewWillDisappear` fired the accessory's dismissal on UIKit's
+    /// default one — and some screens add a THIRD by calling
+    /// `setTabBarHidden(true, animated: true)` by hand.
+    ///
+    /// With no transition (a tab switch, the place page pushed over a bar that
+    /// never moves) there is nothing to ride, so it animates on its own. That
+    /// case is not a desync, only the abruptness.
+    private func ride(_ coordinator: UIViewControllerTransitionCoordinator?,
+                      _ change: @escaping (_ animated: Bool) -> Void) {
+        guard let coordinator else {
+            change(true)
+            return
+        }
+        coordinator.animate(alongsideTransition: { _ in change(false) })
     }
 
     /// ⚠️ A FLIGHT INTERRUPTED BY A REMOVAL WOULD LEAVE A TRANSFORM BEHIND.

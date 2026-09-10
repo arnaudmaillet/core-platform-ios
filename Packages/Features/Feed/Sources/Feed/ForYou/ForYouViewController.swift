@@ -499,16 +499,37 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        // No title. The large left-aligned title was the convention for a root
-        // tab here, and removing it also removes the large-title content-area
-        // layout from the transition's path — which is the second reason for
-        // this change, see below.
-        // No title, because the tabs ARE the title: the capsule occupies the
-        // slot a title string would have. Removing the large title also keeps
-        // the large-title content-area layout out of the hero flight's path,
-        // which is the second reason for it — see below.
-        navigationItem.title = nil
+        // The tab's own name, in the bar — the screen says where it is.
+        //
+        // The slot was empty because the selector used to live in it; the
+        // selector is at the foot of the screen in a `UITabAccessory` now, and
+        // an empty centre is just an empty centre.
+        //
+        // ⚠️ **THE STATIC WORD, NOT THE LIVE LENS NAME.** This tab renames
+        // ITSELF from the active content lens — the `UITab` reads "For You",
+        // "Entertainment", "Work", "Focus" or "Gaming" (see
+        // `publishTabPresentation`). Mirroring that here is the one width risk
+        // in this change: "Entertainment" is ~104pt of text against a centre
+        // this bar leaves ~102-117pt of at 375pt, and it is the bar that
+        // already carries a leading glyph plus two trailing items. The static
+        // word costs ~56 and cannot collide.
+        //
+        // `largeTitleDisplayMode` stays `.never`: the large-title content-area
+        // layout is kept out of the hero flight's path, which is a separate
+        // reason from the title string and still holds.
+        navigationItem.title = "For You"
         navigationItem.largeTitleDisplayMode = .never
+        // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
+        // screen pushed from it a WORDED back button, and two pushed bars were
+        // budgeted against a bare 44pt chevron: `SearchResultsViewController`
+        // says in as many words that its field would then be "44pt too
+        // generous", and the chat thread's identity view is capped at 240pt on
+        // the same assumption — 32 margins + 44 chevron + 24 gap + 8 padding +
+        // 240 = 348 fits 375, while a "Messages" label (~98pt with its platter)
+        // makes it ~402 and does not. `.minimal` keeps the title for this
+        // screen and the chevron bare for the next one.
+        navigationItem.backButtonDisplayMode = .minimal
+
         // The bar keeps the lens glyph leading and search + wallet trailing.
         // The centre is empty and stays empty: the selector is not in this bar.
         navigationItem.leftBarButtonItems = [contextItem]
@@ -2047,7 +2068,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // `setContentScrollView(_:for: .bottom)`. The behaviour is shell-wide;
         // arming it from a host with no scroller registered would give every
         // other tab a collapsing bar and this one nothing.
-        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+                                   alongside: transitionCoordinator)
         tabBarController?.view.layoutIfNeeded()
         pager.setFootChromeCover(floatingBarCover)
         sweepAbandonedTransition()
@@ -2102,7 +2124,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // over the pushed profile, and over whichever tab you switch to. One
         // line here covers a push, a tab switch, and the un-appearance after a
         // cancelled interactive pop.
-        selectorAccessory?.remove(from: tabBarController)
+        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         guard navigationController?.topViewController === self else { return }
         // The hosted surface lives in the TAB BAR CONTROLLER's view, one level
         // above the navigation controller — deliberately, so a push cannot
