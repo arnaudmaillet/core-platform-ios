@@ -233,20 +233,28 @@ final class ForYouSelectorAccessoryHost: UIView {
         else { return }
         let dx = was.x - centreNow.x
         let dy = was.y - centreNow.y
-        let scale = wasWidth / widthNow
-        // A pass that did not move or resize it, or did either by a hair, is
-        // not a journey.
-        guard abs(dx) > 1 || abs(dy) > 1 || abs(wasWidth - widthNow) > 1 else { return }
+        // ⚠️ **WIDENING ONLY, AND THE ASYMMETRY IS THE WHOLE POINT.** Carrying
+        // the width in BOTH directions was a regression on the collapse, which
+        // was already right: there the width lands FIRST, under tab items that
+        // are still fading out, so nothing needs carrying and a scale only adds
+        // a stretch nobody asked for. Expanding, the width lands LAST, alone,
+        // in front of a settled bar — and that is the frame a viewer sees.
+        //
+        // So the collapse takes the same translate-only path it took when it
+        // was approved, and only the grow is scaled. A trace of a collapse
+        // shows no `scaleX` at all; if one appears there, this guard broke.
+        let isWidening = widthNow > wasWidth + 1
+        let scale = isWidening ? wasWidth / widthNow : 1
+        // A pass that did not move it, or moved it a hair, is not a journey.
+        guard abs(dx) > 1 || abs(dy) > 1 || isWidening else { return }
         if ForYouSelectorDock.isTracing {
             print(String(format: "[dock] catchup dx=%.0f dy=%.0f scaleX=%.2f", dx, dy, scale))
         }
-        // ⚠️ SCALED IN X ONLY, and the type does stretch for the length of the
-        // spring — 0.65 to 1 on the expand. Weighed against a 126pt capsule
-        // appearing between two frames, a third of a second of narrow text is
-        // the cheaper artefact. The honest alternative is driving a width
-        // CONSTRAINT instead, which does not distort but cannot start until the
-        // pass after the one that resized us — a frame of stillness at the head
-        // of a six-frame animation.
+        // The type stretches for the length of the spring on a grow, 0.65 to 1.
+        // Against a 126pt capsule appearing between two frames, a third of a
+        // second of narrow text is the cheaper artefact; the alternative that
+        // does not distort is a width CONSTRAINT, which cannot start until the
+        // pass after the one that resized us.
         transform = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: 1)
         UIView.animate(
             withDuration: 0.32, delay: 0,
