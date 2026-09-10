@@ -493,10 +493,20 @@ public final class PagedTabBar: UIControl {
         /// Every segment as wide as the widest — one balanced control, and the
         /// right answer whenever the bar has room to spare.
         case equalSlots
-        /// Every segment as wide as its own title: "All" narrower than
-        /// "Requests". What the `.inline` accessory asks for, where the slot is
-        /// 234pt and equal slots price every title at the longest one's width.
-        case naturalWidths
+        /// Every segment as wide as its own title — "All" narrower than
+        /// "Requests" — **but only when equal slots would not fit**.
+        ///
+        /// ⚠️ **THE CONDITION IS THE WHOLE POINT, AND IT WAS MISSING.** Natural
+        /// widths hug, and a hugged row centres itself in a slot it does not
+        /// fill: filmed on For You's inline band, "Discover" and "Following"
+        /// want 171pt of a 226pt slot and sat with ~27pt of dead glass at each
+        /// end, inside a capsule UIKit keeps 234pt wide whatever the row does.
+        /// So this asks first — if the equal-slot arrangement fits, it stays,
+        /// because filling the glass is what makes the band read as one
+        /// control. Measured against the three real strips at 226pt: For You's
+        /// equal slots want ~202 and stay, the inbox's want ~298 and give way,
+        /// the profile's five want ~333 and give way.
+        case naturalWhenCrowded
     }
 
     /// Defaults to `.equalSlots`, which is what every host had before this
@@ -522,7 +532,28 @@ public final class PagedTabBar: UIControl {
     /// came out 52pt wide where its content needed 36, and its selection read
     /// as an oval instead of a disk. Natural widths therefore centre the row
     /// (`rowHugsConstraints`) rather than stretching it.
-    private var spreadsSegments: Bool { spansItsHost && segmentSizing == .equalSlots }
+    private var spreadsSegments: Bool {
+        guard spansItsHost else { return false }
+        switch segmentSizing {
+        case .equalSlots:
+            return true
+        case .naturalWhenCrowded:
+            // ⚠️ The test is on the arrangement being LEFT, not the one being
+            // taken. "Do the natural widths fit?" is the wrong question: a row
+            // whose naturals fit at 220 but whose equal slots want 300 would
+            // keep equal slots and overflow, when giving way would have fitted.
+            // Asking whether EQUAL SLOTS fit can never do that.
+            return fittedWidth(for: .fillEqually) <= bounds.width + 0.5
+        }
+    }
+
+    /// The arrangement currently installed, so a layout pass can tell a real
+    /// change from the answer it already applied.
+    ///
+    /// ⚠️ WITHOUT THIS, `layoutSubviews` RE-APPLIES ON EVERY PASS, and
+    /// `applyRowArrangement` ends with `setNeedsLayout()` — a loop that never
+    /// settles.
+    private var appliedSpread: Bool?
 
     /// How the row divides itself RIGHT NOW.
     private var activeDistribution: UIStackView.Distribution {
@@ -537,6 +568,7 @@ public final class PagedTabBar: UIControl {
     /// defect was a badge arriving while the segments still carried their old
     /// frames, which drew "99" permanently outside its own pill.
     private func applyRowArrangement() {
+        appliedSpread = spreadsSegments
         row.distribution = activeDistribution
         NSLayoutConstraint.deactivate(spreadsSegments ? rowHugsConstraints : rowFillsConstraints)
         NSLayoutConstraint.activate(spreadsSegments ? rowFillsConstraints : rowHugsConstraints)
@@ -903,6 +935,16 @@ public final class PagedTabBar: UIControl {
         }
         #endif
         hasLaidOut = true
+        // ⚠️ **DECIDED HERE, BECAUSE IT DEPENDS ON A WIDTH.** `.naturalWhenCrowded`
+        // asks whether the equal-slot arrangement fits, and nothing knows that
+        // until the bar has been given its bounds — which for an accessory
+        // changes underneath it, 360pt expanded and 234 docked, with no
+        // callback but this one.
+        let spread = spreadsSegments
+        if spread != appliedSpread {
+            appliedSpread = spread
+            applyRowArrangement()
+        }
         enforceCapsuleShape()
         resolveSegmentsThenApplyProgress()
     }

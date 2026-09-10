@@ -98,19 +98,31 @@ struct SelectorAccessoryTests {
                 "expanded, every segment is as wide as the widest: \(strip.debugSegmentWidths)")
     }
 
-    /// ⚠️ **AND COLLAPSED THEY ARE NOT.** Equal slots price every segment at
-    /// the LONGEST title, so in a 234pt inline slot "All" wears "Suggestions"'
-    /// box — 41pt of word in a 98pt box — and the strip scrolls to show three
-    /// titles it would otherwise fit. Natural widths are what the inline
-    /// environment asks for, and Apple's only sizing sentence about the
-    /// accessory says the same thing: "When the accessory is inline with the
-    /// tab bar, there is less space available to display it."
-    @Test func collapsedSegmentsTakeTheirOwnWidths() {
+    /// ⚠️ **AND COLLAPSED, A CROWDED STRIP GIVES WAY.** Equal slots price every
+    /// segment at the LONGEST title, so in a 234pt inline slot "All" wears
+    /// "Suggestions"' box — 41pt of word in a 98pt box — and the strip scrolls
+    /// to show three titles it would otherwise fit. Apple's only sizing
+    /// sentence about the accessory says the same thing: "When the accessory is
+    /// inline with the tab bar, there is less space available to display it."
+    @Test func aCrowdedCollapsedStripGivesEachSegmentItsOwnWidth() {
         let (_, strip) = makeHost(titles: ["All", "Requests", "Suggestions"],
                                   environment: .inline, width: 234)
-        #expect(strip.segmentSizing == .naturalWidths)
+        #expect(strip.segmentSizing == .naturalWhenCrowded)
         #expect(widthSpread(strip) > 0.5,
                 "collapsed, a short title gets a short box: \(strip.debugSegmentWidths)")
+    }
+
+    /// ⚠️ **BUT A STRIP THAT FITS KEEPS ITS EQUAL SLOTS, COLLAPSED OR NOT.**
+    /// Hugging centres the row in a capsule UIKit keeps 234pt wide whatever the
+    /// row does, so a short strip that gave way would sit with dead glass at
+    /// each end — filmed on For You's inline band, ~27pt a side. Two titles
+    /// that fit are left alone.
+    @Test func aCollapsedStripThatFitsKeepsItsEqualSlots() {
+        let (_, strip) = makeHost(titles: ["Discover", "Following"],
+                                  environment: .inline, width: 234)
+        #expect(strip.segmentSizing == .naturalWhenCrowded)
+        #expect(widthSpread(strip) < 0.5,
+                "two short titles fit, so they share the glass: \(strip.debugSegmentWidths)")
     }
 
     /// The collapse is a round trip, and coming back must restore the shape
@@ -123,7 +135,7 @@ struct SelectorAccessoryTests {
         host.updateTraitsIfNeeded()
         host.frame = CGRect(x: 0, y: 0, width: 234, height: 48)
         host.layoutIfNeeded()
-        #expect(strip.segmentSizing == .naturalWidths)
+        #expect(strip.segmentSizing == .naturalWhenCrowded)
 
         host.traitOverrides.tabAccessoryEnvironment = .regular
         host.updateTraitsIfNeeded()

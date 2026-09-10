@@ -169,7 +169,7 @@ public final class SelectorAccessoryHost: UIView {
     /// 41pt of word in a 98pt slot — and the strip scrolls to show three.
     private func applyEnvironment() {
         strip?.segmentSizing =
-            traitCollection.tabAccessoryEnvironment == .inline ? .naturalWidths : .equalSlots
+            traitCollection.tabAccessoryEnvironment == .inline ? .naturalWhenCrowded : .equalSlots
     }
 
     @available(*, unavailable)
