@@ -42,7 +42,12 @@ final class HeaderSelectorAudit {
     /// Surfaces that MUST carry a selector. Without this list a vanished
     /// capsule reads as "nothing to audit here" and the run passes — which is
     /// exactly what happened when the inbox's selector was clobbered off the bar.
-    private let mustHaveSelector: Set<AppTab> = [.forYou, .messages]
+    ///
+    /// ⚠️ `.profile` IS ON THIS LIST NOW. The viewer's own profile carries a
+    /// selector too, and it was left off while the strip lived in the scroll
+    /// view — where this audit could never have found it anyway. It is in the
+    /// bottom accessory now, which is somewhere the audit looks.
+    private let mustHaveSelector: Set<AppTab> = [.forYou, .messages, .profile]
 
     func run(tabs: [AppTab]) async {
         print("[header-audit] begin: \(tabs.count) surfaces")
@@ -67,7 +72,11 @@ final class HeaderSelectorAudit {
                 }
                 previous = frame
             }
-            findings.append(audit(surface: tab.rawValue))
+            var finding = audit(surface: tab.rawValue)
+            if let problem = await collapseProblem(surface: tab.rawValue) {
+                finding.problems.append(problem)
+            }
+            findings.append(finding)
         }
         for finding in findings {
             if finding.isClean {
@@ -389,6 +398,51 @@ final class HeaderSelectorAudit {
         }
         walk(root)
         return found
+    }
+
+    /// The two prerequisites of the collapse, both of which fail SILENTLY.
+    ///
+    ///   1. `tabBarMinimizeBehavior` has to be armed. It is SHELL-WIDE, so it
+    ///      is opt-in per screen — and a screen that forgets looks perfect
+    ///      standing still.
+    ///   2. The screen has to have NAMED its scroll view, and named the page
+    ///      that is actually in front. UIKit's own heuristic does not find one
+    ///      nested in a horizontal pager, and naming page 0 while the viewer
+    ///      reads page 1 is indistinguishable from naming none: the offset
+    ///      never moves, so the band never moves.
+    ///
+    /// ⚠️ **IT DOES NOT TRY TO PROVE THE COLLAPSE, AND THAT IS DELIBERATE.**
+    /// The first version scrolled the registered scroll view with
+    /// `setContentOffset` and read the band afterwards. Measured on all three
+    /// accessory surfaces, For You included — the one already confirmed
+    /// collapsing on a real iPhone:
+    ///
+    ///     env=regular accessory=360 barH=83 → env=regular accessory=360 barH=83
+    ///
+    /// UIKit drives the minimize off a DRAG, so a scripted scroll reports three
+    /// working screens as broken. The proof lives in
+    /// `AccessoryCollapseUITests`, which has a real finger. (`tabBar.frame` is
+    /// no use either: 402x83 minimized and 402x83 not.)
+    private func collapseProblem(surface: String) async -> String? {
+        guard locateSelector()?.host == .bottomAccessory else { return nil }
+        guard let top = topNavigationController?.topViewController,
+              tabBarController.bottomAccessory?.contentView.window != nil
+        else { return "accessory selector but no accessory in a window" }
+
+        if tabBarController.tabBarMinimizeBehavior != .onScrollDown {
+            return "minimize NOT ARMED (behavior=\(tabBarController.tabBarMinimizeBehavior.rawValue))"
+        }
+        guard let named = top.contentScrollView(for: .bottom) else {
+            return "no content scroll view registered for .bottom — the band has nothing to ride"
+        }
+        if let onScreen = OnScreenScroller.candidate(in: top.view), named !== onScreen {
+            return "registered the WRONG scroller: \(type(of: named)) at "
+                + String(format: "%.0f", named.convert(named.bounds, to: nil).minX)
+                + " while the visible page is \(type(of: onScreen)) at "
+                + String(format: "%.0f", onScreen.convert(onScreen.bounds, to: nil).minX)
+        }
+        print("[header-audit] \(surface): collapse armed, riding \(type(of: named))")
+        return nil
     }
 
     private func firstPagedTabBar(in root: UIView) -> PagedTabBar? {

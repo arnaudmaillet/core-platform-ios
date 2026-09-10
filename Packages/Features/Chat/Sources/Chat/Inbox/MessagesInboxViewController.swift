@@ -193,6 +193,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // lens and the bar items need no separate path.
         pagerView.onProgress = { [weak self] progress in self?.categoryBar.setProgress(progress) }
         pagerView.onSettled = { [weak self] index in self?.didSettle(on: index) }
+        // The band's minimize rides whichever page is in front. The pager is
+        // what knows, and it is what says so — see `onActiveScrollViewChanged`.
+        pagerView.onActiveScrollViewChanged = { [weak self] scroller in
+            self?.setContentScrollView(scroller, for: .bottom)
+        }
+
 
         for surface in surfaces {
             apply(surface.chrome, from: surface)
@@ -220,7 +226,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     }
 
     override func viewDidAppear(_ animated: Bool) {
-        selectorAccessory?.install(into: tabBarController)
+        // ⚠️ THE MINIMIZE NEEDS A SCROLLER NAMED, or arming it does nothing
+        // here and gives every other tab a collapsing bar for free.
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
         super.viewDidAppear(animated)
         // The pager's horizontal pan yields to the stack's edge-swipe pop, so
         // a back gesture is never stolen by a page change. Wired once the view

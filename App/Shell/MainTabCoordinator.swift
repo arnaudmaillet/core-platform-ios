@@ -205,6 +205,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // objects, stranded views — published to an accessibility probe, a
         // file sink, and the console. The channel every Hero UI suite reads.
         HeroTransitionAudit.installIfRequested(pools: container.debugPlaybackPools)
+        AccessoryCollapseAudit.installIfRequested(tabBarController: tabBarController)
         #endif
 
         #if DEBUG

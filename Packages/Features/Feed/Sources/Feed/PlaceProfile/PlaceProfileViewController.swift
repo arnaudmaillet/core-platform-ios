@@ -195,7 +195,7 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        selectorAccessory?.install(into: tabBarController)
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
         assertAppTabBar()
         // ⚠️ THE ONE INSTANT THE BAR IS BOTH PRESENT AND LAID OUT on this
         // screen: `assertAppTabBar` has just restored it synchronously. The
@@ -874,6 +874,11 @@ final class PlaceProfileViewController: UIViewController {
             for (index, hosted) in hostedPages.enumerated() where index != activeIndex {
                 hosted.setVerticalOffset(alignedOffset(for: index))
             }
+        }
+        // The band's minimize rides whichever page is in front. The pager is
+        // what knows, and it is what says so — see `onActiveScrollViewChanged`.
+        pager.onActiveScrollViewChanged = { [weak self] scroller in
+            self?.setContentScrollView(scroller, for: .bottom)
         }
         pager.onSettled = { [weak self] index in
             guard let self, hostedPages.indices.contains(index) else { return }

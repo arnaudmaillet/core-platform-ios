@@ -34,6 +34,22 @@ final class ProfileGalleryPagerView: UIView {
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
     var onPageSettled: ((ProfileTab) -> Void)?
+
+    /// The page in front changed which scroll view the chrome should follow.
+    ///
+    /// ⚠️ **A SCREEN WITH AN ACCESSORY CANNOT DO THIS FOR ITSELF.** The tab
+    /// bar's minimize rides one named scroll view
+    /// (`setContentScrollView(_:for: .bottom)`), and only the pager knows which
+    /// page is in front. Asked from the host instead — at `viewDidAppear`, or
+    /// even at `viewDidLayoutSubviews` — the answer is a page that has not been
+    /// sized yet, so nothing is registered and nothing ever asks again:
+    /// measured by UITest on the Messages inbox as `named=0` for a whole run,
+    /// on wiring that was otherwise correct. Published from here, it is right
+    /// from the first layout because it does not depend on geometry at all.
+    ///
+    /// Exact here rather than searched: a gallery page IS a
+    /// `ProfileGalleryGridView` and owns its collection view.
+    var onActiveScrollViewChanged: ((UIScrollView) -> Void)?
     /// Fractional page position, emitted on every scroll tick.
     ///
     /// This is what lets the selector's lens track the finger instead of
@@ -376,6 +392,7 @@ final class ProfileGalleryPagerView: UIView {
         // else and correcting.
         pages[index].setVerticalOffset(alignedOffset(for: pages[index]))
         activeIndex = index
+        publishActiveScrollView()
         scrollView.setContentOffset(CGPoint(x: CGFloat(index) * bounds.width, y: 0), animated: animated)
         reportVerticalOffset()
     }
@@ -391,9 +408,21 @@ final class ProfileGalleryPagerView: UIView {
     }
 
     private var lastLayoutWidth: CGFloat = 0
+    private weak var publishedScroller: UIScrollView?
+
+    /// Names the active page's collection view, when it is not the one already
+    /// named. Never from `onProgress`: mid-swipe neither page is the answer.
+    private func publishActiveScrollView() {
+        guard pages.indices.contains(activeIndex) else { return }
+        let scroller = pages[activeIndex].collectionView
+        guard scroller !== publishedScroller else { return }
+        publishedScroller = scroller
+        onActiveScrollViewChanged?(scroller)
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        publishActiveScrollView()
         // Keep the offset page-aligned through width changes (first layout,
         // rotation) — offsets are in points, not page indices.
         let target = CGFloat(activeIndex) * bounds.width
@@ -472,6 +501,7 @@ extension ProfileGalleryPagerView: UIScrollViewDelegate {
             .clamped(to: 0...(pages.count - 1))
         guard landed != activeIndex else { return }
         activeIndex = landed
+        publishActiveScrollView()
         reportVerticalOffset()
         onPageSettled?(pageOrder[landed])
     }

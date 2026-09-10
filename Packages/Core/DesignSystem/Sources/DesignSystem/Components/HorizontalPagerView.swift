@@ -26,6 +26,18 @@ public final class HorizontalPagerView: UIView {
     /// A page became active: a settled finger swipe or a finished programmatic
     /// page. Not fired when the index is unchanged.
     public var onSettled: ((Int) -> Void)?
+    /// The page in front changed which scroll view the chrome should follow.
+    ///
+    /// ⚠️ **A SCREEN WITH AN ACCESSORY CANNOT DO THIS FOR ITSELF.** The tab
+    /// bar's minimize rides one named scroll view
+    /// (`setContentScrollView(_:for: .bottom)`), and only the pager knows which
+    /// page is in front. Asked from the host instead — at `viewDidAppear`, or
+    /// even at `viewDidLayoutSubviews` — the answer is a page that has not been
+    /// sized yet, so nothing is registered and nothing ever asks again:
+    /// measured by UITest on the Messages inbox as `named=0` for a whole run,
+    /// on wiring that was otherwise correct. Published from here, it is right
+    /// from the first layout because it does not depend on geometry at all.
+    public var onActiveScrollViewChanged: ((UIScrollView) -> Void)?
 
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's interactive pop.
@@ -54,6 +66,10 @@ public final class HorizontalPagerView: UIView {
     private let scrollView = HorizontalPagerScrollView()
     private let pages: [UIView]
     private var lastLayoutWidth: CGFloat = 0
+    /// Weak, and compared by identity: a page rebuilt behind the pager gets a
+    /// new scroller, and republishing the same one on every layout pass would
+    /// hand UIKit a change it has to react to sixty times a second.
+    private weak var publishedScroller: UIScrollView?
 
     public init(pages: [UIView], initialIndex: Int = 0) {
         self.pages = pages
@@ -95,6 +111,9 @@ public final class HorizontalPagerView: UIView {
     /// for the same reason, as `ForYouPagerView`.
     override public func layoutSubviews() {
         super.layoutSubviews()
+        // Outside the width guard below: the scroller is published on the FIRST
+        // layout, whose width has not changed from any earlier one.
+        publishActiveScrollView()
         guard bounds.width != lastLayoutWidth, bounds.width > 0 else { return }
         lastLayoutWidth = bounds.width
         reassertActivePage()
@@ -114,6 +133,22 @@ public final class HorizontalPagerView: UIView {
         scrollView.setContentOffset(CGPoint(x: offsetX(for: activeIndex), y: 0), animated: false)
         reportedIndex = activeIndex
         onProgress?(CGFloat(activeIndex))
+        publishActiveScrollView()
+    }
+
+    /// Names the active page's own vertical scroller, when it is not the one
+    /// already named.
+    ///
+    /// ⚠️ NEVER FROM `onProgress`. Mid-swipe two pages share the screen and
+    /// neither is the answer; `ForYouPagerView` publishes at its commit points
+    /// for the same reason, and the reason is recorded there too.
+    private func publishActiveScrollView() {
+        guard pages.indices.contains(activeIndex),
+              let scroller = OnScreenScroller.vertical(in: pages[activeIndex]),
+              scroller !== publishedScroller
+        else { return }
+        publishedScroller = scroller
+        onActiveScrollViewChanged?(scroller)
     }
 
     /// Pages chain horizontally, each exactly one viewport wide and tall — the
@@ -162,6 +197,7 @@ public final class HorizontalPagerView: UIView {
         activeIndex = index
         guard bounds.width > 0 else { return }
         scrollView.setContentOffset(CGPoint(x: offsetX(for: index), y: 0), animated: animated)
+        publishActiveScrollView()
         if !animated {
             onProgress?(CGFloat(index))
             settle()
@@ -217,6 +253,7 @@ extension HorizontalPagerView: UIScrollViewDelegate {
         guard pages.indices.contains(landed), landed != reportedIndex else { return }
         activeIndex = landed
         reportedIndex = landed
+        publishActiveScrollView()
         onSettled?(landed)
     }
 }

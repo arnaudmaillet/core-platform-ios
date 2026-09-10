@@ -733,7 +733,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        selectorAccessory?.install(into: tabBarController)
+        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
         #if DEBUG
         verifyRevealClearsSelector()
         #endif
@@ -1918,6 +1918,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             self.viewModel.refresh()
         }
         galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
+        // The band's minimize rides whichever page is in front. The pager is
+        // what knows, and it is what says so — see `onActiveScrollViewChanged`.
+        galleryPager.onActiveScrollViewChanged = { [weak self] scroller in
+            self?.setContentScrollView(scroller, for: .bottom)
+        }
+
 
         // Above everything, including the header it is pulled out from under:
         // the band between the safe-area top and the first content is exactly
