@@ -13,11 +13,12 @@ import UIKit
 /// is three: posts as cards, media as a grid, people as rows are three
 /// LAYOUTS, and the search screen's list has exactly one.
 ///
-/// # The header
+/// # The chrome, top and bottom
 ///
-/// `[back][selector]` in the LEADING group, `[query]` in the trailing one.
+///     navigation bar   [back] ……………………………… [query field]
+///     bottom toolbar   [selector] ………………………… [filter tray]
 ///
-/// ⚠️ REAL BAR ITEMS, AND THE COMPOSITE THEY REPLACE IS WHY. This was one
+/// ⚠️ REAL BAR ITEMS, AND THE COMPOSITE THEY REPLACE IS WHY. The header was one
 /// `UIStackView` in `navigationItem.titleView` holding both controls, which
 /// looked identical at rest and animated wrongly: a title view is ONE view to
 /// UIKit, so a push snapshots it and cross-fades the picture. The individual
@@ -25,19 +26,29 @@ import UIKit
 /// the bar is concerned there are no individual bubbles. Bar ITEMS do
 /// interpolate, which is what every other header in this app relies on.
 ///
-/// ⚠️ `leftItemsSupplementBackButton = true` IS LOAD-BEARING, not tidiness.
-/// `NativePopPolicy` refuses the interactive edge pop when a custom leading
-/// item sits beside the back button and that flag is false — which is exactly
-/// why an earlier revision here concluded the leading group was unusable and
-/// reached for the title slot instead. The flag is the answer that policy is
-/// asking for: the system back button stays the back button, and the selector
-/// beside it is a supplement.
+/// ⚠️ **THE SELECTOR IS NOT IN THIS BAR, AND ARITHMETIC IS WHY.** With both it
+/// and the query field up there, each asking for half of what was left, the two
+/// halves paved a 402pt bar EXACTLY — 120pt of fixed cost, 141 each — and iOS
+/// 26 answers items that will not fit by sweeping the whole trailing group into
+/// a `•••`. A pop briefly narrows the bar, so there was no margin to be had:
+/// the field was cut to a 44pt glyph to save the arrangement, and the header
+/// stopped showing what had been searched for. Moving the strip to the toolbar
+/// buys that back — a toolbar has no item groups and no overflow control, so
+/// the failure the navigation bar has is not available to it.
+///
+/// ⚠️ AND `leftItemsSupplementBackButton` IS FALSE NOW, where it used to be
+/// load-bearing. That flag exists because `NativePopPolicy` refuses the
+/// interactive edge pop when a custom leading item sits beside the back button
+/// without it — which is why an earlier revision concluded the leading group
+/// was unusable and reached for the title slot. With nothing in the leading
+/// group the back button is the back button and the policy has nothing to
+/// refuse.
 ///
 /// ⚠️ THE SELECTOR SCROLLS WHEN IT DOES NOT FIT — `PagedTabBar`'s documented
-/// behaviour for a bar host. Its minimums are required, so the strip overflows
-/// and scrolls rather than truncating a title, with `keepLensVisible` bringing
-/// the selected tab back: it degrades by hiding a tab reachably instead of by
-/// rendering an unreadable word.
+/// behaviour. Its minimums are required, so the strip overflows and scrolls
+/// rather than truncating a title, with `keepLensVisible` bringing the selected
+/// tab back: it degrades by hiding a tab reachably instead of by rendering an
+/// unreadable word.
 ///
 /// # The three pages
 ///
@@ -243,8 +254,22 @@ final class SearchResultsViewController: UIViewController {
     /// a device nobody tested, and that one was wrong on every one of them.
     private static func queryWidth(inBarOfWidth barWidth: CGFloat) -> CGFloat {
         // 16 a side, the back button's platter, the gap between the leading and
-        // trailing groups, and the trailing platter's own inset. The numbers
-        // are `LeadingSelectorBudget`'s, measured on iPhone 17 Pro.
+        // trailing groups, and the trailing platter's own inset.
+        //
+        // ⚠️ THESE ARE COPIES. The originals are `LeadingSelectorBudget`'s,
+        // measured on iPhone 17 Pro and pinned by tests — but that type is
+        // internal to DesignSystem, so a caller outside it can only restate
+        // them. They are a floor, not a ceiling: the field YIELDS, so a copy
+        // that has drifted low costs a narrower field and never an overflow,
+        // which is the direction that stays safe. If the budget ever goes
+        // public, delete these.
+        //
+        // ⚠️ AND THE BACK BUTTON IS CHARGED A BARE 44pt CHEVRON, which is what
+        // `LeadingSelectorHost` measured beside a leading custom view: "iOS 26
+        // draws the back button as a bare 44pt chevron platter". This screen
+        // has no leading custom view, so if UIKit ever gives the chevron its
+        // word back the field is 44pt too generous — and yields, rather than
+        // overflowing.
         let claimed: CGFloat = 16 * 2 + 44 + 24 + 8
         return max(NavigationBarMetrics.itemPlatterHeight, barWidth - claimed)
     }
