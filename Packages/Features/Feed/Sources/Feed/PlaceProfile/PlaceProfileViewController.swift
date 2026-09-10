@@ -880,6 +880,12 @@ final class PlaceProfileViewController: UIViewController {
                 applyHeaderOffset(hostedPages[destination].verticalOffset)
             }, for: .valueChanged)
         }
+        // Drag on the pill → pages. The neighbour alignment below rides it for
+        // free, since a scrub moves the offset and `onProgress` answers.
+        tabBar.onScrub = { [weak self] progress in self?.pager.scrub(to: progress) }
+        tabBar.onScrubEnd = { [weak self] velocity in
+            self?.pager.settleAfterScrub(velocityInPages: velocity)
+        }
         // Swipe → lens, every frame — and the neighbours are settled every
         // frame too: mid-swipe both pages are on screen, and a neighbour
         // arriving at a stale offset is a header jump the viewer watches.

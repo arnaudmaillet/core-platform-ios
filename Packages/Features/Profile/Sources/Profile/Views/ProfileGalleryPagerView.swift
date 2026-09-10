@@ -76,6 +76,14 @@ final class ProfileGalleryPagerView: UIView {
     var activePageIndex: Int { activeIndex }
 
     private let scrollView = PagerScrollView()
+    /// True while the SELECTOR's pill is driving the horizontal offset.
+    ///
+    /// ⚠️ A scrub writes `contentOffset` directly, so the scroll view reports
+    /// neither dragging nor decelerating — and `layoutSubviews` re-aligns the
+    /// offset to the active page on exactly that condition. Without this flag a
+    /// layout pass landing mid-drag snaps the pages back under the finger while
+    /// the pill keeps following it.
+    private var isScrubbing = false
     private let pages: [ProfileGalleryGridView]
     private var activeIndex = 0 {
         didSet { syncAutoplay() }
@@ -426,9 +434,10 @@ final class ProfileGalleryPagerView: UIView {
         // Keep the offset page-aligned through width changes (first layout,
         // rotation) — offsets are in points, not page indices.
         let target = CGFloat(activeIndex) * bounds.width
-        // Nothing writes this offset by hand any more, so "neither dragging nor
-        // decelerating" is once again the whole of "nobody is holding it".
-        if !scrollView.isDragging, !scrollView.isDecelerating,
+        // "Neither dragging nor decelerating" is not the whole of "nobody is
+        // holding it": a scrub holds this offset by assigning it, which the
+        // scroll view reports as neither. See `isScrubbing`.
+        if !isScrubbing, !scrollView.isDragging, !scrollView.isDecelerating,
            scrollView.contentOffset.x != target {
             scrollView.contentOffset = CGPoint(x: target, y: 0)
         }
@@ -438,6 +447,10 @@ final class ProfileGalleryPagerView: UIView {
 
 #if DEBUG
 extension ProfileGalleryPagerView {
+    /// Whether a drag currently owns the horizontal offset — the flag that
+    /// keeps `layoutSubviews` from snapping the pages back under a finger.
+    var debugIsScrubbing: Bool { isScrubbing }
+
     var debugActiveFormat: ProfileTab { pageOrder[activeIndex] }
     var debugActiveIndex: Int { activeIndex }
     var debugContentOffsetX: CGFloat { scrollView.contentOffset.x }
@@ -462,6 +475,56 @@ extension ProfileGalleryPagerView {
     }
 }
 #endif
+
+// MARK: - Driven by the selector's own drag
+
+extension ProfileGalleryPagerView {
+    /// Drives the pager from something other than its own pan — the selector's
+    /// selection pill, which can be picked up and dragged like the pages
+    /// themselves. Unanimated by design: this is called per frame of a finger.
+    func scrub(to progress: CGFloat) {
+        guard bounds.width > 0, pages.count > 1 else { return }
+        isScrubbing = true
+        let clamped = min(max(progress, 0), CGFloat(pages.count - 1))
+        scrollView.setContentOffset(CGPoint(x: clamped * bounds.width, y: 0), animated: false)
+    }
+
+    /// The finger let go: commit to a page.
+    ///
+    /// ⚠️ **`settle()` will not do this job.** It only runs on the scroll view's
+    /// own deceleration, and a scrub never decelerates — the offset was being
+    /// written directly, frame by frame, so releasing mid-way would leave the
+    /// pager parked between two pages with no callback coming to rescue it.
+    func settleAfterScrub(velocityInPages: CGFloat) {
+        guard bounds.width > 0, pages.count > 1 else {
+            isScrubbing = false
+            return
+        }
+        // Half a page of "throw" per unit velocity — enough that a flick
+        // commits, small enough that a slow drag released mid-way falls back to
+        // whichever page it is actually nearest.
+        let progress = scrollView.contentOffset.x / bounds.width
+        let landing = (progress + velocityInPages * 0.5)
+            .rounded()
+            .clamped(to: 0...CGFloat(pages.count - 1))
+        let index = Int(landing)
+        let changedPage = index != activeIndex
+        // The index is true before the travel starts, so nothing can re-align to
+        // the page being left.
+        pages[index].setVerticalOffset(alignedOffset(for: pages[index]))
+        activeIndex = index
+        publishActiveScrollView()
+        let target = landing * bounds.width
+        if scrollView.contentOffset.x == target {
+            isScrubbing = false
+        } else {
+            scrollView.setContentOffset(CGPoint(x: target, y: 0), animated: true)
+        }
+        reportVerticalOffset()
+        guard changedPage else { return }
+        onPageSettled?(pageOrder[index])
+    }
+}
 
 // MARK: - UIScrollViewDelegate
 
@@ -491,7 +554,18 @@ extension ProfileGalleryPagerView: UIScrollViewDelegate {
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         guard scrollView === self.scrollView else { return }
+        isScrubbing = false
         settle()
+    }
+
+    /// The end of a `settleAfterScrub` animation — the only animated horizontal
+    /// travel this pager runs. The claim on the offset is released HERE as well
+    /// as on the two release paths above, because a settle that had distance to
+    /// cover keeps it raised for the length of the animation, and a claim left
+    /// raised switches layout's ownership off for the life of the screen.
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        guard scrollView === self.scrollView else { return }
+        isScrubbing = false
     }
 
     /// A finger swipe settled on a page: adopt it and tell the selector.

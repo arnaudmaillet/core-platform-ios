@@ -77,14 +77,15 @@ struct PagedTabBarCrowdingTests {
         #expect(abs(narrow.intrinsicContentSize.width - wide.intrinsicContentSize.width) < 1)
     }
 }
-/// The gestures this bar does and does not have.
+/// The gestures this bar has, and which one a finger gets.
 ///
-/// It used to have a third: a pan on the capsule that slid the lens and ran the
-/// pages under the finger. It read well with room to spare and fought
-/// everything else without — a strip that overflows must yield the same drag to
-/// its own scroll view, so one gesture on one control meant different things at
-/// three tabs and at five. These pin the two that remain and the absence of the
-/// one that went, because "no recognizer" is not something a screenshot shows.
+/// Three drivers share one control, and the whole design is that WHERE the
+/// touch lands decides: on the selection pill it drags the pill, anywhere else
+/// on the capsule it scrolls the strip, and a press that does not travel is a
+/// tap. That rule replaced an earlier drag which could be grabbed anywhere and
+/// therefore had to stand down whenever the strip could scroll — the same
+/// finger on the same control meaning different things at three tabs and at
+/// five. None of this is something a screenshot shows.
 @MainActor
 struct PagedTabBarGestureTests {
     private func bar(_ titles: [String], style: PagedTabBar.Style) -> PagedTabBar {
@@ -95,13 +96,38 @@ struct PagedTabBarGestureTests {
         return bar
     }
 
-    /// ⚠️ No pan of the bar's own, on either host. The scroll view brings one
-    /// with it — that one belongs to the strip and is expected.
+    /// ⚠️ **The bar adds exactly ONE recognizer, and no pan lives anywhere in
+    /// its subtree but the scroll view's own.**
+    ///
+    /// The subtree is what is walked, not `bar.gestureRecognizers` — the test
+    /// this replaces filtered the bar's own list for a pan, and the pan it
+    /// existed to forbid was attached to `capsule.contentView`, one level down.
+    /// It could never have failed.
     @Test(arguments: [PagedTabBar.Style.floating, .navigationTitle])
-    func theCapsuleCarriesNoPanOfItsOwn(style: PagedTabBar.Style) {
+    func theOnlyGrabIsTheOneOnThePill(style: PagedTabBar.Style) {
         let bar = bar(["Activity", "Gallery", "Short"], style: style)
-        let own = (bar.gestureRecognizers ?? []).filter { $0 is UIPanGestureRecognizer }
-        #expect(own.isEmpty)
+        var pans: [UIPanGestureRecognizer] = []
+        var presses: [UILongPressGestureRecognizer] = []
+        func walk(_ view: UIView) {
+            for recognizer in view.gestureRecognizers ?? [] {
+                if let pan = recognizer as? UIPanGestureRecognizer { pans.append(pan) }
+                if let press = recognizer as? UILongPressGestureRecognizer { presses.append(press) }
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(bar)
+        // The strip's own, and nothing else's.
+        #expect(pans.allSatisfy { $0.view is UIScrollView })
+        // The grab: exactly one on the bar itself, beginning on touch-down.
+        // (The segments are `UIButton`s and UIKit gives each of them long
+        // presses of its own — those are not ours and are counted out by asking
+        // whose view they are on.)
+        let grabs = presses.filter { $0.view === bar }
+        #expect(grabs.count == 1)
+        #expect(grabs.first?.minimumPressDuration == 0)
+        // ⚠️ It must not cancel touches in view, or the segment under it never
+        // sees the tap and `onReselect` dies with it.
+        #expect(grabs.first?.cancelsTouchesInView == false)
     }
 
     /// Tapping is how a tab is chosen, and it still is: the selection moves and
