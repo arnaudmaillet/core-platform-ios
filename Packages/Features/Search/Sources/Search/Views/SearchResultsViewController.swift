@@ -151,11 +151,6 @@ final class SearchResultsViewController: UIViewController {
         configurePages()
         configureToolbar()
         subscribe()
-        // ⚠️ THE HEADER'S QUERY IS RE-READ, not set once. A refine screen can
-        // change what was searched for while this screen sits underneath it,
-        // and the field was assigned in `configureHeader` — so after a refine
-        // submit the tabs showed the new answer under the OLD words.
-        searchField.text = viewModel.submittedQueryText
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
         #if DEBUG
@@ -381,7 +376,82 @@ final class SearchResultsViewController: UIViewController {
         // screen. What IS shared is the toolbar's visibility, which is why this
         // screen still shows it on the way in and hides it on the way out.
         toolbarItems = [UIBarButtonItem(customView: tabBar), .flexibleSpace(), filter]
+
+        // ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER. Docked at the foot of the
+        // screen the selector sits over a pager of scrolling grids, and a drag
+        // that starts on it was scrolling the page underneath at the same time.
+        // The strip is the thing the finger is on, so it takes priority.
+        tabBar.addGestureRecognizer(selectorTouchProbe)
     }
+
+    /// Reports a touch on the selector without taking it.
+    ///
+    /// ⚠️ **NOT `.touchDown` ON THE CONTROL, AND `PagedTabBar` BEING A
+    /// `UIControl` IS THE TRAP.** The obvious spelling is the filter sheet's —
+    /// `addAction(for: [.touchDown, …])`, which is how the sheet stops its own
+    /// drag while a segment is being used. It cannot work here: the strip fills
+    /// itself with a horizontal scroller (`delaysContentTouches = false`), so
+    /// touches land in that scroller and the control's own tracking never
+    /// begins. The actions would be wired, correct-looking and silent.
+    ///
+    /// ⚠️ AND IT MUST NOT SWALLOW WHAT IT WATCHES. `cancelsTouchesInView` is
+    /// false and the delegate recognises simultaneously, so the strip still
+    /// scrolls and still selects — this only observes. A recogniser added
+    /// without both of those silences the control it was meant to watch, which
+    /// this codebase has already paid for once: a tap with no action still
+    /// prevents an ancestor's.
+    private lazy var selectorTouchProbe: UILongPressGestureRecognizer = {
+        let probe = UILongPressGestureRecognizer(
+            target: self, action: #selector(selectorTouchChanged)
+        )
+        probe.minimumPressDuration = 0
+        probe.cancelsTouchesInView = false
+        probe.delaysTouchesBegan = false
+        probe.delaysTouchesEnded = false
+        probe.delegate = self
+        return probe
+    }()
+
+    @objc private func selectorTouchChanged(_ probe: UILongPressGestureRecognizer) {
+        switch probe.state {
+        case .began, .changed:
+            setPageScrollEnabled(false)
+        case .ended, .cancelled, .failed:
+            setPageScrollEnabled(true)
+        default:
+            break
+        }
+    }
+
+    /// Stops the FINGER driving anything under the pager while the selector is
+    /// in use, without stopping the pager itself.
+    ///
+    /// ⚠️ **THE PAN, NOT `isScrollEnabled`, AND THE DIFFERENCE BROKE TAB
+    /// SELECTION.** The first cut set `isScrollEnabled = false` on every
+    /// scroller under the pager, which reads as the same thing and is not: a
+    /// disabled scroll view also ignores `setContentOffset(_:animated:)`, and
+    /// that is exactly how `setActivePage` moves the pages. Measured — tapping
+    /// "Media" left the content byte-identical (MAE 0), so the selector still
+    /// lit the new tab and the pager never followed. Disabling the PAN
+    /// recogniser takes the gesture away and leaves the programmatic move
+    /// alone.
+    ///
+    /// ⚠️ FOUND BY WALKING, because the pager keeps its pages laid out side by
+    /// side and vends none of their scrollers. The walk stops at the pager, so
+    /// the strip's own scroller — which lives in the toolbar, not here — is
+    /// never touched and goes on scrolling under the finger, which is the whole
+    /// point.
+    private func setPageScrollEnabled(_ isEnabled: Bool) {
+        guard isEnabled != isPageScrollEnabled else { return }
+        isPageScrollEnabled = isEnabled
+        func walk(_ view: UIView) {
+            (view as? UIScrollView)?.panGestureRecognizer.isEnabled = isEnabled
+            view.subviews.forEach(walk)
+        }
+        walk(pager)
+    }
+
+    private var isPageScrollEnabled = true
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -393,6 +463,18 @@ final class SearchResultsViewController: UIViewController {
         // would keep showing the OLD answer while the post tabs — driven by a
         // different callback — showed the new one. One screen, two answers.
         subscribe()
+        // ⚠️ **THE QUERY IS RE-READ HERE, AND HERE ONLY.** A refine screen
+        // pushed over this one shares this screen's view model and POPS on
+        // submit, so the words change while this screen is off-window and
+        // nothing tells it. Assigning the field in `configureHeader` covers the
+        // first appearance and no other: searching "test", refining to "test2"
+        // and coming back left "test" in the bar over an answer about "test2".
+        //
+        // ⚠️ AND IT WAS WRITTEN INTO `viewDidLoad` BY MISTAKE, one line below a
+        // `subscribe()` that appears in both methods — where it did nothing at
+        // all, because `configureHeader` had already set the same value two
+        // lines earlier.
+        searchField.text = viewModel.submittedQueryText
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
         // ⚠️ SHOWN HERE AND HIDDEN ON THE WAY OUT, because a navigation
@@ -520,5 +602,18 @@ extension SearchResultsViewController: UITextFieldDelegate {
     func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
         onEditQuery?()
         return false
+    }
+}
+
+extension SearchResultsViewController: UIGestureRecognizerDelegate {
+    /// ⚠️ ALWAYS TRUE, AND THAT IS WHAT KEEPS THE PROBE A PROBE. The recogniser
+    /// on the selector exists to be TOLD about a touch, not to win it; refusing
+    /// simultaneous recognition would make it compete with the strip's own
+    /// scroller and with its segment taps.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        true
     }
 }
