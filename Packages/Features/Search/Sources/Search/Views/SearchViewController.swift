@@ -116,16 +116,7 @@ final class SearchViewController: UIViewController {
         // the Maps and For You headers, and the bar it would sit under belongs
         // to the screen it came from. UIKit puts that bar back on the pop; the
         // fade below is only about HOW it leaves and returns.
-        //
-        // ⚠️ **AND THIS SCREEN'S FLAG DECIDES THE RESULTS SCREEN'S BAR TOO.**
-        // `MainTabCoordinator.syncTabBarVisibility` keeps the bar hidden while
-        // ANY pushed controller on the stack asked for it — deliberately, so a
-        // flagged screen with an unflagged one above it does not get the bar
-        // slid back over it. So `-search-results-tab-bar` has to reach here as
-        // well: with this one still flagged, the results screen un-setting its
-        // own flag and calling `setTabBarHidden(false)` was undone by the next
-        // reconciliation, and the band sat at the foot with no bar under it.
-        hidesBottomBarWhenPushed = !SearchResultsViewController.wantsTabBar
+        hidesBottomBarWhenPushed = true
         #if DEBUG
         installKeyboardTraceIfRequested()
         #endif
@@ -477,24 +468,51 @@ final class SearchViewController: UIViewController {
             navigationItem.rightBarButtonItems = [
                 UIBarButtonItem(
                     title: "Cancel",
-                    primaryAction: UIAction { [weak self] _ in
-                        guard let self else { return }
-                        // ⚠️ RESTORES BEFORE IT POPS. This screen shares its
-                        // view model with the answer underneath, so the typing
-                        // that happened here has already driven the phase to
-                        // `.suggesting` — a typeahead, on a screen whose whole
-                        // content is an answer. Cancelling means "forget I
-                        // asked", and forgetting has to include putting the
-                        // answer back.
-                        self.viewModel.restoreSubmittedAnswer()
-                        self.navigationController?.popViewController(animated: false)
-                    }
+                    primaryAction: UIAction { [weak self] _ in self?.cancelRefine() }
                 ),
                 fieldItem
             ]
         }
         applyFieldWidth()
+        #if DEBUG
+        driveRefineCycleIfRequested()
+        #endif
     }
+
+    /// Cancelling a refine: put the answer back, then leave.
+    private func cancelRefine() {
+        // ⚠️ RESTORES BEFORE IT POPS. This screen shares its view model with
+        // the answer underneath, so the typing that happened here has already
+        // driven the phase to `.suggesting` — a typeahead, on a screen whose
+        // whole content is an answer. Cancelling means "forget I asked", and
+        // forgetting has to include putting the answer back.
+        viewModel.restoreSubmittedAnswer()
+        // ⚠️ **ANIMATED, AND THE BAR IS THE REASON.** This was
+        // `animated: false`, with no reason recorded, and the asymmetry
+        // showed: the push into refine reads as a change of bar and the way
+        // back did not — the results bar simply reappeared, fully formed, in
+        // one frame. Bar items are not individually animatable, so the only
+        // cross-dissolve available is the one UIKit runs for the whole bar
+        // during a transition, and an unanimated pop has no transition to run
+        // it in.
+        navigationController?.popViewController(animated: true)
+    }
+
+    #if DEBUG
+    /// `-search-refine-cycle`: opens the refine screen and cancels it on a
+    /// timer, so the bar's transition can be FILMED. XCUITest cannot: its
+    /// `tap()` waits for the app to idle before returning, so a burst of
+    /// stills taken after one shows only the settled state — measured, all
+    /// eight frames identical and after the fact.
+    private func driveRefineCycleIfRequested() {
+        guard case .refine = mode,
+              ProcessInfo.processInfo.arguments.contains("-search-refine-cycle")
+        else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.cancelRefine()
+        }
+    }
+    #endif
 
     /// The field takes what the bar has left.
     ///

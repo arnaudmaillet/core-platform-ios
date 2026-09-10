@@ -168,14 +168,7 @@ final class SearchResultsViewController: UIViewController {
         // push BEGINS, and `viewDidLoad` can run inside that same push — set
         // there it is a coin toss whether the bar goes. The screen underneath
         // hides it too, so this only keeps it hidden rather than hiding it.
-        //
-        // `-search-results-tab-bar` KEEPS the bar, to see what this screen
-        // looks like wearing the same collapse/expand the tab roots have. It is
-        // a flag because it is a product question, not a technical one: the
-        // band works either way — measured, an accessory is hosted with the bar
-        // hidden just as it is with the bar showing — and what changes is
-        // whether a pushed screen offers a way out of itself.
-        hidesBottomBarWhenPushed = !Self.wantsTabBar
+        hidesBottomBarWhenPushed = true
     }
 
     @available(*, unavailable)
@@ -798,22 +791,11 @@ final class SearchResultsViewController: UIViewController {
         // `minimizesOnScroll: false` — there is no tab bar under this screen to
         // minimize, and arming a shell-wide behaviour from a screen that cannot
         // use it is how every other tab inherits a collapsing bar.
-        #if DEBUG
-        // ⚠️ **UN-SETTING `hidesBottomBarWhenPushed` DOES NOT BRING THE BAR
-        // BACK.** The screen underneath — the global search — hides it too, so
-        // by the time this one is pushed the bar is already gone and the flag
-        // only decides whether it would have hidden it again. Filmed: the band
-        // at the foot and no tab bar under it. Asking for it is a separate act.
-        if Self.wantsTabBar {
-            tabBarController?.setTabBarHidden(false, animated: animated)
-        }
-        #endif
         installBottomChromeWhenAppearing(
             handsOver: tabBarController?.bottomAccessory != nil
         ) { [weak self] in
             guard let self else { return }
             selectorAccessory?.install(into: tabBarController,
-                                       minimizesOnScroll: Self.wantsTabBar,
                                        alongside: transitionCoordinator)
         }
         // ⚠️ RE-SUBSCRIBED EVERY TIME, and this is not belt and braces.
@@ -842,8 +824,18 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        selectorAccessory?.install(into: tabBarController,
-                                   minimizesOnScroll: Self.wantsTabBar)
+        selectorAccessory?.install(into: tabBarController)
+        #if DEBUG
+        // `-search-refine-cycle`: ask for the refine screen on a timer, so the
+        // bar transition in BOTH directions can be filmed.
+        if ProcessInfo.processInfo.arguments.contains("-search-refine-cycle"),
+           !hasDrivenRefineCycle {
+            hasDrivenRefineCycle = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.onEditQuery?()
+            }
+        }
+        #endif
         #if DEBUG
         reportAccessorySpike()
         #endif
@@ -859,13 +851,6 @@ final class SearchResultsViewController: UIViewController {
         // ⚠️ NOTHING OF OURS OUTLIVES THIS SCREEN'S TURN ON TOP. A suspended
         // pan is stack-wide state; carrying one into a pushed screen's
         // dismissal is how a gesture that should pop one level pops two.
-        #if DEBUG
-        // Put it back the way it was found: the bar is shell-wide state, and
-        // the screen underneath is the one that wanted it hidden.
-        if Self.wantsTabBar, isMovingFromParent {
-            tabBarController?.setTabBarHidden(true, animated: animated)
-        }
-        #endif
         selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         setPageScrollEnabled(true)
         Self.traceNavigation(
@@ -885,15 +870,10 @@ final class SearchResultsViewController: UIViewController {
     /// that quietly stops being true.
     private(set) var selectorAccessory: SelectorAccessory?
 
-    /// `-search-results-tab-bar`: keep the app's tab bar under this screen and
-    /// let the band minimize into it on scroll, the way a tab root does.
-    static var wantsTabBar: Bool {
-        #if DEBUG
-        return ProcessInfo.processInfo.arguments.contains("-search-results-tab-bar")
-        #else
-        return false
-        #endif
-    }
+    #if DEBUG
+    private var hasDrivenRefineCycle = false
+    #endif
+
 
     /// The filter, as a plain system bar item.
     ///
