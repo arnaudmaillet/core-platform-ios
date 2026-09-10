@@ -26,6 +26,22 @@ enum ForYouSelectorDock {
         #endif
     }
 
+    /// `-foryou-dock-empty`: put an EMPTY content view in the accessory — no
+    /// strip, nothing to lay out — while keeping the bubble UIKit draws around
+    /// it. Pair with `-foryou-dock-no-catchup` for the pure-UIKit baseline.
+    ///
+    /// ⚠️ THIS IS THE ONLY THING THAT SEPARATES "UIKIT DOES NOT ANIMATE THE
+    /// CONTAINER" FROM "OUR CONTENT IS WHAT LAGS". Everything measured so far
+    /// has had a `PagedTabBar` inside, re-laying its segments out on every
+    /// bounds change, so no run has ever shown what the container does alone.
+    static var isEmpty: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-foryou-dock-empty")
+        #else
+        false
+        #endif
+    }
+
     /// `-foryou-minimize-only`: arm the minimize with NO accessory at all.
     ///
     /// ⚠️ **THE BASELINE, AND IT IS WHAT ACQUITS THE ACCESSORY.** Measured on
@@ -123,7 +139,7 @@ final class ForYouSelectorAccessoryHost: UIView {
     /// arithmetic that goes stale when the container's height changes.
     private static let contentInset: CGFloat = 4
 
-    private let strip: PagedTabBar
+    private let strip: PagedTabBar?
 
     /// Fired from `layoutSubviews`, because there is no other signal.
     ///
@@ -133,9 +149,18 @@ final class ForYouSelectorAccessoryHost: UIView {
     /// hears it here.
     var onLayoutChanged: (() -> Void)?
 
-    init(strip: PagedTabBar) {
+    init(strip: PagedTabBar?) {
         self.strip = strip
         super.init(frame: .zero)
+
+        guard let strip else {
+            // Empty on purpose: the container still draws its bubble around
+            // nothing, which is the whole point of the probe.
+            registerForTraitChanges([UITraitTabAccessoryEnvironment.self]) {
+                (self: ForYouSelectorAccessoryHost, _) in self.trace("trait")
+            }
+            return
+        }
 
         strip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(strip)
@@ -275,8 +300,8 @@ final class ForYouSelectorAccessoryHost: UIView {
 
         let presented = container.layer.presentation()?.affineTransform() ?? .identity
         if ForYouSelectorDock.isTracing {
-            print(String(format: "[dock] catchup dx=%.0f dy=%.0f scaleX=%.2f onto=%.2f",
-                         delta.tx, delta.ty, delta.a, presented.a))
+            Self.emit(String(format: "catchup dx=%.0f dy=%.0f scaleX=%.2f onto=%.2f",
+                                delta.tx, delta.ty, delta.a, presented.a))
         }
         container.transform = presented.concatenating(delta)
         UIView.animate(
@@ -324,6 +349,31 @@ final class ForYouSelectorAccessoryHost: UIView {
         lastWidth = nil
     }
 
+    /// ⚠️ **A FILE, NOT ONLY THE CONSOLE, AND THE REASON IS THIS BUG.** The
+    /// direction that misbehaves is the EXPAND, and injected touches will not
+    /// produce one — only a hand on the device does. A console line nobody is
+    /// attached to is a measurement that does not exist, so every line is also
+    /// appended to `dock-trace.log` in the app's Documents directory, where it
+    /// survives the run and can be read afterwards with
+    /// `xcrun simctl get_app_container <udid> <bundle> data`.
+    static func emit(_ line: String) {
+        print("[dock] \(line)")
+        guard ForYouSelectorDock.isTracing,
+              let directory = FileManager.default.urls(
+                for: .documentDirectory, in: .userDomainMask
+              ).first
+        else { return }
+        let url = directory.appendingPathComponent("dock-trace.log")
+        guard let data = (line + "\n").data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
     private var lastTrace = ""
     private var traceCount = 0
 
@@ -337,7 +387,7 @@ final class ForYouSelectorAccessoryHost: UIView {
         case .unspecified: environment = "unspecified"
         @unknown default: environment = "?"
         }
-        let wanted = strip.intrinsicContentSize.width
+        let wanted = strip?.intrinsicContentSize.width ?? 0
         // ⚠️ THE POSITION, NOT ONLY THE SIZE. A collapse that reads as a
         // teleport is either a frame that snaps or a frame that travels while
         // its CONTENTS snap, and only the origin tells them apart.
@@ -353,13 +403,13 @@ final class ForYouSelectorAccessoryHost: UIView {
                 + "strip=%.0fx%.0f wants=%.0f overflow=%.0f",
             environment, bounds.width, bounds.height, inWindow.minX, inWindow.minY,
             keys,
-            strip.bounds.width, strip.bounds.height,
-            wanted, max(0, wanted - strip.bounds.width)
+            strip?.bounds.width ?? 0, strip?.bounds.height ?? 0,
+            wanted, max(0, wanted - (strip?.bounds.width ?? 0))
         )
         guard line != lastTrace else { return }
         lastTrace = line
         traceCount += 1
-        print("[dock] #\(traceCount) \(reason) \(line)")
+        Self.emit("#\(traceCount) \(reason) \(line)")
     }
 }
 
@@ -383,7 +433,9 @@ final class ForYouSelectorAccessory {
     private var savedMinimizeBehavior: UITabBarController.MinimizeBehavior?
 
     init(strip: PagedTabBar) {
-        hostView = ForYouSelectorAccessoryHost(strip: strip)
+        hostView = ForYouSelectorAccessoryHost(
+            strip: ForYouSelectorDock.isEmpty ? nil : strip
+        )
     }
 
     func install(into controller: UITabBarController?) {
@@ -393,7 +445,7 @@ final class ForYouSelectorAccessory {
                 savedMinimizeBehavior = controller.tabBarMinimizeBehavior
             }
             controller.tabBarMinimizeBehavior = .onScrollDown
-            print("[dock] installed BASELINE - minimize armed, no accessory")
+            ForYouSelectorAccessoryHost.emit("installed BASELINE - minimize armed, no accessory")
             return
         }
         guard controller.bottomAccessory?.contentView !== hostView else { return }
@@ -416,7 +468,7 @@ final class ForYouSelectorAccessory {
         // ⚠️ UNCONDITIONAL, and that is the point: an empty log reads exactly
         // like a passing one. This line is what tells "the flag never arrived"
         // from "it installed and nothing moved".
-        print("[dock] installed behaviour=onScrollDown host=\(hostView.bounds.size)")
+        ForYouSelectorAccessoryHost.emit("installed behaviour=onScrollDown host=\(hostView.bounds.size)")
     }
 
     func remove(from controller: UITabBarController?) {
@@ -429,7 +481,7 @@ final class ForYouSelectorAccessory {
             controller.tabBarMinimizeBehavior = saved
             savedMinimizeBehavior = nil
         }
-        print("[dock] removed")
+        ForYouSelectorAccessoryHost.emit("removed")
     }
 
     /// ⚠️ A FLIGHT INTERRUPTED BY A REMOVAL WOULD LEAVE A TRANSFORM BEHIND.
