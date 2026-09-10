@@ -75,15 +75,15 @@ struct PlaceProfileTests {
     /// its whole height from `slot.bottom == host.bottom`, so anchoring the BAR
     /// to the picture would make every number derived from the header — the
     /// pages' inset, the dock line, the content floor — hostage to a control
-    /// that fades out at the dock.
-    @Test func theSelectorSitsOnTheBannersFootRatherThanBelowIt() {
+    /// ⚠️ THE HEADER IS THE BANNER, FULL STOP. It used to be the banner plus
+    /// a fixed-height slot holding the inline selector, and this test pinned
+    /// the selector's foot to the banner's. With the strip at the foot of the
+    /// screen the slot is gone and the banner's own bottom is what gives the
+    /// header its height — which is the constraint that replaced it.
+    @Test func theHeaderIsExactlyTheBanner() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(abs(profile.debugSelectorBottomVsBanner) < 0.5)
-        // The header is the banner plus the slot's footer alone — which is what
-        // "on rehausse le reste du contenu" amounts to in numbers: 52pt less
-        // than the same banner with the selector stacked below it.
-        #expect(abs(profile.debugHeaderBottom - (profile.debugBannerHeight + 16)) < 0.5)
+        #expect(abs(profile.debugHeaderBottom - profile.debugBannerHeight) < 0.5)
     }
 
     /// ⚠️ THE COUNTERS MUST CLEAR THE CAPSULE THAT NOW OVERLAPS THEM. The old
@@ -415,26 +415,12 @@ struct PlaceProfileTests {
         #expect(items.allSatisfy { !$0.sharesBackground })
     }
 
-    /// The selector docks into the navigation bar's LEADING group, beside the
-    /// back chevron, and the inline copy owns the un-scrolled state. Both
-    /// copies exist from the start — the hand-over is a crossfade, which is
-    /// not a state one re-parented view can express.
-    @Test func theSelectorHandsOverToTheBarAtTheDockLine() {
-        let profile = makeProfile()
-        profile.loadViewIfNeeded()
-        profile.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        profile.view.layoutIfNeeded()
-
-        #expect(!profile.debugIsBarDocked, "expanded: the inline copy owns it")
-        #expect(profile.debugInlineSelectorAlpha == 1)
-        #expect(!profile.debugDockedSelectorItemPresent,
-                "…and the bar item is absent, not merely transparent")
-
-        profile.debugScrollActivePage(to: profile.debugHeaderTravel + 40)
-        #expect(profile.debugIsBarDocked)
-        #expect(profile.debugDockedSelectorItemPresent)
-        #expect(profile.debugDockedSelectorAlpha == 1)
-    }
+    /// ⚠️ THE HAND-OVER TEST IS GONE BECAUSE THE HAND-OVER IS. There were two
+    /// selector copies crossfading at a dock line — an inline one in the
+    /// header's slot and a docked one in the navigation bar's leading group —
+    /// and four tests drove `debugIsBarDocked` through it. The strip lives at
+    /// the foot of the screen now and never moves, so there is no threshold, no
+    /// crossfade and no bar item to be present or absent.
 
     // MARK: - The collapsible header's coordinator rules
 
@@ -500,12 +486,10 @@ struct PlaceProfileTests {
         profile.debugScrollActivePage(to: dock + 400)
         #expect(abs(profile.debugHeaderConstant + dock) < 1, "past the line the header is DOCKED")
         #expect(profile.debugIdentityAlpha == 0, "identity is gone under the bar")
-        #expect(profile.debugIsBarDocked, "…and the selector has moved into the bar")
 
         profile.debugScrollActivePage(to: 0)
         #expect(abs(profile.debugHeaderConstant) < 1, "and it comes all the way back")
         #expect(profile.debugIdentityAlpha == 1)
-        #expect(!profile.debugIsBarDocked, "expanded, the selector is back in the header")
 
         profile.debugScrollActivePage(to: -60)
         #expect(profile.debugHeaderConstant == 60, "overscroll carries the header down, unclamped")
