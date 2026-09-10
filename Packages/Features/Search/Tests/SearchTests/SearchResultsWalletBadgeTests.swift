@@ -94,4 +94,44 @@ struct SearchResultsWalletBadgeTests {
         let squeezed = SearchResultsViewController.queryWidth(inBarOfWidth: 375, walletWanted: 86)
         #expect(squeezed >= NavigationBarMetrics.itemPlatterHeight)
     }
+
+    /// ⚠️ **A LEADING ITEM IS CHARGED TOO, AND THE FIELD PAYS FOR IT AS WELL.**
+    /// The bar can read `[back][filter][credit][field]`, and a leading glyph
+    /// that was not charged is a `•••` on the narrow device — the failure this
+    /// whole function exists to prevent.
+    ///
+    /// The numbers are read off `-header-bar-tree` at 375pt rather than
+    /// derived: back 16..60, filter 72..131, credit 162..242, field 254..359.
+    /// The gap to the chevron is TWELVE — the two wear their own platters, so
+    /// the 27pt shared-pill spacing does not apply.
+    ///
+    /// ⚠️ **AND THE PLATTER IS WIDER THAN THE VIEW IN IT — this test is what
+    /// found that.** The first version charged what the button's
+    /// `systemLayoutSizeFitting` returns, asserted the 105 the bar drew, and
+    /// got 90: a glyph button fits UNDER the 44pt touch target while UIKit
+    /// draws its platter at 59. Under-charging by 15 is the direction that ends
+    /// in a `•••`, and it only survived the device because the badge's own
+    /// charge over-states by about the same amount — two errors cancelling,
+    /// which is not a budget.
+    @Test func theFieldPaysForALeadingItemAsWell() {
+        let without = SearchResultsViewController.queryWidth(inBarOfWidth: 375, walletWanted: 71)
+        let with = SearchResultsViewController.queryWidth(
+            inBarOfWidth: 375, walletWanted: 71, leadingWanted: 43
+        )
+        #expect(with == without - (SearchResultsViewController.glyphItemPlatterWidth + 12))
+
+        // A leading item that WANTS more than the glyph platter is charged what
+        // it wants, plus the platter's own inset either side. Asked on a 402pt
+        // bar, because at 375 this lands under the 44pt floor and the floor —
+        // correctly — answers instead of the arithmetic.
+        let wide = SearchResultsViewController.queryWidth(inBarOfWidth: 402, walletWanted: 71)
+        #expect(SearchResultsViewController.queryWidth(
+            inBarOfWidth: 402, walletWanted: 71, leadingWanted: 90
+        ) == wide - (90 + 16 + 12))
+
+        // And the floor still holds at the narrowest bar with everything on it.
+        #expect(SearchResultsViewController.queryWidth(
+            inBarOfWidth: 375, walletWanted: 86, leadingWanted: 43
+        ) >= NavigationBarMetrics.itemPlatterHeight)
+    }
 }

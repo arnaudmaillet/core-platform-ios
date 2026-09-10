@@ -241,12 +241,28 @@ final class SearchResultsViewController: UIViewController {
         configureWalletBadge()
         applyTrailingItems()
 
-        // ⚠️ NO `leftItemsSupplementBackButton` ANY MORE, because there is no
-        // leading custom item to supplement. That flag exists so an item that
-        // REPLACES the back button cannot silently disable the interactive pop;
-        // with the leading group empty the back button is the back button and
-        // `NativePopPolicy` has nothing to refuse.
+        #if DEBUG
+        // `-search-filter-in-bar` — the filter as a LEADING item beside the
+        // chevron, giving `[back][filter][credit][field]`. Behind a flag
+        // because the only thing that can answer whether it fits is a 375pt
+        // device, and the failure mode is a `•••` that takes the whole group.
+        if Self.wantsFilterInBar {
+            navigationItem.leftBarButtonItems = [UIBarButtonItem(customView: barFilterButton)]
+            // ⚠️ WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON, and UIKit
+            // silently disables the interactive pop with it — the failure this
+            // flag exists to guard.
+            navigationItem.leftItemsSupplementBackButton = true
+        } else {
+            // ⚠️ NO `leftItemsSupplementBackButton`, because there is no leading
+            // custom item to supplement. That flag exists so an item that
+            // REPLACES the back button cannot silently disable the interactive
+            // pop; with the leading group empty the back button is the back
+            // button and `NativePopPolicy` has nothing to refuse.
+            navigationItem.leftItemsSupplementBackButton = false
+        }
+        #else
         navigationItem.leftItemsSupplementBackButton = false
+        #endif
     }
 
 
@@ -359,13 +375,24 @@ final class SearchResultsViewController: UIViewController {
     /// against the narrowest supported bar, 375. The field's own width stays
     /// `.defaultHigh`, so a `claimed` that drifts low costs a narrower field
     /// and never an overflow.
+    /// The width a custom leading item wants, or 0 when the leading group is
+    /// empty.
+    private func leadingWanted() -> CGFloat {
+        guard let item = navigationItem.leftBarButtonItems?.first,
+              let custom = item.customView
+        else { return 0 }
+        return max(NavigationBarMetrics.itemPlatterHeight,
+                   custom.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width)
+    }
+
     private func applyHeaderWidths() {
         guard let bar = navigationController?.navigationBar, bar.bounds.width > 0 else { return }
         // ⚠️ NOT WHILE A TRANSITION IS RUNNING: the bar's width is not settled
         // there, and rebuilding the trailing run mid-flight is its own flash.
         guard transitionCoordinator == nil else { return }
         let wanted = Self.queryWidth(inBarOfWidth: bar.bounds.width,
-                                     walletWanted: walletWanted())
+                                     walletWanted: walletWanted(),
+                                     leadingWanted: leadingWanted())
         guard queryWidth.constant != wanted else { return }
         queryWidth.constant = wanted
         searchField.superview?.layoutIfNeeded()
@@ -377,8 +404,22 @@ final class SearchResultsViewController: UIViewController {
     /// screen stated 150pt a side and was ten points over the budget on a 402pt
     /// bar, which UIKit answered with a `•••` — a stated width can be wrong for
     /// a device nobody tested, and that one was wrong on every one of them.
+    /// The width UIKit gives a glyph bar item's platter, measured — `59`, where
+    /// the button inside it fits under the 44pt touch target.
+    ///
+    /// ⚠️ NOT `itemWidth`. 44 is the least a platter can be, not what a glyph
+    /// item comes out at, and the 15pt between them is the whole margin
+    /// this screen has on a 375pt bar.
+    static let glyphItemPlatterWidth: CGFloat = 59
+
+    /// - Parameter leadingWanted: the width a custom LEADING item wants, or 0
+    ///   when the leading group is empty. Charged the same way the badge is —
+    ///   its own platter beside the chevron's, `max(44, wanted)` because UIKit
+    ///   draws no platter narrower than the touch target, and the wider of the
+    ///   two measured gaps between it and the back button.
     static func queryWidth(inBarOfWidth barWidth: CGFloat,
-                           walletWanted: CGFloat) -> CGFloat {
+                           walletWanted: CGFloat,
+                           leadingWanted: CGFloat = 0) -> CGFloat {
         // 16 a side, the back button's platter, the gap between the leading and
         // trailing groups, and the trailing platter's own inset.
         //
@@ -426,6 +467,28 @@ final class SearchResultsViewController: UIViewController {
             // likely 12 apart. Over-charging costs the field a few points;
             // under-charging costs an overflow, and only the field can yield.
             claimed += 8 + max(44, walletWanted) + 27
+        }
+        if leadingWanted > 0 {
+            // Read off the bar rather than reasoned out — `-header-bar-tree` at
+            // 375pt, the four platters left to right:
+            //
+            //     back    16..60   (44 wide)
+            //     filter  72..131  (59)
+            //     credit  162..242 (80)
+            //     field   254..359 (105)
+            //
+            // ⚠️ **THE GAP IS 12, NOT THE SHARED-PILL 27.** 60 → 72: the
+            // chevron and a custom leading item wear their OWN platters, so the
+            // spacing between items inside one pill does not apply here.
+            //
+            // ⚠️ **AND THE PLATTER IS WIDER THAN THE VIEW IN IT.** A glyph
+            // button's `systemLayoutSizeFitting` answers under the 44pt touch
+            // target, and UIKit drew it 59 wide — so charging what the VIEW
+            // wants under-charges by 15, which is the direction that ends in a
+            // `•••`. A test caught it: the arithmetic said 90 and the bar drew
+            // 105, and the two only agreed because the badge's own charge
+            // happens to over-state by about the same amount.
+            claimed += max(Self.glyphItemPlatterWidth, leadingWanted + 16) + 12
         }
         return max(NavigationBarMetrics.itemPlatterHeight, barWidth - claimed)
     }
@@ -574,6 +637,14 @@ final class SearchResultsViewController: UIViewController {
         // screen still shows it on the way in and hides it on the way out.
         selectorAccessory = SelectorAccessory(strip: tabBar)
 
+        #if DEBUG
+        if Self.wantsFilterInBar {
+            // The bar's own copy — configured in `configureHeader`, which runs
+            // BEFORE this. Nothing else to place: no tray, no accessory
+            // trailing item.
+            return
+        }
+        #endif
         let tray = InlineFilterTrayView(trailing: filter)
         view.addSubview(tray)
         NSLayoutConstraint.activate([
@@ -805,6 +876,26 @@ final class SearchResultsViewController: UIViewController {
     /// into a content view UIKit owns, and a rule nothing can see is a rule
     /// that quietly stops being true.
     private(set) var selectorAccessory: SelectorAccessory?
+
+    #if DEBUG
+    static var wantsFilterInBar: Bool {
+        ProcessInfo.processInfo.arguments.contains("-search-filter-in-bar")
+    }
+
+    /// The filter as a bar item's custom view.
+    ///
+    /// ⚠️ A CUSTOM VIEW, NOT `UIBarButtonItem(image:)`, because the budget has
+    /// to be able to ASK how wide it wants to be — `leadingWanted()` reads
+    /// `systemLayoutSizeFitting`, and a system item has no view to ask.
+    private lazy var barFilterButton: UIButton = {
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: "line.3.horizontal.decrease")
+        let button = UIButton(configuration: configuration,
+                              primaryAction: UIAction { [weak self] _ in self?.presentFilters() })
+        button.accessibilityLabel = "Filters"
+        return button
+    }()
+    #endif
 
     #if DEBUG
     /// What the spike actually produced, in numbers — whether the accessory was
