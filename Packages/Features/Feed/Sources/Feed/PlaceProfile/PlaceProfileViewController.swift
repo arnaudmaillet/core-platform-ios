@@ -540,6 +540,19 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
+        // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
+        // +36ms, `viewDidAppear` at +947ms — nine hundred milliseconds of empty
+        // band under a screen already fully on display. The call below is
+        // idempotent with the one in `viewDidAppear`, which stays as the
+        // backstop for the paths the policy declines (a scrub that has not
+        // committed, a flight that owns the chrome).
+        installBottomChromeWhenAppearing(hasActiveFlight: false) { [weak self] in
+            guard let self else { return }
+            selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+                                       alongside: transitionCoordinator)
+        }
+
         syncAutoplay()
     }
 

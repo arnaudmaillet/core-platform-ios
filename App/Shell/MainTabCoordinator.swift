@@ -586,6 +586,15 @@ extension MainTabCoordinator: AppNavigating {
 
     func selectTab(_ tab: AppTab) {
         guard let match = orderedTabs.first(where: { $0.0 == tab }) else { return }
+        #if DEBUG
+        // The zero the `[dock]` stamps are read against: how long after the tab
+        // changed did the band actually arrive. Stamped HERE and not in
+        // `didSelect(_:)` — that delegate callback answers a real tap only, and
+        // every debug route into a tab goes through this method instead, so a
+        // trace driven by `-switch-tab` had no zero at all.
+        print(String(format: "[dock] %.3f selectTab %@",
+                     ProcessInfo.processInfo.systemUptime, tab.rawValue))
+        #endif
         // Tab-owning routes mean "take me there": anything presented over the
         // shell would keep covering the destination, so dismiss it first.
         if tabBarController.presentedViewController != nil {

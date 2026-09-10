@@ -171,6 +171,76 @@ struct SelectorAccessoryTests {
                 "a foreign remove must not take down the accessory in the slot")
     }
 
+    /// ⚠️ **THE HAND-OVER, WHICH IS WHAT MAKES A TAB SWITCH SEAMLESS.** On a
+    /// tab switch the incoming screen's `viewWillAppear` lands SIX
+    /// MILLISECONDS BEFORE the outgoing screen's `viewWillDisappear`
+    /// (measured, headless). So the newcomer claims the slot first and the
+    /// screen it replaced must find the band is no longer its own and leave it
+    /// alone — the band is never taken down between two screens that both want
+    /// one, and the viewer sees no gap.
+    ///
+    /// The 900ms this replaced: installed from `viewDidAppear`, the band
+    /// arrived +961ms after the tab changed, on a screen that had been fully on
+    /// display for most of a second. From `viewWillAppear` it arrives at +20ms.
+    @Test func aHandOverLeavesTheNewcomersBandStanding() {
+        let controller = UITabBarController()
+        let outgoing = SelectorAccessory(strip: PagedTabBar(titles: ["A"], style: .navigationTitle))
+        let incoming = SelectorAccessory(strip: PagedTabBar(titles: ["B"], style: .navigationTitle))
+
+        outgoing.install(into: controller, minimizesOnScroll: true)
+        // The order a tab switch actually produces: the newcomer first.
+        incoming.install(into: controller, minimizesOnScroll: true)
+        #expect(controller.bottomAccessory?.contentView === incoming.hostView)
+
+        outgoing.remove(from: controller)
+        #expect(controller.bottomAccessory?.contentView === incoming.hostView,
+                "the outgoing screen must not take down the band it handed over")
+        #expect(controller.tabBarMinimizeBehavior == .onScrollDown,
+                "the newcomer still wants the collapse")
+    }
+
+    /// ⚠️ **AND THE SHELL GETS ITS OWN BEHAVIOUR BACK AT THE END OF THE CHAIN.**
+    /// A per-accessory `savedMinimizeBehavior` cannot do this: the newcomer
+    /// installs while the outgoing screen still has the bar armed, so it
+    /// captures `.onScrollDown` as though that were the shell's default and
+    /// hands it back on the way out — `.onScrollDown` for every tab, which is
+    /// the exact hazard the restore exists to prevent. Counted per controller,
+    /// the first arm records what the shell had and the last release returns it.
+    @Test func theShellsOwnBehaviourSurvivesAChainOfHandOvers() {
+        let controller = UITabBarController()
+        controller.tabBarMinimizeBehavior = .never
+        let first = SelectorAccessory(strip: PagedTabBar(titles: ["A"], style: .navigationTitle))
+        let second = SelectorAccessory(strip: PagedTabBar(titles: ["B"], style: .navigationTitle))
+        let third = SelectorAccessory(strip: PagedTabBar(titles: ["C"], style: .navigationTitle))
+
+        first.install(into: controller, minimizesOnScroll: true)
+        second.install(into: controller, minimizesOnScroll: true)
+        first.remove(from: controller)
+        third.install(into: controller, minimizesOnScroll: true)
+        second.remove(from: controller)
+        #expect(controller.tabBarMinimizeBehavior == .onScrollDown,
+                "somebody still holds it")
+
+        third.remove(from: controller)
+        #expect(controller.tabBarMinimizeBehavior == .never,
+                "the last one out gives the shell its own behaviour back")
+        #expect(controller.bottomAccessory == nil)
+    }
+
+    /// A screen that installs twice — `viewWillAppear` then `viewDidAppear`,
+    /// which is exactly what every host does — must not count as two owners,
+    /// or the shell never gets its behaviour back.
+    @Test func installingTwiceHoldsTheMinimizeOnce() {
+        let controller = UITabBarController()
+        controller.tabBarMinimizeBehavior = .never
+        let accessory = SelectorAccessory(strip: PagedTabBar(titles: ["A"], style: .navigationTitle))
+
+        accessory.install(into: controller, minimizesOnScroll: true)
+        accessory.install(into: controller, minimizesOnScroll: true)
+        accessory.remove(from: controller)
+        #expect(controller.tabBarMinimizeBehavior == .never)
+    }
+
     /// ⚠️ THE MINIMIZE IS SHELL-WIDE, SO IT IS OPT-IN. It only means anything
     /// on a host that has registered a scroll view; arming it from one that has
     /// not gives every other tab a collapsing bar and this one nothing.

@@ -372,7 +372,11 @@ public final class SelectorAccessoryHost: UIView {
     /// survives the run and can be read afterwards with
     /// `xcrun simctl get_app_container <udid> <bundle> data`.
     static func emit(_ line: String, options: Options) {
-        print("[dock] \(line)")
+        // A STAMP, because the question these lines answer most often is one of
+        // ORDER and LATENCY — which of two hosts moved first, and how long
+        // after the viewer's tap the band arrived. Neither is legible in a
+        // sequence of undated lines.
+        print(String(format: "[dock] %.3f %@", ProcessInfo.processInfo.systemUptime, line))
         guard options.isTracing,
               let directory = FileManager.default.urls(
                 for: .documentDirectory, in: .userDomainMask
@@ -458,12 +462,83 @@ public final class SelectorAccessoryHost: UIView {
 /// switching to Maps shows it over the map. The screen that installs it is the
 /// screen that takes it down, one line each, and every hazard that comes from
 /// it being shell-lifetime state goes away with the bracket.
+/// The shell's own minimize behaviour, remembered once per tab bar controller
+/// for as long as ANY accessory has it armed.
+///
+/// ⚠️ **A PER-ACCESSORY `savedMinimizeBehavior` LEAKS THE MOMENT TWO HOSTS
+/// OVERLAP.** Measured on a tab switch, headless: the incoming screen's
+/// `viewWillAppear` lands 6ms BEFORE the outgoing screen's
+/// `viewWillDisappear`. So the newcomer captures `.onScrollDown` — the value
+/// the screen it is replacing armed — as though it were the shell's default,
+/// and hands that back when it leaves. `.onScrollDown` then belongs to every
+/// tab, which is the exact hazard the restore exists to prevent.
+///
+/// Counted, because the overlap is real and bounded: the first arm records what
+/// the shell had, the last release gives it back, and the ones in between are
+/// hand-overs that must not touch it.
+@MainActor
+private enum MinimizeBehaviourStore {
+    /// ⚠️ **THE CONTROLLER IS HELD WEAKLY AND CHECKED, NOT JUST KEYED ON.**
+    /// `ObjectIdentifier` is an ADDRESS, and a deallocated controller's address
+    /// is handed straight to the next one — so a table keyed on it alone serves
+    /// the dead object's owner count to its successor. Caught by the tests
+    /// rather than reasoned about: one case installs a band and never removes
+    /// it (which is what a hand-over looks like), leaving a count of 1 behind,
+    /// and the next case's fresh `UITabBarController` landed on the same
+    /// address and inherited it — so it never recorded the shell's own
+    /// behaviour and never gave it back. Harmless in the app, where the shell's
+    /// controller outlives everything; a trap anywhere else, which is exactly
+    /// the kind that gets found once and then found again.
+    private struct Record {
+        weak var controller: UITabBarController?
+        var saved: UITabBarController.MinimizeBehavior
+        var owners: Int
+    }
+
+    private static var records: [ObjectIdentifier: Record] = [:]
+
+    /// The record for `controller`, or nil when the entry belongs to a dead
+    /// object that happened to share its address.
+    private static func record(for controller: UITabBarController) -> Record? {
+        guard let found = records[ObjectIdentifier(controller)],
+              found.controller === controller
+        else { return nil }
+        return found
+    }
+
+    static func arm(_ controller: UITabBarController) {
+        let key = ObjectIdentifier(controller)
+        if var existing = record(for: controller) {
+            existing.owners += 1
+            records[key] = existing
+        } else {
+            records[key] = Record(controller: controller,
+                                  saved: controller.tabBarMinimizeBehavior,
+                                  owners: 1)
+        }
+        controller.tabBarMinimizeBehavior = .onScrollDown
+    }
+
+    static func release(_ controller: UITabBarController) {
+        guard var existing = record(for: controller), existing.owners > 0 else { return }
+        existing.owners -= 1
+        if existing.owners == 0 {
+            controller.tabBarMinimizeBehavior = existing.saved
+            records[ObjectIdentifier(controller)] = nil
+        } else {
+            records[ObjectIdentifier(controller)] = existing
+        }
+    }
+}
+
 @MainActor
 public final class SelectorAccessory {
     public typealias Options = SelectorAccessoryOptions
 
     public let hostView: SelectorAccessoryHost
-    private var savedMinimizeBehavior: UITabBarController.MinimizeBehavior?
+    /// Whether THIS accessory is one of the store's owners, so a double
+    /// install or a double remove cannot move the count twice.
+    private var holdsMinimize = false
 
     private let options: Options
 
@@ -518,11 +593,9 @@ public final class SelectorAccessory {
         ride(coordinator) { animated in
             controller.setBottomAccessory(accessory, animated: animated)
         }
-        if minimizesOnScroll {
-            if savedMinimizeBehavior == nil {
-                savedMinimizeBehavior = controller.tabBarMinimizeBehavior
-            }
-            controller.tabBarMinimizeBehavior = .onScrollDown
+        if minimizesOnScroll, !holdsMinimize {
+            holdsMinimize = true
+            MinimizeBehaviourStore.arm(controller)
         }
 
         // ⚠️ UNCONDITIONAL, and that is the point: an empty log reads exactly
@@ -543,18 +616,28 @@ public final class SelectorAccessory {
     /// captured from somewhere else.
     public func remove(from controller: UITabBarController?,
                        alongside coordinator: UIViewControllerTransitionCoordinator? = nil) {
-        guard let controller,
-              controller.bottomAccessory?.contentView === hostView
-        else { return }
+        guard let controller else { return }
+        // ⚠️ **RELEASED WHETHER OR NOT THE BAND IS STILL OURS, AND THE IDENTITY
+        // GUARD BELOW IS WHY.** This instance armed the minimize, so this
+        // instance gives it up — even on the hand-over path where the newcomer
+        // has already taken the slot and the guard sends us home. Leaving the
+        // release under the guard is how the count runs away: every hand-over
+        // adds an owner nothing ever removes, and the shell's default never
+        // comes back.
+        if holdsMinimize {
+            holdsMinimize = false
+            MinimizeBehaviourStore.release(controller)
+        }
+        guard controller.bottomAccessory?.contentView === hostView else {
+            // Somebody else's band is up. That is the hand-over working: the
+            // incoming screen claimed the slot before we were asked to leave,
+            // so there is nothing to take down and no gap to leave behind.
+            SelectorAccessoryHost.emit("handed over", options: options)
+            return
+        }
         clearCatchUp()
         ride(coordinator) { animated in
             controller.setBottomAccessory(nil, animated: animated)
-        }
-        // ⚠️ RESTORED, or the other four tabs inherit a minimizing bar. The
-        // behaviour is shell-wide; only the accessory is ours.
-        if let saved = savedMinimizeBehavior {
-            controller.tabBarMinimizeBehavior = saved
-            savedMinimizeBehavior = nil
         }
         SelectorAccessoryHost.emit("removed", options: options)
     }

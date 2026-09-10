@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// WHEN the grid may put the system tab bar back after a screen it pushed
 /// goes away.
@@ -60,5 +61,78 @@ public enum TabBarRevealPolicy {
     /// to delete on purpose rather than one nobody wrote.
     public static func shouldReveal(afterTransitionCancelled cancelled: Bool) -> Bool {
         !cancelled
+    }
+}
+
+@MainActor
+public extension UIViewController {
+    /// Puts a piece of bottom chrome up as EARLY as the transition allows.
+    ///
+    /// # Why this exists, in one measurement
+    ///
+    /// The tab bar's accessory band was installed from `viewDidAppear`, and on
+    /// a tab switch that is very late. Measured headless (Slow Animations
+    /// defeated, or every number here is a lie ×10):
+    ///
+    ///     +0ms    selectTab messages
+    ///     +36ms   inbox viewWillAppear
+    ///     +42ms   the OUTGOING screen's band is taken down
+    ///     +947ms  inbox viewDidAppear
+    ///     +961ms  the incoming band is installed
+    ///
+    /// Nine hundred milliseconds of empty band under a screen that is fully on
+    /// display. The whole of it sits between `viewWillAppear` and
+    /// `viewDidAppear`, so moving the install to the earlier one is worth ~900ms
+    /// — and, because the incoming screen's `viewWillAppear` lands SIX
+    /// MILLISECONDS BEFORE the outgoing screen's `viewWillDisappear`, it also
+    /// turns a remove-then-install into a HAND-OVER: the newcomer claims the
+    /// slot first, and the screen it replaced finds the band is no longer its
+    /// own and leaves it alone. The band never goes away at all between two
+    /// screens that both want one.
+    ///
+    /// ⚠️ **BUT `viewWillAppear` IS A QUESTION, NOT AN ANSWER, ON TWO PATHS** —
+    /// which is why this is a policy and not a moved line. UIKit runs it when an
+    /// interactive pop BEGINS, so a back-swipe released below the threshold
+    /// would show the band over a screen that springs back and then take it
+    /// away again; and while a hero flight is in the air the chrome is driven on
+    /// the flight's own clock. `TabBarRevealPolicy` already draws exactly this
+    /// distinction for the tab bar itself, and forking it per screen is what its
+    /// own doc warns against.
+    ///
+    /// - Parameter hasActiveFlight: whether a hero flight owns the chrome right
+    ///   now. Screens without flights pass the default.
+    /// - Parameter install: idempotent, and called at most once — a caller
+    ///   keeps its `viewDidAppear` install as the backstop for the paths this
+    ///   deliberately declines.
+    func installBottomChromeWhenAppearing(hasActiveFlight: Bool = false,
+                                          _ install: @escaping () -> Void) {
+        let coordinator = transitionCoordinator
+        switch TabBarRevealPolicy.timing(
+            hasActiveFlight: hasActiveFlight,
+            isTransitioning: coordinator != nil,
+            isInteractive: coordinator?.isInteractive ?? false
+        ) {
+        case .immediately:
+            // The tab switch — the case this exists for.
+            install()
+        case .whenTransitionCommits:
+            guard let coordinator else { return install() }
+            coordinator.notifyWhenInteractionChanges { context in
+                guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
+                else { return }
+                install()
+            }
+            // Backstop for a scrub that never reports a release. Idempotent
+            // against the notifier above, exactly as the tab bar's own is.
+            coordinator.animate(alongsideTransition: nil) { context in
+                guard TabBarRevealPolicy.shouldReveal(afterTransitionCancelled: context.isCancelled)
+                else { return }
+                install()
+            }
+        case .drivenByFlight:
+            // The flight owns the chrome; the caller's `viewDidAppear` install
+            // is what puts the band back once it has landed.
+            break
+        }
     }
 }
