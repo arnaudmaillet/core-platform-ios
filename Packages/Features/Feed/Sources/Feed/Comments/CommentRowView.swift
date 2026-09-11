@@ -88,7 +88,11 @@ final class CommentRowView: UIView {
     var onBlock: (() -> Void)?
     var onReport: (() -> Void)?
 
-    init() {
+    /// `installsContextMenu: false` is the unified thread's row
+    /// (`-unified-thread`): the long press belongs to the stream there, which
+    /// lifts the pressed row itself (`ThreadRowContextMenu`), so a row-level
+    /// interaction would only compete with it.
+    init(installsContextMenu: Bool = true) {
         super.init(frame: .zero)
         buildLayout()
 
@@ -108,9 +112,20 @@ final class CommentRowView: UIView {
         rowTapRecognizer = rowTap
         // Held, because a caption row takes them away and a recycled row puts
         // them back — see `configureAsPostCaption`.
-        let menu = UIContextMenuInteraction(delegate: self)
-        contextMenu = menu
-        addInteraction(menu)
+        if installsContextMenu {
+            let menu = UIContextMenuInteraction(delegate: self)
+            contextMenu = menu
+            addInteraction(menu)
+        }
+    }
+
+    /// The body's label — what Select Text lays its overlay over.
+    var bodyTextLabel: UILabel { bodyLabel }
+
+    /// A conversation's messages carry no ♥: there is nothing to like them
+    /// with on the wire, and a control that does nothing is worse than none.
+    func setLikeControlHidden(_ hidden: Bool) {
+        likeButton.isHidden = hidden
     }
 
     /// Test/preview convenience: build and configure in one step.

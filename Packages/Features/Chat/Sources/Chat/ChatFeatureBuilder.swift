@@ -2,6 +2,7 @@ import ChatInterface
 import CoreModels
 import CoreStorage
 import CoreNavigation
+import FeedInterface
 import MediaCore
 import UIKit
 
@@ -27,6 +28,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// into the same one. Without that, reading a thread has no way to reach
     /// the list it should disappear from.
     private let catalog: InboxCatalog
+    /// `-unified-thread`: who draws a conversation when it is Feed's text-post
+    /// screen rather than this package's own. Nil (the default) is the shipping
+    /// screen, untouched. A closure rather than the value because the Feed
+    /// builder reaches the router, and the router reaches this — the same lazy
+    /// edge Maps takes to the feed.
+    private let threadScreens: (() -> any ConversationThreadScreenBuilding)?
 
     public init(
         repository: any ChatProviding,
@@ -34,8 +41,10 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         people: (any PeopleDirectoryProviding)? = nil,
         imagePipeline: ImagePipeline? = nil,
         router: (any Router)? = nil,
-        recentSearches: RecentSearchStore? = nil
+        recentSearches: RecentSearchStore? = nil,
+        threadScreens: (() -> any ConversationThreadScreenBuilding)? = nil
     ) {
+        self.threadScreens = threadScreens
         let directory = ConversationDirectory()
         self.directory = directory
         catalog = InboxCatalog(repository: repository, relations: connections, directory: directory)
@@ -73,17 +82,17 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         // push, minus the compose bar (typing is impossible in a peek).
         // One provider, both surfaces: the peek is the real thread screen in
         // `.preview` mode, and Requests earns the same long-press as All.
-        let makeThreadPreview: (ConversationID) -> UIViewController = {
-            [repository, directory, router] id in
-            ConversationViewController(
-                viewModel: ConversationViewModel(
-                    conversationID: id,
-                    repository: repository,
-                    directory: directory,
-                    router: router
-                ),
-                mode: .preview
+        // The peek's view model is built WITHOUT the inbox callbacks, in both
+        // screens: a peek is not a read.
+        let makeThreadPreview: (ConversationID) -> UIViewController = { [self] id in
+            let viewModel = ConversationViewModel(
+                conversationID: id,
+                repository: repository,
+                directory: directory,
+                router: router
             )
+            return makeUnifiedThreadScreen(viewModel, mode: .preview, prefill: "")
+                ?? ConversationViewController(viewModel: viewModel, mode: .preview)
         }
         conversations.threadPreviewProvider = makeThreadPreview
 
@@ -164,11 +173,39 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         // the viewer would otherwise swipe back from a thread they started to
         // a list without it.
         viewModel.onDidResolveConversation = { [catalog] _ in catalog.refresh() }
+        if let unified = makeUnifiedThreadScreen(viewModel, mode: .full, prefill: prefill) {
+            return unified
+        }
         return ConversationViewController(
             viewModel: viewModel,
             prefill: prefill,
             imagePipeline: imagePipeline,
             avatars: connections as? any PeerAvatarProviding
+        )
+    }
+
+    /// Feed's text-post screen driving this view model, or nil when the flag
+    /// is off and the caller builds the shipping screen.
+    ///
+    /// Called AFTER the inbox callbacks are wired on the view model, so mark-
+    /// read, sends and draft resolution report back exactly as they do today —
+    /// the driver never touches those four.
+    private func makeUnifiedThreadScreen(
+        _ viewModel: ConversationViewModel,
+        mode: ConversationThreadMode,
+        prefill: String
+    ) -> UIViewController? {
+        guard let threadScreens else { return nil }
+        let driver = ConversationThreadDriver(
+            viewModel: viewModel,
+            viewer: repository,
+            avatars: connections as? any PeerAvatarProviding
+        )
+        return threadScreens().makeConversationThreadViewController(
+            driver: driver,
+            mode: mode,
+            prefill: prefill,
+            accessory: mode == .full ? EmoteStripAccessory() : nil
         )
     }
 

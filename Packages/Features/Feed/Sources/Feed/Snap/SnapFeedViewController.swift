@@ -220,6 +220,11 @@ final class SnapFeedViewController: UIViewController {
     /// post — injected by the feature builder so this VC needs none of the
     /// detail's dependencies. Nil disables the comments engagement.
     private let makeCommentsPanelContent: ((PostID) -> UIViewController)?
+    /// The panel for a TEXT page's resting interface, when it is not the one
+    /// above (`-unified-thread`: the day pills and the lifted menu belong to
+    /// text posts only). Nil — the default — means text pages build
+    /// `makeCommentsPanelContent` exactly as before.
+    private let makeRestingCommentsPanelContent: ((PostID) -> UIViewController)?
     /// The post whose comments engagement is active, nil when disengaged.
     /// Owns the paging veto: the pager is frozen while the mutated layout
     /// (a per-cell state) is on screen.
@@ -337,6 +342,7 @@ final class SnapFeedViewController: UIViewController {
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
         makeCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
+        makeRestingCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         reporting: (any ContentReporting)? = nil
@@ -345,6 +351,7 @@ final class SnapFeedViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
         self.makeCommentsPanelContent = makeCommentsPanelContent
+        self.makeRestingCommentsPanelContent = makeRestingCommentsPanelContent
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
         self.reporting = reporting
@@ -2117,7 +2124,7 @@ final class SnapFeedViewController: UIViewController {
               modelsByID[id]?.mediaURL == nil,
               let makeCommentsPanelContent else { return }
         discardPrewarmedResting()
-        let content = makeCommentsPanelContent(id)
+        let content = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
         content.view.backgroundColor = .clear
         // ⚠️ IN THE DEVICE'S THEME, not `.unspecified`.
         //
@@ -2470,7 +2477,7 @@ final class SnapFeedViewController: UIViewController {
             discardPrewarmedResting()
             return warmed
         }
-        return makeCommentsPanelContent?(id)
+        return (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)?(id)
     }
 
     /// Everything a resting panel needs once it has a cell — identical whether
@@ -4265,7 +4272,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
               view.bounds.width > 0, view.bounds.height > 0
         else { return }
 
-        let panel = makeCommentsPanelContent(id)
+        let panel = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
         // Transparent, so the lent ground is still what is on screen — and so a
         // flight that clears both floors is not lidded by this.
         panel.view.backgroundColor = .clear

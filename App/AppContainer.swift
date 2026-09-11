@@ -77,6 +77,23 @@ final class AppContainer {
     /// hand. It requires network.
     static let usesRichMedia = ProcessInfo.processInfo.arguments.contains("-rich-media")
 
+    /// `-unified-thread`: the conversation screen built from the text post's
+    /// screen — comment rows, the post's composer and footer (emotes in place
+    /// of the music pill) — with the day pill and the long-press menu on BOTH
+    /// screens. One decision, handed to both the Chat and the Feed builders,
+    /// so a conversation and a text post can never disagree about which
+    /// version is running. Off: both screens are exactly what they were.
+    ///
+    /// DEBUG-only while it is a prototype; Release is always the shipping
+    /// screen until the flag flips (the text reveal's road).
+    static let usesUnifiedThread: Bool = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-unified-thread")
+        #else
+        false
+        #endif
+    }()
+
     private(set) lazy var mockRealtimeServer = MockRealtimeServer()
 
     /// Bridge from the compose feature to the feed's optimistic insert.
@@ -327,7 +344,8 @@ final class AppContainer {
         // counter.v1, so a card can show reach. The timeline read hydrates
         // likes only, and a card's counter chip shows VIEWS — without this it
         // has nothing to say and hides itself, which is what it did.
-        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient)
+        counterClient: Counter_V1_CounterServiceClient(client: authenticatedRPCClient),
+        unifiedThread: Self.usesUnifiedThread
     )
 
     // MARK: - Maps
@@ -702,7 +720,11 @@ final class AppContainer {
         router: routeResolver,
         // One history for the whole app: a query typed in the inbox is recent on
         // the search screen, and the other way round.
-        recentSearches: recentSearchStore
+        recentSearches: recentSearchStore,
+        // `-unified-thread`: a conversation is drawn by the feed's text-post
+        // screen. Lazy, like every feature here: the feed builder reaches the
+        // router, and the router reaches this.
+        threadScreens: Self.usesUnifiedThread ? { [unowned self] in self.feedFeature } : nil
     )
 
     // MARK: - Routing

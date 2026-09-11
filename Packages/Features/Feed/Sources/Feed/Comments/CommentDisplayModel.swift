@@ -24,6 +24,9 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     public let avatarURL: URL?
     /// The thread parent's id for level-2 replies; nil at top level.
     public let parentID: String?
+    /// When it was written — what the unified thread's day pills group by
+    /// (`-unified-thread`). Nil for a row built without one.
+    public let createdAt: Date?
     /// Level-2 marker: replies render with the standard reply indentation
     /// (the stream carries exactly two depths — comment.v1's contract).
     public var isReply: Bool { parentID != nil }
@@ -37,6 +40,31 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         monogram = Self.monogram(entry.authorName)
         avatarURL = entry.authorAvatarURL
         metaText = Self.relativeShort(from: entry.createdAt, to: now)
+        createdAt = entry.createdAt
+    }
+
+    /// A row that is not a comment: a conversation's message, drawn in the
+    /// comment grammar (`-unified-thread`). `metaText` is whatever the header
+    /// shows beside the name — a clock time there, under the day pills.
+    init(
+        id: String,
+        authorID: ProfileID,
+        authorName: String,
+        metaText: String,
+        body: String,
+        avatarURL: URL?,
+        parentID: String? = nil,
+        createdAt: Date? = nil
+    ) {
+        self.id = id
+        self.authorID = authorID
+        self.authorName = authorName
+        self.metaText = metaText
+        self.body = body
+        self.avatarURL = avatarURL
+        self.parentID = parentID
+        self.createdAt = createdAt
+        monogram = Self.monogram(authorName)
     }
 
     private static func monogram(_ name: String) -> String {

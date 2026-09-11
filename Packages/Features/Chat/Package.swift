@@ -20,6 +20,10 @@ let package = Package(
         .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/MediaCore"),
+        // `-unified-thread`: the conversation drawn by Feed's text-post screen.
+        // The INTERFACE only — features never import each other — the same
+        // edge Maps and Profile already have.
+        .package(path: "../../FeatureInterfaces/FeedInterface"),
         // Renders the composer's favorite-sticker strip. dotLottie (.lottie)
         // is a zipped bundle of Bodymovin JSON, so a real player is required —
         // there is no UIImage path for it.
@@ -36,6 +40,7 @@ let package = Package(
                 "CoreNavigation",
                 "CoreStorage",
                 "DesignSystem",
+                "FeedInterface",
                 "MediaCore",
                 .product(name: "Lottie", package: "lottie-ios")
             ],
@@ -50,6 +55,7 @@ let package = Package(
                 "Chat",
                 "CoreNavigation",
                 "CoreNetworking",
+                "FeedInterface",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )
