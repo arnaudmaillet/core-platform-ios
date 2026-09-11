@@ -1188,9 +1188,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let navigation = UINavigationController(rootViewController: composer)
         navigation.modalPresentationStyle = .pageSheet
         if let sheet = navigation.sheetPresentationController {
-            // Half height for an empty page, the whole screen for a thread —
-            // and for the keyboard, which the composer grows the sheet for.
-            sheet.detents = [.medium(), .large()]
+            // Half height for an empty page — taller only when the invitation
+            // cannot show whole there — and the whole screen for a thread and
+            // for the keyboard, which the composer grows the sheet for.
+            sheet.detents = [composer.makeRestingDetent(), .large()]
             sheet.prefersGrabberVisible = true
         }
         return navigation

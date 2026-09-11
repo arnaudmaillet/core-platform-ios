@@ -252,11 +252,12 @@ final class ConversationThreadViewController: UIViewController {
             ])
         }
         let emptyCell = UICollectionView.CellRegistration<CommentsEmptyPageCell, Item> { [weak self] cell, _, _ in
+            let copy = ConversationThreadViewController.emptyPageCopy
             cell.configure(
-                symbolName: "bubble.left.and.bubble.right",
-                title: "No messages yet",
-                subtitle: "Say hi 👋",
-                height: self?.emptyPageHeight() ?? SnapCommentsLayout.emptyPageMinimumHeight
+                symbolName: copy.symbol,
+                title: copy.title,
+                subtitle: copy.subtitle,
+                height: self?.emptyPageHeight() ?? SnapCommentsLayout.emptyPageFallbackHeight
             )
         }
         let dayHeader = UICollectionView.SupplementaryRegistration<DayPillHeaderView>(
@@ -723,10 +724,31 @@ final class ConversationThreadViewController: UIViewController {
 
     // MARK: - Misc
 
+    /// What an empty conversation says: one copy for the row and for its
+    /// measurement.
+    private static let emptyPageCopy = PostDetailViewController.EmptyPageCopy(
+        symbol: "bubble.left.and.bubble.right",
+        title: "No messages yet",
+        subtitle: "Say hi 👋"
+    )
+
     private func emptyPageHeight() -> CGFloat {
         let insets = collectionView.adjustedContentInset
         let height = collectionView.bounds.height > 0 ? collectionView.bounds.height : view.bounds.height
-        return SnapCommentsLayout.emptyPageHeight(availableHeight: height - insets.top - insets.bottom)
+        let width = collectionView.bounds.width > 0 ? collectionView.bounds.width : view.bounds.width
+        let copy = Self.emptyPageCopy
+        return SnapCommentsLayout.emptyPageHeight(
+            // Nil before layout: no geometry to fit yet.
+            availableHeight: height > 0 ? height - insets.top - insets.bottom : nil,
+            // The section's side insets, which the row's width is less.
+            blockHeight: CommentsEmptyPageCell.blockHeight(
+                symbolName: copy.symbol,
+                title: copy.title,
+                subtitle: copy.subtitle,
+                width: width - Spacing.lg * 2,
+                contentSizeCategory: traitCollection.preferredContentSizeCategory
+            )
+        )
     }
 
     private func presentNotice(_ title: String, _ message: String) {

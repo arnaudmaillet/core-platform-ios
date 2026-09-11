@@ -2659,17 +2659,26 @@ struct SnapCommentsPresentationTests {
 
     /// The comments-only empty PAGE row. `EmptyStateView` centres its block
     /// and has no vertical intrinsic size, so a self-sizing list row has to
-    /// be told a height. The seed claims the whole available region (which
-    /// already excludes header, composer and safe areas); the correction
-    /// gives back whatever the caption row above it turned out to take.
-    @Test func theEmptyPageRowSeedsFromTheAvailableRoom() {
-        #expect(SnapCommentsLayout.emptyPageHeight(availableHeight: 700) == 700)
-        // The floor covers the pre-layout call, where bounds are still zero.
+    /// be told a height. It claims the whole available region (which already
+    /// excludes header, composer and safe areas), so the block is centred in
+    /// what is visible — down to the block's own height, and no further.
+    @Test func theEmptyPageRowTakesTheRoomDownToTheBlock() {
+        #expect(SnapCommentsLayout.emptyPageHeight(availableHeight: 700, blockHeight: 110) == 700)
+        // The Text Post sheet at its medium height on an iPhone SE: less room
+        // than the old flat 260pt floor, more than the block. The room wins,
+        // or the block is centred in a row taller than the screen shows.
+        #expect(SnapCommentsLayout.emptyPageHeight(availableHeight: 125, blockHeight: 110) == 125)
+        // Less room than the block: the block, whose top then shows first.
+        #expect(SnapCommentsLayout.emptyPageHeight(availableHeight: 80, blockHeight: 110) == 110)
+        // A caption that fills the stream leaves none, or less: still the
+        // block — not the pre-layout fallback under a long caption.
+        #expect(SnapCommentsLayout.emptyPageHeight(availableHeight: 0, blockHeight: 110) == 110)
+        #expect(SnapCommentsLayout.emptyPageHeight(availableHeight: -40, blockHeight: 110) == 110)
+        // No geometry at all yet: the pre-layout call.
         #expect(
-            SnapCommentsLayout.emptyPageHeight(availableHeight: 0)
-                == SnapCommentsLayout.emptyPageMinimumHeight
+            SnapCommentsLayout.emptyPageHeight(availableHeight: nil, blockHeight: 110)
+                == SnapCommentsLayout.emptyPageFallbackHeight
         )
-        #expect(SnapCommentsLayout.emptyPageMinimumHeight > 0)
     }
 
     // MARK: - Entry point

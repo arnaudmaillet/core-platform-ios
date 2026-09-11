@@ -287,7 +287,19 @@ final class PostDetailViewController: UIViewController {
         guard height > 0, abs(height - lastLaidOutHeight) > 0.5 else { return }
         let isFirst = lastLaidOutHeight == 0
         lastLaidOutHeight = height
-        guard !isFirst, hasAppliedStream, renderedEmptyPageFit != nil else { return }
+        guard !isFirst else { return }
+        refitEmptyPage()
+    }
+
+    /// Re-fits a shown empty page to the current geometry and text size.
+    ///
+    /// Two things move its fit after it was decided: the room (a sheet's
+    /// detent, above) and the block's own height, which is the page's floor
+    /// and grows with the text size. `applyStream` reconfigures the page
+    /// only if the fit really changed, so a call that finds nothing to do
+    /// costs one measurement.
+    private func refitEmptyPage() {
+        guard hasAppliedStream, renderedEmptyPageFit != nil else { return }
         applyStream(animated: false)
     }
 
@@ -344,6 +356,12 @@ final class PostDetailViewController: UIViewController {
         viewModel.onPublished = { [weak self] entry in self?.becomePublished(entry) }
         viewModel.onPublishFailed = { [weak self] text in self?.restoreUnpublished(text) }
         configureProfileSwitcher()
+        // The empty page's floor is its block's own height, which the text
+        // size changes — see `refitEmptyPage`.
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
+            (controller: PostDetailViewController, _: UITraitCollection) in
+            controller.refitEmptyPage()
+        }
         render(.loading)
         viewModel.viewDidLoad()
     }
@@ -1314,11 +1332,20 @@ final class PostDetailViewController: UIViewController {
         // presentation.
         let emptyPageCell = UICollectionView.CellRegistration<CommentsEmptyPageCell, StreamItem> {
             [weak self] cell, _, _ in
-            let copy = self?.emptyPageCopy ?? PostDetailViewController.commentsEmptyPageCopy
-            let height = self?.emptyPageHeight() ?? SnapCommentsLayout.emptyPageMinimumHeight
-            cell.configure(symbolName: copy.symbol, title: copy.title, subtitle: copy.subtitle, height: height)
+            let fit = self?.currentEmptyPageFit() ?? EmptyPageFit(
+                copy: PostDetailViewController.commentsEmptyPageCopy,
+                height: SnapCommentsLayout.emptyPageFallbackHeight,
+                blockOffset: 0
+            )
+            cell.configure(
+                symbolName: fit.copy.symbol,
+                title: fit.copy.title,
+                subtitle: fit.copy.subtitle,
+                height: fit.height,
+                blockOffset: fit.blockOffset
+            )
             // What the cell was actually given — see `applyStream`.
-            self?.renderedEmptyPageFit = EmptyPageFit(copy: copy, height: height)
+            self?.renderedEmptyPageFit = fit
         }
         let captionCell = UICollectionView.CellRegistration<CaptionBubbleCell, StreamItem> {
             [weak self] cell, _, _ in
@@ -1515,7 +1542,7 @@ final class PostDetailViewController: UIViewController {
         if let rendered = renderedEmptyPageFit,
            snapshot.itemIdentifiers.contains(.emptyState),
            streamDataSource.snapshot().itemIdentifiers.contains(.emptyState),
-           !rendered.matches(EmptyPageFit(copy: emptyPageCopy, height: emptyPageHeight())) {
+           !rendered.matches(currentEmptyPageFit()) {
             snapshot.reconfigureItems([.emptyState])
         }
         hasAppliedStream = true
@@ -1550,12 +1577,16 @@ final class PostDetailViewController: UIViewController {
     private struct EmptyPageFit {
         let copy: EmptyPageCopy
         let height: CGFloat
+        /// See `emptyPageBlockOffset`.
+        let blockOffset: CGFloat
 
-        /// Heights within half a point are the same page: the measurement is
-        /// arithmetic on fonts, and a re-configure for a rounding difference
-        /// would be a jump for nothing.
+        /// Within half a point is the same page: the measurement is arithmetic
+        /// on fonts, and a re-configure for a rounding difference would be a
+        /// jump for nothing.
         func matches(_ other: EmptyPageFit) -> Bool {
-            copy == other.copy && abs(height - other.height) < 0.5
+            copy == other.copy
+                && abs(height - other.height) < 0.5
+                && abs(blockOffset - other.blockOffset) < 0.5
         }
     }
 
@@ -1609,9 +1640,13 @@ final class PostDetailViewController: UIViewController {
     /// computed before the transition has produced it. Nil until engaged.
     private var engagedStreamInsets: (top: CGFloat, bottom: CGFloat)?
 
-    /// The empty page's height, resolved SYNCHRONOUSLY: the room the stream
-    /// has, less the section's own insets, less the caption row that sits
-    /// above it.
+    /// The empty page's fit, resolved SYNCHRONOUSLY.
+    ///
+    /// The HEIGHT is the room the stream has, less the section's own insets,
+    /// less the caption row that sits above it, and never less than the block
+    /// the row holds, measured at the row's width (see
+    /// `SnapCommentsLayout.emptyPageHeight`). The OFFSET centres that block in
+    /// the space a reader sees as empty (see `emptyPageBlockOffset`).
     ///
     /// The caption row is measured here rather than waited for. It is the
     /// only other row in this stream, and a throwaway `CaptionBubbleCell`
@@ -1620,18 +1655,123 @@ final class PostDetailViewController: UIViewController {
     /// layout pass per empty-state configuration; NOT measuring costs a
     /// visible jump, because anything learned after frame 0 arrives as
     /// motion the presentation did not ask for.
-    private func emptyPageHeight() -> CGFloat {
-        // The view's width, when the stream has not been laid out yet: the
-        // resting engagement configures rows before the container has run a
-        // pass, and a zero width would measure the caption as zero-height
-        // and hand the empty page the whole viewport.
+    private func currentEmptyPageFit() -> EmptyPageFit {
+        let rowWidth = streamRowWidth
+        let caption = captionRowHeight(width: rowWidth)
+        let block = emptyPageBlockHeight(width: rowWidth)
+        let room = availableStreamHeight
+        // No room at all is no geometry yet: the pre-layout call. Whole
+        // points, so the rows never overrun the room by a rounding and leave
+        // the page scrolling by a fraction.
+        let available: CGFloat? = room > 0
+            ? floor(room - streamSectionVerticalInsets - caption)
+            : nil
+        let height = SnapCommentsLayout.emptyPageHeight(availableHeight: available, blockHeight: block)
+        return EmptyPageFit(
+            copy: emptyPageCopy,
+            height: height,
+            blockOffset: emptyPageBlockOffset(rowHeight: height, blockHeight: block, captionHeight: caption)
+        )
+    }
+
+    /// How far below its row's centre the empty page's block sits (above,
+    /// when negative), so that it is centred in the space a reader SEES as
+    /// empty.
+    ///
+    /// ⚠️ THE ROW IS NOT THAT SPACE. The row fills the stream's content area,
+    /// which starts a breath below the header and stops the stream's footer
+    /// clearance above the bottom — 16pt short of the composer's top. What a
+    /// reader sees as empty runs from the header's foot (or from the caption
+    /// row, once there is one) down to the composer. Centred in its row, the
+    /// block sat about 24pt above the middle of that space on the Text Post
+    /// sheet: measured on an iPhone SE, 30pt of air above it and 47pt below.
+    ///
+    /// Outside the engaged context the stream does end at the composer's top,
+    /// but the row still stops the section's bottom inset short of it: the
+    /// space is the row plus its section insets, which centre it
+    /// `(bottom − top) / 2` lower. Never more than the row's slack, so the
+    /// block never leaves its row.
+    private func emptyPageBlockOffset(rowHeight: CGFloat, blockHeight: CGFloat, captionHeight: CGFloat) -> CGFloat {
+        let slack = max(0, (rowHeight - blockHeight) / 2)
+        guard let engaged = engagedStreamInsets, view.bounds.height > 0 else {
+            return min((Spacing.lg - streamSectionTopInset) / 2, slack)
+        }
+        let rowTop = engaged.top + streamSectionTopInset + captionHeight
+        let spaceTop = captionHeight > 0 ? rowTop : engaged.top - SnapCommentsLayout.streamTopBreath
+        // The composer at rest, as `setEngagedInsets` places it. Its RESTING
+        // height, a function of the text size, never its laid-out one: a bar
+        // laid out after the first fit would change this answer on a later
+        // apply, and a changed answer is a block that jumps.
+        let restingBottomInset = engaged.bottom - Self.engagedFooterClearance
+        let composerHeight = CommentsInputBar.restingHeight(for: traitCollection.preferredContentSizeCategory)
+        let spaceBottom = view.bounds.height - restingBottomInset - Spacing.sm - composerHeight
+        let offset = (spaceTop + spaceBottom) / 2 - (rowTop + rowHeight / 2)
+        return min(max(offset, -slack), slack)
+    }
+
+    /// The empty stream's section insets, mirroring the layout
+    /// (`collectionView`): no top inset when the stream leads with a caption
+    /// row — comments-only, even while a draft has none yet — and `Spacing.lg`
+    /// at the bottom.
+    private var streamSectionTopInset: CGFloat { mode == .full ? Spacing.lg : 0 }
+    private var streamSectionVerticalInsets: CGFloat { streamSectionTopInset + Spacing.lg }
+
+    /// How tall this view has to be for the empty page's block to show WHOLE
+    /// in the visible stream — the inverse of `currentEmptyPageFit`: the
+    /// height at which the room the stream has is exactly the block. Nil while
+    /// the stream holds no empty page, or before the engaged insets are known.
+    /// A sheet sizes its resting detent from it.
+    ///
+    /// ⚠️ THE TEXT SIZE IS THE CALLER'S. A host asks from its own trait-change
+    /// handler, which runs before this controller's traits have caught up:
+    /// reading them here measured the block at the size it had just left, and
+    /// the sheet did not follow a text size changed while it was open.
+    func viewHeightShowingEmptyPage(contentSizeCategory: UIContentSizeCategory) -> CGFloat? {
+        guard isViewLoaded, let engaged = engagedStreamInsets,
+              streamDataSource.snapshot().itemIdentifiers.contains(.emptyState) else { return nil }
+        let rowWidth = streamRowWidth
+        guard rowWidth > 0 else { return nil }
+        let caption = captionRowHeight(width: rowWidth)
+        let block = emptyPageBlockHeight(width: rowWidth, contentSizeCategory: contentSizeCategory)
+        // The row has to hold the block…
+        let rowHoldsBlock = engaged.top + engaged.bottom + streamSectionVerticalInsets + caption + block
+        // …and the block has to clear the composer, which the stream's fixed
+        // footer clearance stops covering once the field outgrows one small
+        // line (accessibility sizes: the field reaches ~80pt).
+        let rowTop = engaged.top + streamSectionTopInset + caption
+        let restingBottomInset = engaged.bottom - Self.engagedFooterClearance
+        let composerHeight = CommentsInputBar.restingHeight(for: contentSizeCategory)
+        let blockClearsComposer = rowTop + block + Spacing.sm + composerHeight + restingBottomInset
+        return ceil(max(rowHoldsBlock, blockClearsComposer))
+    }
+
+    /// The stream's rows are this wide: the stream less the section's side
+    /// insets.
+    ///
+    /// The view's width stands in when the stream has not been laid out yet:
+    /// the resting engagement configures rows before the container has run a
+    /// pass, and a zero width would measure the caption as zero-height and
+    /// hand the empty page the whole viewport.
+    private var streamRowWidth: CGFloat {
         let streamWidth = collectionView.bounds.width > 0
             ? collectionView.bounds.width
             : view.bounds.width
-        let rowWidth = streamWidth - Spacing.lg * 2
-        let occupied = Spacing.lg * 2 + captionRowHeight(width: rowWidth)
-        return SnapCommentsLayout.emptyPageHeight(
-            availableHeight: availableStreamHeight - occupied
+        return streamWidth - Spacing.lg * 2
+    }
+
+    /// The empty page's block at `width`, in this screen's text size unless
+    /// told another.
+    private func emptyPageBlockHeight(
+        width: CGFloat,
+        contentSizeCategory: UIContentSizeCategory? = nil
+    ) -> CGFloat {
+        let copy = emptyPageCopy
+        return CommentsEmptyPageCell.blockHeight(
+            symbolName: copy.symbol,
+            title: copy.title,
+            subtitle: copy.subtitle,
+            width: width,
+            contentSizeCategory: contentSizeCategory ?? traitCollection.preferredContentSizeCategory
         )
     }
 

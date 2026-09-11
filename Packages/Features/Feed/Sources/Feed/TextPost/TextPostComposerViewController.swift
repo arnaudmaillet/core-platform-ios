@@ -50,6 +50,9 @@ final class TextPostComposerViewController: UIViewController {
     /// Whether the sheet grew to make room for the keyboard — so it shrinks
     /// back when the keyboard goes, and only then.
     private var expandedForKeyboard = false
+    /// The least the sheet may rest at, as a detent value — see
+    /// `makeRestingDetent`. Nil while the medium height is enough.
+    private var restingFloor: CGFloat?
     private let keyboardObservers = NotificationObserverTokenBag()
     private let draftObservers = NotificationObserverTokenBag()
 
@@ -128,6 +131,12 @@ final class TextPostComposerViewController: UIViewController {
         ]
         bookmarkButton.addAction(UIAction { [weak self] _ in self?.toggleBookmark() }, for: .primaryActionTriggered)
         observeKeyboard()
+        // The invitation grows with the text size, and so may the least the
+        // sheet rests at.
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
+            (controller: TextPostComposerViewController, _: UITraitCollection) in
+            controller.updateRestingFloor()
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -148,6 +157,8 @@ final class TextPostComposerViewController: UIViewController {
             headerFrost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
         }
         applyPanelInsets()
+        // In a window now: the bottom safe area the floor subtracts is known.
+        updateRestingFloor()
         panel.setComposerEntranceState(offstage: false)
         #if DEBUG
         runDebugHooks()
@@ -218,6 +229,7 @@ final class TextPostComposerViewController: UIViewController {
         if let applied = appliedInsets, applied.top == top, applied.bottom == bottom { return }
         appliedInsets = (top, bottom)
         panel.setEngagedInsets(top: top, bottomInset: bottom)
+        updateRestingFloor()
     }
 
     // MARK: - Writing
@@ -416,7 +428,62 @@ final class TextPostComposerViewController: UIViewController {
         placeSoundPill(onTop: false)
         guard expandedForKeyboard, let sheet = navigationController?.sheetPresentationController else { return }
         expandedForKeyboard = false
-        sheet.animateChanges { sheet.selectedDetentIdentifier = .medium }
+        sheet.animateChanges { sheet.selectedDetentIdentifier = Self.restingDetentIdentifier }
+    }
+
+    // MARK: - Resting height
+
+    static let restingDetentIdentifier = UISheetPresentationController.Detent.Identifier("textPost.resting")
+
+    /// The sheet's resting detent: the system's medium height, unless the
+    /// invitation cannot show whole there.
+    ///
+    /// ⚠️ ONLY WHEN CENTRING CANNOT WORK. At the default text size the medium
+    /// height leaves the stream room enough, and the invitation is centred in
+    /// it (`SnapCommentsLayout.emptyPageHeight`). At accessibility sizes on an
+    /// iPhone SE the block is taller than that room, and its subtitle went
+    /// under the composer. The sheet then rests just tall enough to show it
+    /// whole, and never taller than its large height.
+    func makeRestingDetent() -> UISheetPresentationController.Detent {
+        .custom(identifier: Self.restingDetentIdentifier) { [weak self] context in
+            // Medium is inactive in a compact height — an iPhone on its side —
+            // and so is this: the sheet is full height there, as it was.
+            guard let medium = UISheetPresentationController.Detent.medium().resolvedValue(in: context) else {
+                return nil
+            }
+            return Self.restingHeight(
+                medium: medium,
+                maximum: context.maximumDetentValue,
+                floor: MainActor.assumeIsolated { self?.restingFloor }
+            )
+        }
+    }
+
+    /// The medium height, raised to `floor` when there is one, and never past
+    /// the sheet's largest height.
+    nonisolated static func restingHeight(medium: CGFloat, maximum: CGFloat, floor: CGFloat?) -> CGFloat {
+        guard let floor else { return medium }
+        return min(maximum, max(medium, floor))
+    }
+
+    /// Re-reads how tall the sheet has to rest for the invitation to show
+    /// whole, and re-resolves the detent only when that changed.
+    private func updateRestingFloor() {
+        // While writing only: a published post's page scrolls like any other.
+        let needed = publishedEntry == nil
+            ? panel.viewHeightShowingEmptyPage(contentSizeCategory: traitCollection.preferredContentSizeCategory)
+            : nil
+        // A detent's value leaves out the bottom safe area, which this view's
+        // height includes.
+        let floor = needed.map { $0 - (view.window?.safeAreaInsets.bottom ?? 0) }
+        switch (floor, restingFloor) {
+        case (nil, nil): return
+        case let (new?, old?) where abs(new - old) < 0.5: return
+        default: break
+        }
+        restingFloor = floor
+        guard let sheet = navigationController?.sheetPresentationController else { return }
+        sheet.animateChanges { sheet.invalidateDetents() }
     }
 
     // MARK: - Published
@@ -430,6 +497,7 @@ final class TextPostComposerViewController: UIViewController {
         let model = FeedDisplayModelBuilder().build(entry, now: Date())
         publishedEntry = entry
         publishedModel = model
+        updateRestingFloor()
         navigationController?.isModalInPresentation = false
         // The post is shown whole: the keyboard goes down with what it wrote.
         view.endEditing(true)
@@ -598,6 +666,7 @@ final class TextPostComposerViewController: UIViewController {
 
     #if DEBUG
     var debugIsPublished: Bool { publishedModel != nil }
+    var debugRestingFloor: CGFloat? { restingFloor }
 
     private var didRunDebugHooks = false
 

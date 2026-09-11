@@ -732,7 +732,7 @@ final class CommentSkeletonRowView: UIView {
 ///
 /// The answer is not to recompute more carefully but to stop recomputing.
 /// The height is resolved once, from geometry that is already final on frame
-/// 0 (`PostDetailViewController.emptyPageHeight`), and this cell returns it
+/// 0 (`PostDetailViewController.currentEmptyPageFit`), and this cell returns it
 /// unchanged for the life of the configuration.
 final class CommentsEmptyPageCell: UICollectionViewCell {
     private let empty = EmptyStateView()
@@ -741,23 +741,35 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
     /// returns exactly this — never a self-sized alternative.
     private var targetHeight: CGFloat = 0
 
+    /// The block's box in the row: edge to edge, but for the block's offset —
+    /// see `configure`.
+    private lazy var emptyTop = empty.topAnchor.constraint(equalTo: contentView.topAnchor)
+    private lazy var emptyBottom = empty.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         empty.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(empty)
         NSLayoutConstraint.activate([
-            empty.topAnchor.constraint(equalTo: contentView.topAnchor),
+            emptyTop,
             empty.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             empty.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            empty.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            emptyBottom,
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(symbolName: String, title: String, subtitle: String, height: CGFloat) {
+    /// `blockOffset` moves the block off the row's centre — down when
+    /// positive — for a row whose centre is not the centre of the space the
+    /// reader sees as empty. The owner keeps it within the row's slack.
+    func configure(symbolName: String, title: String, subtitle: String, height: CGFloat, blockOffset: CGFloat = 0) {
         targetHeight = max(0, height)
+        // The view centres the block in its own box, so moving one edge of the
+        // box by twice the offset moves the block by the offset.
+        emptyTop.constant = max(0, blockOffset * 2)
+        emptyBottom.constant = min(0, blockOffset * 2)
         empty.configure(symbolName: symbolName, title: title, subtitle: subtitle)
         // No implicit animation may attach to the setup pass: this runs
         // inside the engagement's animation block on the resting-engagement
@@ -768,6 +780,46 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
             contentView.layoutIfNeeded()
         }
     }
+
+    /// How tall the block itself is at `width`: the least the row may be (see
+    /// `SnapCommentsLayout.emptyPageHeight`).
+    ///
+    /// Measured through a real `EmptyStateView`, so the answer cannot drift
+    /// from what the row draws. The sizing view is held, and rebuilt only
+    /// when the text size changes.
+    ///
+    /// ⚠️ THE SIZE IS THE CALLER'S, NOT THE APP'S. A view outside the
+    /// hierarchy has no window to inherit a text size from, so it is handed
+    /// `contentSizeCategory` as an override. Without it the block would be
+    /// measured at the app's size while a screen that caps or overrides its
+    /// own size draws it at another.
+    static func blockHeight(
+        symbolName: String,
+        title: String,
+        subtitle: String,
+        width: CGFloat,
+        contentSizeCategory: UIContentSizeCategory
+    ) -> CGFloat {
+        guard width > 0 else { return 0 }
+        let view: EmptyStateView
+        if let sizing, sizing.category == contentSizeCategory {
+            view = sizing.view
+        } else {
+            view = EmptyStateView()
+            view.traitOverrides.preferredContentSizeCategory = contentSizeCategory
+            view.updateTraitsIfNeeded()
+            sizing = (contentSizeCategory, view)
+        }
+        view.configure(symbolName: symbolName, title: title, subtitle: subtitle)
+        return ceil(view.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height)
+    }
+
+    /// Offscreen, never in the hierarchy — see `blockHeight`.
+    private static var sizing: (category: UIContentSizeCategory, view: EmptyStateView)?
 
     /// The height, locked. Laid out synchronously first so what UIKit is
     /// handed on frame 0 is byte-identical to what the settled layout would

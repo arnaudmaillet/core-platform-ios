@@ -57,6 +57,30 @@ final class CommentsInputBar: UIView {
         }
     }
 
+    /// The bar's height at rest in `category`: one empty line, and never less
+    /// than the field's floor. For a host that places something against the
+    /// resting bar before it is laid out.
+    ///
+    /// ⚠️ NOT A CONSTANT. The field grows with the text size — 38pt up to the
+    /// large sizes, about 80pt at the largest accessibility size — so this
+    /// asks a text view set up like the bar's own (`updateFieldHeight`), and
+    /// gets the answer the bar will reach. Cached per size.
+    static func restingHeight(for category: UIContentSizeCategory) -> CGFloat {
+        if let cached = restingHeights[category] { return cached }
+        let probe = UITextView()
+        probe.font = .preferredFont(
+            forTextStyle: .body,
+            compatibleWith: UITraitCollection(preferredContentSizeCategory: category)
+        )
+        probe.textContainerInset = UIEdgeInsets(top: Spacing.sm, left: Spacing.sm, bottom: Spacing.sm, right: Spacing.sm)
+        let fitting = probe.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height
+        let height = max(ceil(fitting), Metrics.controlSize)
+        restingHeights[category] = height
+        return height
+    }
+
+    private static var restingHeights: [UIContentSizeCategory: CGFloat] = [:]
+
     private enum Metrics {
         static let maxLines: CGFloat = 4
         static let controlSize: CGFloat = 38
