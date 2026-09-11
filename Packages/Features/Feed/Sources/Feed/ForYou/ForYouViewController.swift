@@ -102,9 +102,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// target and no menu.
     ///
     /// It stands where the context glyph used to, because the bar's detached
-    /// trailing item is the camera now and search had to land somewhere it is
-    /// actually wanted. The "+" that used to hold the leading corner is gone
-    /// with the compose screen it opened.
+    /// trailing item was taken — by a camera first, by the "+" menu (Camera,
+    /// Upload Media, Text Post) since — and search had to land somewhere it is
+    /// actually wanted. The header "+" that used to hold the leading corner is
+    /// gone with the compose screen it opened; making a post starts from the
+    /// bar's "+" now.
     private lazy var searchItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
             image: UIImage(systemName: "magnifyingglass"),

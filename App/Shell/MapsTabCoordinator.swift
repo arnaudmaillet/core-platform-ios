@@ -24,9 +24,10 @@ final class MapsTabCoordinator: TabCoordinator {
     /// Search, at the very edge of the trailing group.
     ///
     /// It lives here rather than in the bar because the bar's detached trailing
-    /// item is the camera now. Constructed by the coordinator so the tap is
-    /// owned by navigation and the Maps package stays navigation-agnostic —
-    /// exactly as the "+" that stood opposite it used to be.
+    /// item is the "+" menu now (`CreateTabItem`). Constructed by the
+    /// coordinator so the tap is owned by navigation and the Maps package stays
+    /// navigation-agnostic — exactly as the header "+" that stood opposite it
+    /// used to be.
     private lazy var searchButtonItem: UIBarButtonItem = {
         let item = UIBarButtonItem(
             image: UIImage(systemName: "magnifyingglass"),

@@ -721,12 +721,19 @@ final class AppContainer {
     // MARK: - Compose / upload
 
     // ⚠️ THE PIPELINE, WITH NO SCREEN IN FRONT OF IT. The compose screen was
-    // deleted with the "+" tab: upload is being rebuilt from scratch, and a
-    // half-designed screen is not a starting point. `PostComposer` is —
-    // IssueUploadTicket → byte upload → CommitUpload → ResolveDelivery →
-    // CreatePost → PublishPost is the same flow whatever picks the media, it
-    // is covered by tests, and `-mock-compose-demo` still drives it end to
-    // end. Whatever the new screen is, it talks to this.
+    // deleted with the header "+" (#152): upload is being rebuilt from
+    // scratch, and a half-designed screen is not a starting point.
+    // `PostComposer` is — IssueUploadTicket → byte upload → CommitUpload →
+    // ResolveDelivery → CreatePost → PublishPost is the same flow whatever
+    // picks the media, it is covered by tests, and `-mock-compose-demo` still
+    // drives it end to end. Whatever the new screens are, they talk to this.
+    //
+    // The "+" is back, in the TAB BAR, as a menu (`CreateTabItem`). Its Upload
+    // Media and Text Post entries open empty screens on purpose — see
+    // `UploadFeatureBuilder` — and are where those new screens will go.
+
+    /// Stateless, so built on demand.
+    var uploadFeature: UploadFeatureBuilder { UploadFeatureBuilder() }
 
     // Computed (not lazy): the PostComposer init is actor-isolated, which a
     // stored-property initializer can't call under default-MainActor isolation.
