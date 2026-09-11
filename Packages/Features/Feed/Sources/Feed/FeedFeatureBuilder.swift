@@ -49,6 +49,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// clients are already wired, and the composition root hands the same
     /// instances to whoever needs them.
     private let socialGraph: (any SocialGraphWriting)?
+    /// The Text Post page's drafts. Nil keeps the app's own list on this
+    /// device; a test hands in one of its own.
+    private let postDrafts: PostDraftStore?
     public init(
         repository: any FeedProviding,
         engagementProvider: (any EngagementProviding)? = nil,
@@ -66,8 +69,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         /// Reads the numbers the timeline does not carry, so a card can show
         /// reach. Optional: without it the cards simply hide their counter,
         /// which is what they did before.
-        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil
+        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil,
+        postDrafts: PostDraftStore? = nil
     ) {
+        self.postDrafts = postDrafts
         self.counterClient = counterClient
         self.reporting = reporting
         self.socialGraph = socialGraph
@@ -1086,7 +1091,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let wallet = wallet
         let makeWalletSheet = makeWalletSheet
         let makePanel: (PostID, Bool) -> UIViewController = { postID, threadChrome in
-            PostDetailViewController(
+            Self.makeCommentsPanel(
                 viewModel: PostDetailViewModel(
                     postID: postID,
                     repository: repository,
@@ -1094,11 +1099,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                     commentsProvider: commentsProvider,
                     router: router
                 ),
+                threadChrome: threadChrome,
                 imagePipeline: imagePipeline,
-                mode: .commentsOnly,
-                profileSwitcher: makeProfileSwitcher?(),
-                wallet: wallet,
-                threadChrome: threadChrome
+                makeProfileSwitcher: makeProfileSwitcher,
+                wallet: wallet
             )
         }
         return SnapFeedViewController(
@@ -1119,6 +1123,77 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // nobody to file with — the same rule the grid's card menu follows.
             reporting: reporting
         )
+    }
+
+    /// The comments panel every snap page embeds. ONE construction, so the
+    /// Text Post page's draft panel is the text page's panel by definition
+    /// rather than by resemblance.
+    private static func makeCommentsPanel(
+        viewModel: PostDetailViewModel,
+        threadChrome: Bool,
+        imagePipeline: ImagePipeline,
+        makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)?,
+        wallet: WalletStore?
+    ) -> PostDetailViewController {
+        PostDetailViewController(
+            viewModel: viewModel,
+            imagePipeline: imagePipeline,
+            mode: .commentsOnly,
+            profileSwitcher: makeProfileSwitcher?(),
+            wallet: wallet,
+            threadChrome: threadChrome
+        )
+    }
+
+    /// The "+" menu's Text Post: a text post's own page, born empty, in an
+    /// expandable sheet — the content of an empty page is one invitation, and
+    /// a full screen of it was mostly air.
+    ///
+    /// ⚠️ THE PANEL IS THE TEXT PAGE'S REAL ONE, built by `makeCommentsPanel`
+    /// like every page's, over a DRAFT: no post, nothing fetched, and a first
+    /// send that publishes the post instead of commenting on one. Everything
+    /// the published page reads is primed before the panel turns into it — the
+    /// entry held so it is never fetched back, its empty first page of
+    /// comments — and from then on the sheet is that post's.
+    public func makeTextPostScreen(publisher: any TextPostPublishing) -> UIViewController {
+        let repository = repository
+        let commentsProvider = commentsProvider
+        let draft = PostDetailDraft { text, author in
+            let entry = try await publisher.publishTextPost(text, as: author)
+            await repository.remember(entry)
+            commentsProvider?.seedTopComments([], for: entry.post.id)
+            return entry
+        }
+        let panel = Self.makeCommentsPanel(
+            viewModel: PostDetailViewModel(
+                draft: draft,
+                repository: repository,
+                engagementProvider: engagementProvider,
+                commentsProvider: commentsProvider,
+                router: router
+            ),
+            threadChrome: true,
+            imagePipeline: imagePipeline,
+            makeProfileSwitcher: makeProfileSwitcher,
+            wallet: wallet
+        )
+        let composer = TextPostComposerViewController(
+            panel: panel,
+            drafts: postDrafts ?? PostDraftStore(),
+            imagePipeline: imagePipeline,
+            router: router,
+            wallet: wallet,
+            makeWalletSheet: makeWalletSheet
+        )
+        let navigation = UINavigationController(rootViewController: composer)
+        navigation.modalPresentationStyle = .pageSheet
+        if let sheet = navigation.sheetPresentationController {
+            // Half height for an empty page, the whole screen for a thread —
+            // and for the keyboard, which the composer grows the sheet for.
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        return navigation
     }
 
     public func makePostDetailViewController(for postID: PostID, mode: PostDetailMode) -> UIViewController {

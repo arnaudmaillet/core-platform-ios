@@ -1033,6 +1033,8 @@ final class SnapFeedViewController: UIViewController {
     /// driving a whole engagement — which needs a live cell, a hosted child,
     /// and a spring to settle.
     func setEngagedChrome(_ engaged: Bool, hasMedia: Bool, animated: Bool) {
+        engagedChromeOnBar = engaged
+        engagedChromeHasMedia = hasMedia
         // `rightBarButtonItems` reads RIGHT TO LEFT: index 0 is the
         // rightmost, so the sort lands just LEFT of the author pill.
         //
@@ -1149,13 +1151,15 @@ final class SnapFeedViewController: UIViewController {
         // the LEADING group, which takes its width from the same bar. What the
         // author can have is what the bar has left after everything else on it,
         // whichever end that everything sits at.
+        // A withdrawn sort (`CommentSortPolicy`) takes nothing: no pill, no
+        // padding, no spacer beside the arrow.
+        let sortShown = isCommentSortAvailable
         func authorBudget(sortWidth: CGFloat) -> CGFloat {
             let pad = Self.itemPlatterPadding
             return bar
                 - Self.barSideMargin * 2
                 - (Self.leadingItemWidth + pad)
-                - (sortWidth + pad)
-                - Spacing.sm
+                - (sortShown ? sortWidth + pad + Spacing.sm : 0)
                 - pad
                 - walletItemFootprint()
         }
@@ -1169,7 +1173,7 @@ final class SnapFeedViewController: UIViewController {
         // Rung 2: the name alone cannot absorb it — the HANDLE would start
         // truncating next, so the sort pill gives up its word first and the
         // width it frees goes to the author.
-        if budget < authorIdentityView.widthKeepingHandleWhole {
+        if sortShown, budget < authorIdentityView.widthKeepingHandleWhole {
             commentSortButton.setTitleHidden(true)
             budget = authorBudget(sortWidth: sortWidth())
         }
@@ -1249,11 +1253,53 @@ final class SnapFeedViewController: UIViewController {
         // this is the end that carries what the screen is DOING. The trailing
         // end carries who the post is by.
         var items = [backItem].compactMap { $0 }
-        if engaged {
+        if engaged, isCommentSortAvailable {
             items += items.isEmpty ? [sortItem] : [.fixedSpace(Spacing.sm), sortItem]
         }
         guard navigationItem.leftBarButtonItems ?? [] != items else { return }
         navigationItem.setLeftBarButtonItems(items, animated: animated)
+    }
+
+    /// Whether the engaged thread is long enough to be worth sorting — see
+    /// `CommentSortPolicy`. Until it is, the sort is not in the bar at all, and
+    /// the author pill has its width.
+    private var isCommentSortAvailable = false
+
+    /// Whether the bar is WEARING the engaged chrome, which is not the same as
+    /// an engagement holding the slot: a text page mounts its engagement while
+    /// it is still being scrolled in, and a closing thread keeps its slot until
+    /// the animation's teardown — the bar is resting in both. A count arriving
+    /// then is kept for the next engaged chrome, not drawn onto a resting bar.
+    private var engagedChromeOnBar = false
+    private var engagedChromeHasMedia = false
+
+    /// Offers or withdraws the sort. Fed by the ENGAGED panel's comment count,
+    /// so a thread that reaches the threshold while it is open — the viewer's
+    /// own tenth comment — brings the sort in through the bar's own animation.
+    /// Internal for tests, which have no panel to count.
+    func setCommentSortAvailable(_ available: Bool, animated: Bool = false) {
+        guard available != isCommentSortAvailable else { return }
+        isCommentSortAvailable = available
+        guard engagedChromeOnBar else { return }
+        applyLeadingNavItem(engaged: true, hasMedia: engagedChromeHasMedia, animated: animated)
+        applyEngagedTrailingRunFit()
+    }
+
+    /// Reads the answer off the panel about to own the engagement — BEFORE the
+    /// engaged chrome is built, so the bar comes up right the first time.
+    private func syncCommentSortAvailability() {
+        let count = (commentsContentVC as? PostDetailViewController)?.commentCount ?? 0
+        isCommentSortAvailable = CommentSortPolicy.isAvailable(commentCount: count)
+    }
+
+    /// The count, as it changes, from a panel that holds the engagement. A
+    /// panel that does not (a warm, a preview) is heard at its promotion
+    /// instead, through `syncCommentSortAvailability`.
+    private func observeCommentCount(of detail: PostDetailViewController?) {
+        detail?.onCommentCountChange = { [weak self, weak detail] count in
+            guard let self, let detail, self.commentsContentVC === detail else { return }
+            self.setCommentSortAvailable(CommentSortPolicy.isAvailable(commentCount: count), animated: true)
+        }
     }
 
     private func applyTrailingNavItems(_ items: [UIBarButtonItem], animated: Bool) {
@@ -2027,6 +2073,7 @@ final class SnapFeedViewController: UIViewController {
                 detail?.setCommentSortOrder(order)
             }
         }
+        syncCommentSortAvailability()
         setEngagedChrome(true, hasMedia: true, animated: animated)
         // LAYOUT FIRST, UNANIMATED. Inside the spring, `layoutIfNeeded`
         // turns every frame the layout resolves into an animated property —
@@ -2518,6 +2565,7 @@ final class SnapFeedViewController: UIViewController {
         detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
             self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
         }
+        observeCommentCount(of: detail)
         // INSTANT: composer already onstage, cell engaged synchronously —
         // no spring, no offstage→onstage slide. The interface simply IS,
         // frame one, so scrolling it into view reveals it already formed.
@@ -2616,6 +2664,7 @@ final class SnapFeedViewController: UIViewController {
         detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
             self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
         }
+        observeCommentCount(of: detail)
         detail?.setComposerEntranceState(offstage: true)
         detail?.setStreamTransitionProgress(1)
         cell.setCommentsEngagementProgress(1)
@@ -2858,6 +2907,7 @@ final class SnapFeedViewController: UIViewController {
         commentSortButton.onOrderChange = { [weak detail] order in
             detail?.setCommentSortOrder(order)
         }
+        syncCommentSortAvailability()
         setEngagedChrome(true, hasMedia: false, animated: true)
     }
 
@@ -3189,6 +3239,9 @@ final class SnapFeedViewController: UIViewController {
         // resting pre-render can be torn down by more than one — a second
         // call must be a clean no-op.
         guard commentsEngagedID != nil else { return }
+        // The bar is resting from here, whichever path got here — some never
+        // pass through `setEngagedChrome(false)` (see below).
+        engagedChromeOnBar = false
         // Belt and braces for non-animated/interrupted paths.
         let cell = engagedCell()
         cell?.setCommentsEngaged(false)

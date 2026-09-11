@@ -1232,6 +1232,8 @@ struct SnapCommentsPresentationTests {
         feed.endAppearanceTransition()
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
 
+        // A thread long enough to sort (`CommentSortPolicy`).
+        feed.setCommentSortAvailable(true)
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         #expect((feed.navigationItem.rightBarButtonItems?.first?.customView as? UIButton)?
                     .accessibilityLabel == "Close comments")
@@ -1257,6 +1259,7 @@ struct SnapCommentsPresentationTests {
         let resting = feed.navigationItem.leftBarButtonItems ?? []
         #expect(resting.count == 1) // the back arrow alone
 
+        feed.setCommentSortAvailable(true)
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         let engaged = feed.navigationItem.leftBarButtonItems ?? []
         #expect(engaged.count == 3)
@@ -1268,6 +1271,36 @@ struct SnapCommentsPresentationTests {
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting)
+    }
+
+    /// ⚠️ NO SORT UNTIL THERE IS SOMETHING TO SORT: under ten comments the
+    /// engaged bar is the arrow alone.
+    @Test func aShortThreadOffersNoSort() throws {
+        let (_, feed) = Self.chromeHost()
+        let resting = feed.navigationItem.leftBarButtonItems ?? []
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting)
+        #expect(CommentSortPolicy.isAvailable(commentCount: 9) == false)
+        #expect(CommentSortPolicy.isAvailable(commentCount: 10))
+    }
+
+    /// A count reaching the threshold while the bar is RESTING — a text page
+    /// mounting under a scroll, a thread closing — is kept, not drawn: the sort
+    /// joins the bar with the engaged chrome, and leaves it the same way.
+    @Test func theSortWaitsForTheEngagedChrome() throws {
+        let (_, feed) = Self.chromeHost()
+        let resting = feed.navigationItem.leftBarButtonItems ?? []
+
+        feed.setCommentSortAvailable(true)
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting, "a resting bar stays resting")
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect((feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is SnapCommentSortButton })
+
+        feed.setCommentSortAvailable(false)
+        #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting, "withdrawn from the engaged bar at once")
     }
 
     /// ⚠️ THE WHOLE BAR, ENGAGED ON A MEDIA POST: [‹ back] [⇅ sort] ———
@@ -1295,6 +1328,7 @@ struct SnapCommentsPresentationTests {
         feed.beginAppearanceTransition(true, animated: false)
         feed.endAppearanceTransition()
 
+        feed.setCommentSortAvailable(true)
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
 
         // LEADING, left to right: the arrow then the sort.

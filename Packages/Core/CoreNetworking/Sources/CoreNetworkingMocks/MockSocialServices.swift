@@ -120,6 +120,9 @@ public final class MockSocialServices: @unchecked Sendable {
             view.profileID = draft.profileID
             view.caption = draft.caption
             view.publishedAtMs = draft.createdAtMS
+            // The kind the seeded posts carry, so an authored post reads the
+            // same on the wire.
+            view.kind = Self.kind(forMediaURL: draft.media?.url)
             if let media = draft.media {
                 view.attachments = [makeAttachment(url: media.url, width: media.width, height: media.height)]
             }

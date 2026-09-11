@@ -96,6 +96,9 @@ final class CommentsInputBar: UIView {
     private let textView = UITextView()
     private let placeholderLabel = UILabel()
     private let boostButton = UIButton(configuration: .glass())
+    /// The boost's slot, on a post that does not exist yet: who will see it.
+    /// See `visibilityMenu`.
+    private let visibilityButton = UIButton(configuration: .glass())
     private let sendButton = UIButton(configuration: .prominentGlass())
     /// The trailing slot's UTILITY face (send's overlay partner): a
     /// keyboard-state morphing control. Keyboard closed → the MICROPHONE
@@ -175,6 +178,15 @@ final class CommentsInputBar: UIView {
             ]
         )
 
+        visibilityButton.configuration?.image = UIImage(
+            systemName: "globe",
+            withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+        )
+        visibilityButton.configuration?.cornerStyle = .capsule
+        visibilityButton.accessibilityLabel = "Post visibility"
+        visibilityButton.showsMenuAsPrimaryAction = true
+        visibilityButton.isHidden = true
+
         sendButton.configuration?.image = UIImage(
             systemName: "arrow.up",
             withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
@@ -238,8 +250,10 @@ final class CommentsInputBar: UIView {
         addSubview(sendButton)
         addSubview(utilityButton)
         addSubview(boostButton)
+        addSubview(visibilityButton)
         avatarBubble.translatesAutoresizingMaskIntoConstraints = false
         boostButton.translatesAutoresizingMaskIntoConstraints = false
+        visibilityButton.translatesAutoresizingMaskIntoConstraints = false
         field.translatesAutoresizingMaskIntoConstraints = false
         sendButton.translatesAutoresizingMaskIntoConstraints = false
         utilityButton.translatesAutoresizingMaskIntoConstraints = false
@@ -276,6 +290,11 @@ final class CommentsInputBar: UIView {
             boostButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             boostButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             boostButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
+            // The boost's own station: the two never show at once.
+            visibilityButton.centerXAnchor.constraint(equalTo: boostButton.centerXAnchor),
+            visibilityButton.centerYAnchor.constraint(equalTo: boostButton.centerYAnchor),
+            visibilityButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
+            visibilityButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
         ])
 
         // The disc is NEVER empty. Before an identity resolves the bar shows
@@ -409,6 +428,37 @@ final class CommentsInputBar: UIView {
     var defaultPlaceholder: String? {
         didSet { applyPlaceholder() }
     }
+
+    /// The send button's spoken name. Nil is "Send comment"; the Text Post
+    /// page's first send publishes the post, and says so.
+    var sendAccessibilityLabel: String? {
+        didSet { sendButton.accessibilityLabel = sendAccessibilityLabel ?? "Send comment" }
+    }
+
+    /// The trailing slot's other face. A boost needs a post to land on; a post
+    /// that does not exist yet has a different question for that slot — who
+    /// will see it. Non-nil swaps the star for a globe that opens this menu;
+    /// nil puts the star back.
+    var visibilityMenu: UIMenu? {
+        didSet {
+            visibilityButton.menu = visibilityMenu
+            visibilityButton.isHidden = visibilityMenu == nil
+            boostButton.isHidden = visibilityMenu != nil
+        }
+    }
+
+    /// Every change to the draft, typed or set — for a host that keeps it (the
+    /// Text Post page's drafts, and its guard against a swipe throwing it away).
+    var onTextChange: ((String) -> Void)?
+
+    #if DEBUG
+    /// Types `text` and sends it, exactly as a tap on send would — for the
+    /// simulator hooks, which cannot type into a field.
+    func debugSend(_ text: String) {
+        draftText = text
+        sendTapped()
+    }
+    #endif
 
     /// Puts `text` into the draft — at the caret while the field is being
     /// edited, at the end otherwise — without sending. The emote strip's tap.
@@ -809,6 +859,7 @@ extension CommentsInputBar: UITextViewDelegate {
         placeholderLabel.isHidden = textView.hasText
         updateTrailingButtons(animated: true)
         updateFieldHeight()
+        onTextChange?(textView.text ?? "")
     }
 }
 

@@ -71,4 +71,9 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
     func loadPost(_ id: PostID) async throws -> FeedEntry {
         try await base.loadPost(id)
     }
+
+    /// Forwarded, like the peek: the post is held where every read looks.
+    func remember(_ entry: FeedEntry) async {
+        await base.remember(entry)
+    }
 }

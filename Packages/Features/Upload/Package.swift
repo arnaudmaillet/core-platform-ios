@@ -9,6 +9,9 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../FeatureInterfaces/AuthInterface"),
+        // The Text Post screen is drawn by Feed. The INTERFACE only — Upload
+        // hands it a publisher, the way Chat hands it a thread driver.
+        .package(path: "../../FeatureInterfaces/FeedInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/MediaCore"),
@@ -20,6 +23,7 @@ let package = Package(
             name: "Upload",
             dependencies: [
                 "AuthInterface",
+                "FeedInterface",
                 "CoreContracts",
                 "CoreModels",
                 "MediaCore",
@@ -30,6 +34,7 @@ let package = Package(
             name: "UploadTests",
             dependencies: [
                 "Upload",
+                "FeedInterface",
                 "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]

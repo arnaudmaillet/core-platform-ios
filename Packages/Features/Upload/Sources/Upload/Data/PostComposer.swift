@@ -34,13 +34,25 @@ public enum ComposeError: Error, Equatable, Sendable {
     case transport(String)
 }
 
-/// What the compose screen drives.
+/// What the compose screens drive.
 public protocol PostComposing: Sendable {
-    /// Runs the full media.v1 upload + post.v1 create/publish flow and, on
-    /// success, publishes the new entry to the shared `ComposedPostChannel`
-    /// so the feed prepends it. Throws on any failed step; nothing partial is
-    /// broadcast.
-    func publish(media: ComposeMedia?, caption: String) async throws
+    /// Runs the full media.v1 upload + post.v1 create/publish flow as `author`
+    /// — one of the signed-in account's profiles; nil means its first — and,
+    /// on success, publishes the new entry to the shared `ComposedPostChannel`
+    /// so the feed prepends it. Returns that same entry, so a screen can show
+    /// the post it just made without fetching it back. Throws on any failed
+    /// step; nothing partial is broadcast.
+    @discardableResult
+    func publish(media: ComposeMedia?, caption: String, as author: AuthorSummary?) async throws -> FeedEntry
+}
+
+public extension PostComposing {
+    /// As the account's first profile — what every post was published as before
+    /// a screen could say who its author is.
+    @discardableResult
+    func publish(media: ComposeMedia?, caption: String) async throws -> FeedEntry {
+        try await publish(media: media, caption: caption, as: nil)
+    }
 }
 
 /// Orchestrates the create-post flow end to end:
@@ -61,7 +73,10 @@ public actor PostComposer: PostComposing {
     private let now: @Sendable () -> Date
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "compose")
 
-    private var cachedViewer: (accountID: AccountID, author: AuthorSummary)?
+    /// The signed-in account and every profile it holds — the set a post may be
+    /// published as. Cached after the first read; refreshed once when asked to
+    /// publish as a profile it does not contain (one created since).
+    private var cachedAccount: (accountID: AccountID, profiles: [AuthorSummary])?
 
     public init(
         mediaClient: any Media_V1_MediaServiceClientInterface,
@@ -91,12 +106,13 @@ public actor PostComposer: PostComposing {
         self.now = now
     }
 
-    public func publish(media: ComposeMedia?, caption: String) async throws {
+    @discardableResult
+    public func publish(media: ComposeMedia?, caption: String, as author: AuthorSummary?) async throws -> FeedEntry {
         let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
         guard media != nil || !trimmedCaption.isEmpty else {
             throw ComposeError.emptyPost
         }
-        let viewer = try await resolveViewer()
+        let viewer = try await resolveViewer(as: author)
 
         // `server` is what CreatePost references (the delivery URL); `optimistic`
         // is what the feed renders right away — for video that's the local file
@@ -147,6 +163,7 @@ public actor PostComposer: PostComposing {
             await imagePipeline.store(imageSeed.image, for: imageSeed.url)
         }
         await composedChannel.publish(entry)
+        return entry
     }
 
     // MARK: - Steps
@@ -302,9 +319,33 @@ public actor PostComposer: PostComposing {
         _ = try unwrap(response.message, errorMessage: response.error?.message, as: ComposeError.transport)
     }
 
-    private func resolveViewer() async throws -> (accountID: AccountID, author: AuthorSummary) {
-        if let cachedViewer {
-            return cachedViewer
+    /// The profile a post is published as: `author` when the account holds it,
+    /// otherwise — nil — the account's first profile, the only answer there was
+    /// before a screen could say who.
+    ///
+    /// An author the cached list does not contain (a profile created since) is
+    /// looked for once more before being refused: publishing as a profile this
+    /// account does not hold is exactly what the check exists to stop.
+    private func resolveViewer(as author: AuthorSummary?) async throws -> (accountID: AccountID, author: AuthorSummary) {
+        var account = try await resolveAccount(refresh: false)
+        guard let author else {
+            guard let first = account.profiles.first else { throw ComposeError.noViewerProfile }
+            return (account.accountID, first)
+        }
+        if !account.profiles.contains(where: { $0.id == author.id }) {
+            account = try await resolveAccount(refresh: true)
+        }
+        guard account.profiles.contains(where: { $0.id == author.id }) else {
+            throw ComposeError.noViewerProfile
+        }
+        // The screen's own rendering of its author, verbatim: the post arrives
+        // wearing exactly the face it was written under.
+        return (account.accountID, author)
+    }
+
+    private func resolveAccount(refresh: Bool) async throws -> (accountID: AccountID, profiles: [AuthorSummary]) {
+        if !refresh, let cachedAccount {
+            return cachedAccount
         }
         guard case .authenticated(let accountID) = await authSession.currentState() else {
             throw ComposeError.notAuthenticated
@@ -313,17 +354,16 @@ public actor PostComposer: PostComposing {
         request.accountID = accountID.rawValue
         let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
         let body = try unwrap(response.message, errorMessage: response.error?.message, as: ComposeError.transport)
-        guard let profile = body.profiles.first else {
-            throw ComposeError.noViewerProfile
+        let profiles = body.profiles.map { profile in
+            AuthorSummary(
+                id: ProfileID(profile.profileID),
+                handle: profile.handle,
+                displayName: profile.displayName,
+                avatarURL: URL(string: profile.avatarURL)
+            )
         }
-        let author = AuthorSummary(
-            id: ProfileID(profile.profileID),
-            handle: profile.handle,
-            displayName: profile.displayName,
-            avatarURL: URL(string: profile.avatarURL)
-        )
-        let resolved = (accountID, author)
-        cachedViewer = resolved
+        let resolved = (accountID, profiles)
+        cachedAccount = resolved
         return resolved
     }
 

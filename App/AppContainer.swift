@@ -292,11 +292,32 @@ final class AppContainer {
         snapshotStore: CodableFileStore<[FeedEntry]>(name: "feed-first-page")
     )
 
-    private lazy var commentsRepository = CommentsRepository(
-        commentClient: Comment_V1_CommentServiceClient(client: authenticatedRPCClient),
-        profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
-        authSession: sessionManager
-    )
+    /// Forwards every profile switch to `commentsRepository`, for as long as the
+    /// container lives.
+    private var activeViewerObserver: NSObjectProtocol?
+
+    private lazy var commentsRepository = makeCommentsRepository()
+
+    private func makeCommentsRepository() -> CommentsRepository {
+        let repository = CommentsRepository(
+            commentClient: Comment_V1_CommentServiceClient(client: authenticatedRPCClient),
+            profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+            authSession: sessionManager
+        )
+        // ⚠️ THE REPOSITORY HOLDS ITS OWN "WHO AM I", and a switch used to reach
+        // it only through an open comments panel's observer. A switch made from
+        // the Profile tab with no panel alive left it on the old profile — and
+        // the Text Post page, which takes its author from here, then showed and
+        // published as a profile the viewer had already left. Heard here, once,
+        // it is told every switch whatever is on screen.
+        activeViewerObserver = NotificationCenter.default.addObserver(
+            forName: .activeProfileDidChange, object: nil, queue: .main
+        ) { [repository] notification in
+            guard let id = ActiveProfileChange.profileID(from: notification) else { return }
+            Task { await repository.setActiveViewer(id) }
+        }
+        return repository
+    }
 
     private(set) lazy var feedFeature: any FeedFeatureBuilding = FeedFeatureBuilder(
         repository: feedRepository,
@@ -732,12 +753,17 @@ final class AppContainer {
     // picks the media, it is covered by tests, and `-mock-compose-demo` still
     // drives it end to end. Whatever the new screens are, they talk to this.
     //
-    // The "+" is back, in the TAB BAR, as a menu (`CreateTabItem`). Its Upload
-    // Media and Text Post entries open empty screens on purpose — see
-    // `UploadFeatureBuilder` — and are where those new screens will go.
+    // The "+" is back, in the TAB BAR, as a menu (`CreateTabItem`). Its Text
+    // Post entry is Feed's text page, born empty, publishing through this
+    // pipeline; Upload Media still opens an empty screen on purpose — see
+    // `UploadFeatureBuilder`.
 
-    /// Stateless, so built on demand.
-    var uploadFeature: UploadFeatureBuilder { UploadFeatureBuilder() }
+    /// Built on demand: its only state is what it is handed. The Text Post
+    /// screen is Feed's, reached through a closure for the same lazy-cycle
+    /// reason Chat's thread screens are (`chatFeature`).
+    var uploadFeature: UploadFeatureBuilder {
+        UploadFeatureBuilder(composer: postComposer, textPostScreens: { [unowned self] in self.feedFeature })
+    }
 
     // Computed (not lazy): the PostComposer init is actor-isolated, which a
     // stored-property initializer can't call under default-MainActor isolation.

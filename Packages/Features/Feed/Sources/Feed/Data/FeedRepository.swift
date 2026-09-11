@@ -34,6 +34,15 @@ public protocol FeedProviding: Sendable {
     /// turn the feed is built in, so anything awaited lands mid-flight and
     /// rebuilds the nav chrome inside the animation (the measured "flash").
     nonisolated func peekPost(_ id: PostID) -> FeedEntry?
+    /// Holds a post the client already has in full, so it is never fetched
+    /// back.
+    ///
+    /// For the one post that can be on screen before the server has served it:
+    /// the viewer's own, just published from the Text Post page. The fleet's
+    /// GetPost may lag behind PublishPost, and the page that post becomes would
+    /// then render "Couldn't load this post" over text the viewer can see they
+    /// wrote.
+    func remember(_ entry: FeedEntry) async
 }
 
 public extension FeedProviding {
@@ -46,6 +55,8 @@ public extension FeedProviding {
     /// Providers without a cache (test doubles, the fixed-set adapter) treat
     /// warming as a no-op.
     func prewarm(_ ids: [PostID]) async {}
+    /// …and remembering too: they fetch whatever they are asked for.
+    func remember(_ entry: FeedEntry) async {}
 }
 
 /// The engagement write/read path the feed UI consumes.
@@ -210,6 +221,12 @@ public actor FeedRepository: FeedProviding {
 
     public nonisolated func peekPost(_ id: PostID) -> FeedEntry? {
         peekablePostCache.entry(for: id)
+    }
+
+    /// Into the same cache a warm read fills, so both `loadPost` and the
+    /// synchronous peek answer with it.
+    public func remember(_ entry: FeedEntry) async {
+        storeInCache(entry)
     }
 
     private func cachedPost(_ id: PostID) -> FeedEntry? {

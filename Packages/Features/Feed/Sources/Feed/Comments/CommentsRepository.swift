@@ -57,10 +57,22 @@ public struct ViewerIdentity: Equatable, Sendable {
     /// an unresolved profile, and a failed fetch all leave the monogram
     /// standing.
     public let avatarURL: URL?
+    /// The profile this identity IS. Nil from a source that knows only a face
+    /// — a conversation signs its viewer "You" before it knows more.
+    public let profileID: ProfileID?
+    public let handle: String
 
-    public init(name: String, avatarURL: URL?) {
+    public init(name: String, avatarURL: URL?, profileID: ProfileID? = nil, handle: String = "") {
         self.name = name
         self.avatarURL = avatarURL
+        self.profileID = profileID
+        self.handle = handle
+    }
+
+    /// This identity as a post's author: what a post written under this face
+    /// is published as. Nil without a profile — a face alone authors nothing.
+    public var author: AuthorSummary? {
+        profileID.map { AuthorSummary(id: $0, handle: handle, displayName: name, avatarURL: avatarURL) }
     }
 }
 
@@ -91,6 +103,14 @@ public protocol CommentsProviding: Sendable {
     /// `parentID` nil posts top-level; non-nil posts a level-2 reply under
     /// that top-level comment (comment.v1's two-depth contract).
     func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry
+    /// The viewer's identity as last resolved, or nil — never a fetch.
+    /// Synchronous for the one screen whose bars wear the viewer before
+    /// anything has loaded: the Text Post page, whose author IS the viewer.
+    nonisolated func cachedViewerIdentity() -> ViewerIdentity?
+    /// Records `entries` as `postID`'s first page, exactly as a load would —
+    /// for a post whose comments the client knows without asking. A post it
+    /// has just published has none.
+    nonisolated func seedTopComments(_ entries: [CommentEntry], for postID: PostID)
 }
 
 public extension CommentsProviding {
@@ -98,6 +118,10 @@ public extension CommentsProviding {
     /// panel awaits its load and shows a skeleton meanwhile.
     func prefetchTopComments(for postID: PostID) async {}
     nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? { nil }
+    /// Default: nothing held — the bars fill in when the identity resolves.
+    nonisolated func cachedViewerIdentity() -> ViewerIdentity? { nil }
+    /// Default: nowhere to put it; the panel loads as it always did.
+    nonisolated func seedTopComments(_ entries: [CommentEntry], for postID: PostID) {}
     /// Default: no viewer. The composer's avatar is an enhancement, so a
     /// provider that doesn't know who is signed in (every test fake, and
     /// any future read-only source) opts out by saying nothing.
@@ -235,7 +259,21 @@ public actor CommentsRepository: CommentsProviding {
         guard let viewer = try? await resolveViewerProfileID() else { return nil }
         await hydrateAuthors(for: [viewer])
         guard let author = authorCache[viewer] else { return nil }
-        return ViewerIdentity(name: author.name, avatarURL: author.avatarURL)
+        let identity = ViewerIdentity(
+            name: author.name, avatarURL: author.avatarURL, profileID: viewer, handle: author.handle
+        )
+        // Mirrored only if nobody switched while this was in flight: a peek
+        // must never answer with a face the viewer has already left.
+        if viewerProfileID == viewer { viewerMirror.set(identity) }
+        return identity
+    }
+
+    public nonisolated func cachedViewerIdentity() -> ViewerIdentity? {
+        viewerMirror.value
+    }
+
+    public nonisolated func seedTopComments(_ entries: [CommentEntry], for postID: PostID) {
+        topPages.set(entries, for: postID)
     }
 
     /// Overrides the resolved viewer — the same one-line move
@@ -245,7 +283,21 @@ public actor CommentsRepository: CommentsProviding {
     /// identity's name and avatar are already there if that profile has
     /// appeared in any thread.
     public func setActiveViewer(_ id: ProfileID) async {
+        if id != viewerProfileID { viewerMirror.set(nil) }
         viewerProfileID = id
+    }
+
+    /// The last resolved identity, readable without awaiting — the one read a
+    /// screen makes while it is being BUILT, which cannot await. Locked rather
+    /// than isolated for the reason `topPages` is.
+    private nonisolated let viewerMirror = ViewerMirror()
+
+    private final class ViewerMirror: @unchecked Sendable {
+        private let lock = NSLock()
+        private var identity: ViewerIdentity?
+
+        var value: ViewerIdentity? { lock.withLock { identity } }
+        func set(_ identity: ViewerIdentity?) { lock.withLock { self.identity = identity } }
     }
 
     // MARK: - Hydration

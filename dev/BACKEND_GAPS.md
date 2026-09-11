@@ -26,6 +26,8 @@ full functionality.
 | 16 | No topic/category on a post | For You's `ContentContext` lens filters by caption keywords | Medium |
 | 17 | No per-conversation unread count | All-list avatar badges saturate at the fetched window | Medium |
 | 18 | No semantic geo clusters (city/country/region) | Map cluster gallery — mocked client-side in DEBUG | Medium |
+| 19 | `search.v1`: no date filter, no viewer scope, no engagement sorts | Search filter tray (7 of 12 segments disabled) | Medium |
+| 20 | `CreatePost` carries no audience / visibility | Text Post "who can see this" control (shown, only "Everyone" enabled) | Medium |
 
 ---
 
@@ -770,6 +772,31 @@ accepted and ignored is honoured now too.
 — `published_after` / `published_before`, a `SearchScope` resolved at the edge
 the way `exclude_author_ids` already is, `MOST_COMMENTED` / `MOST_LIKED` sorts,
 and a `PLACE` entity kind if locations are to be searchable at all.
+
+---
+
+## 20. `CreatePost` carries no audience / visibility
+
+**What the client wants.** The "+" menu's Text Post page has a control, in the
+composer's trailing slot, for who will see the post: everyone, the author's
+followers, or their friends (mutual follows).
+
+**What `post.v1` offers.** `CreatePostRequest` has profile_id, kind, caption,
+attachments, parent_id, root_id, audio_ref and location — nothing about who may
+read the post. `profile.v1.ProfileView.visibility` exists, but it is
+whole-profile (see #13), not per post. So every post is public, and nothing a
+client sends can make one otherwise.
+
+**What ships meanwhile.** The control is drawn as a globe opening a
+"Visibility" menu. "Everyone" is checked; "Followers" and "Friends" are shown
+and DISABLED with "Coming soon" under them — the search tray's rule (#19): the
+dimension stays readable, and nothing claims a choice the server would ignore.
+
+**What we need.** An `audience` on `CreatePostRequest` (and echoed on
+`PostView`) — `PUBLIC` / `FOLLOWERS` / `MUTUALS` to start — enforced wherever a
+post is served: GetPost, the timeline fan-out, search, profile lists and the map
+tiles. Enforcement at read time is the part that makes it a feature; a stored
+field nothing checks would be a promise the client cannot keep.
 
 ---
 
