@@ -25,27 +25,45 @@ import UIKit
 /// - long press → the native context menu (share / block / report).
 final class CommentRowView: UIView {
     private enum Metrics {
-        static let avatarSize: CGFloat = 32
         static let avatarGap: CGFloat = Spacing.sm
-        /// The level-2 indentation: replies step in by one avatar column
-        /// (avatar + its gap), the standard thread offset — a reply's
-        /// avatar starts where its parent's text does.
-        static let replyIndent: CGFloat = avatarSize + 8
+        /// Between the name line and the body.
+        static let lineSpacing: CGFloat = 2
+    }
+
+    /// The avatar's diameter: EXACTLY the name line, the gap under it and the
+    /// body's first line, so the disc stands centred on the two lines it
+    /// belongs to rather than hanging off the top of them. Derived from the
+    /// two fonts rather than fixed, so it follows Dynamic Type — at the default
+    /// size it is 39pt.
+    static func avatarSize(for traits: UITraitCollection?) -> CGFloat {
+        let header = UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: traits)
+        let body = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits)
+        return ceil(ceil(header.lineHeight) + Metrics.lineSpacing + body.lineHeight)
+    }
+
+    /// The level-2 indentation: replies step in by one avatar column (avatar
+    /// + its gap), the standard thread offset — a reply's avatar starts where
+    /// its parent's text does.
+    static func replyIndent(for traits: UITraitCollection?) -> CGFloat {
+        avatarSize(for: traits) + 8
     }
 
     /// Exposed for layout tests: the leading inset a reply row applies.
-    static var replyIndent: CGFloat { Metrics.replyIndent }
+    static var replyIndent: CGFloat { replyIndent(for: nil) }
     /// The avatar column, shared with the caption bubble row so the two
     /// align to the point — that alignment is what makes the caption read
     /// as the thread's first message.
-    static var avatarSize: CGFloat { Metrics.avatarSize }
+    static var avatarSize: CGFloat { avatarSize(for: nil) }
     static var avatarGap: CGFloat { Metrics.avatarGap }
 
     /// The shared identity disc — the SAME component the chat inbox, the
     /// compose picker, and the profile relationship lists draw, at this
     /// surface's diameter. Two features rolling their own discs drift, and
     /// the lists read as different products the moment they do.
-    private let avatarView = MonogramAvatarView(diameter: Metrics.avatarSize)
+    private let avatarView = MonogramAvatarView(diameter: CommentRowView.avatarSize)
+    /// Whether this row is a reply — kept so a Dynamic Type change can restate
+    /// the indent, which is sized from the same type as the avatar.
+    private var isReplyRow = false
     /// The picture, pinned OVER the monogram (never swapped for it — the
     /// monogram stays behind as the permanent fallback).
     private let avatarImageView = AvatarImageView()
@@ -95,6 +113,11 @@ final class CommentRowView: UIView {
     init(installsContextMenu: Bool = true) {
         super.init(frame: .zero)
         buildLayout()
+        // The disc and the reply indent are sized from the type, so they are
+        // re-derived whenever the type is.
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (row: CommentRowView, _: UITraitCollection) in
+            row.refreshTypeDrivenGeometry()
+        }
 
         // The avatar's tap outranks the row's (recognizers resolve to the
         // deepest view); everything else on the row is the reply trigger.
@@ -142,8 +165,16 @@ final class CommentRowView: UIView {
         headerLabel.text = "\(model.authorName) · \(model.metaText)"
         bodyLabel.text = model.body
         avatarView.setMonogram(model.monogram)
-        rowLeading?.constant = model.isReply ? Metrics.replyIndent : 0
+        isReplyRow = model.isReply
+        refreshTypeDrivenGeometry()
         loadAvatar(model.avatarURL, for: model.id, using: imagePipeline)
+    }
+
+    /// Restates everything sized from the text: the disc's diameter and a
+    /// reply's indent.
+    private func refreshTypeDrivenGeometry() {
+        avatarView.setDiameter(Self.avatarSize(for: traitCollection))
+        rowLeading?.constant = isReplyRow ? Self.replyIndent(for: traitCollection) : 0
     }
 
     /// Points the row at the POST — the thread's first message.
@@ -172,7 +203,8 @@ final class CommentRowView: UIView {
         headerLabel.text = timestamp.isEmpty ? authorName : "\(authorName) · \(timestamp)"
         bodyLabel.text = caption
         avatarView.setMonogram(monogram)
-        rowLeading?.constant = 0
+        isReplyRow = false
+        refreshTypeDrivenGeometry()
         setCaptionLikeCount(likeCount)
         becomeCaption()
         loadAvatar(avatarURL, for: nil, using: imagePipeline)
@@ -324,7 +356,7 @@ final class CommentRowView: UIView {
 
         let textStack = UIStackView(arrangedSubviews: [headerRow, bodyLabel])
         textStack.axis = .vertical
-        textStack.spacing = 2
+        textStack.spacing = Metrics.lineSpacing
 
         let row = UIStackView(arrangedSubviews: [avatarView, textStack])
         row.axis = .horizontal
@@ -666,8 +698,9 @@ final class CommentSkeletonRowView: UIView {
             row.leadingAnchor.constraint(equalTo: leadingAnchor),
             row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.likeColumnReservation),
             row.bottomAnchor.constraint(equalTo: bottomAnchor),
-            avatar.widthAnchor.constraint(equalToConstant: 32),
-            avatar.heightAnchor.constraint(equalToConstant: 32),
+            // The real row's disc, whatever the type size makes it.
+            avatar.widthAnchor.constraint(equalToConstant: CommentRowView.avatarSize),
+            avatar.heightAnchor.constraint(equalToConstant: CommentRowView.avatarSize),
             header.heightAnchor.constraint(equalToConstant: Metrics.headerHeight),
             header.widthAnchor.constraint(equalTo: textColumn.widthAnchor, multiplier: headerFraction),
             body.heightAnchor.constraint(equalToConstant: Metrics.bodyHeight),

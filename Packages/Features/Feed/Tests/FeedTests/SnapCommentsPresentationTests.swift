@@ -1476,10 +1476,9 @@ struct SnapCommentsPresentationTests {
         }
     }
 
-    /// The avatar is a GLASS BUBBLE, matching the mic and "+" beside it, and
-    /// the whole 38pt bubble is the tap target — not just the 30pt face,
-    /// which would leave the glass rim dead and the target under the 44pt
-    /// guidance by even more than it already is.
+    /// The avatar is a GLASS BUBBLE, matching the mic and "+" beside it, that
+    /// the face FILLS edge to edge — no ring of glass around it — and the
+    /// whole 38pt bubble is the tap target.
     @Test func composerAvatarSitsInAnInteractiveGlassBubble() throws {
         let bar = CommentsInputBar()
         bar.frame = CGRect(x: 0, y: 0, width: 340, height: 38)
@@ -1493,8 +1492,8 @@ struct SnapCommentsPresentationTests {
         // never `layer.cornerRadius` + `clipsToBounds`.
         #expect(bubble.cornerConfiguration != nil)
         let face = try #require(Self.firstView(MonogramAvatarView.self, in: bubble))
-        #expect(face.bounds.width == 30)
         #expect(bubble.bounds.width == 38)
+        #expect(face.bounds.size == bubble.bounds.size, "the face fills its bubble, no margin of glass")
 
         // The button spans the bubble and lives in the CONTENT view (adding
         // it to the effect view itself raises).

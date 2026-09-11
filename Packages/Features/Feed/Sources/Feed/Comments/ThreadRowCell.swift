@@ -129,6 +129,9 @@ final class ThreadQuoteView: UIView {
 
     private let bar = UIView()
     private let label = UILabel()
+    /// The indent to the row's text column, which moves with the avatar's
+    /// type-driven size.
+    private var barLeading: NSLayoutConstraint?
 
     init() {
         super.init(frame: .zero)
@@ -143,9 +146,15 @@ final class ThreadQuoteView: UIView {
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bar)
         addSubview(label)
-        let indent = CommentRowView.avatarSize + CommentRowView.avatarGap
+        let leading = bar.leadingAnchor.constraint(
+            equalTo: leadingAnchor, constant: CommentRowView.avatarSize + CommentRowView.avatarGap
+        )
+        barLeading = leading
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (quote: ThreadQuoteView, _: UITraitCollection) in
+            quote.barLeading?.constant = CommentRowView.avatarSize(for: quote.traitCollection) + CommentRowView.avatarGap
+        }
         NSLayoutConstraint.activate([
-            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: indent),
+            leading,
             bar.widthAnchor.constraint(equalToConstant: 2),
             bar.topAnchor.constraint(equalTo: topAnchor, constant: 2),
             bar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
