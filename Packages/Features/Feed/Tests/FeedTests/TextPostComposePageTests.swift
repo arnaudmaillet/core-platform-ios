@@ -277,6 +277,51 @@ struct TextPostComposePageTests {
         #expect(block.maxY <= composerTop + 0.5, "clear of a \(bar.bounds.height)pt composer: \(block) vs \(composerTop)")
     }
 
+    /// ⚠️ THE KEYBOARD TAKES THE STREAM'S ROOM WITHOUT TOUCHING ITS INSETS, so
+    /// a row fitted to the resting layout keeps a middle that is now behind
+    /// the keys: the invitation sat under the composer with the keyboard up,
+    /// on an iPhone SE. It re-centres in what is left above the composer.
+    @Test func theInvitationRecentresWhenTheKeyboardCoversTheStream() async throws {
+        let probe = try await openPage(size: CGSize(width: 375, height: 340))
+        let floor = try #require(probe.composer.debugRestingFloor)
+        let height = floor + 420
+        let page = try await openPage(size: CGSize(width: 375, height: height))
+        let panel = try #require(page.panel.view)
+        let stream = try #require(Self.all(UICollectionView.self, in: panel).first)
+        let resting = try #require(Self.all(CommentsEmptyPageCell.self, in: panel).first).bounds.height
+
+        // A keyboard covering the bottom 220pt of the SCREEN — which is what a
+        // keyboard notification carries, and what the page must read it as.
+        let covered: CGFloat = 220
+        let screen = page.window.screen.bounds
+        NotificationCenter.default.post(
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil,
+            userInfo: [
+                UIResponder.keyboardFrameEndUserInfoKey:
+                    NSValue(cgRect: CGRect(
+                        x: 0, y: screen.maxY - covered, width: screen.width, height: covered
+                    )),
+            ]
+        )
+        try await settle { (Self.all(CommentsEmptyPageCell.self, in: panel).first?.bounds.height ?? resting) < resting }
+        page.window.layoutIfNeeded()
+
+        let row = try #require(Self.all(CommentsEmptyPageCell.self, in: panel).first)
+        #expect(row.bounds.height < resting, "the row gives up what the keyboard took: \(resting) → \(row.bounds.height)")
+        let empty = try #require(Self.all(EmptyStateView.self, in: panel).first)
+        let stack = try #require(Self.all(UIStackView.self, in: empty).first)
+        let block = stack.convert(stack.bounds, to: panel)
+        // The composer rides the keyboard: a gap and its own height above it.
+        let composerTop = height - covered - Spacing.sm - CommentsInputBar.restingHeight(for: .large)
+        #expect(block.maxY <= composerTop + 0.5, "the invitation clears the lifted composer: \(block) vs \(composerTop)")
+        // …and is centred in what is left, not merely above it.
+        let visibleTop = stream.convert(stream.bounds, to: panel).minY + stream.contentInset.top
+        let above = block.minY - (visibleTop - SnapCommentsLayout.streamTopBreath)
+        let below = composerTop - block.maxY
+        #expect(abs(above - below) <= 1, "centred over the keyboard: \(above) above, \(below) below")
+    }
+
     @Test func theDraftNeverFetches() async throws {
         let page = try await openPage()
         try await Task.sleep(for: .milliseconds(100))

@@ -362,6 +362,8 @@ final class PostDetailViewController: UIViewController {
             (controller: PostDetailViewController, _: UITraitCollection) in
             controller.refitEmptyPage()
         }
+        // …and the keyboard takes the room the page is fitted to.
+        observeKeyboardForEmptyPage()
         render(.loading)
         viewModel.viewDidLoad()
     }
@@ -1660,17 +1662,27 @@ final class PostDetailViewController: UIViewController {
         let caption = captionRowHeight(width: rowWidth)
         let block = emptyPageBlockHeight(width: rowWidth)
         let room = availableStreamHeight
+        let space = streamSpace(captionHeight: caption)
         // No room at all is no geometry yet: the pre-layout call. Whole
         // points, so the rows never overrun the room by a rounding and leave
         // the page scrolling by a fraction.
-        let available: CGFloat? = room > 0
+        var available: CGFloat? = room > 0
             ? floor(room - streamSectionVerticalInsets - caption)
             : nil
+        // ⚠️ THE KEYBOARD TAKES THE STREAM'S ROOM WITHOUT TOUCHING ITS INSETS.
+        // It lifts the composer; the insets stay what the resting layout set.
+        // So the row stops a breath above the composer WHEREVER IT IS. Sized
+        // from the insets alone, the row kept its resting height and the
+        // invitation was centred in a middle that had gone behind the keys —
+        // reported on an iPhone SE.
+        if let space, let roomBased = available {
+            available = min(roomBased, floor(space.bottom - Spacing.lg - space.rowTop))
+        }
         let height = SnapCommentsLayout.emptyPageHeight(availableHeight: available, blockHeight: block)
         return EmptyPageFit(
             copy: emptyPageCopy,
             height: height,
-            blockOffset: emptyPageBlockOffset(rowHeight: height, blockHeight: block, captionHeight: caption)
+            blockOffset: emptyPageBlockOffset(rowHeight: height, blockHeight: block, space: space)
         )
     }
 
@@ -1691,22 +1703,97 @@ final class PostDetailViewController: UIViewController {
     /// space is the row plus its section insets, which centre it
     /// `(bottom − top) / 2` lower. Never more than the row's slack, so the
     /// block never leaves its row.
-    private func emptyPageBlockOffset(rowHeight: CGFloat, blockHeight: CGFloat, captionHeight: CGFloat) -> CGFloat {
+    private func emptyPageBlockOffset(rowHeight: CGFloat, blockHeight: CGFloat, space: StreamSpace?) -> CGFloat {
         let slack = max(0, (rowHeight - blockHeight) / 2)
-        guard let engaged = engagedStreamInsets, view.bounds.height > 0 else {
-            return min((Spacing.lg - streamSectionTopInset) / 2, slack)
-        }
-        let rowTop = engaged.top + streamSectionTopInset + captionHeight
-        let spaceTop = captionHeight > 0 ? rowTop : engaged.top - SnapCommentsLayout.streamTopBreath
-        // The composer at rest, as `setEngagedInsets` places it. Its RESTING
-        // height, a function of the text size, never its laid-out one: a bar
-        // laid out after the first fit would change this answer on a later
-        // apply, and a changed answer is a block that jumps.
-        let restingBottomInset = engaged.bottom - Self.engagedFooterClearance
-        let composerHeight = CommentsInputBar.restingHeight(for: traitCollection.preferredContentSizeCategory)
-        let spaceBottom = view.bounds.height - restingBottomInset - Spacing.sm - composerHeight
-        let offset = (spaceTop + spaceBottom) / 2 - (rowTop + rowHeight / 2)
+        guard let space else { return min((Spacing.lg - streamSectionTopInset) / 2, slack) }
+        let offset = (space.top + space.bottom) / 2 - (space.rowTop + rowHeight / 2)
         return min(max(offset, -slack), slack)
+    }
+
+    /// Where the empty page's row starts, and the space a reader SEES as
+    /// empty around it.
+    private struct StreamSpace {
+        let rowTop: CGFloat
+        let top: CGFloat
+        let bottom: CGFloat
+    }
+
+    /// That space, in this view's coordinates: from the header's foot — or
+    /// the caption row's bottom, once there is one — down to the composer's
+    /// top, WHEREVER THE COMPOSER IS. Nil outside the engaged context.
+    ///
+    /// The composer is where `setEngagedInsets` puts it: above the footer
+    /// band at rest, lifted to the keyboard's top while it is up. Its RESTING
+    /// height, a function of the text size, never its laid-out one — a bar
+    /// laid out after the first fit would change this answer on a later apply,
+    /// and a changed answer is a block that jumps.
+    private func streamSpace(captionHeight: CGFloat) -> StreamSpace? {
+        guard let engaged = engagedStreamInsets, view.bounds.height > 0 else { return nil }
+        let rowTop = engaged.top + streamSectionTopInset + captionHeight
+        let top = captionHeight > 0 ? rowTop : engaged.top - SnapCommentsLayout.streamTopBreath
+        let restingBottomInset = engaged.bottom - Self.engagedFooterClearance
+        var composerBottom = view.bounds.height - restingBottomInset - Spacing.sm
+        // ⚠️ CONVERTED HERE, NEVER STORED CONVERTED. The sheet grows to its
+        // large height FOR the keyboard, which moves this view under a frame
+        // that has not moved: a top converted when the notification arrived
+        // was 300pt out by the time the page was fitted, and the invitation
+        // was pinned to the top of a row squeezed to nothing.
+        if composerTracksKeyboard, let covered = keyboardHeightFromBottom {
+            composerBottom = min(composerBottom, view.bounds.height - covered - Spacing.sm)
+        }
+        let composerHeight = CommentsInputBar.restingHeight(for: traitCollection.preferredContentSizeCategory)
+        return StreamSpace(rowTop: rowTop, top: top, bottom: composerBottom - composerHeight)
+    }
+
+    /// How much of the screen's bottom the keyboard covers while it is up,
+    /// nil when it is down.
+    ///
+    /// ⚠️ A HEIGHT, NEVER A CONVERTED POSITION. The sheet grows to its large
+    /// height FOR the keyboard, so this view is moving while the keyboard is:
+    /// converting the keyboard's frame into this view's coordinates answered
+    /// 520 where the truth was 377 — measured — and the invitation then sat
+    /// as though no keyboard were up. A height needs no coordinate space, and
+    /// the composer's own ceiling is anchored to the screen the same way (see
+    /// `setEngagedInsets`).
+    ///
+    /// Read from the notification's END frame rather than from
+    /// `keyboardLayoutGuide`: the guide only reaches that value as the
+    /// keyboard finishes animating, and the empty page is fitted once, to
+    /// where things are going.
+    private var keyboardHeightFromBottom: CGFloat?
+    private let keyboardObservers = NotificationObserverTokenBag()
+
+    private func observeKeyboardForEmptyPage() {
+        let center = NotificationCenter.default
+        keyboardObservers.tokens = [
+            // The frame is read out here: a `Notification` cannot cross into
+            // the main actor's isolation, and a `CGRect` can.
+            center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] note in
+                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                MainActor.assumeIsolated { self?.keyboardIsMoving(endingAt: frame) }
+            },
+            center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
+                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                MainActor.assumeIsolated { self?.keyboardIsMoving(endingAt: frame) }
+            },
+            center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.keyboardWentDown() }
+            },
+        ]
+    }
+
+    private func keyboardIsMoving(endingAt frame: CGRect?) {
+        guard let window = view.window, let frame else { return }
+        let covered = max(0, window.screen.bounds.maxY - frame.minY)
+        guard keyboardHeightFromBottom != covered else { return }
+        keyboardHeightFromBottom = covered
+        refitEmptyPage()
+    }
+
+    private func keyboardWentDown() {
+        guard keyboardHeightFromBottom != nil else { return }
+        keyboardHeightFromBottom = nil
+        refitEmptyPage()
     }
 
     /// The empty stream's section insets, mirroring the layout
