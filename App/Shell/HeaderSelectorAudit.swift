@@ -224,7 +224,7 @@ final class HeaderSelectorAudit {
                 // ⚠️ The inventory says the item is THERE and the custom view is
                 // not in a window; it does not say what UIKit put on the bar
                 // instead. Dumped unconditionally on a surface that must have a
-                // selector and does not — the sweep visits five tabs and cannot
+                // selector and does not — the sweep visits every tab and cannot
                 // be re-run against the one that failed, so evidence not taken
                 // here is evidence gone.
                 dumpBarTree()

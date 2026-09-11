@@ -37,6 +37,12 @@ import UIKit
 /// answered a finger. So this overlay is an ANCHOR only — no interaction and
 /// no accessibility element. VoiceOver activates the bar's own element, which
 /// lands in the same `shouldSelectTab`.
+///
+/// ⚠️ MEASURED ON A COMPACT IPHONE ONLY. The anchor is looked up inside
+/// `tabBarController.tabBar`. On an iPad at regular width the tabs are drawn
+/// by the floating top bar instead, so the anchor may never be placed and the
+/// "+" would refuse its selection with no menu to show. Not a target today;
+/// check this first if iPad becomes one.
 @MainActor
 final class CreateTabItem {
     /// What the menu offers, in declaration order.

@@ -20,7 +20,8 @@ import Upload
 /// (`ProfileTabCoordinator`) — it is the canonical entry point, so it is the one
 /// place the settings gear, the profile switcher and Log Out belong. It replaced
 /// the avatar button that used to sit in the Maps nav bar; the map header now
-/// carries only the "+" and the notifications bell.
+/// carries the notifications bell, the wallet and search. Its "+" left with
+/// #152 — making a post starts from the bar's "+" (`CreateTabItem`).
 ///
 /// **Every bar button is now a tab.** Slot 1 used to be a vetoed Feed action
 /// that pushed the timeline onto whatever tab you were on; it is now the For You
@@ -591,8 +592,10 @@ extension MainTabCoordinator {
         var queue = bar.subviews
         while !queue.isEmpty {
             let view = queue.removeFirst()
-            // The overlays carry the same labels by design; skip them or one
-            // would match itself and pin its own frame.
+            // The Profile and For You overlays carry their tab's label by
+            // design; skip them or one would match itself and pin its own
+            // frame. The "+" overlay carries none, and is skipped with the rest
+            // so the rule needs no exception.
             if view === profileMenuOverlay || view === forYouMenuOverlay || view === createItem.overlay {
                 continue
             }
