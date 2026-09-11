@@ -38,11 +38,12 @@ import UIKit
 /// no accessibility element. VoiceOver activates the bar's own element, which
 /// lands in the same `shouldSelectTab`.
 ///
-/// ⚠️ MEASURED ON A COMPACT IPHONE ONLY. The anchor is looked up inside
+/// ⚠️ MEASURED ON A COMPACT IPHONE ONLY. The anchor is placed inside
 /// `tabBarController.tabBar`. On an iPad at regular width the tabs are drawn
-/// by the floating top bar instead, so the anchor may never be placed and the
-/// "+" would refuse its selection with no menu to show. Not a target today;
-/// check this first if iPad becomes one.
+/// by the floating top bar instead, so the anchor may never be placed; the
+/// "+" then offers the same choices as an action sheet (`makeFallbackSheet`)
+/// rather than the menu. Not a target today; check this first if iPad
+/// becomes one.
 @MainActor
 final class CreateTabItem {
     /// What the menu offers, in declaration order.
@@ -55,8 +56,10 @@ final class CreateTabItem {
     let tab: UITab
     /// Kept aligned over the bubble by `MainTabCoordinator`, which owns the bar.
     let overlay: UIButton
+    private let open: @MainActor (Destination) -> Void
 
     init(open: @escaping @MainActor (Destination) -> Void) {
+        self.open = open
         // The provider is never asked for a screen that is shown — selection
         // is vetoed — but it must answer one.
         let tab = UISearchTab { _ in UIViewController() }
@@ -75,9 +78,33 @@ final class CreateTabItem {
         overlay = button
     }
 
-    /// Opens the menu, anchored to the bubble.
-    func presentMenu() {
+    /// Opens the menu, anchored to the bubble. Returns `false`, and opens
+    /// nothing, when the anchor is not in a window.
+    ///
+    /// ⚠️ THAT IS A CRASH, NOT A NO-OP. The menu builds its preview from the
+    /// anchor, and `UITargetedPreview(view:)` raises for a view outside a
+    /// window — the "+" killed the app on an iPhone SE whose anchor had never
+    /// been placed. Check before asking, and let the caller fall back to
+    /// `makeFallbackSheet()`.
+    @discardableResult
+    func presentMenu() -> Bool {
+        guard overlay.window != nil else { return false }
         overlay.performPrimaryAction()
+        return true
+    }
+
+    /// The same choices as an action sheet, for when the anchor could not be
+    /// placed. Anchored on the tab itself, which is a popover source item.
+    func makeFallbackSheet() -> UIAlertController {
+        let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        for destination in Destination.allCases {
+            sheet.addAction(UIAlertAction(title: destination.title, style: .default) { [open] _ in
+                open(destination)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceItem = tab
+        return sheet
     }
 
     /// A plain list: icon AND label on every row.
