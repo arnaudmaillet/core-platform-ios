@@ -88,10 +88,10 @@ final class CommentRowView: UIView {
     var onBlock: (() -> Void)?
     var onReport: (() -> Void)?
 
-    /// `installsContextMenu: false` is the unified thread's row
-    /// (`-unified-thread`): the long press belongs to the stream there, which
-    /// lifts the pressed row itself (`ThreadRowContextMenu`), so a row-level
-    /// interaction would only compete with it.
+    /// `installsContextMenu: false` is `ThreadRowCell`'s row: the long press
+    /// belongs to the stream there, which lifts the pressed row itself
+    /// (`ThreadRowContextMenu`), so a row-level interaction would only compete
+    /// with it.
     init(installsContextMenu: Bool = true) {
         super.init(frame: .zero)
         buildLayout()

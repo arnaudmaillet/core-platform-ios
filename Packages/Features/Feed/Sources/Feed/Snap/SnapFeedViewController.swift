@@ -220,10 +220,9 @@ final class SnapFeedViewController: UIViewController {
     /// post — injected by the feature builder so this VC needs none of the
     /// detail's dependencies. Nil disables the comments engagement.
     private let makeCommentsPanelContent: ((PostID) -> UIViewController)?
-    /// The panel for a TEXT page's resting interface, when it is not the one
-    /// above (`-unified-thread`: the day pills and the lifted menu belong to
-    /// text posts only). Nil — the default — means text pages build
-    /// `makeCommentsPanelContent` exactly as before.
+    /// The panel for a TEXT page's resting interface: the day pills and the
+    /// lifted menu belong to text posts only. Nil — the default, and every
+    /// test host — means text pages build `makeCommentsPanelContent`.
     private let makeRestingCommentsPanelContent: ((PostID) -> UIViewController)?
     /// The post whose comments engagement is active, nil when disengaged.
     /// Owns the paging veto: the pager is frozen while the mutated layout

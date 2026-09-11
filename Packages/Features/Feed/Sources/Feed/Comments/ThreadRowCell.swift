@@ -1,9 +1,8 @@
 import DesignSystem
 import UIKit
 
-/// A comment row that can be LIFTED into a context menu — the cell the unified
-/// thread uses (`-unified-thread`) for a conversation's messages and a text
-/// post's comments alike.
+/// A comment row that can be LIFTED into a context menu — the cell a
+/// conversation's messages and a text post's resting comments share.
 ///
 /// The same `CommentRowView` as `CommentCell`, at the same insets, so the
 /// stream reads identically. What differs is what a lift needs:

@@ -7,8 +7,8 @@ import UIKit
 
 /// The stream's diffable identity space. Content is looked up at cell-
 /// configure time (`streamModels`); identity is what animates.
-/// `.day` exists only with the unified thread's chrome on (`-unified-thread`,
-/// a text post's comments): the threads grouped under a pinned pill per day.
+/// `.day` exists only with the text page's chrome on (`threadChrome`): the
+/// threads grouped under a pinned pill per day.
 private enum StreamSection: Hashable {
     case main
     case day(Date)
@@ -56,11 +56,11 @@ final class PostDetailViewController: UIViewController {
     private let viewModel: PostDetailViewModel
     private let imagePipeline: ImagePipeline
     private let mode: PostDetailMode
-    /// `-unified-thread`, and only on a TEXT post's resting comments: the
-    /// threads grouped under pinned day pills (Recent order only), and the long
-    /// press lifting the row into its menu. False everywhere else — media
-    /// comment panels, the pushed `.comments` screen, and every screen with the
-    /// flag off — where nothing below runs and the stream is what it was.
+    /// A TEXT post's resting comments: the threads grouped under pinned day
+    /// pills (Recent order only), and the long press lifting the row into its
+    /// menu. False everywhere else — media comment panels and the pushed
+    /// `.comments` screen — where nothing below runs and each row keeps its
+    /// own menu.
     private let threadChrome: Bool
     private let streamPolicy = StreamSectionPolicy()
     private lazy var rowContextMenu = ThreadRowContextMenu()
@@ -117,7 +117,7 @@ final class PostDetailViewController: UIViewController {
                 bottom: Spacing.lg,
                 trailing: Spacing.lg
             )
-            // GROUPED BY DAY (`-unified-thread` only). The single section's
+            // GROUPED BY DAY (text pages only). The single section's
             // insets are split across the pieces so the stream's outline does
             // not move: the caption section keeps the top, the LAST section
             // keeps the bottom, and nothing in between adds any.
@@ -415,7 +415,7 @@ final class PostDetailViewController: UIViewController {
         collectionView.delegate = self
         if threadChrome {
             // One long press for the whole stream, lifting the pressed row.
-            // Nothing is installed without the flag, so the rows' own menus
+            // Nothing is installed without the chrome, so the rows' own menus
             // arbitrate exactly as before.
             rowContextMenu.install(on: collectionView)
             rowContextMenu.menuProvider = { [weak self] indexPath in self?.rowMenu(at: indexPath) }
@@ -1119,7 +1119,7 @@ final class PostDetailViewController: UIViewController {
             guard let self, let model = self.streamModels[commentID] else { return }
             self.configureCommentRow(cell.row, with: model)
         }
-        // The same row, liftable (`-unified-thread`): no menu of its own, the
+        // The same row, liftable (text pages): no menu of its own, the
         // stream's `rowContextMenu` lifts it.
         let liftableCommentCell = UICollectionView.CellRegistration<ThreadRowCell, String> {
             [weak self] cell, _, commentID in
@@ -1298,7 +1298,7 @@ final class PostDetailViewController: UIViewController {
         return sections
     }
 
-    /// A comment's long-press menu (`-unified-thread`): its own actions — the
+    /// A text page comment's long-press menu: its own actions — the
     /// row's Share, Block and Report — plus Copy and Select Text. Nil for
     /// everything that is not a comment, the caption included.
     private func rowMenu(at indexPath: IndexPath) -> UIMenu? {

@@ -1,7 +1,8 @@
 import UIKit
 
-/// The unified thread's long press (`-unified-thread`): ONE context-menu
-/// interaction on the stream, lifting whichever `ThreadRowCell` was pressed.
+/// The long press of a conversation and of a text post's resting comments: ONE
+/// context-menu interaction on the stream, lifting whichever `ThreadRowCell` was
+/// pressed.
 ///
 /// On the stream rather than on each row for two reasons. The row is recycled,
 /// and an interaction attached per dequeue is the kind of allocation the
@@ -9,8 +10,9 @@ import UIKit
 /// — a view the cell owns, with the platter's padding built in — which is
 /// something only a host that can see the cell can hand over.
 ///
-/// Installed only when the flag is on. With it off, nothing is added to the
-/// stream at all, so the rows' own interactions arbitrate exactly as before.
+/// Installed only on streams whose rows are `ThreadRowCell`s. The other comment
+/// surfaces — a media post's panel, the pushed comments screen — get nothing on
+/// the stream, and their rows' own menus arbitrate exactly as before.
 ///
 /// It also owns Select Text's session: one row at most is selecting, and a tap
 /// anywhere else on the stream, a new long press, or the start of a drag ends

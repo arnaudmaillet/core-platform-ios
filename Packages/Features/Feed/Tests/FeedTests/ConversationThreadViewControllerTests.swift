@@ -5,7 +5,7 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The conversation drawn as a text post's screen (`-unified-thread`), driven
+/// The conversation drawn as a text post's screen, driven
 /// by a fake: what it lists, how it groups, what the composer and the footer
 /// are wired to, and what a peek leaves out.
 @MainActor

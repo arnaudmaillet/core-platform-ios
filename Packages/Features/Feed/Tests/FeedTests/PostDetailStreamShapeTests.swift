@@ -4,16 +4,15 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// THE COMMENT STREAM'S SHAPE, AS IT SHIPS — pinned before the unified-thread
-/// work (`-unified-thread`) adds day sections and a lifted menu behind a
-/// parameter that defaults to off.
+/// THE COMMENT STREAM WITHOUT THE TEXT PAGE'S CHROME (`threadChrome: false`) —
+/// a media post's panel and the pushed comments screen: one section whatever
+/// the comments' days, a menu carried by each ROW and none by the stream, and
+/// the footer capping the view with the stream inset under it.
 ///
-/// Only a handful of tests built this controller before, and none of them
-/// looked at its sections, its rows' menus or its engaged footer, so a change
-/// that leaked past the default would have passed the whole suite. These are
-/// the facts the flag-off path must keep: one section whatever the comments'
-/// days, a menu carried by each ROW and none by the stream, and the footer
-/// capping the view with the stream inset under it.
+/// Pinned when the text page gained day sections and a lifted menu, because
+/// nothing else in the suite looked at the stream's sections, its rows' menus
+/// or its engaged footer — a change leaking past the parameter would have
+/// passed everything. `UnifiedThreadChromeTests` is the other side.
 @MainActor
 struct PostDetailStreamShapeTests {
     /// The post never arrives: these tests are about the stream, which the

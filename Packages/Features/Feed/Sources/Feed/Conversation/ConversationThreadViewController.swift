@@ -5,7 +5,7 @@ import FeedInterface
 import MediaCore
 import UIKit
 
-/// A conversation, drawn as a text post's screen (`-unified-thread`).
+/// A conversation, drawn as a text post's screen.
 ///
 /// The pieces are the text page's own, not look-alikes: messages are
 /// `CommentRowView`s (avatar, "Name · 14:32", body — the viewer's too), the

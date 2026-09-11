@@ -5,12 +5,13 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// A text post's comments with the unified thread's chrome ON
-/// (`-unified-thread`): threads grouped under a pinned day pill in Recent
-/// order, one section in Trending, and the long press owned by the stream.
+/// A TEXT post's resting comments (`threadChrome: true`): threads grouped
+/// under a pinned day pill in Recent order, one section in Trending, and the
+/// long press owned by the stream.
 ///
-/// The flag-OFF shape is `PostDetailStreamShapeTests`; together they pin both
-/// sides of the one parameter.
+/// The other side — a media post's panel, the pushed comments screen — is
+/// `PostDetailStreamShapeTests`; together they pin both sides of the one
+/// parameter.
 @MainActor
 struct UnifiedThreadChromeTests {
     private final class NoPostFeed: FeedProviding, @unchecked Sendable {

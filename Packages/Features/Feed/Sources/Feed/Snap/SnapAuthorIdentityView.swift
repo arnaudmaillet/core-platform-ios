@@ -261,7 +261,7 @@ final class SnapAuthorIdentityView: UIView {
     }
 
     /// Shows a person who is not a post's author — a conversation's
-    /// correspondent (`-unified-thread`). The same pill and the same cross-
+    /// correspondent. The same pill and the same cross-
     /// fade as `setAuthor`; the meta line says whatever the host passes, and
     /// an empty one simply leaves the name alone on the pill.
     func setPerson(id: ProfileID?, name: String, meta: String, avatarURL: URL?, pipeline: ImagePipeline) {

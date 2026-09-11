@@ -5,9 +5,9 @@ import Testing
 import UIKit
 @testable import Chat
 
-/// Where a conversation is drawn: by this package's own screen with the flag
-/// off, and by whoever `threadScreens` names with it on (`-unified-thread`) —
-/// for an existing thread, a draft and a shared link alike.
+/// A conversation is drawn by whoever `threadScreens` names — Feed's text-post
+/// screen in the app — for an existing thread, a draft and a shared link alike,
+/// with the emote strip in its footer.
 @MainActor
 struct ChatFeatureBuilderThreadTests {
     private actor Stub: ChatProviding {
@@ -41,12 +41,7 @@ struct ChatFeatureBuilderThreadTests {
         }
     }
 
-    @Test func withoutTheFlagAConversationIsThisPackagesScreen() {
-        let builder = ChatFeatureBuilder(repository: Stub())
-        #expect(builder.makeConversationViewController(for: ConversationID("c1")) is ConversationViewController)
-    }
-
-    @Test func withTheFlagAnExistingThreadIsTheFeedsScreenWithTheEmoteStrip() {
+    @Test func anExistingThreadIsTheFeedsScreenWithTheEmoteStrip() {
         let screens = RecordingScreens()
         let builder = ChatFeatureBuilder(repository: Stub(), threadScreens: { screens })
         let built = builder.makeConversationViewController(for: ConversationID("c1"))

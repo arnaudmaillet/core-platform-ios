@@ -49,12 +49,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// clients are already wired, and the composition root hands the same
     /// instances to whoever needs them.
     private let socialGraph: (any SocialGraphWriting)?
-    /// `-unified-thread`: the day pill and the lifted long-press menu on a TEXT
-    /// post's comments. The same decision the Chat builder is handed, so a
-    /// conversation and a text post never disagree about which version runs.
-    /// Off (the default): every comments surface is exactly what it was.
-    private let unifiedThread: Bool
-
     public init(
         repository: any FeedProviding,
         engagementProvider: (any EngagementProviding)? = nil,
@@ -72,10 +66,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         /// Reads the numbers the timeline does not carry, so a card can show
         /// reach. Optional: without it the cards simply hide their counter,
         /// which is what they did before.
-        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil,
-        unifiedThread: Bool = false
+        counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil
     ) {
-        self.unifiedThread = unifiedThread
         self.counterClient = counterClient
         self.reporting = reporting
         self.socialGraph = socialGraph
@@ -92,8 +84,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.makeWalletSheet = makeWalletSheet
     }
 
-    /// A conversation drawn by the text post's screen (`-unified-thread`).
-    /// Chat drives it; the bars, the wallet and the image pipeline are Feed's.
+    /// A conversation, drawn by the text post's screen. Chat drives it; the
+    /// bars, the wallet and the image pipeline are Feed's.
     public func makeConversationThreadViewController(
         driver: any ConversationThreadDriving,
         mode: ConversationThreadMode,
@@ -1118,9 +1110,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // Text-only pages host the SAME panel (their engaged card
             // carries the post, exactly like media pages).
             makeCommentsPanelContent: { postID in makePanel(postID, false) },
-            // `-unified-thread`: a TEXT page's resting comments carry the day
-            // pills and the lifted menu; media pages keep the panel above.
-            makeRestingCommentsPanelContent: unifiedThread ? { postID in makePanel(postID, true) } : nil,
+            // A TEXT page's resting comments carry the day pills and the lifted
+            // menu; media pages keep the panel above.
+            makeRestingCommentsPanelContent: { postID in makePanel(postID, true) },
             wallet: wallet,
             makeWalletSheet: makeWalletSheet,
             // For the ⋯ menu's Report row, which withholds itself when there is

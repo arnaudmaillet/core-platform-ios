@@ -70,9 +70,9 @@ public protocol ForYouModeMenuProviding: UIViewController {
 /// nothing but Feed itself.
 ///
 /// It refines `ConversationThreadScreenBuilding` so the shell hands the Chat
-/// builder this very value (`-unified-thread`) and the relationship is checked
-/// by the compiler — a runtime cast that failed would quietly fall back to the
-/// old conversation screen.
+/// builder this very value and the relationship is checked by the compiler:
+/// Feed draws every conversation, and a runtime cast that failed would leave
+/// the Chat builder with nothing to draw one with.
 @MainActor
 public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding {
     func makeFeedViewController() -> UIViewController

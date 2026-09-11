@@ -2,14 +2,12 @@ import CoreModels
 import FeedInterface
 import Foundation
 
-/// Drives Feed's conversation screen (`-unified-thread`) from the thread's
-/// existing view model.
+/// Drives Feed's conversation screen from the thread's view model.
 ///
 /// A pass-through, deliberately: `ConversationViewModel` keeps every rule it
 /// has — sending, replies, the session-local delete, the draft that resolves
 /// underneath, mark-read and the inbox callbacks the builder wires on it — and
-/// this only re-spells its outputs in the values Feed's screen reads. Nothing
-/// the old screen relied on moves.
+/// this only re-spells its outputs in the values Feed's screen reads.
 @MainActor
 final class ConversationThreadDriver: ConversationThreadDriving {
     var onPhaseChange: ((ConversationThreadPhase) -> Void)?

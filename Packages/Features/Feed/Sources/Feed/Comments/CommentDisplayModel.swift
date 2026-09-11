@@ -24,8 +24,8 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     public let avatarURL: URL?
     /// The thread parent's id for level-2 replies; nil at top level.
     public let parentID: String?
-    /// When it was written — what the unified thread's day pills group by
-    /// (`-unified-thread`). Nil for a row built without one.
+    /// When it was written — what the day pills group by. Nil for a row built
+    /// without one.
     public let createdAt: Date?
     /// Level-2 marker: replies render with the standard reply indentation
     /// (the stream carries exactly two depths — comment.v1's contract).
@@ -44,7 +44,7 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     }
 
     /// A row that is not a comment: a conversation's message, drawn in the
-    /// comment grammar (`-unified-thread`). `metaText` is whatever the header
+    /// comment grammar. `metaText` is whatever the header
     /// shows beside the name — a clock time there, under the day pills.
     init(
         id: String,

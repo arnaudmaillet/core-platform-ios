@@ -1,8 +1,8 @@
 import DesignSystem
 import UIKit
 
-/// The text post's footer, as a composition the conversation screen
-/// (`-unified-thread`) builds with its own leading item:
+/// The text post's footer, as a composition the conversation screen builds
+/// with its own leading item:
 ///
 /// ```
 ///  [leading] ———————————————— [🔖 ⇄] [⋯]

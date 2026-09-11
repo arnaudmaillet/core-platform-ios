@@ -4,11 +4,9 @@ import Foundation
 /// localized date — the chip pinned atop each day of a conversation or a
 /// comment thread.
 ///
-/// The chat transcript builder's rules, made shared so the unified
-/// conversation and a text post's comments name their days with the same
-/// words: "MMMMd" within the current year, "MMMMdyyyy" otherwise. The old
-/// conversation screen keeps its own copy in `ChatTranscript` until it is
-/// deleted.
+/// The chat transcript's rules, shared so a conversation and a text post's
+/// comments name their days with the same words: "MMMMd" within the current
+/// year, "MMMMdyyyy" otherwise.
 ///
 /// ⚠️ "Today" and "Yesterday" are English literals, exactly as the chat
 /// transcript had them — nothing in the app is localized yet.

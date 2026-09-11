@@ -3,7 +3,7 @@ import UIKit
 
 // MARK: - The conversation, drawn by Feed and driven by Chat
 
-// The conversation screen built from the text post's screen (`-unified-thread`).
+// The conversation screen, built from the text post's screen.
 //
 // Feed owns the DRAWING — the post's comment rows, its composer, its header
 // frost and footer — because every one of those pieces is Feed's, and a

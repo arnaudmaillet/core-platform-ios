@@ -3,10 +3,8 @@ import UIKit
 /// The floating day chip pinned atop each day of a stream — "Today",
 /// "Yesterday", "July 14" — as a collection view's section header.
 ///
-/// The chat transcript's day chip, made shared so the unified conversation and
-/// a text post's comments can both carry it (the old conversation screen keeps
-/// its own `DayHeaderView` until it is deleted); the words come from
-/// `DayTitleFormatter`. Pin it
+/// The chat transcript's day chip, shared so a conversation and a text post's
+/// comments can both carry it; the words come from `DayTitleFormatter`. Pin it
 /// with `NSCollectionLayoutBoundarySupplementaryItem.pinToVisibleBounds` so the
 /// current day stays on screen while its rows scroll under it.
 ///

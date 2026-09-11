@@ -3,12 +3,12 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// The comments composer, in the app's native Liquid Glass grammar —
-/// deliberately the SAME recipe as Private Messages' `ChatInputBar`
-/// (features don't import each other, so the recipe is replicated, not the
-/// class): a floating glass capsule field that grows with its text, and a
-/// round prominent-glass send button sharing its bottom baseline. It owns
-/// no keyboard logic — the host pins its bottom to
+/// The comments composer — and, since the conversation became the text post's
+/// screen, the MESSAGES composer too — in the app's native Liquid Glass
+/// grammar: a floating glass capsule field that grows with its text, and a
+/// round prominent-glass send button sharing its bottom baseline. (It began as
+/// a replica of the chat's own input bar, which is gone: this is the one
+/// composer now.) It owns no keyboard logic — the host pins its bottom to
 /// `view.keyboardLayoutGuide.topAnchor`.
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
@@ -397,7 +397,7 @@ final class CommentsInputBar: UIView {
 
     /// The idle faces — mic with the keyboard down, the dismiss chevron with it
     /// up and nothing typed — outside a feed engagement too. The conversation
-    /// screen (`-unified-thread`) is the text page's bar without a pager
+    /// screen is the text page's bar without a pager
     /// behind it; everywhere else this stays false and the rule is exactly
     /// the page-swipe marker it always was.
     var showsIdleUtilityFaces = false {
