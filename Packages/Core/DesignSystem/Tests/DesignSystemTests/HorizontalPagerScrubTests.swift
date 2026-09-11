@@ -113,15 +113,42 @@ struct HorizontalPagerScrubTests {
         #expect(settled == [2])
     }
 
-    /// ⚠️ **The landing is committed even when it is the page the drag started
-    /// on**, which is the case `setActivePage` cannot serve: it returns early on
-    /// an unchanged index, and the pages would be left parked mid-offset.
-    @Test func fallingBackStillTravels() {
+    /// ⚠️ **Why `settleAfterScrub` exists at all**, stated as the contrast: the
+    /// call a host would reach for first CANNOT bring a scrubbed pager home. It
+    /// returns early on an unchanged index, and the pages stay parked between
+    /// two of them.
+    ///
+    /// Asserted on the OFFSET, because the index is unchanged in this case
+    /// whatever happens — the version of this test that asserted `activeIndex
+    /// == 0` after a fall-back was asserting a value that was already 0 before
+    /// the call, and would have passed against a `settleAfterScrub` that did
+    /// nothing whatsoever.
+    @Test func theCallThatCannotBringAScrubHome() {
         let pager = pager()
         pager.scrub(to: 0.3)
         #expect(pager.pagingScrollView.contentOffset.x == 120)
-        pager.settleAfterScrub(velocityInPages: 0)
-        #expect(pager.activeIndex == 0)
+        pager.setActivePage(0, animated: true)
+        #expect(pager.pagingScrollView.contentOffset.x == 120, "setActivePage settled a scrub it should refuse")
+    }
+
+    /// ⚠️ **A flick never skips a page.** The bar measures velocity in pages per
+    /// second against a SEGMENT's width, which is about a quarter of a page of
+    /// travel — so an ordinary flick across one tab reports six or seven pages a
+    /// second, and an unclamped throw hands it three.
+    @Test(arguments: [CGFloat(4), 8, 20, 100])
+    func aHardFlickStillAdvancesOnlyOnePage(velocity: CGFloat) {
+        let pager = pager(pages: 5)
+        pager.scrub(to: 1)
+        pager.settleAfterScrub(velocityInPages: velocity)
+        #expect(pager.activeIndex == 2)
+    }
+
+    @Test(arguments: [CGFloat(-4), -8, -20, -100])
+    func aHardFlickBackwardsAlsoAdvancesOnlyOnePage(velocity: CGFloat) {
+        let pager = pager(pages: 5)
+        pager.scrub(to: 3)
+        pager.settleAfterScrub(velocityInPages: velocity)
+        #expect(pager.activeIndex == 2)
     }
 }
 

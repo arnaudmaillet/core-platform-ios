@@ -159,6 +159,64 @@ struct PagedTabBarPillDragTests {
         #expect(bar.debugStripAcceptsScrolling)
     }
 
+    /// ⚠️ **A finger that never travels moves NOTHING** — not the pill, not the
+    /// pages. The gate used to be split: the pages moved on the first point of
+    /// travel while the release was gated on the slop, so a wobble under a
+    /// fingertip scrubbed the pager a fraction of a page and let go of it with
+    /// no settle coming.
+    @Test func aTouchBelowTheSlopDoesNothingAtAll() {
+        let bar = bar()
+        var reported: [CGFloat] = []
+        var released = 0
+        bar.onScrub = { reported.append($0) }
+        bar.onScrubEnd = { _ in released += 1 }
+        let start = pillCentre(bar)
+        #expect(bar.debugBeginPillDrag(atViewportX: start))
+        bar.debugDragPill(toViewportX: start + 2)
+        bar.debugDragPill(toViewportX: start + 1)
+        bar.debugEndPillDrag()
+        #expect(reported.isEmpty, "the pages moved for a press that never travelled")
+        #expect(released == 0, "a tap published a release")
+        #expect(abs(pillCentre(bar) - start) < 0.5)
+    }
+
+    /// ⚠️ **The end-of-strip scroller is ARMED BY THE GRAB**, not by the test.
+    /// Nothing else can see this: a `CADisplayLink`'s ticks are not something a
+    /// test can wait for, so without this the whole auto-scroll could be wired
+    /// to nothing and every other test here would still pass.
+    @Test func theGrabArmsTheEndOfStripScroller() {
+        let bar = bar(Self.five, width: 260)
+        #expect(bar.debugEdgeScrollIsArmed == false)
+        #expect(bar.debugBeginPillDrag(atViewportX: pillCentre(bar)))
+        #expect(bar.debugEdgeScrollIsArmed)
+        bar.debugEndPillDrag()
+        #expect(bar.debugEdgeScrollIsArmed == false)
+    }
+
+    /// ⚠️ And a still finger inside an end zone scrolls nothing. The last tab's
+    /// pill RESTS inside that zone, so a scroller gated on the zone alone would
+    /// run for a plain tap on it and carry the pages away.
+    @Test func aStillFingerInTheEndZoneScrollsNothing() {
+        let bar = bar(Self.five, width: 260)
+        #expect(bar.debugOverflow > 0)
+        // A MIDDLE tab, so the strip still has somewhere to go — pinned at
+        // either end the clamp would refuse the scroll for a reason that has
+        // nothing to do with the rule under test. `keepLensVisible` reveals the
+        // selection at the trailing edge, so the pill now rests INSIDE the end
+        // zone, which is the whole hazard: a tap on it must not scroll.
+        bar.setProgress(2)
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        let resting = bar.debugStripOffset
+        #expect(resting < bar.debugOverflow, "the strip is already at its end; nothing to prove")
+        let touch = bar.debugPillInViewport.maxX - 2
+        #expect(touch > bar.debugViewportWidth - 36, "the touch is not in the end zone")
+        #expect(bar.debugBeginPillDrag(atViewportX: touch))
+        for _ in 0..<30 { bar.debugStepEdgeScroll() }
+        #expect(bar.debugStripOffset == resting)
+        bar.debugEndPillDrag()
+    }
+
     // MARK: - The release
 
     /// The release hands over how fast the pill was going, signed, so the pager

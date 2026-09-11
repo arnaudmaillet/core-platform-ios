@@ -624,10 +624,13 @@ public final class PagedTabBar: UIControl {
     /// The pill is being dragged, reported as a fractional page position.
     ///
     /// The exact mirror of `setProgress`: one `CGFloat` in logical page units,
-    /// every frame of the finger. The owner scrubs its pager to it, and the
-    /// pager reports back through `setProgress` — so the lens is still driven
-    /// by the pages even while the finger is what is moving them, and the two
-    /// cannot disagree.
+    /// every frame of the finger. The owner scrubs its pager to it.
+    ///
+    /// ⚠️ Mid-drag the FINGER drives the lens directly and the pager's echo
+    /// through `setProgress` is a no-op on the same number — the two agree by
+    /// arithmetic, not because one is driving the other. The pages take the lens
+    /// back at the release, when the settle animation reports its way home
+    /// through `setProgress` frame by frame.
     ///
     /// ⚠️ **A drag never announces `.valueChanged`.** Where the pages land is
     /// the PAGER's answer, not the bar's: the release hands over a velocity and
@@ -1490,38 +1493,42 @@ public final class PagedTabBar: UIControl {
             #if DEBUG
             debugGrabsBegun += 1
             #endif
-            let x = grab.location(in: capsule.contentView).x
-            pillDrag = PillDrag(
-                grab: x + scroller.contentOffset.x - lens.frame.midX,
-                start: x, touch: x,
-                lastProgress: progress, lastMoment: CACurrentMediaTime(),
-                speed: 0, moved: false
-            )
-            // ⚠️ **THE STRIP STANDS DOWN, and it is a lock rather than a
-            // `require(toFail:)` edge.** Two things say so. The recorded one:
-            // `require(toFail:)` into a scroll view's recognizer graph formed a
-            // requirement cycle that froze a whole subtree once already
-            // (`SnapShortcutRailView`), and the replacement it settled on is
-            // this — suspend the competing scroller for the life of the
-            // gesture. The local one: `keepLensVisible` refuses to move a strip
-            // that reports `isDragging`, so a scroller left live enough to
-            // begin its own pan would silently switch off the end-of-strip
-            // scrolling this drag depends on.
-            //
-            // A disabled scroll view still takes a `contentOffset` assignment,
-            // which is the only way this drag moves it anyway.
-            scroller.isScrollEnabled = false
-            startEdgeScroll()
+            beginPillDrag(atViewportX: grab.location(in: capsule.contentView).x)
         case .changed:
-            guard let drag = pillDrag else { return }
-            let x = grab.location(in: capsule.contentView).x
-            if !drag.moved, abs(x - drag.start) > Metrics.dragSlop { cancelSegmentTracking() }
-            trackPill(to: x)
+            trackPill(to: grab.location(in: capsule.contentView).x)
         case .ended, .cancelled, .failed:
             endPillDrag()
         default:
             break
         }
+    }
+
+    /// Takes the touch. ONE routine, because the debug entry point uses it too —
+    /// a test that set the drag up itself would be testing its own copy, and the
+    /// half it forgot (arming the end-of-strip scroll) is exactly the half that
+    /// had no test.
+    private func beginPillDrag(atViewportX x: CGFloat) {
+        pillDrag = PillDrag(
+            grab: x + scroller.contentOffset.x - lens.frame.midX,
+            start: x, touch: x,
+            lastProgress: progress, lastMoment: CACurrentMediaTime(),
+            speed: 0, moved: false
+        )
+        // ⚠️ **THE STRIP STANDS DOWN, and it is a lock rather than a
+        // `require(toFail:)` edge.** Two things say so. The recorded one:
+        // `require(toFail:)` into a scroll view's recognizer graph formed a
+        // requirement cycle that froze a whole subtree once already
+        // (`SnapShortcutRailView`), and the replacement it settled on is this —
+        // suspend the competing scroller for the life of the gesture. The local
+        // one: `keepLensVisible` refuses to move a strip that reports
+        // `isDragging`, so a scroller left live enough to begin its own pan
+        // would silently switch off the end-of-strip scrolling this drag
+        // depends on.
+        //
+        // A disabled scroll view still takes a `contentOffset` assignment,
+        // which is the only way this drag moves it anyway.
+        scroller.isScrollEnabled = false
+        startEdgeScroll()
     }
 
     /// Puts the pill where the finger is, and tells the pages.
@@ -1532,6 +1539,27 @@ public final class PagedTabBar: UIControl {
     /// wherever the grip says it is.
     private func trackPill(to viewportX: CGFloat, at now: CFTimeInterval = CACurrentMediaTime()) {
         guard var drag = pillDrag, segments.count > 1 else { return }
+        // ⚠️ **BELOW THE SLOP, NOTHING HAPPENS AT ALL — not the pill, not the
+        // pages, not the end-of-strip scroll.** One gate, because a gesture
+        // that publishes before it commits produces a state nobody settles:
+        // this used to move the pages on the first point of travel while the
+        // RELEASE was gated on the slop, so a 2pt wobble under a fingertip
+        // scrubbed the pager a fraction of a page and then let go of it, with no
+        // settle coming. A finger resting on the tab it already has is a tap,
+        // and a tap must leave the pages exactly where it found them.
+        if !drag.moved {
+            guard abs(viewportX - drag.start) > Metrics.dragSlop else { return }
+            drag.moved = true
+            // The clock starts HERE, not at touch-down: a press held still for
+            // half a second before travelling would otherwise average its
+            // velocity over the wait and report a flick as a crawl.
+            drag.lastProgress = progress
+            drag.lastMoment = now
+            pillDrag = drag
+            // The segment under the finger stops tracking the moment this stops
+            // being a tap — see `cancelSegmentTracking`.
+            cancelSegmentTracking()
+        }
         let centre = viewportX + scroller.contentOffset.x - drag.grab
         let target = pageProgress(forPillCentre: centre)
 
@@ -1542,7 +1570,6 @@ public final class PagedTabBar: UIControl {
             drag.lastProgress = target
             drag.lastMoment = now
         }
-        drag.moved = drag.moved || abs(viewportX - drag.start) > Metrics.dragSlop
         drag.touch = viewportX
         pillDrag = drag
 
@@ -1662,6 +1689,12 @@ public final class PagedTabBar: UIControl {
 
     @objc private func stepEdgeScroll(_ link: CADisplayLink) {
         guard let drag = pillDrag else { return stopEdgeScroll() }
+        // ⚠️ A STILL FINGER SCROLLS NOTHING, and the gate is the drag's, not the
+        // zone's. The pill can come to rest inside an end zone — that is where
+        // the last tab's pill sits — so a link that only asked "is the finger
+        // near the edge" would run for a plain TAP on that tab, scrolling the
+        // strip and carrying the pages with it while nothing moved.
+        guard drag.moved else { return }
         let speed = edgeScrollSpeed(at: drag.touch)
         guard speed != 0 else { return }
         let reachable = max(0, scroller.contentSize.width - scroller.bounds.width)
@@ -1736,15 +1769,14 @@ public final class PagedTabBar: UIControl {
 
     public func debugBeginPillDrag(atViewportX x: CGFloat) -> Bool {
         guard debugBeginsPillDrag(atViewportX: x) else { return false }
-        pillDrag = PillDrag(
-            grab: x + scroller.contentOffset.x - lens.frame.midX,
-            start: x, touch: x,
-            lastProgress: progress, lastMoment: CACurrentMediaTime(),
-            speed: 0, moved: false
-        )
-        scroller.isScrollEnabled = false
+        beginPillDrag(atViewportX: x)
         return true
     }
+
+    /// Whether the end-of-strip scroller is armed — the wiring a test cannot
+    /// otherwise see, since a `CADisplayLink`'s own ticks are not something a
+    /// test can wait for.
+    public var debugEdgeScrollIsArmed: Bool { edgeScrollLink != nil }
 
     /// `after` is how long this frame took, since the velocity a release hands
     /// over is made of distance and time and a test runs both in the same
@@ -1752,14 +1784,13 @@ public final class PagedTabBar: UIControl {
     /// flick of several hundred pages per second or none at all.
     public func debugDragPill(toViewportX x: CGFloat, after seconds: CFTimeInterval = 1.0 / 60.0) {
         guard let drag = pillDrag else { return }
-        if !drag.moved, abs(x - drag.start) > Metrics.dragSlop { cancelSegmentTracking() }
         trackPill(to: x, at: drag.lastMoment + seconds)
     }
 
     /// One frame of the end-of-strip scroll, at a stated frame duration — the
     /// display link's own clock is not a thing a test can wait for.
     public func debugStepEdgeScroll(seconds: CGFloat = 1 / 60) {
-        guard let drag = pillDrag else { return }
+        guard let drag = pillDrag, drag.moved else { return }
         let speed = edgeScrollSpeed(at: drag.touch)
         guard speed != 0 else { return }
         let reachable = max(0, scroller.contentSize.width - scroller.bounds.width)
@@ -2005,9 +2036,13 @@ public final class PagedTabBar: UIControl {
 /// `UIView` already declares `gestureRecognizerShouldBegin(_:)` and Swift will
 /// not let an extension override it.
 ///
-/// ⚠️ Deleting this line does not fail to compile and does not fail a test. It
-/// silently stops the pill drag being asked WHETHER it may begin, so the grab
-/// takes every touch on the capsule and the segments stop selecting.
+/// ⚠️ It is not decoration. Without it the policy above is never consulted:
+/// UIKit asks the DELEGATE here, and `UIView`'s override of the same name is
+/// not called for this recognizer. Measured that way round, the grab took every
+/// touch on the capsule and the segments stopped selecting
+/// (`grabs=1 taps=0 begin=[]`). Deleting the line alone is a compile error —
+/// `pillGrab.delegate = self` needs it — but a future edit that drops the
+/// `delegate` assignment instead compiles, passes, and breaks the bar silently.
 extension PagedTabBar: UIGestureRecognizerDelegate {}
 
 // MARK: - The strip

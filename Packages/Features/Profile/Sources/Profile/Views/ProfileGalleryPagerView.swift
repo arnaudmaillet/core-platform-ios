@@ -503,8 +503,17 @@ extension ProfileGalleryPagerView {
         // Half a page of "throw" per unit velocity — enough that a flick
         // commits, small enough that a slow drag released mid-way falls back to
         // whichever page it is actually nearest.
-        let progress = scrollView.contentOffset.x / bounds.width
-        let landing = (progress + velocityInPages * 0.5)
+        //
+        // ⚠️ **AND NEVER MORE THAN ONE PAGE, which is what a paging scroll view
+        // does and what the velocity's units make necessary.** The bar measures
+        // the flick in PAGES PER SECOND against a SEGMENT's width — about a
+        // quarter of a page of travel — so an ordinary flick across one tab
+        // reports six or seven pages a second, and an unclamped throw would
+        // hand it three tabs. A flick advances one, or falls back; it never
+        // skips what it flew over.
+        let here = scrollView.contentOffset.x / bounds.width
+        let landing = (here + velocityInPages * 0.5)
+            .clamped(to: (here - 1)...(here + 1))
             .rounded()
             .clamped(to: 0...CGFloat(pages.count - 1))
         let index = Int(landing)
@@ -548,7 +557,13 @@ extension ProfileGalleryPagerView: UIScrollViewDelegate {
     /// A release that does not throw the pages far enough to decelerate never
     /// reaches `didEndDecelerating`, so it settles from here instead.
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        guard scrollView === self.scrollView, !decelerate else { return }
+        guard scrollView === self.scrollView else { return }
+        // ⚠️ The claim is released by a FINGER on the pages too. A settle
+        // animation that a new swipe interrupts never reaches
+        // `didEndScrollingAnimation`, and a claim left raised switches layout's
+        // ownership off for the life of the screen.
+        isScrubbing = false
+        guard !decelerate else { return }
         settle()
     }
 
@@ -558,11 +573,11 @@ extension ProfileGalleryPagerView: UIScrollViewDelegate {
         settle()
     }
 
-    /// The end of a `settleAfterScrub` animation — the only animated horizontal
-    /// travel this pager runs. The claim on the offset is released HERE as well
-    /// as on the two release paths above, because a settle that had distance to
-    /// cover keeps it raised for the length of the animation, and a claim left
-    /// raised switches layout's ownership off for the life of the screen.
+    /// The end of an animated horizontal travel — a settle after a scrub, or a
+    /// selector tap through `setActivePage`. The claim on the offset is released
+    /// here because a settle with distance to cover keeps it raised for the
+    /// length of the animation, and a claim left raised switches layout's
+    /// ownership off for the life of the screen.
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         guard scrollView === self.scrollView else { return }
         isScrubbing = false

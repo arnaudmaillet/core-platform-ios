@@ -241,7 +241,16 @@ public final class HorizontalPagerView: UIView {
         // Half a page of "throw" per unit velocity — enough that a flick
         // commits, small enough that a slow drag released mid-way falls back to
         // whichever page it is actually nearest.
-        let projected = progress + velocityInPages * 0.5
+        //
+        // ⚠️ **AND NEVER MORE THAN ONE PAGE, which is what a paging scroll view
+        // does and what the velocity's units make necessary.** The bar measures
+        // the flick in PAGES PER SECOND against a SEGMENT's width — about a
+        // quarter of a page of travel — so an ordinary flick across one tab
+        // reports six or seven pages a second, and an unclamped throw would
+        // hand it three tabs. A flick advances one, or falls back; it never
+        // skips what it flew over.
+        let here = progress
+        let projected = min(max(here + velocityInPages * 0.5, here - 1), here + 1)
         let landing = min(max(Int(projected.rounded()), 0), pages.count - 1)
         activeIndex = landing
         publishActiveScrollView()
