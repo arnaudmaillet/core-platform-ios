@@ -7,7 +7,36 @@ import UIKit
 
 /// The stream's diffable identity space. Content is looked up at cell-
 /// configure time (`streamModels`); identity is what animates.
-private enum StreamSection: Hashable { case main }
+/// `.day` exists only with the text page's chrome on (`threadChrome`): the
+/// threads grouped under a pinned pill per day.
+private enum StreamSection: Hashable {
+    case main
+    case day(Date)
+}
+
+/// What the layout's section provider needs to know about the snapshot it is
+/// laying out — which sections carry a day pill, and which is last. Read by a
+/// provider that must not reach back through the controller (see the layout's
+/// own note), written before every apply.
+private final class StreamSectionPolicy: @unchecked Sendable {
+    private(set) var isGrouped = false
+    private(set) var pinnedSections: Set<Int> = []
+    private(set) var lastSection = 0
+
+    /// Returns whether the grouping changed — a layout built for one shape
+    /// must be invalidated before the other is applied.
+    @discardableResult
+    func update(_ sections: [StreamSection]) -> Bool {
+        let wasGrouped = isGrouped
+        pinnedSections = Set(sections.indices.filter {
+            if case .day = sections[$0] { return true }
+            return false
+        })
+        isGrouped = !pinnedSections.isEmpty
+        lastSection = max(0, sections.count - 1)
+        return wasGrouped != isGrouped
+    }
+}
 private enum StreamItem: Hashable {
     case postSection
     /// The post's caption, as the list's first row — a message bubble in
@@ -27,6 +56,17 @@ final class PostDetailViewController: UIViewController {
     private let viewModel: PostDetailViewModel
     private let imagePipeline: ImagePipeline
     private let mode: PostDetailMode
+    /// A TEXT post's resting comments: the threads grouped under pinned day
+    /// pills (Recent order only), and the long press lifting the row into its
+    /// menu. False everywhere else — media comment panels and the pushed
+    /// `.comments` screen — where nothing below runs and each row keeps its
+    /// own menu.
+    private let threadChrome: Bool
+    private let streamPolicy = StreamSectionPolicy()
+    private lazy var rowContextMenu = ThreadRowContextMenu()
+    /// The order the engaged toolbar last chose; day grouping follows Recent
+    /// only — a Trending rank has no chronology to pin days over.
+    private var commentSortOrder: SnapCommentSortButton.Order = .recent
     /// Builds the composer avatar's profile switcher menu. Nil on the pushed
     /// comments screen and wherever the app wires none — the face is then a
     /// plain, inert identity.
@@ -45,7 +85,8 @@ final class PostDetailViewController: UIViewController {
         // section provider that reaches back through `self` is a retain cycle
         // waiting for someone to forget the `weak`.
         let leadsWithCaption = mode != .full
-        let layout = UICollectionViewCompositionalLayout { _, environment in
+        let policy = streamPolicy
+        let layout = UICollectionViewCompositionalLayout { index, environment in
             var config = UICollectionLayoutListConfiguration(appearance: .plain)
             config.showsSeparators = false
             config.backgroundColor = .clear
@@ -76,6 +117,26 @@ final class PostDetailViewController: UIViewController {
                 bottom: Spacing.lg,
                 trailing: Spacing.lg
             )
+            // GROUPED BY DAY (text pages only). The single section's
+            // insets are split across the pieces so the stream's outline does
+            // not move: the caption section keeps the top, the LAST section
+            // keeps the bottom, and nothing in between adds any.
+            if policy.isGrouped {
+                if index > 0 { section.contentInsets.top = 0 }
+                if index != policy.lastSection { section.contentInsets.bottom = 0 }
+                if policy.pinnedSections.contains(index) {
+                    let pill = NSCollectionLayoutBoundarySupplementaryItem(
+                        layoutSize: NSCollectionLayoutSize(
+                            widthDimension: .fractionalWidth(1), heightDimension: .estimated(36)
+                        ),
+                        elementKind: DayPillHeaderView.elementKind,
+                        alignment: .top
+                    )
+                    pill.pinToVisibleBounds = true
+                    pill.zIndex = 2
+                    section.boundarySupplementaryItems = [pill]
+                }
+            }
             return section
         }
         let view = UICollectionView(frame: .zero, collectionViewLayout: layout)
@@ -183,11 +244,13 @@ final class PostDetailViewController: UIViewController {
         imagePipeline: ImagePipeline,
         mode: PostDetailMode = .full,
         profileSwitcher: (any ProfileSwitcherPresenting)? = nil,
-        wallet: WalletStore? = nil
+        wallet: WalletStore? = nil,
+        threadChrome: Bool = false
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.mode = mode
+        self.threadChrome = threadChrome
         self.profileSwitcher = profileSwitcher
         self.wallet = wallet
         super.init(nibName: nil, bundle: nil)
@@ -350,6 +413,13 @@ final class PostDetailViewController: UIViewController {
         // scroll delegate reports it continuously, during the drag AND
         // through the spring-back, which is what makes the cancel free.
         collectionView.delegate = self
+        if threadChrome {
+            // One long press for the whole stream, lifting the pressed row.
+            // Nothing is installed without the chrome, so the rows' own menus
+            // arbitrate exactly as before.
+            rowContextMenu.install(on: collectionView)
+            rowContextMenu.menuProvider = { [weak self] indexPath in self?.rowMenu(at: indexPath) }
+        }
         configureStreamDataSource()
         configureComposeBar()
         // Scroll view fills above the compose bar, which tracks the keyboard.
@@ -1049,6 +1119,13 @@ final class PostDetailViewController: UIViewController {
             guard let self, let model = self.streamModels[commentID] else { return }
             self.configureCommentRow(cell.row, with: model)
         }
+        // The same row, liftable (text pages): no menu of its own, the
+        // stream's `rowContextMenu` lifts it.
+        let liftableCommentCell = UICollectionView.CellRegistration<ThreadRowCell, String> {
+            [weak self] cell, _, commentID in
+            guard let self, let model = self.streamModels[commentID] else { return }
+            self.configureCommentRow(cell.row, with: model)
+        }
         let seamCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
             [weak self] cell, _, item in
             guard let self, case .seam(let kind, let parentID) = item else { return }
@@ -1144,6 +1221,7 @@ final class PostDetailViewController: UIViewController {
             }
             cell.onAvatarTap = { [weak self] in self?.viewModel.didTapAuthor() }
         }
+        let threadChrome = threadChrome
         streamDataSource = UICollectionViewDiffableDataSource<StreamSection, StreamItem>(
             collectionView: collectionView
         ) { collectionView, indexPath, item in
@@ -1163,11 +1241,85 @@ final class PostDetailViewController: UIViewController {
             case .skeletonPlaceholder(let index):
                 return collectionView.dequeueConfiguredReusableCell(using: skeletonCell, for: indexPath, item: index)
             case .comment(let id):
-                return collectionView.dequeueConfiguredReusableCell(using: commentCell, for: indexPath, item: id)
+                return threadChrome
+                    ? collectionView.dequeueConfiguredReusableCell(using: liftableCommentCell, for: indexPath, item: id)
+                    : collectionView.dequeueConfiguredReusableCell(using: commentCell, for: indexPath, item: id)
             case .seam:
                 return collectionView.dequeueConfiguredReusableCell(using: seamCell, for: indexPath, item: item)
             }
         }
+        guard threadChrome else { return }
+        let dayPill = UICollectionView.SupplementaryRegistration<DayPillHeaderView>(
+            elementKind: DayPillHeaderView.elementKind
+        ) { [weak self] pill, _, indexPath in
+            guard let self,
+                  case .day(let day) = self.streamDataSource.sectionIdentifier(for: indexPath.section)
+            else { return }
+            pill.configure(title: DayTitleFormatter.title(for: day))
+        }
+        streamDataSource.supplementaryViewProvider = { collectionView, _, indexPath in
+            collectionView.dequeueConfiguredReusableSupplementary(using: dayPill, for: indexPath)
+        }
+    }
+
+    /// The stream's sections: today's single `.main` whenever the chrome is
+    /// off, and — with it on — the caption in `.main`, then one `.day` per day
+    /// that a THREAD began on. A reply stays with its thread, under the day
+    /// the thread started, so a thread never splits across two pills.
+    ///
+    /// Only under Recent, with comments loaded and some to show: a Trending
+    /// rank, a skeleton and the empty page have no chronology to pin days over.
+    private func streamSections() -> [(section: StreamSection, items: [StreamItem])] {
+        let items = streamItems()
+        guard threadChrome, commentsLoaded, commentSortOrder == .recent, !latestComments.isEmpty else {
+            return [(.main, items)]
+        }
+        let calendar = Calendar.current
+        var sections: [(section: StreamSection, items: [StreamItem])] = [(.main, [])]
+        var indexByDay: [Date: Int] = [:]
+        var current = 0
+        for item in items {
+            if case .comment(let id) = item, let model = streamModels[id], model.parentID == nil,
+               let createdAt = model.createdAt {
+                let day = calendar.startOfDay(for: createdAt)
+                if let existing = indexByDay[day] {
+                    // A day that already has a pill keeps it — a section
+                    // identity can appear once in a snapshot.
+                    current = existing
+                } else {
+                    sections.append((.day(day), []))
+                    current = sections.count - 1
+                    indexByDay[day] = current
+                }
+            }
+            sections[current].items.append(item)
+        }
+        if sections[0].items.isEmpty { sections.removeFirst() }
+        return sections
+    }
+
+    /// A text page comment's long-press menu: its own actions — the
+    /// row's Share, Block and Report — plus Copy and Select Text. Nil for
+    /// everything that is not a comment, the caption included.
+    private func rowMenu(at indexPath: IndexPath) -> UIMenu? {
+        guard case .comment(let id) = streamDataSource.itemIdentifier(for: indexPath),
+              let model = streamModels[id] else { return nil }
+        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
+            UIPasteboard.general.string = model.body
+        }
+        let select = UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) {
+            [weak self] _ in
+            guard let self, let current = self.streamDataSource.indexPath(for: .comment(id)) else { return }
+            self.rowContextMenu.beginTextSelection(at: current)
+        }
+        let share = UIAction(title: "Share Comment", image: UIImage(systemName: "square.and.arrow.up")) {
+            [weak self] _ in self?.presentCommentShare(model)
+        }
+        // The moderation seams, exactly as the row's own menu has them: the
+        // affordance is honest, the mutations wait on a moderation backend.
+        let block = UIAction(title: "Block User", image: UIImage(systemName: "hand.raised"), attributes: .destructive) { _ in }
+        let report = UIAction(title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive) { _ in }
+        return UIMenu(children: [copy, select, share, UIMenu(options: .displayInline, children: [block, report])])
     }
 
     private func streamItems() -> [StreamItem] {
@@ -1223,9 +1375,14 @@ final class PostDetailViewController: UIViewController {
 
     private func applyStream(animated: Bool, completion: (() -> Void)? = nil) {
         var snapshot = NSDiffableDataSourceSnapshot<StreamSection, StreamItem>()
-        snapshot.appendSections([.main])
-        let items = streamItems()
-        snapshot.appendItems(items)
+        let sections = streamSections()
+        for (section, items) in sections {
+            snapshot.appendSections([section])
+            snapshot.appendItems(items, toSection: section)
+        }
+        if streamPolicy.update(sections.map(\.section)) {
+            collectionView.collectionViewLayout.invalidateLayout()
+        }
         hasAppliedStream = true
         streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
     }
@@ -1332,6 +1489,9 @@ final class PostDetailViewController: UIViewController {
     /// The engaged toolbar's sort selector lands here — the view model
     /// re-ranks the data and the diffable apply animates the moves.
     func setCommentSortOrder(_ order: SnapCommentSortButton.Order) {
+        // Recorded BEFORE the view model re-emits: the re-render that follows
+        // decides from it whether days are pinned.
+        commentSortOrder = order
         viewModel.setCommentSort(order == .trending ? .trending : .recent)
     }
 
@@ -1350,11 +1510,13 @@ final class PostDetailViewController: UIViewController {
         applyStream(animated: true) { [weak self] in
             guard let self else { return }
             let items = self.streamDataSource.snapshot().itemIdentifiers
-            guard let index = items.firstIndex(where: { item in
+            // Looked up through the data source, not as an index into section
+            // 0: with day pills on, the seam lives in whichever day its thread
+            // started on.
+            guard let seam = items.first(where: { item in
                 if case .seam(_, let id) = item { return id == parentID }
                 return false
-            }) else { return }
-            let indexPath = IndexPath(item: index, section: 0)
+            }), let indexPath = self.streamDataSource.indexPath(for: seam) else { return }
             if let attributes = self.collectionView.layoutAttributesForItem(at: indexPath) {
                 self.collectionView.scrollRectToVisible(
                     attributes.frame.insetBy(dx: 0, dy: -60), animated: true
@@ -1468,6 +1630,7 @@ extension PostDetailViewController: UICollectionViewDelegate {
     /// Arming is unconditional by construction: overshoot exists only at the
     /// top, so a drag anywhere else reports zero and drives nothing.
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        if threadChrome { rowContextMenu.endTextSelection() }
         // INTENT, decided once per drag: only a gesture that starts at the
         // top is a dismissal. A drag that begins mid-list and scrolls up
         // into the top is someone reading — it still bounces, because that

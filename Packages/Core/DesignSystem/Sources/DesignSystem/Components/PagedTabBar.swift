@@ -1007,7 +1007,7 @@ public final class PagedTabBar: UIControl {
 
     /// Materialized in-window, never in init: creating a real effect off
     /// screen stalls the render server on headless CI simulators (the same
-    /// rule `ChatInputBar` and `SnapGlassCardView` follow).
+    /// rule `CommentsInputBar` and `SnapGlassCardView` follow).
     private func materializeEffects() {
         guard window != nil, style.carriesBackdrop, !suppressesBackdrop else { return }
         if capsule.effect == nil {

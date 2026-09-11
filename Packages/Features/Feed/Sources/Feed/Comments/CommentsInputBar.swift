@@ -3,12 +3,12 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// The comments composer, in the app's native Liquid Glass grammar —
-/// deliberately the SAME recipe as Private Messages' `ChatInputBar`
-/// (features don't import each other, so the recipe is replicated, not the
-/// class): a floating glass capsule field that grows with its text, and a
-/// round prominent-glass send button sharing its bottom baseline. It owns
-/// no keyboard logic — the host pins its bottom to
+/// The comments composer — and, since the conversation became the text post's
+/// screen, the MESSAGES composer too — in the app's native Liquid Glass
+/// grammar: a floating glass capsule field that grows with its text, and a
+/// round prominent-glass send button sharing its bottom baseline. (It began as
+/// a replica of the chat's own input bar, which is gone: this is the one
+/// composer now.) It owns no keyboard logic — the host pins its bottom to
 /// `view.keyboardLayoutGuide.topAnchor`.
 final class CommentsInputBar: UIView {
     /// Fired with trimmed, non-empty text; the field clears itself first.
@@ -395,6 +395,32 @@ final class CommentsInputBar: UIView {
         }
     }
 
+    /// The idle faces — mic with the keyboard down, the dismiss chevron with it
+    /// up and nothing typed — outside a feed engagement too. The conversation
+    /// screen is the text page's bar without a pager
+    /// behind it; everywhere else this stays false and the rule is exactly
+    /// the page-swipe marker it always was.
+    var showsIdleUtilityFaces = false {
+        didSet { updateTrailingButtons(animated: false) }
+    }
+
+    /// The prompt when nobody is being replied to, overriding the comment
+    /// wording ("Comment as …") — a conversation's field says "Message…".
+    var defaultPlaceholder: String? {
+        didSet { applyPlaceholder() }
+    }
+
+    /// Puts `text` into the draft — at the caret while the field is being
+    /// edited, at the end otherwise — without sending. The emote strip's tap.
+    func insertIntoComposer(_ text: String) {
+        if textView.isFirstResponder {
+            textView.insertText(text)
+        } else {
+            textView.text = (textView.text ?? "") + text
+        }
+        textViewDidChange(textView)
+    }
+
     /// The utility face's tap: with the keyboard up it retires the keyboard
     /// (the engagement stays); with it down it opens the voice-note seam.
     /// One slot, one thumb position, state-appropriate intent.
@@ -493,6 +519,8 @@ final class CommentsInputBar: UIView {
     private func applyPlaceholder() {
         if let replyName {
             placeholderLabel.text = "Reply to \(replyName)…"
+        } else if let defaultPlaceholder {
+            placeholderLabel.text = defaultPlaceholder
         } else if let viewerName, !viewerName.isEmpty {
             placeholderLabel.text = "Comment as \(viewerName)"
         } else {
@@ -698,8 +726,10 @@ final class CommentsInputBar: UIView {
     ///   keyboard OPEN, field empty → dismiss-keyboard chevron
     ///   keyboard OPEN, has text    → send (also while a send is in flight)
     ///   keyboard CLOSED, empty     → 🎙 microphone (voice note)
-    /// Both idle faces belong to a FEED ENGAGEMENT; the pushed comments
-    /// screen wires no page-swipe and keeps a permanent send. Swapped as
+    /// Both idle faces belong to a FEED ENGAGEMENT, or to a bar that asks for
+    /// them (`showsIdleUtilityFaces` — the conversation, which never parks a
+    /// draft behind the mic); the pushed comments screen does neither and
+    /// keeps a permanent send. Swapped as
     /// short crossfades — the slot swap animates alpha, the utility glyph
     /// its own cross-dissolve — never a pop.
     private func updateTrailingButtons(animated: Bool) {
@@ -707,13 +737,18 @@ final class CommentsInputBar: UIView {
         sendButton.isEnabled = hasText && !isSending
         // The page-swipe drive is the engagement's marker — BOTH media and
         // text posts wire it (the ✕ that used to distinguish them is gone
-        // from this bar entirely). The pushed comments SCREEN wires nothing
-        // and keeps its permanent send.
-        let isFeedEngagement = onPageSwipe != nil
+        // from this bar entirely). The conversation asks for the faces
+        // explicitly; the pushed comments SCREEN does neither and keeps its
+        // permanent send.
+        let isFeedEngagement = onPageSwipe != nil || showsIdleUtilityFaces
         let showsKeyboardDismiss = isFeedEngagement && isKeyboardOpen && !hasText
         // The mic owns the slot whenever an engaged bar is idle — keyboard
-        // down, draft parked or not (send needs the keyboard up).
-        let showsMic = isFeedEngagement && !isKeyboardOpen
+        // down, draft parked or not (send needs the keyboard up) — on the
+        // POST. A conversation never parks a draft behind it: a shared link
+        // or an emote lands in the field precisely to be sent, and a mic in
+        // that slot turned the route's one action into a "not available"
+        // notice.
+        let showsMic = isFeedEngagement && !isKeyboardOpen && !(showsIdleUtilityFaces && hasText)
         let showsSend = isSending || !(showsKeyboardDismiss || showsMic)
         let apply = {
             self.sendButton.alpha = showsSend ? 1 : 0

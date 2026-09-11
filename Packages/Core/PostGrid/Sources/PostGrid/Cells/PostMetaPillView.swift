@@ -277,7 +277,7 @@ public class PostMetaPillView: UIVisualEffectView {
     /// Materialized on window attach, never in init: building a real effect
     /// off-screen contacts the render server and stalls the main actor for tens
     /// of seconds on a headless CI simulator. It is the rule `ToastView`,
-    /// `SnapGlassCardView` and `ChatInputBar` all follow, and it matters more
+    /// `SnapGlassCardView` and `CommentsInputBar` all follow, and it matters more
     /// here than for any of them — these are cells, so the alternative is that
     /// cost once per row rather than once per screen.
     override public func didMoveToWindow() {

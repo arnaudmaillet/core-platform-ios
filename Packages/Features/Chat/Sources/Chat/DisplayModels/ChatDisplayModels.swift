@@ -59,8 +59,8 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     }
 }
 
-/// View-ready message bubble. `senderID`/`sentAt` stay raw here: run grouping
-/// and time formatting are transcript concerns (see `ChatTranscript`).
+/// View-ready message. `senderID`/`sentAt` stay raw here: day grouping and
+/// time formatting belong to the screen that draws it.
 public struct MessageDisplayModel: Equatable, Sendable, Identifiable {
     public let id: String
     public let senderID: ProfileID

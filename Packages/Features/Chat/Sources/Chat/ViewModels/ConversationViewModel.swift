@@ -25,7 +25,7 @@ public final class ConversationViewModel {
         case failed(message: String)
     }
 
-    /// Bubble context-menu actions the view can request. Copy is absent by
+    /// Message context-menu actions the view can request. Copy is absent by
     /// design: it completes in the view layer (pasteboard, no data plane).
     public nonisolated enum MessageAction: Sendable {
         case reply

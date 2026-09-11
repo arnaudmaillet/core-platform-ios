@@ -260,6 +260,47 @@ final class SnapAuthorIdentityView: UIView {
         }
     }
 
+    /// Shows a person who is not a post's author — a conversation's
+    /// correspondent. The same pill and the same cross-
+    /// fade as `setAuthor`; the meta line says whatever the host passes, and
+    /// an empty one simply leaves the name alone on the pill.
+    func setPerson(id: ProfileID?, name: String, meta: String, avatarURL: URL?, pipeline: ImagePipeline) {
+        let faceChanged = id != authorID || avatarURL != personAvatarURL
+        guard faceChanged || name != nameLabel.text || meta != metaLabel.text else { return }
+        renderedModel = nil
+        authorID = id
+        personAvatarURL = avatarURL
+        defer { animateBarRemeasure() }
+
+        UIView.transition(with: self, duration: 0.18,
+                          options: [.transitionCrossDissolve, .allowUserInteraction]) {
+            self.setRedacted(false)
+            self.nameLabel.text = name
+            self.metaLabel.text = meta
+            if faceChanged { self.avatarView.image = nil }
+        }
+
+        guard faceChanged else { return }
+        avatarTask?.cancel()
+        guard let url = avatarURL else { return }
+        avatarTask = Task { [weak self] in
+            guard let image = try? await pipeline.image(for: url) else { return }
+            guard let self, self.personAvatarURL == url else { return }
+            UIView.transition(with: self.avatarView, duration: 0.15, options: [.transitionCrossDissolve]) {
+                self.avatarView.image = image
+            }
+        }
+    }
+
+    /// The face `setPerson` last asked for — the arrival guard for its fetch.
+    private var personAvatarURL: URL?
+
+    /// A conversation offers no follow from its header: the correspondent's
+    /// profile is one tap away, and that is where following lives.
+    func setFollowHidden(_ hidden: Bool) {
+        followButton.isHidden = hidden
+    }
+
     @objc private func authorTapped() {
         guard let authorID else { return }
         onAuthorTapped?(authorID)

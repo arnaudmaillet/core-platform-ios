@@ -702,7 +702,11 @@ final class AppContainer {
         router: routeResolver,
         // One history for the whole app: a query typed in the inbox is recent on
         // the search screen, and the other way round.
-        recentSearches: recentSearchStore
+        recentSearches: recentSearchStore,
+        // A conversation is drawn by the feed's text-post screen. Lazy, like
+        // every feature here: the feed builder reaches the router, and the
+        // router reaches this.
+        threadScreens: { [unowned self] in self.feedFeature }
     )
 
     // MARK: - Routing

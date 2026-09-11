@@ -36,7 +36,7 @@ public enum GlassCapsule {
     /// interpolates, so the capsule dismissed as a hard SQUARE for a frame
     /// before snapping back to a bubble. `cornerConfiguration` is a property
     /// UIKit owns and animates with the view, so the shape survives the morph —
-    /// the same reason `ToastView` and `ChatInputBar` state it this way.
+    /// the same reason `ToastView` and `CommentsInputBar` state it this way.
     @MainActor
     public static func wrap(_ content: UIView) -> UIVisualEffectView {
         let effect = UIGlassEffect()

@@ -159,9 +159,9 @@ enum SnapCommentsLayout {
     }
 
     /// The caption bubble's corner radius: the app's MESSAGE-BUBBLE radius,
-    /// taken from `MessageCell` rather than picked — the caption is a bubble
-    /// in a list of messages, so it is the same bubble the chat transcript
-    /// draws. Applied via `cornerConfiguration` (see `SnapGlassCardView`),
+    /// the one the chat transcript's bubbles were drawn with, rather than a
+    /// radius picked for this card. Applied via `cornerConfiguration` (see
+    /// `SnapGlassCardView`),
     /// which is what gives it the continuous curve — a layer radius would
     /// clip the material instead of shaping it.
     static let stripCardCornerRadius: CGFloat = 18

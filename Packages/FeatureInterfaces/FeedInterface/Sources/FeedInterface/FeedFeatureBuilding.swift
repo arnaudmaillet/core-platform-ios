@@ -68,8 +68,13 @@ public protocol ForYouModeMenuProviding: UIViewController {
 /// or features that embed feed surfaces) depend on this interface package —
 /// never on the Feed implementation — so editing Feed internals recompiles
 /// nothing but Feed itself.
+///
+/// It refines `ConversationThreadScreenBuilding` so the shell hands the Chat
+/// builder this very value and the relationship is checked by the compiler:
+/// Feed draws every conversation, and a runtime cast that failed would leave
+/// the Chat builder with nothing to draw one with.
 @MainActor
-public protocol FeedFeatureBuilding {
+public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding {
     func makeFeedViewController() -> UIViewController
     /// The For You tab's root: a Discover mosaic and a Following timeline under
     /// one content lens, where tapping a tile opens the full-screen feed seeded

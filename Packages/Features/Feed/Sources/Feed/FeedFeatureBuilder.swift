@@ -49,7 +49,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// clients are already wired, and the composition root hands the same
     /// instances to whoever needs them.
     private let socialGraph: (any SocialGraphWriting)?
-
     public init(
         repository: any FeedProviding,
         engagementProvider: (any EngagementProviding)? = nil,
@@ -83,6 +82,25 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.videoPlayback = videoPlayback
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+    }
+
+    /// A conversation, drawn by the text post's screen. Chat drives it; the
+    /// bars, the wallet and the image pipeline are Feed's.
+    public func makeConversationThreadViewController(
+        driver: any ConversationThreadDriving,
+        mode: ConversationThreadMode,
+        prefill: String,
+        accessory: (any ConversationThreadAccessory)?
+    ) -> UIViewController {
+        ConversationThreadViewController(
+            driver: driver,
+            mode: mode,
+            prefill: prefill,
+            accessory: accessory,
+            imagePipeline: imagePipeline,
+            wallet: wallet,
+            makeWalletSheet: makeWalletSheet
+        )
     }
 
     /// The timeline is the full-screen snap feed — the app's sole Timeline.
@@ -1067,6 +1085,22 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         let makeProfileSwitcher = makeProfileSwitcher
         let wallet = wallet
         let makeWalletSheet = makeWalletSheet
+        let makePanel: (PostID, Bool) -> UIViewController = { postID, threadChrome in
+            PostDetailViewController(
+                viewModel: PostDetailViewModel(
+                    postID: postID,
+                    repository: repository,
+                    engagementProvider: engagementProvider,
+                    commentsProvider: commentsProvider,
+                    router: router
+                ),
+                imagePipeline: imagePipeline,
+                mode: .commentsOnly,
+                profileSwitcher: makeProfileSwitcher?(),
+                wallet: wallet,
+                threadChrome: threadChrome
+            )
+        }
         return SnapFeedViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
@@ -1075,21 +1109,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // `.comments` route pushes — one comments UI, two presentations.
             // Text-only pages host the SAME panel (their engaged card
             // carries the post, exactly like media pages).
-            makeCommentsPanelContent: { postID in
-                PostDetailViewController(
-                    viewModel: PostDetailViewModel(
-                        postID: postID,
-                        repository: repository,
-                        engagementProvider: engagementProvider,
-                        commentsProvider: commentsProvider,
-                        router: router
-                    ),
-                    imagePipeline: imagePipeline,
-                    mode: .commentsOnly,
-                    profileSwitcher: makeProfileSwitcher?(),
-                    wallet: wallet
-                )
-            },
+            makeCommentsPanelContent: { postID in makePanel(postID, false) },
+            // A TEXT page's resting comments carry the day pills and the lifted
+            // menu; media pages keep the panel above.
+            makeRestingCommentsPanelContent: { postID in makePanel(postID, true) },
             wallet: wallet,
             makeWalletSheet: makeWalletSheet,
             // For the ⋯ menu's Report row, which withholds itself when there is
