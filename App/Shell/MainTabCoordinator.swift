@@ -206,6 +206,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // file sink, and the console. The channel every Hero UI suite reads.
         HeroTransitionAudit.installIfRequested(pools: container.debugPlaybackPools)
         AccessoryCollapseAudit.installIfRequested(tabBarController: tabBarController)
+        PillDragAudit.installIfRequested(tabBarController: tabBarController)
         #endif
 
         #if DEBUG

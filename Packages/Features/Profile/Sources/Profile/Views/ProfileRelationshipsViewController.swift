@@ -146,6 +146,12 @@ final class ProfileRelationshipsViewController: UIViewController {
             },
             for: .valueChanged
         )
+        // Drag on the pill → pages, every frame of the finger; the release
+        // hands the pager a velocity and it lands itself.
+        tabBar.onScrub = { [weak self] progress in self?.pager.scrub(to: progress) }
+        tabBar.onScrubEnd = { [weak self] velocity in
+            self?.pager.settleAfterScrub(velocityInPages: velocity)
+        }
         // Swipe → lens, every frame of the drag.
         pager.onProgress = { [weak self] progress in
             #if DEBUG

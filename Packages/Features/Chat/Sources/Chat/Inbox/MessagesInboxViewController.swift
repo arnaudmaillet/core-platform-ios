@@ -199,10 +199,16 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             },
             for: .valueChanged
         )
-        // Dragging the header IS dragging the pages. The bar reports a
-        // fractional page position and the pager is scrubbed to it, so the same
-        // `onProgress` loop that answers a content swipe answers this too — the
-        // lens and the bar items need no separate path.
+        // Dragging the PILL is dragging the pages. The bar reports a fractional
+        // page position for every frame of the finger and the pager is scrubbed
+        // to it; the pager reports back through `onProgress`, so the same loop
+        // that answers a content swipe answers this too and the lens needs no
+        // separate path. The release hands over a velocity and the pager lands
+        // itself, which is why nothing here has to know a drag happened.
+        categoryBar.onScrub = { [weak self] progress in self?.pagerView.scrub(to: progress) }
+        categoryBar.onScrubEnd = { [weak self] velocity in
+            self?.pagerView.settleAfterScrub(velocityInPages: velocity)
+        }
         pagerView.onProgress = { [weak self] progress in self?.categoryBar.setProgress(progress) }
         pagerView.onSettled = { [weak self] index in self?.didSettle(on: index) }
         // The band's minimize rides whichever page is in front. The pager is

@@ -204,6 +204,74 @@ public final class HorizontalPagerView: UIView {
         }
     }
 
+    // MARK: - Driven by the bar's own drag
+
+    /// Drives the pager from something other than its own pan — the tab bar's
+    /// selection pill, which can be picked up and dragged like the pages
+    /// themselves. Unanimated by design: this is called per frame of a finger.
+    ///
+    /// Lives here rather than in the caller so the index↔offset conversion (and
+    /// with it the RTL mirroring) stays in one place; a caller writing
+    /// `contentOffset` itself would be right in English and wrong in Arabic.
+    ///
+    /// ⚠️ It does NOT move `activeIndex`. Mid-drag there is no active page —
+    /// two of them share the screen — and the index that matters is the one
+    /// `settleAfterScrub` commits to. Everything a swipe does per frame still
+    /// happens, because assigning the offset runs `scrollViewDidScroll` exactly
+    /// as a finger on the pages would.
+    public func scrub(to progress: CGFloat) {
+        guard bounds.width > 0, pages.count > 1 else { return }
+        let clamped = min(max(progress, 0), CGFloat(pages.count - 1))
+        let slot = isRTL ? CGFloat(pages.count - 1) - clamped : clamped
+        scrollView.setContentOffset(CGPoint(x: slot * bounds.width, y: 0), animated: false)
+    }
+
+    /// Ends a scrub on a whole page, carrying the fling through: a flick that
+    /// barely moved still lands on the next page, the same way the pager's own
+    /// pan behaves.
+    ///
+    /// ⚠️ **`settle()` will not do this job.** It runs off the scroll view's own
+    /// deceleration, and a scrub never decelerates — the offset was being
+    /// written directly, frame by frame — so a release with nothing here would
+    /// leave the pages parked between two of them with no callback coming to
+    /// rescue them. `onSettled` still fires, from the end of the animation this
+    /// starts.
+    public func settleAfterScrub(velocityInPages: CGFloat) {
+        guard bounds.width > 0, pages.count > 1 else { return }
+        // Half a page of "throw" per unit velocity — enough that a flick
+        // commits, small enough that a slow drag released mid-way falls back to
+        // whichever page it is actually nearest.
+        //
+        // ⚠️ **AND NEVER MORE THAN ONE PAGE, which is what a paging scroll view
+        // does and what the velocity's units make necessary.** The bar measures
+        // the flick in PAGES PER SECOND against a SEGMENT's width — about a
+        // quarter of a page of travel — so an ordinary flick across one tab
+        // reports six or seven pages a second, and an unclamped throw would
+        // hand it three tabs. A flick advances one, or falls back; it never
+        // skips what it flew over.
+        let here = progress
+        let projected = min(max(here + velocityInPages * 0.5, here - 1), here + 1)
+        let landing = min(max(Int(projected.rounded()), 0), pages.count - 1)
+        activeIndex = landing
+        publishActiveScrollView()
+        // Always travel, even when the landing is the page it started on: that
+        // case is a scrub that did not commit, and it still has to come back
+        // from wherever the finger left it. It is also the case
+        // `setActivePage` cannot serve — it returns early on an unchanged
+        // index, which is exactly the state this arrives in.
+        //
+        // ⚠️ **UNLESS THERE IS NOTHING TO TRAVEL, and then the landing is
+        // announced HERE.** A drag released past the last tab clamps to an
+        // offset the pages are already sitting on, and an animated scroll of
+        // zero distance is not something to hang a callback on — `onSettled` is
+        // what five of the six hosts commit their model from, so a release that
+        // silently skipped it would leave the screen on one tab and its view
+        // model on another.
+        let target = offsetX(for: landing)
+        guard abs(scrollView.contentOffset.x - target) > 0.5 else { return settle() }
+        scrollView.setContentOffset(CGPoint(x: target, y: 0), animated: true)
+    }
+
     // MARK: - Index ↔ offset
 
     /// Right-to-left languages lay the pages out mirrored (the constraints use

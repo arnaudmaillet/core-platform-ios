@@ -546,6 +546,12 @@ final class SearchResultsViewController: UIViewController {
         // moved on its own taps would sit on "Posts" while the viewer read the
         // gallery, which is the bug this channel exists to prevent.
         pager.onProgress = { [weak self] progress in self?.tabBar.setProgress(progress) }
+        // And the pages follow the PILL: a drag that starts on the selection
+        // runs them under the finger, and the release lets the pager land.
+        tabBar.onScrub = { [weak self] progress in self?.pager.scrub(to: progress) }
+        tabBar.onScrubEnd = { [weak self] velocity in
+            self?.pager.settleAfterScrub(velocityInPages: velocity)
+        }
         pager.onSettled = { [weak self] index in
             self?.tabBar.select(index)
             self?.updatePlayback()

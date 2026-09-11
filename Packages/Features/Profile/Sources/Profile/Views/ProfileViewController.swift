@@ -2016,6 +2016,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         galleryPager.onProgress = { [weak self] progress in
             self?.selectorBar.setProgress(progress)
         }
+        // And the other way: the pill can be picked up, which scrubs the
+        // gallery under the finger. The release hands over a velocity and the
+        // pager commits — including the `onPageSettled` this screen adopts its
+        // tab from, so a drag ends exactly where a swipe does.
+        selectorBar.onScrub = { [weak self] progress in self?.galleryPager.scrub(to: progress) }
+        selectorBar.onScrubEnd = { [weak self] velocity in
+            self?.galleryPager.settleAfterScrub(velocityInPages: velocity)
+        }
 
         placeSelectors()
 

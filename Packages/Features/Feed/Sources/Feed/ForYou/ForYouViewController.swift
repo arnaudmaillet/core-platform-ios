@@ -571,9 +571,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             },
             for: .valueChanged
         )
-        // Dragging the capsule IS dragging the pages: the bar reports a
-        // fractional page position and the pager is scrubbed to it, so the same
-        // `onProgress` loop that answers a content swipe answers this too.
+        // Dragging the PILL is dragging the pages: the bar reports a fractional
+        // page position for every frame of the finger and the pager is scrubbed
+        // to it, so the same `onProgress` loop that answers a content swipe
+        // answers this too. The release hands over a velocity and the pager
+        // lands itself.
+        tabBar.onScrub = { [weak self] progress in self?.pager.scrub(to: progress) }
+        tabBar.onScrubEnd = { [weak self] velocity in
+            self?.pager.settleAfterScrub(velocityInPages: velocity)
+        }
         // ⚠️ THE RECEIVER IS THE VIEW CONTROLLER, and the scroll view is the
         // ACTIVE PAGE's — UIKit's own heuristic search does not find a scroller
         // nested in a horizontal pager, so without this the tab bar never
