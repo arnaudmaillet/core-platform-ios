@@ -115,8 +115,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// plain tap still selects the tab.
     ///
     /// ⚠️ Its accessibility label is NOT fixed: this tab is renamed by whichever
-    /// lens is active ("For You", "Work", "Focus"), and the button that finds it
-    /// in the bar matches on that title — so the label is re-stated on every
+    /// lens is active ("For You", "Work", "Focus"), and VoiceOver reads this
+    /// overlay, not the tab under it — so the label is re-stated on every
     /// alignment pass rather than set once here.
     private lazy var forYouMenuOverlay: UIButton = {
         let button = UIButton(type: .custom)
@@ -485,7 +485,12 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// VoiceOver and a hardware keyboard arrive by the same road.
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
         guard tab === createItem.tab else { return true }
-        createItem.presentMenu()
+        // Place the anchor now rather than trust the last layout pass, and
+        // never open the menu from an anchor outside a window: that raises.
+        alignMenuOverlays()
+        if !createItem.presentMenu(), tabBarController.presentedViewController == nil {
+            tabBarController.present(createItem.makeFallbackSheet(), animated: true)
+        }
         return false
     }
 
@@ -532,9 +537,9 @@ extension MainTabCoordinator {
     /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
     /// nothing already added and writes the frame only when it moved.
     fileprivate func alignMenuOverlays() {
-        align(profileMenuOverlay, over: profileTab?.tab.title)
+        align(profileMenuOverlay, over: profileTab?.tab)
         alignForYouMenuOverlay()
-        align(createItem.overlay, over: createItem.tab.title)
+        align(createItem.overlay, over: createItem.tab)
     }
 
     /// Keeps the lens-menu overlay over the For You tab, and installs the menu
@@ -546,25 +551,33 @@ extension MainTabCoordinator {
     /// matters: the menu resolves its own rows at presentation, so re-fetching
     /// it on every layout pass would buy nothing and cost a build per frame.
     private func alignForYouMenuOverlay() {
-        // The tab is renamed by the active lens, so both the lookup and the
-        // label follow it rather than a constant.
-        let title = forYouTab?.tab.title
-        forYouMenuOverlay.accessibilityLabel = title
+        // The tab is renamed by the active lens, so the label follows it rather
+        // than a constant.
+        forYouMenuOverlay.accessibilityLabel = forYouTab?.tab.title
         if forYouMenuOverlay.menu == nil { forYouMenuOverlay.menu = forYouTab?.modeMenu }
-        align(forYouMenuOverlay, over: title)
+        align(forYouMenuOverlay, over: forYouTab?.tab)
     }
 
-    /// Puts an overlay exactly over the bar button titled `title`.
+    /// Puts an overlay exactly over the bar's button for `tab`.
     ///
     /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
     /// nothing already added and writes the frame only when it moved.
-    private func align(_ overlay: UIButton, over title: String?) {
+    ///
+    /// ⚠️ ASKS THE TAB WHERE IT IS, through `frame(in:)` — public, since `UITab`
+    /// is a `UIPopoverPresentationControllerSourceItem`. It used to walk the bar
+    /// for the view whose `accessibilityLabel` was the tab's title, and a tab
+    /// button carries that label ONLY while the accessibility runtime is loaded:
+    /// on a simulator an accessibility inspector has touched, yes; on an iPhone
+    /// with VoiceOver off, no. Every overlay then went unplaced — measured on an
+    /// iPhone SE simulator, not one `_UITabButton` labelled — and the "+" crashed
+    /// opening its menu from an anchor outside any window.
+    private func align(_ overlay: UIButton, over tab: UITab?) {
+        guard let tab else { return }
         let bar = tabBarController.tabBar
-        guard let title, let button = tabButton(labelled: title, in: bar) else { return }
-        let frame = button.convert(button.bounds, to: bar)
-        // A zero frame means the bar has not placed its buttons yet; leaving the
-        // overlay unplaced is right, and a later pass will catch it.
-        guard !frame.isEmpty else { return }
+        // No frame, or an empty one, means the bar has not placed its buttons
+        // yet; leaving the overlay unplaced is right, and a later pass will
+        // catch it.
+        guard let frame = tab.frame(in: bar), !frame.isEmpty else { return }
         if overlay.superview !== bar { bar.addSubview(overlay) }
         if overlay.frame != frame { overlay.frame = frame }
         // Keep it topmost: UIKit re-adds its own subviews during a layout pass
@@ -579,30 +592,6 @@ extension MainTabCoordinator {
             onSwitch: {},
             onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
         )
-    }
-
-    /// The tab bar's button for the tab titled `title`.
-    ///
-    /// Breadth-first, and matched on `accessibilityLabel` rather than on the
-    /// private button classes it walks past: a tab button is labelled with its
-    /// own title, and breadth-first reaches the button before the label nested
-    /// inside it — so this never has to name `_UITabButton`. A future iOS
-    /// re-shuffling that hierarchy costs the menu, not a crash.
-    private func tabButton(labelled title: String, in bar: UIView) -> UIView? {
-        var queue = bar.subviews
-        while !queue.isEmpty {
-            let view = queue.removeFirst()
-            // The Profile and For You overlays carry their tab's label by
-            // design; skip them or one would match itself and pin its own
-            // frame. The "+" overlay carries none, and is skipped with the rest
-            // so the rule needs no exception.
-            if view === profileMenuOverlay || view === forYouMenuOverlay || view === createItem.overlay {
-                continue
-            }
-            if view.accessibilityLabel == title { return view }
-            queue.append(contentsOf: view.subviews)
-        }
-        return nil
     }
 
     /// Opens one of the "+" menu's destinations.

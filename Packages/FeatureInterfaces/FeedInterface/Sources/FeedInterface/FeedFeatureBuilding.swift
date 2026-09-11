@@ -73,8 +73,12 @@ public protocol ForYouModeMenuProviding: UIViewController {
 /// builder this very value and the relationship is checked by the compiler:
 /// Feed draws every conversation, and a runtime cast that failed would leave
 /// the Chat builder with nothing to draw one with.
+///
+/// It refines `TextPostScreenBuilding` for the same reason: the "+" menu's Text
+/// Post is a text post's own page, so Feed draws it, and the shell hands this
+/// value to the Upload builder that owns the publishing.
 @MainActor
-public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding {
+public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostScreenBuilding {
     func makeFeedViewController() -> UIViewController
     /// The For You tab's root: a Discover mosaic and a Following timeline under
     /// one content lens, where tapping a tile opens the full-screen feed seeded

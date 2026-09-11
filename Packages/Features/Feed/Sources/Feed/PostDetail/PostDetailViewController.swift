@@ -1,3 +1,4 @@
+import CoreModels
 import CoreStorage
 import MediaCore
 import DesignSystem
@@ -270,6 +271,36 @@ final class PostDetailViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         remeasureStreamOnWidthChange()
+        refitEmptyPageOnHeightChange()
+    }
+
+    /// This view's height as last laid out — see `refitEmptyPageOnHeightChange`.
+    private var lastLaidOutHeight: CGFloat = 0
+
+    /// The empty page fills the room the stream has, and a SHEET changes that
+    /// room without changing the width: moving between its detents. Re-fitted
+    /// on a genuine change of THIS view's height — never per layout, and never
+    /// for the stream's own growth during an engagement, which moves the
+    /// collection view inside a view that stays put (`availableStreamHeight`).
+    private func refitEmptyPageOnHeightChange() {
+        let height = view.bounds.height
+        guard height > 0, abs(height - lastLaidOutHeight) > 0.5 else { return }
+        let isFirst = lastLaidOutHeight == 0
+        lastLaidOutHeight = height
+        guard !isFirst else { return }
+        refitEmptyPage()
+    }
+
+    /// Re-fits a shown empty page to the current geometry and text size.
+    ///
+    /// Two things move its fit after it was decided: the room (a sheet's
+    /// detent, above) and the block's own height, which is the page's floor
+    /// and grows with the text size. `applyStream` reconfigures the page
+    /// only if the fit really changed, so a call that finds nothing to do
+    /// costs one measurement.
+    private func refitEmptyPage() {
+        guard hasAppliedStream, renderedEmptyPageFit != nil else { return }
+        applyStream(animated: false)
     }
 
     /// The width the stream's self-sizing rows were last measured against.
@@ -308,6 +339,7 @@ final class PostDetailViewController: UIViewController {
         title = mode == .commentsOnly ? "Comments" : "Post"
         view.backgroundColor = .systemBackground
         configureViews()
+        if viewModel.isDraft { configureDraft() }
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onEngagementChange = { [weak self] state in self?.renderEngagement(state) }
@@ -316,8 +348,22 @@ final class PostDetailViewController: UIViewController {
         viewModel.onViewerIdentityChange = { [weak self] identity in
             guard let self else { return }
             composeBar.setViewerIdentity(identity, imagePipeline: imagePipeline)
+            // A DRAFT's composer names who the post will be BY: a switch
+            // before publishing changes the author, not just the commenter.
+            guard viewModel.isDraft else { return }
+            composeBar.defaultPlaceholder = "Post as \(identity.name)"
         }
+        viewModel.onPublished = { [weak self] entry in self?.becomePublished(entry) }
+        viewModel.onPublishFailed = { [weak self] text in self?.restoreUnpublished(text) }
         configureProfileSwitcher()
+        // The empty page's floor is its block's own height, which the text
+        // size changes — see `refitEmptyPage`.
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
+            (controller: PostDetailViewController, _: UITraitCollection) in
+            controller.refitEmptyPage()
+        }
+        // …and the keyboard takes the room the page is fitted to.
+        observeKeyboardForEmptyPage()
         render(.loading)
         viewModel.viewDidLoad()
     }
@@ -549,6 +595,101 @@ final class PostDetailViewController: UIViewController {
         composeBar.setBoostContext(balance: wallet.balance, undoableAmount: sessionBoostAmount)
     }
 
+    /// The boost button's opening face: this viewer's spend on this post so
+    /// far, from the wallet's ledger — nothing on a draft, which is not a post.
+    private func refreshBoostTotal() {
+        guard let wallet else { return }
+        composeBar.setBoostTotal(viewModel.postID.map { wallet.boostTotal(forTarget: $0.rawValue) } ?? 0)
+        refreshComposeBarBoostState()
+    }
+
+    // MARK: - Draft (the "+" menu's Text Post)
+
+    /// Where a published draft is handed on: the Text Post page, which keeps
+    /// this panel and changes its own bars from "writing" to "the post".
+    var onPostPublished: ((FeedEntry) -> Void)?
+
+    /// How many comments the stream holds — what the sort control waits on
+    /// (`CommentSortPolicy`). Reported on every change.
+    private(set) var commentCount = 0
+    var onCommentCountChange: ((Int) -> Void)?
+
+    /// The composer's text, for a host that keeps drafts of it.
+    var composerText: String {
+        get { composeBar.draftText }
+        set { composeBar.draftText = newValue }
+    }
+
+    var onComposerTextChange: ((String) -> Void)? {
+        didSet { composeBar.onTextChange = onComposerTextChange }
+    }
+
+    /// Who will see the post, in the boost's slot — see
+    /// `CommentsInputBar.visibilityMenu`. Nil puts the boost back.
+    func setVisibilityMenu(_ menu: UIMenu?) {
+        composeBar.visibilityMenu = menu
+    }
+
+    /// Whether the composer holds unsent text: what closing the page would lose.
+    var composerHasDraft: Bool {
+        !composeBar.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// A draft whose first message is on its way — already sent, past recall.
+    var isPublishing: Bool { viewModel.isDraft && composeBar.isSending }
+
+    #if DEBUG
+    func debugSend(_ text: String) { composeBar.debugSend(text) }
+    #endif
+
+    /// The composer of a post that does not exist yet.
+    ///
+    /// - The footer band wears the TEXT page's veil from the start. It is set
+    ///   from a loaded post's format (`configure`), and a draft has no post:
+    ///   left at zero it would be a bare blur that snaps to the text veil the
+    ///   moment the post is published.
+    /// - Send is reachable with the keyboard down — the idle faces without a
+    ///   pager. A text page parks a draft behind the mic until the keyboard
+    ///   rises, which here would park the post itself.
+    /// - It says what it does: it publishes.
+    private func configureDraft() {
+        composerBackdrop.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: false))
+        composeBar.showsIdleUtilityFaces = true
+        composeBar.defaultPlaceholder = "Write your post…"
+        composeBar.sendAccessibilityLabel = "Publish post"
+    }
+
+    /// The draft is a post now: the composer goes back to being a post's —
+    /// "Comment as …", a send that comments, and the boost in the slot the
+    /// visibility held (a published post's audience is settled). Its idle
+    /// faces stay: the page it lives on has no pager to lend it the feed's.
+    private func becomePublished(_ entry: FeedEntry) {
+        composeBar.defaultPlaceholder = nil
+        composeBar.sendAccessibilityLabel = nil
+        composeBar.visibilityMenu = nil
+        refreshBoostTotal()
+        onPostPublished?(entry)
+    }
+
+    /// The post did not go out. The composer cleared itself when the text was
+    /// sent, so the text is put back — ahead of anything typed since.
+    private func restoreUnpublished(_ text: String) {
+        let typedSince = composeBar.draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        composeBar.draftText = typedSince.isEmpty ? text : text + "\n" + composeBar.draftText
+        presentNotice(
+            "Couldn't Publish",
+            "Your post wasn't published. Your text is still here, so you can try again."
+        )
+    }
+
+    /// The text page family's notices are alerts — see the conversation's.
+    private func presentNotice(_ title: String, _ message: String) {
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
     private func configureComposeBar() {
         // The Liquid Glass composer (Private Messages' recipe): a floating
         // capsule field, no opaque bar, no separator — the glass carries
@@ -572,7 +713,12 @@ final class PostDetailViewController: UIViewController {
         // doesn't have. Nil wallet (an unwired host) leaves the tap inert.
         composeBar.onBoost = { [weak self] amount in
             guard let self, let wallet = self.wallet else { return }
-            switch wallet.boost(targetID: self.viewModel.postID.rawValue, amount: amount) {
+            // A DRAFT is not a post yet, and a boost has nothing to land on —
+            // said, rather than spent against an id that does not exist.
+            guard let postID = self.viewModel.postID else {
+                return self.presentNotice("Boost", "You can boost your post once it's published.")
+            }
+            switch wallet.boost(targetID: postID.rawValue, amount: amount) {
             case .boosted(_, let targetTotal, let spent):
                 // `spent`, never the request — a near-cap boost is clamped.
                 self.sessionBoostAmount += spent
@@ -592,8 +738,9 @@ final class PostDetailViewController: UIViewController {
         // lives on this controller, and this controller dies with the visit.
         composeBar.onBoostUndo = { [weak self] in
             guard let self, let wallet = self.wallet, self.sessionBoostAmount > 0,
+                  let postID = self.viewModel.postID,
                   let result = wallet.undoBoost(
-                      targetID: self.viewModel.postID.rawValue, amount: self.sessionBoostAmount
+                      targetID: postID.rawValue, amount: self.sessionBoostAmount
                   )
             else { return }
             let refunded = self.sessionBoostAmount
@@ -608,19 +755,12 @@ final class PostDetailViewController: UIViewController {
         // booster with the receipt, not the invitation. The observer keeps
         // it honest against spends made through any other surface.
         if let wallet {
-            composeBar.setBoostTotal(wallet.boostTotal(forTarget: viewModel.postID.rawValue))
-            refreshComposeBarBoostState()
+            refreshBoostTotal()
             walletObservers.tokens = [
                 NotificationCenter.default.addObserver(
                     forName: WalletStore.didChangeNotification, object: wallet, queue: .main
                 ) { [weak self] _ in
-                    MainActor.assumeIsolated {
-                        guard let self, let wallet = self.wallet else { return }
-                        self.composeBar.setBoostTotal(
-                            wallet.boostTotal(forTarget: self.viewModel.postID.rawValue)
-                        )
-                        self.refreshComposeBarBoostState()
-                    }
+                    MainActor.assumeIsolated { self?.refreshBoostTotal() }
                 },
             ]
         }
@@ -1087,6 +1227,10 @@ final class PostDetailViewController: UIViewController {
         latestComments = models
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         commentsLoaded = true
+        if models.count != commentCount {
+            commentCount = models.count
+            onCommentCountChange?(models.count)
+        }
         // The first apply lands cold (nothing to animate FROM); reloads,
         // sort re-ranks, and submissions animate as native diffs — moves,
         // insertions, deletions, all UIKit's own.
@@ -1190,12 +1334,20 @@ final class PostDetailViewController: UIViewController {
         // presentation.
         let emptyPageCell = UICollectionView.CellRegistration<CommentsEmptyPageCell, StreamItem> {
             [weak self] cell, _, _ in
-            cell.configure(
-                symbolName: "bubble.left.and.bubble.right",
-                title: SnapCommentEmptyStateView.promptText,
-                subtitle: "Be the first to comment.",
-                height: self?.emptyPageHeight() ?? SnapCommentsLayout.emptyPageMinimumHeight
+            let fit = self?.currentEmptyPageFit() ?? EmptyPageFit(
+                copy: PostDetailViewController.commentsEmptyPageCopy,
+                height: SnapCommentsLayout.emptyPageFallbackHeight,
+                blockOffset: 0
             )
+            cell.configure(
+                symbolName: fit.copy.symbol,
+                title: fit.copy.title,
+                subtitle: fit.copy.subtitle,
+                height: fit.height,
+                blockOffset: fit.blockOffset
+            )
+            // What the cell was actually given — see `applyStream`.
+            self?.renderedEmptyPageFit = fit
         }
         let captionCell = UICollectionView.CellRegistration<CaptionBubbleCell, StreamItem> {
             [weak self] cell, _, _ in
@@ -1383,9 +1535,64 @@ final class PostDetailViewController: UIViewController {
         if streamPolicy.update(sections.map(\.section)) {
             collectionView.collectionViewLayout.invalidateLayout()
         }
+        // ⚠️ THE EMPTY PAGE KEEPS ITS IDENTITY, so nothing re-asks it — and what
+        // it should say, or how tall it should be, can change under it: a
+        // draft becoming a post, or a caption arriving after an empty stream
+        // already sized the page without one (the page then scrolled by
+        // exactly the caption's height). Reconfigured in this same apply, so
+        // there is no frame of the stale one — and only on a real change.
+        if let rendered = renderedEmptyPageFit,
+           snapshot.itemIdentifiers.contains(.emptyState),
+           streamDataSource.snapshot().itemIdentifiers.contains(.emptyState),
+           !rendered.matches(currentEmptyPageFit()) {
+            snapshot.reconfigureItems([.emptyState])
+        }
         hasAppliedStream = true
         streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
     }
+
+    /// The empty stream's words: an invitation to write while this is a
+    /// DRAFT, an invitation to comment once it is a post.
+    struct EmptyPageCopy: Equatable {
+        let symbol: String
+        let title: String
+        let subtitle: String
+    }
+
+    static let commentsEmptyPageCopy = EmptyPageCopy(
+        symbol: "bubble.left.and.bubble.right",
+        title: SnapCommentEmptyStateView.promptText,
+        subtitle: "Be the first to comment."
+    )
+
+    static let draftEmptyPageCopy = EmptyPageCopy(
+        symbol: "square.and.pencil",
+        title: "Start your post",
+        subtitle: "Your first message becomes the post."
+    )
+
+    private var emptyPageCopy: EmptyPageCopy {
+        viewModel.isDraft ? Self.draftEmptyPageCopy : Self.commentsEmptyPageCopy
+    }
+
+    /// What the empty page was last configured with.
+    private struct EmptyPageFit {
+        let copy: EmptyPageCopy
+        let height: CGFloat
+        /// See `emptyPageBlockOffset`.
+        let blockOffset: CGFloat
+
+        /// Within half a point is the same page: the measurement is arithmetic
+        /// on fonts, and a re-configure for a rounding difference would be a
+        /// jump for nothing.
+        func matches(_ other: EmptyPageFit) -> Bool {
+            copy == other.copy
+                && abs(height - other.height) < 0.5
+                && abs(blockOffset - other.blockOffset) < 0.5
+        }
+    }
+
+    private var renderedEmptyPageFit: EmptyPageFit?
 
     /// Re-asks every row how tall it wants to be.
     ///
@@ -1435,9 +1642,13 @@ final class PostDetailViewController: UIViewController {
     /// computed before the transition has produced it. Nil until engaged.
     private var engagedStreamInsets: (top: CGFloat, bottom: CGFloat)?
 
-    /// The empty page's height, resolved SYNCHRONOUSLY: the room the stream
-    /// has, less the section's own insets, less the caption row that sits
-    /// above it.
+    /// The empty page's fit, resolved SYNCHRONOUSLY.
+    ///
+    /// The HEIGHT is the room the stream has, less the section's own insets,
+    /// less the caption row that sits above it, and never less than the block
+    /// the row holds, measured at the row's width (see
+    /// `SnapCommentsLayout.emptyPageHeight`). The OFFSET centres that block in
+    /// the space a reader sees as empty (see `emptyPageBlockOffset`).
     ///
     /// The caption row is measured here rather than waited for. It is the
     /// only other row in this stream, and a throwaway `CaptionBubbleCell`
@@ -1446,18 +1657,208 @@ final class PostDetailViewController: UIViewController {
     /// layout pass per empty-state configuration; NOT measuring costs a
     /// visible jump, because anything learned after frame 0 arrives as
     /// motion the presentation did not ask for.
-    private func emptyPageHeight() -> CGFloat {
-        // The view's width, when the stream has not been laid out yet: the
-        // resting engagement configures rows before the container has run a
-        // pass, and a zero width would measure the caption as zero-height
-        // and hand the empty page the whole viewport.
+    private func currentEmptyPageFit() -> EmptyPageFit {
+        let rowWidth = streamRowWidth
+        let caption = captionRowHeight(width: rowWidth)
+        let block = emptyPageBlockHeight(width: rowWidth)
+        let room = availableStreamHeight
+        let space = streamSpace(captionHeight: caption)
+        // No room at all is no geometry yet: the pre-layout call. Whole
+        // points, so the rows never overrun the room by a rounding and leave
+        // the page scrolling by a fraction.
+        var available: CGFloat? = room > 0
+            ? floor(room - streamSectionVerticalInsets - caption)
+            : nil
+        // ⚠️ THE KEYBOARD TAKES THE STREAM'S ROOM WITHOUT TOUCHING ITS INSETS.
+        // It lifts the composer; the insets stay what the resting layout set.
+        // So the row stops a breath above the composer WHEREVER IT IS. Sized
+        // from the insets alone, the row kept its resting height and the
+        // invitation was centred in a middle that had gone behind the keys —
+        // reported on an iPhone SE.
+        if let space, let roomBased = available {
+            available = min(roomBased, floor(space.bottom - Spacing.lg - space.rowTop))
+        }
+        let height = SnapCommentsLayout.emptyPageHeight(availableHeight: available, blockHeight: block)
+        return EmptyPageFit(
+            copy: emptyPageCopy,
+            height: height,
+            blockOffset: emptyPageBlockOffset(rowHeight: height, blockHeight: block, space: space)
+        )
+    }
+
+    /// How far below its row's centre the empty page's block sits (above,
+    /// when negative), so that it is centred in the space a reader SEES as
+    /// empty.
+    ///
+    /// ⚠️ THE ROW IS NOT THAT SPACE. The row fills the stream's content area,
+    /// which starts a breath below the header and stops the stream's footer
+    /// clearance above the bottom — 16pt short of the composer's top. What a
+    /// reader sees as empty runs from the header's foot (or from the caption
+    /// row, once there is one) down to the composer. Centred in its row, the
+    /// block sat about 24pt above the middle of that space on the Text Post
+    /// sheet: measured on an iPhone SE, 30pt of air above it and 47pt below.
+    ///
+    /// Outside the engaged context the stream does end at the composer's top,
+    /// but the row still stops the section's bottom inset short of it: the
+    /// space is the row plus its section insets, which centre it
+    /// `(bottom − top) / 2` lower. Never more than the row's slack, so the
+    /// block never leaves its row.
+    private func emptyPageBlockOffset(rowHeight: CGFloat, blockHeight: CGFloat, space: StreamSpace?) -> CGFloat {
+        let slack = max(0, (rowHeight - blockHeight) / 2)
+        guard let space else { return min((Spacing.lg - streamSectionTopInset) / 2, slack) }
+        let offset = (space.top + space.bottom) / 2 - (space.rowTop + rowHeight / 2)
+        return min(max(offset, -slack), slack)
+    }
+
+    /// Where the empty page's row starts, and the space a reader SEES as
+    /// empty around it.
+    private struct StreamSpace {
+        let rowTop: CGFloat
+        let top: CGFloat
+        let bottom: CGFloat
+    }
+
+    /// That space, in this view's coordinates: from the header's foot — or
+    /// the caption row's bottom, once there is one — down to the composer's
+    /// top, WHEREVER THE COMPOSER IS. Nil outside the engaged context.
+    ///
+    /// The composer is where `setEngagedInsets` puts it: above the footer
+    /// band at rest, lifted to the keyboard's top while it is up. Its RESTING
+    /// height, a function of the text size, never its laid-out one — a bar
+    /// laid out after the first fit would change this answer on a later apply,
+    /// and a changed answer is a block that jumps.
+    private func streamSpace(captionHeight: CGFloat) -> StreamSpace? {
+        guard let engaged = engagedStreamInsets, view.bounds.height > 0 else { return nil }
+        let rowTop = engaged.top + streamSectionTopInset + captionHeight
+        let top = captionHeight > 0 ? rowTop : engaged.top - SnapCommentsLayout.streamTopBreath
+        let restingBottomInset = engaged.bottom - Self.engagedFooterClearance
+        var composerBottom = view.bounds.height - restingBottomInset - Spacing.sm
+        // ⚠️ CONVERTED HERE, NEVER STORED CONVERTED. The sheet grows to its
+        // large height FOR the keyboard, which moves this view under a frame
+        // that has not moved: a top converted when the notification arrived
+        // was 300pt out by the time the page was fitted, and the invitation
+        // was pinned to the top of a row squeezed to nothing.
+        if composerTracksKeyboard, let covered = keyboardHeightFromBottom {
+            composerBottom = min(composerBottom, view.bounds.height - covered - Spacing.sm)
+        }
+        let composerHeight = CommentsInputBar.restingHeight(for: traitCollection.preferredContentSizeCategory)
+        return StreamSpace(rowTop: rowTop, top: top, bottom: composerBottom - composerHeight)
+    }
+
+    /// How much of the screen's bottom the keyboard covers while it is up,
+    /// nil when it is down.
+    ///
+    /// ⚠️ A HEIGHT, NEVER A CONVERTED POSITION. The sheet grows to its large
+    /// height FOR the keyboard, so this view is moving while the keyboard is:
+    /// converting the keyboard's frame into this view's coordinates answered
+    /// 520 where the truth was 377 — measured — and the invitation then sat
+    /// as though no keyboard were up. A height needs no coordinate space, and
+    /// the composer's own ceiling is anchored to the screen the same way (see
+    /// `setEngagedInsets`).
+    ///
+    /// Read from the notification's END frame rather than from
+    /// `keyboardLayoutGuide`: the guide only reaches that value as the
+    /// keyboard finishes animating, and the empty page is fitted once, to
+    /// where things are going.
+    private var keyboardHeightFromBottom: CGFloat?
+    private let keyboardObservers = NotificationObserverTokenBag()
+
+    private func observeKeyboardForEmptyPage() {
+        let center = NotificationCenter.default
+        keyboardObservers.tokens = [
+            // The frame is read out here: a `Notification` cannot cross into
+            // the main actor's isolation, and a `CGRect` can.
+            center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] note in
+                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                MainActor.assumeIsolated { self?.keyboardIsMoving(endingAt: frame) }
+            },
+            center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
+                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                MainActor.assumeIsolated { self?.keyboardIsMoving(endingAt: frame) }
+            },
+            center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.keyboardWentDown() }
+            },
+        ]
+    }
+
+    private func keyboardIsMoving(endingAt frame: CGRect?) {
+        guard let window = view.window, let frame else { return }
+        let covered = max(0, window.screen.bounds.maxY - frame.minY)
+        guard keyboardHeightFromBottom != covered else { return }
+        keyboardHeightFromBottom = covered
+        refitEmptyPage()
+    }
+
+    private func keyboardWentDown() {
+        guard keyboardHeightFromBottom != nil else { return }
+        keyboardHeightFromBottom = nil
+        refitEmptyPage()
+    }
+
+    /// The empty stream's section insets, mirroring the layout
+    /// (`collectionView`): no top inset when the stream leads with a caption
+    /// row — comments-only, even while a draft has none yet — and `Spacing.lg`
+    /// at the bottom.
+    private var streamSectionTopInset: CGFloat { mode == .full ? Spacing.lg : 0 }
+    private var streamSectionVerticalInsets: CGFloat { streamSectionTopInset + Spacing.lg }
+
+    /// How tall this view has to be for the empty page's block to show WHOLE
+    /// in the visible stream — the inverse of `currentEmptyPageFit`: the
+    /// height at which the room the stream has is exactly the block. Nil while
+    /// the stream holds no empty page, or before the engaged insets are known.
+    /// A sheet sizes its resting detent from it.
+    ///
+    /// ⚠️ THE TEXT SIZE IS THE CALLER'S. A host asks from its own trait-change
+    /// handler, which runs before this controller's traits have caught up:
+    /// reading them here measured the block at the size it had just left, and
+    /// the sheet did not follow a text size changed while it was open.
+    func viewHeightShowingEmptyPage(contentSizeCategory: UIContentSizeCategory) -> CGFloat? {
+        guard isViewLoaded, let engaged = engagedStreamInsets,
+              streamDataSource.snapshot().itemIdentifiers.contains(.emptyState) else { return nil }
+        let rowWidth = streamRowWidth
+        guard rowWidth > 0 else { return nil }
+        let caption = captionRowHeight(width: rowWidth)
+        let block = emptyPageBlockHeight(width: rowWidth, contentSizeCategory: contentSizeCategory)
+        // The row has to hold the block…
+        let rowHoldsBlock = engaged.top + engaged.bottom + streamSectionVerticalInsets + caption + block
+        // …and the block has to clear the composer, which the stream's fixed
+        // footer clearance stops covering once the field outgrows one small
+        // line (accessibility sizes: the field reaches ~80pt).
+        let rowTop = engaged.top + streamSectionTopInset + caption
+        let restingBottomInset = engaged.bottom - Self.engagedFooterClearance
+        let composerHeight = CommentsInputBar.restingHeight(for: contentSizeCategory)
+        let blockClearsComposer = rowTop + block + Spacing.sm + composerHeight + restingBottomInset
+        return ceil(max(rowHoldsBlock, blockClearsComposer))
+    }
+
+    /// The stream's rows are this wide: the stream less the section's side
+    /// insets.
+    ///
+    /// The view's width stands in when the stream has not been laid out yet:
+    /// the resting engagement configures rows before the container has run a
+    /// pass, and a zero width would measure the caption as zero-height and
+    /// hand the empty page the whole viewport.
+    private var streamRowWidth: CGFloat {
         let streamWidth = collectionView.bounds.width > 0
             ? collectionView.bounds.width
             : view.bounds.width
-        let rowWidth = streamWidth - Spacing.lg * 2
-        let occupied = Spacing.lg * 2 + captionRowHeight(width: rowWidth)
-        return SnapCommentsLayout.emptyPageHeight(
-            availableHeight: availableStreamHeight - occupied
+        return streamWidth - Spacing.lg * 2
+    }
+
+    /// The empty page's block at `width`, in this screen's text size unless
+    /// told another.
+    private func emptyPageBlockHeight(
+        width: CGFloat,
+        contentSizeCategory: UIContentSizeCategory? = nil
+    ) -> CGFloat {
+        let copy = emptyPageCopy
+        return CommentsEmptyPageCell.blockHeight(
+            symbolName: copy.symbol,
+            title: copy.title,
+            subtitle: copy.subtitle,
+            width: width,
+            contentSizeCategory: contentSizeCategory ?? traitCollection.preferredContentSizeCategory
         )
     }
 
@@ -1465,13 +1866,31 @@ final class PostDetailViewController: UIViewController {
     /// caption row. Sized through the real cell so the answer cannot drift
     /// from what the layout will produce.
     private func captionRowHeight(width: CGFloat) -> CGFloat {
-        guard width > 0, mode == .commentsOnly,
-              let post = latestPost, post.hasCaption else { return 0 }
+        guard width > 0, mode == .commentsOnly else { return 0 }
         let sizingCell = captionSizingCell
         // The SAME count the real row gets: this cell exists to answer how tall
         // the caption row will be, and a closing line it was not given is a
         // line of height it does not reserve.
-        sizingCell.configure(with: post, imagePipeline: nil, likeCount: captionLikeCount)
+        if let post = latestPost {
+            guard post.hasCaption else { return 0 }
+            sizingCell.configure(with: post, imagePipeline: nil, likeCount: captionLikeCount)
+        } else if let seed = seededCaption {
+            // A SEEDED caption is on screen too — the row the opener handed
+            // over before the post loaded — and it takes the same room.
+            // Reserving nothing for it made a zero-comment page's empty block
+            // too tall by exactly that row, and the page scrolled.
+            sizingCell.configureSeed(
+                caption: seed.text,
+                timestamp: seed.timestamp,
+                authorName: seededAuthor?.name ?? "",
+                monogram: seededAuthor?.monogram ?? "",
+                avatarURL: nil,
+                likeCount: captionLikeCount,
+                imagePipeline: nil
+            )
+        } else {
+            return 0
+        }
         sizingCell.bounds.size.width = width
         sizingCell.contentView.setNeedsLayout()
         sizingCell.contentView.layoutIfNeeded()
@@ -1590,7 +2009,12 @@ final class PostDetailViewController: UIViewController {
 
     private func renderComposing(_ composing: Bool) {
         composeBar.isSending = composing
+        onComposingChange?(composing)
     }
+
+    /// Whether a send is in flight — for a host that must not let go of the
+    /// screen meanwhile: the Text Post page, while its post is on its way.
+    var onComposingChange: ((Bool) -> Void)?
 
     // MARK: - Images
 

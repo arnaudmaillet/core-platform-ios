@@ -96,6 +96,13 @@ struct UnifiedThreadChromeTests {
         #expect(pill is DayPillHeaderView)
     }
 
+    /// The count the sort waits on (`CommentSortPolicy`), as the stream holds it.
+    @Test func theStreamReportsHowManyCommentsItHolds() async throws {
+        let (controller, _, _) = try await makeStream(Self.spreadAcrossDays)
+
+        #expect(controller.commentCount == 3)
+    }
+
     @Test func aReplyStaysUnderTheDayItsThreadBegan() async throws {
         let entries = [
             Self.entry("c1", ageInDays: 0),

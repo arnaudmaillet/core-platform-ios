@@ -9,10 +9,15 @@ import Foundation
 /// accepts CreateComment (parentID included, persisted at the right level).
 public final class MockCommentService: @unchecked Sendable {
     private let dataset: MockSocialDataset
+    /// Posts created this session. None of them existed when the seed was
+    /// written, so no stranger has commented on them yet: they open with no
+    /// comments, the way a post you have just published does on the fleet.
+    private let postStore: MockPostStore?
     private let store = Store()
 
-    public init(dataset: MockSocialDataset) {
+    public init(dataset: MockSocialDataset, postStore: MockPostStore? = nil) {
         self.dataset = dataset
+        self.postStore = postStore
     }
 
     public func register(on bff: MockBFF) {
@@ -173,6 +178,8 @@ public final class MockCommentService: @unchecked Sendable {
 
     private func seedComments(for postID: String) -> [Comment_V1_CommentView] {
         guard !Self.zeroCommentPostIDs.contains(postID) else { return [] }
+        // Authored this session: no seed, only what CreateComment adds.
+        guard postStore?.record(for: postID) == nil else { return [] }
         let authors = dataset.authors
         guard authors.count >= 3 else { return [] }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)

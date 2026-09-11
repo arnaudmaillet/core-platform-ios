@@ -140,9 +140,28 @@ enum SnapCommentsLayout {
     /// the room it has mid-transition (see
     /// `PostDetailViewController.availableStreamHeight`), minus everything
     /// above the empty page.
-    static let emptyPageMinimumHeight: CGFloat = 260
-    static func emptyPageHeight(availableHeight: CGFloat) -> CGFloat {
-        max(emptyPageMinimumHeight, availableHeight)
+    ///
+    /// The row takes that room, so the block is centred in what is VISIBLE
+    /// between the header and the composer. The only floor is the block's
+    /// own height (`blockHeight`, from `CommentsEmptyPageCell.blockHeight`):
+    /// a stream shorter than the block shows the block's top and scrolls,
+    /// rather than cutting it.
+    ///
+    /// ⚠️ THE FLOOR IS THE BLOCK, NOT A CONSTANT. It used to be a flat 260pt,
+    /// which never binds on a full-screen page. The Text Post sheet at its
+    /// medium height on an iPhone SE leaves the stream ~125pt, so the row
+    /// stayed 260pt tall. The block was centred in a row taller than the
+    /// visible stream, and "Start your post" sat behind the composer.
+    ///
+    /// `availableHeight` is nil while there is no geometry at all — the
+    /// pre-layout call — and only then does `emptyPageFallbackHeight` answer.
+    /// A stream that its caption row fills leaves no room, or less than none,
+    /// and gets the block: a 260pt row under a long caption is a page that
+    /// scrolls for nothing.
+    static let emptyPageFallbackHeight: CGFloat = 260
+    static func emptyPageHeight(availableHeight: CGFloat?, blockHeight: CGFloat) -> CGFloat {
+        guard let availableHeight else { return max(emptyPageFallbackHeight, blockHeight) }
+        return max(blockHeight, availableHeight)
     }
 
     /// Where the engaged stream's content begins — the comments region's

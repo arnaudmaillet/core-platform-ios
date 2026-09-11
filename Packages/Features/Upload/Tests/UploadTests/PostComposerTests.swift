@@ -148,4 +148,46 @@ struct PostComposerTests {
         let body = try response.result.get()
         #expect(body.items.first?.authorID == MockSocialDataset.viewerProfileID)
     }
+
+    /// The entry comes back to the caller as well as down the channel, so a
+    /// screen can become the post it just made without fetching it back.
+    @Test func publishReturnsTheEntryItBroadcasts() async throws {
+        let harness = makeHarness()
+        let entries = await harness.channel.entries()
+
+        let returned = try await harness.composer.publish(media: nil, caption: "Returned")
+
+        var iterator = entries.makeAsyncIterator()
+        let broadcast = try #require(await iterator.next())
+        #expect(returned == broadcast)
+        #expect(returned.post.caption == "Returned")
+    }
+
+    /// A post is BY the author the screen named — verbatim, face and all.
+    @Test func publishingAsOneOfTheAccountsProfilesAuthorsThePost() async throws {
+        let harness = makeHarness()
+        let author = AuthorSummary(
+            id: ProfileID(MockSocialDataset.viewerProfileID), handle: "you",
+            displayName: "Demo Viewer", avatarURL: URL(string: "mock://avatar/viewer?w=128&h=128")
+        )
+
+        let entry = try await harness.composer.publish(media: nil, caption: "Mine", as: author)
+
+        #expect(entry.author == author)
+        #expect(entry.post.authorID == author.id)
+    }
+
+    /// …and never by a profile the account does not hold: that is refused
+    /// before anything is created.
+    @Test func publishingAsAProfileOutsideTheAccountIsRefused() async {
+        let harness = makeHarness()
+        let stranger = AuthorSummary(
+            id: ProfileID("prof-not-mine"), handle: "stranger", displayName: "Stranger", avatarURL: nil
+        )
+
+        await #expect(throws: ComposeError.noViewerProfile) {
+            try await harness.composer.publish(media: nil, caption: "Not mine", as: stranger)
+        }
+        #expect(!harness.bff.recordedRequests.map(\.path).contains("/post.v1.PostService/CreatePost"))
+    }
 }

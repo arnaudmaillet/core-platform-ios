@@ -105,7 +105,7 @@ final class AppCoordinator: Coordinator {
             // wiring is verifiable without driving the picker UI.
             if composeDemo {
                 try? await Task.sleep(for: .seconds(2))
-                try? await composer.publish(
+                _ = try? await composer.publish(
                     media: .image(PickedImage(Self.demoImage())),
                     caption: "Shipped M4: photo upload + compose 🚀"
                 )
@@ -116,7 +116,7 @@ final class AppCoordinator: Coordinator {
                 try? await Task.sleep(for: .seconds(2))
                 if let source = try? await PlaceholderVideoFetcher()
                     .playableURL(for: URL(string: "mock://video/demo?w=720&h=1280")!) {
-                    try? await composer.publish(
+                    _ = try? await composer.publish(
                         media: .video(PickedVideo(sourceURL: source)),
                         caption: "My first video post 🎬"
                     )

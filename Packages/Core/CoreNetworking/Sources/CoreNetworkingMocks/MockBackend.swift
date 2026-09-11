@@ -48,7 +48,7 @@ public struct MockBackend: Sendable {
         MockPostAuthoringService(store: postStore).register(on: bff)
         MockSearchService(dataset: dataset, counters: counterStore).register(on: bff)
         MockNotificationService(dataset: dataset).register(on: bff)
-        MockCommentService(dataset: dataset).register(on: bff)
+        MockCommentService(dataset: dataset, postStore: postStore).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
         MockSocialGraphService(dataset: dataset).register(on: bff)
         MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
