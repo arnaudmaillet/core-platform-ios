@@ -19,19 +19,33 @@ public final class MonogramAvatarView: UIView {
     public static let rowDiameter: CGFloat = 48
 
     private let label = UILabel()
+    private var widthConstraint: NSLayoutConstraint!
+    private var heightConstraint: NSLayoutConstraint!
 
     public init(diameter: CGFloat = MonogramAvatarView.rowDiameter) {
         super.init(frame: .zero)
         backgroundColor = .tertiarySystemFill
         clipsToBounds = true
-        label.font = .systemFont(ofSize: diameter * 0.375, weight: .semibold)
+        label.font = Self.monogramFont(diameter)
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.pin(to: self)
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: diameter),
-            heightAnchor.constraint(equalToConstant: diameter)
-        ])
+        widthConstraint = widthAnchor.constraint(equalToConstant: diameter)
+        heightConstraint = heightAnchor.constraint(equalToConstant: diameter)
+        NSLayoutConstraint.activate([widthConstraint, heightConstraint])
+    }
+
+    /// Resizes the disc, initials included — for a row whose disc is sized
+    /// from its text and follows Dynamic Type.
+    public func setDiameter(_ diameter: CGFloat) {
+        guard diameter > 0, heightConstraint.constant != diameter else { return }
+        widthConstraint.constant = diameter
+        heightConstraint.constant = diameter
+        label.font = Self.monogramFont(diameter)
+    }
+
+    private static func monogramFont(_ diameter: CGFloat) -> UIFont {
+        .systemFont(ofSize: diameter * 0.375, weight: .semibold)
     }
 
     @available(*, unavailable)

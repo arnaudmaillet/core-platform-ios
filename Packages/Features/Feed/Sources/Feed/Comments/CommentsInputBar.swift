@@ -60,10 +60,11 @@ final class CommentsInputBar: UIView {
     private enum Metrics {
         static let maxLines: CGFloat = 4
         static let controlSize: CGFloat = 38
-        /// The face inside the 38pt bubble. Inset so the glass reads as a
-        /// container around it rather than a rim the disc has covered —
-        /// the same relationship the mic and boost glyphs have with theirs.
-        static let avatarDiameter: CGFloat = 30
+        /// The face FILLS its 38pt bubble, edge to edge — the bubble's own
+        /// capsule clip is the disc's circle. It used to sit inset at 30pt so
+        /// the glass read as a rim around it; that ring of glass read as a
+        /// margin instead, and the face is the thing worth the room.
+        static let avatarDiameter: CGFloat = controlSize
     }
 
     /// The viewer's face, leading the bar — the composer's answer to the
@@ -209,9 +210,8 @@ final class CommentsInputBar: UIView {
         // the picture layered over it) → a transparent button spanning the
         // whole bubble, which owns the touches and carries the menu.
         //
-        // The button is LAST and full-bleed rather than wrapping the disc,
-        // so the whole 38pt bubble is the tap target — a 30pt disc alone is
-        // under the 44pt guidance already, and the glass rim would be dead.
+        // The button is LAST and full-bleed over the disc, so the whole 38pt
+        // bubble is the tap target and owns the menu.
         avatarImageView.pin(to: avatarView)
         avatarBubble.cornerConfiguration = .capsule(maximumRadius: Metrics.controlSize / 2)
         avatarBubble.clipsToBounds = true
