@@ -2,6 +2,7 @@ import CoreNavigation
 import NotificationsInterface
 import ProfileInterface
 import UIKit
+import Upload
 #if DEBUG
 #endif
 
@@ -9,9 +10,11 @@ import UIKit
 /// `TabCoordinator` per tab. Each tab owns its own navigation stack; this
 /// coordinator only assembles them and holds them alive.
 ///
-/// Tabs are set via the modern `UITabBarController.tabs` API. The Search tab is
-/// a `UISearchTab`, which the system detaches to the trailing edge, producing
-/// the grouped bar `| Maps  For You  Messages  Profile |  Search |` natively.
+/// Tabs are set via the modern `UITabBarController.tabs` API. The trailing item
+/// is the "+" (`CreateTabItem`), a `UISearchTab`, which the system detaches to
+/// the trailing edge, producing the grouped bar
+/// `| Maps  For You  Messages  Profile |  + |` natively. It opens a menu and is
+/// never selected.
 ///
 /// Profile is a root tab, carrying the viewer's own avatar as its icon
 /// (`ProfileTabCoordinator`) — it is the canonical entry point, so it is the one
@@ -124,6 +127,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
         return button
     }()
 
+    /// The bar's detached "+": a menu of ways to make a post, never a tab
+    /// anyone stands on. See `CreateTabItem`.
+    private lazy var createItem = CreateTabItem { [weak self] destination in
+        self?.openCreate(destination)
+    }
+
     /// Tabs paired with their `AppTab`, in bar order — the lookup `selectTab`
     /// resolves against. Every bar button is in here now that the Feed action
     /// slot has become the For You root.
@@ -163,9 +172,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         self.profileTab = profileTab
         let forYouTab = ForYouTabCoordinator(container: container)
         self.forYouTab = forYouTab
-        // Bar order. The trailing entry is separated from the other four by
-        // UIKit itself because it is a `UISearchTab` — see `CameraTabCoordinator`
-        // for why the type, not `.pinned`, is what detaches it.
+        // Bar order: the four places, then the "+". The "+" is not a place, so
+        // it is not in `orderedTabs` and nothing can route to it. UIKit
+        // separates it from the other four because it is a `UISearchTab` — see
+        // `CreateTabItem` for why the type, not `.pinned`, is what detaches it.
         orderedTabs = [
             (.maps, MapsTabCoordinator(
                 container: container,
@@ -173,28 +183,28 @@ final class MainTabCoordinator: NSObject, Coordinator {
             )),
             (.forYou, forYouTab),
             (.messages, MessagesTabCoordinator(container: container)),
-            (.profile, profileTab),
-            (.camera, CameraTabCoordinator())
+            (.profile, profileTab)
         ]
         for (_, tab) in orderedTabs {
             tab.start()
             addChild(tab)
         }
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
-        tabBarController.tabs = orderedTabs.map { $0.1.tab }
+        tabBarController.tabs = orderedTabs.map { $0.1.tab } + [createItem.tab]
         tabBarController.delegate = self
-        // The Profile tab's long-press switcher. `UITab` carries no menu of its
-        // own — `UITab`, `UITabBar`, `UITabBarItem` and the controller delegate
-        // were all checked against the iOS 26 SDK and expose nothing — so the
-        // menu rides an invisible button kept aligned over the tab.
+        // The bar's menus: Profile's long-press switcher, For You's lens menu
+        // and the "+". `UITab` carries no menu of its own — `UITab`, `UITabBar`,
+        // `UITabBarItem` and the controller delegate were all checked against
+        // the iOS 26 SDK and expose nothing — so each menu rides an invisible
+        // button kept aligned over its item.
         tabBarController.onLayout = { [weak self] in
-            self?.alignProfileMenuOverlay()
+            self?.alignMenuOverlays()
             // The CONTROLLER lays out before the bar has placed its own buttons,
             // and then does not lay out again — measured: one call, reading a
             // zero frame. One hop to the next runloop turn catches the settled
             // geometry, and alignment ignores a zero frame rather than caching
             // it, so the early pass costs nothing.
-            DispatchQueue.main.async { self?.alignProfileMenuOverlay() }
+            DispatchQueue.main.async { self?.alignMenuOverlays() }
         }
 
         loadAvatar()
@@ -211,9 +221,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
         #if DEBUG
         // Dev convenience: `-select-tab N` opens directly on a tab for testing,
-        // in bar order (0 = Maps … 4 = Camera). Every index is a plain
-        // selection now — 1 used to trigger the feed push instead, which it no
-        // longer does; use `-open-feed` for the timeline.
+        // in bar order (0 = Maps … 3 = Profile; the "+" is not a tab and has no
+        // index). Every index is a plain selection now — 1 used to trigger the
+        // feed push instead, which it no longer does; use `-open-feed` for the
+        // timeline.
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-select-tab"), index + 1 < arguments.count,
            let tabIndex = Int(arguments[index + 1]), AppTab.allCases.indices.contains(tabIndex) {
@@ -252,6 +263,16 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // keyboard, headlessly. Pair with `-select-tab` to choose the origin.
         if arguments.contains("-open-search") {
             DispatchQueue.main.async { [weak self] in self?.container.router.route(to: .search) }
+        }
+        // `-open-create <camera|upload|text>` opens one of the "+" menu's
+        // destinations on launch through the menu's own code path, minus the
+        // menu. Deferred ~0.6s rather than a tick: a PRESENTATION from a
+        // controller that is not in a window yet is refused outright.
+        if let index = arguments.firstIndex(of: "-open-create"), index + 1 < arguments.count,
+           let destination = CreateTabItem.Destination(rawValue: arguments[index + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.openCreate(destination)
+            }
         }
         // `-tab-round-trip` leaves the current tab and comes back ~1.5s apart.
         // Pair with any push that hides the bar (`-open-my-profile`,
@@ -453,8 +474,18 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         refreshUnreadBadge()
         syncTabBarVisibility()
         // Selection resizes the tab buttons (the selected one carries the
-        // lens), so the overlay has to follow.
-        alignProfileMenuOverlay()
+        // lens), so the overlays have to follow.
+        alignMenuOverlays()
+    }
+
+    /// The "+" is never a place — see `CreateTabItem`. A tap on it lands HERE,
+    /// on the real bubble, which is what keeps the bubble's glass press
+    /// response; the selection is refused and the menu opens instead.
+    /// VoiceOver and a hardware keyboard arrive by the same road.
+    func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
+        guard tab === createItem.tab else { return true }
+        createItem.presentMenu()
+        return false
     }
 
     /// The bar is managed by hand around full-bleed snap surfaces (the pushed
@@ -491,16 +522,18 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     }
 }
 
-// MARK: - Profile tab long-press
+// MARK: - Bar menus
 
 extension MainTabCoordinator {
-    /// Keeps the switcher overlay exactly over the Profile tab's button.
+    /// Keeps every menu overlay exactly over its bar item: Profile's switcher,
+    /// For You's lens menu and the "+".
     ///
     /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
     /// nothing already added and writes the frame only when it moved.
-    fileprivate func alignProfileMenuOverlay() {
+    fileprivate func alignMenuOverlays() {
         align(profileMenuOverlay, over: profileTab?.tab.title)
         alignForYouMenuOverlay()
+        align(createItem.overlay, over: createItem.tab.title)
     }
 
     /// Keeps the lens-menu overlay over the For You tab, and installs the menu
@@ -560,11 +593,29 @@ extension MainTabCoordinator {
             let view = queue.removeFirst()
             // The overlays carry the same labels by design; skip them or one
             // would match itself and pin its own frame.
-            if view === profileMenuOverlay || view === forYouMenuOverlay { continue }
+            if view === profileMenuOverlay || view === forYouMenuOverlay || view === createItem.overlay {
+                continue
+            }
             if view.accessibilityLabel == title { return view }
             queue.append(contentsOf: view.subviews)
         }
         return nil
+    }
+
+    /// Opens one of the "+" menu's destinations.
+    ///
+    /// PRESENTED over the shell, not pushed onto the current tab: making a
+    /// post belongs to no tab, and is finished or abandoned as a whole.
+    fileprivate func openCreate(_ destination: CreateTabItem.Destination) {
+        // A second presentation would be refused. The bar cannot be tapped
+        // under one, so this only ever turns away the debug hook.
+        guard tabBarController.presentedViewController == nil else { return }
+        let screen: UIViewController = switch destination {
+        case .camera: CameraViewController()
+        case .upload: container.uploadFeature.makeMediaUploadViewController()
+        case .text: container.uploadFeature.makeTextPostViewController()
+        }
+        tabBarController.present(screen, animated: true)
     }
 }
 

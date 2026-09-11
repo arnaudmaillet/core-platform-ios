@@ -34,7 +34,7 @@ public enum AppRoute: Equatable, Sendable {
     /// The people search screen.
     ///
     /// It used to be a ROOT TAB, reached from the bar's detached trailing item.
-    /// That item is the camera now, so search moved into the headers that
+    /// That item is the "+" now, so search moved into the headers that
     /// actually want it — Maps and For You — and this is the name they use.
     /// The screen itself is unchanged: pushed onto the current tab, it renders
     /// its field in the navigation bar from its own
