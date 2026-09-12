@@ -14,6 +14,9 @@ let package = Package(
         .package(path: "../../FeatureInterfaces/FeedInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
+        // The picker wears the app's chrome: the segmented strip in its bottom
+        // toolbar, the spacing scale, the empty states.
+        .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/MediaPlayback"),
         .package(path: "../../Core/CoreNetworking")
@@ -26,6 +29,7 @@ let package = Package(
                 "FeedInterface",
                 "CoreContracts",
                 "CoreModels",
+                "DesignSystem",
                 "MediaCore",
                 "MediaPlayback"
             ]

@@ -55,18 +55,27 @@ struct UploadFeatureBuilderTests {
         #expect(entry.post.caption == "Hello")
     }
 
-    /// Upload Media is still its own screen, and it can be closed from a
-    /// control — a sheet whose only way out is a swipe nobody is told about is
-    /// a trap, however empty it is.
-    @Test func theMediaEntryIsStillItsOwnClosableScreen() throws {
+    /// Upload Media opens on the library picker as a sheet that rests on one
+    /// row of the album and opens into the whole grid, with a way out in its own
+    /// bar — a screen whose only exit is a swipe nobody is told about is a trap.
+    @Test func theMediaEntryOpensThePickerAsASheetRestingOnOneRow() throws {
         let builder = UploadFeatureBuilder(
             composer: RecordingComposer(), textPostScreens: { RecordingTextPostScreens() }
         )
-        let root = try #require(
-            (builder.makeMediaUploadViewController() as? UINavigationController)?.viewControllers.first
-        )
+        let navigation = try #require(builder.makeMediaUploadViewController() as? UINavigationController)
+        let root = try #require(navigation.viewControllers.first)
+        let sheet = try #require(navigation.sheetPresentationController)
 
-        #expect(root.title == "Upload Media")
-        #expect(root.navigationItem.leftBarButtonItem != nil)
+        #expect(navigation.modalPresentationStyle == .pageSheet, "a sheet, not full screen")
+        #expect(sheet.detents.count == 2, "one row, and the whole album")
+        #expect(
+            sheet.selectedDetentIdentifier == MediaPickerViewController.restingDetentIdentifier,
+            "and it arrives on the small one"
+        )
+        #expect(root is MediaPickerViewController)
+        #expect(
+            root.navigationItem.leftBarButtonItems?.first?.title == "Cancel",
+            "the way out the top bar promises"
+        )
     }
 }
