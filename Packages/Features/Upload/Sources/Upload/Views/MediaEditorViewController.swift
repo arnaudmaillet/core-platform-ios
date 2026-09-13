@@ -798,6 +798,36 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     }
 }
 
+// MARK: - The editing band
+
+extension MediaEditorViewController {
+    /// Puts a control in the strip between the toolbar and the page indicator,
+    /// or takes it away with `nil`.
+    ///
+    /// The band reserves room and owns placement; what goes in it — a horizontal
+    /// row of filter thumbnails first — is built separately and handed over here,
+    /// so the screen never learns what a filter is.
+    ///
+    /// ⚠️ **THIS IS PRODUCTION CODE AND MUST STAY OUT OF `#if DEBUG`. IT DID NOT,
+    /// AND IT COST A RED CI CYCLE.** It was first written just below
+    /// `debugTapFit()` — inside the DEBUG-only extension that starts a few lines
+    /// down — while its only callers, `showAccessory(for:)`, are ordinary code.
+    /// Debug compiled, the 120-test suite passed, and the flow was verified end to
+    /// end on a device; **every one of those instruments builds Debug**, where the
+    /// symbol exists. CI compiles Debug *and* Release, and Release failed with
+    /// `cannot find 'setEditingAccessory' in scope`. The old comment here already
+    /// said "NOT A DEBUG HOOK" — the intent was right, only the placement was
+    /// wrong, which is why a comment is no substitute for the right side of a
+    /// `#if`. Before pushing anything added near those accessors, build Release.
+    func setEditingAccessory(_ accessory: UIView?) {
+        if let accessory {
+            band.show(accessory)
+        } else {
+            band.clear()
+        }
+    }
+}
+
 #if DEBUG
 extension MediaEditorViewController {
     /// Where the canvas actually IS, behind `-upload-log-sheet`.
@@ -839,22 +869,6 @@ extension MediaEditorViewController {
     func debugFit(for id: String) -> ContentFit { fits[id] ?? .fill }
     /// Internal for tests: the path the fill/fit button takes, without a bar to tap.
     func debugTapFit() { toggleFit() }
-    // MARK: - The editing band
-
-    /// Puts a control in the strip between the toolbar and the page indicator,
-    /// or takes it away with `nil`.
-    ///
-    /// ⚠️ **THE SEAM THE NEXT STEP CALLS, NOT A DEBUG HOOK.** The band reserves
-    /// room and owns placement; what goes in it — a horizontal row of filter
-    /// thumbnails first — is built separately and handed over here, so the
-    /// screen never learns what a filter is.
-    func setEditingAccessory(_ accessory: UIView?) {
-        if let accessory {
-            band.show(accessory)
-        } else {
-            band.clear()
-        }
-    }
 
     /// Internal for tests: the band itself, to measure where it put things.
     var debugBand: MediaEditorBandView { band }
