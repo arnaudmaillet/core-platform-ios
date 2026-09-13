@@ -25,8 +25,8 @@ struct UploadFeatureBuilderTests {
 
         private(set) var calls: [Call] = []
 
-        func publish(media: ComposeMedia?, caption: String, as author: AuthorSummary?) async throws -> FeedEntry {
-            calls.append(Call(hasMedia: media != nil, caption: caption, author: author))
+        func publish(media: [ComposeMedia], caption: String, as author: AuthorSummary?) async throws -> FeedEntry {
+            calls.append(Call(hasMedia: !media.isEmpty, caption: caption, author: author))
             let by = author ?? AuthorSummary(id: ProfileID("first"), handle: "first", displayName: "First", avatarURL: nil)
             return FeedEntry(
                 post: Post(id: PostID("new"), authorID: by.id, caption: caption, attachments: [], publishedAt: Date()),
@@ -55,10 +55,10 @@ struct UploadFeatureBuilderTests {
         #expect(entry.post.caption == "Hello")
     }
 
-    /// Upload Media opens on the library picker as a sheet that rests on one
-    /// row of the album and opens into the whole grid, with a way out in its own
-    /// bar — a screen whose only exit is a swipe nobody is told about is a trap.
-    @Test func theMediaEntryOpensThePickerAsASheetRestingOnOneRow() throws {
+    /// Upload Media opens on the library picker as a sheet standing at its full
+    /// height, with a way out in its own bar — a screen whose only exit is a
+    /// swipe nobody is told about is a trap.
+    @Test func theMediaEntryOpensThePickerAsAFullHeightSheet() throws {
         let builder = UploadFeatureBuilder(
             composer: RecordingComposer(), textPostScreens: { RecordingTextPostScreens() }
         )
@@ -67,11 +67,8 @@ struct UploadFeatureBuilderTests {
         let sheet = try #require(navigation.sheetPresentationController)
 
         #expect(navigation.modalPresentationStyle == .pageSheet, "a sheet, not full screen")
-        #expect(sheet.detents.count == 2, "one row, and the whole album")
-        #expect(
-            sheet.selectedDetentIdentifier == MediaPickerViewController.restingDetentIdentifier,
-            "and it arrives on the small one"
-        )
+        #expect(sheet.detents.count == 1, "one height, with nowhere to collapse to")
+        #expect(sheet.selectedDetentIdentifier == .large, "and it opens to the top")
         #expect(root is MediaPickerViewController)
         #expect(
             root.navigationItem.leftBarButtonItems?.first?.title == "Cancel",

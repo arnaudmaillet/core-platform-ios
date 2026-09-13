@@ -13,6 +13,8 @@ import UIKit
 final class DebugMediaLibrary: MediaLibraryReading {
     private let items: [MediaLibraryItem]
     private let albumList: [MediaLibraryAlbum]
+    /// What each album actually holds, built once — see the note in `init`.
+    private let contents: [String: [MediaLibraryItem]]
 
     /// Every fourth item is a video, so the "Videos" pill has a count and the
     /// grid has durations to stamp.
@@ -37,37 +39,84 @@ final class DebugMediaLibrary: MediaLibraryReading {
         }
         self.items = items
 
-        let videos = items.filter(\.isVideo).count
-        let favorites = max(total / 5, 1)
-        let screenshots = max(total / 8, 1)
+        // ⚠️ **DIFFERENT FOLDERS, NOT THE SAME ONE WEARING FOUR NAMES.** These
+        // were all slices of the same run — `prefix(total/5)`, `suffix(total/8)`
+        // — so paging between albums showed the same tiles in the same order and
+        // proved nothing about the pager, the per-album load, or the counts. The
+        // ranges below are disjoint where it matters, so an album visibly IS a
+        // different set of pictures.
+        var contents: [String: [MediaLibraryItem]] = [:]
+        contents["recents"] = items
+        contents["videos"] = items.filter(\.isVideo)
+        // Every fifth, scattered through the run rather than taken off the front.
+        contents["favorites"] = items.enumerated()
+            .filter { $0.offset % 5 == 0 }
+            .map(\.element)
+        contents["screenshots"] = Array(items.suffix(max(total / 8, 1)))
+        contents["trip"] = Array(items.dropFirst(3).prefix(7))
+        contents["family"] = Array(items.dropFirst(12).prefix(6))
+        // The even indices are the 3:4 portraits the fixture renders — a folder
+        // whose shape is uniform, which is what makes a 9:16 thumbnail frame
+        // show fit-vs-fill clearly.
+        contents["portraits"] = items.enumerated()
+            .filter { $0.offset.isMultiple(of: 2) }
+            .map(\.element)
+        self.contents = contents
+
         let albums = [
-            MediaLibraryAlbum(id: "recents", title: "Recents", count: total),
-            MediaLibraryAlbum(id: "videos", title: "Videos", count: videos),
-            MediaLibraryAlbum(id: "favorites", title: "Favorites", count: favorites),
-            MediaLibraryAlbum(id: "screenshots", title: "Screenshots", count: screenshots)
+            MediaLibraryAlbum(id: "recents", title: "Recents", count: contents["recents"]?.count ?? 0),
+            MediaLibraryAlbum(id: "videos", title: "Videos", count: contents["videos"]?.count ?? 0),
+            MediaLibraryAlbum(id: "favorites", title: "Favorites", count: contents["favorites"]?.count ?? 0),
+            MediaLibraryAlbum(id: "trip", title: "Paris 2026", count: contents["trip"]?.count ?? 0),
+            MediaLibraryAlbum(id: "family", title: "Family", count: contents["family"]?.count ?? 0),
+            MediaLibraryAlbum(id: "portraits", title: "Portraits", count: contents["portraits"]?.count ?? 0),
+            MediaLibraryAlbum(id: "screenshots", title: "Screenshots", count: contents["screenshots"]?.count ?? 0)
         ]
         albumList = albums.filter { $0.count > 0 }
     }
 
-    var access: MediaLibraryAccess { .granted }
+    /// ⚠️ **`.limited` IS UNREACHABLE ON A SIMULATOR WITHOUT THIS.** The device
+    /// grants the whole library, and this stand-in returned `.granted` outright,
+    /// so the access notice above the grid could be written and shipped without
+    /// anyone ever having seen it appear. `-upload-access limited` (or `denied`)
+    /// forces the state the banner exists for.
+    var access: MediaLibraryAccess {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-upload-access"),
+              arguments.count > flag + 1
+        else { return .granted }
+        switch arguments[flag + 1] {
+        case "limited": return .limited
+        case "denied": return .denied
+        case "undetermined": return .undetermined
+        default: return .granted
+        }
+    }
 
-    func requestAccess() async -> MediaLibraryAccess { .granted }
+    func requestAccess() async -> MediaLibraryAccess { access }
+
+    /// ⚠️ **DELIBERATELY NOTHING, AND IT SAYS SO.** There is no system sheet to
+    /// present against a synthetic library, and a stand-in that pretended to
+    /// widen the selection would report a success the grid could never show. The
+    /// notice's OTHER route — Settings — is the one worth driving on a simulator.
+    func presentLimitedPicker(from host: UIViewController) {}
 
     func albums() async -> [MediaLibraryAlbum] { albumList }
 
     func items(in album: MediaLibraryAlbum.ID) async -> [MediaLibraryItem] {
-        switch album {
-        case "videos":
-            return items.filter(\.isVideo)
-        case "favorites":
-            return Array(items.prefix(max(items.count / 5, 1)))
-        case "screenshots":
-            return Array(items.suffix(max(items.count / 8, 1)))
-        default:
-            return items
-        }
+        contents[album] ?? items
     }
 
+    /// ⚠️ **A STAND-IN MUST NOT BE THE SHAPE OF WHATEVER ASKED FOR IT.** This
+    /// rendered at exactly `size`, so every picture matched its container's
+    /// aspect exactly — and `scaleAspectFill` and `scaleAspectFit` then produce
+    /// IDENTICAL pixels. The editor's fill/fit control was therefore impossible
+    /// to judge by eye on any screen: both states looked full-bleed, and the
+    /// only time a letterbox ever appeared was when the canvas was BROKEN and
+    /// the cell disagreed with the size that had been requested.
+    ///
+    /// Real photographs are 3:4 or 4:3. These alternate by index, so filling
+    /// crops and fitting letterboxes — in both directions, over a run of tiles.
     func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage? {
         let index = Int(item.dropFirst("debug-".count)) ?? 0
         // A hue per index, spun by the golden angle so that neighbouring tiles
@@ -76,18 +125,27 @@ final class DebugMediaLibrary: MediaLibraryReading {
         let hue = spun.truncatingRemainder(dividingBy: 1)
         let fill = UIColor(hue: hue, saturation: 0.55, brightness: 0.85, alpha: 1)
         let number = String(index + 1) as NSString
+
+        // The long edge follows what was asked for, so a full-screen request
+        // still yields a full-screen-scale picture; only the SHAPE is the
+        // photograph's own.
+        let longEdge = max(size.width, size.height, 1)
+        let rendered = index.isMultiple(of: 2)
+            ? CGSize(width: longEdge * 0.75, height: longEdge)
+            : CGSize(width: longEdge, height: longEdge * 0.75)
+
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: size.height * 0.32, weight: .heavy),
+            .font: UIFont.systemFont(ofSize: rendered.height * 0.32, weight: .heavy),
             .foregroundColor: UIColor.white.withAlphaComponent(0.85)
         ]
 
-        return UIGraphicsImageRenderer(size: size).image { context in
+        return UIGraphicsImageRenderer(size: rendered).image { context in
             fill.setFill()
-            context.fill(CGRect(origin: .zero, size: size))
+            context.fill(CGRect(origin: .zero, size: rendered))
             let measured = number.size(withAttributes: attributes)
             let origin = CGPoint(
-                x: (size.width - measured.width) / 2,
-                y: (size.height - measured.height) / 2
+                x: (rendered.width - measured.width) / 2,
+                y: (rendered.height - measured.height) / 2
             )
             number.draw(at: origin, withAttributes: attributes)
         }

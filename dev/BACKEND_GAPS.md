@@ -800,6 +800,64 @@ field nothing checks would be a promise the client cannot keep.
 
 ---
 
+## 21. `CreatePost` carries no title
+
+**What the client wants.** The media flow's last screen ("New post") offers a
+short title above the caption, the way every comparable app separates a
+headline from the body.
+
+**What `post.v1` offers.** `CreatePostRequest` has one free-text field,
+`caption`. `PostView` echoes the same one. There is nowhere for a title to go,
+and no second text field anywhere in the message.
+
+**What ships meanwhile.** The field is drawn and typed into, and its text is
+held on the screen only — it is NOT sent, and NOT merged into the caption.
+Folding it into `caption` was considered and rejected: it would publish a
+composite string that no reader could split back apart, and every surface that
+renders a caption would start showing a title it cannot style.
+
+**What we need.** A `title` on `CreatePostRequest`, echoed on `PostView`, with
+a length bound the client can enforce before sending.
+
+---
+
+## 22. `CreatePost` carries no post-level policy, and no AI disclosure
+
+**What the client wants.** The "New post" screen offers, per post: whether
+comments are enabled / hidden / disabled; whether the points, reposts and
+bookmark counts are visible or hidden; whether the post may be downloaded; and
+whether it is disclosed as AI-generated.
+
+**What `post.v1` offers.** Nothing for any of them. `CreatePostRequest` is
+profile_id, kind, caption, attachments, parent_id, root_id, audio_ref and
+location; `PostView` adds only ids, status and timestamps. There is no policy
+message, no per-post flag, and no disclosure field. `counter.v1` projects the
+counts with no notion of an author hiding them, and `interaction.v1` accepts a
+comment without consulting the post.
+
+**What ships meanwhile.** The controls are drawn and fully operable, and their
+state lives on the screen for the length of the compose — deliberately NOT
+persisted anywhere, because a preference that survives the screen would imply a
+setting the fleet has never heard of. The section footer says plainly that the
+server does not carry them yet. This follows the privacy screen's rule (#13a):
+a local honour-system control is acceptable only while it says so.
+
+**What we need.** A `PostPolicy` on `CreatePostRequest`, echoed on `PostView`
+and ENFORCED at read and write time, not merely stored:
+- `comments`: `ENABLED` / `HIDDEN` / `DISABLED` — `interaction.v1.AddComment`
+  must refuse a disabled post, and comment reads must respect `HIDDEN`.
+- `hides_points`, `hides_reposts`, `hides_bookmarks` — `counter.v1` must omit
+  or mask those values for everyone but the author.
+- `allows_download` — meaningful only if the media URLs can be served
+  accordingly; a client-side flag alone is decorative.
+- `ai_disclosure` — a disclosed post needs the flag on `PostView` so every
+  surface can badge it, not just the one that created it.
+
+A stored-but-unenforced policy is worse than none: it tells the author their
+comments are off while the fleet keeps accepting them.
+
+---
+
 ## Resolved
 
 - **`ProfileService.ListProfilesByAccount` ScyllaDB CQL type bug** (`limit`

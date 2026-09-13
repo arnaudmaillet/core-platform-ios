@@ -2,106 +2,98 @@ import DesignSystem
 import UIKit
 
 /// The first step of posting media: the viewer's own library, and what they
-/// have picked out of it — in a sheet that starts as a single row.
+/// have picked out of it — in a sheet that opens to the top and stays there.
 ///
 /// ```
-///  resting                          expanded
-/// ┌──────────────────────┐         ┌──────────────────────┐
-/// │ Cancel   Drafts Next │         │ Cancel   Drafts Next │
-/// ├──────────────────────┤         ├──────────────────────┤
-/// │ ▦ ▦ ▦ →  one row,    │         │ ▦ ▦ ▦                │
-/// │          scrolled    │         │ ▦ ▦ ▦   the album,   │
-/// │          sideways    │         │ ▦ ▦ ▦   three to a   │
-/// │ ░ 1 2 3 ░░░░░░░░░░░░ │         │ ░ 1 2 3 ░░░░░░░░░░░░ │
-/// ├──────────────────────┤         ├──────────────────────┤
-/// │ Recents 99+  Videos 8│         │ Recents 99+  Videos 8│
-/// └──────────────────────┘         └──────────────────────┘
+/// ┌──────────────────────┐
+/// │ Cancel   Drafts Next │
+/// ├──────────────────────┤
+/// │ ▦ ▦ ▦    one album   │
+/// │ ▦ ▦ ▦    per page,   │
+/// │ ▦ ▦ ▦    swiped      │
+/// │ ▦ ▦ ▦    sideways    │
+/// │ ░ 1 2 3 ░░░░░░░░░░░░ │
+/// ├──────────────────────┤
+/// │ Recents 99+  Videos 8│
+/// └──────────────────────┘
 /// ```
 ///
-/// **The axis follows the detent.** At rest the sheet is exactly one row tall,
-/// so the grid becomes a single horizontal strip — three columns of a vertical
-/// grid in that space would show a third of a row and scroll into nothing.
-/// Expanded, it is the album as a grid again. `sheetPresentationControllerDidChangeSelectedDetentIdentifier`
-/// is what swaps them.
+/// **The albums are TABS, and the strip is their selector.** Each album is a
+/// page of a `HorizontalPagerView`; the strip and the pages drive each other
+/// through the container contract every other tabbed screen here follows — a tap
+/// pages, a swipe moves the pill, and the pill itself can be dragged to scrub
+/// the pages under it. See `configurePager`.
 ///
-/// **The count rides in the pill's BADGE.** Every other selector in the app
-/// states a number in that red bubble, and a library is not the place to invent
-/// a second spelling — the first cut wrote "Recents (112)" into the title, which
-/// read as a different control wearing the same shape.
+/// ⚠️ **THAT CONTRACT IS ALSO WHAT MAKES THE PILL MOVE AT ALL.** `PagedTabBar`
+/// answers a tap by setting `selectedIndex` and announcing `.valueChanged`; the
+/// pill is placed only by `setProgress`. Before the pages existed this screen had
+/// nothing to drive that and stated the position by hand — a tap changed the
+/// album under a pill that never moved. The pager now reports its own scroll and
+/// the hand-written call is gone.
 ///
-/// What the badge costs is the exact figure: `BadgeView` stops at "99+", so an
-/// album of 112 and an album of 12,400 say the same thing. That ceiling is the
-/// shared component's and it stays there, because the two hosts it was written
-/// for count unread things, where a precise total is noise. The album pills are
-/// the first host where the number itself was worth reading — and consistency
-/// with every other selector is the trade that was chosen.
+/// **One height, one axis.** The sheet has a single detent and each album is a
+/// vertical three-column grid. This screen used to rest at one album row and turn
+/// the grid sideways to suit, on a custom detent measured from the bars; that,
+/// its resolver, the axis swap and the re-resolve guards are all gone.
 ///
-/// ⚠️ **A BADGE DOES NOT SURVIVE `setTitles`.** Segments are rebuilt by a
-/// retitle and a badge belongs to its segment. `PagedTabBar` documents this and
-/// notes that no host had ever needed both; this screen is the first with a
-/// changing title list AND counts, so `showAlbums` re-applies them every time.
+/// **The count rides in the pill's BADGE**, in blue rather than the unread pill's
+/// red — an album's count is how many photographs it holds, not how many things
+/// are demanding an answer. `BadgeView` stops at "99+", so a large library's
+/// exact size is not on screen; that ceiling is the shared component's.
+///
+/// ⚠️ **A BADGE DOES NOT SURVIVE `setTitles`.** Segments are rebuilt by a retitle
+/// and a badge belongs to its segment, so `showAlbums` re-applies them every time.
 final class MediaPickerViewController: UIViewController {
     private enum Metrics {
-        /// ⚠️ ONE NUMBER FOR BOTH GAPS. The space around the grid and the space
-        /// between two tiles are the same measurement, so a tile is never
-        /// closer to its neighbour than it is to the edge — which is what makes
-        /// a grid read as a grid rather than as a block that has been nudged.
-        static let gutter = Spacing.sm
-        static let corner: CGFloat = 10
-        static let columns: CGFloat = 3
-        /// What a bar is worth before one exists to measure.
-        static let barFallback: CGFloat = 44
-        static let toolbarFallback: CGFloat = 49
-        /// The narrowest phone this app is built for, as a last resort.
-        static let widthFallback: CGFloat = 375
-        /// Taller than this is not a bar — see `sane(_:fallback:)`.
-        static let barCeiling: CGFloat = 120
-        /// How near its resting height the sheet must be before the album is
-        /// allowed to turn sideways.
-        static let settleTolerance: CGFloat = 2
         /// Air between the album's last row and the strip of chosen thumbnails.
         /// Without it the two read as one block with a seam down the middle.
         static let trayGap = Spacing.lg
     }
 
-    /// The sheet's resting size: the bars, one row of the album, and the tray if
-    /// anything has been chosen.
-    static let restingDetentIdentifier = UISheetPresentationController.Detent.Identifier("mediaPickerResting")
-
     private let library: any MediaLibraryReading
-    /// What "Next" hands the selection to. The step after this one does not
-    /// exist yet, so the builder passes a screen that says so.
+    /// What "Next" hands the selection to.
     private let onNext: ([MediaLibraryItem]) -> UIViewController
 
     private var albums: [MediaLibraryAlbum] = []
-    private var items: [MediaLibraryItem] = []
+    /// Every item this screen has seen, across every album it has opened —
+    /// merged, never replaced, because a selection made in one album keeps its
+    /// thumbnails in the tray after the viewer moves to another.
     private var itemsByID: [String: MediaLibraryItem] = [:]
     private var selection = MediaPickerSelection()
 
-    private var grid: UICollectionView!
-    private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
-    private var gridAxis: UICollectionView.ScrollDirection = .vertical
-    /// Softens the album's visible bottom edge — see `updateGridFade()`.
-    private let gridFade = CAGradientLayer()
+    /// One page per album, in `albums` order. Built when the albums land,
+    /// because `HorizontalPagerView` takes its pages at construction.
+    private var pages: [MediaAlbumPageView] = []
+    private var pager: HorizontalPagerView?
+    /// Which albums have been fetched. A page is filled when it is first
+    /// settled on, so opening the picker reads one album rather than all of them.
+    private var loadedAlbumIDs: Set<String> = []
+    /// The sheet has finished presenting. Until it has, a page has no on-screen
+    /// rectangle to animate into, so the album's reveal waits for it.
+    private var hasAppeared = false
+
     /// Shown from the moment the screen opens until the library has answered —
     /// including while the system is asking the viewer for permission.
     private let spinner = UIActivityIndicatorView(style: .large)
-
-    /// Taken in `viewDidLayoutSubviews` and kept, because the detent resolver
-    /// may not go looking for them itself — see `restingHeight()`.
-    private var measuredWidth = Metrics.widthFallback
-    private var measuredBarHeight = Metrics.barFallback
-    private var measuredToolbarHeight = Metrics.toolbarFallback
-    /// The height the sheet was last asked to resolve, so a layout pass that
-    /// changes nothing does not ask again.
-    private var lastResolvedRestingHeight: CGFloat = 0
-    /// The height at the previous layout pass — how a sheet in flight is told
-    /// apart from one that has come to rest.
-    private var lastLaidOutHeight: CGFloat = 0
     /// Built once the albums are known: a strip with no segments has nothing to
     /// lay out, and the toolbar stays down until there is something to show.
     private var albumBar: PagedTabBar?
+    /// The screen's own empty state — no access, or no albums at all. An album
+    /// that is merely empty says so on its own page.
     private let emptyState = EmptyStateView()
+
+    /// The band that takes the album's definition away as it passes under the
+    /// strip — see `configureTray` for why it replaced a mask on the grid.
+    private let trayBlur = ProgressiveBlurView()
+
+    /// Says the library is only partly shared, ABOVE the grid rather than instead
+    /// of it.
+    ///
+    /// ⚠️ **ONLY FOR `.limited`.** `.denied` and `.undetermined` are the empty
+    /// state's business — `load()` already turns them into a full "No access to
+    /// your photos" screen with its own Settings button, and a banner as well
+    /// would say the same thing twice. `.granted` hides it outright.
+    private let accessNotice = MediaAccessNoticeView()
 
     private lazy var tray = SelectedMediaTrayView { [weak self] id, size in
         guard let self else { return nil }
@@ -141,7 +133,6 @@ final class MediaPickerViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        configureGrid()
         configureTray()
         emptyState.isHidden = true
         emptyState.pin(to: view)
@@ -171,195 +162,138 @@ final class MediaPickerViewController: UIViewController {
         navigationController?.setToolbarHidden(albumBar == nil, animated: animated)
     }
 
-    override func viewIsAppearing(_ animated: Bool) {
-        super.viewIsAppearing(animated)
-        guard let sheet = navigationController?.sheetPresentationController else { return }
-        sheet.delegate = self
-        applyGridAxis(settledAxis())
+    /// ⚠️ **THE ALBUM'S REVEAL BELONGS HERE, NOT TO THE GRID.** `viewDidAppear`
+    /// is the first moment a page has a rectangle on screen: the album loads
+    /// while the sheet is still travelling, and a spring committed then is
+    /// committed instantly. The two can finish in either order, so whichever is
+    /// last plays it — this, or `loadAlbum` — and `playReveal()` is a no-op for
+    /// whichever was first.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        hasAppeared = true
+        revealActivePage()
         #if DEBUG
-        logSheet("appearing")
+        // ⚠️ **A PROBE, BECAUSE FOUR HYPOTHESES ARE ALREADY DEAD.** Returning
+        // from the editor leaves the album pills WHITE on a light bar and the
+        // badges desaturated — two different visual properties degrading
+        // together, which points at one shared input. Ruled out by reading:
+        // partial appearance restore (all three slots are captured and put
+        // back), colours resolved once (they are `.label`/`.secondaryLabel`,
+        // live), any interface-style override in Upload (there is none), and
+        // Feed's toolbar override (this sheet builds its OWN nav controller).
+        // So measure the state instead of theorising a fifth time: a
+        // transparent background that never came back, a dark resolved trait,
+        // and a wrong tint are three different fixes.
+        logBarState("didAppear")
+        logBubbleMetrics()
         #endif
+    }
+
+    #if DEBUG
+    /// ⚠️ **ASK UIKIT, DO NOT MEASURE PIXELS.** Matching the notice to the bar's
+    /// bubbles needs two numbers UIKit owns and the repo never writes down — bar
+    /// items are system-laid-out. Four attempts to read them off a screenshot all
+    /// failed for the same structural reason: a white pill on a white sheet has
+    /// no usable contrast, and the notice is translucent glass over coloured
+    /// tiles. The last run returned a height that moved between 37.7pt and 28.0pt
+    /// depending on the threshold — a number that depends on the threshold is not
+    /// a measurement. The view hierarchy answers exactly.
+    private func logBubbleMetrics() {
+        guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet"),
+              let bar = navigationController?.navigationBar
+        else { return }
+        // ⚠️ **THE LAYOUT PASS BELONGS INSIDE THE GUARD, NOT BEFORE IT.** These
+        // two lines first sat in `viewDidAppear`, which forced two layout passes
+        // on every appearance of this screen in every DEBUG build — a permanent
+        // cost for an occasional instrument. They cannot simply be dropped
+        // either: without them the frames below read zero, and a probe that
+        // reports zero is indistinguishable from a probe that never ran.
+        view.layoutIfNeeded()
+        bar.layoutIfNeeded()
+
+        // ⚠️ **THE FIRST CUT FOUND THE LABEL'S WRAPPER, NOT THE CAPSULE.** It
+        // took "the view whose child is a label" and reported `leading=0
+        // trailing=0` — a label filling its parent edge to edge, which is
+        // precisely what a bubble is NOT. The plausibility guard passed anyway,
+        // because a wrong number can sit comfortably inside a plausible range.
+        // So do not guess which ancestor is the capsule: print the chain and let
+        // the one that is genuinely larger than its label identify itself.
+        func walk(_ view: UIView) {
+            for child in view.subviews {
+                if let label = child as? UILabel, let text = label.text, !text.isEmpty {
+                    var chain: [String] = []
+                    var node: UIView? = label
+                    var depth = 0
+                    while let current = node, current !== bar, depth < 5 {
+                        let kind = String(describing: type(of: current))
+                        chain.append(String(
+                            format: "%@ %.1fx%.1f", kind, current.bounds.width, current.bounds.height
+                        ))
+                        node = current.superview
+                        depth += 1
+                    }
+                    write("[bubble] bar \"\(text)\" chain: " + chain.joined(separator: " < "))
+                }
+                walk(child)
+            }
+        }
+        walk(bar)
+
+        // The notice, measured the same way: its own box, and where its label
+        // sits inside it. Comparing heights without comparing the padding would
+        // answer half the question.
+        let pill = accessNotice.bounds
+        let inner = accessNotice.debugLabelFrame
+        write(
+            "[bubble] notice box=\(pill.width)x\(pill.height)"
+            + " label=\(inner.minX),\(inner.minY) \(inner.width)x\(inner.height)"
+            + " leading=\(inner.minX) top=\(inner.minY)"
+            + " bottom=\(pill.height - inner.maxY) hidden=\(accessNotice.isHidden)"
+        )
+    }
+
+    private func write(_ line: String) {
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+
+    private func logBarState(_ when: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet"),
+              let bar = navigationController?.toolbar
+        else { return }
+        let standard = bar.standardAppearance
+        let line = "[bars] \(when)"
+            + " forced=\(bar.overrideUserInterfaceStyle.rawValue)"
+            + " resolved=\(bar.traitCollection.userInterfaceStyle.rawValue)"
+            + " albumBarResolved=\(albumBar?.traitCollection.userInterfaceStyle.rawValue ?? -1)"
+            + " tint=\(bar.tintColor.map { "\($0)" } ?? "nil")"
+            + " bgEffect=\(standard.backgroundEffect.map { "\($0)" } ?? "nil")"
+            + " bgColor=\(standard.backgroundColor.map { "\($0)" } ?? "nil")"
+            + " barStyle=\(bar.barStyle.rawValue)\n"
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+    #endif
+
+    /// Plays the pending reveal on whichever page the viewer is looking at.
+    private func revealActivePage() {
+        guard let index = pager?.activeIndex else { return }
+        revealPage(at: index)
+    }
+
+    /// Plays the pending arrival on one page, if it owes one and the screen is
+    /// up. Safe to call every frame of a drag: `playReveal()` spends the debt
+    /// once and is a no-op thereafter.
+    private func revealPage(at index: Int) {
+        guard hasAppeared, pages.indices.contains(index) else { return }
+        pages[index].playReveal()
     }
 
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
-        updateGridInsets()
-    }
-
-    /// Where the resting height's ingredients are taken.
-    ///
-    /// ⚠️ GUARDED ON A CHANGE, because re-resolving the detents lays the sheet
-    /// out again — an ungated `invalidateDetents()` in here is a loop.
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        guard view.bounds.width > 0 else { return }
-        measuredWidth = view.bounds.width
-        // ⚠️ THE GRID'S OWN INSET, NOT THE NAVIGATION BAR'S FRAME. What the
-        // album loses at the top is `adjustedContentInset.top`, and inside a
-        // sheet that is not the bar's height — the bar sits below a grabber,
-        // and the difference is exactly the strip of tile that was being cut
-        // off the bottom of the row.
-        measuredBarHeight = Self.sane(grid.adjustedContentInset.top, fallback: Metrics.barFallback)
-        measuredToolbarHeight = Self.sane(toolbarBand, fallback: Metrics.toolbarFallback)
-        applyGridAxis(settledAxis())
-        updateGridFade()
-
-        // ⚠️ **GUARDED ON THE ANSWER, NOT ON THE INGREDIENTS.** Re-resolving the
-        // detents lays the sheet out again, so an ungated call here is a loop —
-        // but gating on the measurements themselves LATCHES whatever they
-        // happened to read during the presentation, and one odd frame then
-        // fixes the sheet at the wrong height for the rest of its life. That is
-        // what left it resting 170pt too tall with a band of empty white under
-        // the row. Comparing the computed height converges instead.
-        // ⚠️ **NOT WHILE THE SHEET IS TRAVELLING, AND THAT IS THE STUTTER.**
-        // `refreshRestingHeight()` wraps `invalidateDetents()` in
-        // `animateChanges`, and this method runs on EVERY FRAME of a drag — so
-        // re-resolving here starts an animation inside an interactive gesture,
-        // frame after frame. The log showed the cost plainly: the resting
-        // height walked 235 → 258 → 261 while the sheet was still in flight.
-        // The measurements above stay current regardless; only the re-resolve
-        // waits for the height to stop moving.
-        let isStill = abs(view.bounds.height - lastLaidOutHeight) < 0.5
-        lastLaidOutHeight = view.bounds.height
-        let height = restingHeight()
-        guard isStill, abs(height - lastResolvedRestingHeight) > 0.5 else { return }
-        refreshRestingHeight()
-        #if DEBUG
-        logSheet("layout")
-        #endif
-    }
-
-    // MARK: - The sheet
-
-    /// The resting detent: the bars, one row, and the tray once there is one.
-    ///
-    /// ⚠️ IT IS RE-RESOLVED, NOT RECOMPUTED BY HAND. Choosing the first photo
-    /// raises the tray, which makes the resting size taller — so the selection
-    /// asks the sheet to resolve its detents again rather than trying to move
-    /// the sheet itself.
-    func makeRestingDetent() -> UISheetPresentationController.Detent {
-        .custom(identifier: Self.restingDetentIdentifier) { [weak self] context in
-            // `self.` stated: the unwrap happens in the outer closure and the
-            // call in the nested `assumeIsolated` one, and implicit self does
-            // not carry across that boundary.
-            MainActor.assumeIsolated {
-                guard let self else { return nil }
-                return min(self.restingHeight(), context.maximumDetentValue)
-            }
-        }
-    }
-
-    /// ⚠️ **THE RESOLVER READS NOTHING THAT COULD LOAD A VIEW.** A sheet
-    /// resolves its detents WHILE it is presenting the screen, so reaching for
-    /// `view.bounds` in here loads the view from inside that resolution. The
-    /// first cut did exactly that, and the detent was ignored outright: the
-    /// sheet reported `mediaPickerResting` as its selected identifier — the
-    /// album even switched to its resting axis — while opening at `.large`
-    /// every single time. Everything this needs is measured in
-    /// `viewDidLayoutSubviews` and kept in a stored property.
-    private func restingHeight() -> CGFloat {
-        let row = Self.tileSide(forWidth: measuredWidth) + Metrics.gutter * 2
-        let tray = selection.isEmpty ? 0 : SelectedMediaTrayView.height + Metrics.trayGap
-        return (measuredBarHeight + row + tray + measuredToolbarHeight).rounded(.up)
-    }
-
-    /// The band the toolbar actually occupies at the foot of this view.
-    ///
-    /// ⚠️ **THE SAFE AREA IS THE HONEST SOURCE, AND TWO OTHERS ARE NOT.**
-    /// `toolbar.frame.height` lies while the sheet is presenting — 223pt on an
-    /// iPhone SE, the height of the whole container — which walked the resting
-    /// height up to 489 and left a band of empty white above the tray. Falling
-    /// back to the 49pt constant then undershot the real band by some 45pt, so
-    /// the sheet rested too short and the tray climbed over the row it is meant
-    /// to sit below. This is the same measurement the tray's own bottom
-    /// constraint is pinned to, so the two cannot disagree. The window's own
-    /// inset — the home indicator — is taken back out, because a detent's value
-    /// already excludes it.
-    private var toolbarBand: CGFloat {
-        let homeIndicator = view.window?.safeAreaInsets.bottom ?? 0
-        return max(0, view.safeAreaInsets.bottom - homeIndicator)
-    }
-
-    /// ⚠️ **A BAR'S FRAME LIES WHILE THE SHEET THAT HOLDS IT IS PRESENTING.**
-    /// Measured on an iPhone SE: the navigation controller's toolbar reported
-    /// **223pt** — the height of the whole container rather than its own band —
-    /// and a resting height built on that walked up 223 → 407 → 489 and left
-    /// the sheet 170pt too tall, with a band of empty white above the tray.
-    /// Anything taller than the ceiling is not a bar, and the fallback is a
-    /// better answer than a measurement that cannot be true.
-    private static func sane(_ reported: CGFloat?, fallback: CGFloat) -> CGFloat {
-        guard let reported, reported > 0, reported <= Metrics.barCeiling else { return fallback }
-        return reported
-    }
-
-    private func refreshRestingHeight() {
-        guard let sheet = navigationController?.sheetPresentationController else { return }
-        lastResolvedRestingHeight = restingHeight()
-        sheet.animateChanges { sheet.invalidateDetents() }
-    }
-
-    /// ⚠️ **THE AXIS FOLLOWS THE HEIGHT THE SHEET HAS REACHED, NOT THE DETENT
-    /// IT HAS ANNOUNCED.** A sheet reports its new detent as the drag ENDS,
-    /// while the animation towards that height is still running — so turning
-    /// the album sideways there rebuilds the layout in mid-flight, and the grid
-    /// is seen reflowing as the sheet travels. The album stays vertical for the
-    /// whole of every animation and turns only on arrival.
-    /// ⚠️ **BOTH SIDES OF THE COMPARISON MUST EXCLUDE THE HOME INDICATOR.** A
-    /// detent's value does not count it and `view.bounds.height` does, so on a
-    /// phone that has one the sheet measures ~34pt taller than the height it is
-    /// resting at — it is never judged to have arrived, and the album stays a
-    /// vertical grid inside a one-row sheet, drawn under its own bars. On an
-    /// iPhone SE, where that inset is zero, the identical code looked perfect.
-    /// That is the whole reason this was reported from a device and not caught
-    /// here.
-    private func settledAxis() -> UICollectionView.ScrollDirection {
-        let homeIndicator = view.window?.safeAreaInsets.bottom ?? 0
-        return Self.axis(
-            forDetent: navigationController?.sheetPresentationController?.selectedDetentIdentifier,
-            height: view.bounds.height - homeIndicator,
-            restingHeight: restingHeight()
-        )
-    }
-
-    /// The rule on its own, so it can be asked without a sheet to drag.
-    static func axis(
-        forDetent identifier: UISheetPresentationController.Detent.Identifier?,
-        height: CGFloat,
-        restingHeight: CGFloat
-    ) -> UICollectionView.ScrollDirection {
-        guard identifier == restingDetentIdentifier else { return .vertical }
-        return height <= restingHeight + Metrics.settleTolerance ? .horizontal : .vertical
-    }
-
-    private func applyGridAxis(_ axis: UICollectionView.ScrollDirection) {
-        guard axis != gridAxis else { return }
-        gridAxis = axis
-        // ⚠️ NOT INSIDE THE LAYOUT PASS THAT ASKED FOR IT. Swapping a collection
-        // view's layout from within `viewDidLayoutSubviews` lays it out again
-        // underneath itself. The next turn of the run loop is soon enough, and
-        // the axis is already recorded, so nothing asks for the swap twice.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            // ⚠️ NOT ANIMATED. A compositional layout swap animates every item
-            // to its new place, and this one runs as the sheet arrives — two
-            // animations over the same pixels, which reads as a stumble. The
-            // album simply IS the other shape by the time the sheet lands.
-            grid.setCollectionViewLayout(Self.gridLayout(axis: axis), animated: false)
-            // ⚠️ AND THE OFFSET GOES BACK TO THE TOP. A swapped layout keeps
-            // the offset it had, which in the new axis is measured against a
-            // different content size — the album then opens part-scrolled,
-            // with its first row sitting under the navigation bar.
-            grid.setContentOffset(
-                CGPoint(x: -grid.adjustedContentInset.left, y: -grid.adjustedContentInset.top),
-                animated: false
-            )
-            // ⚠️ AND THE OTHER AXIS STOPS SCROLLING. Sideways, a vertical drag
-            // has nowhere to go: left bouncing, it only makes the row look
-            // loose and drags the sheet's own gesture into the argument.
-            grid.alwaysBounceVertical = axis == .vertical
-            grid.alwaysBounceHorizontal = axis == .horizontal
-            grid.showsVerticalScrollIndicator = axis == .vertical
-        }
+        updateTrayReserve()
+        // The notice's own height is not fixed — its line wraps at larger text
+        // sizes — so the room it claims is recomputed on the same beat as the
+        // tray's rather than measured once and trusted.
+        updateNoticeReserve()
     }
 
     // MARK: - Bars
@@ -400,7 +334,9 @@ final class MediaPickerViewController: UIViewController {
         navigationController?.pushViewController(onNext(chosen), animated: true)
     }
 
-    /// The album strip, at the foot of the screen.
+    // MARK: - The albums, as tabs
+
+    /// The album strip, at the foot of the screen, and the pages it selects.
     ///
     /// No `SelectorTouchProbe` here, and that is not an oversight: the probe
     /// suspends a stack's back-swipe while a finger is on the strip, and this
@@ -416,12 +352,15 @@ final class MediaPickerViewController: UIViewController {
             // is exactly what shipped in the first cut of this screen. The
             // search results screen sets this for the same reason.
             bar.suppressesBackdrop = true
-            bar.addAction(
-                UIAction { [weak self] _ in self?.albumChanged() }, for: .valueChanged
-            )
+            // ⚠️ NOT NOTIFICATION RED. The default is the unread pill's colour,
+            // which is right for the two hosts it was written for and wrong
+            // here: an album's count is how many photographs are in it, not how
+            // many things are demanding an answer. A library is not an alarm.
+            bar.badgeTint = .systemBlue
             albumBar = bar
             toolbarItems = [UIBarButtonItem(customView: bar), .flexibleSpace()]
             navigationController?.setToolbarHidden(false, animated: true)
+            configurePager(for: albums, bar: bar)
         } else {
             bar.setTitles(albums.map(\.title))
         }
@@ -433,9 +372,140 @@ final class MediaPickerViewController: UIViewController {
         }
     }
 
+    /// The container contract, the same one the relationship lists and the inbox
+    /// follow: four wires, and between them the strip and the pages can never
+    /// disagree about which album is on screen.
+    ///
+    /// 1. tap on a segment → page, animated, so the pill rides the same progress
+    ///    stream a finger would produce rather than jumping;
+    /// 2. drag ON the pill → `scrub`, every frame of the finger, and the release
+    ///    hands the pager a velocity so it lands itself;
+    /// 3. swipe on the pages → fractional progress → the pill follows;
+    /// 4. a settled page → that album is fetched, if it never has been.
+    ///
+    /// ⚠️ **THE PAGER IS BUILT HERE AND NOT IN `viewDidLoad`.**
+    /// `HorizontalPagerView` takes its pages at construction and the albums are
+    /// read asynchronously, so there is nothing to build until they land. It goes
+    /// in at index 0 so the tray, the empty state and the spinner stay above it.
+    private func configurePager(for albums: [MediaLibraryAlbum], bar: PagedTabBar) {
+        pages = albums.map { _ in makePage() }
+        let pager = HorizontalPagerView(pages: pages, initialIndex: 0)
+        self.pager = pager
+        // ⚠️ **`pin(to:)` WOULD UNDO THE LINE ABOVE IT.** That helper calls
+        // `parent.addSubview(self)` unconditionally, and `addSubview` MOVES a
+        // view that is already in the hierarchy to the TOP of its siblings — so
+        // inserting the pager at 0 and then pinning it put the album back over
+        // the chosen-media strip, its blur and the spinner, and the strip stopped
+        // being drawn at all.
+        //
+        // Measured rather than reasoned: the strip reported `idx=1`, which is
+        // only possible if the pager had been re-parented above it — at index 0
+        // it would have been 2. Explicit constraints keep the pager where it was
+        // put.
+        view.insertSubview(pager, at: 0)
+        pager.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            pager.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            pager.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            pager.topAnchor.constraint(equalTo: view.topAnchor),
+            pager.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+
+        // ⚠️ **ABOVE THE PAGER, BELOW THE TRAY — AND NOT WITH `pin(to:)`.** That
+        // helper calls `addSubview` unconditionally, which MOVES a view to the
+        // top of its siblings; doing it to the pager once put the album over the
+        // chosen-media strip and stopped the strip drawing at all. Anchoring
+        // above the pager by name keeps the tray, its blur, the spinner and the
+        // empty state where they were put.
+        view.insertSubview(accessNotice, aboveSubview: pager)
+        accessNotice.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            // ⚠️ **THE BAR'S MARGIN, INHERITED RATHER THAN COPIED.** This used to
+            // be the safe area plus `Spacing.sm` (8pt), which is not what the
+            // navigation bar uses for its own items — so the banner sat a few
+            // points inboard of "Cancel" and the two edges disagreed. Anchoring
+            // to `layoutMarginsGuide` takes the same margin the bar takes, so it
+            // cannot drift out of step with a number written in two places.
+            // `ToastView` and `SectionHeaderPillButton` align this way already.
+            accessNotice.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+            accessNotice.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+            accessNotice.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm
+            )
+        ])
+        accessNotice.onSelectMore = { [weak self] in
+            guard let self else { return }
+            library.presentLimitedPicker(from: self)
+        }
+        accessNotice.onOpenSettings = {
+            guard let settings = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(settings)
+        }
+        // ⚠️ **ACCESS IS READ ONCE AND BOTH WAYS OUT LEAVE THE APP.** `load()`
+        // consults the library exactly once, so a viewer who widens their
+        // permission and comes back would be met by a banner still claiming they
+        // had shared only some photos. Registered here because this runs once.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(accessMayHaveChanged),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        refreshAccessNotice()
+
+        bar.addAction(
+            UIAction { [weak self] _ in self?.albumChanged() }, for: .valueChanged
+        )
+        bar.onScrub = { [weak self] progress in self?.pager?.scrub(to: progress) }
+        bar.onScrubEnd = { [weak self] velocity in
+            self?.pager?.settleAfterScrub(velocityInPages: velocity)
+        }
+        pager.onProgress = { [weak self] progress in
+            guard let self else { return }
+            albumBar?.setProgress(progress)
+            // ⚠️ **THE PAGE BEING SWIPED TO IS WOKEN MID-DRAG, NOT AT SETTLE.**
+            // A page that owes an arrival is HIDDEN until it plays, so waiting
+            // for `onSettled` would drag a blank rectangle across the screen and
+            // only fill it once the finger let go. `onProgress` fires every
+            // frame with a fractional page, so the neighbour is revealed as soon
+            // as it is genuinely coming.
+            revealPage(at: Int(progress.rounded()))
+        }
+        pager.onSettled = { [weak self] index in
+            guard let self, albums.indices.contains(index) else { return }
+            Task {
+                await self.loadAlbum(at: index)
+                // An album filled while it was a page away still owes its
+                // reveal until the viewer has actually been brought to it.
+                self.revealActivePage()
+            }
+        }
+        updateTrayReserve()
+    }
+
+    private func makePage() -> MediaAlbumPageView {
+        let page = MediaAlbumPageView()
+        page.tile = { [weak self] id in
+            guard let self, let item = itemsByID[id] else { return nil }
+            return MediaAlbumPageView.Tile(
+                item: item, order: selection.order(of: id), isSelectable: canChoose(id)
+            )
+        }
+        page.onTap = { [weak self] id in self?.toggle(id) }
+        page.thumbnail = { [weak self] id, size in
+            guard let self else { return nil }
+            return await library.thumbnail(for: id, size: size)
+        }
+        page.onPrefetch = { [weak self] ids, size in self?.library.startCaching(ids, size: size) }
+        page.onCancelPrefetch = { [weak self] ids, size in self?.library.stopCaching(ids, size: size) }
+        return page
+    }
+
+    /// A segment was chosen. The page is what moves; the pill follows it back
+    /// through `onProgress`, which is why nothing here touches the bar.
     private func albumChanged() {
-        guard let index = albumBar?.selectedIndex, albums.indices.contains(index) else { return }
-        Task { await showItems(in: albums[index]) }
+        guard let bar = albumBar, albums.indices.contains(bar.selectedIndex) else { return }
+        pager?.setActivePage(bar.selectedIndex, animated: true)
     }
 }
 
@@ -461,7 +531,7 @@ private extension MediaPickerViewController {
         }
 
         let albums = await library.albums()
-        guard let first = albums.first else {
+        guard !albums.isEmpty else {
             showEmptyState(
                 symbolName: "photo.on.rectangle.angled",
                 title: "Nothing to post yet",
@@ -470,49 +540,34 @@ private extension MediaPickerViewController {
             return
         }
         showAlbums(albums)
-        await showItems(in: first)
-        refreshRestingHeight()
+        await loadAlbum(at: 0)
         #if DEBUG
         runDebugHooks()
         #endif
     }
 
-    func showItems(in album: MediaLibraryAlbum) async {
+    /// Fills one page, once. Every album after the first arrives this way, from
+    /// the pager settling on it.
+    func loadAlbum(at index: Int) async {
+        guard albums.indices.contains(index), pages.indices.contains(index) else { return }
+        let album = albums[index]
+        guard !loadedAlbumIDs.contains(album.id) else { return }
+        loadedAlbumIDs.insert(album.id)
+
         let loaded = await library.items(in: album.id)
-        items = loaded
-        // ⚠️ AND THE GRID COMES BACK. `showEmptyState` hides it, and an earlier
+        // ⚠️ AND THE PAGES COME BACK. `showEmptyState` hides them, and an earlier
         // refusal followed by a grant would otherwise leave the album loaded,
         // correct, and invisible.
-        grid.isHidden = false
+        pager?.isHidden = false
         spinner.stopAnimating()
-        // Merged, never replaced: a selection made in one album keeps its
-        // thumbnails in the tray after the viewer moves to another, and the
-        // screen after this one is handed items it may no longer be showing.
+        // Merged, never replaced — the tray and the step after this one are both
+        // handed items the visible album may no longer be showing.
         for item in loaded { itemsByID[item.id] = item }
-        emptyState.isHidden = !loaded.isEmpty
-        if loaded.isEmpty {
-            emptyState.configure(
-                symbolName: "photo.on.rectangle.angled",
-                title: "This album is empty"
-            )
-        }
-
-        var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
-        snapshot.appendSections([0])
-        snapshot.appendItems(loaded.map(\.id))
-        await dataSource.apply(snapshot, animatingDifferences: false)
-        // ⚠️ THE OFFSET IS READ AFTER A LAYOUT PASS, NOT BEFORE ONE.
-        // `adjustedContentInset` is only final once the grid has been laid out
-        // inside the bars above and below it. Read on the way in it is short by
-        // the navigation bar, and the album opens a few points too high — a
-        // sliver of the first row showing above the top of the grid.
-        grid.layoutIfNeeded()
-        let top = -grid.adjustedContentInset.top
-        let leading = -grid.adjustedContentInset.left
-        grid.setContentOffset(
-            gridAxis == .vertical ? CGPoint(x: 0, y: top) : CGPoint(x: leading, y: 0),
-            animated: false
-        )
+        pages[index].setItems(loaded, albumID: album.id)
+        updateTrayReserve()
+        // The album can land after the sheet has settled, in which case nothing
+        // else is coming along to play its reveal.
+        revealActivePage()
     }
 
     func showEmptyState(
@@ -530,167 +585,51 @@ private extension MediaPickerViewController {
             actionHandler: action
         )
         emptyState.isHidden = false
-        grid.isHidden = true
+        pager?.isHidden = true
         spinner.stopAnimating()
-    }
-}
-
-// MARK: - The grid
-
-private extension MediaPickerViewController {
-    var tileSide: CGFloat { Self.tileSide(forWidth: view.bounds.width) }
-
-    /// Three tiles and FOUR gaps: one at each edge and one between each pair.
-    static func tileSide(forWidth width: CGFloat) -> CGFloat {
-        let gaps = Metrics.gutter * (Metrics.columns + 1)
-        return max(((width - gaps) / Metrics.columns).rounded(.down), 60)
-    }
-
-    func configureGrid() {
-        grid = UICollectionView(frame: .zero, collectionViewLayout: Self.gridLayout(axis: .vertical))
-        grid.backgroundColor = .systemBackground
-        grid.alwaysBounceVertical = true
-        // A diagonal drag should not smear the row up and down while it travels.
-        grid.isDirectionalLockEnabled = true
-        grid.delegate = self
-        grid.prefetchDataSource = self
-        // ⚠️ **THE LAST ROW FADES RATHER THAN BEING CUT.** When the sheet
-        // changes detent the album changes axis, and the rows below the first
-        // stop existing between one frame and the next — which reads as a blink
-        // along the bottom edge. A gradient mask placed at the VISIBLE bottom
-        // (above the tray and the toolbar, not at the grid's own edge) turns
-        // that into a dissolve, and it costs nothing when the sheet is open
-        // because what it fades there is already behind the chrome.
-        gridFade.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
-        gridFade.startPoint = CGPoint(x: 0.5, y: 0)
-        gridFade.endPoint = CGPoint(x: 0.5, y: 1)
-        grid.layer.mask = gridFade
-        grid.pin(to: view)
-
-        let cell = UICollectionView.CellRegistration<MediaPickerGridCell, String> { [weak self] cell, _, id in
-            guard let self, let item = itemsByID[id] else { return }
-            cell.configure(item: item, order: selection.order(of: id), isSelectable: canChoose(id))
-            let size = CGSize(width: tileSide, height: tileSide)
-            Task { [weak cell] in
-                let image = await self.library.thumbnail(for: id, size: size)
-                cell?.showThumbnail(image, for: id)
-            }
-        }
-        dataSource = UICollectionViewDiffableDataSource(collectionView: grid) { view, indexPath, id in
-            view.dequeueConfiguredReusableCell(using: cell, for: indexPath, item: id)
-        }
-    }
-
-    /// ⚠️ THE TILE IS MEASURED FROM THE LAYOUT ENVIRONMENT, not from
-    /// `view.bounds`. A sheet is laid out at one width and re-laid at another
-    /// as it is dragged, and a layout built against a stale width leaves a
-    /// column hanging over the edge.
-    static func gridLayout(axis: UICollectionView.ScrollDirection) -> UICollectionViewCompositionalLayout {
-        var configuration = UICollectionViewCompositionalLayoutConfiguration()
-        configuration.scrollDirection = axis
-        return UICollectionViewCompositionalLayout(
-            sectionProvider: { _, environment in
-                let side = tileSide(forWidth: environment.container.effectiveContentSize.width)
-                let size = NSCollectionLayoutSize(
-                    widthDimension: .absolute(side), heightDimension: .absolute(side)
-                )
-                let item = NSCollectionLayoutItem(layoutSize: size)
-                let group: NSCollectionLayoutGroup
-                if axis == .vertical {
-                    group = NSCollectionLayoutGroup.horizontal(
-                        layoutSize: NSCollectionLayoutSize(
-                            widthDimension: .fractionalWidth(1), heightDimension: .absolute(side)
-                        ),
-                        repeatingSubitem: item,
-                        count: Int(Metrics.columns)
-                    )
-                    group.interItemSpacing = .fixed(Metrics.gutter)
-                } else {
-                    group = NSCollectionLayoutGroup.horizontal(layoutSize: size, subitems: [item])
-                }
-                let section = NSCollectionLayoutSection(group: group)
-                section.interGroupSpacing = Metrics.gutter
-                section.contentInsets = NSDirectionalEdgeInsets(
-                    top: Metrics.gutter,
-                    leading: Metrics.gutter,
-                    bottom: Metrics.gutter,
-                    trailing: Metrics.gutter
-                )
-                return section
-            },
-            configuration: configuration
-        )
-    }
-
-    /// Places the bottom fade at the album's VISIBLE foot.
-    ///
-    /// ⚠️ A MASK ON A SCROLL VIEW'S LAYER SCROLLS WITH IT. The layer's bounds
-    /// travel with `contentOffset`, so a mask pinned to `bounds` would slide
-    /// away up the content. Its frame is therefore the visible rectangle
-    /// expressed in content coordinates, refreshed on every scroll as well as
-    /// on every layout.
-    func updateGridFade() {
-        let height = grid.bounds.height
-        guard height > 0 else { return }
-
-        // ⚠️ **NOT WHILE THE ALBUM IS A SINGLE ROW.** The fade is for rows
-        // travelling under the strip; at rest the one row on screen IS the
-        // content and passes under nothing. Widening the band to a whole tile
-        // made it tall enough to wash out that row from the middle down — the
-        // resting album came back visibly greyed. Sideways, the mask is flat.
-        guard gridAxis == .vertical else {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            gridFade.frame = CGRect(origin: grid.contentOffset, size: grid.bounds.size)
-            gridFade.locations = [0, 1, 1]
-            CATransaction.commit()
-            return
-        }
-        let visibleBottom = height - grid.adjustedContentInset.bottom
-        // ⚠️ A WHOLE TILE, so a row is fully transparent by the time it is fully
-        // under the strip and fully opaque while it is still clear of it. Half
-        // a tile made the change abrupt enough to read as the blink it replaced.
-        let band = Self.tileSide(forWidth: measuredWidth)
-        let start = max(0, min(1, (visibleBottom - band) / height))
-        let end = max(start, min(1, visibleBottom / height))
-
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        gridFade.frame = CGRect(origin: grid.contentOffset, size: grid.bounds.size)
-        gridFade.locations = [0, NSNumber(value: Float(start)), NSNumber(value: Float(end))]
-        CATransaction.commit()
-    }
-
-    /// The room the tray takes, given back to the grid as inset rather than as
-    /// height: the tiles under the tray stay where they are, and the last row
-    /// can still be scrolled clear of it.
-    func updateGridInsets() {
-        let reserved = selection.isEmpty ? 0 : SelectedMediaTrayView.height + Metrics.trayGap
-        grid.contentInset.bottom = reserved
-        grid.verticalScrollIndicatorInsets.bottom = reserved
-    }
-
-    /// An unchosen tile stops offering itself once the cap is reached; a chosen
-    /// one can always be given back.
-    func canChoose(_ id: String) -> Bool {
-        selection.order(of: id) != nil || !selection.isFull
     }
 }
 
 // MARK: - The selection
 
 private extension MediaPickerViewController {
+    /// An unchosen tile stops offering itself once the cap is reached; a chosen
+    /// one can always be given back.
+    func canChoose(_ id: String) -> Bool {
+        selection.order(of: id) != nil || !selection.isFull
+    }
+
     func configureTray() {
         tray.onRemove = { [weak self] id in self?.drop(id) }
         tray.onReorder = { [weak self] order in self?.reorder(order) }
 
-        // ⚠️ **NO BACKDROP BEHIND THE STRIP.** A blurred plate was tried here
-        // and the user's answer was the right one: the album should be SEEN
-        // through the strip's band and simply run out of opacity as it passes
-        // under it. That is the grid's own bottom fade — see `updateGridFade()`
-        // — and a plate would only hide the thing the fade exists to show.
+        // ⚠️ **NO PLATE BEHIND THE STRIP — A PROGRESSIVE BLUR INSTEAD.** An
+        // opaque backdrop was tried here once and rejected: the album has to be
+        // SEEN through the strip's band. It used to lose opacity on its way
+        // under, by a mask on each page's own grid; since 2026-09-12 the album
+        // runs on at full strength to the foot of the screen and this blur is
+        // what takes its definition away — clear where it begins, full material
+        // at the bottom.
+        //
+        // ⚠️ **HUNG FROM THE STRIP'S TOP EDGE, AND NEVER HIDDEN.** It travels
+        // with the strip, so parking the strip below the screen shortens the
+        // band by exactly the strip's height and leaves the toolbar's own band
+        // blurred — which is the behaviour asked for, and it animates for free
+        // because the strip's constraint already moves inside `settle`'s
+        // animation. An earlier cut set `isHidden` instead and took the whole
+        // band away with it; height is the dial here, not visibility.
+        //
+        // It goes in BEFORE the tray, so the thumbnails sit on top of it.
+        trayBlur.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(trayBlur)
         tray.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tray)
+        NSLayoutConstraint.activate([
+            trayBlur.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            trayBlur.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            trayBlur.topAnchor.constraint(equalTo: tray.topAnchor),
+            trayBlur.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
         trayBottom = tray.bottomAnchor.constraint(
             equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: SelectedMediaTrayView.height
         )
@@ -700,6 +639,61 @@ private extension MediaPickerViewController {
             tray.heightAnchor.constraint(equalToConstant: SelectedMediaTrayView.height),
             trayBottom
         ])
+    }
+
+    /// The room the tray takes, told to every page — a page the viewer has not
+    /// reached yet must already know, or its first row sits under the strip for
+    /// one frame after they swipe to it.
+    func updateTrayReserve() {
+        let reserved = selection.isEmpty ? 0 : SelectedMediaTrayView.height + Metrics.trayGap
+        for page in pages { page.setTrayReserve(reserved) }
+    }
+
+    /// Shows the notice only for `.limited`, and gives every page the room it
+    /// takes.
+    ///
+    /// ⚠️ **`.denied` IS NOT THIS VIEW'S BUSINESS.** `load()` already turns a
+    /// refusal into a full empty state carrying its own Settings button; a banner
+    /// as well would say the same thing twice, in two visual languages, on one
+    /// screen.
+    func refreshAccessNotice() {
+        accessNotice.isHidden = library.access != .limited
+        updateNoticeReserve()
+    }
+
+    /// The room the notice takes at the top, told to every page — the same
+    /// contract `updateTrayReserve` keeps at the bottom, and for the same reason:
+    /// a page the viewer has not swiped to yet must already know, or its first
+    /// row sits under the banner for a frame once they arrive.
+    func updateNoticeReserve() {
+        let reserved: CGFloat
+        if accessNotice.isHidden {
+            reserved = 0
+        } else {
+            // ⚠️ MEASURED, NOT READ FROM `bounds`. This runs from
+            // `configurePager`, before the notice has ever been laid out, so
+            // `bounds.height` would be 0 and the first album would open with its
+            // top row under the banner.
+            let width = view.bounds.width - Spacing.sm * 2
+            reserved = accessNotice.systemLayoutSizeFitting(
+                CGSize(width: width, height: 0),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            ).height + Metrics.trayGap
+        }
+        for page in pages { page.setNoticeReserve(reserved) }
+    }
+
+    /// ⚠️ **THE BANNER IS REFRESHED, THE LIBRARY IS NOT — AND THAT IS A REAL
+    /// GAP, NOT AN OVERSIGHT I AM HIDING.** Both ways out of the notice leave the
+    /// app, so coming back is exactly when the permission may have widened. This
+    /// re-reads the access and hides the banner accordingly, but `loadedAlbumIDs`
+    /// still blocks any album from being fetched a second time, so newly shared
+    /// photos will not appear until the sheet is reopened. Fixing that means
+    /// invalidating those ids and re-running `load()`, which is a larger change
+    /// than this notice.
+    @objc private func accessMayHaveChanged() {
+        refreshAccessNotice()
     }
 
     func toggle(_ id: String) {
@@ -727,8 +721,8 @@ private extension MediaPickerViewController {
     /// snapshot". The work is handed to the next turn of the run loop instead.
     ///
     /// On the accepted path the tray is deliberately NOT told: it already shows
-    /// this order, being the thing that moved. Only the grid's numbers, which
-    /// belong to a different data source, have to catch up.
+    /// this order, being the thing that moved. Only the grids' numbers, which
+    /// belong to different data sources, have to catch up.
     func reorder(_ order: [String]) {
         let accepted = selection.setOrder(order)
         DispatchQueue.main.async { [weak self] in
@@ -744,13 +738,13 @@ private extension MediaPickerViewController {
     }
 
     /// Everything a change to the selection touches, in one place: the strip,
-    /// the numbers on the tiles, the room the grid gives up, how tall the sheet
-    /// rests, and the word on the button that carries it all forward.
+    /// the numbers on the tiles, the room the pages give up, and the word on the
+    /// button that carries it all forward.
     func settle(changed: String?, capChanged: Bool, animated: Bool) {
         let hadTray = trayBottom.constant == 0
         tray.setItems(selection.ids, animated: animated)
         updateNextItem()
-        updateGridInsets()
+        updateTrayReserve()
         refreshTiles(changed: changed, capChanged: capChanged, animated: animated)
 
         let wantsTray = !selection.isEmpty
@@ -767,38 +761,26 @@ private extension MediaPickerViewController {
         } else {
             settleLayout()
         }
-        // The tray is part of what the sheet rests around, so its arrival and
-        // departure change the resting height.
-        refreshRestingHeight()
+        #if DEBUG
+        logTray("settle")
+        #endif
     }
 
-    /// ⚠️ THE TILE THAT WAS TAPPED IS UPDATED IN PLACE, AND THE REST THROUGH THE
-    /// SNAPSHOT. A reconfigure re-runs the cell's registration, which cannot
-    /// animate the one tile the finger is on — so that tile is configured
-    /// directly, and the others (renumbered, or newly beyond the cap) follow
-    /// without animation. A tile that is not on screen needs neither.
+    /// ⚠️ **EVERY PAGE, NOT JUST THE ONE ON SCREEN.** The same photograph can
+    /// appear in Recents and in Favourites, and a number that was only corrected
+    /// on the visible page would be wrong the moment the viewer swiped. The
+    /// tapped tile is updated in place — a reconfigure cannot animate the tile a
+    /// finger is on — and the rest follow through each page's snapshot.
     func refreshTiles(changed: String?, capChanged: Bool, animated: Bool) {
-        if let changed,
-           let indexPath = dataSource.indexPath(for: changed),
-           let cell = grid.cellForItem(at: indexPath) as? MediaPickerGridCell,
-           let item = itemsByID[changed] {
-            cell.configure(
-                item: item,
-                order: selection.order(of: changed),
-                isSelectable: canChoose(changed),
-                animated: animated
-            )
+        for page in pages {
+            if let changed { page.updateTile(changed, animated: animated) }
+            let present = Set(page.items.map(\.id))
+            // The cap crossing is the one case where every unchosen tile
+            // changes, because they all stop — or start — offering themselves.
+            var stale = capChanged ? present : Set(selection.ids).intersection(present)
+            if let changed { stale.remove(changed) }
+            page.reconfigure(Array(stale))
         }
-
-        var snapshot = dataSource.snapshot()
-        let present = Set(snapshot.itemIdentifiers)
-        // The cap crossing is the one case where every unchosen tile changes,
-        // because they all stop — or start — offering themselves.
-        var stale = capChanged ? present : Set(selection.ids).intersection(present)
-        if let changed { stale.remove(changed) }
-        guard !stale.isEmpty else { return }
-        snapshot.reconfigureItems(Array(stale))
-        dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     /// The cap, said once and briefly. A selection that cannot grow is not an
@@ -814,60 +796,6 @@ private extension MediaPickerViewController {
     }
 }
 
-// MARK: - Delegates
-
-extension MediaPickerViewController: UICollectionViewDelegate {
-    /// ⚠️ **SIDEWAYS, THE VERTICAL AXIS IS HELD SHUT.**
-    /// `alwaysBounceVertical = false` is not enough on its own: the album is
-    /// full-bleed behind its bars, so once the top inset and the tray's bottom
-    /// inset are added its scrollable height overruns the band by a few points,
-    /// and those few points are draggable. A viewer at rest could shift the row
-    /// up and down a little, which is exactly what should not be possible.
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        // ⚠️ BEFORE THE AXIS GUARD, NOT AFTER IT. The mask has to be re-placed
-        // on every scroll in BOTH axes — a fade refreshed only while the album
-        // reads sideways would slide away the moment it is read downwards,
-        // which is the one case this was built for.
-        updateGridFade()
-        guard gridAxis == .horizontal else { return }
-        let top = -scrollView.adjustedContentInset.top
-        guard abs(scrollView.contentOffset.y - top) > 0.5 else { return }
-        scrollView.contentOffset.y = top
-    }
-
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: false)
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
-        toggle(id)
-    }
-}
-
-extension MediaPickerViewController: UICollectionViewDataSourcePrefetching {
-    func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-        let side = tileSide
-        library.startCaching(ids(at: indexPaths), size: CGSize(width: side, height: side))
-    }
-
-    func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
-        let side = tileSide
-        library.stopCaching(ids(at: indexPaths), size: CGSize(width: side, height: side))
-    }
-
-    private func ids(at indexPaths: [IndexPath]) -> [String] {
-        indexPaths.compactMap { dataSource.itemIdentifier(for: $0) }
-    }
-}
-
-extension MediaPickerViewController: UISheetPresentationControllerDelegate {
-    /// The announcement only asks for a layout pass; that pass decides, once it
-    /// can see the height the sheet actually reached.
-    func sheetPresentationControllerDidChangeSelectedDetentIdentifier(
-        _ sheetPresentationController: UISheetPresentationController
-    ) {
-        view.setNeedsLayout()
-    }
-}
-
 // MARK: - Debug
 
 #if DEBUG
@@ -878,50 +806,66 @@ extension MediaPickerViewController {
     var debugAlbumTitles: [String] { albumBar?.currentTitles ?? [] }
     /// Internal for tests: whether the tray is up.
     var debugTrayIsShowing: Bool { trayBottom?.constant == 0 }
-    /// Internal for tests: the items the grid is showing.
-    var debugItems: [MediaLibraryItem] { items }
+    /// Internal for tests: whether the limited-access banner is up. The screen
+    /// offers no other way to ask, and "is it conditional" cannot be answered by
+    /// a test that can only see it in one state.
+    var debugAccessNoticeIsHidden: Bool { accessNotice.isHidden }
+    /// Internal for tests: the room the banner claims from each page, so the
+    /// reserve can be checked without measuring pixels.
+    var debugNoticeReserve: CGFloat { pages.first?.debugNoticeReserve ?? 0 }
+    /// Internal for tests: the items the album ON SCREEN is showing.
+    var debugItems: [MediaLibraryItem] { debugActivePage?.items ?? [] }
     /// Internal for tests: whether the screen is still saying it is working.
     var debugIsLoading: Bool { spinner.isAnimating }
-    /// Internal for tests: which way the album scrolls right now.
-    var debugGridAxis: UICollectionView.ScrollDirection { gridAxis }
-    /// Internal for tests: how tall the sheet asks to rest.
-    var debugRestingHeight: CGFloat { restingHeight() }
-
-    /// What the sheet is actually resting on, behind `-upload-log-sheet`.
+    /// Internal for tests: the pager, so a test can assert the strip and the
+    /// pages stay in step — which is the whole contract of this screen's chrome.
+    var debugPager: HorizontalPagerView? { pager }
+    /// Internal for tests: one page per album.
+    var debugPageCount: Int { pages.count }
+    /// Where the strip and its blur actually ARE, behind `-upload-log-sheet`.
     ///
-    /// ⚠️ `NSLog`, NOT `print`. `print` writes to stdout, which `simctl launch`
-    /// throws away unless it is handed a pty — and a pty that is killed takes
-    /// the app with it. This reaches the unified log, where
-    /// `simctl spawn <udid> log show` can read it after the fact.
-    func logSheet(_ moment: String) {
+    /// ⚠️ MEASURED, NOT DEDUCED. The strip stopped drawing when the blur arrived,
+    /// and three readings of the source each cleared a suspect without finding
+    /// the cause: `settle` still raises it, the blur goes in BELOW it, and its
+    /// height is a sane 80pt. `theTrayStaysDownUntilSomethingIsChosen` passes in
+    /// a hosted window, so the model is right and it is the live hierarchy that
+    /// differs — which source cannot answer and a frame can.
+    ///
+    /// ⚠️ `NSLog`, NOT `print`: stdout is discarded by `simctl launch` unless it
+    /// is handed a pty, and killing that pty takes the app with it.
+    func logTray(_ moment: String) {
         guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet") else { return }
-        let sheet = navigationController?.sheetPresentationController
+        view.layoutIfNeeded()
         NSLog(
-            "[picker] %@ resting=%@ bounds=%@ home=%@ axis=%@ bar=%@ toolbar=%@ tray=%@ selected=%@",
+            "[tray] %@ frame=%@ hidden=%@ alpha=%.2f super=%@ idx=%@ blur=%@ blurHidden=%@ safeBottom=%.1f",
             moment,
-            "\(restingHeight())",
-            "\(view.bounds.height)",
-            "\(view.window?.safeAreaInsets.bottom ?? 0)",
-            gridAxis == .horizontal ? "H" : "V",
-            "\(measuredBarHeight)",
-            "\(measuredToolbarHeight)",
-            "\(selection.isEmpty ? 0 : SelectedMediaTrayView.height)",
-            sheet?.selectedDetentIdentifier?.rawValue ?? "nil"
+            "\(tray.frame)",
+            tray.isHidden ? "yes" : "no",
+            tray.alpha,
+            tray.superview.map { String(describing: type(of: $0)) } ?? "nil",
+            "\(tray.superview?.subviews.firstIndex(of: tray) ?? -1)",
+            "\(trayBlur.frame)",
+            trayBlur.isHidden ? "yes" : "no",
+            view.safeAreaInsets.bottom
         )
     }
-    /// Internal for tests: the one gap that is both margin and gutter.
-    static var debugGutter: CGFloat { Metrics.gutter }
-    /// Internal for tests: the air between the album and the strip.
-    static var debugTrayGap: CGFloat { Metrics.trayGap }
 
-    /// Internal for tests: the tile the grid would cut at this width.
+    /// Internal for tests: the one gap that is both margin and gutter.
+    static var debugGutter: CGFloat { MediaAlbumPageView.gutter }
+
+    /// Internal for tests: the tile a page would cut at this width.
     static func debugTileSide(forWidth width: CGFloat) -> CGFloat {
-        tileSide(forWidth: width)
+        MediaAlbumPageView.tileSide(forWidth: width)
+    }
+
+    private var debugActivePage: MediaAlbumPageView? {
+        guard let index = pager?.activeIndex, pages.indices.contains(index) else { return nil }
+        return pages[index]
     }
 
     /// Internal for tests: the path a tap takes, without a window to hit-test in.
     func debugTapItem(at index: Int) {
-        guard items.indices.contains(index) else { return }
+        guard let items = debugActivePage?.items, items.indices.contains(index) else { return }
         toggle(items[index].id)
     }
 
@@ -931,31 +875,191 @@ extension MediaPickerViewController {
     }
 
     /// `-upload-album <index>` opens on that album, `-upload-pick 0,2,5` chooses
-    /// those tiles, and `-upload-expand` opens on the large detent — the
-    /// simulator cannot tap a grid or drag a sheet, and a screenshot of an empty
-    /// selection shows neither the numbering nor the tray.
+    /// those tiles, and `-upload-edit` goes straight on to the editor — the
+    /// simulator cannot tap a grid or press a bar item, and a screenshot of an
+    /// empty selection shows neither the numbering nor the tray.
     func runDebugHooks() {
         let arguments = ProcessInfo.processInfo.arguments
         if let raw = Self.debugArgument("-upload-album", in: arguments),
            let index = Int(raw), albums.indices.contains(index) {
             albumBar?.select(index)
-            Task { await showItems(in: albums[index]) }
+            pager?.setActivePage(index, animated: false)
+            Task { await loadAlbum(at: index) }
         }
-        if arguments.contains("-upload-expand"), let sheet = navigationController?.sheetPresentationController {
-            // The axis is NOT set here. Changing the detent lays the sheet out,
-            // and that pass decides — a debug hook that carried its own copy of
-            // the rule would be the one place it could drift.
-            sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
+        if let picks = Self.debugArgument("-upload-pick", in: arguments) {
+            for index in picks.split(separator: ",").compactMap({ Int($0) }) {
+                debugTapItem(at: index)
+            }
         }
-        guard let picks = Self.debugArgument("-upload-pick", in: arguments) else { return }
-        for index in picks.split(separator: ",").compactMap({ Int($0) }) {
-            debugTapItem(at: index)
+        // Last, so it carries the picks made above with it. Without this the
+        // editor is unreachable on a simulator: the grid cannot be tapped and
+        // neither can "Next".
+        if arguments.contains("-upload-edit") { goNext() }
+        // ⚠️ **A ROUND TRIP, NOT A COORDINATE TAP.** The bar-state probe fires on
+        // the picker's `viewDidAppear`, so the defect only shows after going to
+        // the editor AND COMING BACK — and this has to be replayable identically
+        // before and after a fix. A tap on the chevron is not an instrument: it
+        // has already, on this branch, hit the wrong simulator once and landed a
+        // zero-distance gesture on the navigation bar another time.
+        if arguments.contains("-upload-edit-return") {
+            goNext()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.navigationController?.popViewController(animated: true)
+            }
         }
+        if arguments.contains("-upload-bench-slides") { runSlideBench() }
+        if arguments.contains("-upload-bench-drag") { runDragBench() }
     }
 
     private static func debugArgument(_ flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag), arguments.count > index + 1 else { return nil }
         return arguments[index + 1]
+    }
+
+    /// ⚠️ **A BENCH, NOT A DEMO.** Walks every album once at a fixed cadence —
+    /// which is what the viewer does sliding across the strip, and the case
+    /// reported as costly — and stamps the window on stderr so the host can
+    /// bracket its sampling on the app's own clock.
+    ///
+    /// ⚠️ **ONE LAP, AND THE STAGING RULE IS WHY.** The arrival is armed once per
+    /// album (`stagedAlbums`) and `setItems` only re-arms when a page goes from
+    /// empty to filled, so a second lap would animate NOTHING and quietly halve
+    /// whatever the run appeared to measure. One visit per album is also exactly
+    /// what a real session does.
+    ///
+    /// Paired with `-upload-no-reveal`, the identical walk runs without the
+    /// animation: the difference between the two is the animation's share, which
+    /// is the number worth having before optimising anything.
+    private func runSlideBench() {
+        let count = albums.count
+        let step: TimeInterval = 0.9
+        // ⚠️ **FRAME TIMES, NOT CUMULATIVE CPU — THE FIRST INSTRUMENT WAS BLIND.**
+        // Measuring app CPU and render-server CPU across this same walk found
+        // nothing: medians of 1.82s with the animation against 2.04s without,
+        // inside a run-to-run spread of 1.41-2.84s, and 0.35s of render server
+        // either way. That cannot see this cost — group opacity, path-less
+        // shadows and squircle masks are GPU work, and on a simulator that lands
+        // on the Mac's GPU, where neither counter looks. A long frame is a long
+        // frame whichever unit produced it.
+        BenchFrameTimer.shared.start()
+        benchStamp("start albums=\(count) step=\(step)")
+        for index in 0..<count {
+            DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(index)) { [weak self] in
+                guard let self else { return }
+                albumBar?.select(index)
+                pager?.setActivePage(index, animated: true)
+                Task { await self.loadAlbum(at: index) }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(count) + 0.8) { [weak self] in
+            self?.benchStamp("done " + BenchFrameTimer.shared.stop())
+        }
+    }
+
+    /// ⚠️ **THE FINGER'S PATH, NOT THE PROGRAMMATIC ONE — AND THAT DIFFERENCE IS
+    /// THE WHOLE POINT.** `-upload-bench-slides` turns pages with
+    /// `setActivePage`, which never drives `onProgress`. A drag does, every
+    /// frame, and `onProgress` calls `revealPage` → `playReveal()` — so the one
+    /// code path the viewer described as costly is INVISIBLE to that bench,
+    /// which is a fair reading of why two instruments came back null.
+    ///
+    /// This scrubs across each boundary in 1/60 steps and then lets go, which is
+    /// what a thumb does. Same `[bench] start`/`done` markers, so the host
+    /// harness reads it unchanged.
+    private func runDragBench() {
+        let count = albums.count
+        guard count > 1 else { benchStamp("done VOID-one-album"); return }
+        let perPage: TimeInterval = 0.35
+        let steps = 21
+        let settle: TimeInterval = 0.55
+        BenchFrameTimer.shared.start()
+        benchStamp("start drag albums=\(count) perPage=\(perPage)")
+
+        var clock: TimeInterval = 0
+        for page in 0..<(count - 1) {
+            let base = clock
+            for step in 0...steps {
+                let progress = CGFloat(page) + CGFloat(step) / CGFloat(steps)
+                let at = base + perPage * Double(step) / Double(steps)
+                DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+                    self?.pager?.scrub(to: progress)
+                }
+            }
+            clock = base + perPage
+            DispatchQueue.main.asyncAfter(deadline: .now() + clock) { [weak self] in
+                self?.pager?.settleAfterScrub(velocityInPages: 0)
+            }
+            clock += settle
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + clock + 0.6) { [weak self] in
+            self?.benchStamp("done " + BenchFrameTimer.shared.stop())
+        }
+    }
+
+    /// stderr, unbuffered. stdout is BLOCK-buffered into a file sink in an app
+    /// that never exits, so a `print` here would sit in a 4KB buffer and the run
+    /// would read as a silent harness — which has already cost this branch two
+    /// filmed takes.
+    private func benchStamp(_ what: String) {
+        let stamp = String(format: "%.3f", ProcessInfo.processInfo.systemUptime)
+        FileHandle.standardError.write(Data("[bench] t=\(stamp) \(what)\n".utf8))
+    }
+}
+
+/// Per-frame intervals across a benched window.
+///
+/// ⚠️ **THIS EXISTS BECAUSE CUMULATIVE CPU MEASURED NOTHING.** App CPU and
+/// render-server CPU over the identical album walk came back 1.82s with the
+/// arrival animation against 2.04s without — the animated run LOWER — inside a
+/// run-to-run spread of 1.41-2.84s. The effect under investigation is GPU work
+/// (group opacity forcing an offscreen composite, path-less shadows, squircle
+/// masks), and on a simulator that lands on the Mac's GPU where those counters
+/// do not look. Frame duration is agnostic: a long frame is a long frame
+/// whichever unit produced it.
+///
+/// `NSObject` because `#selector` requires it; `@MainActor` because a
+/// `static let shared` of a non-Sendable class is an error under strict
+/// concurrency — and a display link's callbacks belong on the main run loop.
+@MainActor
+final class BenchFrameTimer: NSObject {
+    static let shared = BenchFrameTimer()
+
+    private var link: CADisplayLink?
+    private var last: CFTimeInterval = 0
+    private var deltas: [Double] = []
+
+    func start() {
+        link?.invalidate()
+        deltas.removeAll(keepingCapacity: true)
+        deltas.reserveCapacity(4096)
+        last = 0
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        if last > 0 { deltas.append(link.timestamp - last) }
+        last = link.timestamp
+    }
+
+    /// ⚠️ **THE DENOMINATOR IS IN THE LINE.** `frames=0` is a display link that
+    /// never ticked — a broken instrument — not a run with nothing to draw, and
+    /// the two must never read alike. An empty instrument has already passed for
+    /// a clean result four times on this branch.
+    func stop() -> String {
+        link?.invalidate()
+        link = nil
+        guard deltas.count > 1 else { return "frames=\(deltas.count) VOID-no-ticks" }
+        let sorted = deltas.sorted()
+        let mean = deltas.reduce(0, +) / Double(deltas.count)
+        let p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        let nominal = 1.0 / 60.0
+        let long = deltas.filter { $0 > nominal * 1.5 }.count
+        return String(
+            format: "frames=%ld mean=%.2fms p95=%.2fms max=%.2fms long=%ld",
+            deltas.count, mean * 1000, p95 * 1000, sorted[sorted.count - 1] * 1000, long
+        )
     }
 }
 #endif

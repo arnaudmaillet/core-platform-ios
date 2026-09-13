@@ -347,14 +347,18 @@ struct TextPostComposePageTests {
         let page = try await openPage()
 
         let leading = try #require(page.composer.toolbarItems?.first?.customView)
-        #expect(leading.accessibilityLabel == "Add a sound and a cover")
+        // ⚠️ The subtitle went when the pill moved to DesignSystem as
+        // `SoundPillView` (2026-09-12), so the label is the title alone now. The
+        // name carries the whole assertion here — nothing else identifies the
+        // footer's leading slot.
+        #expect(leading.accessibilityLabel == "Add a sound")
     }
 
     /// While the keyboard is up it covers the footer, so the sound pill rides in
     /// the top bar inboard of Drafts — and goes home with the keyboard.
     @Test func theSoundPillFollowsTheKeyboard() async throws {
         let page = try await openPage()
-        let label = "Add a sound and a cover"
+        let label = "Add a sound"
         func onTop() -> Bool {
             (page.composer.navigationItem.rightBarButtonItems ?? []).contains { $0.customView?.accessibilityLabel == label }
         }

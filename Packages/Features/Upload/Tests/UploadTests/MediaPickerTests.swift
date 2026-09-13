@@ -1,3 +1,4 @@
+import DesignSystem
 import Testing
 import UIKit
 @testable import Upload
@@ -124,6 +125,10 @@ struct MediaPickerTests {
             return access
         }
 
+        /// Nothing to present against a stub — the seam exists so the picker can
+        /// offer the system sheet without importing `Photos`.
+        func presentLimitedPicker(from host: UIViewController) {}
+
         func albums() async -> [MediaLibraryAlbum] {
             if albumDelayMS > 0 {
                 try? await Task.sleep(for: .milliseconds(albumDelayMS))
@@ -177,9 +182,41 @@ struct MediaPickerTests {
         window.rootViewController = navigation
         window.isHidden = false
         window.layoutIfNeeded()
-        try await settle(until: { !picker.debugItems.isEmpty || !picker.debugAlbumTitles.isEmpty })
+        // ⚠️ ITEMS, OR A SCREEN THAT HAS STOPPED WORKING — NOT "titles yet".
+        // `showAlbums` now runs BEFORE the first album is fetched, because the
+        // pages have to exist before anything can be loaded into one. Waiting on
+        // the titles would hand every test a picker whose visible page is still
+        // empty, and `debugTapItem` would quietly toggle nothing.
+        try await settle(until: { !picker.debugItems.isEmpty || !picker.debugIsLoading })
         window.layoutIfNeeded()
         return Screen(picker: picker, navigation: navigation, window: window)
+    }
+
+    /// ⚠️ **LIMITED IS A SUCCESS, SO THE GRID STAYS AND THE NOTICE SITS OVER IT.**
+    /// `MediaLibraryAccess` records that treating limited access as a refusal
+    /// would put an "allow access" wall in front of photos the viewer has already
+    /// agreed to share. So this asserts both halves: the banner is up, AND the
+    /// album still loaded behind it.
+    ///
+    /// The reserve is asserted too, because a banner laid OVER the grid without
+    /// one would hide the first row permanently — it would cover the very photos
+    /// it is talking about.
+    @Test func limitedAccessOffersTheNoticeWithoutTakingTheGridAway() async throws {
+        let screen = try await open(Self.library(photos: 6, access: .limited, grantOnRequest: .limited))
+
+        #expect(screen.picker.debugAccessNoticeIsHidden == false, "the banner is up")
+        #expect(!screen.picker.debugItems.isEmpty, "and the album loaded behind it")
+        #expect(screen.picker.debugNoticeReserve > 0, "the first row is not left under it")
+    }
+
+    /// ⚠️ **THE HALF THAT MAKES THE OTHER TEST MEAN ANYTHING.** A banner mounted
+    /// unconditionally would pass `limitedAccessOffers…` exactly as well. Only
+    /// this says it is driven by the access at all.
+    @Test func fullAccessShowsNoNoticeAtAll() async throws {
+        let screen = try await open(Self.library(photos: 6, access: .granted, grantOnRequest: .granted))
+
+        #expect(screen.picker.debugAccessNoticeIsHidden, "nothing to offer when everything is shared")
+        #expect(screen.picker.debugNoticeReserve == 0, "and no room claimed from the grid")
     }
 
     /// The library answers on its own turn, so the screen is given one.
@@ -224,6 +261,64 @@ struct MediaPickerTests {
         let marks = Self.labels(in: bar)
         #expect(marks.contains("99+"), "the ceiling, not the figure: \(marks)")
         #expect(screen.picker.debugAlbumTitles.first == "Recents", "and no count in the title")
+    }
+
+    /// An album's count is how many photographs are in it, not how many things
+    /// want an answer — so it does not wear the unread pill's red.
+    @Test func theAlbumCountsAreNotNotificationRed() async throws {
+        let screen = try await open(Self.library(photos: 7, videos: 3))
+
+        let bar = try #require(
+            (screen.picker.toolbarItems ?? []).compactMap(\.customView).first as? PagedTabBar
+        )
+        #expect(bar.badgeTint != .systemRed, "not the alarm colour")
+        #expect(bar.badgeTint == .systemBlue)
+    }
+
+    /// The albums are TABS: one page each, and the strip selects between them.
+    @Test func theGalleryIsOnePageForEachAlbum() async throws {
+        let screen = try await open(Self.library(photos: 7, videos: 3))
+
+        #expect(screen.picker.debugPageCount == 2, "Recents and Videos")
+        #expect(screen.picker.debugPager != nil, "and a pager to carry them")
+    }
+
+    /// ⚠️ THE REGRESSION THIS PINS: a tap sets `selectedIndex` and announces
+    /// `.valueChanged`, and by itself nothing else happens at all. The HOST is
+    /// what turns that into a page — and the pill then follows the pages back
+    /// through `onProgress`, which is why this asserts the PAGE and not the
+    /// pill. Where the pill sits given a page is the component's own contract,
+    /// and DesignSystem's suites hold it.
+    @Test func tappingAnAlbumPagesToIt() async throws {
+        let screen = try await open(Self.library(photos: 7, videos: 3))
+        let bar = try #require(
+            (screen.picker.toolbarItems ?? []).compactMap(\.customView).first as? PagedTabBar
+        )
+        screen.window.layoutIfNeeded()
+
+        bar.debugSimulateTap(at: 1)
+
+        #expect(bar.selectedIndex == 1)
+        #expect(screen.picker.debugPager?.activeIndex == 1, "the pages followed the strip")
+    }
+
+    /// An album is read when it is first landed on, not all of them at once —
+    /// opening the picker on a device full of albums should cost one fetch.
+    @Test func anAlbumIsFetchedWhenItIsFirstLandedOn() async throws {
+        let screen = try await open(Self.library(photos: 7, videos: 3))
+        screen.window.layoutIfNeeded()
+        let pager = try #require(screen.picker.debugPager)
+
+        pager.setActivePage(1, animated: false)
+        try await settle(until: { screen.picker.debugItems.count == 3 })
+
+        // ⚠️ HOISTED OUT OF THE MACRO. `allSatisfy` is `rethrows`, and
+        // swift-testing rewrites an `#expect` expression into closures that lose
+        // the non-throwing inference — "call can throw, but it is not marked
+        // with 'try'", reported from inside the expanded macro where no line of
+        // ours appears.
+        let videosOnly = screen.picker.debugItems.allSatisfy(\.isVideo)
+        #expect(videosOnly, "the Videos album, fetched on arrival: \(screen.picker.debugItems)")
     }
 
     @Test func theAlbumStripRidesTheToolbar() async throws {
@@ -292,51 +387,7 @@ struct MediaPickerTests {
         #expect(screen.picker.debugSelection == [chosen[2], chosen[0], chosen[1]])
     }
 
-    // MARK: - The sheet
-
-    /// One row tall, a three-column grid shows a third of a row and scrolls into
-    /// a void. Sideways it says what it is: there is more of the album that way.
-    ///
-    /// ⚠️ AND IT TURNS ON ARRIVAL, NOT ON THE ANNOUNCEMENT. A sheet reports its
-    /// new detent as the drag ends, while the animation towards that height is
-    /// still running — an album that turned then would be seen reflowing as the
-    /// sheet travelled.
-    @Test func theAlbumTurnsSidewaysOnlyOnceTheSheetHasArrived() {
-        let resting = MediaPickerViewController.restingDetentIdentifier
-
-        #expect(
-            MediaPickerViewController.axis(forDetent: resting, height: 352, restingHeight: 352)
-                == .horizontal,
-            "arrived at its resting height"
-        )
-        #expect(
-            MediaPickerViewController.axis(forDetent: resting, height: 700, restingHeight: 352)
-                == .vertical,
-            "still travelling towards it"
-        )
-        #expect(
-            MediaPickerViewController.axis(forDetent: .large, height: 352, restingHeight: 352)
-                == .vertical,
-            "opened, however tall it happens to be in mid-flight"
-        )
-    }
-
-    /// The tray is part of what the sheet rests around, so choosing the first
-    /// photo has to make the resting height taller by exactly the tray AND the
-    /// air kept above it — without that gap the album's last row and the strip
-    /// of chosen thumbnails read as one block with a seam down the middle.
-    @Test func theSheetRestsTallerOnceTheTrayIsUp() async throws {
-        let screen = try await open(Self.library(photos: 6))
-        let bare = screen.picker.debugRestingHeight
-
-        screen.picker.debugTapItem(at: 0)
-
-        let expected = bare + SelectedMediaTrayView.height + MediaPickerViewController.debugTrayGap
-        #expect(
-            screen.picker.debugRestingHeight == expected,
-            "grew by the tray and its gap, nothing else: \(bare) → \(screen.picker.debugRestingHeight)"
-        )
-    }
+    // MARK: - The grid
 
     /// The gap at the edges and the gap between two tiles are one measurement,
     /// so three tiles and four gaps fill the width with nothing left over.
@@ -409,5 +460,143 @@ struct MediaPickerTests {
         // ⚠️ A refusal ends the wait too. A spinner left turning over an empty
         // state is the most convincing way to look permanently broken.
         #expect(picker.debugIsLoading == false, "and it stops saying it is working")
+    }
+}
+
+/// **A PAGE OWES ITS REVEAL UNTIL IT HAS SOMEWHERE TO PLAY IT.** The album is
+/// filled while the sheet is still presenting, and a `UIView.animate` committed
+/// without an on-screen rectangle is not slow — it is instant. That is how the
+/// spring was swallowed for six takes while every test stayed green, so what is
+/// pinned here is the DEBT rather than the animation: a page that cannot yet
+/// play its reveal must keep it, not spend it.
+@MainActor
+struct MediaAlbumPageRevealTests {
+    private static func items(_ count: Int) -> [MediaLibraryItem] {
+        (0..<count).map { MediaLibraryItem(id: "photo-\($0)", kind: .photo) }
+    }
+
+    @Test func aFilledPageOwesAReveal() {
+        let page = MediaAlbumPageView()
+        // ⚠️ STATED, NOT INHERITED FROM THE SESSION. Suites run in parallel and
+        // any of them that opens a picker would otherwise have spent this
+        // page's arrival before the test got to it.
+        page.debugStagesArrival = true
+
+        #expect(page.awaitingReveal == false, "nothing is owed before it is filled")
+
+        page.setItems(Self.items(9), albumID: "recents")
+
+        #expect(page.awaitingReveal, "and it is owed from the moment it is")
+    }
+
+    /// ⚠️ THE REGRESSION THIS EXISTS FOR. A page is filled long before the sheet
+    /// has finished presenting; a reveal spent there leaves the viewer exactly
+    /// the plain arrival the spring was meant to replace.
+    @Test func aPageWithNoWindowKeepsTheDebtInsteadOfSpendingIt() {
+        let page = MediaAlbumPageView()
+        page.debugStagesArrival = true
+        page.frame = CGRect(x: 0, y: 0, width: 390, height: 700)
+        page.setItems(Self.items(9), albumID: "recents")
+
+        page.playReveal()
+
+        #expect(page.awaitingReveal, "no window, no rectangle — and the debt survives")
+    }
+
+    @Test func aPageOnScreenSpendsItOnce() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let page = MediaAlbumPageView()
+        page.debugStagesArrival = true
+        page.frame = window.bounds
+        window.addSubview(page)
+        window.isHidden = false
+        window.layoutIfNeeded()
+        page.setItems(Self.items(9), albumID: "recents")
+        window.layoutIfNeeded()
+
+        page.playReveal()
+        #expect(page.awaitingReveal == false, "spent, once it had somewhere to play")
+
+        page.playReveal()
+        #expect(page.awaitingReveal == false, "and asking twice is not an error")
+    }
+
+    /// ⚠️ THE REGRESSION MEASURED ON DEVICE: opening the sheet, cancelling, and
+    /// opening it again played the arrival a SECOND time (`arms=2, plays=2`).
+    /// A reopened sheet is not an arrival — the viewer has already seen the
+    /// library — but a fresh picker builds fresh, empty pages, so only
+    /// session-scoped state can tell the two apart.
+    @Test func aSecondOpeningDoesNotStageTheArrivalAgain() {
+        let album = "reopened-\(UUID().uuidString)"
+        let first = MediaAlbumPageView()
+        first.debugStagesArrival = true
+        first.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let window = UIWindow(frame: first.frame)
+        window.addSubview(first)
+        window.isHidden = false
+        window.layoutIfNeeded()
+        first.setItems(Self.items(9), albumID: album)
+        window.layoutIfNeeded()
+        first.playReveal()
+
+        // A fresh page for the SAME album, as a reopened sheet would build — and
+        // it asks the session rather than being told.
+        let second = MediaAlbumPageView()
+        second.setItems(Self.items(9), albumID: album)
+
+        #expect(first.awaitingReveal == false, "the first one spent its arrival")
+        #expect(second.awaitingReveal == false, "and the same album does not get another")
+    }
+
+    /// ⚠️ **THE BUG THE SINGLE FLAG CAUSED.** Staging was one `Bool` for the
+    /// whole process, so Recents consumed it and every other tab was suppressed
+    /// for good — the animation looked like a Recents-only feature. A DIFFERENT
+    /// album must still get its own arrival.
+    @Test func anotherAlbumStillStagesItsOwnArrival() {
+        let recents = MediaAlbumPageView()
+        recents.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let window = UIWindow(frame: recents.frame)
+        window.addSubview(recents)
+        window.isHidden = false
+        window.layoutIfNeeded()
+        recents.setItems(Self.items(9), albumID: "tab-recents-\(UUID().uuidString)")
+        window.layoutIfNeeded()
+        recents.playReveal()
+
+        let videos = MediaAlbumPageView()
+        videos.setItems(Self.items(9), albumID: "tab-videos-\(UUID().uuidString)")
+
+        #expect(recents.awaitingReveal == false, "the first tab spent its own")
+        #expect(videos.awaitingReveal, "and the second tab is still owed one")
+    }
+
+    /// ⚠️ **THE DEBT FLAG IS NOT THE ANIMATION, AND FILM PROVED THE DIFFERENCE.**
+    /// Every other reveal test asserts that `awaitingReveal` flips — which is
+    /// precisely what a guard passing over an EMPTY `visibleCells` also does: it
+    /// spends the debt, un-hides the grid and animates nothing. On device that is
+    /// a pop, and every one of those tests stayed green through it. Per-tile
+    /// luminance at 48fps: 992 → final in ONE frame, stagger 0.000s.
+    @Test func aRevealOnScreenAnimatesTheCellsItHas() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let page = MediaAlbumPageView()
+        page.debugStagesArrival = true
+        page.frame = window.bounds
+        window.addSubview(page)
+        window.isHidden = false
+        window.layoutIfNeeded()
+        page.setItems(Self.items(9), albumID: "revealed-\(UUID().uuidString)")
+        window.layoutIfNeeded()
+
+        page.playReveal()
+
+        #expect(page.debugRevealedCells > 0, "a reveal that animates nothing is a pop")
+    }
+
+    @Test func anEmptyAlbumOwesNothing() {
+        let page = MediaAlbumPageView()
+
+        page.setItems([], albumID: "empty")
+
+        #expect(page.awaitingReveal == false, "there is nothing to spring in")
     }
 }

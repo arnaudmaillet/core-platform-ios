@@ -42,11 +42,23 @@ public protocol PostComposing: Sendable {
     /// so the feed prepends it. Returns that same entry, so a screen can show
     /// the post it just made without fetching it back. Throws on any failed
     /// step; nothing partial is broadcast.
+    /// ⚠️ **PLURAL SINCE 2026-09-12, BECAUSE THE PICKER ALWAYS WAS.** The media
+    /// picker lets a viewer choose up to twenty and `post.v1.CreatePostRequest`
+    /// takes `attachments` repeated with `kind = .carousel`, but this seam took
+    /// exactly one — so a twenty-item selection could only ever have published
+    /// its first, silently. The contract was never the limit; this signature was.
     @discardableResult
-    func publish(media: ComposeMedia?, caption: String, as author: AuthorSummary?) async throws -> FeedEntry
+    func publish(media: [ComposeMedia], caption: String, as author: AuthorSummary?) async throws -> FeedEntry
 }
 
 public extension PostComposing {
+    /// One item, or none — what the text-post path and every caller before the
+    /// carousel says. Kept so widening the requirement churned nothing.
+    @discardableResult
+    func publish(media: ComposeMedia?, caption: String, as author: AuthorSummary?) async throws -> FeedEntry {
+        try await publish(media: media.map { [$0] } ?? [], caption: caption, as: author)
+    }
+
     /// As the account's first profile — what every post was published as before
     /// a screen could say who its author is.
     @discardableResult
@@ -107,9 +119,9 @@ public actor PostComposer: PostComposing {
     }
 
     @discardableResult
-    public func publish(media: ComposeMedia?, caption: String, as author: AuthorSummary?) async throws -> FeedEntry {
+    public func publish(media: [ComposeMedia], caption: String, as author: AuthorSummary?) async throws -> FeedEntry {
         let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard media != nil || !trimmedCaption.isEmpty else {
+        guard !media.isEmpty || !trimmedCaption.isEmpty else {
             throw ComposeError.emptyPost
         }
         let viewer = try await resolveViewer(as: author)
@@ -117,30 +129,35 @@ public actor PostComposer: PostComposing {
         // `server` is what CreatePost references (the delivery URL); `optimistic`
         // is what the feed renders right away — for video that's the local file
         // so the author's own clip plays instantly, before any network fetch.
-        var serverAttachment: MediaAttachment?
-        var optimisticAttachment: MediaAttachment?
-        var imageSeed: (image: UIImage, url: URL)?
+        var serverAttachments: [MediaAttachment] = []
+        var optimisticAttachments: [MediaAttachment] = []
+        var imageSeeds: [(image: UIImage, url: URL)] = []
 
-        switch media {
-        case .image(let picked):
-            let attachment = try await uploadImage(picked, ownerID: viewer.accountID)
-            serverAttachment = attachment
-            optimisticAttachment = attachment
-            if let url = attachment.url { imageSeed = (picked.image, url) }
-        case .video(let picked):
-            let uploaded = try await uploadVideo(picked, ownerID: viewer.accountID)
-            serverAttachment = uploaded.server
-            optimisticAttachment = uploaded.optimistic
-        case .none:
-            break
+        // ⚠️ **IN ORDER, AND ONE AT A TIME.** The array's order IS the carousel's
+        // order — `post.v1` has no per-attachment index — so these cannot be
+        // uploaded concurrently and collected as they finish. A `TaskGroup` here
+        // would publish the viewer's pictures in whatever order the network
+        // happened to return them.
+        for item in media {
+            switch item {
+            case .image(let picked):
+                let attachment = try await uploadImage(picked, ownerID: viewer.accountID)
+                serverAttachments.append(attachment)
+                optimisticAttachments.append(attachment)
+                if let url = attachment.url { imageSeeds.append((picked.image, url)) }
+            case .video(let picked):
+                let uploaded = try await uploadVideo(picked, ownerID: viewer.accountID)
+                serverAttachments.append(uploaded.server)
+                optimisticAttachments.append(uploaded.optimistic)
+            }
         }
 
-        let attachmentInputs = serverAttachment.map { [makeAttachmentInput(from: $0)] } ?? []
+        let attachmentInputs = serverAttachments.map { makeAttachmentInput(from: $0) }
         let postID = try await createDraft(
             profileID: viewer.author.id,
             caption: trimmedCaption,
             attachments: attachmentInputs,
-            hasMedia: serverAttachment != nil
+            hasMedia: !serverAttachments.isEmpty
         )
         try await publishDraft(postID: postID, profileID: viewer.author.id)
 
@@ -149,18 +166,18 @@ public actor PostComposer: PostComposing {
                 id: postID,
                 authorID: viewer.author.id,
                 caption: trimmedCaption,
-                attachments: optimisticAttachment.map { [$0] } ?? [],
+                attachments: optimisticAttachments,
                 publishedAt: now()
             ),
             author: viewer.author,
             likeCount: 0
         )
 
-        // Seed the just-picked image under its CDN URL so the feed renders it
-        // instantly, before any network fetch of that URL. (Video plays from the
-        // local file URL carried on the optimistic attachment instead.)
-        if let imageSeed {
-            await imagePipeline.store(imageSeed.image, for: imageSeed.url)
+        // Seed the just-picked images under their CDN URLs so the feed renders
+        // them instantly, before any network fetch. (Video plays from the local
+        // file URL carried on the optimistic attachment instead.)
+        for seed in imageSeeds {
+            await imagePipeline.store(seed.image, for: seed.url)
         }
         await composedChannel.publish(entry)
         return entry

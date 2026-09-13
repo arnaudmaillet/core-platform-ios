@@ -65,6 +65,17 @@ protocol MediaLibraryReading: AnyObject {
     /// Asks, if it has never been asked, and reports what we are left with.
     func requestAccess() async -> MediaLibraryAccess
 
+    /// Presents the system sheet that widens a LIMITED selection, hosted by
+    /// `host`.
+    ///
+    /// ⚠️ **IT LIVES BEHIND THIS SEAM FOR THE SAME REASON EVERYTHING ELSE DOES.**
+    /// The picker screen has never imported `Photos`, and the one call that would
+    /// have made it — `PHPhotoLibrary.shared().presentLimitedLibraryPicker` — is
+    /// exactly the sort that quietly drags a framework across a boundary because
+    /// it is one line. The stand-in library answers it with nothing, which is how
+    /// the simulator path stays honest.
+    func presentLimitedPicker(from host: UIViewController)
+
     /// The albums to offer, in the order the selector shows them: "Recents"
     /// leads. Empty ones are left out — a pill reading "(0)" offers nothing.
     func albums() async -> [MediaLibraryAlbum]

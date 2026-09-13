@@ -1,4 +1,10 @@
 import Photos
+// ⚠️ `presentLimitedLibraryPicker(from:)` IS PhotosUI, NOT Photos. It reads like
+// a `PHPhotoLibrary` method and is spelled like one, but the framework that
+// declares that extension is PhotosUI — importing only Photos fails with "value
+// of type 'PHPhotoLibrary' has no member", which sounds like a wrong API rather
+// than a missing import.
+import PhotosUI
 import UIKit
 
 /// The real library: Photos.
@@ -8,7 +14,13 @@ import UIKit
 /// string — but it also draws its own chrome, so it cannot number a selection,
 /// carry a tray, or put album pills in a toolbar. Reading `PHAsset` ourselves is
 /// what buys that screen, and `NSPhotoLibraryUsageDescription` in `App/Info.plist`
-/// is the price. Nothing here writes to the library.
+/// is the price.
+///
+/// ⚠️ **THIS USED TO SAY "NOTHING HERE WRITES TO THE LIBRARY", AND THAT IS NO
+/// LONGER TRUE IN DEBUG.** `albums()` first runs `DebugPhotoAlbumSeeder`, which
+/// behind `-seed-photo-albums` CREATES albums and files existing assets into
+/// them — the only way to get user albums onto a simulator. In release builds
+/// the seeder does not exist and this type still only reads.
 final class PhotosMediaLibrary: MediaLibraryReading {
     private let images = PHCachingImageManager()
 
@@ -68,6 +80,14 @@ final class PhotosMediaLibrary: MediaLibraryReading {
         return Self.access(from: status)
     }
 
+    /// ⚠️ **THE ONE PLACE THIS CALL BELONGS.** Widening a limited selection is a
+    /// `Photos` affair, and this file is the only one in the feature that imports
+    /// it. Adding photos here never leaves the app — Settings does, and asks the
+    /// viewer to find their way back — which is why the notice offers this first.
+    func presentLimitedPicker(from host: UIViewController) {
+        PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: host)
+    }
+
     private static func access(from status: PHAuthorizationStatus) -> MediaLibraryAccess {
         switch status {
         case .notDetermined: .undetermined
@@ -81,6 +101,14 @@ final class PhotosMediaLibrary: MediaLibraryReading {
     // MARK: - Contents
 
     func albums() async -> [MediaLibraryAlbum] {
+        // ⚠️ A SIMULATOR HAS NO USER ALBUMS, so the branch below finds nothing
+        // and the strip shows smart albums alone. Behind `-seed-photo-albums`
+        // this makes a few first — see `DebugPhotoAlbumSeeder` for why no
+        // command-line tool can do it.
+        #if DEBUG
+        await DebugPhotoAlbumSeeder.seedIfAsked()
+        #endif
+
         var found: [MediaLibraryAlbum] = []
         var collections: [String: PHAssetCollection] = [:]
 

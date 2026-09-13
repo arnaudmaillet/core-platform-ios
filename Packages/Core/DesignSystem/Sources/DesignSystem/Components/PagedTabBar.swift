@@ -1221,6 +1221,21 @@ public final class PagedTabBar: UIControl {
         }
     }
 
+    /// The colour every badge on this bar is filled with. Notification red by
+    /// default — the unread pill, which is what the hosts this was written for
+    /// are saying.
+    ///
+    /// ⚠️ **RE-APPLIED WHENEVER SEGMENTS ARE REBUILT.** `setTitles` throws away
+    /// the segments and with them their badges, so a colour stated once would
+    /// leave with the segment that wore it — exactly the trap the counts
+    /// themselves carry. `buildSegments` states it again for each new segment.
+    public var badgeTint: UIColor = .systemRed {
+        didSet {
+            guard badgeTint != oldValue else { return }
+            for segment in segments { segment.setBadgeTint(badgeTint) }
+        }
+    }
+
     /// The count beside a segment's title; 0 hides it. Numeric by definition —
     /// the convenience for hosts that count things.
     public func setBadge(_ count: Int, at index: Int) {
@@ -1845,6 +1860,7 @@ public final class PagedTabBar: UIControl {
                 // `UIControl` this used to be never fired it at all.
                 for: .primaryActionTriggered
             )
+            segment.setBadgeTint(badgeTint)
             row.addArrangedSubview(segment)
             return segment
         }
@@ -2301,6 +2317,10 @@ private final class SegmentView: UIButton {
         }
     }
 
+    func setBadgeTint(_ color: UIColor) {
+        badge.setTint(color)
+    }
+
     func setBadge(_ style: PagedTabBar.BadgeStyle) {
         badge.apply(style)
         badge.isHidden = !style.isVisible
@@ -2458,6 +2478,17 @@ private final class BadgeView: UIView {
     /// fill is also re-derived on every selection change.
     private var style: PagedTabBar.BadgeStyle = .count(0)
 
+    /// The fill, which the host may state. Notification red by default, because
+    /// that is what the two hosts this was written for are saying: something is
+    /// waiting for you. A host counting things that are merely THERE — the
+    /// photographs in an album — wants a different colour, and says so.
+    private var tint: UIColor = .systemRed
+
+    func setTint(_ color: UIColor) {
+        tint = color
+        applyFill()
+    }
+
     func apply(_ style: PagedTabBar.BadgeStyle) {
         self.style = style
         defer { applyFill() }
@@ -2513,13 +2544,11 @@ private final class BadgeView: UIView {
     /// arrangement that once resolved `.systemBackground` to the wrong end of
     /// the spectrum in dark mode (see the type comment) — so it was checked in
     /// both appearances rather than reasoned about.
+    /// Both styles wear the same fill — a dot is a count with the number taken
+    /// away, not a quieter thing — so there is one statement rather than a
+    /// switch whose arms had become identical.
     private func applyFill() {
-        switch style {
-        case .count:
-            backgroundColor = .systemRed
-        case .dot:
-            backgroundColor = .systemRed
-        }
+        backgroundColor = tint
     }
 }
 

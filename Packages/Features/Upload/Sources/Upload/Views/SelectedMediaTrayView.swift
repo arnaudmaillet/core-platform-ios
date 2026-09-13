@@ -15,8 +15,11 @@ import UIKit
 /// a `.systemThinMaterial` band inside this view, which read as a grey plate
 /// with a hard edge; a screen-owned blur behind it read as a plate too. What
 /// the album actually wants is to be SEEN through this band and to run out of
-/// opacity as it passes under — which is the grid's own bottom fade, not
-/// anything this view draws. See `MediaPickerViewController.updateGridFade()`.
+/// definition as it passes under — which is a progressive blur hung from this
+/// strip's top edge by the picker, not anything this view draws. See
+/// `ProgressiveBlurView`; it replaced a per-page gradient fade on 2026-09-12,
+/// when the album started running on to the foot of the screen instead of
+/// stopping at the strip.
 final class SelectedMediaTrayView: UIView {
     private enum Metrics {
         static let thumbnail: CGFloat = 56
@@ -70,8 +73,13 @@ final class SelectedMediaTrayView: UIView {
         )
         let section = NSCollectionLayoutSection(group: group)
         section.interGroupSpacing = Spacing.sm
+        // ⚠️ **NO HORIZONTAL INSET HERE — IT IS COMPUTED, NOT FIXED.** The strip
+        // centres its thumbnails when they do not fill it (see
+        // `centreContentIfItFits`), which means the side room depends on the
+        // count and the width. Stating `Spacing.lg` here as well would add to
+        // that and push a centred row off-centre by exactly one margin.
         section.contentInsets = NSDirectionalEdgeInsets(
-            top: Spacing.sm, leading: Spacing.lg, bottom: Spacing.sm, trailing: Spacing.lg
+            top: Spacing.sm, leading: 0, bottom: Spacing.sm, trailing: 0
         )
         let layout = UICollectionViewCompositionalLayout(section: section, configuration: configuration)
 
@@ -197,10 +205,11 @@ final class SelectedMediaTrayView: UIView {
         guard grab.state == .began || grab.state == .changed else { return }
         let took = collectionView.beginInteractiveMovementForItem(at: indexPath)
         #if DEBUG
-        // Behind `-upload-log-sheet`, like the sheet's own diagnostics: a press
-        // that produces nothing is indistinguishable from one that was never
-        // delivered, and guessing between the two is what cost five builds on
-        // the resting detent.
+        // Behind `-upload-log-sheet`, which is now this flag's ONLY user: the
+        // picker's own sheet diagnostics went out with the resting detent. A
+        // press that produces nothing is indistinguishable from one that was
+        // never delivered, and guessing between those two is what cost five
+        // builds while that detent was being fitted.
         if ProcessInfo.processInfo.arguments.contains("-upload-log-sheet") {
             NSLog("[tray] began item=%d took=%@", indexPath.item, took ? "yes" : "no")
         }
@@ -224,6 +233,34 @@ final class SelectedMediaTrayView: UIView {
         snapshot.appendSections([0])
         snapshot.appendItems(ids)
         dataSource.apply(snapshot, animatingDifferences: animated)
+        // The count is half the centring arithmetic, so it is re-run here as
+        // well as on a bounds change.
+        centreContentIfItFits()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        centreContentIfItFits()
+    }
+
+    /// Centres the thumbnails while they fit, and lets them run edge to edge
+    /// once they do not.
+    ///
+    /// ⚠️ **A CONTENT INSET, NOT AN ALIGNMENT.** This strip is a collection
+    /// view, so there is no stack `alignment` to set: with a short selection the
+    /// content is simply narrower than the strip and sits against the leading
+    /// edge. The side room is therefore computed — half the slack — and floors
+    /// at `Spacing.lg` so a full strip keeps its normal margin and still scrolls
+    /// to both ends.
+    private func centreContentIfItFits() {
+        guard let dataSource, bounds.width > 0 else { return }
+        let count = dataSource.snapshot().numberOfItems
+        guard count > 0 else { return }
+        let content = CGFloat(count) * Metrics.cell + CGFloat(count - 1) * Spacing.sm
+        let side = max(Spacing.lg, (bounds.width - content) / 2)
+        guard abs(collectionView.contentInset.left - side) > 0.5 else { return }
+        collectionView.contentInset.left = side
+        collectionView.contentInset.right = side
     }
 
     /// Brings the newest thumbnail into view, so a choice made from the far end
