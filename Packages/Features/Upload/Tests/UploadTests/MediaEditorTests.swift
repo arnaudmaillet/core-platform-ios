@@ -377,4 +377,48 @@ struct MediaEditorTests {
         }
         return found
     }
+
+    // MARK: - Sliding the pill, not only tapping it
+
+    /// ⚠️ **THE HALF `PagedTabBarPillDragTests` CANNOT REACH.** Those pin that the
+    /// bar announces a landing; nothing there says this screen ever subscribed.
+    /// All three could pass while `MediaEditorViewController` wires nothing at
+    /// all — a green suite over dead code, which this flow has already produced
+    /// more than once.
+    ///
+    /// Reported from a device: sliding the pill onto a category moved the pill and
+    /// left the band showing the previous one until the viewer also tapped it.
+    ///
+    /// ⚠️ **`setProgress`, NOT `select(_:)`.** `select` announces `.valueChanged`
+    /// and would open the band through the tap path — the one that already worked
+    /// — hiding the very thing under test. `setProgress` is what a settle actually
+    /// calls, and it updates `selectedIndex` SILENTLY, which is the whole defect.
+    @Test func aSettledDragOpensTheBandTheWayATapDoes() async throws {
+        let screen = open(Self.items(2))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        let bar = screen.editor.debugCategoryBar
+        // ⚠️ DERIVED, NEVER `categories[3]`. This strip has been reordered once
+        // already, and a hard-coded position would break in silence.
+        let filters = try #require(
+            screen.editor.debugCategoryTitles.firstIndex(of: "Filters"),
+            "the category this test is about must exist"
+        )
+
+        #expect(screen.editor.debugBand.debugIsShowing == false,
+                "witness: the band starts closed, so 'it opened' below means something")
+        #expect(bar.onSettled != nil, "the screen must subscribe, or the bar talks to nobody")
+
+        // Exactly what a settle does: the index moves in silence…
+        bar.setProgress(CGFloat(filters))
+        #expect(bar.selectedIndex == filters, "guard: the silent update really landed")
+        #expect(screen.editor.debugBand.debugIsShowing == false,
+                "…and on its own it still tells the band nothing — that IS the bug")
+
+        // …and then the landing is announced.
+        bar.onSettled?(filters)
+
+        #expect(screen.editor.debugBand.debugIsShowing,
+                "the band follows a slide, without waiting for a tap")
+    }
 }

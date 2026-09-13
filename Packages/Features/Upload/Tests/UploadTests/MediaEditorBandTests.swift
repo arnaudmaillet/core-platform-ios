@@ -206,4 +206,84 @@ struct MediaEditorBandTests {
             "the band still rests on the safe area: \(screen.editor.debugBand.frame)"
         )
     }
+
+    // MARK: - The dissolve behind the chrome
+
+    /// ⚠️ **THE DENOMINATOR FOR THE TWO TESTS AFTER IT.** The dissolve hangs from
+    /// the band's top when the band holds something and from the toolbar's top
+    /// when it does not — but an EMPTY band collapses to `safeArea.bottom -
+    /// Spacing.sm`, only 8pt from the toolbar. Without a real safe area the two
+    /// anchors land close enough that both of the next tests would pass whichever
+    /// constraint were active, which is the same trap this file already records
+    /// for the band itself. This asserts the cases are actually distinguishable.
+    @Test func theTwoAnchorsLandInClearlyDifferentPlaces() {
+        let screen = open(3)
+        let root = screen.editor.view!
+        let empty = screen.editor.debugBackdrop.frame.minY
+
+        let strip = UIView()
+        strip.heightAnchor.constraint(equalToConstant: 64).isActive = true
+        screen.editor.setEditingAccessory(strip)
+        screen.window.layoutIfNeeded()
+        let filled = screen.editor.debugBackdrop.frame.minY
+
+        #expect(root.safeAreaInsets.bottom >= Self.bottomInset,
+                "guard: with no safe area the anchors coincide and nothing below can fail")
+        #expect(empty - filled > 60,
+                "a filled band must start the ramp clearly higher: empty=\(empty) filled=\(filled)")
+    }
+
+    @Test func anEmptyBandHangsTheDissolveFromTheToolbar() {
+        let screen = open(3)
+        let root = screen.editor.view!
+        let safeBottom = root.bounds.height - root.safeAreaInsets.bottom
+        let begins = screen.editor.debugBackdrop.frame.minY
+
+        #expect(abs(begins - safeBottom) < 0.5,
+                "begins at the toolbar's top edge: \(begins) vs \(safeBottom)")
+    }
+
+    @Test func aFilledBandHangsTheDissolveFromTheBand() {
+        let screen = open(3)
+        let strip = UIView()
+        strip.heightAnchor.constraint(equalToConstant: 64).isActive = true
+
+        screen.editor.setEditingAccessory(strip)
+        screen.window.layoutIfNeeded()
+
+        let band = screen.editor.debugBand.frame.minY
+        let begins = screen.editor.debugBackdrop.frame.minY
+        #expect(abs(begins - band) < 0.5,
+                "begins where the controls do: \(begins) vs \(band)")
+    }
+
+    /// ⚠️ **THE FOOT OF THE SCREEN, NOT THE SAFE AREA** — and never hidden. The
+    /// picker's copy of this blur lost its whole band to an `isHidden` once; the
+    /// top anchor is the dial here, visibility is not.
+    @Test func theDissolveReachesTheFootOfTheScreenAndIsNeverHidden() {
+        let screen = open(3)
+        let root = screen.editor.view!
+        let backdrop = screen.editor.debugBackdrop
+
+        #expect(backdrop.isHidden == false)
+        #expect(root.safeAreaInsets.bottom >= Self.bottomInset,
+                "guard: this only differs from the safe area when there IS one")
+        #expect(abs(backdrop.frame.maxY - root.bounds.maxY) < 0.5,
+                "runs past the safe area to the screen's foot: \(backdrop.frame) in \(root.bounds)")
+    }
+
+    /// ⚠️ **ABOVE THE PICTURE, BENEATH THE CHROME.** `pin(to:)` and
+    /// `constrain(in:)` both call `addSubview` first, which would have moved the
+    /// dissolve to the top of the stack and veiled the very controls it exists to
+    /// lift off the picture.
+    @Test func theDissolveSitsAboveThePictureButBeneathTheChrome() throws {
+        let screen = open(3)
+        let subviews = screen.editor.view!.subviews
+        let backdrop = try #require(subviews.firstIndex(of: screen.editor.debugBackdrop))
+        let band = try #require(subviews.firstIndex(of: screen.editor.debugBand))
+        let dots = try #require(subviews.firstIndex(of: screen.editor.debugPageDots))
+
+        #expect(backdrop < band, "the band draws on top of the dissolve")
+        #expect(backdrop < dots, "and so does the indicator")
+    }
 }

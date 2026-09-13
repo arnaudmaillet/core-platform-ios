@@ -138,9 +138,31 @@ final class MediaEditorViewController: UIViewController {
     private let pageDots = MediaPageDotsView()
 
     /// The reserved strip an editing control is put into — see
-    /// `MediaEditorBandView`. Empty today: this round reserves the room, it does
-    /// not fill it.
+    /// `MediaEditorBandView`. It holds the row of looks while "Filters" is the
+    /// chosen category, and collapses to nothing otherwise.
     private let band = MediaEditorBandView()
+
+    /// The dissolve the chrome sits on: clear where it begins, full material at
+    /// the foot of the screen, so the picture runs on underneath and merely loses
+    /// definition as it passes behind the controls.
+    ///
+    /// ⚠️ **IT IS NEVER HIDDEN — THE TOP ANCHOR IS THE DIAL.** The picker learned
+    /// this on its own copy: an earlier cut there set `isHidden` and took the
+    /// whole band away instead of shortening it. Here the two constraints below
+    /// swap, and the view stays.
+    private let backdrop = ProgressiveBlurView()
+
+    /// Where the dissolve begins when the band is holding something: the band's
+    /// own top edge, so the ramp starts exactly where the controls do.
+    private var backdropFromBand: NSLayoutConstraint!
+
+    /// And where it begins when the band is empty: the top of the toolbar.
+    ///
+    /// ⚠️ **THESE ARE NOT THE SAME POINT, WHICH IS WHY THERE ARE TWO.** An empty
+    /// band collapses to zero height at `safeArea.bottom - Spacing.sm`, so hanging
+    /// the dissolve from `band.topAnchor` alone would start it 8pt above the
+    /// toolbar rather than at it.
+    private var backdropFromChrome: NSLayoutConstraint!
 
     /// What the toolbar appearance was before this screen borrowed it. The
     /// toolbar belongs to the STACK, and the picker underneath draws its album
@@ -353,6 +375,34 @@ final class MediaEditorViewController: UIViewController {
             )
         }
 
+        // ⚠️ **`insertSubview(_:aboveSubview:)`, NEVER `pin(to:)` OR
+        // `constrain(in:)`.** Both of those call `addSubview` first, which MOVES
+        // the view to the TOP of the stack — the dissolve would then cover the
+        // band, the indicator and the bars, which is the exact opposite of its
+        // job. The picker states the same rule for its access notice, and this
+        // flow has already lost a screen to that helper once.
+        //
+        // Above the canvas and below everything else: the picture dissolves, the
+        // chrome does not.
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(backdrop, aboveSubview: canvas)
+        backdropFromBand = backdrop.topAnchor.constraint(equalTo: band.topAnchor)
+        backdropFromChrome = backdrop.topAnchor.constraint(
+            equalTo: view.safeAreaLayoutGuide.bottomAnchor
+        )
+        NSLayoutConstraint.activate([
+            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            // ⚠️ THE FOOT OF THE SCREEN, NOT THE SAFE AREA. The canvas is
+            // full-bleed and runs behind the home indicator; a dissolve stopping
+            // at the safe area would leave a sharp band of untouched picture
+            // beneath it. The picker's blur ends at `view.bottomAnchor` for the
+            // same reason.
+            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            // The band starts empty, so the chrome anchor is the one that holds.
+            backdropFromChrome
+        ])
+
         // ⚠️ ABOVE THE BAND, NOT ABOVE THE TOOLBAR. The toolbar's items are the
         // sound pill and the category strip; the indicator belongs to the PICTURE,
         // so it sits on the canvas just clear of the chrome — and now just clear
@@ -497,6 +547,20 @@ final class MediaEditorViewController: UIViewController {
         categoryBar.addAction(
             UIAction { [weak self] _ in self?.categoryChanged() }, for: .valueChanged
         )
+        // ⚠️ **AND THE SAME ANSWER FOR A DRAG, WHICH `.valueChanged` NEVER GIVES.**
+        // Reported from a device: sliding the pill onto a category moved the pill
+        // and left the band showing the previous one until the viewer also tapped
+        // it. `PagedTabBar` is right not to announce a drag — where the pages land
+        // is the PAGER's answer — but this screen has no pager: its categories are
+        // modes, not pages, so nothing ever echoed back and `.valueChanged` only
+        // ever fired from a tap. `onSettled` is the landing, once, for exactly
+        // this case; see its note.
+        //
+        // ⚠️ `onScrubEnd` STAYS NIL ON PURPOSE. Wiring it would take the settle
+        // away from the bar (`if let onScrubEnd { … } else { settleLensAlone(…) }`)
+        // and leave the pill stranded mid-strip unless this screen animated it
+        // home itself — a second, visual bug in the fix for the first.
+        categoryBar.onSettled = { [weak self] _ in self?.categoryChanged() }
         touchProbe.attach(to: categoryBar)
         // ⚠️ **THE PILL KEEPS ITS WORD AND THE STRIP GIVES.** The two together
         // over-subscribe the band — a pill beside a four-segment strip does not
@@ -820,10 +884,17 @@ extension MediaEditorViewController {
     /// wrong, which is why a comment is no substitute for the right side of a
     /// `#if`. Before pushing anything added near those accessors, build Release.
     func setEditingAccessory(_ accessory: UIView?) {
+        // ⚠️ **DEACTIVATE BEFORE ACTIVATING.** Both anchors pin the same edge, so
+        // leaving the old one alive for even one pass gives Auto Layout a conflict
+        // to arbitrate — and it may keep the one being replaced.
         if let accessory {
             band.show(accessory)
+            backdropFromChrome.isActive = false
+            backdropFromBand.isActive = true
         } else {
             band.clear()
+            backdropFromBand.isActive = false
+            backdropFromChrome.isActive = true
         }
     }
 }
@@ -872,6 +943,10 @@ extension MediaEditorViewController {
 
     /// Internal for tests: the band itself, to measure where it put things.
     var debugBand: MediaEditorBandView { band }
+
+    /// Internal for tests: the dissolve behind the chrome, to measure where it
+    /// begins, how far it reaches, and which side of the band it draws on.
+    var debugBackdrop: UIView { backdrop }
 
     /// Internal for tests: the indicator, whose position is what the band moves.
     var debugPageDots: UIView { pageDots }
