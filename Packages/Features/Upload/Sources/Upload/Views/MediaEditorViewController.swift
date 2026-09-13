@@ -80,10 +80,11 @@ final class MediaEditorViewController: UIViewController {
     private let library: any MediaLibraryReading
     /// What "Next" hands the media to. The step that writes a caption and
     /// publishes is still a stand-in, so the builder passes a screen saying so.
-    /// ⚠️ CARRIES THE FIT CHOICES TOO. The step after this one draws the same
-    /// pictures as thumbnails, and a picture the author chose to show WHOLE must
-    /// not reappear cropped there.
-    private let onNext: ([MediaLibraryItem], [String: ContentFit]) -> UIViewController
+    /// ⚠️ CARRIES THE FIT CHOICES AND THE LOOKS TOO. The step after this one
+    /// draws the same pictures as thumbnails — a picture the author chose to show
+    /// WHOLE must not reappear cropped — and it is where a look is baked into the
+    /// full-resolution image that is uploaded.
+    private let onNext: ([MediaLibraryItem], [String: ContentFit], [String: MediaFilter]) -> UIViewController
 
     /// ⚠️ A `CarouselCollectionView`, NOT A PLAIN ONE: on its first page it
     /// declines a rightward drag so the stack's back-swipe can carry the screen
@@ -106,12 +107,40 @@ final class MediaEditorViewController: UIViewController {
     /// `.fill`, which is what the canvas has always done.
     private var fits: [String: ContentFit] = [:]
 
+    /// Which look each picture is being shown in. Per item for the same reason
+    /// `fits` is: a carousel holds several pictures and a screen-wide choice
+    /// would make dressing one of them undress another. Absent means
+    /// `.original`, which is the picture untouched.
+    ///
+    /// ⚠️ **CARRIED TO THE PUBLISH PATH, AND BAKED THERE.** `onNext` hands these
+    /// on with the fits, and the finalisation screen applies the look to the
+    /// FULL-RESOLUTION picture it uploads — not to the preview. A look chosen
+    /// here is therefore in the post, which is why nothing may quietly drop it.
+    private var filters: [String: MediaFilter] = [:]
+
+    /// The row of looks the band holds while "Filters" is the chosen category.
+    /// Built once, because rebuilding it per selection would re-render nine
+    /// thumbnails for a band that is merely being reopened.
+    private lazy var filterRow: MediaFilterRowView = {
+        let row = MediaFilterRowView()
+        row.onPick = { [weak self] filter in
+            guard let self, let id = self.currentItemID else { return }
+            self.applyFilter(filter, to: id)
+        }
+        return row
+    }()
+
     /// Which glyph the bar is currently wearing, so the item is only re-stated
     /// when it actually changes — see `updateFitItem(animated:)`.
     private var shownFit: ContentFit = .fill
 
     /// Which of several media is showing. Hides itself for a single one.
     private let pageDots = MediaPageDotsView()
+
+    /// The reserved strip an editing control is put into — see
+    /// `MediaEditorBandView`. Empty today: this round reserves the room, it does
+    /// not fill it.
+    private let band = MediaEditorBandView()
 
     /// What the toolbar appearance was before this screen borrowed it. The
     /// toolbar belongs to the STACK, and the picker underneath draws its album
@@ -122,6 +151,23 @@ final class MediaEditorViewController: UIViewController {
     /// Guards `-upload-post` against firing twice: `viewDidAppear` runs again
     /// every time the finalisation screen is popped back off this one.
     private var hasAutoAdvanced = false
+
+    /// The same guard for `-upload-category`, which would otherwise reopen the
+    /// band on every return from the finalisation screen.
+    private var hasSelectedDebugCategory = false
+
+    /// The value after a flag, `-upload-category 3` style.
+    ///
+    /// ⚠️ **THE PICKER'S `debugArgument` IS PRIVATE TO IT**, so this is stated
+    /// here rather than reached for. Two small readers beat widening a seam for
+    /// a DEBUG convenience.
+    static func debugValue(after flag: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: flag), arguments.count > index + 1 else {
+            return nil
+        }
+        return arguments[index + 1]
+    }
     #endif
 
     /// ⚠️ DRAWN, AND WIRED TO NOTHING — see the type comment. There is no audio
@@ -139,7 +185,7 @@ final class MediaEditorViewController: UIViewController {
     init(
         items: [MediaLibraryItem],
         library: any MediaLibraryReading,
-        onNext: @escaping ([MediaLibraryItem], [String: ContentFit]) -> UIViewController
+        onNext: @escaping ([MediaLibraryItem], [String: ContentFit], [String: MediaFilter]) -> UIViewController
     ) {
         self.items = items
         self.itemsByID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -219,6 +265,24 @@ final class MediaEditorViewController: UIViewController {
                 self?.goNext()
             }
         }
+        // ⚠️ **"Filters" IS THE ONE CATEGORY A TAP CANNOT REACH.** It is fourth in
+        // a strip this toolbar over-subscribes — the sound pill floors at 240pt,
+        // so the strip scrolls its overflow and the fourth pill sits off the
+        // trailing edge. A coordinate tap therefore cannot open the band, and this
+        // repository has already concluded once that a tap is not an instrument.
+        // `-upload-category <i>` is the picker's `-upload-album <i>` idiom, here.
+        //
+        // ⚠️ GUARDED LIKE `-upload-post`, AND FOR THE SAME REASON: `viewDidAppear`
+        // runs again on every pop back from the finalisation screen.
+        if !hasSelectedDebugCategory,
+           let raw = Self.debugValue(after: "-upload-category"),
+           let index = Int(raw), Self.categories.indices.contains(index) {
+            hasSelectedDebugCategory = true
+            categoryBar.select(index)
+            // ⚠️ `select(_:)` ANNOUNCES ONLY ON A CHANGE — picking the index the
+            // strip already rests on sends nothing, and the band would never open.
+            categoryChanged()
+        }
         #endif
     }
 
@@ -269,17 +333,42 @@ final class MediaEditorViewController: UIViewController {
         canvas.bottomEdgeEffect.isHidden = true
         canvas.pin(to: view)
 
-        // ⚠️ ABOVE THE TOOLBAR, NOT INSIDE IT. The toolbar's items are the sound
-        // pill and the category strip; the indicator belongs to the PICTURE, so
-        // it sits on the canvas just clear of the chrome. Anchored to the safe
-        // area rather than to the view, because the canvas is full-bleed on
-        // purpose and its bottom edge is behind the home indicator.
-        pageDots.constrain(in: view) { guide in
-            pageDots.centerXAnchor.constraint(equalTo: guide.centerXAnchor)
-            pageDots.bottomAnchor.constraint(
+        // ⚠️ FULL WIDTH OF THE SHEET, NOT OF THE MARGINS. The band is a rail for
+        // a horizontal scroller, and a scroller that starts inside a margin reads
+        // as a short list rather than a list running off the edge. Anchored to the
+        // safe area at the foot for the same reason the indicator was: the canvas
+        // is full-bleed on purpose and its bottom edge is behind the home
+        // indicator.
+        //
+        // ⚠️ ADDED BEFORE THE INDICATOR, BECAUSE `constrain(in:)` RE-PARENTS —
+        // its first statement is `addSubview`, so whatever is stated last sits on
+        // top. They do not overlap, but the order is stated rather than left to
+        // chance; `pin(to:)` has the same bite and has cost this flow a screen
+        // before.
+        band.constrain(in: view) { guide in
+            band.leadingAnchor.constraint(equalTo: guide.leadingAnchor)
+            band.trailingAnchor.constraint(equalTo: guide.trailingAnchor)
+            band.bottomAnchor.constraint(
                 equalTo: guide.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.sm
             )
         }
+
+        // ⚠️ ABOVE THE BAND, NOT ABOVE THE TOOLBAR. The toolbar's items are the
+        // sound pill and the category strip; the indicator belongs to the PICTURE,
+        // so it sits on the canvas just clear of the chrome — and now just clear
+        // of whatever the band is holding.
+        //
+        // ⚠️ NO CONSTANT HERE, ON PURPOSE. The gap is inside the band (see its
+        // type comment): stating it twice would push the indicator 8pt down from
+        // where it sits today whenever the band is empty, which is most of the
+        // time and is invisible on a single medium, where there is no indicator.
+        pageDots.constrain(in: view) { guide in
+            pageDots.centerXAnchor.constraint(equalTo: guide.centerXAnchor)
+            pageDots.bottomAnchor.constraint(equalTo: band.topAnchor)
+        }
+        // ⚠️ THIS HIDES ITSELF UNDER TWO ITEMS (`isHidden = count < 2`), which is
+        // what makes the band's placement unconditional: nothing here has to ask
+        // whether there is a carousel.
         pageDots.configure(count: items.count, current: 0)
 
         // The canvas reports its own paging, so the bar glyph and the dots can
@@ -293,9 +382,15 @@ final class MediaEditorViewController: UIViewController {
             // would otherwise arrive wearing the previous picture's choice.
             cell.setContentMode((fits[id] ?? .fill).mode, animated: false)
             let size = canvasSize
+            // ⚠️ AND THE LOOK IS RE-APPLIED FOR THE SAME REASON, on the same
+            // beat. A filtered page that scrolls off and comes back would
+            // otherwise return undressed — the recycled cell knows nothing of
+            // what was chosen for the picture it now carries.
+            let look = filters[id] ?? .original
             Task { [weak cell] in
                 let image = await self.library.thumbnail(for: id, size: size)
-                cell?.show(image, for: id)
+                let shown = image.flatMap { MediaFilterRenderer.apply(look, to: $0) } ?? image
+                cell?.show(shown, for: id)
             }
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: canvas) { view, indexPath, id in
@@ -435,6 +530,77 @@ final class MediaEditorViewController: UIViewController {
         UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState]) {
             self.categoryBar.setProgress(CGFloat(self.categoryBar.selectedIndex))
         }
+        showAccessory(for: selectedCategory)
+    }
+
+    /// ⚠️ **READ ON `.valueChanged`, NEVER POLLED.** `PagedTabBar` rewrites
+    /// `selectedIndex` half-way through a scrub (`applyProgress`), and its own
+    /// note warns the index flips at the mid-point — so asking it at any other
+    /// moment would open this band in the middle of a drag. The action fires only
+    /// from `select(_:)`, which is the moment a choice is actually made.
+    ///
+    /// ⚠️ AND THE TITLE IS DERIVED, NOT A HARD-CODED POSITION. This strip has
+    /// already been reordered once; `categories[3]` would break in silence.
+    private var selectedCategory: String? {
+        let index = categoryBar.selectedIndex
+        return Self.categories.indices.contains(index) ? Self.categories[index] : nil
+    }
+
+    private func showAccessory(for category: String?) {
+        guard category == "Filters" else {
+            setEditingAccessory(nil)
+            return
+        }
+        setEditingAccessory(filterRow)
+        refreshFilterRow()
+    }
+
+    /// Feeds the row the picture it is choosing a look for, and restores the
+    /// look this item already carries.
+    ///
+    /// ⚠️ **ONE FETCH, NOT NINE.** The row filters locally from a single source;
+    /// the library seam caches nothing, so nine thumbnail requests would be nine
+    /// `PHImageManager` round trips for one photograph.
+    private func refreshFilterRow() {
+        guard let id = currentItemID else { return }
+        filterRow.setSelected(filters[id] ?? .original)
+        // ⚠️ THE THUMBNAIL'S SIDE, NOT THE ROW'S HEIGHT. The row is taller than
+        // its pictures by a caption, and asking for that size would fetch a
+        // picture bigger than anything shown.
+        let side = MediaFilterRowView.thumbnailSide
+        Task { [weak self] in
+            guard let self else { return }
+            let source = await self.library.thumbnail(for: id, size: CGSize(width: side, height: side))
+            guard self.currentItemID == id else { return }
+            self.filterRow.show(source)
+        }
+    }
+
+    /// ⚠️ **SILENT WHEN THE BAND IS SHUT, AND THAT IS THE POINT.** Both settle
+    /// hooks call this on every swipe; without the guard each one would run a
+    /// full `PHImageManager` request — iCloud access allowed — to dress a row
+    /// nobody is looking at.
+    private func refreshFilterRowIfShowing() {
+        guard band.content === filterRow else { return }
+        refreshFilterRow()
+    }
+
+    /// Applies a look to the picture on screen.
+    ///
+    /// ⚠️ **A SECOND RENDER, AT CANVAS SIZE.** The thumbnail the look was chosen
+    /// from is 56pt; pushing that onto the page would show a blurred picture. The
+    /// canvas asks the library for its own size and filters that.
+    private func applyFilter(_ filter: MediaFilter, to id: String) {
+        filters[id] = filter
+        let size = canvasSize
+        Task { [weak self] in
+            guard let self else { return }
+            let source = await self.library.thumbnail(for: id, size: size)
+            guard self.filters[id] == filter else { return }
+            let shown = source.flatMap { MediaFilterRenderer.apply(filter, to: $0) } ?? source
+            let page = self.canvas.cellForItem(at: IndexPath(item: self.currentIndex, section: 0))
+            (page as? MediaEditorPageCell)?.show(shown, for: id)
+        }
     }
 
     // MARK: - Fill or fit
@@ -495,7 +661,7 @@ final class MediaEditorViewController: UIViewController {
     }
 
     private func goNext() {
-        navigationController?.pushViewController(onNext(items, fits), animated: true)
+        navigationController?.pushViewController(onNext(items, fits, filters), animated: true)
     }
 
     // MARK: - The strip wins its own touches
@@ -619,10 +785,46 @@ extension MediaEditorViewController: UICollectionViewDelegate {
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateFitItem(animated: true)
+        refreshFilterRowIfShowing()
     }
 
+    /// ⚠️ **BOTH SETTLE HOOKS, NOT JUST THE DRAGGED ONE.** A canvas that arrives
+    /// by `scrollToItem` announces itself here instead, and handling only the
+    /// dragged case would leave the row dressed in the previous picture while the
+    /// canvas shows the next one.
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         updateFitItem(animated: true)
+        refreshFilterRowIfShowing()
+    }
+}
+
+// MARK: - The editing band
+
+extension MediaEditorViewController {
+    /// Puts a control in the strip between the toolbar and the page indicator,
+    /// or takes it away with `nil`.
+    ///
+    /// The band reserves room and owns placement; what goes in it — a horizontal
+    /// row of filter thumbnails first — is built separately and handed over here,
+    /// so the screen never learns what a filter is.
+    ///
+    /// ⚠️ **THIS IS PRODUCTION CODE AND MUST STAY OUT OF `#if DEBUG`. IT DID NOT,
+    /// AND IT COST A RED CI CYCLE.** It was first written just below
+    /// `debugTapFit()` — inside the DEBUG-only extension that starts a few lines
+    /// down — while its only callers, `showAccessory(for:)`, are ordinary code.
+    /// Debug compiled, the 120-test suite passed, and the flow was verified end to
+    /// end on a device; **every one of those instruments builds Debug**, where the
+    /// symbol exists. CI compiles Debug *and* Release, and Release failed with
+    /// `cannot find 'setEditingAccessory' in scope`. The old comment here already
+    /// said "NOT A DEBUG HOOK" — the intent was right, only the placement was
+    /// wrong, which is why a comment is no substitute for the right side of a
+    /// `#if`. Before pushing anything added near those accessors, build Release.
+    func setEditingAccessory(_ accessory: UIView?) {
+        if let accessory {
+            band.show(accessory)
+        } else {
+            band.clear()
+        }
     }
 }
 
@@ -667,6 +869,13 @@ extension MediaEditorViewController {
     func debugFit(for id: String) -> ContentFit { fits[id] ?? .fill }
     /// Internal for tests: the path the fill/fit button takes, without a bar to tap.
     func debugTapFit() { toggleFit() }
+
+    /// Internal for tests: the band itself, to measure where it put things.
+    var debugBand: MediaEditorBandView { band }
+
+    /// Internal for tests: the indicator, whose position is what the band moves.
+    var debugPageDots: UIView { pageDots }
+
     /// Internal for tests: the categories the strip spells.
     var debugCategoryTitles: [String] { categoryBar.currentTitles }
     /// Internal for tests: whether the picture runs under the bars.

@@ -24,6 +24,7 @@ struct MediaEditorTests {
     private final class Handed {
         var items: [MediaLibraryItem]?
         var fits: [String: ContentFit]?
+        var filters: [String: MediaFilter]?
         let destination = UIViewController()
     }
 
@@ -55,9 +56,10 @@ struct MediaEditorTests {
     private func open(_ items: [MediaLibraryItem]) -> Screen {
         let library = StubLibrary()
         let handed = Handed()
-        let editor = MediaEditorViewController(items: items, library: library) { editing, fits in
+        let editor = MediaEditorViewController(items: items, library: library) { editing, fits, looks in
             handed.items = editing
             handed.fits = fits
+            handed.filters = looks
             return handed.destination
         }
         let navigation = UINavigationController(rootViewController: editor)
