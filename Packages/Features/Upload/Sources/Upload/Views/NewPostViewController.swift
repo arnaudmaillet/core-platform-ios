@@ -226,15 +226,13 @@ final class NewPostViewController: UIViewController {
     // MARK: - Bars
 
     private func configureBars() {
-        let back = UIBarButtonItem(
-            image: UIImage(systemName: "chevron.backward"),
-            primaryAction: UIAction { [weak self] _ in
-                self?.navigationController?.popViewController(animated: true)
-            }
-        )
-        back.accessibilityLabel = "Back"
-        // LEFT TO RIGHT here: the chevron takes the edge, the draft sits inboard.
-        navigationItem.leftBarButtonItems = [back, saveDraftItem]
+        // ⚠️ **UIKit'S OWN BACK BUTTON, BECAUSE THE BACK-SWIPE COMES WITH IT** —
+        // see the editor's note for the measurement. A custom leading item
+        // replaces the back button and silently takes the interactive pop with
+        // it; `leftItemsSupplementBackButton` is what makes the item sit BESIDE
+        // the chevron instead of in its place.
+        navigationItem.leftBarButtonItems = [saveDraftItem]
+        navigationItem.leftItemsSupplementBackButton = true
         navigationItem.rightBarButtonItems = [postItem]
         postItem.style = .done
     }

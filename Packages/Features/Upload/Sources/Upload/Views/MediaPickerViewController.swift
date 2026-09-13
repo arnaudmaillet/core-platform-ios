@@ -305,6 +305,11 @@ final class MediaPickerViewController: UIViewController {
                 primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
             )
         ]
+        // The chevron the EDITOR wears. This screen has no title to lend it, so
+        // it already draws bare — `.minimal` keeps it that way if one is ever
+        // added. Nothing here affects this screen's own leading group: the picker
+        // is the stack's root and shows no back button at all.
+        navigationItem.backButtonDisplayMode = .minimal
         // Right-to-left: the first item is the RIGHTMOST, so "Next" sits at the
         // edge and "Drafts" beside it, which is the order the layout asks for.
         navigationItem.rightBarButtonItems = [
