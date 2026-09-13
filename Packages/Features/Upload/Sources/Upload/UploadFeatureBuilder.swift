@@ -59,15 +59,15 @@ public struct UploadFeatureBuilder {
         // with it — session-scoped, nothing on disk, nothing global.
         let draft = PostDraft()
         let picker = MediaPickerViewController(library: library) { chosen in
-            MediaEditorViewController(items: chosen, library: library) { editing, fits in
+            MediaEditorViewController(items: chosen, library: library) { editing, fits, looks in
                 // ⚠️ THE SCREEN DISMISSES ITSELF. This closure cannot reach the
                 // navigation controller — it is built below, after the picker
                 // that owns this one — and a published post is broadcast on
                 // `ComposedPostChannel`, so the feed already has it and nobody
                 // here needs telling.
                 NewPostViewController(
-                    items: editing, fits: fits, library: library, composer: composer,
-                    draft: draft
+                    items: editing, fits: fits, filters: looks,
+                    library: library, composer: composer, draft: draft
                 ) { _ in }
             }
         }

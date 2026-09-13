@@ -58,6 +58,11 @@ struct NewPostTests {
         struct Call: Sendable {
             let mediaCount: Int
             let caption: String
+            /// ⚠️ **THE PICTURES THEMSELVES, NOT JUST THEIR COUNT.** A composer
+            /// that records `mediaCount` alone cannot tell a baked look from an
+            /// untouched photograph, and a test written against it would pass
+            /// whether or not the filter was ever applied.
+            let images: [PickedImage]
         }
 
         private(set) var calls: [Call] = []
@@ -65,7 +70,11 @@ struct NewPostTests {
         func publish(
             media: [ComposeMedia], caption: String, as author: AuthorSummary?
         ) async throws -> FeedEntry {
-            calls.append(Call(mediaCount: media.count, caption: caption))
+            let pictures: [PickedImage] = media.compactMap {
+                if case .image(let picked) = $0 { return picked }
+                return nil
+            }
+            calls.append(Call(mediaCount: media.count, caption: caption, images: pictures))
             let by = author ?? AuthorSummary(
                 id: ProfileID("first"), handle: "first", displayName: "First", avatarURL: nil
             )
@@ -92,13 +101,14 @@ struct NewPostTests {
 
     private func open(
         _ items: [MediaLibraryItem],
-        fits: [String: ContentFit] = [:]
+        fits: [String: ContentFit] = [:],
+        filters: [String: MediaFilter] = [:]
     ) -> Screen {
         let library = StubLibrary()
         let composer = RecordingComposer()
         let handed = Handed()
         let post = NewPostViewController(
-            items: items, fits: fits, library: library, composer: composer
+            items: items, fits: fits, filters: filters, library: library, composer: composer
         ) { handed.entry = $0 }
         let navigation = UINavigationController(rootViewController: post)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -133,6 +143,64 @@ struct NewPostTests {
         #expect(left.map(\.title) == ["Save draft"], "the draft alone; the chevron is the system's")
         #expect(screen.post.navigationItem.leftItemsSupplementBackButton)
         #expect(screen.post.navigationItem.rightBarButtonItems?.map(\.title) == ["Post"])
+    }
+
+    // MARK: - The look, baked
+
+    /// The centre pixel of an image, as three 0–255 components.
+    private static func centrePixel(of image: UIImage) -> (r: Int, g: Int, b: Int)? {
+        guard let cgImage = image.cgImage else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return nil }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return (Int(pixel[0]), Int(pixel[1]), Int(pixel[2]))
+    }
+
+    private func publishedImages(from composer: RecordingComposer) async throws -> [PickedImage] {
+        for _ in 0..<300 {
+            let calls = await composer.calls
+            if let first = calls.first { return first.images }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return []
+    }
+
+    /// ⚠️ **THE LOOK MUST REACH THE UPLOAD, NOT JUST THE PREVIEW.** The editor
+    /// shows a filter on a canvas-sized render and on a 56pt chip; neither of
+    /// those is what the composer is handed. This asserts on the picture that
+    /// actually goes, and it reads its PIXELS — "an image was published" is
+    /// satisfied just as well by an untouched photograph.
+    @Test func aChosenLookIsBakedIntoThePictureThatIsPublished() async throws {
+        let screen = open(Self.items(1), filters: ["photo-0": .mono])
+
+        screen.post.debugTapPost()
+        let images = try await publishedImages(from: screen.composer)
+
+        let picture = try #require(images.first, "nothing reached the composer")
+        let pixel = try #require(Self.centrePixel(of: picture.image))
+        #expect(abs(pixel.r - pixel.g) < 12, "mono levels red and green: \(pixel)")
+        #expect(abs(pixel.g - pixel.b) < 12, "and green and blue: \(pixel)")
+    }
+
+    /// ⚠️ **THE OTHER HALF, AND WITHOUT IT THE ONE ABOVE PROVES LESS THAN IT
+    /// SEEMS.** A renderer that quietly returned grey for everything would
+    /// satisfy the mono assertion; only the untouched case shows the picture is
+    /// left alone when no look was chosen. The stub answers in pure red.
+    @Test func noLookLeavesThePicturePreciselyAsItWas() async throws {
+        let screen = open(Self.items(1))
+
+        screen.post.debugTapPost()
+        let images = try await publishedImages(from: screen.composer)
+
+        let picture = try #require(images.first, "nothing reached the composer")
+        let pixel = try #require(Self.centrePixel(of: picture.image))
+        #expect(pixel.r > pixel.g + 60, "still the red the library answered with: \(pixel)")
+        #expect(pixel.r > pixel.b + 60, "untouched, not levelled: \(pixel)")
     }
 
     // MARK: - The cover

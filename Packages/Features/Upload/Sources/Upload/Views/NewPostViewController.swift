@@ -133,6 +133,10 @@ final class NewPostViewController: UIViewController {
     /// How the author left each picture in the editor. Absent means `.fill`,
     /// which is where the canvas starts.
     private let fits: [String: ContentFit]
+
+    /// The look chosen for each picture in the editor, baked into what is
+    /// uploaded — see `post()`. Absent means `.original`.
+    private let filters: [String: MediaFilter]
     private let library: any MediaLibraryReading
     private let composer: any PostComposing
     /// Where a published post hands back to — the flow's own dismissal.
@@ -181,6 +185,7 @@ final class NewPostViewController: UIViewController {
     init(
         items: [MediaLibraryItem],
         fits: [String: ContentFit] = [:],
+        filters: [String: MediaFilter] = [:],
         library: any MediaLibraryReading,
         composer: any PostComposing,
         draft: PostDraft = PostDraft(),
@@ -188,6 +193,7 @@ final class NewPostViewController: UIViewController {
     ) {
         self.items = items
         self.fits = fits
+        self.filters = filters
         self.library = library
         self.composer = composer
         self.draft = draft
@@ -616,7 +622,19 @@ final class NewPostViewController: UIViewController {
                     guard let image = await library.thumbnail(for: item.id, size: Self.publishPixels) else {
                         continue
                     }
-                    media.append(.image(PickedImage(image)))
+                    // ⚠️ **BAKED HERE, ON THE FULL-RESOLUTION PICTURE.** The editor
+                    // showed the look on a canvas-sized render and on a 56pt chip;
+                    // neither of those is what gets uploaded. The filter is applied
+                    // to the publish-sized image and BEFORE `MediaEncoder`, which
+                    // downscales and compresses — filtering after that would work
+                    // on pixels the viewer never approved.
+                    //
+                    // ⚠️ A FAILED RENDER PUBLISHES THE ORIGINAL RATHER THAN NOTHING.
+                    // Dropping the picture because a filter could not be rasterised
+                    // would lose the author's photograph over a decoration.
+                    let look = filters[item.id] ?? .original
+                    let baked = MediaFilterRenderer.apply(look, to: image) ?? image
+                    media.append(.image(PickedImage(baked)))
                 }
                 let entry = try await composer.publish(media: media, caption: caption, as: nil)
                 onPublished(entry)

@@ -24,14 +24,20 @@ import UIKit
 /// - **`Self.edgeWidth` IS A CHOICE, NOT A MEASUREMENT.** UIKit's own screen-edge
 ///   band is not published and this code cannot read it; 20pt matches the usual
 ///   feel. Widen it if the gesture feels hard to catch.
-/// - **Direction is NOT tested here, and must not be added back.** At the moment
-///   this delegate is asked the touch has not moved: translation reads `(0,0)`,
-///   and so does velocity — measured once each way, two builds apart, each time
-///   refusing every drag and looking exactly like a killed gesture. Only WHERE the
-///   touch began is knowable at this instant. The recogniser keeps its own
-///   direction logic: measured, a vertical drag starting 12pt from the edge never
-///   reaches this method at all — the finalisation list scrolled and the screen
-///   stayed.
+/// - **Direction is NOT tested here, and must not be added back.** Translation and
+///   velocity both read `(0,0)` when this delegate is asked — measured once each
+///   way, two builds apart, each time refusing every drag and looking exactly like
+///   a killed gesture. The recogniser keeps its own direction logic: measured, a
+///   vertical drag starting 12pt from the edge never reaches this method at all —
+///   the finalisation list scrolled and the screen stayed.
+/// - **NOR IS THE START POSITION KNOWABLE HERE** — an earlier revision of this very
+///   comment claimed it was, and the claim was false. The zeroed translation is a
+///   REBASE, not a still finger: by the time this runs the touch has already
+///   travelled a VARIABLE distance (measured: 24.0 from a drag begun at x=10, and
+///   30.0 from one begun at x=6 — nearer the edge reading further from it). Every
+///   such refusal looks exactly like a back-swipe that has been broken, which is
+///   how it survived a green suite for a whole session. The start is captured at
+///   touch-down in `shouldReceive` instead.
 @MainActor
 final class UploadNavigationController: UINavigationController {
     /// ⚠️ **THE SAME BAND THE CAROUSELS YIELD OVER, STATED ONCE.** If this gate
@@ -42,6 +48,21 @@ final class UploadNavigationController: UINavigationController {
 
     /// The pan that actually pops. Weak: UIKit owns it.
     private weak var fullWidthPan: UIPanGestureRecognizer?
+
+    /// Where the finger landed, recorded at touch-down.
+    ///
+    /// ⚠️ **BY THE TIME `shouldBegin` RUNS THE FINGER HAS ALREADY MOVED — AND NOT
+    /// BY A FIXED AMOUNT.** Measured on this screen with the probe below: a drag
+    /// injected from x=10 reported `startX=24.0`, and one from x=6 — further left
+    /// — reported `startX=30.0`. Starting NEARER the edge read FURTHER from it, so
+    /// the offset is not a constant to subtract; it grows with how slowly the drag
+    /// accelerates before the recogniser commits.
+    ///
+    /// So inside `shouldBegin` there is no trustworthy start position at all:
+    /// translation reads `(0,0)` because the recogniser rebases, and `location`
+    /// has already travelled. `shouldReceive` is the one moment the touch is still
+    /// where the viewer put it.
+    private var touchDownX: CGFloat?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -100,6 +121,20 @@ final class UploadNavigationController: UINavigationController {
 // MARK: - Where a back-swipe may begin
 
 extension UploadNavigationController: UIGestureRecognizerDelegate {
+    /// ⚠️ **A PROBE, NOT A FILTER — IT ALWAYS ANSWERS TRUE.** Its only purpose is
+    /// to read the touch while it is still at its origin, because `shouldBegin` is
+    /// asked too late to know. Answering false here would silence the gesture
+    /// outright, which is a different bug wearing the same face.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldReceive touch: UITouch
+    ) -> Bool {
+        if gestureRecognizer === fullWidthPan {
+            touchDownX = touch.location(in: view).x
+        }
+        return true
+    }
+
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else {
             logGate("asked about a non-pan \(type(of: gestureRecognizer)) -> true")
@@ -133,13 +168,48 @@ extension UploadNavigationController: UIGestureRecognizerDelegate {
         // edge is therefore left to it, and that case is verified on a device
         // rather than asserted here — no unit test can begin this pan.
         //
-        // ⚠️ And because nothing has moved, `location` IS where the drag began;
-        // the `location − translation` reconstruction an earlier revision did was
-        // a detour around a zero.
-        let startX = pan.location(in: view).x
-        let verdict = Self.allows(startX: startX, edgeWidth: Self.edgeWidth)
-        logGate("ask on \(type(of: top)) startX=\(startX) edge=\(Self.edgeWidth) -> \(verdict)")
+        // ⚠️ **`location` IS NOT WHERE THE DRAG BEGAN — THAT CLAIM STOOD HERE, IN
+        // CAPITALS, AND WAS WRONG.** The recogniser asks only once the touch looks
+        // like a pan, by which point the finger has travelled a VARIABLE distance:
+        // measured, a drag begun at x=10 read 24.0 and one begun at x=6 read 30.0.
+        // Nearer the edge read further from it, so there is no fixed offset to
+        // subtract. Both refusals looked exactly like a back-swipe someone had
+        // broken, which is how this survived a green suite.
+        //
+        // `touchDownX` is captured in `shouldReceive` above, where the touch is
+        // still at rest. The fallback covers only a recogniser that somehow began
+        // without one, and it keeps the old (wrong) reading rather than refusing.
+        let startX = touchDownX ?? pan.location(in: view).x
+
+        // ⚠️ **THE EDGE BAND AND THE FIRST CHIP OVERLAP, AND THE BACK-SWIPE WAS
+        // WINNING.** The editing band's row starts at x=16 while this gate accepts
+        // anything within 20pt of the edge, so a drag begun on the leftmost chip
+        // was claimed as a back-swipe and the row would not scroll. Reported from
+        // a device as "sometimes scrolling from an item does nothing".
+        //
+        // A band holds a control of its own; drags inside it belong to that
+        // control, never to the stack.
+        let inBand = Self.beginsInsideTheEditingBand(pan.location(in: top.view), in: top.view)
+        let verdict = !inBand && Self.allows(startX: startX, edgeWidth: Self.edgeWidth)
+        logGate("ask on \(type(of: top)) startX=\(startX) inBand=\(inBand) -> \(verdict)")
         return verdict
+    }
+
+    /// Whether a touch begins inside the editing band, whose tenant owns its own
+    /// drags.
+    ///
+    /// ⚠️ NOT "inside any horizontal scroller" — the editor's canvas is one and
+    /// runs the whole screen, so that rule would disable the back-swipe entirely.
+    /// It is the BAND that claims its drags, not scrolling in general.
+    static func beginsInsideTheEditingBand(_ point: CGPoint, in root: UIView) -> Bool {
+        guard let hit = root.hitTest(point, with: nil) else { return false }
+        var node: UIView? = hit
+        while let current = node {
+            if current is MediaEditorBandView { return true }
+            if current === root { return false }
+            node = current.superview
+        }
+        return false
     }
 
     /// ⚠️ A DEBUG PROBE, BECAUSE FOUR PREDICTIONS IN A ROW WERE WRONG ON THIS

@@ -60,4 +60,40 @@ struct UploadNavigationControllerTests {
 
         #expect(navigation.debugGatesTheBackSwipe)
     }
+
+    // MARK: - The touch-down probe
+
+    /// ⚠️ **THE DECISION ABOVE IS FED BY A PROBE UIKit LOOKS UP BY SELECTOR, AND A
+    /// DRIFTED SIGNATURE MAKES IT SILENTLY NEVER RUN.** That is not hypothetical:
+    /// this session, `shouldBeRequiredToFailBy` was written with `override` on a
+    /// method `UIScrollView` does not implement, and the same class of mistake here
+    /// — `UIPress` for `UITouch`, or the method moved off the conforming extension
+    /// — would leave `touchDownX` forever nil. `shouldBegin` would then fall back
+    /// to the travelled `location`, which is the exact bug this probe exists to
+    /// fix, and every test above would still pass.
+    ///
+    /// ⚠️ **AND WHAT THIS CANNOT DO, SAID PLAINLY:** `UITouch` has no public
+    /// initialiser carrying a location, so no unit test can hand the probe a touch
+    /// and check the x it records. That half is verified with injected drags on a
+    /// device — the same drag that read `startX=24.0` from a start of 10 must read
+    /// `10.0` once this is wired.
+    @Test func uiKitCanFindTheTouchDownProbe() {
+        let navigation = UploadNavigationController(rootViewController: UIViewController())
+        let plain = UINavigationController(rootViewController: UIViewController())
+        let probe = Selector(("gestureRecognizer:shouldReceiveTouch:"))
+
+        // ⚠️ THE DENOMINATOR, AND IT IS NOT DECORATION. Asserting only that the
+        // subclass answers cannot tell "my method is wired" from "UIKit's own class
+        // always answered" — and this session has already shipped three guards that
+        // could not fail. If this first line ever goes false, the second proves
+        // nothing and must be rewritten, not re-run.
+        #expect(
+            plain.responds(to: probe) == false,
+            "guard: a bare UINavigationController must NOT answer, or the next line is vacuous"
+        )
+        #expect(
+            navigation.responds(to: probe),
+            "UIKit finds this by selector; a changed signature is a probe that never runs"
+        )
+    }
 }
