@@ -85,7 +85,10 @@ final class MediaEditorViewController: UIViewController {
     /// not reappear cropped there.
     private let onNext: ([MediaLibraryItem], [String: ContentFit]) -> UIViewController
 
-    private var canvas: UICollectionView!
+    /// ⚠️ A `CarouselCollectionView`, NOT A PLAIN ONE: on its first page it
+    /// declines a rightward drag so the stack's back-swipe can carry the screen
+    /// back. See `CarouselBackSwipe`.
+    private var canvas: CarouselCollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
     private let categoryBar = PagedTabBar(
         titles: MediaEditorViewController.categories, style: .navigationTitle
@@ -252,7 +255,7 @@ final class MediaEditorViewController: UIViewController {
     // MARK: - The canvas
 
     private func configureCanvas() {
-        canvas = UICollectionView(frame: .zero, collectionViewLayout: Self.canvasLayout())
+        canvas = CarouselCollectionView(frame: .zero, collectionViewLayout: Self.canvasLayout())
         canvas.backgroundColor = .clear
         canvas.isPagingEnabled = true
         canvas.showsHorizontalScrollIndicator = false
@@ -354,23 +357,25 @@ final class MediaEditorViewController: UIViewController {
 
     private func configureBars() {
         configureNavigationAppearance()
-        // ⚠️ A SYSTEM ITEM, NOT A BUTTON IN A CUSTOM VIEW. Wrapped in a
-        // `UIButton` a glyph comes out in a 59x44 oval instead of the 44pt circle
-        // every other bar glyph in this app wears — the search screen measured it.
+        // ⚠️ **THE BACK BUTTON IS UIKit'S OWN, AND THE BACK-SWIPE COMES WITH
+        // IT.** A custom leading item REPLACES the back button, and UIKit
+        // disables the interactive pop along with it — silently, so only a real
+        // edge drag ever shows it. Measured on this flow: with a hand-made
+        // chevron standing in, an edge drag moved nothing; with
+        // `leftItemsSupplementBackButton` set, the identical drag popped the
+        // screen. `SearchResultsViewController` records paying for the same trap.
         //
-        // And the back button is STATED rather than inherited: a pushed screen
-        // gets one for free, but it wears the previous screen's title beside the
-        // chevron, and the picker has no title to lend it.
-        let back = UIBarButtonItem(
-            image: UIImage(systemName: "chevron.backward"),
-            primaryAction: UIAction { [weak self] _ in
-                self?.navigationController?.popViewController(animated: true)
-            }
-        )
-        back.accessibilityLabel = "Back"
-        // LEFT TO RIGHT on this side: the chevron takes the edge and the draft
-        // sits inboard of it.
-        navigationItem.leftBarButtonItems = [back, saveDraftItem]
+        // The chevron that used to stand here did nothing but `popViewController`
+        // — exactly what UIKit's own does.
+        //
+        // ⚠️ AND THE OLD NOTE'S FEAR DOES NOT MATERIALISE: it warned that an
+        // inherited button wears the previous screen's title, but no Upload
+        // screen HAS a title, so it draws as a bare chevron. Verified on device.
+        navigationItem.leftBarButtonItems = [saveDraftItem]
+        navigationItem.leftItemsSupplementBackButton = true
+        // The chevron the NEXT screen wears, kept wordless if a title ever lands
+        // here.
+        navigationItem.backButtonDisplayMode = .minimal
         // ⚠️ RIGHT ITEMS ARE LAID OUT FROM THE TRAILING EDGE INWARDS, so the
         // FIRST one written is the RIGHTMOST. `[next, fit]` is what draws
         // `[fit][next]` on screen — the order this screen promises.

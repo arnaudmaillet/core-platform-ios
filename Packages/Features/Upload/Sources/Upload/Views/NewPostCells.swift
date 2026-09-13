@@ -26,7 +26,10 @@ final class NewPostMediaCell: UICollectionViewListCell {
         static let corner: CGFloat = 14
     }
 
-    private let scroller = UIScrollView()
+    /// ⚠️ A `CarouselScrollView`, NOT A PLAIN ONE: at its leading edge it
+    /// declines a rightward drag so the stack's back-swipe can carry the screen
+    /// back. See `CarouselBackSwipe`.
+    private let scroller = CarouselScrollView()
     private let row = UIStackView()
     /// What the strip currently stands for, so a re-configure of the same
     /// selection in the same order does not rebuild and re-fetch it.

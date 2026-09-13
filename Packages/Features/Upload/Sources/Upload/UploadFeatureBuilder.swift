@@ -71,7 +71,10 @@ public struct UploadFeatureBuilder {
                 ) { _ in }
             }
         }
-        let navigation = UINavigationController(rootViewController: picker)
+        // ⚠️ NOT A PLAIN `UINavigationController`: UIKit's full-width back-swipe
+        // would let a drag anywhere on the screen leave the flow, and this one is
+        // wanted from the window's edge only. See `UploadNavigationController`.
+        let navigation = UploadNavigationController(rootViewController: picker)
         navigation.modalPresentationStyle = .pageSheet
         if let sheet = navigation.sheetPresentationController {
             // ONE DETENT, AND THE FLOW IS SIMPLER FOR IT. The picker used to

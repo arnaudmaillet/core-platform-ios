@@ -126,9 +126,12 @@ struct NewPostTests {
         let screen = open(Self.items(2))
 
         #expect(screen.post.title == nil, "no 'New post' in the middle of the bar")
+        // ⚠️ THE CHEVRON IS UIKit'S — see `MediaEditorTests`. The flag is what
+        // makes "Save draft" sit BESIDE the back button rather than in its place,
+        // and the back-swipe survives only while it is set.
         let left = try #require(screen.post.navigationItem.leftBarButtonItems)
-        #expect(left.first?.accessibilityLabel == "Back")
-        #expect(left.last?.title == "Save draft")
+        #expect(left.map(\.title) == ["Save draft"], "the draft alone; the chevron is the system's")
+        #expect(screen.post.navigationItem.leftItemsSupplementBackButton)
         #expect(screen.post.navigationItem.rightBarButtonItems?.map(\.title) == ["Post"])
     }
 

@@ -158,11 +158,19 @@ struct MediaEditorTests {
             right.last?.accessibilityLabel == "Fit the picture",
             "named for what it will DO: the canvas fills, so the button offers fit"
         )
+        // ⚠️ **THE CHEVRON IS UIKit'S NOW, AND THAT IS WHAT KEEPS THE
+        // BACK-SWIPE.** A custom leading item stands IN PLACE of the back button
+        // and UIKit disables the interactive pop along with it — silently, so no
+        // assertion about the bar can catch the loss. The flag below is the
+        // difference, and it is asserted because only a real edge drag on a
+        // device would otherwise reveal it.
         let left = try #require(screen.editor.navigationItem.leftBarButtonItems)
-        #expect(left.count == 2, "the chevron, then the draft")
-        #expect(left.first?.accessibilityLabel == "Back", "a chevron, named for anyone listening")
-        #expect(left.first?.title == nil, "and not wearing the previous screen's title")
-        #expect(left.last?.title == "Save draft")
+        #expect(left.map(\.title) == ["Save draft"], "the draft alone; the chevron is the system's")
+        #expect(screen.editor.navigationItem.leftItemsSupplementBackButton)
+        #expect(
+            screen.editor.navigationItem.backButtonDisplayMode == .minimal,
+            "the chevron the NEXT screen wears carries no word"
+        )
     }
 
     /// The strip carries the editing categories, in the toolbar, with no backdrop
