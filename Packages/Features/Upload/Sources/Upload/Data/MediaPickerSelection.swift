@@ -6,13 +6,15 @@ import Foundation
 /// numbering does when an item in the middle is dropped, and what happens at the
 /// cap — should not need a window, a collection view or a photo library to ask.
 struct MediaPickerSelection: Equatable {
-    /// ⚠️ TWENTY HERE, AND THE PUBLISH PIPELINE STILL TAKES ONE.
-    /// `post.v1` already carries an array of attachments and a `carousel` kind,
-    /// so the cap is a product decision rather than a contract limit — but
-    /// `PostComposing.publish(media:caption:as:)` accepts a single
-    /// `ComposeMedia`, so the screen AFTER this one cannot yet carry a
-    /// selection of twenty off the device. Raising that is its own piece of
-    /// work; this screen is allowed to run ahead of it.
+    /// Twenty, a product decision rather than a contract limit: `post.v1`
+    /// carries an array of attachments and a `carousel` kind, and since
+    /// 2026-09-12 `PostComposing.publish(media:caption:as:)` takes `[ComposeMedia]`
+    /// and uploads them in order, so a full selection reaches the wire.
+    ///
+    /// ⚠️ One gap remains and it is the library seam's, not this cap's:
+    /// `MediaLibraryReading` vends images only, so a chosen VIDEO has nothing to
+    /// upload. The new-post screen marks them and says so rather than dropping
+    /// them silently.
     static let limit = 20
 
     private(set) var ids: [String] = []

@@ -61,7 +61,7 @@ final class TextPostComposerViewController: UIViewController {
     private var draftsItem: UIBarButtonItem?
     /// The sound pill's two homes — see `placeSoundPill`. Two instances,
     /// because a view lives in one bar at a time.
-    private let topSoundItem = UIBarButtonItem(customView: TextPostSoundPill())
+    private let topSoundItem = UIBarButtonItem(customView: SoundPillView())
     private var footerSoundItem: UIBarButtonItem?
     /// The writing footer without its leading pill: [🔖 ⇄] [⋯], right-aligned.
     private var writingFooterTrailing: [UIBarButtonItem] = []
@@ -247,7 +247,7 @@ final class TextPostComposerViewController: UIViewController {
         let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: []))
         more.isEnabled = false
         let footer = SnapFooterToolbar.items(
-            leading: TextPostSoundPill(),
+            leading: SoundPillView(),
             bookmark: bookmarkButton,
             repost: SnapFooterToolbar.makeRepostButton(),
             more: more
@@ -706,81 +706,8 @@ extension TextPostComposerViewController: UIAdaptivePresentationControllerDelega
     }
 }
 
-/// The footer's leading item while writing: where the post's sound — and its
-/// cover — will be chosen. The attribution pill's shape, so the footer keeps
-/// its outline when the post is published and the pill becomes the post's own.
-///
-/// ⚠️ NO ACTION YET: the screen that picks a sound does not exist. It is drawn
-/// because it is part of the page, and a tap on it does nothing.
-private final class TextPostSoundPill: UIControl {
-    private static let height: CGFloat = 36
-    /// The attribution pill's cap, which this pill stands in for.
-    private static let maxWidth: CGFloat = 240
-
-    /// ⚠️ ITS TEXT DOES NOT GROW WITH DYNAMIC TYPE, in either bar — pinned at the
-    /// default size. In the top bar it shares a run with Cancel and Drafts,
-    /// whose titles do not grow either, and a pill that did would outgrow the
-    /// bar at large sizes and fold the run into `•••`. In the footer its two
-    /// lines live in a bubble of fixed height: measured at accessibility XL,
-    /// the second line spilled out underneath it.
-    init() {
-        super.init(frame: .zero)
-        let traits = UITraitCollection(preferredContentSizeCategory: .large)
-        let disc = UIView()
-        disc.backgroundColor = .tertiarySystemFill
-        disc.layer.cornerRadius = AvatarImageView.barDiameter / 2
-        disc.isUserInteractionEnabled = false
-        disc.widthAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
-        disc.heightAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
-        let plus = UIImageView(image: UIImage(
-            systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .bold)
-        ))
-        plus.tintColor = .label
-        plus.translatesAutoresizingMaskIntoConstraints = false
-        disc.addSubview(plus)
-        NSLayoutConstraint.activate([
-            plus.centerXAnchor.constraint(equalTo: disc.centerXAnchor),
-            plus.centerYAnchor.constraint(equalTo: disc.centerYAnchor),
-        ])
-
-        let title = UILabel()
-        title.text = "Add a sound"
-        title.font = UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: traits).withWeight(.semibold)
-        title.textColor = .label
-        let subtitle = UILabel()
-        subtitle.text = "and a cover"
-        subtitle.font = .preferredFont(forTextStyle: .caption2, compatibleWith: traits)
-        subtitle.textColor = .secondaryLabel
-        let labels = UIStackView(arrangedSubviews: [title, subtitle])
-        labels.axis = .vertical
-        labels.alignment = .leading
-        // The words give way first — the attribution's rule — so the cap
-        // truncates them rather than squeezing the disc.
-        labels.setContentCompressionResistancePriority(UILayoutPriority(749), for: .horizontal)
-
-        let row = UIStackView(arrangedSubviews: [disc, labels])
-        row.axis = .horizontal
-        row.spacing = Spacing.sm
-        row.alignment = .center
-        row.isUserInteractionEnabled = false
-        let breathing = (Self.height - AvatarImageView.barDiameter) / 2
-        row.constrain(in: self) { parent in
-            row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: breathing)
-            row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Spacing.sm)
-            row.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
-        // 999, never required: the bar pins its item wrapper with autoresizing
-        // constraints, and anything required loses to that with a console break.
-        let height = heightAnchor.constraint(equalToConstant: Self.height)
-        height.priority = UILayoutPriority(999)
-        height.isActive = true
-        widthAnchor.constraint(lessThanOrEqualToConstant: Self.maxWidth).isActive = true
-
-        isAccessibilityElement = true
-        accessibilityLabel = "Add a sound and a cover"
-        accessibilityTraits = .button
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
+// The sound pill moved to DesignSystem as `SoundPillView` on 2026-09-12, when
+// the media editor needed the same control and features cannot import one
+// another. Its subtitle ("and a cover") went with the move, at Arnaud's
+// instruction — the word now centres on the disc. Everything else, including the
+// measured reason its text is pinned at `.large`, is recorded there.

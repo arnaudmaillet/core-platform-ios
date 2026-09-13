@@ -10,10 +10,17 @@ import UIKit
 /// the part it owns: `PostComposer`, behind Feed's `TextPostPublishing`.
 ///
 /// UPLOAD MEDIA IS THIS PACKAGE'S OWN SCREEN. It opens on the device library
-/// (`MediaPickerViewController`), and the step that writes a caption and
-/// publishes is still a stand-in — the picker hands it what was chosen, in the
-/// order it was chosen. Whatever that step becomes, it publishes through
-/// `PostComposer` too.
+/// (`MediaPickerViewController`), goes on to the editor
+/// (`MediaEditorViewController`), which shows what was chosen full-bleed in the
+/// order it was chosen and can lay each one filled or whole, and ends at
+/// `NewPostViewController` — the cover, a title, a caption and the post's
+/// settings — which publishes through `PostComposer`.
+///
+/// ⚠️ **THAT LAST SCREEN DRAWS MORE THAN THE CONTRACT CARRIES, ON PURPOSE.**
+/// Of what it offers, only the media, their ORDER (the cover) and the caption
+/// reach the server; the title and the six settings are honoured by the screen
+/// alone and say so on it (`dev/BACKEND_GAPS.md` §21, §22). Read that screen's
+/// own comment before wiring anything there to a field that does not exist.
 @MainActor
 public struct UploadFeatureBuilder {
     private let composer: any PostComposing
@@ -32,30 +39,49 @@ public struct UploadFeatureBuilder {
 
     /// "Upload Media" — photos and videos from the library.
     ///
-    /// A sheet that rests on a single row of the album and opens into the whole
-    /// grid. The resting detent is the screen's own, because only the screen
-    /// knows how tall one row is and whether the tray is up;
-    /// `MediaPickerViewController` says why the album changes axis with it.
+    /// A sheet that opens to the top and stays there, showing the album as a
+    /// three-column grid.
     public func makeMediaUploadViewController() -> UIViewController {
-        let picker = MediaPickerViewController(library: Self.makeLibrary()) { chosen in
-            PendingScreenViewController(
-                title: "New Post",
-                message: Self.pendingMessage(for: chosen),
-                showsClose: false
-            )
+        // ⚠️ ONE LIBRARY FOR THE WHOLE FLOW, NOT ONE PER SCREEN. The Photos
+        // implementation keeps the assets it fetched keyed by identifier, and
+        // every thumbnail request looks its asset up in there — so an editor
+        // handed a library of its own would be asking for pictures that library
+        // has never fetched, and would draw nothing at all.
+        let library = Self.makeLibrary()
+        // ⚠️ **ONE DRAFT PER PRESENTATION, AND IT MUST BE BORN HERE.** The
+        // finalisation screen is rebuilt on every "Next" — the closure below
+        // constructs a fresh `NewPostViewController` each time — so a caption
+        // typed before stepping back to the editor had nowhere to survive.
+        //
+        // Declared OUTSIDE both closures on purpose: inside, it would be made
+        // again on every call and would reproduce the very bug it fixes while
+        // looking exactly like the fix. It lives as long as this sheet and dies
+        // with it — session-scoped, nothing on disk, nothing global.
+        let draft = PostDraft()
+        let picker = MediaPickerViewController(library: library) { chosen in
+            MediaEditorViewController(items: chosen, library: library) { editing, fits in
+                // ⚠️ THE SCREEN DISMISSES ITSELF. This closure cannot reach the
+                // navigation controller — it is built below, after the picker
+                // that owns this one — and a published post is broadcast on
+                // `ComposedPostChannel`, so the feed already has it and nobody
+                // here needs telling.
+                NewPostViewController(
+                    items: editing, fits: fits, library: library, composer: composer,
+                    draft: draft
+                ) { _ in }
+            }
         }
         let navigation = UINavigationController(rootViewController: picker)
         navigation.modalPresentationStyle = .pageSheet
         if let sheet = navigation.sheetPresentationController {
-            sheet.detents = [picker.makeRestingDetent(), .large()]
-            sheet.selectedDetentIdentifier = MediaPickerViewController.restingDetentIdentifier
+            // ONE DETENT, AND THE FLOW IS SIMPLER FOR IT. The picker used to
+            // offer a resting height of a single album row and open from there;
+            // it now opens to the top and stays, so there is no second height to
+            // travel to, nothing to expand when the album is scrolled at its
+            // edge, and no custom detent to resolve.
+            sheet.detents = [.large()]
+            sheet.selectedDetentIdentifier = .large
             sheet.prefersGrabberVisible = true
-            // ⚠️ OFF, OR THE SHEET OPENS ITSELF. A sheet expands to its largest
-            // detent when the scroll view it tracks is scrolled at its edge, and
-            // the picker sets the grid's offset itself as soon as an album
-            // lands — which reads to UIKit as exactly that scroll. The album
-            // opens the sheet only when the viewer drags it.
-            sheet.prefersScrollingExpandsWhenScrolledToEdge = false
         }
         return navigation
     }

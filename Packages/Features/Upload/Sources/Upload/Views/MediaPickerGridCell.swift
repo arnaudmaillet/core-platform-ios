@@ -7,9 +7,15 @@ final class MediaPickerGridCell: UICollectionViewCell {
     private enum Metrics {
         static let badgeSize: CGFloat = 24
         static let badgeInset: CGFloat = 6
-        /// The same radius the tray's thumbnails wear, so a tile and the
-        /// thumbnail it becomes when chosen are visibly the same object.
-        static let corner: CGFloat = 10
+        /// ⚠️ **NO LONGER THE TRAY'S RADIUS, AND THAT IS DELIBERATE.** This was
+        /// 10 to match `SelectedMediaTrayView`, so a tile and the thumbnail it
+        /// becomes when chosen read as one object. The grid's gutter has since
+        /// gone to 2pt, and at 10pt the four radii meeting at a junction opened a
+        /// light rosette several times wider than the 2pt gap that is supposed to
+        /// be the only space there — the grid measured tight and read loose. The
+        /// tray's geometry did not change, so it keeps its 10 and the two are now
+        /// allowed to differ.
+        static let corner: CGFloat = 4
         /// How far the thumbnail shrinks once it is chosen. The tile keeps its
         /// place in the grid and the gap that opens around it is the whole
         /// signal — the same move Photos makes, and the reason a chosen tile is
@@ -32,7 +38,6 @@ final class MediaPickerGridCell: UICollectionViewCell {
     private let thumbnail = UIImageView()
     private let badge = SelectionBadgeView()
     private let duration = UILabel()
-    private let durationScrim = UIView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -47,8 +52,6 @@ final class MediaPickerGridCell: UICollectionViewCell {
         // A video's duration sits over the photo's own colours, so it carries a
         // shadow rather than a plate: a plate on every video tile turns a grid
         // of pictures into a grid of labels.
-        durationScrim.isUserInteractionEnabled = false
-        durationScrim.backgroundColor = .clear
         duration.font = .preferredFont(forTextStyle: .caption2)
         duration.adjustsFontForContentSizeCategory = true
         duration.textColor = .white
@@ -164,6 +167,27 @@ private final class SelectionBadgeView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// ⚠️ **A SHADOW WITH NO PATH IS DERIVED FROM THE LAYER'S ALPHA CHANNEL
+    /// EVERY TIME IT COMPOSITES**, and this badge is on EVERY tile — it is never
+    /// hidden, only re-coloured, so eighteen of them sit on screen while the
+    /// grid's arrival fades and scales each cell. The shape is a capsule and it
+    /// is known, so hand it over rather than making Core Animation infer it.
+    /// Pixel-identical by construction: same rect, same radius.
+    ///
+    /// Honest label: this is a PRINCIPLED win, not a measured one. Three
+    /// instruments — app CPU, render-server CPU, and frame times under both a
+    /// programmatic walk and a simulated drag — all came back inside their own
+    /// noise, with p95 pinned at exactly 16.67ms. A simulator renders on the
+    /// Mac's GPU and cannot price this; that is a limit of the instrument, not
+    /// evidence that the work is free on a phone.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.shadowPath = UIBezierPath(
+            roundedRect: bounds,
+            cornerRadius: bounds.height / 2
+        ).cgPath
+    }
 
     /// ⚠️ THE BOUNCE FIRES ON A CHANGE OF STATE, NOT ON EVERY CONFIGURE. A
     /// reconfigure runs for renumbering and for the cap crossing too, and a

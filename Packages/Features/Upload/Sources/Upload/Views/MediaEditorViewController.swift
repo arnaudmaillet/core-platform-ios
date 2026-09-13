@@ -1,0 +1,674 @@
+import DesignSystem
+import UIKit
+
+/// Whether a picture fills its frame and is cropped, or is shown whole with the
+/// ground around it.
+///
+/// ⚠️ **MODULE SCOPE, BECAUSE THE CHOICE OUTLIVES THE EDITOR.** It was nested in
+/// `MediaEditorViewController` while the editor was the only screen that cared.
+/// The new-post screen's thumbnails have to honour the same decision — a picture
+/// the author chose to show whole must not come back cropped one screen later —
+/// so the type travels with the media.
+///
+/// ⚠️ **THE GLYPH OFFERS THE OTHER STATE.** A button is named for what it will
+/// do, not for what is: while the picture FILLS, the button shows the inward
+/// arrows that will shrink it to fit. Drawing the current state instead is the
+/// classic way to make a toggle read backwards.
+enum ContentFit {
+    case fill, fit
+
+    var mode: UIView.ContentMode { self == .fill ? .scaleAspectFill : .scaleAspectFit }
+    var toggled: ContentFit { self == .fill ? .fit : .fill }
+    var symbolName: String {
+        self == .fill ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
+    }
+    var actionName: String { self == .fill ? "Fit the picture" : "Fill the screen" }
+}
+
+/// The second step of posting media: what was chosen, full-bleed, with the
+/// editing categories beneath it.
+///
+/// ```
+/// ┌──────────────────────────┐
+/// │ ‹ Save draft     ⤡  Next │
+/// │                          │
+/// │                          │
+/// │      the media, filling  │
+/// │      the whole canvas    │
+/// │                          │
+/// │                          │
+/// │ ⊕ Add a song  Effects ░░ │
+/// └──────────────────────────┘
+/// ```
+///
+/// **Several items page sideways, one to a screen**, in the order the picker
+/// handed them over — so nothing here has to ask which of them is "the" one
+/// being edited.
+///
+/// ⚠️ **NOTHING HERE EDITS ANYTHING YET, AND THAT IS DELIBERATE.** The category
+/// pills select and drive nothing, and "Add a song" has no destination: this
+/// repository holds no audio seam of any kind — no track model, no picker, no
+/// mock, nothing behind `CoreNetworking`. Drawing the control and saying so in
+/// the source is the precedent Feed's own sound pill sets. Inventing a seam to
+/// put behind it would be inventing a product decision.
+///
+/// ⚠️ **A VIDEO DRAWS ITS POSTER FRAME, NOT PLAYBACK.** `MediaLibraryReading`
+/// vends images, and no player is injected into this package — so a chosen video
+/// shows the same frame the grid showed it by. No play glyph is laid over it, on
+/// purpose: a button that promises playback and does nothing is worse than a
+/// still that promises nothing.
+///
+/// **The sheet becomes the whole screen here.** The flow is a stack inside a
+/// page sheet that rests on a single album row, and a canvas one row tall is not
+/// a canvas — so this screen states the detent it needs on the way in, and the
+/// picker takes its own back on the way out.
+final class MediaEditorViewController: UIViewController {
+    private enum Metrics {
+        /// What the canvas is worth before it has been laid out once — the
+        /// narrowest phone this app is built for. Only a first thumbnail request
+        /// can ever land on it.
+        static let canvasFallback = CGSize(width: 375, height: 812)
+    }
+
+
+    /// What the strip at the foot of the screen offers. Editing itself is not
+    /// built, so this is the list the design asks for and nothing more.
+    static let categories = ["Effects", "Text", "Stickers", "Filters"]
+
+    private let items: [MediaLibraryItem]
+    private let itemsByID: [String: MediaLibraryItem]
+    private let library: any MediaLibraryReading
+    /// What "Next" hands the media to. The step that writes a caption and
+    /// publishes is still a stand-in, so the builder passes a screen saying so.
+    /// ⚠️ CARRIES THE FIT CHOICES TOO. The step after this one draws the same
+    /// pictures as thumbnails, and a picture the author chose to show WHOLE must
+    /// not reappear cropped there.
+    private let onNext: ([MediaLibraryItem], [String: ContentFit]) -> UIViewController
+
+    private var canvas: UICollectionView!
+    private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
+    private let categoryBar = PagedTabBar(
+        titles: MediaEditorViewController.categories, style: .navigationTitle
+    )
+
+    private lazy var nextItem = UIBarButtonItem(
+        title: "Next",
+        primaryAction: UIAction { [weak self] _ in self?.goNext() }
+    )
+
+    /// ⚠️ **PER ITEM, NOT PER SCREEN.** "Fill or fit the current media" is a
+    /// decision about one picture: a portrait shot and a landscape one in the
+    /// same carousel want opposite answers, and a single screen-wide flag would
+    /// make choosing for one of them undo the choice for the other. Absent means
+    /// `.fill`, which is what the canvas has always done.
+    private var fits: [String: ContentFit] = [:]
+
+    /// Which glyph the bar is currently wearing, so the item is only re-stated
+    /// when it actually changes — see `updateFitItem(animated:)`.
+    private var shownFit: ContentFit = .fill
+
+    /// Which of several media is showing. Hides itself for a single one.
+    private let pageDots = MediaPageDotsView()
+
+    /// What the toolbar appearance was before this screen borrowed it. The
+    /// toolbar belongs to the STACK, and the picker underneath draws its album
+    /// strip in the same one.
+    private var restoreToolbar: (() -> Void)?
+
+    #if DEBUG
+    /// Guards `-upload-post` against firing twice: `viewDidAppear` runs again
+    /// every time the finalisation screen is popped back off this one.
+    private var hasAutoAdvanced = false
+    #endif
+
+    /// ⚠️ DRAWN, AND WIRED TO NOTHING — see the type comment. There is no audio
+    /// seam in this repository for it to reach. The same control the text-post
+    /// composer uses, which is why it lives in DesignSystem.
+    private let soundPill = SoundPillView(title: "Add a song", neverTruncates: true)
+
+    /// ⚠️ DRAWN AND INERT TOO, and for a nearer reason: media drafts do not
+    /// exist. `MediaDraftsViewController` is an empty list waiting for the
+    /// notion, so there is nothing for this to save into yet.
+    private lazy var saveDraftItem = UIBarButtonItem(
+        title: "Save draft", style: .plain, target: nil, action: nil
+    )
+
+    init(
+        items: [MediaLibraryItem],
+        library: any MediaLibraryReading,
+        onNext: @escaping ([MediaLibraryItem], [String: ContentFit]) -> UIViewController
+    ) {
+        self.items = items
+        self.itemsByID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        self.library = library
+        self.onNext = onNext
+        super.init(nibName: nil, bundle: nil)
+        // ⚠️ THE TOP BAR BELONGS TO THE SCREEN, NOT TO ITS VIEW. A navigation
+        // controller reads `navigationItem` on the way in, so a screen that has
+        // been made but not yet shown would hand back a bar with nothing in it.
+        // The picker's `init` carries the same note.
+        configureBars()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    // MARK: - Lifecycle
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // A media canvas is black. The picture is the subject, and a light ground
+        // around a portrait photo reads as a letterbox nobody asked for.
+        view.backgroundColor = .black
+        // ⚠️ **THE BARS WERE INSETTING THE CANVAS, NOT MERELY COVERING IT — AND
+        // A TRANSPARENT APPEARANCE ALONE DID NOT FIX IT.** Measured from a
+        // screenshot: the sheet spans 63→874pt while the picture spanned only
+        // 131→795, short by ~68pt at the top and ~79 at the foot — a navigation
+        // bar, and a toolbar plus the home indicator. That is UIKit's opaque-bar
+        // rule: `extendedLayoutIncludesOpaqueBars` is FALSE by default, so a
+        // child's view is laid out BELOW an opaque bar rather than under it, and
+        // `pin(to: view)` then pins to a view that already stops at the chrome.
+        // Stating it here is what lets "fill" fill the window and "fit" fit the
+        // window; the transparent appearance is what makes the picture visible
+        // through the bars once it gets there. Both are needed.
+        edgesForExtendedLayout = .all
+        extendedLayoutIncludesOpaqueBars = true
+        configureCanvas()
+        configureCategoryStrip()
+        showItems()
+    }
+
+    /// The stack's toolbar carries the category strip, and a toolbar's
+    /// VISIBILITY belongs to the stack rather than to a screen's `toolbarItems`
+    /// — so the screen raises it itself, as the picker and the relationship
+    /// lists both do.
+    ///
+    /// This screen used to narrow the sheet to a single detent on the way in,
+    /// because the picker underneath offered a resting height of one album row
+    /// and a canvas that could be dragged down to it was no canvas at all. The
+    /// picker now opens to the top and stays, so there is nothing left to narrow
+    /// — and with it went the restore on the way out, which had to run after the
+    /// pop or it took the whole app down with a stack overflow.
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.setToolbarHidden(false, animated: animated)
+        configureBarAppearance()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        restoreToolbar?()
+        restoreToolbar = nil
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        #if DEBUG
+        logCanvas("didAppear")
+        // ⚠️ **THE FINALISATION SCREEN HAD NO SCRIPTED WAY IN.** `-upload-edit`
+        // stops at this screen and `debugTapNext()` is internal-to-tests, so the
+        // keyboard and the caption — both reported as broken there — could not be
+        // reached in a running app at all. One flag carries the flow the last
+        // step, after a beat so the push does not race this appearance.
+        if ProcessInfo.processInfo.arguments.contains("-upload-post"), !hasAutoAdvanced {
+            hasAutoAdvanced = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.goNext()
+            }
+        }
+        #endif
+    }
+
+    /// ⚠️ **THE CANVAS ALREADY RAN THE FULL WINDOW — THE BARS WERE PAINTING
+    /// OVER IT.** `pin(to:)` anchors to `.edges` by default and the canvas
+    /// ignores inset adjustment, so the picture has always spanned the sheet
+    /// top to bottom. What stopped at the bars was the VIEW of it: an opaque
+    /// bar background drawn on top. Both bars go transparent, so "fill" fills
+    /// the window and "fit" fits the window, each running behind the chrome.
+    ///
+    /// ⚠️ **THE NAVIGATION BAR IS SET PER ITEM AND THE TOOLBAR IS NOT.** A
+    /// `navigationItem` appearance is scoped to this screen and unwinds itself
+    /// on the way out; a `UIToolbar`'s belongs to the STACK, and the picker
+    /// underneath draws its album strip in that same toolbar — so this one is
+    /// captured and put back in `viewWillDisappear`.
+    private func configureBarAppearance() {
+        guard let toolbar = navigationController?.toolbar, restoreToolbar == nil else { return }
+        let standard = toolbar.standardAppearance
+        let compact = toolbar.compactAppearance
+        let scrollEdge = toolbar.scrollEdgeAppearance
+        restoreToolbar = { [weak toolbar] in
+            toolbar?.standardAppearance = standard
+            toolbar?.compactAppearance = compact
+            toolbar?.scrollEdgeAppearance = scrollEdge
+        }
+
+        let foot = UIToolbarAppearance()
+        foot.configureWithTransparentBackground()
+        toolbar.standardAppearance = foot
+        toolbar.compactAppearance = foot
+        toolbar.scrollEdgeAppearance = foot
+    }
+
+    // MARK: - The canvas
+
+    private func configureCanvas() {
+        canvas = UICollectionView(frame: .zero, collectionViewLayout: Self.canvasLayout())
+        canvas.backgroundColor = .clear
+        canvas.isPagingEnabled = true
+        canvas.showsHorizontalScrollIndicator = false
+        // ⚠️ FULL-BLEED UNDER THE BARS TAKES THREE STATEMENTS, NOT ONE. The
+        // inset adjustment would push the picture down below the navigation bar;
+        // the two scroll edge effects would lay a fade over the top and the
+        // bottom of it. The snap feed's full-screen media states all three, for
+        // exactly this reason.
+        canvas.contentInsetAdjustmentBehavior = .never
+        canvas.topEdgeEffect.isHidden = true
+        canvas.bottomEdgeEffect.isHidden = true
+        canvas.pin(to: view)
+
+        // ⚠️ ABOVE THE TOOLBAR, NOT INSIDE IT. The toolbar's items are the sound
+        // pill and the category strip; the indicator belongs to the PICTURE, so
+        // it sits on the canvas just clear of the chrome. Anchored to the safe
+        // area rather than to the view, because the canvas is full-bleed on
+        // purpose and its bottom edge is behind the home indicator.
+        pageDots.constrain(in: view) { guide in
+            pageDots.centerXAnchor.constraint(equalTo: guide.centerXAnchor)
+            pageDots.bottomAnchor.constraint(
+                equalTo: guide.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.sm
+            )
+        }
+        pageDots.configure(count: items.count, current: 0)
+
+        // The canvas reports its own paging, so the bar glyph and the dots can
+        // follow whichever picture the viewer has swiped to.
+        canvas.delegate = self
+
+        let cell = UICollectionView.CellRegistration<MediaEditorPageCell, String> { [weak self] cell, _, id in
+            guard let self, let item = itemsByID[id] else { return }
+            cell.prepare(for: item)
+            // ⚠️ RE-STATED ON EVERY REGISTRATION, because a cell is recycled and
+            // would otherwise arrive wearing the previous picture's choice.
+            cell.setContentMode((fits[id] ?? .fill).mode, animated: false)
+            let size = canvasSize
+            Task { [weak cell] in
+                let image = await self.library.thumbnail(for: id, size: size)
+                cell?.show(image, for: id)
+            }
+        }
+        dataSource = UICollectionViewDiffableDataSource(collectionView: canvas) { view, indexPath, id in
+            view.dequeueConfiguredReusableCell(using: cell, for: indexPath, item: id)
+        }
+    }
+
+    /// One item the size of the screen, scrolling sideways.
+    private static func canvasLayout() -> UICollectionViewCompositionalLayout {
+        var configuration = UICollectionViewCompositionalLayoutConfiguration()
+        configuration.scrollDirection = .horizontal
+        let size = NSCollectionLayoutSize(
+            widthDimension: .fractionalWidth(1), heightDimension: .fractionalHeight(1)
+        )
+        let group = NSCollectionLayoutGroup.horizontal(
+            layoutSize: size, subitems: [NSCollectionLayoutItem(layoutSize: size)]
+        )
+        let section = NSCollectionLayoutSection(group: group)
+        // ⚠️ **THE SAFE AREA WAS THE INSET, AND ONLY A MEASUREMENT FOUND IT.**
+        // `contentInsetsReference` defaults to `.safeArea`, so a
+        // `fractionalHeight(1)` group is measured against the SAFE AREA rather
+        // than against the canvas. Measured on device: the view and the canvas
+        // were both (0,0,402,812) — already correct — while the cell came back
+        // (0,70,402,656), which is 812 less a 70pt top inset and an 86pt bottom
+        // one. Two earlier attempts (transparent bar appearances, then
+        // `extendedLayoutIncludesOpaqueBars`) were right in themselves and
+        // irrelevant to this: they govern the VIEW's frame. This is the layout's
+        // own idea of where the content may go.
+        section.contentInsetsReference = .none
+        return UICollectionViewCompositionalLayout(section: section, configuration: configuration)
+    }
+
+    /// The size a full-page picture is asked for, in points.
+    private var canvasSize: CGSize {
+        let bounds = view.bounds.size
+        return bounds.width > 0 && bounds.height > 0 ? bounds : Metrics.canvasFallback
+    }
+
+    private func showItems() {
+        var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
+        snapshot.appendSections([0])
+        snapshot.appendItems(items.map(\.id))
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    // MARK: - Bars
+
+    /// ⚠️ **SET IN `init`, NOT ON APPEAR.** The navigation controller decides
+    /// whether to inset this screen's view when the screen is pushed; an
+    /// appearance installed in `viewWillAppear` arrives after that decision has
+    /// already been taken, which is why the first cut of this changed nothing.
+    private func configureNavigationAppearance() {
+        let bar = UINavigationBarAppearance()
+        bar.configureWithTransparentBackground()
+        navigationItem.standardAppearance = bar
+        navigationItem.scrollEdgeAppearance = bar
+        navigationItem.compactAppearance = bar
+    }
+
+    private func configureBars() {
+        configureNavigationAppearance()
+        // ⚠️ A SYSTEM ITEM, NOT A BUTTON IN A CUSTOM VIEW. Wrapped in a
+        // `UIButton` a glyph comes out in a 59x44 oval instead of the 44pt circle
+        // every other bar glyph in this app wears — the search screen measured it.
+        //
+        // And the back button is STATED rather than inherited: a pushed screen
+        // gets one for free, but it wears the previous screen's title beside the
+        // chevron, and the picker has no title to lend it.
+        let back = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.backward"),
+            primaryAction: UIAction { [weak self] _ in
+                self?.navigationController?.popViewController(animated: true)
+            }
+        )
+        back.accessibilityLabel = "Back"
+        // LEFT TO RIGHT on this side: the chevron takes the edge and the draft
+        // sits inboard of it.
+        navigationItem.leftBarButtonItems = [back, saveDraftItem]
+        // ⚠️ RIGHT ITEMS ARE LAID OUT FROM THE TRAILING EDGE INWARDS, so the
+        // FIRST one written is the RIGHTMOST. `[next, fit]` is what draws
+        // `[fit][next]` on screen — the order this screen promises.
+        navigationItem.rightBarButtonItems = [nextItem, makeFitItem(for: .fill)]
+        nextItem.style = .done
+    }
+
+    private func configureCategoryStrip() {
+        // ⚠️ **THE TOOLBAR ALREADY SUPPLIES A CAPSULE.** iOS composites every bar
+        // item through its own neutral glass, so a strip carrying its own
+        // backdrop renders as a bubble inside a bubble — the defect the picker's
+        // first cut shipped.
+        categoryBar.suppressesBackdrop = true
+        // ⚠️ **THE PILL DOES NOT MOVE ITSELF — AND THIS COMMENT USED TO CLAIM IT
+        // DID.** `PagedTabBar` answers a tap by setting `selectedIndex` and
+        // sending `.valueChanged`; the pill is placed by `applyProgress`, which
+        // only `setProgress` calls, and every screen that works drives that from
+        // a pager reporting its scroll. This screen has no pager, so with no
+        // action wired the tap looked dead — which is exactly how it was
+        // reported. It states the position itself instead.
+        //
+        // There is still nothing BEHIND a category: choosing one moves the pill
+        // and changes nothing else, because editing is not built yet.
+        categoryBar.addAction(
+            UIAction { [weak self] _ in self?.categoryChanged() }, for: .valueChanged
+        )
+        touchProbe.attach(to: categoryBar)
+        // ⚠️ **THE PILL KEEPS ITS WORD AND THE STRIP GIVES.** The two together
+        // over-subscribe the band — a pill beside a four-segment strip does not
+        // fit a phone — and the pill was the one that yielded, coming out as
+        // "Add a…".
+        //
+        // Compression resistance was the WRONG LEVER and setting it here did
+        // nothing: `PagedTabBar` STATES an intrinsic width, and resistance only
+        // governs shrinking below an intrinsic size — lowering the strip's let
+        // it shrink but obliged nobody to respect the pill, which had no minimum
+        // of its own. The pill now carries a width FLOOR (`neverTruncates`), and
+        // the strip is told it may give, which it can afford: it already handles
+        // being short by scrolling its overflow, where the pill can only lose
+        // letters.
+        categoryBar.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // [song][categories], both leading, with the flexible space pushing them
+        // left together. The fixed space keeps them two bubbles rather than one
+        // platter — the same spacing the composer's own footer uses between its
+        // pill and the buttons beside it.
+        toolbarItems = [
+            UIBarButtonItem(customView: soundPill),
+            .fixedSpace(Spacing.sm),
+            UIBarButtonItem(customView: categoryBar),
+            .flexibleSpace()
+        ]
+    }
+
+    /// Moves the pill onto the category that was tapped — see the note in
+    /// `configureCategoryStrip` for why a tap does not do this by itself.
+    private func categoryChanged() {
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState]) {
+            self.categoryBar.setProgress(CGFloat(self.categoryBar.selectedIndex))
+        }
+    }
+
+    // MARK: - Fill or fit
+
+    /// Which page the canvas is resting on. Read from the offset rather than
+    /// stored: the canvas pages itself, and a stored index drifts the moment a
+    /// swipe is interrupted.
+    private var currentIndex: Int {
+        guard canvas.bounds.width > 0, !items.isEmpty else { return 0 }
+        let page = Int((canvas.contentOffset.x / canvas.bounds.width).rounded())
+        return min(max(page, 0), items.count - 1)
+    }
+
+    private var currentItemID: String? {
+        items.indices.contains(currentIndex) ? items[currentIndex].id : nil
+    }
+
+    private var currentFit: ContentFit {
+        currentItemID.flatMap { fits[$0] } ?? .fill
+    }
+
+    private func toggleFit() {
+        guard let id = currentItemID else { return }
+        let next = (fits[id] ?? .fill).toggled
+        fits[id] = next
+        let page = canvas.cellForItem(at: IndexPath(item: currentIndex, section: 0))
+        (page as? MediaEditorPageCell)?.setContentMode(next.mode, animated: true)
+        updateFitItem(animated: true)
+    }
+
+    private func makeFitItem(for fit: ContentFit) -> UIBarButtonItem {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: fit.symbolName),
+            primaryAction: UIAction { [weak self] _ in self?.toggleFit() }
+        )
+        item.accessibilityLabel = fit.actionName
+        return item
+    }
+
+    /// Keeps the glyph offering the move the viewer can actually make on the
+    /// picture in front of them — including after a swipe, when the next
+    /// picture may have been left in the other state.
+    ///
+    /// ⚠️ **A NEW ITEM, NOT A NEW IMAGE.** Assigning `.image` on the item that
+    /// is already in the bar swaps the glyph in a single frame. UIKit animates
+    /// the capsule only when the ITEM ITSELF is replaced and the change is
+    /// stated through `setRightBarButtonItems(_:animated:)` — identity is what
+    /// it diffs on.
+    ///
+    /// ⚠️ **AND ONLY WHEN IT ACTUALLY CHANGES.** Re-stating the bar on every
+    /// settle would animate the item while swiping between two pictures that
+    /// share a fit state, which reads as a flicker for no reason.
+    private func updateFitItem(animated: Bool) {
+        let fit = currentFit
+        guard fit != shownFit else { return }
+        shownFit = fit
+        navigationItem.setRightBarButtonItems([nextItem, makeFitItem(for: fit)], animated: animated)
+    }
+
+    private func goNext() {
+        navigationController?.pushViewController(onNext(items, fits), animated: true)
+    }
+
+    // MARK: - The strip wins its own touches
+
+    /// ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER — see `SelectorTouchProbe`. The
+    /// picker skips this because it is the only screen in its stack; this screen
+    /// is pushed, so a sideways drag on the strip is a drag the back-swipe wants
+    /// for itself.
+    private lazy var touchProbe = SelectorTouchProbe { [weak self] isTouching in
+        self?.setStackGesturesEnabled(!isTouching)
+    }
+
+    private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
+
+    /// Suspends every pan on the navigation controller's own container view for
+    /// the length of a touch on the strip.
+    ///
+    /// ⚠️ **THE STACK HAS TWO BACK-SWIPE RECOGNISERS AND
+    /// `interactivePopGestureRecognizer` VENDS ONLY ONE** — audited on the search
+    /// results screen, where gating the vended one looked right and popped the
+    /// screen anyway. Every pan on the container is suspended, each restored to
+    /// the value it had rather than to `true`, and only while this screen is the
+    /// top one.
+    ///
+    /// These lines also exist in Profile's relationship lists. Features cannot
+    /// import one another, so the choice was this or promoting the helper into
+    /// DesignSystem — a change with a wider blast radius than the one screen that
+    /// needed it.
+    private func setStackGesturesEnabled(_ isEnabled: Bool) {
+        if isEnabled {
+            for (recogniser, wasEnabled) in suspendedPans { recogniser.isEnabled = wasEnabled }
+            suspendedPans = []
+            return
+        }
+        guard navigationController?.topViewController === self,
+              suspendedPans.isEmpty,
+              let host = navigationController?.view
+        else { return }
+        let pans = (host.gestureRecognizers ?? []).filter { $0 is UIPanGestureRecognizer }
+        suspendedPans = pans.map { ($0, $0.isEnabled) }
+        for recogniser in pans { recogniser.isEnabled = false }
+    }
+}
+
+/// One page of the canvas: the media, filling it.
+final class MediaEditorPageCell: UICollectionViewCell {
+    /// ⚠️ A PICTURE ARRIVES LATE AND A CELL IS REUSED EARLY — the same guard the
+    /// grid's tile carries, for the same reason.
+    private(set) var representedID: String?
+
+    private let picture = UIImageView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        picture.contentMode = .scaleAspectFill
+        picture.clipsToBounds = true
+        picture.pin(to: contentView)
+        isAccessibilityElement = true
+        accessibilityTraits = .image
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        representedID = nil
+        picture.image = nil
+    }
+
+    func prepare(for item: MediaLibraryItem) {
+        representedID = item.id
+        accessibilityLabel = item.isVideo ? "Video" : "Photo"
+    }
+
+    /// Hands over a picture fetched for `id`, and ignores one whose page has
+    /// moved on.
+    func show(_ image: UIImage?, for id: String) {
+        guard representedID == id else { return }
+        picture.image = image
+    }
+
+    /// ⚠️ **`contentMode` IS NOT AN ANIMATABLE PROPERTY.** Assigning it inside a
+    /// `UIView.animate` block changes the picture in one frame. A crossfade
+    /// through `UIView.transition` is how the jump is softened — the same move
+    /// the feed's render view makes when it swaps a poster for live playback.
+    func setContentMode(_ mode: UIView.ContentMode, animated: Bool) {
+        guard picture.contentMode != mode else { return }
+        guard animated else {
+            picture.contentMode = mode
+            return
+        }
+        UIView.transition(
+            with: picture, duration: 0.25,
+            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.picture.contentMode = mode
+        }
+    }
+
+    /// Internal for tests: whether a picture has actually landed.
+    var debugHasPicture: Bool { picture.image != nil }
+    /// Internal for tests: how the picture is currently laid in its page.
+    var debugContentMode: UIView.ContentMode { picture.contentMode }
+}
+
+// MARK: - The canvas reports its paging
+
+/// Only so the fill/fit glyph can follow the picture the viewer swiped to. The
+/// canvas has no selection and wants none — a tap on the media edits nothing
+/// yet.
+extension MediaEditorViewController: UICollectionViewDelegate {
+    /// ⚠️ THE DOTS FOLLOW THE SCROLL, THE GLYPH FOLLOWS THE SETTLE. The mark
+    /// should track the finger — an indicator that jumps only once the page
+    /// lands reads as lagging — while the fill/fit item must NOT be re-stated
+    /// mid-drag, since re-stating it animates the bar.
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        pageDots.setCurrent(currentIndex)
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        updateFitItem(animated: true)
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        updateFitItem(animated: true)
+    }
+}
+
+#if DEBUG
+extension MediaEditorViewController {
+    /// Where the canvas actually IS, behind `-upload-log-sheet`.
+    ///
+    /// ⚠️ **TWO CAUSES LOOK IDENTICAL IN A SCREENSHOT AND NEED OPPOSITE FIXES:**
+    /// a canvas laid out BETWEEN the bars, or a canvas running the full sheet
+    /// under bars that paint over it. Both show a picture that stops at the
+    /// chrome. Two rounds were spent guessing between them — transparent bar
+    /// appearances, then `extendedLayoutIncludesOpaqueBars` — and neither moved
+    /// a pixel. These are the numbers that tell them apart: if the CELL spans
+    /// the sheet, the bars are painting; if it stops short, the layout is.
+    func logCanvas(_ moment: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet") else { return }
+        let bar = navigationController?.navigationBar
+        let foot = navigationController?.toolbar
+        let cell = canvas.cellForItem(at: IndexPath(item: 0, section: 0))
+        print("""
+        [editor \(moment)] \
+        window=\(view.window?.bounds.size.debugDescription ?? "nil") \
+        view=\(view.frame) safeArea=\(view.safeAreaInsets) \
+        canvas=\(canvas.frame) inset=\(canvas.contentInset) adjusted=\(canvas.adjustedContentInset) \
+        cell=\(cell?.frame.debugDescription ?? "nil") \
+        navBar=\(bar?.frame.debugDescription ?? "nil") barTranslucent=\(bar?.isTranslucent.description ?? "nil") \
+        toolbar=\(foot?.frame.debugDescription ?? "nil") footTranslucent=\(foot?.isTranslucent.description ?? "nil") \
+        extendedOpaque=\(extendedLayoutIncludesOpaqueBars) edges=\(edgesForExtendedLayout.rawValue)
+        """)
+    }
+
+    /// Internal for tests: the canvas's own bounds, to compare a page against.
+    var debugCanvasBounds: CGRect { canvas.bounds }
+
+    /// Internal for tests: how many pages the canvas holds.
+    var debugPageCount: Int { dataSource.snapshot().numberOfItems }
+    /// Internal for tests: what the fill/fit button currently offers.
+    var debugFitActionName: String? {
+        navigationItem.rightBarButtonItems?.last?.accessibilityLabel
+    }
+    /// Internal for tests: the fit chosen for an item, defaulting as the screen does.
+    func debugFit(for id: String) -> ContentFit { fits[id] ?? .fill }
+    /// Internal for tests: the path the fill/fit button takes, without a bar to tap.
+    func debugTapFit() { toggleFit() }
+    /// Internal for tests: the categories the strip spells.
+    var debugCategoryTitles: [String] { categoryBar.currentTitles }
+    /// Internal for tests: whether the picture runs under the bars.
+    var debugCanvasIgnoresInsets: Bool { canvas.contentInsetAdjustmentBehavior == .never }
+    /// Internal for tests: the strip itself, to read what it is wearing.
+    var debugCategoryBar: PagedTabBar { categoryBar }
+    /// Internal for tests: the path "Next" takes, without a bar to tap.
+    func debugTapNext() { goNext() }
+}
+#endif

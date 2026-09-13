@@ -39,6 +39,14 @@ let package = Package(
             dependencies: [
                 "Upload",
                 "FeedInterface",
+                // Declared because the tests import it: the editor's tests read
+                // what its category strip is wearing, and `PagedTabBar` is
+                // DesignSystem's. It would compile without this line — SwiftPM
+                // puts every package dependency's module on the search path for
+                // each target here, which is why the composer's tests import
+                // five modules this list never names — so this states intent
+                // rather than fixing a break.
+                "DesignSystem",
                 "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
