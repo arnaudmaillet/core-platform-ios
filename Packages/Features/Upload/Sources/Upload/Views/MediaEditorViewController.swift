@@ -71,9 +71,28 @@ final class MediaEditorViewController: UIViewController {
     }
 
 
-    /// What the strip at the foot of the screen offers. Editing itself is not
-    /// built, so this is the list the design asks for and nothing more.
-    static let categories = ["Effects", "Text", "Stickers", "Filters"]
+    /// One editing mode the strip offers.
+    ///
+    /// ⚠️ **ICONS, NOT WORDS — AND THAT IS WHAT MAKES FIVE OF THEM POSSIBLE.**
+    /// Four titles already overran this toolbar: the fourth sat off the trailing
+    /// edge and could not be tapped at all, which is why `-upload-category` had to
+    /// exist to reach it. A symbol is a fixed 36pt square, so five fit in 196pt
+    /// where four words did not fit in any width this bar has.
+    struct Category {
+        let title: String
+        let symbol: String
+    }
+
+    /// What the strip at the foot of the screen offers.
+    static let categories: [Category] = [
+        Category(title: "Effects", symbol: "wand.and.stars"),
+        Category(title: "Text", symbol: "textformat"),
+        Category(title: "Stickers", symbol: "face.smiling"),
+        Category(title: "Filters", symbol: "camera.filters"),
+        // Crop and straighten are one mode and one icon: the viewer reaches for
+        // the same tool to square a horizon and to cut a border away.
+        Category(title: "Crop", symbol: "crop.rotate")
+    ]
 
     private let items: [MediaLibraryItem]
     private let itemsByID: [String: MediaLibraryItem]
@@ -91,8 +110,18 @@ final class MediaEditorViewController: UIViewController {
     /// back. See `CarouselBackSwipe`.
     private var canvas: CarouselCollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
-    private let categoryBar = PagedTabBar(
-        titles: MediaEditorViewController.categories, style: .navigationTitle
+    /// ⚠️ **NOT `PagedTabBar`, AND THE DIFFERENCE IS THE CONTRACT.** That bar is
+    /// built for tabs standing over a pager: a drag publishes a fractional page
+    /// and the PAGER answers where it lands. Seven screens are right to use it.
+    /// This one has no pager — its categories switch a mode, they do not turn a
+    /// page — so that contract had nothing on the other end, and the screen spent
+    /// a release driving the bar by hand and still needing a tap after every
+    /// slide. `IconSelectorBar` is the same gesture with the contract this screen
+    /// actually has.
+    private let categoryBar = IconSelectorBar(
+        items: MediaEditorViewController.categories.map {
+            IconSelectorBar.Item(symbolName: $0.symbol, accessibilityLabel: $0.title)
+        }
     )
 
     private lazy var nextItem = UIBarButtonItem(
@@ -138,9 +167,31 @@ final class MediaEditorViewController: UIViewController {
     private let pageDots = MediaPageDotsView()
 
     /// The reserved strip an editing control is put into — see
-    /// `MediaEditorBandView`. Empty today: this round reserves the room, it does
-    /// not fill it.
+    /// `MediaEditorBandView`. It holds the row of looks while "Filters" is the
+    /// chosen category, and collapses to nothing otherwise.
     private let band = MediaEditorBandView()
+
+    /// The dissolve the chrome sits on: clear where it begins, full material at
+    /// the foot of the screen, so the picture runs on underneath and merely loses
+    /// definition as it passes behind the controls.
+    ///
+    /// ⚠️ **IT IS NEVER HIDDEN — THE TOP ANCHOR IS THE DIAL.** The picker learned
+    /// this on its own copy: an earlier cut there set `isHidden` and took the
+    /// whole band away instead of shortening it. Here the two constraints below
+    /// swap, and the view stays.
+    private let backdrop = ProgressiveBlurView()
+
+    /// Where the dissolve begins when the band is holding something: the band's
+    /// own top edge, so the ramp starts exactly where the controls do.
+    private var backdropFromBand: NSLayoutConstraint!
+
+    /// And where it begins when the band is empty: the top of the toolbar.
+    ///
+    /// ⚠️ **THESE ARE NOT THE SAME POINT, WHICH IS WHY THERE ARE TWO.** An empty
+    /// band collapses to zero height at `safeArea.bottom - Spacing.sm`, so hanging
+    /// the dissolve from `band.topAnchor` alone would start it 8pt above the
+    /// toolbar rather than at it.
+    private var backdropFromChrome: NSLayoutConstraint!
 
     /// What the toolbar appearance was before this screen borrowed it. The
     /// toolbar belongs to the STACK, and the picker underneath draws its album
@@ -353,6 +404,34 @@ final class MediaEditorViewController: UIViewController {
             )
         }
 
+        // ⚠️ **`insertSubview(_:aboveSubview:)`, NEVER `pin(to:)` OR
+        // `constrain(in:)`.** Both of those call `addSubview` first, which MOVES
+        // the view to the TOP of the stack — the dissolve would then cover the
+        // band, the indicator and the bars, which is the exact opposite of its
+        // job. The picker states the same rule for its access notice, and this
+        // flow has already lost a screen to that helper once.
+        //
+        // Above the canvas and below everything else: the picture dissolves, the
+        // chrome does not.
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(backdrop, aboveSubview: canvas)
+        backdropFromBand = backdrop.topAnchor.constraint(equalTo: band.topAnchor)
+        backdropFromChrome = backdrop.topAnchor.constraint(
+            equalTo: view.safeAreaLayoutGuide.bottomAnchor
+        )
+        NSLayoutConstraint.activate([
+            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            // ⚠️ THE FOOT OF THE SCREEN, NOT THE SAFE AREA. The canvas is
+            // full-bleed and runs behind the home indicator; a dissolve stopping
+            // at the safe area would leave a sharp band of untouched picture
+            // beneath it. The picker's blur ends at `view.bottomAnchor` for the
+            // same reason.
+            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            // The band starts empty, so the chrome anchor is the one that holds.
+            backdropFromChrome
+        ])
+
         // ⚠️ ABOVE THE BAND, NOT ABOVE THE TOOLBAR. The toolbar's items are the
         // sound pill and the category strip; the indicator belongs to the PICTURE,
         // so it sits on the canvas just clear of the chrome — and now just clear
@@ -494,9 +573,13 @@ final class MediaEditorViewController: UIViewController {
         //
         // There is still nothing BEHIND a category: choosing one moves the pill
         // and changes nothing else, because editing is not built yet.
-        categoryBar.addAction(
-            UIAction { [weak self] _ in self?.categoryChanged() }, for: .valueChanged
-        )
+        // ⚠️ **ONE CHANNEL FOR TAP AND SLIDE ALIKE.** The bar this replaced
+        // announced a tap through `.valueChanged` and a drag through nothing at
+        // all, on the reasoning that a pager would answer for the drag — correct
+        // for a screen that has one. This screen does not, so a slide went
+        // unheard and the viewer had to tap to finish what it had already
+        // decided. Reported from a device.
+        categoryBar.onSelect = { [weak self] _ in self?.categoryChanged() }
         touchProbe.attach(to: categoryBar)
         // ⚠️ **THE PILL KEEPS ITS WORD AND THE STRIP GIVES.** The two together
         // over-subscribe the band — a pill beside a four-segment strip does not
@@ -526,10 +609,12 @@ final class MediaEditorViewController: UIViewController {
 
     /// Moves the pill onto the category that was tapped — see the note in
     /// `configureCategoryStrip` for why a tap does not do this by itself.
+    /// ⚠️ **NOTHING TO DRIVE BY HAND ANY MORE.** This used to animate
+    /// `setProgress` onto the bar's own `selectedIndex`, because `PagedTabBar`
+    /// places its pill only from that call and expected a pager to make it. The
+    /// selector moves its own pill, so what is left here is the screen's actual
+    /// job: show what the chosen mode offers.
     private func categoryChanged() {
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState]) {
-            self.categoryBar.setProgress(CGFloat(self.categoryBar.selectedIndex))
-        }
         showAccessory(for: selectedCategory)
     }
 
@@ -543,7 +628,7 @@ final class MediaEditorViewController: UIViewController {
     /// already been reordered once; `categories[3]` would break in silence.
     private var selectedCategory: String? {
         let index = categoryBar.selectedIndex
-        return Self.categories.indices.contains(index) ? Self.categories[index] : nil
+        return Self.categories.indices.contains(index) ? Self.categories[index].title : nil
     }
 
     private func showAccessory(for category: String?) {
@@ -820,10 +905,17 @@ extension MediaEditorViewController {
     /// wrong, which is why a comment is no substitute for the right side of a
     /// `#if`. Before pushing anything added near those accessors, build Release.
     func setEditingAccessory(_ accessory: UIView?) {
+        // ⚠️ **DEACTIVATE BEFORE ACTIVATING.** Both anchors pin the same edge, so
+        // leaving the old one alive for even one pass gives Auto Layout a conflict
+        // to arbitrate — and it may keep the one being replaced.
         if let accessory {
             band.show(accessory)
+            backdropFromChrome.isActive = false
+            backdropFromBand.isActive = true
         } else {
             band.clear()
+            backdropFromBand.isActive = false
+            backdropFromChrome.isActive = true
         }
     }
 }
@@ -873,15 +965,19 @@ extension MediaEditorViewController {
     /// Internal for tests: the band itself, to measure where it put things.
     var debugBand: MediaEditorBandView { band }
 
+    /// Internal for tests: the dissolve behind the chrome, to measure where it
+    /// begins, how far it reaches, and which side of the band it draws on.
+    var debugBackdrop: UIView { backdrop }
+
     /// Internal for tests: the indicator, whose position is what the band moves.
     var debugPageDots: UIView { pageDots }
 
     /// Internal for tests: the categories the strip spells.
-    var debugCategoryTitles: [String] { categoryBar.currentTitles }
+    var debugCategoryTitles: [String] { Self.categories.map(\.title) }
     /// Internal for tests: whether the picture runs under the bars.
     var debugCanvasIgnoresInsets: Bool { canvas.contentInsetAdjustmentBehavior == .never }
     /// Internal for tests: the strip itself, to read what it is wearing.
-    var debugCategoryBar: PagedTabBar { categoryBar }
+    var debugCategoryBar: IconSelectorBar { categoryBar }
     /// Internal for tests: the path "Next" takes, without a bar to tap.
     func debugTapNext() { goNext() }
 }

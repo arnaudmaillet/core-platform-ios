@@ -649,6 +649,7 @@ public final class PagedTabBar: UIControl {
     /// ride home, so the bar runs its own.
     public var onScrubEnd: ((CGFloat) -> Void)?
 
+
     private var titles: [String]
     private let capsule = UIVisualEffectView(effect: nil)
     /// Scrolls the segments when they out-measure the capsule. Below that

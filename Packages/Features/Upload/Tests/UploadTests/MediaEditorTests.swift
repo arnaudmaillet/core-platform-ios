@@ -184,8 +184,8 @@ struct MediaEditorTests {
         let hosted = (screen.editor.toolbarItems ?? []).compactMap(\.customView)
         #expect(hosted.count == 2, "the pill and the strip, and nothing else")
         #expect(hosted.first is SoundPillView, "the song leads: \(hosted)")
-        #expect(hosted.last is PagedTabBar, "and the categories follow it")
-        #expect(screen.editor.debugCategoryTitles == MediaEditorViewController.categories)
+        #expect(hosted.last is IconSelectorBar, "and the categories follow it")
+        #expect(screen.editor.debugCategoryTitles == MediaEditorViewController.categories.map(\.title))
         #expect(screen.editor.debugCategoryBar.suppressesBackdrop, "no bubble inside a bubble")
         #expect(screen.navigation.isToolbarHidden == false, "raised by the screen itself")
     }
@@ -204,13 +204,17 @@ struct MediaEditorTests {
         let bar = screen.editor.debugCategoryBar
         screen.window.layoutIfNeeded()
 
-        bar.debugSimulateTap(at: 2)
+        bar.debugTap(2)
         screen.window.layoutIfNeeded()
 
         #expect(bar.selectedIndex == 2)
         let alignment = try #require(bar.debugLensAlignment)
+        // ⚠️ CENTRES, NOT LEADING EDGES. The pill is the icon's square and the
+        // segment is that plus its clearance, so their minX agree only by
+        // accident — which is exactly how a 4pt leftward offset survived until
+        // this assertion was rewritten.
         #expect(
-            abs(alignment.lens.minX - alignment.segment.minX) < 1,
+            abs(alignment.lens.midX - alignment.segment.midX) < 1,
             "the pill sits on the segment that was tapped: \(alignment)"
         )
     }
@@ -376,5 +380,44 @@ struct MediaEditorTests {
             found += pages(in: subview)
         }
         return found
+    }
+
+    // MARK: - Sliding the pill, not only tapping it
+
+    /// ⚠️ **THE HALF `IconSelectorBarTests` CANNOT REACH.** Those pin that the
+    /// selector announces a choice; nothing there says this screen subscribed.
+    /// They could all pass while the editor wires nothing — a green suite over
+    /// dead code, which this flow has produced more than once.
+    ///
+    /// Reported from a device: sliding the pill onto a category moved the pill and
+    /// left the band showing the previous one until the viewer also tapped it.
+    @Test func choosingACategoryOpensWhatItOffers() async throws {
+        let screen = open(Self.items(2))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        // ⚠️ DERIVED, NEVER `categories[3]`. This strip has been reordered once
+        // already and gained a fifth entry since; a hard-coded position would
+        // break in silence.
+        let filters = try #require(
+            screen.editor.debugCategoryTitles.firstIndex(of: "Filters"),
+            "the category this test is about must exist"
+        )
+
+        #expect(screen.editor.debugBand.debugIsShowing == false,
+                "witness: the band starts closed, so 'it opened' below means something")
+
+        screen.editor.debugCategoryBar.debugTap(filters)
+
+        #expect(screen.editor.debugBand.debugIsShowing,
+                "the band follows the selector, by tap or by slide alike")
+    }
+
+    /// The fifth mode exists and is reachable by name rather than by position.
+    @Test func cropIsOfferedInTheSelector() async throws {
+        let screen = open(Self.items(2))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        #expect(screen.editor.debugCategoryTitles.contains("Crop"),
+                "offered: \(screen.editor.debugCategoryTitles)")
     }
 }
