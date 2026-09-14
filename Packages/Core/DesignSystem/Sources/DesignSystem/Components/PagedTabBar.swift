@@ -649,27 +649,6 @@ public final class PagedTabBar: UIControl {
     /// ride home, so the bar runs its own.
     public var onScrubEnd: ((CGFloat) -> Void)?
 
-    /// Where a drag landed, for a host that has **no pager to ask**.
-    ///
-    /// ⚠️ **FIRED ONLY WHEN THE BAR SETTLES ITSELF — i.e. only when `onScrubEnd`
-    /// is nil.** Every host with a pager already learns the landing from that
-    /// pager (`onSettled` / `onPageSettled`), and announcing here as well is the
-    /// "commit the model twice, to two answers, in an order nobody chose" this
-    /// file warns about a few lines up. So the two are exclusive by construction:
-    /// wire `onScrubEnd` and the pager answers, leave it nil and this does.
-    ///
-    /// It exists because a drag is otherwise **unobservable** to such a host.
-    /// `setProgress` updates `selectedIndex` deliberately without announcing, so
-    /// the pill lands on the right segment and nothing is ever told — which on
-    /// Upload's editor meant sliding to a category moved the pill and left the
-    /// band showing the previous one until the viewer also tapped it. Reported
-    /// from a device.
-    ///
-    /// ⚠️ NOT A SUBSTITUTE FOR `onScrub`. Reading `selectedIndex` every frame is
-    /// what the editor's own note forbids — the index flips at the mid-point of a
-    /// scrub, so a per-frame handler opens a mode half-way through the gesture.
-    /// This is the landing, once.
-    public var onSettled: ((Int) -> Void)?
 
     private var titles: [String]
     private let capsule = UIVisualEffectView(effect: nil)
@@ -1662,20 +1641,9 @@ public final class PagedTabBar: UIControl {
     private func settleLensAlone(speed: CGFloat) {
         let landing = landingIndex(from: progress, speed: speed)
         guard CGFloat(landing) != progress else { return }
-        // ⚠️ **READ BEFORE THE ANIMATION, NOT AFTER.** `setProgress` inside the
-        // block rewrites `selectedIndex` to the landing, so asking afterwards
-        // compares the landing against itself and announces every settle —
-        // including a drag that wandered off a segment and came back, which
-        // changed nothing and must say nothing.
-        let previous = selectedIndex
         UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
             self.setProgress(CGFloat(landing))
         }
-        // Only a real change, and only from HERE — see `onSettled`, which exists
-        // for hosts with no pager to ask and must stay exclusive with the
-        // `onScrubEnd` path above it.
-        guard landing != previous else { return }
-        onSettled?(landing)
     }
 
     /// Where a release commits: half a page of throw per unit of velocity —

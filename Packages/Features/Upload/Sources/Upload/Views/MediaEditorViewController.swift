@@ -71,9 +71,28 @@ final class MediaEditorViewController: UIViewController {
     }
 
 
-    /// What the strip at the foot of the screen offers. Editing itself is not
-    /// built, so this is the list the design asks for and nothing more.
-    static let categories = ["Effects", "Text", "Stickers", "Filters"]
+    /// One editing mode the strip offers.
+    ///
+    /// ⚠️ **ICONS, NOT WORDS — AND THAT IS WHAT MAKES FIVE OF THEM POSSIBLE.**
+    /// Four titles already overran this toolbar: the fourth sat off the trailing
+    /// edge and could not be tapped at all, which is why `-upload-category` had to
+    /// exist to reach it. A symbol is a fixed 36pt square, so five fit in 196pt
+    /// where four words did not fit in any width this bar has.
+    struct Category {
+        let title: String
+        let symbol: String
+    }
+
+    /// What the strip at the foot of the screen offers.
+    static let categories: [Category] = [
+        Category(title: "Effects", symbol: "wand.and.stars"),
+        Category(title: "Text", symbol: "textformat"),
+        Category(title: "Stickers", symbol: "face.smiling"),
+        Category(title: "Filters", symbol: "camera.filters"),
+        // Crop and straighten are one mode and one icon: the viewer reaches for
+        // the same tool to square a horizon and to cut a border away.
+        Category(title: "Crop", symbol: "crop.rotate")
+    ]
 
     private let items: [MediaLibraryItem]
     private let itemsByID: [String: MediaLibraryItem]
@@ -91,8 +110,18 @@ final class MediaEditorViewController: UIViewController {
     /// back. See `CarouselBackSwipe`.
     private var canvas: CarouselCollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
-    private let categoryBar = PagedTabBar(
-        titles: MediaEditorViewController.categories, style: .navigationTitle
+    /// ⚠️ **NOT `PagedTabBar`, AND THE DIFFERENCE IS THE CONTRACT.** That bar is
+    /// built for tabs standing over a pager: a drag publishes a fractional page
+    /// and the PAGER answers where it lands. Seven screens are right to use it.
+    /// This one has no pager — its categories switch a mode, they do not turn a
+    /// page — so that contract had nothing on the other end, and the screen spent
+    /// a release driving the bar by hand and still needing a tap after every
+    /// slide. `IconSelectorBar` is the same gesture with the contract this screen
+    /// actually has.
+    private let categoryBar = IconSelectorBar(
+        items: MediaEditorViewController.categories.map {
+            IconSelectorBar.Item(symbolName: $0.symbol, accessibilityLabel: $0.title)
+        }
     )
 
     private lazy var nextItem = UIBarButtonItem(
@@ -544,23 +573,13 @@ final class MediaEditorViewController: UIViewController {
         //
         // There is still nothing BEHIND a category: choosing one moves the pill
         // and changes nothing else, because editing is not built yet.
-        categoryBar.addAction(
-            UIAction { [weak self] _ in self?.categoryChanged() }, for: .valueChanged
-        )
-        // ⚠️ **AND THE SAME ANSWER FOR A DRAG, WHICH `.valueChanged` NEVER GIVES.**
-        // Reported from a device: sliding the pill onto a category moved the pill
-        // and left the band showing the previous one until the viewer also tapped
-        // it. `PagedTabBar` is right not to announce a drag — where the pages land
-        // is the PAGER's answer — but this screen has no pager: its categories are
-        // modes, not pages, so nothing ever echoed back and `.valueChanged` only
-        // ever fired from a tap. `onSettled` is the landing, once, for exactly
-        // this case; see its note.
-        //
-        // ⚠️ `onScrubEnd` STAYS NIL ON PURPOSE. Wiring it would take the settle
-        // away from the bar (`if let onScrubEnd { … } else { settleLensAlone(…) }`)
-        // and leave the pill stranded mid-strip unless this screen animated it
-        // home itself — a second, visual bug in the fix for the first.
-        categoryBar.onSettled = { [weak self] _ in self?.categoryChanged() }
+        // ⚠️ **ONE CHANNEL FOR TAP AND SLIDE ALIKE.** The bar this replaced
+        // announced a tap through `.valueChanged` and a drag through nothing at
+        // all, on the reasoning that a pager would answer for the drag — correct
+        // for a screen that has one. This screen does not, so a slide went
+        // unheard and the viewer had to tap to finish what it had already
+        // decided. Reported from a device.
+        categoryBar.onSelect = { [weak self] _ in self?.categoryChanged() }
         touchProbe.attach(to: categoryBar)
         // ⚠️ **THE PILL KEEPS ITS WORD AND THE STRIP GIVES.** The two together
         // over-subscribe the band — a pill beside a four-segment strip does not
@@ -590,10 +609,12 @@ final class MediaEditorViewController: UIViewController {
 
     /// Moves the pill onto the category that was tapped — see the note in
     /// `configureCategoryStrip` for why a tap does not do this by itself.
+    /// ⚠️ **NOTHING TO DRIVE BY HAND ANY MORE.** This used to animate
+    /// `setProgress` onto the bar's own `selectedIndex`, because `PagedTabBar`
+    /// places its pill only from that call and expected a pager to make it. The
+    /// selector moves its own pill, so what is left here is the screen's actual
+    /// job: show what the chosen mode offers.
     private func categoryChanged() {
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState]) {
-            self.categoryBar.setProgress(CGFloat(self.categoryBar.selectedIndex))
-        }
         showAccessory(for: selectedCategory)
     }
 
@@ -607,7 +628,7 @@ final class MediaEditorViewController: UIViewController {
     /// already been reordered once; `categories[3]` would break in silence.
     private var selectedCategory: String? {
         let index = categoryBar.selectedIndex
-        return Self.categories.indices.contains(index) ? Self.categories[index] : nil
+        return Self.categories.indices.contains(index) ? Self.categories[index].title : nil
     }
 
     private func showAccessory(for category: String?) {
@@ -952,11 +973,11 @@ extension MediaEditorViewController {
     var debugPageDots: UIView { pageDots }
 
     /// Internal for tests: the categories the strip spells.
-    var debugCategoryTitles: [String] { categoryBar.currentTitles }
+    var debugCategoryTitles: [String] { Self.categories.map(\.title) }
     /// Internal for tests: whether the picture runs under the bars.
     var debugCanvasIgnoresInsets: Bool { canvas.contentInsetAdjustmentBehavior == .never }
     /// Internal for tests: the strip itself, to read what it is wearing.
-    var debugCategoryBar: PagedTabBar { categoryBar }
+    var debugCategoryBar: IconSelectorBar { categoryBar }
     /// Internal for tests: the path "Next" takes, without a bar to tap.
     func debugTapNext() { goNext() }
 }
