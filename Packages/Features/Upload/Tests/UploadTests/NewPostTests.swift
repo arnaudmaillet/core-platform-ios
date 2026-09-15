@@ -1,4 +1,10 @@
+// `AVURLAsset`, to prove the file the stub hands over is a real clip and not a
+// URL that merely looks like one.
+import AVFoundation
 import CoreModels
+// `PlaceholderVideoFetcher` — the feed's mock video source, which synthesises
+// the real H.264 bytes the publish path then opens for real.
+import MediaPlayback
 import Testing
 import UIKit
 @testable import Upload
@@ -67,6 +73,28 @@ struct NewPostTests {
         /// The strip asks small and the publish loop asks large, so the large
         /// ones are the post itself.
         var publishedIDs: [String] { requests.filter { $0.size.width >= 1000 }.map(\.id) }
+
+        /// Every video the publish loop asked for a file for, in order.
+        private(set) var videoRequests: [String] = []
+
+        /// Makes `videoFile` answer nothing — how "a clip that cannot be read
+        /// stops the publish" is told apart from "it silently shrinks it".
+        var answersNoVideoFile = false
+
+        /// ⚠️ **A REAL CLIP, SYNTHESISED — NOT A URL THAT LOOKS LIKE ONE.**
+        /// `PostComposer` runs an `AVAssetExportSession` over whatever comes
+        /// back and pulls a poster out of it with `AVAssetImageGenerator`; a URL
+        /// with no video track behind it fails both, and the test would be
+        /// measuring this stub rather than the screen. Tiny and short on
+        /// purpose, and `PlaceholderVideoFetcher` caches by URL on disk, so the
+        /// whole suite pays for one encode per id.
+        func videoFile(for item: MediaLibraryItem.ID) async -> URL? {
+            videoRequests.append(item)
+            guard !answersNoVideoFile else { return nil }
+            guard let source = URL(string: "mock://video/\(item)?w=64&h=64") else { return nil }
+            return try? await PlaceholderVideoFetcher(durationSeconds: 0.4, framesPerSecond: 10)
+                .playableURL(for: source)
+        }
     }
 
     private actor RecordingComposer: PostComposing {
@@ -78,6 +106,13 @@ struct NewPostTests {
             /// untouched photograph, and a test written against it would pass
             /// whether or not the filter was ever applied.
             let images: [PickedImage]
+            /// ⚠️ **AND THEIR KINDS, IN CAROUSEL ORDER.** Since videos publish,
+            /// `mediaCount == 3` is satisfied just as well by three photographs
+            /// as by the two-photos-and-a-clip that was actually chosen — and
+            /// the ORDER is the carousel, which `post.v1` cannot express any
+            /// other way.
+            let kinds: [String]
+            let videos: [PickedVideo]
         }
 
         private(set) var calls: [Call] = []
@@ -89,7 +124,18 @@ struct NewPostTests {
                 if case .image(let picked) = $0 { return picked }
                 return nil
             }
-            calls.append(Call(mediaCount: media.count, caption: caption, images: pictures))
+            let clips: [PickedVideo] = media.compactMap {
+                if case .video(let picked) = $0 { return picked }
+                return nil
+            }
+            let kinds: [String] = media.map {
+                if case .video = $0 { return "video" }
+                return "photo"
+            }
+            calls.append(Call(
+                mediaCount: media.count, caption: caption,
+                images: pictures, kinds: kinds, videos: clips
+            ))
             let by = author ?? AuthorSummary(
                 id: ProfileID("first"), handle: "first", displayName: "First", avatarURL: nil
             )
@@ -135,8 +181,14 @@ struct NewPostTests {
         )
     }
 
+    /// ⚠️ **RAISED FROM 300 BECAUSE VIDEO ARRIVED.** Three seconds was ample
+    /// while this screen only fetched images. The video tests synthesise real
+    /// H.264 behind their stub, and on CI — one machine, nine package lanes,
+    /// every suite `@MainActor` — they timed out mid-publish with partial
+    /// results. A bound that is too large costs nothing when the condition
+    /// holds.
     private func settle(until condition: () -> Bool) async throws {
-        for _ in 0..<300 {
+        for _ in 0..<3000 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -255,13 +307,16 @@ struct NewPostTests {
     // MARK: - The cover
 
     /// ⚠️ NOT SIMPLY THE FIRST ITEM. Only photos publish, so if the viewer's
-    /// first pick is a video the cover is the first PHOTO — otherwise the strip
-    /// would badge a cover the feed never shows.
-    @Test func theCoverIsTheFirstPhotoEvenWhenAVideoWasChosenFirst() {
+    /// ⚠️ **THE FIRST ITEM, EVEN WHEN IT IS A VIDEO — AND THIS TEST USED TO
+    /// ASSERT THE OPPOSITE.** While videos could not be published, the cover
+    /// skipped to the first PHOTO so the strip would not badge a face the feed
+    /// never showed. A video now publishes and carries a poster, so skipping it
+    /// would silently reorder a selection that was chosen clip-first.
+    @Test func theCoverIsTheFirstItemEvenWhenItIsAVideo() {
         let screen = open(Self.items(3, videosAt: [0]))
 
-        #expect(screen.post.debugCoverID == "photo-1")
-        #expect(screen.post.debugPublishOrder.first == "photo-1", "and it leads the carousel")
+        #expect(screen.post.debugCoverID == "video-0")
+        #expect(screen.post.debugPublishOrder.first == "video-0", "and it leads the carousel")
     }
 
     @Test func choosingACoverMovesItToTheFrontAndKeepsTheRestInOrder() {
@@ -276,14 +331,16 @@ struct NewPostTests {
         )
     }
 
-    /// A video cannot be published, so offering one as the cover would promise a
-    /// face for the post that never arrives.
-    @Test func theCoverMenuOffersPhotosOnly() {
+    /// ⚠️ **EVERY ITEM NOW, AND THE TITLES SAY WHICH IS WHICH.** This asserted
+    /// "photos only" for as long as a video could not be published. The number
+    /// is the item's place in the SELECTION, not among its own kind, so the
+    /// label answers "which one" rather than "which video".
+    @Test func theCoverMenuOffersEveryItemAndNamesItsKind() {
         let screen = open(Self.items(4, videosAt: [1, 3]))
 
-        let choices = screen.post.debugCoverMenu().children
+        let titles = screen.post.debugCoverMenu().children.compactMap { ($0 as? UIAction)?.title }
 
-        #expect(choices.count == 2, "two photos among four items: \(choices.map(\.title))")
+        #expect(titles == ["Photo 1", "Video 2", "Photo 3", "Video 4"], "got \(titles)")
     }
 
     // MARK: - What actually gets published
@@ -302,7 +359,16 @@ struct NewPostTests {
         #expect(screen.library.publishedIDs == ["photo-2", "photo-0", "photo-1"])
     }
 
-    @Test func videosAreLeftBehindRatherThanPublishedEmpty() async throws {
+    /// ⚠️ **THE WHOLE POINT OF THIS SLICE, AND THIS TEST USED TO ASSERT THE
+    /// LOSS.** It was `videosAreLeftBehindRatherThanPublishedEmpty`, and it
+    /// pinned `mediaCount == 2` out of a four-item selection. Everything below
+    /// the `where !item.isVideo` clause in `post()` was already built and green;
+    /// the clause was the whole of the gap.
+    ///
+    /// The KINDS are asserted, not just the count: four photographs would
+    /// satisfy `mediaCount == 4` exactly as well as the two-and-two that was
+    /// chosen, and the array's order IS the carousel's.
+    @Test func aVideoIsPublishedAlongsideThePhotosInCarouselOrder() async throws {
         let screen = open(Self.items(4, videosAt: [1, 2]))
 
         screen.post.debugTapPost()
@@ -312,9 +378,50 @@ struct NewPostTests {
         // "it finished" signal anyway.
         try await settle(until: { screen.handed.entry != nil })
 
-        #expect(screen.library.publishedIDs == ["photo-0", "photo-3"], "the videos were never fetched")
         let calls = await screen.composer.calls
-        #expect(calls.first?.mediaCount == 2, "and only the photos reached the composer")
+        #expect(calls.first?.mediaCount == 4, "all four were chosen, all four go")
+        #expect(calls.first?.kinds == ["photo", "video", "video", "photo"],
+                "in the order they were chosen: \(calls.first?.kinds ?? [])")
+        #expect(screen.library.publishedIDs == ["photo-0", "photo-3"],
+                "only the photographs are fetched as images")
+        #expect(screen.library.videoRequests == ["video-1", "video-2"],
+                "and the clips are fetched as files")
+    }
+
+    /// ⚠️ **A URL IS NOT A VIDEO, AND ONLY OPENING IT SAYS SO.** `PostComposer`
+    /// runs an `AVAssetExportSession` over whatever this screen hands it and
+    /// pulls a poster out with `AVAssetImageGenerator`; a path that merely looks
+    /// plausible fails both, at publish time, in front of the author. The stub
+    /// synthesises real H.264, so this asks the file the same question the
+    /// composer will.
+    @Test func theVideoHandedToTheComposerIsAPlayableFile() async throws {
+        let screen = open(Self.items(2, videosAt: [1]))
+
+        screen.post.debugTapPost()
+        try await settle(until: { screen.handed.entry != nil })
+
+        let calls = await screen.composer.calls
+        let clip = try #require(calls.first?.videos.first)
+        #expect(clip.sourceURL.isFileURL)
+        let tracks = try await AVURLAsset(url: clip.sourceURL).loadTracks(withMediaType: .video)
+        #expect(tracks.isEmpty == false, "the file handed over carries no video track")
+    }
+
+    /// ⚠️ **A CLIP THAT CANNOT BE READ STOPS THE POST — IT DOES NOT SHRINK IT.**
+    /// Publishing three of the four things the author assembled, with no word
+    /// said, is the exact defect this slice removes; doing it again by way of an
+    /// error path would be the same bug wearing a different sleeve. The usual
+    /// cause is an unfinished iCloud download, which is worth saying out loud.
+    @Test func aVideoThatCannotBeReadStopsThePostRatherThanShrinkingIt() async throws {
+        let screen = open(Self.items(3, videosAt: [1]))
+        screen.library.answersNoVideoFile = true
+
+        screen.post.debugTapPost()
+        try await settle(until: { screen.post.presentedViewController is UIAlertController })
+
+        #expect(screen.handed.entry == nil, "nothing was handed back")
+        let calls = await screen.composer.calls
+        #expect(calls.isEmpty, "and the composer was never asked to publish a short carousel")
     }
 
     /// ⚠️ **THE REGRESSION §21 EXISTS FOR.** Folding the title into the caption
@@ -443,13 +550,22 @@ struct NewPostTests {
         #expect(screen.post.debugHeaderText(forSection: 0) == nil, "the media wears no header")
     }
 
-    /// The video warning is worth drawing only when there is a video to warn
-    /// about — an unconditional apology is furniture.
-    @Test func theVideoWarningAppearsOnlyWhenAVideoWasChosen() {
+    /// ⚠️ **THE APOLOGY IS GONE BECAUSE THE LIMITATION IS.** This was
+    /// `theVideoWarningAppearsOnlyWhenAVideoWasChosen`, and it required the
+    /// media footer to read "Videos can't be posted yet" whenever a clip was in
+    /// the selection. A notice that outlives the thing it apologises for is
+    /// worse than none: it tells the author their video will be dropped while
+    /// the screen quietly publishes it.
+    ///
+    /// The text section keeps ITS footer — §21 is still true — which is the
+    /// witness that this is reading a real footer and not a broken accessor.
+    @Test func theMediaSectionNoLongerApologisesForVideos() {
         let withVideo = open(Self.items(2, videosAt: [1]))
         let withoutVideo = open(Self.items(2))
 
-        #expect(withVideo.post.debugFooterText(forSection: 0)?.contains("Videos can't be posted") == true)
+        #expect(withVideo.post.debugFooterText(forSection: 0) == nil)
         #expect(withoutVideo.post.debugFooterText(forSection: 0) == nil)
+        #expect(withVideo.post.debugFooterText(forSection: 1)?.isEmpty == false,
+                "guard: the text section still states what it does not publish")
     }
 }

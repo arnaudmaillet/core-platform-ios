@@ -79,12 +79,51 @@ public struct VideoExporter: Sendable {
         )
     }
 
-    /// A poster frame (first ~clean frame) for the compose preview and the
-    /// feed thumbnail. Best-effort; returns nil if generation fails.
+    /// A poster frame for the compose preview and the feed thumbnail.
+    /// Best-effort; returns nil if generation fails.
+    ///
+    /// ⚠️ **NOT AT t=0, BECAUSE REAL FILM OPENS ON BLACK.** This asked for
+    /// exactly zero, and the doc called it "the first ~clean frame" as though it
+    /// were. It is not: a great deal of real content fades in, and the very
+    /// first frame is then a black rectangle — which becomes the post's
+    /// `thumbnail_url`, and a black thumbnail is indistinguishable from the
+    /// no-thumbnail bug this poster exists to prevent.
+    ///
+    /// Found the moment real encodes were put behind the device-media mock: Big
+    /// Buck Bunny's tile drew its forest, and the Sintel trailer's drew pure
+    /// black, because Sintel opens on a fade. Both files are perfectly fine.
+    ///
+    /// A tenth of the way in, capped at one second — far enough past an opening
+    /// fade for ordinary content, near enough that the poster is still
+    /// recognisably the start of the clip. Zero remains the fallback, so a clip
+    /// too short or too stubborn for the offset still gets a picture rather than
+    /// nothing.
     public func posterImage(for url: URL) async -> UIImage? {
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        let time = CMTime(seconds: 0, preferredTimescale: 600)
+        // ⚠️ **AT OR AFTER, NEVER BEFORE — OR THE OFFSET BUYS NOTHING.** The
+        // default tolerance is infinite in BOTH directions, so the generator is
+        // free to answer with the nearest keyframe, and on a short clip the
+        // nearest keyframe to "a tenth of the way in" is frame zero. The whole
+        // point is to be past the opening, so earlier is not an acceptable
+        // answer; later is.
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .positiveInfinity
+
+        let seconds = (try? await asset.load(.duration).seconds) ?? 0
+        let offset = seconds.isFinite && seconds > 0 ? min(1, seconds / 10) : 0
+        if offset > 0,
+           let frame = await Self.frame(from: generator, atSeconds: offset) {
+            return frame
+        }
+        return await Self.frame(from: generator, atSeconds: 0)
+    }
+
+    private static func frame(
+        from generator: AVAssetImageGenerator, atSeconds seconds: Double
+    ) async -> UIImage? {
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
         return try? await withCheckedThrowingContinuation { continuation in
             generator.generateCGImageAsynchronously(for: time) { cgImage, _, error in
                 if let cgImage {

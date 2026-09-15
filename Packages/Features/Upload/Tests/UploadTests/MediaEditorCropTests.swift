@@ -49,6 +49,8 @@ struct MediaEditorCropTests {
         func presentLimitedPicker(from host: UIViewController) {}
         func albums() async -> [MediaLibraryAlbum] { [] }
         func items(in album: MediaLibraryAlbum.ID) async -> [MediaLibraryItem] { [] }
+        /// The editor draws a video's poster frame; it never asks for the file.
+        func videoFile(for item: MediaLibraryItem.ID) async -> URL? { nil }
         func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage? {
             requested.append(size)
             return UIGraphicsImageRenderer(size: CGSize(width: 40, height: 30)).image { context in
@@ -498,6 +500,37 @@ struct MediaEditorCropTests {
         #expect(notice?.debugText?.contains("video") == true, "got \(notice?.debugText ?? "nil")")
         #expect(!screen.editor.debugIsCropping,
                 "and nothing is borrowed for a mode that is not running")
+    }
+
+    /// ⚠️ **THE SAME RULE FOR THE LOOK, AND IT BECAME NECESSARY THE DAY VIDEOS
+    /// STARTED PUBLISHING.** The filter row was offered on every page, video
+    /// included, for as long as `post()` dropped clips: the look reached nothing,
+    /// but neither did the clip, and the last screen said so. Now the clip is
+    /// published and `post()`'s video branch never reads `edits` — `MediaFilter`
+    /// is `UIImage`-to-`UIImage` — so an author could choose a look, watch the
+    /// canvas apply it, and publish the untouched video.
+    ///
+    /// That is precisely the defect `where !item.isVideo` was deleted to end,
+    /// moved one screen earlier. A control that reaches nothing must say so.
+    @Test func aVideoSaysWhyItCannotBeFiltered() {
+        let screen = open(Self.items(1, videoAt: 0))
+
+        choose(Mode.filters, on: screen)
+
+        let notice = screen.editor.debugBand.content as? BandNoticeView
+        #expect(notice != nil, "got \(String(describing: screen.editor.debugBand.content))")
+        #expect(notice?.debugText?.contains("filtered") == true, "got \(notice?.debugText ?? "nil")")
+    }
+
+    /// The witness for the line above: a photograph still gets the looks, so the
+    /// notice is about the video and not about the mode being broken.
+    @Test func aPhotographInTheSamePlaceGetsTheLooks() {
+        let screen = open(Self.items(1))
+
+        choose(Mode.filters, on: screen)
+
+        #expect(screen.editor.debugBand.content is MediaFilterRowView,
+                "got \(String(describing: screen.editor.debugBand.content))")
     }
 
     /// The witness: a photograph in the same position gets the tools.

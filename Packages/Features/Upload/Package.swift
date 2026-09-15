@@ -47,6 +47,10 @@ let package = Package(
                 // five modules this list never names — so this states intent
                 // rather than fixing a break.
                 "DesignSystem",
+                // Same reason: `NewPostTests` synthesises a real clip with
+                // `PlaceholderVideoFetcher` so the publish path opens genuine
+                // H.264 bytes rather than a URL that merely looks like one.
+                "MediaPlayback",
                 "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]

@@ -52,11 +52,13 @@ enum ContentFit {
 /// the source is the precedent Feed's own sound pill sets. Inventing a seam to
 /// put behind it would be inventing a product decision.
 ///
-/// ⚠️ **A VIDEO DRAWS ITS POSTER FRAME, NOT PLAYBACK.** `MediaLibraryReading`
-/// vends images, and no player is injected into this package — so a chosen video
-/// shows the same frame the grid showed it by. No play glyph is laid over it, on
-/// purpose: a button that promises playback and does nothing is worse than a
-/// still that promises nothing.
+/// ⚠️ **A VIDEO DRAWS ITS POSTER FRAME, NOT PLAYBACK.** The seam can hand over a
+/// clip's file now (`MediaLibraryReading.videoFile(for:)`), but no player is
+/// injected into this package — `UploadFeatureBuilder.init` takes a composer and
+/// the text-post screens, nothing else — so a chosen video still shows the same
+/// frame the grid showed it by. No play glyph is laid over it, on purpose: a
+/// button that promises playback and does nothing is worse than a still that
+/// promises nothing.
 ///
 /// **The sheet becomes the whole screen here.** The flow is a stack inside a
 /// page sheet that rests on a single album row, and a canvas one row tall is not
@@ -854,8 +856,22 @@ final class MediaEditorViewController: UIViewController {
         if isCropping, category != "Crop" { exitCrop() }
         switch category {
         case "Filters":
-            setEditingAccessory(filterRow)
-            refreshFilterRow()
+            // ⚠️ **A VIDEO GETS THE NOTICE, NOT THE ROW — AND THIS BECAME TRUE
+            // THE DAY VIDEOS STARTED PUBLISHING.** The row was offered on every
+            // page for as long as a clip was dropped at publish: the look went
+            // nowhere, but so did the video, and the finalisation screen said so.
+            // Now the clip goes and `post()`'s video branch never reads `edits`
+            // — `MediaFilter` is `UIImage`-to-`UIImage` — so leaving the row here
+            // would let an author choose a look, watch it applied on the canvas,
+            // and publish the untouched clip. That is the exact defect
+            // `where !item.isVideo` was removed to end, wearing a different
+            // sleeve.
+            if currentItemID.flatMap({ itemsByID[$0] })?.isVideo == true {
+                setEditingAccessory(filtersUnavailable)
+            } else {
+                setEditingAccessory(filterRow)
+                refreshFilterRow()
+            }
         case "Crop":
             enterCrop()
         default:
@@ -1074,8 +1090,18 @@ final class MediaEditorViewController: UIViewController {
     }()
 
     /// What the band says instead, for a picture this mode cannot serve.
+    ///
+    /// ⚠️ **THE SECOND HALF USED TO READ "only the photos in this selection will
+    /// go", AND IT IS NOW FALSE.** Videos publish. Leaving it would have the
+    /// screen tell the author their clip is about to be dropped while it quietly
+    /// posts it — a notice outliving its reason, which is worse than no notice.
     private lazy var cropUnavailable = BandNoticeView(
-        "A video can't be cropped yet — only the photos in this selection will go."
+        "A video can't be cropped yet — it'll be posted as it is."
+    )
+
+    /// The same, for the look. See the note in `showAccessory(for:)`.
+    private lazy var filtersUnavailable = BandNoticeView(
+        "A video can't be filtered yet — it'll be posted as it is."
     )
 
     /// The shape each picture's box is being held to.
@@ -1124,11 +1150,14 @@ final class MediaEditorViewController: UIViewController {
     private func enterCrop() {
         guard let id = currentItemID, let item = itemsByID[id] else { return }
         guard !item.isVideo else {
-            // ⚠️ SAID, NOT SILENTLY DROPPED. `MediaLibraryReading` vends images
-            // and `MediaCropRenderer` takes one, so the only thing a video could
-            // offer here is its poster frame — and `post()` discards videos
-            // entirely, so a crop chosen on one would be a control that appears
-            // to work and reaches nothing.
+            // ⚠️ SAID, NOT SILENTLY DROPPED — AND THE REASON HAS NARROWED.
+            // `post()` no longer discards videos; a clip publishes. What it
+            // cannot carry is an EDIT: `MediaCrop.apply` and `MediaFilter` are
+            // `UIImage`-to-`UIImage`, so the only thing this mode could cut here
+            // is the poster frame, and the cut would never reach the file that
+            // gets uploaded. Still a control that reaches nothing — for a
+            // different reason, written down in
+            // `dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4.
             setEditingAccessory(cropUnavailable)
             return
         }

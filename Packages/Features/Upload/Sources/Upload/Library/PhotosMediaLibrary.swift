@@ -1,3 +1,6 @@
+// `AVURLAsset`, `AVAssetExportPresetPassthrough` — what a picked video is
+// flattened into a file with. Photos re-exports neither.
+import AVFoundation
 import Photos
 // ⚠️ `presentLimitedLibraryPicker(from:)` IS PhotosUI, NOT Photos. It reads like
 // a `PHPhotoLibrary` method and is spelled like one, but the framework that
@@ -197,6 +200,89 @@ final class PhotosMediaLibrary: MediaLibraryReading {
         }
         return boxed?.image
     }
+
+    // MARK: - Video files
+
+    /// ⚠️ **TWO ROUTES, AND THE FAST ONE IS NOT AN OPTIMISATION — IT IS THE
+    /// COMMON CASE.** A clip recorded on this device is already a file, and
+    /// `requestAVAsset` hands back an `AVURLAsset` pointing straight at it; the
+    /// `.url` costs nothing and copies nothing. Exporting that would duplicate
+    /// hundreds of megabytes into the temp directory for no reason.
+    ///
+    /// ⚠️ **THE SLOW ROUTE IS NOT A FALLBACK FOR ERRORS — IT IS FOR ASSETS THAT
+    /// ARE NOT ONE FILE.** `requestAVAssetForVideo:` is typed `AVAsset *`, not
+    /// `AVURLAsset *`, and the header promises nothing more. A composed asset
+    /// has no single URL to take, so a passthrough export flattens it into one.
+    /// Whether a slow-motion asset is such a composite is **unverified here** —
+    /// widely repeated, never stated by Apple — which is exactly why this does
+    /// not test for slo-mo and instead asks the only question that matters: did
+    /// I get a URL, or do I have to make one?
+    ///
+    /// ⚠️ **NOTHING AVFOUNDATION CROSSES OUT OF THE RESULT HANDLER.** Photos
+    /// calls it on an arbitrary queue, and measured under Swift 6 with
+    /// `-emit-sil`: `AVAsset` is not `Sendable`, and `AVAssetExportSession`'s
+    /// conformance is explicitly *unavailable*. So the asset is inspected, and
+    /// the session is driven, **inside** the handler; only a `URL` is ever
+    /// resumed. See `MediaLibraryReading.videoFile(for:)` for the full table.
+    func videoFile(for item: MediaLibraryItem.ID) async -> URL? {
+        guard let asset = assetsByID[item], asset.mediaType == .video else { return nil }
+
+        let options = PHVideoRequestOptions()
+        // Same reasoning as a thumbnail's: a clip that lives in iCloud is still
+        // one of the viewer's videos, and refusing it would look like a library
+        // with holes in it. This is also why the call can take a while — it may
+        // be a download.
+        options.isNetworkAccessAllowed = true
+        // What the viewer sees in Photos, edits included — not the original
+        // camera capture. Publishing the unedited take would discard a trim
+        // they already made there.
+        options.version = .current
+        options.deliveryMode = .highQualityFormat
+
+        if let file: URL = await withCheckedContinuation({ continuation in
+            let once = ResumeOnce()
+            images.requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+                once.run { continuation.resume(returning: (avAsset as? AVURLAsset)?.url) }
+            }
+        }) {
+            return file
+        }
+
+        return await flattened(asset, options: options)
+    }
+
+    /// Writes a non-file asset out as one, unchanged.
+    ///
+    /// `AVAssetExportPresetPassthrough` re-wraps rather than re-encodes: no
+    /// quality is spent here, and `VideoExporter` does the real transcode later
+    /// on its way to the upload. `.mov` for the same reason — the container is
+    /// an intermediate nobody but `VideoExporter` will open.
+    private func flattened(_ asset: PHAsset, options: PHVideoRequestOptions) async -> URL? {
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("picked-\(UUID().uuidString).mov")
+
+        return await withCheckedContinuation { continuation in
+            let once = ResumeOnce()
+            images.requestExportSession(
+                forVideo: asset, options: options, exportPreset: AVAssetExportPresetPassthrough
+            ) { session, _ in
+                guard let session else {
+                    once.run { continuation.resume(returning: nil) }
+                    return
+                }
+                Task {
+                    do {
+                        try await session.export(to: output, as: .mov)
+                        once.run { continuation.resume(returning: output) }
+                    } catch {
+                        once.run { continuation.resume(returning: nil) }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Caching
 
     func startCaching(_ items: [MediaLibraryItem.ID], size: CGSize) {
         let assets = items.compactMap { assetsByID[$0] }

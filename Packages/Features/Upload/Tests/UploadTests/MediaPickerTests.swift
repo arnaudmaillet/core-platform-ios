@@ -129,6 +129,10 @@ struct MediaPickerTests {
         /// offer the system sheet without importing `Photos`.
         func presentLimitedPicker(from host: UIViewController) {}
 
+        /// The picker only chooses; the file is fetched at publish time, which
+        /// is `NewPostTests`' subject and not this one's.
+        func videoFile(for item: MediaLibraryItem.ID) async -> URL? { nil }
+
         func albums() async -> [MediaLibraryAlbum] {
             if albumDelayMS > 0 {
                 try? await Task.sleep(for: .milliseconds(albumDelayMS))

@@ -98,6 +98,35 @@ protocol MediaLibraryReading: AnyObject {
     /// the long edge.
     func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage?
 
+    /// A plain local file holding a video item, or nil when it could not be
+    /// read. Photos only — a still answers nil.
+    ///
+    /// ⚠️ **A FILE URL, NOT AN `AVAsset` — AND THE REASON IS THE COMPILER, NOT
+    /// TASTE.** Measured against iPhoneOS26.5.sdk under Swift 6, with
+    /// `-emit-sil` rather than `-typecheck`, because `-typecheck` alone does not
+    /// run the region-isolation pass and hands a non-`Sendable` class into a
+    /// `Task.detached` with zero complaints: `AVURLAsset` is `Sendable`
+    /// (`NS_SWIFT_SENDABLE`, `AVAsset.h:633`) and **`AVAsset` is not**
+    /// (`AVAsset.h:56`); `AVComposition` is not either, and
+    /// `AVMutableComposition` is explicitly `@_nonSendable`.
+    ///
+    /// The boundary that bites is not the exporter — it is right here.
+    /// `PHImageManager` calls its result handler on an arbitrary queue, so
+    /// resuming a continuation from it with an `AVAsset` fails **even declared
+    /// `sending`**. A `URL` crosses clean. And since `requestAVAssetForVideo:`
+    /// is typed `AVAsset *`, a file has to be materialised inside
+    /// `PhotosMediaLibrary` whatever this signature says — so it may as well say
+    /// the thing every consumer downstream actually wants: `PickedVideo` takes a
+    /// `sourceURL`, `VideoExporter.export` takes a `URL`, and
+    /// `VideoPlaybackController` is keyed on `mediaURL` end to end.
+    ///
+    /// ⚠️ **NO PROTOCOL-EXTENSION DEFAULT, UNLIKE THE TWO BELOW.** A missing
+    /// cache is an optimisation; a missing video is the feature. This screen
+    /// spent its whole life dropping videos at publish, and a `nil` inherited
+    /// from an extension is exactly how that would come back wearing a green
+    /// suite. Every double answers it on purpose.
+    func videoFile(for item: MediaLibraryItem.ID) async -> URL?
+
     /// Warms the thumbnails a scroll is about to reach, and lets them go again.
     func startCaching(_ items: [MediaLibraryItem.ID], size: CGSize)
     func stopCaching(_ items: [MediaLibraryItem.ID], size: CGSize)

@@ -44,11 +44,13 @@ import UIKit
 ///   of. The footer says so in plain words, which is the privacy screen's rule
 ///   (§13a): a local honour-system control is acceptable only while it admits it.
 ///
-/// ⚠️ **VIDEOS CANNOT BE POSTED YET, AND THE SCREEN SAYS SO.**
-/// `MediaLibraryReading` vends images; there is no `AVAsset` or file-URL
-/// accessor on it, so a chosen video has nothing to upload. Rather than drop
-/// them silently — the one thing worse than refusing — the strip marks each
-/// video, the cover menu omits them, and the footer states it outright.
+/// ⚠️ **VIDEOS PUBLISH, BUT THEY ARE NOT EDITABLE YET.** `MediaLibraryReading`
+/// grew `videoFile(for:)` and a chosen clip now uploads, leads the carousel if
+/// it is the cover, and carries a poster frame. What it does NOT carry is any of
+/// this flow's edits: crop, straighten, mirror and filters are `UIImage`-to-
+/// `UIImage` by signature, so the editor still shows a notice on a video page
+/// (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4). A video is published exactly as it
+/// was picked.
 final class NewPostViewController: UIViewController {
     /// ⚠️ **THE SETTINGS ARE THREE SECTIONS, NOT ONE LIST.** Six switches in a
     /// single card is a wall: nothing in it tells the reader that hiding a
@@ -149,8 +151,7 @@ final class NewPostViewController: UIViewController {
     private var settings = Settings()
     private var isPublishing = false
 
-    /// Which chosen photo leads the carousel. Only photos are offered, because
-    /// only photos publish — see the type comment.
+    /// Which chosen item leads the carousel — a photo or a video.
     private var coverID: String?
 
     private var list: UICollectionView!
@@ -168,8 +169,6 @@ final class NewPostViewController: UIViewController {
         title: "Save draft", style: .plain, target: nil, action: nil
     )
 
-    private var hasVideo: Bool { items.contains(where: \.isVideo) }
-    private var photos: [MediaLibraryItem] { items.filter { !$0.isVideo } }
 
     /// What will actually be published, in order: the cover first, then the rest
     /// as they were chosen. The strip shows this, so changing the cover visibly
@@ -202,7 +201,11 @@ final class NewPostViewController: UIViewController {
         // ⚠️ AN EXPLICIT PICK WINS OVER THE DEFAULT; NOTHING PICKED FALLS BACK.
         // The default below is computed, so storing it in the draft would make a
         // real choice indistinguishable from never having chosen.
-        self.coverID = draft.coverID ?? items.first(where: { !$0.isVideo })?.id
+        // ⚠️ **THE FIRST ITEM, NOT THE FIRST PHOTO.** This skipped videos while
+        // they could not be published; keeping that would silently reorder a
+        // selection that leads with a clip, handing the post a face its author
+        // did not put first.
+        self.coverID = draft.coverID ?? items.first?.id
         super.init(nibName: nil, bundle: nil)
         // ⚠️ THE TOP BAR BELONGS TO THE SCREEN, NOT TO ITS VIEW — a navigation
         // controller reads `navigationItem` on the way in. The picker and the
@@ -291,7 +294,7 @@ final class NewPostViewController: UIViewController {
                 symbolName: "square.on.square",
                 menu: coverMenu(),
                 // One photo is no choice, and none at all is not a cover.
-                isEnabled: photos.count > 1
+                isEnabled: items.count > 1
             )
         }
         let title = UICollectionView.CellRegistration<NewPostTitleCell, Row> { [weak self] cell, _, _ in
@@ -428,7 +431,7 @@ final class NewPostViewController: UIViewController {
     private func footerText(for section: Section) -> String? {
         switch section {
         case .media:
-            hasVideo ? "Videos can't be posted yet — only the photos in this selection will go." : nil
+            nil
         case .text:
             "Titles aren't carried by the server yet, so only the caption is published."
         case .engagement, .sharing:
@@ -510,12 +513,19 @@ final class NewPostViewController: UIViewController {
 
     // MARK: - The cover
 
-    /// ⚠️ **PHOTOS ONLY.** A video cannot be published, so offering one as the
-    /// cover would promise a face for the post that never arrives.
+    /// ⚠️ **EVERY ITEM, PHOTOS AND VIDEOS ALIKE — AND THE OLD REASON FOR
+    /// EXCLUDING VIDEOS HAS EXPIRED.** This read "photos only", because a video
+    /// could not be published and offering one would have promised a face the
+    /// post never wore. A video now publishes and carries a poster frame, so it
+    /// can lead the carousel like anything else.
+    ///
+    /// The number is the item's place in the selection, not its place among its
+    /// own kind: "Video 2" is the second thing chosen, so the label answers
+    /// "which one" rather than "which video".
     private func coverMenu() -> UIMenu {
-        UIMenu(children: photos.enumerated().map { index, item in
+        UIMenu(children: items.enumerated().map { index, item in
             UIAction(
-                title: "Photo \(index + 1)",
+                title: "\(item.isVideo ? "Video" : "Photo") \(index + 1)",
                 state: item.id == coverID ? .on : .off
             ) { [weak self] _ in
                 self?.setCover(item.id)
@@ -596,11 +606,18 @@ final class NewPostViewController: UIViewController {
 
     // MARK: - Publishing
 
-    /// ⚠️ **PHOTOS ONLY, AND IN THE ORDER THEY WILL APPEAR.** The array's order
-    /// is the carousel's order — `post.v1` has no per-attachment index — so the
-    /// images are fetched one at a time rather than through a task group that
-    /// would return them in whatever order the library answered. The cover leads
-    /// because `publishOrder` puts it there.
+    /// ⚠️ **IN THE ORDER THEY WILL APPEAR.** The array's order is the carousel's
+    /// order — `post.v1` has no per-attachment index — so the media are fetched
+    /// one at a time rather than through a task group that would return them in
+    /// whatever order the library answered. The cover leads because
+    /// `publishOrder` puts it there.
+    ///
+    /// Photos and videos take different routes out of the library and meet again
+    /// as `ComposeMedia`: a photo is read at publish size and baked with its
+    /// edits, a video is read as a file and handed over untouched. Video editing
+    /// does not exist yet (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4), so there is
+    /// nothing to bake into one — which is why `edits` is consulted on one side
+    /// of the loop only.
     ///
     /// The title and the six settings are NOT sent: nothing in the contract
     /// carries them (§21, §22).
@@ -613,7 +630,28 @@ final class NewPostViewController: UIViewController {
             guard let self else { return }
             do {
                 var media: [ComposeMedia] = []
-                for item in publishOrder where !item.isVideo {
+                for item in publishOrder {
+                    if item.isVideo {
+                        // ⚠️ **A VIDEO THAT CANNOT BE READ STOPS THE POST; A
+                        // PHOTO THAT CANNOT BE READ IS SKIPPED. THE ASYMMETRY IS
+                        // DELIBERATE.** The grid has already drawn every photo,
+                        // so `thumbnail` here is a second successful read of
+                        // something that was on screen a moment ago. This is the
+                        // FIRST time a video's actual bytes are touched — the
+                        // grid only ever had its poster — and the usual reason
+                        // it fails is an iCloud download that did not finish.
+                        // That is worth telling the author about; publishing a
+                        // shorter carousel than they assembled is not. Dropping
+                        // videos in silence is the whole defect this screen is
+                        // being fixed of.
+                        guard let file = await library.videoFile(for: item.id) else {
+                            throw ComposeError.media(
+                                "Couldn't read one of the videos. It may still be downloading from iCloud."
+                            )
+                        }
+                        media.append(.video(PickedVideo(sourceURL: file)))
+                        continue
+                    }
                     guard let image = await library.thumbnail(for: item.id, size: Self.publishPixels) else {
                         continue
                     }

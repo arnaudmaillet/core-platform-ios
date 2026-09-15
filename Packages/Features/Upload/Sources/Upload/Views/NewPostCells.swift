@@ -129,7 +129,14 @@ final class NewPostMediaCell: UICollectionViewListCell {
                 picture.addSubview(Self.badge(text: "Cover"))
             }
             if item.isVideo {
-                let badge = UIImageView(image: UIImage(systemName: "video.slash.fill"))
+                // ⚠️ **`video.fill`, NOT `video.slash.fill`.** The slash meant
+                // "this will not be posted" and was true for as long as the
+                // publish loop dropped videos. It no longer is, and a slashed
+                // camera now reads as a refusal of something that works. The
+                // mark stays, because which tile is a clip is still worth
+                // saying — the picker's grid stamps a duration for the same
+                // reason.
+                let badge = UIImageView(image: UIImage(systemName: "video.fill"))
                 badge.tintColor = .white
                 badge.translatesAutoresizingMaskIntoConstraints = false
                 picture.addSubview(badge)
@@ -181,7 +188,7 @@ final class NewPostMediaCell: UICollectionViewListCell {
     }
 
     private static func label(for item: MediaLibraryItem, isCover: Bool) -> String {
-        let subject = item.isVideo ? "Video, can't be posted yet" : "Photo"
+        let subject = item.isVideo ? "Video" : "Photo"
         return isCover ? "\(subject), the cover" : subject
     }
 

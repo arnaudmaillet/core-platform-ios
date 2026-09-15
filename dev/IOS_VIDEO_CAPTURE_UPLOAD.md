@@ -1,6 +1,7 @@
 # iOS task — Video capture + upload (compose)
 
-Status: **not started (iOS-owned)**. Drafted 2026-07-08.
+Status: **P1 delivered 2026-09-15 (mock mode); P2 blocked on the backend**.
+Drafted 2026-07-08.
 
 The **playback** side of video is done (snap feed, PRs #19–#20). This is the
 **authoring** side: letting a user add a video to a post. It's the one iOS
@@ -129,25 +130,83 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
 
 ## 5. Phasing
 
-- **P1 — mockable now (no backend):** `PickedVideo` + PHPicker video +
-  `VideoExporter` + file-based transport + `PostComposer` video path against the
-  mock; optimistic **local** playback in the snap feed. Fully testable in CI.
+- **P1 — DONE (2026-09-15).** `PickedVideo`, `VideoExporter`, the file-based
+  transport and `PostComposer`'s video path were built earlier and were already
+  green; what was missing to the very end was one hop — `MediaLibraryReading`
+  vended `UIImage` only, so the finalisation screen had nothing to hand the
+  composer and `post()` filtered videos out with `where !item.isVideo`.
+  The seam now has `videoFile(for:) async -> URL?` (a file URL, **not** an
+  `AVAsset`: `AVAsset` is not `Sendable` and `PHImageManager` answers on an
+  arbitrary queue — the full table is on the protocol), `PhotosMediaLibrary`
+  materialises one via `requestAVAsset` or a passthrough export, and
+  `DebugMediaLibrary` synthesises a real H.264 clip so CI and the simulator can
+  drive the whole path. A video also uploads a **poster still** for
+  `thumbnail_url`; without it the thumbnail was the .mp4, which is a black feed
+  rather than a missing picture (see `BACKEND_GAPS.md` §23).
+
+  ⚠️ **AND CI NOW RUNS THE WHOLE CREATION PATH FOR VIDEO**, which it never
+  could before: `VideoPublishEndToEndTests` drives the real `DebugMediaLibrary`
+  (synthesising genuine H.264, its tiles drawn from the clip's own first frame
+  so the grid shows what the post will carry) through the real
+  `NewPostViewController` into a real `PostComposer` against `MockBFF`. Only
+  the transport is fake, and it is fake exactly as the app's own mock mode is.
+  "There is no photo library on a runner" was the reason the video path went
+  four screens' worth of work without anyone noticing `where !item.isVideo`;
+  it is no longer a reason.
+
+  **`-rich-media` puts REAL encodes behind the picker** — Big Buck Bunny and the
+  Sintel trailer, from `MockMediaFixtures`' verified catalogue, downloaded once
+  and cached by `PlaceholderVideoFetcher`. Opt-in, and deliberately the same
+  flag the fixtures themselves obey: the default mock mode is offline, and the
+  unit suite and CI must stay that way. Real encodes immediately earned their
+  keep — they are what showed that `VideoExporter.posterImage` sampled at
+  exactly t=0, so any clip that fades in (Sintel does) published a **black**
+  `thumbnail_url`. It now samples a tenth of the way in, capped at a second,
+  with the tolerance pinned to "at or after" so a short clip's keyframe cannot
+  drag it back to zero.
 - **P2 — needs backend:** `asset_id` on `CreatePost`, the "processing" poster
   state, real fleet `upload → transcode → play`.
 - **P3:** camera capture UI + permissions.
 - **P4:** trim / edit / cover-frame selection — **including crop and straighten,
   which photos already have.** `MediaEditorViewController` offers a "Crop" mode
-  with an interactive box, a straightening dial and quarter turns; on a video page
-  it draws a notice instead. What blocks it is the library seam, not the publish
-  path: `MediaLibraryReading` (`Packages/Features/Upload/Sources/Upload/Library/MediaLibrary.swift`)
-  vends `UIImage` only, and `MediaCropRenderer.apply` is `UIImage`-to-`UIImage` by
-  signature, so the editor can reach a video's POSTER frame and nothing else.
-  Cropping a real clip needs an `AVMutableVideoComposition` with a `renderSize`,
-  run through `AVAssetExportSession` — which needs an `AVAsset` the seam does not
-  vend. The composer end is already built (`ComposeMedia.video`, `PostComposer`'s
-  `.video` branch, the injected `VideoExporter`), so P4 is gated on widening the
-  seam, not on the server.
+  with an interactive box, a straightening dial, quarter turns and a mirror; on a
+  video page it draws a notice instead.
 
-P1 delivers a working "pick a video → it publishes and plays (locally)" flow end
-to end in mock mode, de-risking everything before the backend lands — the same
-build-ahead pattern used for snap-feed Phases 1–2.
+  **The library seam is no longer what blocks this** — P1 closed it. What blocks
+  it now is that the edit types are `UIImage`-shaped: `MediaCrop.apply` and
+  `MediaFilter` are `UIImage`-to-`UIImage` by signature, so the editor can bake a
+  crop into a video's POSTER frame and nothing else.
+
+  Three things to settle before writing any of it:
+
+  1. ⚠️ **`AVMutableVideoComposition` is DEPRECATED in iOS 26.0** — this repo's
+     deployment target — in favour of `AVVideoComposition.Configuration`
+     (`AVVideoComposition.h:263`; same for the mutable Instruction and
+     LayerInstruction at `:558` / `:654`). An earlier draft of this section
+     prescribed it. Do not.
+  2. ⚠️ **CI filters OR an arbitrary output ratio — not both, without writing an
+     `AVVideoCompositing`.** The CIFilter-applier constructor's own documentation
+     says the returned composition's "properties are private and support only
+     CIFilter-based operations… If rotations or other transformations are
+     desired, they must be accomplished via the application of CIFilters", with a
+     `renderSize` derived from the first enabled video track
+     (`AVVideoComposition.h:213-219`, repeated on the non-deprecated variant at
+     `:248`). `Configuration` exposes `renderSize` and `instructions` but has no
+     CI-applier slot. **Measure this on a synthetic clip before committing to a
+     shape.**
+  3. **Trim needs no composition at all** — `AVAssetExportSession.timeRange` —
+     so it can ship regardless of how (2) lands, and it is the most-used video
+     edit. `VideoExporter.export` takes a `URL` today and would need to accept a
+     plan (time range, and a composition BUILDER rather than a composition: a
+     composition must be built where the asset lives, and `AVComposition` is not
+     `Sendable` while `AVVideoComposition` is only `@unchecked` so).
+
+  When crop does land, `MediaCrop.rect` is fractions of the **turned bounding
+  box**, which is invisible at angle zero where nearly every existing test lives
+  — so a video path that reads it differently from the photo path will agree on
+  every test and disagree on every real rotation. One renderer, shared.
+
+P1 delivered exactly what it promised: "pick a video → it publishes and plays
+(locally)", end to end in mock mode, de-risking everything before the backend
+lands — the same build-ahead pattern used for snap-feed Phases 1–2. Everything
+it cannot do against a real fleet is enumerated in `BACKEND_GAPS.md` §23.

@@ -32,9 +32,20 @@ struct PostComposerTests {
         let bff: MockBFF
         let channel: ComposedPostChannel
         let postStore: MockPostStore
+        let pipeline: ImagePipeline
+
+        /// How many assets were uploaded. A video post issues TWO — the clip and
+        /// its poster still — where an image post issues one.
+        var ticketCount: Int {
+            bff.recordedRequests.filter { $0.path == "/media.v1.MediaService/IssueUploadTicket" }.count
+        }
     }
 
-    private func makeHarness() -> Harness {
+    /// `posterFrame` stands in for the one step whose FAILURE has to be
+    /// exercised: a real exporter always finds a frame in a file it just wrote.
+    private func makeHarness(
+        posterFrame: (@Sendable (URL) async -> UIImage?)? = nil
+    ) -> Harness {
         let bff = MockBFF()
         let blobStore = MockBlobStore()
         let postStore = MockPostStore()
@@ -45,16 +56,20 @@ struct PostComposerTests {
 
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
         let channel = ComposedPostChannel()
+        let pipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
         let composer = PostComposer(
             mediaClient: Media_V1_MediaServiceClient(client: client),
             postClient: Post_V1_PostServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
             authSession: ViewerSessionStub(),
             uploadTransport: MockMediaUploadTransport(store: blobStore),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            composedChannel: channel
+            imagePipeline: pipeline,
+            composedChannel: channel,
+            posterFrame: posterFrame ?? { await VideoExporter().posterImage(for: $0) }
         )
-        return Harness(composer: composer, bff: bff, channel: channel, postStore: postStore)
+        return Harness(
+            composer: composer, bff: bff, channel: channel, postStore: postStore, pipeline: pipeline
+        )
     }
 
     @Test func imagePostRunsFullFlowAndBroadcastsEntry() async throws {
@@ -107,6 +122,69 @@ struct PostComposerTests {
         #expect(paths.contains("/media.v1.MediaService/IssueUploadTicket"))
         #expect(paths.contains("/media.v1.MediaService/CommitUpload"))
         #expect(paths.contains("/post.v1.PostService/CreatePost"))
+        #expect(paths.contains("/post.v1.PostService/PublishPost"))
+    }
+
+    /// ⚠️ **THE DEFECT THIS EXISTS TO CATCH IS INVISIBLE IN MOCK MODE AND LOOKS
+    /// LIKE NOTHING AT ALL.** `thumbnail_url` used to be the .mp4's own URL. That
+    /// is not "no picture": every surface resolves a thumbnail through
+    /// `ImagePipeline`, whose FETCH of a video succeeds and whose decode then
+    /// fails — so the placeholder rescue never fires, nothing negative-caches,
+    /// and each re-bind re-downloads the clip through the image path. A black
+    /// snap-feed area, dark grid tiles, a blank hero flight, and autoplay
+    /// withheld forever because `hasCover` never becomes true.
+    ///
+    /// `MockSocialServices` never points a thumbnail at a video, so no simulator
+    /// run reproduces it. This does.
+    @Test func aVideosThumbnailIsAPosterStillAndNotTheClip() async throws {
+        let harness = makeHarness()
+        let entries = await harness.channel.entries()
+        let source = try await PlaceholderVideoFetcher(durationSeconds: 1.0)
+            .playableURL(for: URL(string: "mock://video/poster?w=240&h=320")!)
+
+        try await harness.composer.publish(media: .video(PickedVideo(sourceURL: source)), caption: "clip")
+
+        var iterator = entries.makeAsyncIterator()
+        let entry = try #require(await iterator.next())
+        let attachment = try #require(entry.post.attachments.first)
+        let thumbnail = try #require(attachment.thumbnailURL)
+
+        #expect(thumbnail != attachment.url, "the thumbnail must not be the clip itself")
+        #expect(thumbnail.isFileURL == false, "the poster is uploaded, so it wears a delivery URL")
+        // TWO assets: the clip, then the poster. An image post issues one — the
+        // witness below — so this count can fail.
+        #expect(harness.ticketCount == 2, "expected a clip + a poster, got \(harness.ticketCount)")
+        // Seeded under the exact URL the feed will ask for, already decoded.
+        #expect(await harness.pipeline.cachedImage(for: thumbnail) != nil,
+                "the author's own post must draw its poster without a round trip")
+    }
+
+    /// The witness for the count above: without it, `== 2` could be measuring
+    /// two tickets that every post issues rather than the poster's own.
+    @Test func anImagePostIssuesOneTicket() async throws {
+        let harness = makeHarness()
+        try await harness.composer.publish(media: .image(PickedImage(solidImage())), caption: "one")
+        #expect(harness.ticketCount == 1)
+    }
+
+    /// ⚠️ **A DECORATION MUST NEVER LOSE THE AUTHOR'S VIDEO.** The poster is
+    /// best-effort, and this is the branch a real exporter can never reach —
+    /// which is exactly why it is injected.
+    @Test func aVideoStillPublishesWhenItsPosterCannotBeMade() async throws {
+        let harness = makeHarness(posterFrame: { _ in nil })
+        let entries = await harness.channel.entries()
+        let source = try await PlaceholderVideoFetcher(durationSeconds: 1.0)
+            .playableURL(for: URL(string: "mock://video/noposter?w=240&h=320")!)
+
+        try await harness.composer.publish(media: .video(PickedVideo(sourceURL: source)), caption: "clip")
+
+        var iterator = entries.makeAsyncIterator()
+        let entry = try #require(await iterator.next())
+        let attachment = try #require(entry.post.attachments.first)
+        #expect(attachment.mimeType == "video/mp4")
+        #expect(attachment.url?.isFileURL == true, "the clip still publishes and still plays locally")
+        #expect(harness.ticketCount == 1, "no poster asset was uploaded")
+        let paths = harness.bff.recordedRequests.map(\.path)
         #expect(paths.contains("/post.v1.PostService/PublishPost"))
     }
 

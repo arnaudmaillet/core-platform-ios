@@ -80,6 +80,15 @@ public actor PostComposer: PostComposing {
     private let composedChannel: ComposedPostChannel
     private let encoder: MediaEncoder
     private let videoExporter: VideoExporter
+    /// How a video's poster still is obtained.
+    ///
+    /// ⚠️ **INJECTED SEPARATELY FROM `videoExporter`, AND ONLY BECAUSE ITS
+    /// FAILURE HAS TO BE EXERCISABLE.** The poster is best-effort: when it
+    /// cannot be made, the clip must still publish. A real `VideoExporter`
+    /// always succeeds on a file it has just written itself, so that branch is
+    /// unreachable through the normal seam — and an unreachable fallback is one
+    /// nobody has ever seen run.
+    private let posterFrame: @Sendable (URL) async -> UIImage?
     private let resolveMaxAttempts: Int
     private let resolvePollSeconds: Double
     private let now: @Sendable () -> Date
@@ -100,6 +109,9 @@ public actor PostComposer: PostComposing {
         composedChannel: ComposedPostChannel,
         encoder: MediaEncoder = MediaEncoder(),
         videoExporter: VideoExporter = VideoExporter(),
+        posterFrame: @escaping @Sendable (URL) async -> UIImage? = {
+            await VideoExporter().posterImage(for: $0)
+        },
         resolveMaxAttempts: Int = 6,
         resolvePollSeconds: Double = 1,
         now: @escaping @Sendable () -> Date = { Date() }
@@ -113,6 +125,7 @@ public actor PostComposer: PostComposing {
         self.composedChannel = composedChannel
         self.encoder = encoder
         self.videoExporter = videoExporter
+        self.posterFrame = posterFrame
         self.resolveMaxAttempts = resolveMaxAttempts
         self.resolvePollSeconds = resolvePollSeconds
         self.now = now
@@ -149,6 +162,10 @@ public actor PostComposer: PostComposing {
                 let uploaded = try await uploadVideo(picked, ownerID: viewer.accountID)
                 serverAttachments.append(uploaded.server)
                 optimisticAttachments.append(uploaded.optimistic)
+                // A video's face is seeded exactly like a photograph's, so the
+                // author's own post draws its poster at once rather than after a
+                // round trip.
+                if let poster = uploaded.posterSeed { imageSeeds.append(poster) }
             }
         }
 
@@ -173,9 +190,10 @@ public actor PostComposer: PostComposing {
             likeCount: 0
         )
 
-        // Seed the just-picked images under their CDN URLs so the feed renders
-        // them instantly, before any network fetch. (Video plays from the local
-        // file URL carried on the optimistic attachment instead.)
+        // Seed the just-picked images — and each video's poster — under their
+        // CDN URLs so the feed renders them instantly, before any network fetch.
+        // (The clip itself plays from the local file URL carried on the
+        // optimistic attachment.)
         for seed in imageSeeds {
             await imagePipeline.store(seed.image, for: seed.url)
         }
@@ -207,7 +225,9 @@ public actor PostComposer: PostComposing {
     private func uploadVideo(
         _ picked: PickedVideo,
         ownerID: AccountID
-    ) async throws -> (server: MediaAttachment, optimistic: MediaAttachment) {
+    ) async throws -> (
+        server: MediaAttachment, optimistic: MediaAttachment, posterSeed: (image: UIImage, url: URL)?
+    ) {
         let exported: ExportedVideo
         do {
             exported = try await videoExporter.export(picked.sourceURL)
@@ -222,22 +242,76 @@ public actor PostComposer: PostComposing {
         ) { ticket in
             try await self.uploadTransport.upload(fileURL: exported.fileURL, using: ticket)
         }
+
+        let poster = await uploadPoster(for: exported, ownerID: ownerID)
+
         let server = MediaAttachment(
             url: cdnURL,
-            thumbnailURL: cdnURL,
+            thumbnailURL: poster?.url ?? cdnURL,
             mimeType: exported.mimeType,
             pixelWidth: exported.pixelWidth,
             pixelHeight: exported.pixelHeight
         )
-        // Optimistic entry plays the exported local file directly.
+        // Optimistic entry plays the exported local file directly, and wears the
+        // poster's CDN URL so the face it asks for is the one the seed below
+        // puts in the pipeline — the same trick the image path uses.
         let optimistic = MediaAttachment(
             url: exported.fileURL,
-            thumbnailURL: exported.fileURL,
+            thumbnailURL: poster?.url ?? exported.fileURL,
             mimeType: exported.mimeType,
             pixelWidth: exported.pixelWidth,
             pixelHeight: exported.pixelHeight
         )
-        return (server, optimistic)
+        return (server, optimistic, poster)
+    }
+
+    /// A still frame for `thumbnail_url`, uploaded as its own image asset.
+    ///
+    /// ⚠️ **WITHOUT THIS, `thumbnail_url` IS THE .mp4 — AND THAT IS NOT "NO
+    /// PICTURE", IT IS A BLACK FEED.** Every surface resolves a thumbnail
+    /// through `ImagePipeline.image(for:)`, whose FETCH of a video URL
+    /// *succeeds* — 200 OK, real bytes — and whose decode then fails. So the
+    /// scheme-routing fetcher's placeholder-colour rescue never fires (it
+    /// catches fetch failures, and the decode is downstream), nothing
+    /// negative-caches, and every re-bind downloads the whole clip again through
+    /// the image path. Measured consequences: a black snap-feed media area, dark
+    /// PostGrid tiles, an empty cover slot in the media toolbar, a blank
+    /// map→feed hero flight, and — because both For You and the profile gallery
+    /// gate autoplay on `hasCover` — a clip that is **never admitted as an
+    /// autoplay candidate**.
+    ///
+    /// ⚠️ **AND MOCK MODE CANNOT SHOW ANY OF IT.** `MockSocialServices` never
+    /// points a `thumbnail_url` at a video; it serves `mock://frame0/…`. The
+    /// defect is invisible in the simulator and appears only against a fleet
+    /// that really stores what it is given.
+    ///
+    /// Best-effort on purpose: a poster that cannot be made or uploaded must not
+    /// lose the author's video. The caller falls back to today's behaviour,
+    /// which is wrong in the ways above but still publishes the clip — and
+    /// `PHASE3_VIDEO_BACKEND.md` §3 has the server generating a real poster
+    /// rendition anyway, once that worker exists.
+    private func uploadPoster(
+        for exported: ExportedVideo, ownerID: AccountID
+    ) async -> (image: UIImage, url: URL)? {
+        guard let frame = await posterFrame(exported.fileURL) else {
+            logger.warning("no poster frame for the picked video; thumbnail falls back to the clip")
+            return nil
+        }
+        do {
+            let encoded = try encoder.encode(frame)
+            let url = try await uploadAsset(
+                ownerID: ownerID,
+                mimeType: encoded.mimeType,
+                sizeBytes: encoded.byteSize,
+                sha256: encoded.sha256Hex
+            ) { ticket in
+                try await self.uploadTransport.upload(encoded.data, using: ticket)
+            }
+            return (frame, url)
+        } catch {
+            logger.warning("poster upload failed (\(String(describing: error))); publishing without one")
+            return nil
+        }
     }
 
     /// The shared media.v1 upload dance: IssueUploadTicket → byte upload
