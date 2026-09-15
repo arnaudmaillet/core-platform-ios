@@ -18,6 +18,41 @@ public struct ExportedVideo: Sendable, Equatable {
     public let sha256Hex: String
 }
 
+/// What to make of a picked clip on its way to the upload.
+///
+/// ⚠️ **A VALUE RATHER THAN MORE PARAMETERS, BECAUSE THIS LIST IS GOING TO
+/// GROW.** Trim needs a time range; crop and filters will need a composition,
+/// which cannot simply be passed in — `AVComposition` is not `Sendable` and a
+/// composition has to be built where its asset lives, so that slot will be a
+/// BUILDER. Adding it to a struct changes no call site; adding it to a
+/// parameter list changes every one.
+///
+/// It is not here yet, on purpose: an unused slot is dead code, and this repo
+/// has just removed one for exactly that reason.
+public struct VideoExportPlan: Sendable {
+    public let sourceURL: URL
+
+    /// The part of the clip to keep, in seconds from its start.
+    ///
+    /// ⚠️ **NIL IS NOT THE SAME AS "0 TO THE DURATION".** Nil leaves
+    /// `AVAssetExportSession.timeRange` alone, which is the passthrough every
+    /// untrimmed clip has always taken; a range covering the whole clip still
+    /// makes the session re-encode it. `MediaTrimming.cuts(_:within:)` is what
+    /// the caller asks to tell the two apart.
+    public let timeRange: ClosedRange<Double>?
+
+    /// Nil takes the exporter's own preset.
+    public let preset: String?
+
+    public init(
+        sourceURL: URL, timeRange: ClosedRange<Double>? = nil, preset: String? = nil
+    ) {
+        self.sourceURL = sourceURL
+        self.timeRange = timeRange
+        self.preset = preset
+    }
+}
+
 public enum VideoExportError: Error, Equatable {
     case unreadable
     case exportFailed
@@ -36,20 +71,37 @@ public struct VideoExporter: Sendable {
         self.preset = preset
     }
 
+    /// The whole clip, unchanged — what every caller asked for before a trim
+    /// existed, kept so widening the requirement churned nothing.
     public func export(_ sourceURL: URL) async throws -> ExportedVideo {
-        let asset = AVURLAsset(url: sourceURL)
+        try await export(VideoExportPlan(sourceURL: sourceURL))
+    }
+
+    public func export(_ plan: VideoExportPlan) async throws -> ExportedVideo {
+        let asset = AVURLAsset(url: plan.sourceURL)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
             throw VideoExportError.noVideoTrack
         }
 
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("export-\(UUID().uuidString).mp4")
-        guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {
+        guard let session = AVAssetExportSession(asset: asset, presetName: plan.preset ?? preset)
+        else {
             throw VideoExportError.exportFailed
         }
         session.outputURL = outputURL
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
+        // ⚠️ **ASSIGNED ONLY WHEN THERE IS ONE.** Setting a range that happens
+        // to cover the whole clip is not the same as setting none: the session
+        // re-encodes either way, and every untrimmed video would start paying
+        // for a feature it is not using.
+        if let seconds = plan.timeRange {
+            session.timeRange = CMTimeRange(
+                start: CMTime(seconds: seconds.lowerBound, preferredTimescale: 600),
+                end: CMTime(seconds: seconds.upperBound, preferredTimescale: 600)
+            )
+        }
 
         await session.export()
         guard session.status == .completed else {
@@ -57,6 +109,9 @@ public struct VideoExporter: Sendable {
         }
 
         // Natural size, transform-corrected so portrait clips report portrait.
+        // Read from the SOURCE track: a trim changes how long the clip runs, not
+        // how big its pictures are. The duration below is read from the OUTPUT
+        // for the opposite reason.
         let naturalSize = try await track.load(.naturalSize)
         let transform = try await track.load(.preferredTransform)
         let corrected = naturalSize.applying(transform)

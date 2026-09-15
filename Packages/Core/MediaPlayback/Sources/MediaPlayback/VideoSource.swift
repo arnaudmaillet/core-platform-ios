@@ -66,7 +66,10 @@ public struct PlaceholderVideoFetcher: VideoSource {
         hasher.combine(url.path)
         let hue = CGFloat(abs(hasher.finalize() % 360)) / 360
 
-        let cacheURL = Self.cacheURL(for: url, width: width, height: height)
+        let cacheURL = Self.cacheURL(
+            for: url, width: width, height: height,
+            seconds: durationSeconds, framesPerSecond: framesPerSecond
+        )
         if FileManager.default.fileExists(atPath: cacheURL.path) {
             return cacheURL
         }
@@ -184,11 +187,22 @@ public struct PlaceholderVideoFetcher: VideoSource {
     /// is the second reason v3 matters: **v2's black clips are real files on
     /// real machines**, and a cache that outlives the bug it stored is worse
     /// than no cache.
-    private static func cacheURL(for url: URL, width: Int, height: Int) -> URL {
+    private static func cacheURL(
+        for url: URL, width: Int, height: Int, seconds: Double, framesPerSecond: Int32
+    ) -> URL {
+        // ⚠️ **THE DURATION AND THE FRAME RATE ARE PART OF THE KEY, AND LEAVING
+        // THEM OUT WAS A DEFECT WAITING FOR A SECOND CALLER.** Every caller used
+        // the default 2.5s until `DebugMediaLibrary` gained a clip budget so CI
+        // could ask for shorter ones; the moment two fetchers wanted the same URL
+        // at the same size for different LENGTHS, the second silently got the
+        // first's file. It surfaced as a clip that published 0.4s where 2.5 was
+        // asked for — and, downstream, as a trim resolved against a duration the
+        // file did not have.
+        //
         // v3: `makeFrame` painted opaque black — `UIColor.setFill()` against a
         //     CGContext that was never the current UIKit context.
         // v2: explicit Rec. 709 colour tagging.
-        let key = "v3|\(url.absoluteString)|\(width)x\(height)"
+        let key = "v3|\(url.absoluteString)|\(width)x\(height)|\(seconds)@\(framesPerSecond)"
         return FileManager.default.temporaryDirectory
             .appendingPathComponent("synthvid-\(Self.stableHash(key)).mp4")
     }

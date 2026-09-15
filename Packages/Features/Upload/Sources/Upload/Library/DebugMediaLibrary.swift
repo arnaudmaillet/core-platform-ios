@@ -52,13 +52,22 @@ final class DebugMediaLibrary: MediaLibraryReading {
         for index in 0..<total {
             let kind: MediaLibraryItem.Kind
             if index % 4 == 3 {
-                // ⚠️ **THE REAL CLIP'S OWN LENGTH WHEN THERE IS ONE.** The grid
-                // stamps this in the tile's corner. A made-up 0:10 over a
-                // 52-second film is the same class of lie as a coloured square
-                // standing in for a video: it looks right, and the one thing a
-                // stand-in must not do is disagree with what it stands for.
-                let seconds = Self.realClip(forIndex: index)?.seconds ?? (7 + (index % 53))
-                kind = .video(duration: TimeInterval(seconds))
+                // ⚠️ **THE LENGTH OF THE CLIP THIS ITEM ACTUALLY VENDS —
+                // WHICHEVER KIND IT IS.** The grid stamps this in the tile's
+                // corner, and the trim handles are laid out against it.
+                //
+                // It used to be `7 + (index % 53)`: a pleasing spread of made-up
+                // numbers over synthetic clips that all run `clipSeconds`. That
+                // was merely untidy while nothing read it, and became a defect
+                // the moment trim arrived — a strip built against a declared ten
+                // seconds, cutting a file that is two and a half, resolves to a
+                // range outside the clip. The same class of lie as a coloured
+                // square standing in for a video: it looks right, and the one
+                // thing a stand-in must not do is disagree with what it stands
+                // for. Less varied, and true.
+                let seconds = Self.realClip(forIndex: index).map { Double($0.seconds) }
+                    ?? clipSeconds
+                kind = .video(duration: seconds)
             } else {
                 kind = .photo
             }
