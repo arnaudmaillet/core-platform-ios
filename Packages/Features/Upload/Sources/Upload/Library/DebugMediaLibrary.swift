@@ -37,7 +37,12 @@ final class DebugMediaLibrary: MediaLibraryReading {
         for index in 0..<total {
             let kind: MediaLibraryItem.Kind
             if index % 4 == 3 {
-                let seconds = 7 + (index % 53)
+                // ⚠️ **THE REAL CLIP'S OWN LENGTH WHEN THERE IS ONE.** The grid
+                // stamps this in the tile's corner. A made-up 0:10 over a
+                // 52-second film is the same class of lie as a coloured square
+                // standing in for a video: it looks right, and the one thing a
+                // stand-in must not do is disagree with what it stands for.
+                let seconds = Self.realClip(forIndex: index)?.seconds ?? (7 + (index % 53))
                 kind = .video(duration: TimeInterval(seconds))
             } else {
                 kind = .photo
@@ -213,24 +218,133 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// with no video track, would fail in each of those and prove nothing about
     /// the path this library exists to drive.
     ///
-    /// `PlaceholderVideoFetcher` is the feed's own mock source and already
-    /// synthesises exactly this — a short looping clip with a sweeping band,
-    /// hue derived from the URL and cached on disk — so a picked debug video is
-    /// deterministic and costs one write per id. It lives in `MediaPlayback`,
-    /// which `PostComposer` already depends on for `VideoExporter`.
+    /// Two routes, and both end in a local file:
     ///
-    /// ⚠️ **THE CLIP WEARS THE SHAPE ITS TILE PROMISED**, via `isPortrait` — see
-    /// the note there. Even on both sides because H.264 requires it; the fetcher
-    /// rounds down anyway, but asking correctly keeps the aspect exact.
+    /// - **A real public encode** under `-rich-media` (`realClips`), downloaded
+    ///   once and cached by `PlaceholderVideoFetcher`. This is the one that
+    ///   finds things a fixture cannot: it is what showed that
+    ///   `VideoExporter.posterImage` sampled at exactly t=0 and therefore
+    ///   published a black `thumbnail_url` for any film that fades in.
+    /// - **A synthesised clip** otherwise — the feed's own mock source, a short
+    ///   looping film with a sweeping band, hue derived from the URL, cached on
+    ///   disk, deterministic and offline. This is the default precisely because
+    ///   the unit suite, previews and CI must not touch the network.
+    ///
+    /// ⚠️ **THE SYNTHESISED CLIP WEARS THE SHAPE ITS TILE PROMISED**, via
+    /// `isPortrait` — see the note there. Even on both sides because H.264
+    /// requires it; the fetcher rounds down anyway, but asking correctly keeps
+    /// the aspect exact. A real encode brings its own shape, which is why they
+    /// are all landscape and all land on odd indices; see `realClips`.
     func videoFile(for item: MediaLibraryItem.ID) async -> URL? {
         guard items.first(where: { $0.id == item })?.isVideo == true else { return nil }
-        let portrait = Self.isPortrait(Self.index(of: item))
+        let index = Self.index(of: item)
+        let fetcher = PlaceholderVideoFetcher()
+
+        // ⚠️ **A REAL ENCODE UNDER `-rich-media`, AND ONE CHECK COVERS BOTH WAYS
+        // OF NOT GETTING ONE.** `playableURL` hands an http(s) URL to the
+        // fetcher's own download-once cache, which is itself gated on
+        // `-rich-media` and returns the REMOTE url unchanged when it is absent
+        // or when the download did not produce something plausibly a video. So
+        // `isFileURL` answers "did I actually get a local file" for both the
+        // not-opted-in case and the fixture-went-dark case, and the synthesised
+        // clip below catches both. A remote URL must never escape from here:
+        // `VideoExporter` would run an `AVAssetExportSession` over the network,
+        // and `AVAssetImageGenerator` refuses remote assets outright (-11800).
+        if let clip = Self.realClip(forIndex: index),
+           let remote = URL(string: clip.url),
+           let resolved = try? await fetcher.playableURL(for: remote),
+           resolved.isFileURL {
+            return resolved
+        }
+
+        let portrait = Self.isPortrait(index)
         let width = portrait ? 720 : 960
         let height = portrait ? 960 : 720
         guard let source = URL(string: "mock://video/\(item)?w=\(width)&h=\(height)") else {
             return nil
         }
-        return try? await PlaceholderVideoFetcher().playableURL(for: source)
+        return try? await fetcher.playableURL(for: source)
+    }
+
+    // MARK: - Real clips
+
+    /// A public test encode, and how long it actually runs.
+    struct RealClip: Equatable {
+        let url: String
+        /// Read off the asset, not guessed — the grid stamps this on the tile,
+        /// and a tile that says 0:10 over a 52-second film is a stand-in lying
+        /// about the thing it stands in for.
+        let seconds: Int
+    }
+
+    /// ⚠️ **URLS COPIED FROM `MockMediaFixtures`, NOT IMPORTED FROM IT — AND
+    /// THAT IS DELIBERATE.** They live in `CoreNetworkingMocks`, a product this
+    /// feature's target does not depend on and should not: SwiftPM has no
+    /// per-configuration dependencies, so declaring it would link a mocks
+    /// library into the Release app to serve a file that is `#if DEBUG` from top
+    /// to bottom. `MockMediaFixtures` stays the canonical catalogue — it records
+    /// the `ffprobe`-read dimensions, the verification dates and the
+    /// `deadSources` list — and anything added here should be added there first.
+    ///
+    /// ⚠️ **ALL LANDSCAPE, AND THAT IS NOT AN OVERSIGHT.** `MockMediaFixtures`
+    /// explains why: the commonly cited portrait buckets are dead, and declaring
+    /// a portrait size for a landscape encode mis-drives pre-layout and crops
+    /// the subject. It happens to fit here — every video item lands on an odd
+    /// index, which `isPortrait` already draws 4:3 — but a portrait fixture
+    /// added later must not be assigned to an even one.
+    ///
+    /// ⚠️ **NO TEN-MINUTE FIXTURE.** `MockMediaFixtures.longRunning` is right
+    /// for a playhead-continuity test and wrong here: a picker stand-in that
+    /// takes minutes to export teaches nothing the 52-second one does not.
+    ///
+    /// Verified with a ranged GET on 2026-09-15 — all 206, `video/mp4`. When one
+    /// goes quiet, check it the way that file prescribes:
+    /// `curl -o /dev/null -w '%{http_code}' -r 0-1023 <url>`.
+    static let realClips = [
+        // 1280x720, ~1 MB. `MockMediaFixtures.bigBuckBunny720`.
+        RealClip(
+            url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4",
+            seconds: 10
+        ),
+        // 854x480, the long one — enough to make an export take real time.
+        // `MockMediaFixtures.sintelTrailer`.
+        RealClip(url: "https://media.w3.org/2010/05/sintel/trailer.mp4", seconds: 52),
+        // 640x360, ~1 MB. `MockMediaFixtures.mapPreviewLoop`, without its
+        // `mock-kind=video` marker — that exists to let the map's repository
+        // recognise a video pin by URL shape, and nothing here reads it.
+        RealClip(
+            url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
+            seconds: 10
+        )
+    ]
+
+    /// Which real clip a video item gets, or nil when real clips are off.
+    ///
+    /// Videos sit at every fourth index, so the k-th of them is at `4k + 3`;
+    /// rotating on k rather than on the index is what stops three clips from
+    /// landing on one and repeating.
+    static func realClip(forIndex index: Int) -> RealClip? {
+        guard usesRealClips else { return nil }
+        return rotatedClip(forIndex: index)
+    }
+
+    /// The rotation on its own, with no opinion about whether real clips are
+    /// switched on — so which film lands where is testable without a launch
+    /// argument, and therefore without the network.
+    static func rotatedClip(forIndex index: Int) -> RealClip? {
+        guard index % 4 == 3 else { return nil }
+        return realClips[((index - 3) / 4) % realClips.count]
+    }
+
+    /// ⚠️ **THE SAME FLAG THE FIXTURES THEMSELVES OBEY.** The default mock mode
+    /// is offline and deterministic — the unit suite, previews and CI all run
+    /// against it and must not touch the network — and
+    /// `PlaceholderVideoFetcher`'s download cache is gated on this argument
+    /// already. Inventing a second flag here would let the library ask for a
+    /// download the fetcher then refuses, which reads as "real videos are
+    /// broken" rather than "they are off".
+    static var usesRealClips: Bool {
+        ProcessInfo.processInfo.arguments.contains("-rich-media")
     }
 }
 #endif

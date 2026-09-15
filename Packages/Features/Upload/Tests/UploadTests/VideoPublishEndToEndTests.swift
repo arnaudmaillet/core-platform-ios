@@ -204,6 +204,60 @@ struct VideoPublishEndToEndTests {
         return (Int(pixel[0]), Int(pixel[1]), Int(pixel[2]))
     }
 
+    // MARK: - Real clips, and the offline guarantee
+
+    /// ⚠️ **THE MOST IMPORTANT LINE IN THIS FILE.** `MockMediaFixtures`' header
+    /// states the rule the whole mock layer rests on: the unit suite, previews
+    /// and CI run offline and must not depend on the network. Real clips are
+    /// therefore opt-in, and this is what stops a future edit from making every
+    /// run of this suite download Big Buck Bunny.
+    ///
+    /// The witness matters as much as the assertion: without it, a `realClip`
+    /// that returned nil because the ROTATION broke would read as "correctly
+    /// off".
+    @Test func realClipsAreOffWithoutTheFlagSoTheSuiteNeverReachesTheNetwork() {
+        #expect(DebugMediaLibrary.usesRealClips == false,
+                "this suite must never be run with -rich-media")
+        #expect(DebugMediaLibrary.realClip(forIndex: 3) == nil)
+        #expect(DebugMediaLibrary.rotatedClip(forIndex: 3) != nil,
+                "guard: the nil above is the flag, not a broken rotation")
+    }
+
+    /// Each video tile shows a different film until the catalogue runs out.
+    /// Videos sit at every fourth index, so rotating on the index rather than on
+    /// the video's ordinal would hand three of them the same clip.
+    @Test func eachVideoGetsADifferentFilmBeforeTheRotationRepeats() throws {
+        let films = [3, 7, 11].map { DebugMediaLibrary.rotatedClip(forIndex: $0)?.url }
+        #expect(Set(films.compactMap { $0 }).count == 3, "got \(films)")
+        #expect(
+            DebugMediaLibrary.rotatedClip(forIndex: 15)?.url
+                == DebugMediaLibrary.rotatedClip(forIndex: 3)?.url,
+            "and the fourth wraps back to the first"
+        )
+    }
+
+    @Test func onlyAVideoIndexGetsAFilm() {
+        for index in [0, 1, 2, 4, 5, 6] {
+            #expect(DebugMediaLibrary.rotatedClip(forIndex: index) == nil, "index \(index)")
+        }
+    }
+
+    /// ⚠️ **A MANIFEST IS NOT A FILE, AND THE CATALOGUE IS FULL OF THEM.**
+    /// `MockMediaFixtures` holds HLS ladders alongside progressive MP4s, and an
+    /// `.m3u8` is an index over many segments: `PlaceholderVideoFetcher` passes
+    /// it straight through uncached, `AVAssetExportSession` cannot write it to a
+    /// file, and the publish would fail at the last step with the bytes already
+    /// chosen. Copying one in here is a one-character mistake, so it is pinned.
+    @Test func everyRealClipIsAProgressiveMp4OverHttps() throws {
+        for clip in DebugMediaLibrary.realClips {
+            let url = try #require(URL(string: clip.url))
+            #expect(url.scheme == "https", "\(clip.url)")
+            #expect(url.pathExtension.lowercased() == "mp4",
+                    "\(clip.url) is not a progressive file")
+            #expect(clip.seconds > 0)
+        }
+    }
+
     // MARK: - Picking a video and posting it
 
     /// ⚠️ **THE QUESTION THIS WHOLE SLICE EXISTS TO ANSWER, ASKED ONCE, END TO

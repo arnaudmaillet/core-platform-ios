@@ -153,6 +153,17 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
   "There is no photo library on a runner" was the reason the video path went
   four screens' worth of work without anyone noticing `where !item.isVideo`;
   it is no longer a reason.
+
+  **`-rich-media` puts REAL encodes behind the picker** — Big Buck Bunny and the
+  Sintel trailer, from `MockMediaFixtures`' verified catalogue, downloaded once
+  and cached by `PlaceholderVideoFetcher`. Opt-in, and deliberately the same
+  flag the fixtures themselves obey: the default mock mode is offline, and the
+  unit suite and CI must stay that way. Real encodes immediately earned their
+  keep — they are what showed that `VideoExporter.posterImage` sampled at
+  exactly t=0, so any clip that fades in (Sintel does) published a **black**
+  `thumbnail_url`. It now samples a tenth of the way in, capped at a second,
+  with the tolerance pinned to "at or after" so a short clip's keyframe cannot
+  drag it back to zero.
 - **P2 — needs backend:** `asset_id` on `CreatePost`, the "processing" poster
   state, real fleet `upload → transcode → play`.
 - **P3:** camera capture UI + permissions.
