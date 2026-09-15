@@ -1,4 +1,7 @@
 #if DEBUG
+// `PlaceholderVideoFetcher` — the feed's mock video source, reused here so a
+// picked debug video is a real clip rather than a promise of one.
+import MediaPlayback
 import UIKit
 
 /// A library made of nothing, for a simulator whose own is six stock images
@@ -149,6 +152,28 @@ final class DebugMediaLibrary: MediaLibraryReading {
             )
             number.draw(at: origin, withAttributes: attributes)
         }
+    }
+
+    /// ⚠️ **REAL H.264 BYTES, NOT A STAND-IN FOR THEM.** Everything downstream
+    /// of here opens the file for real — `VideoExporter` runs an
+    /// `AVAssetExportSession` over it, `AVAssetImageGenerator` pulls a poster out
+    /// of it, and the optimistic feed entry plays it. A made-up URL, or a file
+    /// with no video track, would fail in each of those and prove nothing about
+    /// the path this library exists to drive.
+    ///
+    /// `PlaceholderVideoFetcher` is the feed's own mock source and already
+    /// synthesises exactly this — a short looping clip with a sweeping band,
+    /// hue derived from the URL and cached on disk — so a picked debug video is
+    /// deterministic and costs one write per id. It lives in `MediaPlayback`,
+    /// which `PostComposer` already depends on for `VideoExporter`.
+    ///
+    /// 3:4 to match the odd-indexed thumbnails, and even on both sides because
+    /// H.264 requires it — the fetcher rounds down, but asking correctly keeps
+    /// the shape the grid promised.
+    func videoFile(for item: MediaLibraryItem.ID) async -> URL? {
+        guard items.first(where: { $0.id == item })?.isVideo == true else { return nil }
+        guard let source = URL(string: "mock://video/\(item)?w=720&h=960") else { return nil }
+        return try? await PlaceholderVideoFetcher().playableURL(for: source)
     }
 }
 #endif

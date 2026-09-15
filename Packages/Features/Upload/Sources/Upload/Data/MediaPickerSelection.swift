@@ -11,10 +11,11 @@ struct MediaPickerSelection: Equatable {
     /// 2026-09-12 `PostComposing.publish(media:caption:as:)` takes `[ComposeMedia]`
     /// and uploads them in order, so a full selection reaches the wire.
     ///
-    /// ⚠️ One gap remains and it is the library seam's, not this cap's:
-    /// `MediaLibraryReading` vends images only, so a chosen VIDEO has nothing to
-    /// upload. The new-post screen marks them and says so rather than dropping
-    /// them silently.
+    /// Photos and videos alike: `MediaLibraryReading.videoFile(for:)` gives a
+    /// chosen clip a file to upload, so a mixed selection of twenty reaches the
+    /// wire whole. What a video still cannot carry is this flow's EDITS — crop,
+    /// straighten and filters are `UIImage`-to-`UIImage`
+    /// (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4).
     static let limit = 20
 
     private(set) var ids: [String] = []

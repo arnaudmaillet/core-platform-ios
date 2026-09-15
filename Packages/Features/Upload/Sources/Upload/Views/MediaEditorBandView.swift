@@ -79,10 +79,16 @@ final class MediaEditorBandView: UIView {
 /// the author cannot use.
 ///
 /// ⚠️ **SAYING SO IS THE POINT.** The alternative — offering the tools and
-/// quietly dropping what they produce — is the failure mode the finalisation
-/// screen's own footer exists to avoid ("Videos can't be posted yet — only the
-/// photos in this selection will go"), and the one `dev/BACKEND_GAPS.md` §22
-/// names as the line a local control must not cross.
+/// quietly dropping what they produce — is the line `dev/BACKEND_GAPS.md` §22
+/// names as the one a local control must not cross.
+///
+/// The finalisation screen used to carry a footer of the same kind, apologising
+/// that videos could not be posted. It no longer does, because they can: that
+/// gap was `MediaLibraryReading` vending images only, and it is closed. What is
+/// still true here is narrower — a video publishes, but `MediaCrop` and
+/// `MediaFilter` are `UIImage`-to-`UIImage`, so there is nothing to bake an edit
+/// into (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4). A notice that outlives its
+/// reason is worse than none.
 @MainActor
 final class BandNoticeView: UIView {
     private let caption = UILabel()

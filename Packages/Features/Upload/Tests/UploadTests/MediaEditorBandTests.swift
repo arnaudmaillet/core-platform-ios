@@ -45,6 +45,8 @@ struct MediaEditorBandTests {
         func albums() async -> [MediaLibraryAlbum] { [] }
         func items(in album: String) async -> [MediaLibraryItem] { [] }
         func thumbnail(for item: String, size: CGSize) async -> UIImage? { nil }
+        /// The editor draws a video's poster frame; it never asks for the file.
+        func videoFile(for item: String) async -> URL? { nil }
         func presentLimitedPicker(from host: UIViewController) {}
     }
 

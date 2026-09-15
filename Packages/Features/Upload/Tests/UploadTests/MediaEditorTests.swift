@@ -40,6 +40,8 @@ struct MediaEditorTests {
         func presentLimitedPicker(from host: UIViewController) {}
         func albums() async -> [MediaLibraryAlbum] { [] }
         func items(in album: MediaLibraryAlbum.ID) async -> [MediaLibraryItem] { [] }
+        /// The editor draws a video's poster frame; it never asks for the file.
+        func videoFile(for item: MediaLibraryItem.ID) async -> URL? { nil }
 
         func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage? {
             requestedSizes.append(size)
