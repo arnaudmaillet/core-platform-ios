@@ -1,4 +1,8 @@
 import DesignSystem
+// `VideoRenderView` — the surface a picked clip plays in, one page at a time.
+// See `MediaPreviewPlayer` for why this screen owns its player rather than
+// borrowing the feed's.
+import MediaPlayback
 import UIKit
 
 /// Whether a picture fills its frame and is cropped, or is shown whole with the
@@ -108,6 +112,11 @@ final class MediaEditorViewController: UIViewController {
     private let items: [MediaLibraryItem]
     private let itemsByID: [String: MediaLibraryItem]
     private let library: any MediaLibraryReading
+    /// Plays the settled page's clip. Owned by this screen, pool and all.
+    private let preview: any MediaPreviewPlaying
+    /// Which item the preview is currently bound to, if any — so a settle that
+    /// lands back on the same page does not restart it.
+    private var playingID: String?
     /// What "Next" hands the media to. The step that writes a caption and
     /// publishes is still a stand-in, so the builder passes a screen saying so.
     /// ⚠️ CARRIES EVERY DECISION THE AUTHOR MADE — see `MediaEdits`. The step
@@ -386,11 +395,13 @@ final class MediaEditorViewController: UIViewController {
     init(
         items: [MediaLibraryItem],
         library: any MediaLibraryReading,
+        preview: any MediaPreviewPlaying = MediaPreviewPlayer(),
         onNext: @escaping ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController
     ) {
         self.items = items
         self.itemsByID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.library = library
+        self.preview = preview
         self.onNext = onNext
         super.init(nibName: nil, bundle: nil)
         // ⚠️ THE TOP BAR BELONGS TO THE SCREEN, NOT TO ITS VIEW. A navigation
@@ -463,6 +474,8 @@ final class MediaEditorViewController: UIViewController {
     /// be pulled shut.
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // ⚠️ BEFORE `exitCrop`, WHICH SETTLES THE CANVAS AND WOULD START IT AGAIN.
+        stopPreview()
         exitCrop()
         restoreToolbar?()
         restoreToolbar = nil
@@ -477,6 +490,10 @@ final class MediaEditorViewController: UIViewController {
         // said Crop over an empty band, with no way to reopen it: selecting the
         // index the strip already rests on announces nothing.
         if selectedCategory == "Crop", !isCropping { enterCrop() }
+        // The first page has never settled — nothing scrolled — so this is the
+        // only moment it can start. Stepping back from the finalisation screen
+        // lands here too, which is what restarts a clip the author left running.
+        playSettledPage()
         #if DEBUG
         logCanvas("didAppear")
         // ⚠️ **THE FINALISATION SCREEN HAD NO SCRIPTED WAY IN.** `-upload-edit`
@@ -1424,6 +1441,7 @@ final class MediaEditorPageCell: UICollectionViewCell {
     private(set) var representedID: String?
 
     private let picture = UIImageView()
+    private let surface = VideoRenderView()
 
     /// ⚠️ **HELD, BECAUSE A FITTED PICTURE DOES NOT LIVE IN THE SAME RECTANGLE AS
     /// A FILLED ONE.** Filling means the whole window, bars included — that is what
@@ -1449,6 +1467,25 @@ final class MediaEditorPageCell: UICollectionViewCell {
             picture.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             picture.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
         ])
+        // ⚠️ **PINNED TO THE PICTURE, NOT TO THE CONTENT VIEW.** The fit/fill
+        // window is four constants held on `picture`, and a surface that
+        // duplicated them would drift the first time one of the two was changed
+        // alone. Pinned here it inherits the geometry for free: when the author
+        // fits a clip, the video is laid in the same rectangle as the poster it
+        // replaces, and the swap from one to the other moves nothing.
+        surface.isHidden = true
+        surface.isUserInteractionEnabled = false
+        // The page draws its own ground (the editor paints behind everything);
+        // an opaque black surface would put a letterbox back under a fitted clip.
+        surface.paintsOpaqueGround = false
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(surface)
+        NSLayoutConstraint.activate([
+            surface.topAnchor.constraint(equalTo: picture.topAnchor),
+            surface.bottomAnchor.constraint(equalTo: picture.bottomAnchor),
+            surface.leadingAnchor.constraint(equalTo: picture.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: picture.trailingAnchor)
+        ])
         isAccessibilityElement = true
         accessibilityTraits = .image
     }
@@ -1456,15 +1493,46 @@ final class MediaEditorPageCell: UICollectionViewCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// ⚠️ **A REUSED CELL MUST NOT KEEP A SURFACE THAT IS STILL PLAYING.** The
+    /// canvas recycles pages, so the cell that carried page 2's clip becomes
+    /// page 5's without asking anyone. Whoever put a player here has to be told;
+    /// the editor sets this when it hands the cell a surface to play in.
+    var onReuse: ((VideoRenderView) -> Void)?
+
     override func prepareForReuse() {
         super.prepareForReuse()
         representedID = nil
         picture.image = nil
+        onReuse?(surface)
+        onReuse = nil
+        surface.isHidden = true
     }
 
     func prepare(for item: MediaLibraryItem) {
         representedID = item.id
         accessibilityLabel = item.isVideo ? "Video" : "Photo"
+    }
+
+    /// The surface a video plays in, for the editor to hand to its player.
+    /// Hidden until something is actually bound to it — an empty
+    /// `VideoRenderView` over the poster is a black rectangle.
+    var videoSurface: VideoRenderView { surface }
+
+    /// Reveals the video and lets the poster underneath show through until the
+    /// first decoded frame arrives.
+    func beginShowingVideo() {
+        // The poster is the picture this page already drew — the very frame the
+        // grid showed and the publish path will upload. Handing the surface the
+        // same one means the swap to live playback changes the motion and
+        // nothing else.
+        surface.setPoster(picture.image)
+        surface.isHidden = false
+        surface.fadeInOnFirstFrame(over: 0.2)
+    }
+
+    func stopShowingVideo() {
+        surface.isHidden = true
+        surface.setPoster(nil)
     }
 
     /// Hands over a picture fetched for `id`, and ignores one whose page has
@@ -1500,6 +1568,11 @@ final class MediaEditorPageCell: UICollectionViewCell {
     /// would only show less of it for nothing.
     func lay(_ fit: ContentFit, within window: UIEdgeInsets, animated: Bool) {
         setContentMode(fit.mode, animated: animated)
+        // ⚠️ THE VIDEO OBEYS THE SAME CHOICE AS THE PICTURE. Left at the feed's
+        // `.resizeAspectFill`, a clip the author asked to see WHOLE would carry
+        // on being cropped — and the poster beneath it would not be, so the swap
+        // to live playback would jump.
+        surface.videoGravity = fit == .fit ? .resizeAspect : .resizeAspectFill
         let applied = fit == .fit ? window : .zero
         guard top.constant != applied.top || bottom.constant != -applied.bottom else { return }
         top.constant = applied.top
@@ -1523,6 +1596,80 @@ final class MediaEditorPageCell: UICollectionViewCell {
     /// Internal for tests: the size of what is actually on the page — the only
     /// thing that can tell a rendered crop from the picture it was cut from.
     var debugPictureSize: CGSize { picture.image?.size ?? .zero }
+    /// Internal for tests: whether this page is showing a video surface at all.
+    var debugIsShowingVideo: Bool { !surface.isHidden }
+    /// Internal for tests: how the video is laid, which must track the picture.
+    var debugVideoGravityIsFit: Bool { surface.videoGravity == .resizeAspect }
+}
+
+// MARK: - Playing the settled page
+
+private extension MediaEditorViewController {
+    /// ⚠️ **ONE PAGE PLAYS, AND IT IS THE ONE THAT HAS COME TO REST.** The canvas
+    /// holds every chosen medium and recycles their cells, so "play the videos"
+    /// would mean a player per page, a pool the screen does not own, and
+    /// surfaces outliving the cells they were bound to — which is precisely the
+    /// shape of this repo's one recorded player leak. One player, one page, and
+    /// the binding torn down before the next one is made.
+    ///
+    /// ⚠️ **NOT DURING CROP.** Crop mode lifts the picture onto its own surface
+    /// and takes the gestures with it; a clip still running underneath would be
+    /// moving pixels nobody is looking at, behind a still the author IS looking
+    /// at.
+    func playSettledPage() {
+        guard !isCropping else { return stopPreview() }
+        guard let id = currentItemID, itemsByID[id]?.isVideo == true else {
+            return stopPreview()
+        }
+        // A settle that lands where it already was must not restart the clip —
+        // the fill/fit toggle and the band both settle the canvas.
+        guard playingID != id else { return }
+        stopPreview()
+
+        guard let page = canvas.cellForItem(at: IndexPath(item: currentIndex, section: 0))
+                as? MediaEditorPageCell
+        else { return }
+
+        playingID = id
+        page.beginShowingVideo()
+        // ⚠️ THE CELL TELLS US WHEN IT IS TAKEN AWAY. A canvas recycles pages
+        // without asking, and a surface handed to a player and then re-used for
+        // another item would keep the previous clip's frames.
+        page.onReuse = { [weak self] surface in
+            guard let self else { return }
+            preview.stop(surface)
+            if playingID == id { playingID = nil }
+        }
+
+        let surface = page.videoSurface
+        Task { [weak self] in
+            guard let self else { return }
+            guard let file = await library.videoFile(for: id) else {
+                // Nothing to play — the poster stays, which is what this page
+                // showed before playback existed.
+                if playingID == id { stopPreview() }
+                return
+            }
+            // ⚠️ RE-ASKED AFTER THE AWAIT. Reading a file can take a moment —
+            // an iCloud clip can take much longer — and the author may have
+            // swiped on, or opened crop, while it did.
+            guard playingID == id else { return }
+            await preview.play(file, in: surface)
+        }
+    }
+
+    /// Unbinds whatever is playing and puts the page back to its poster.
+    func stopPreview() {
+        guard let id = playingID else { return }
+        playingID = nil
+        guard let index = items.firstIndex(where: { $0.id == id }),
+              let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
+                as? MediaEditorPageCell
+        else { return }
+        page.onReuse = nil
+        preview.stop(page.videoSurface)
+        page.stopShowingVideo()
+    }
 }
 
 // MARK: - The canvas reports its paging
@@ -1543,6 +1690,19 @@ extension MediaEditorViewController: UICollectionViewDelegate {
         updateFitItem(animated: true)
         refreshFilterRowIfShowing()
         reopenCropIfWaiting()
+        playSettledPage()
+    }
+
+    /// ⚠️ **A DRAG RELEASED WITH NO VELOCITY DECELERATES NOWHERE.** Neither hook
+    /// below fires for it, which was survivable while only the fill/fit glyph
+    /// depended on settling — it would simply be re-stated on the next event.
+    /// A clip that never starts is not survivable in the same way.
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard !decelerate else { return }
+        updateFitItem(animated: true)
+        refreshFilterRowIfShowing()
+        reopenCropIfWaiting()
+        playSettledPage()
     }
 
     /// ⚠️ **BOTH SETTLE HOOKS, NOT JUST THE DRAGGED ONE.** A canvas that arrives
@@ -1553,6 +1713,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
         updateFitItem(animated: true)
         refreshFilterRowIfShowing()
         reopenCropIfWaiting()
+        playSettledPage()
     }
 }
 
@@ -1676,6 +1837,13 @@ extension MediaEditorViewController {
         canvas.setContentOffset(
             CGPoint(x: canvas.bounds.width * CGFloat(index), y: 0), animated: false
         )
+        // ⚠️ **THE CELL MUST EXIST BEFORE THE SETTLE IS ANNOUNCED.** A real
+        // scroll lays pages out as it goes, so by the time UIKit calls
+        // `scrollViewDidEndDecelerating` the settled page is on screen. Setting
+        // an offset outright skips that, and anything the settle does through
+        // `cellForItem(at:)` — starting the page's video, for one — silently
+        // found nothing and did nothing. The tests read as a dead feature.
+        canvas.layoutIfNeeded()
         scrollViewDidEndDecelerating(canvas)
     }
 
