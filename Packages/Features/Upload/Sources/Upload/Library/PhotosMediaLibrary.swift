@@ -194,7 +194,7 @@ final class PhotosMediaLibrary: MediaLibraryReading {
                 targetSize: Self.pixels(for: size),
                 contentMode: .aspectFill,
                 options: options
-            ) { image, _ in
+            ) { @Sendable image, _ in
                 once.run { continuation.resume(returning: image.map(PickedImage.init)) }
             }
         }
@@ -224,6 +224,33 @@ final class PhotosMediaLibrary: MediaLibraryReading {
     /// conformance is explicitly *unavailable*. So the asset is inspected, and
     /// the session is driven, **inside** the handler; only a `URL` is ever
     /// resumed. See `MediaLibraryReading.videoFile(for:)` for the full table.
+    ///
+    /// ⚠️ **AND THE HANDLER IS `@Sendable`, WITHOUT WHICH THIS TRAPPED THE
+    /// PROCESS ON THE FIRST REAL CLIP IT EVER SAW.** Keeping AVFoundation inside
+    /// the handler fixed the COMPILE error and left the runtime one standing:
+    /// `MediaLibraryReading` is `@MainActor`, so a closure written here inherits
+    /// main-actor isolation, and `PHImageManager` imports its result handler as a
+    /// bare block with no `@Sendable` — so the compiler accepts it and Swift
+    /// inserts a dynamic executor check that fires the moment Photos calls it on
+    /// `com.apple.photos.requestAVAsset`:
+    ///
+    /// ```
+    /// EXC_BREAKPOINT  thread 9  com.apple.photos.requestAVAsset
+    ///   _dispatch_assert_queue_fail
+    ///   swift_task_isCurrentExecutorWithFlagsImpl
+    ///   closure #1 in closure #1 in PhotosMediaLibrary.videoFile(for:)
+    ///   -[PHImageManager requestAVAssetForAsset:options:resultHandler:]_block_invoke_4
+    /// ```
+    ///
+    /// ⚠️ **AND IT IS THE SAME TRAP `DebugPhotoAlbumSeeder.performCreate` WRITES
+    /// UP ONE FILE AWAY**, which took `nonisolated` as its cure. The note there
+    /// was already exact — "handlers are invoked on an arbitrary serial queue",
+    /// same `dispatch_assert_queue_fail` — and this fell into it anyway, because
+    /// nothing could reach it: a simulator ships 26 assets and every one is a
+    /// still, so until `Scripts/seed-simulator-videos.sh` put real clips in the
+    /// device library, no `PHAsset` video had ever been asked for. The unit suite
+    /// cannot cover it either — there is no photo library on CI — so the guard is
+    /// that script plus a launch into the editor, and this paragraph.
     func videoFile(for item: MediaLibraryItem.ID) async -> URL? {
         guard let asset = assetsByID[item], asset.mediaType == .video else { return nil }
 
@@ -241,7 +268,7 @@ final class PhotosMediaLibrary: MediaLibraryReading {
 
         if let file: URL = await withCheckedContinuation({ continuation in
             let once = ResumeOnce()
-            images.requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+            images.requestAVAsset(forVideo: asset, options: options) { @Sendable avAsset, _, _ in
                 once.run { continuation.resume(returning: (avAsset as? AVURLAsset)?.url) }
             }
         }) {
@@ -265,14 +292,24 @@ final class PhotosMediaLibrary: MediaLibraryReading {
             let once = ResumeOnce()
             images.requestExportSession(
                 forVideo: asset, options: options, exportPreset: AVAssetExportPresetPassthrough
-            ) { session, _ in
+            ) { @Sendable session, _ in
                 guard let session else {
                     once.run { continuation.resume(returning: nil) }
                     return
                 }
+                // ⚠️ **`nonisolated(unsafe)` IS THE NARROWEST ESCAPE HATCH HERE,
+                // AND IT IS NEEDED BECAUSE `AVAssetExportSession`'s `Sendable`
+                // CONFORMANCE IS EXPLICITLY *UNAVAILABLE*** — measured with
+                // `-emit-sil`, not inferred. Photos hands the session over on its
+                // own queue and never touches it again; this is the single
+                // reference, it is used from one `Task` and nowhere else, and it
+                // dies with the export. That is the whole argument, and it is
+                // written down because the keyword says "unsafe" and cannot say
+                // "why".
+                nonisolated(unsafe) let held = session
                 Task {
                     do {
-                        try await session.export(to: output, as: .mov)
+                        try await held.export(to: output, as: .mov)
                         once.run { continuation.resume(returning: output) }
                     } catch {
                         once.run { continuation.resume(returning: nil) }
