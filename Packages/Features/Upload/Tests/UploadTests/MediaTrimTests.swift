@@ -54,7 +54,11 @@ struct MediaTrimTests {
 
         #expect(range.lowerBound >= 0)
         #expect(range.upperBound <= 0.5, "got \(range)")
-        #expect(range.lowerBound <= range.upperBound)
+        // ⚠️ **SOMETHING MUST BE KEPT.** This asserted `lowerBound <=
+        // upperBound`, which `0...0` satisfies — an implementation that
+        // collapsed every short clip to nothing would have passed both
+        // short-clip tests, and the export would produce an empty file.
+        #expect(range.upperBound > range.lowerBound, "nothing survives: \(range)")
     }
 
     // MARK: - Whether it cuts anything
@@ -82,35 +86,43 @@ struct MediaTrimTests {
 
     // MARK: - Dragging
 
+    /// ⚠️ **ASKED OF `moved` DIRECTLY, BECAUSE `resolved` LAUNDERS IT.** Every
+    /// assertion in this section used to read
+    /// `resolved(moved(...)).lowerBound`, and `resolved` clamps too — so BOTH
+    /// clamps inside `moved` could be deleted and all five drag tests would have
+    /// stayed green. A review caught it; it is the plainest example of a test
+    /// that cannot fail hiding behind a test that passes.
+    ///
+    /// `moved` must return a value that is already correct, because it is what
+    /// the strip stores and what `MediaEdits` carries.
     @Test func theStartStopsAtTheBeginningOfTheClip() {
         let moved = MediaTrimming.moved(
             MediaTrim(start: 1, end: 8), handle: .start, bySeconds: -50, within: duration
         )
-        #expect(MediaTrimming.resolved(moved, within: duration).lowerBound == 0)
+        #expect(moved.start == 0, "moved returned \(moved) before any resolving")
     }
 
     @Test func theEndStopsAtTheEndOfTheClip() {
         let moved = MediaTrimming.moved(
             MediaTrim(start: 1, end: 8), handle: .end, bySeconds: 50, within: duration
         )
-        #expect(MediaTrimming.resolved(moved, within: duration).upperBound == duration)
+        #expect(moved.end == duration, "moved returned \(moved) before any resolving")
     }
 
-    /// The handles may not cross, and may not close to nothing.
+    /// The handles may not cross, and may not close to nothing — asserted on
+    /// what `moved` itself returns.
     @Test func theHandlesKeepTheShortestClipBetweenThem() {
         let squeezed = MediaTrimming.moved(
             MediaTrim(start: 2, end: 8), handle: .start, bySeconds: 50, within: duration
         )
-        let range = MediaTrimming.resolved(squeezed, within: duration)
-        #expect(range.upperBound - range.lowerBound >= MediaTrimming.shortestSeconds - 0.001,
-                "got \(range)")
+        let kept = try? #require(squeezed.end).advanced(by: -squeezed.start)
+        #expect((kept ?? 0) >= MediaTrimming.shortestSeconds - 0.001, "got \(squeezed)")
 
         let other = MediaTrimming.moved(
             MediaTrim(start: 2, end: 8), handle: .end, bySeconds: -50, within: duration
         )
-        let otherRange = MediaTrimming.resolved(other, within: duration)
-        #expect(otherRange.upperBound - otherRange.lowerBound >= MediaTrimming.shortestSeconds - 0.001,
-                "got \(otherRange)")
+        let otherKept = try? #require(other.end).advanced(by: -other.start)
+        #expect((otherKept ?? 0) >= MediaTrimming.shortestSeconds - 0.001, "got \(other)")
     }
 
     /// ⚠️ **THE PROPERTY THE INCREMENTAL DESIGN EXISTS FOR.** Drag the end past

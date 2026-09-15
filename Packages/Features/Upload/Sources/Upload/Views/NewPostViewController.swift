@@ -1,3 +1,6 @@
+// `AVURLAsset` — the trim is resolved against the FILE's length, not the item's
+// declared one. See the note in `post()`.
+import AVFoundation
 import CoreModels
 import DesignSystem
 import UIKit
@@ -656,12 +659,24 @@ final class NewPostViewController: UIViewController {
                         // `cuts` rather than `!isWhole`: a range covering the
                         // whole clip is the same instruction as no range at all,
                         // and only nil takes the exporter's passthrough.
+                        // ⚠️ **AGAINST THE FILE'S OWN LENGTH, NOT THE ITEM'S
+                        // DECLARED ONE.** The declaration is whatever vended the
+                        // item said, and it can disagree with the bytes — under
+                        // `-rich-media` a fixture whose download failed falls
+                        // back to a synthetic clip, so an item can truthfully
+                        // say 52 seconds over a file of two and a half.
+                        // Resolving against the declaration would hand the
+                        // exporter a range past the end and publish nothing.
+                        // The editor's strip asks the same question of the same
+                        // asset, so the two cannot drift apart.
                         var kept: ClosedRange<Double>?
-                        if case .video(let seconds) = item.kind {
-                            let trim = (edits[item.id] ?? .untouched).trim
-                            if MediaTrimming.cuts(trim, within: seconds) {
-                                kept = MediaTrimming.resolved(trim, within: seconds)
-                            }
+                        let declared: Double
+                        if case .video(let seconds) = item.kind { declared = seconds } else { declared = 0 }
+                        let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
+                        let length = real.isFinite && real > 0 ? real : declared
+                        let trim = (edits[item.id] ?? .untouched).trim
+                        if MediaTrimming.cuts(trim, within: length) {
+                            kept = MediaTrimming.resolved(trim, within: length)
                         }
                         media.append(
                             .video(PickedVideo(sourceURL: file, keptSeconds: kept))
