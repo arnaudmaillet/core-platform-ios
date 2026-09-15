@@ -362,12 +362,12 @@ struct VideoPublishEndToEndTests {
     /// came out the other side.
     ///
     /// The clip is longer here than the rest of the suite's, because
-    /// `MediaTrimming` will not cut below its floor and a four-tenths-of-a-second
+    /// `MediaTimelining` will not cut below its floor and a four-tenths-of-a-second
     /// fixture is already shorter than that. A trim test on it would pass by
     /// refusing to trim.
     @Test func aTrimChosenInTheEditorShortensThePublishedClip() async throws {
         var edited = MediaEdits.untouched
-        edited.trim = MediaTrim(start: 0.5, end: 1.5)
+        edited.timeline = MediaTimeline(segments: [MediaSegment(start: 0.5, end: 1.5)])
         let harness = await open(
             [3], of: 4, clipSeconds: 2.5, edits: ["debug-3": edited]
         )

@@ -81,16 +81,31 @@ struct MediaEditorPlaybackTests {
         private(set) var filmstripRequests: [(file: URL, count: Int)] = []
         var answersFilmstrip = true
 
-        func filmstrip(of file: URL, count: Int, height: CGFloat) async -> [UIImage] {
-            filmstripRequests.append((file, count))
-            guard answersFilmstrip else { return [] }
-            return (0..<count).map { _ in
-                UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+        func frames(
+            of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
+        ) async -> [Double: UIImage] {
+            filmstripRequests.append((file, seconds.count))
+            guard answersFilmstrip else { return [:] }
+            let swatch = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
                     UIColor.green.setFill()
                     context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
                 }
-            }
+            return Dictionary(uniqueKeysWithValues: seconds.map { ($0, swatch) })
         }
+
+        /// Playback's subject is binding and pausing, not the playhead — the
+        /// track's suite is where scrubbing is asked about.
+        func playhead(in surface: VideoRenderView) -> (fraction: Double, seconds: Double)? { nil }
+
+        func seek(
+            toFraction fraction: Double, in surface: VideoRenderView, toleranceSeconds: Double
+        ) {}
+
+        /// What the stub player says about being stopped. Tests that care set
+        /// it; nil is "nothing is bound", which is neither playing nor paused.
+        var paused: Bool? = false
+
+        func isPaused(in surface: VideoRenderView) -> Bool? { paused }
 
         func isBound(_ surface: VideoRenderView) -> Bool {
             boundSurfaces.contains(ObjectIdentifier(surface))

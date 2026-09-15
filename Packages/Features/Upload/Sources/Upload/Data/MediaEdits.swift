@@ -32,10 +32,11 @@ struct MediaEdits: Equatable, Sendable {
     /// What the author kept of the picture, and how far they straightened it.
     var crop: MediaCrop = .untouched
 
-    /// What the author kept of a CLIP. Meaningless on a photograph, and left
-    /// `.whole` there rather than made optional: an `Optional` would put a `?`
-    /// at every reader to say something none of them can act on.
-    var trim: MediaTrim = .whole
+    /// What the author made of a CLIP: the pieces they kept, in order.
+    /// Meaningless on a photograph, and left `.whole` there rather than made
+    /// optional: an `Optional` would put a `?` at every reader to say something
+    /// none of them can act on.
+    var timeline: MediaTimeline = .whole
 
     static let untouched = MediaEdits()
 
@@ -58,9 +59,10 @@ struct MediaEdits: Equatable, Sendable {
     /// above is about `MediaCrop` growing a field — interpolating `crop` whole
     /// covers that for free. It does **not** cover `MediaEdits` growing one:
     /// `trim` had to be written in here, and a future field will too. The
-    /// failure is the same and just as quiet, one level up.
+    /// failure is the same and just as quiet, one level up — `trim` became
+    /// `timeline` here and the interpolation had to be edited by hand again.
     var signature: String {
-        "\(fit)/\(filter.rawValue)/\(crop)/\(trim)"
+        "\(fit)/\(filter.rawValue)/\(crop)/\(timeline)"
     }
 
     /// The picture as the author left it.

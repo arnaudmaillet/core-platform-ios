@@ -158,4 +158,99 @@ struct VideoExporterTests {
         let resolved = try await PlaceholderVideoFetcher().playableURL(for: localClip)
         #expect(resolved == localClip)
     }
+
+    // MARK: - More than one piece, and rates other than as-shot
+
+    /// ⚠️ **ASSERTED ON THE DURATION OF WHAT COMES OUT, BECAUSE THE FAILURE MODE
+    /// IS SILENCE.** A segment list that is ignored, or that collapses to the
+    /// first piece, produces a perfectly good file — it is simply the wrong film,
+    /// and nothing errors. Two pieces of one second each must give two seconds.
+    @Test func twoPiecesExportAsTheirSum() async throws {
+        let source = try await longerClip()
+
+        let exported = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source,
+            segments: [
+                VideoExportSegment(start: 0.1, end: 0.7),
+                VideoExportSegment(start: 1.6, end: 2.2)
+            ]
+        ))
+
+        #expect(abs(exported.durationSeconds - 1.2) < 0.25,
+                "got \(exported.durationSeconds)s for two six-tenths pieces")
+    }
+
+    /// The witness for the one above: the SAME two moments as a single span would
+    /// be nearly three seconds. Without it, "two seconds" could be a coincidence
+    /// of an exporter that ignored the list and trimmed once.
+    @Test func thePiecesAreJoined_notSpanned() async throws {
+        let source = try await longerClip()
+
+        let spanned = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source, segments: [VideoExportSegment(start: 0.1, end: 2.2)]
+        ))
+
+        #expect(spanned.durationSeconds > 1.8,
+                "guard: the span really is longer than the two pieces: \(spanned.durationSeconds)")
+    }
+
+    /// ⚠️ **A RATE IS A CUT TOO.** The same frames, end to end, are a different
+    /// video once they play at a different speed — and a `timeRange` cannot say
+    /// it, which is the whole reason the composition route exists.
+    @Test func aFasterPieceExportsShorter() async throws {
+        let source = try await longerClip()
+
+        let asShot = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source, segments: [VideoExportSegment(start: 0, end: 2)]
+        ))
+        let doubled = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source, segments: [VideoExportSegment(start: 0, end: 2, speed: 2)]
+        ))
+        #expect(asShot.durationSeconds > 1.7, "guard: the 1x export is a real two seconds")
+
+        #expect(abs(doubled.durationSeconds - asShot.durationSeconds / 2) < 0.3,
+                "\(asShot.durationSeconds)s at 1x became \(doubled.durationSeconds)s at 2x")
+    }
+
+    @Test func aSlowerPieceExportsLonger() async throws {
+        let source = try await longerClip()
+
+        let halved = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source, segments: [VideoExportSegment(start: 0, end: 1, speed: 0.5)]
+        ))
+
+        #expect(halved.durationSeconds > 1.6, "got \(halved.durationSeconds)s for 1s at 0.5x")
+    }
+
+    /// ⚠️ **ONE PIECE AT 1x MUST NOT BUILD A COMPOSITION** — it is the trim every
+    /// clip takes, and a composition there is a second reader and a second set of
+    /// tracks for an identical result.
+    ///
+    /// ⚠️ **AND THIS USED TO COMPARE A PLAN WITH ITSELF.** It exported the
+    /// segment spelling against the `timeRange` spelling and compared durations —
+    /// but `init(sourceURL:timeRange:)` is sugar that builds exactly that
+    /// segment, so both plans were the same value taking the same branch, and
+    /// flipping the route would not have moved either number. Whether a
+    /// composition was built is INVISIBLE in the output; it has to be asked of
+    /// the decision.
+    @Test func onePieceAtOneRateTakesNoComposition() {
+        #expect(VideoExporter.needsComposition(for: []) == false, "an untouched clip")
+        #expect(VideoExporter.needsComposition(
+            for: [VideoExportSegment(start: 0.5, end: 1.5)]
+        ) == false, "a plain trim")
+
+        #expect(VideoExporter.needsComposition(for: [
+            VideoExportSegment(start: 0, end: 1), VideoExportSegment(start: 2, end: 3)
+        ]), "two pieces cannot be one time range")
+        #expect(VideoExporter.needsComposition(
+            for: [VideoExportSegment(start: 0, end: 1, speed: 2)]
+        ), "a rate cannot be a time range either")
+    }
+
+    /// And the two spellings still agree, which is the sugar's own promise.
+    @Test func theRangeSpellingIsTheOnePieceSpelling() {
+        let sugar = VideoExportPlan(sourceURL: URL(filePath: "/x"), timeRange: 0.5...1.5)
+
+        #expect(sugar.segments == [VideoExportSegment(start: 0.5, end: 1.5)])
+    }
 }

@@ -32,25 +32,60 @@ public struct ExportedVideo: Sendable, Equatable {
 public struct VideoExportPlan: Sendable {
     public let sourceURL: URL
 
-    /// The part of the clip to keep, in seconds from its start.
+    /// The pieces of the clip to keep, in order, each with the rate it plays at.
     ///
-    /// ⚠️ **NIL IS NOT THE SAME AS "0 TO THE DURATION".** Nil leaves
-    /// `AVAssetExportSession.timeRange` alone, which is the passthrough every
-    /// untrimmed clip has always taken; a range covering the whole clip still
-    /// makes the session re-encode it. `MediaTrimming.cuts(_:within:)` is what
-    /// the caller asks to tell the two apart.
-    public let timeRange: ClosedRange<Double>?
+    /// ⚠️ **EMPTY IS NOT THE SAME AS "ONE PIECE COVERING EVERYTHING".** Empty
+    /// leaves `AVAssetExportSession.timeRange` alone and builds no composition,
+    /// which is the path every untouched clip has always taken; one piece
+    /// spanning the whole clip still makes the session re-encode it.
+    /// `MediaTimelining.cuts(_:withinSource:)` is what the caller asks to tell
+    /// the two apart.
+    ///
+    /// ⚠️ **AND THE EXPORTER PICKS ITS OWN ROUTE FROM THIS, RATHER THAN BEING
+    /// TOLD.** One piece at 1x is a `timeRange` and no composition at all; more
+    /// than one, or any rate other than 1x, needs an `AVMutableComposition`.
+    /// Leaving that choice to the caller is how a second caller gets it wrong.
+    public let segments: [VideoExportSegment]
 
     /// Nil takes the exporter's own preset.
     public let preset: String?
 
     public init(
-        sourceURL: URL, timeRange: ClosedRange<Double>? = nil, preset: String? = nil
+        sourceURL: URL, segments: [VideoExportSegment] = [], preset: String? = nil
     ) {
         self.sourceURL = sourceURL
-        self.timeRange = timeRange
+        self.segments = segments
         self.preset = preset
     }
+
+    /// One piece, at the rate it was shot — the shape a trim has.
+    public init(sourceURL: URL, timeRange: ClosedRange<Double>?, preset: String? = nil) {
+        self.init(
+            sourceURL: sourceURL,
+            segments: timeRange.map {
+                [VideoExportSegment(start: $0.lowerBound, end: $0.upperBound)]
+            } ?? [],
+            preset: preset
+        )
+    }
+}
+
+/// One piece of the source, and how fast it plays.
+public struct VideoExportSegment: Sendable, Equatable {
+    /// Seconds from the start of the SOURCE file.
+    public let start: Double
+    public let end: Double
+    /// 1 is as shot. 2 plays it twice as fast, so it lasts half as long.
+    public let speed: Double
+
+    public init(start: Double, end: Double, speed: Double = 1) {
+        self.start = start
+        self.end = end
+        self.speed = speed
+    }
+
+    var sourceSeconds: Double { max(end - start, 0) }
+    var isAsShot: Bool { abs(speed - 1) < 0.001 }
 }
 
 public enum VideoExportError: Error, Equatable {
@@ -71,6 +106,91 @@ public struct VideoExporter: Sendable {
         self.preset = preset
     }
 
+    /// Whether a plan can be served by a `timeRange` alone.
+    ///
+    /// ⚠️ **NAMED, BECAUSE IT CANNOT BE SEEN FROM OUTSIDE.** Whether a
+    /// composition was built is invisible in the exported file: one piece at 1x
+    /// through a composition produces the same pictures and the same duration as
+    /// one piece through a `timeRange`. A test comparing the two outputs
+    /// therefore proves nothing — and one did, comparing a plan with ITSELF,
+    /// since `init(sourceURL:timeRange:)` is sugar over exactly this segment.
+    static func needsComposition(for segments: [VideoExportSegment]) -> Bool {
+        segments.count > 1 || segments.contains { !$0.isAsShot }
+    }
+
+    /// The kept pieces, laid end to end, each scaled to the rate it plays at.
+    ///
+    /// ⚠️ **BUILT HERE AND USED ONCE, WHICH IS THE ONLY WAY IT CAN EXIST.**
+    /// `AVMutableComposition` and `AVMutableCompositionTrack` are explicitly
+    /// `@_nonSendable` — the conformance is *unavailable*, measured with
+    /// `-emit-sil` — so one can never be stored in a `Sendable` value or handed
+    /// across an isolation boundary. Region isolation does allow what happens
+    /// here: a composition made inside one function, never escaping except as the
+    /// `AVAsset` an export session reads. That is why `VideoExportPlan` carries
+    /// segment VALUES and not a composition.
+    ///
+    /// ⚠️ **`scaleTimeRange` ON THE COMPOSITION, NEVER ON A TRACK.** The
+    /// track-level call scales that track alone, so a sped-up piece keeps its
+    /// audio at the original rate and the two drift apart for the rest of the
+    /// film. The composition-level one moves every track together. Neither is
+    /// deprecated; the asset-level `insertTimeRange` IS, which is why the inserts
+    /// below are per-track.
+    ///
+    /// ⚠️ **AND THE CURSOR IS READ BACK FROM THE COMPOSITION, NOT ACCUMULATED.**
+    /// Scaling a piece changes how long it occupies the timeline, so the place
+    /// the next piece starts is wherever the composition now ends. Adding up
+    /// source durations would lay every later piece over the one before it.
+    private static func composition(
+        of asset: AVAsset, cut segments: [VideoExportSegment]
+    ) async throws -> AVComposition {
+        guard let sourceVideo = try? await asset.loadTracks(withMediaType: .video).first else {
+            throw VideoExportError.noVideoTrack
+        }
+        let sourceAudio = try? await asset.loadTracks(withMediaType: .audio).first
+
+        let composition = AVMutableComposition()
+        guard let videoTrack = composition.addMutableTrack(
+            withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw VideoExportError.exportFailed
+        }
+        // A clip with no sound is ordinary — a screen recording, a muted export —
+        // and asking for an audio track it cannot fill would leave an empty one.
+        let audioTrack = sourceAudio == nil ? nil : composition.addMutableTrack(
+            withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid
+        )
+
+        for segment in segments where segment.sourceSeconds > 0 {
+            let cursor = composition.duration
+            let range = CMTimeRange(
+                start: CMTime(seconds: segment.start, preferredTimescale: 600),
+                end: CMTime(seconds: segment.end, preferredTimescale: 600)
+            )
+            do {
+                try videoTrack.insertTimeRange(range, of: sourceVideo, at: cursor)
+                if let audioTrack, let sourceAudio {
+                    try audioTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
+                }
+            } catch {
+                throw VideoExportError.exportFailed
+            }
+            guard !segment.isAsShot, segment.speed > 0 else { continue }
+            composition.scaleTimeRange(
+                CMTimeRange(start: cursor, duration: range.duration),
+                toDuration: CMTime(
+                    seconds: segment.sourceSeconds / segment.speed, preferredTimescale: 600
+                )
+            )
+        }
+        // ⚠️ THE TRANSFORM TRAVELS WITH THE PICTURES. Without it a clip a phone
+        // recorded upright exports on its side — the composition track starts
+        // with an identity transform whatever the source carried.
+        if let transform = try? await sourceVideo.load(.preferredTransform) {
+            videoTrack.preferredTransform = transform
+        }
+        return composition
+    }
+
     /// The whole clip, unchanged — what every caller asked for before a trim
     /// existed, kept so widening the requirement churned nothing.
     public func export(_ sourceURL: URL) async throws -> ExportedVideo {
@@ -85,21 +205,41 @@ public struct VideoExporter: Sendable {
 
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("export-\(UUID().uuidString).mp4")
-        guard let session = AVAssetExportSession(asset: asset, presetName: plan.preset ?? preset)
-        else {
+
+        // ⚠️ **ONE PIECE AT 1x NEVER BUILDS A COMPOSITION.** A `timeRange` on
+        // the session is what a trim has always been, and a composition would be
+        // a second reader, a second set of tracks and a second thing to get
+        // wrong for a result that is identical. The composition exists for what
+        // a `timeRange` CANNOT say: several pieces, or a rate other than as-shot.
+        let needsComposition = Self.needsComposition(for: plan.segments)
+        let subject: AVAsset = needsComposition
+            ? try await Self.composition(of: asset, cut: plan.segments)
+            : asset
+
+        guard let session = AVAssetExportSession(
+            asset: subject, presetName: plan.preset ?? preset
+        ) else {
             throw VideoExportError.exportFailed
         }
         session.outputURL = outputURL
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
-        // ⚠️ **ASSIGNED ONLY WHEN THERE IS ONE.** Setting a range that happens
-        // to cover the whole clip is not the same as setting none: the session
-        // re-encodes either way, and every untrimmed video would start paying
-        // for a feature it is not using.
-        if let seconds = plan.timeRange {
+        // ⚠️ **PITCH IS SPECTRAL BY DEFAULT, WHICH IS WHAT A SPEED CHANGE WANTS**
+        // — a voice sped up keeps its pitch instead of turning into a chipmunk.
+        // Stated rather than left implicit because it is one algorithm for the
+        // WHOLE export: a timeline mixing 0.5x and 2x gets one treatment, not one
+        // per piece.
+        session.audioTimePitchAlgorithm = .spectral
+        // ⚠️ **ASSIGNED ONLY WHEN THERE IS ONE, AND NEVER OVER A COMPOSITION.**
+        // The composition already holds only the film that is kept; a range on
+        // top of it would cut the cut. Setting a range that happens to cover the
+        // whole clip is also not the same as setting none — the session re-encodes
+        // either way, and every untouched video would pay for a feature it is not
+        // using.
+        if !needsComposition, let only = plan.segments.first {
             session.timeRange = CMTimeRange(
-                start: CMTime(seconds: seconds.lowerBound, preferredTimescale: 600),
-                end: CMTime(seconds: seconds.upperBound, preferredTimescale: 600)
+                start: CMTime(seconds: only.start, preferredTimescale: 600),
+                end: CMTime(seconds: only.end, preferredTimescale: 600)
             )
         }
 

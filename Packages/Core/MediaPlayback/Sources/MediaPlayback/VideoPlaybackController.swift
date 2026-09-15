@@ -761,16 +761,113 @@ public final class VideoPlaybackController {
     /// then catches up in lurches. A quarter-second either way is inside what
     /// the eye reads as "there", and it lets the player answer from frames it
     /// already has.
-    public func seek(toFraction fraction: Double, in view: VideoRenderView) {
+    /// ⚠️ **`toleranceSeconds` DEFAULTS TO THE QUARTER SECOND THIS ALWAYS USED.**
+    /// A scrubber that knows how fast it is moving can do better — see
+    /// `MediaTimelining.seekTolerance` — but a caller that does not know should
+    /// keep getting the answer that has always worked.
+    public func seek(
+        toFraction fraction: Double, in view: VideoRenderView, toleranceSeconds: Double = 0.25
+    ) {
         guard let player = watchedPlayer(in: view), let item = player.currentItem else { return }
         let duration = item.duration.seconds
         guard duration.isFinite, duration > 0 else { return }
         let seconds = duration * min(max(fraction, 0), 1)
-        let tolerance = CMTime(seconds: 0.25, preferredTimescale: 600)
-        player.seek(
-            to: CMTime(seconds: seconds, preferredTimescale: 600),
-            toleranceBefore: tolerance, toleranceAfter: tolerance
+        let tolerance = CMTime(
+            seconds: max(toleranceSeconds, 0), preferredTimescale: 600
         )
+        let target = CMTime(seconds: seconds, preferredTimescale: 600)
+        // ⚠️ **THE PAUSE ANCHOR MOVES WITH A DELIBERATE SEEK, AND NOT MOVING IT
+        // UNDID EVERY SCRUB.** `setPaused(true)` files where the picture was so
+        // that a resume can pin an HLS stream back after its timebase ran on
+        // while stopped. A scrub wears exactly that shape — pause, go somewhere
+        // else, resume — and the resume found a difference of seconds and called
+        // it drift: the clip was dragged back to where the finger went DOWN.
+        // Reported from the editor's timeline as "the video goes back to its
+        // starting point instead of carrying on from the cursor", reproduced in
+        // `ScrubWhilePausedTests` at 0.098 after a scrub to 0.75.
+        //
+        // ⚠️ **MOVED, NOT DELETED — and deleting it is the fix that looks
+        // right.** Retiring the anchor here would fix the scrub and quietly give
+        // up the drift correction for any stream scrubbed while paused, which is
+        // the case most likely to need it. Only an EXISTING anchor is updated:
+        // filing one for a player that is not paused would hand
+        // `setPaused(false)` an anchor it never took.
+        let key = ObjectIdentifier(player)
+        if pausedAnchors[key] != nil { pausedAnchors[key] = target }
+        lastSeekTolerance = toleranceSeconds
+        chased[key] = Chase(target: target, tolerance: tolerance)
+        guard !seeking.contains(key) else { return }
+        chase(player)
+    }
+
+    /// Where a scrub wants the picture next, waiting for the current seek to
+    /// finish.
+    private struct Chase {
+        let target: CMTime
+        let tolerance: CMTime
+    }
+
+    private var chased: [ObjectIdentifier: Chase] = [:]
+    private var seeking: Set<ObjectIdentifier> = []
+    private var lastSeekTolerance: Double?
+    private var seeksLanded = 0
+    private var seeksCancelled = 0
+
+    /// ⚠️ **ONE SEEK IN FLIGHT, ALWAYS CHASING THE LATEST POSITION — AND ASKING
+    /// SIXTY TIMES A SECOND WITHOUT THIS IS WHY SCRUBBING LURCHED.** A new
+    /// `seek` CANCELS the one still running. A finger on the track produces a
+    /// sample per vsync, so each request killed its predecessor and almost none
+    /// ever landed: the picture sat still and then jumped, which is exactly what
+    /// was reported — "if I scroll fast the video jumps instead of progressing
+    /// frame by frame", and worse in reverse, where every frame costs a decode
+    /// forward from the previous keyframe.
+    ///
+    /// This is Apple's documented scrubbing shape (their sample code calls the
+    /// stored position `chaseTime`): record where the finger is now, and when the
+    /// seek in flight reports back, go to wherever the finger has since got to.
+    /// Every request is honoured — either by being seeked to, or by being
+    /// superseded by a newer one — and none is cancelled midway.
+    ///
+    /// ⚠️ **THE COMPLETION HANDLER IS `NS_SWIFT_SENDABLE` AND
+    /// `NS_SWIFT_NONISOLATED`** — checked in `AVPlayer.h`, not assumed — so it
+    /// runs off the main actor and the hop below is required rather than
+    /// defensive. `PhotosMediaLibrary.videoFile` records what happens when a
+    /// framework is NOT annotated this way: the compiler accepts a main-actor
+    /// closure and the process traps at runtime. Here the compiler refuses
+    /// outright, which is the annotation doing its job.
+    private func chase(_ player: AVPlayer) {
+        let key = ObjectIdentifier(player)
+        guard let wanted = chased.removeValue(forKey: key) else {
+            seeking.remove(key)
+            return
+        }
+        seeking.insert(key)
+        player.seek(
+            to: wanted.target,
+            toleranceBefore: wanted.tolerance, toleranceAfter: wanted.tolerance
+        ) { @Sendable [weak self] finished in
+            Task { @MainActor in
+                guard let self else { return }
+                if finished { self.seeksLanded += 1 } else { self.seeksCancelled += 1 }
+                if self.chased[key] == nil {
+                    self.seeking.remove(key)
+                } else {
+                    self.chase(player)
+                }
+            }
+        }
+    }
+
+    /// Whether the clip in `view` is stopped. Nil when nothing is bound — which
+    /// is not "playing" and not "paused", and a caller drawing a glyph has to
+    /// tell the three apart.
+    ///
+    /// ⚠️ `timeControlStatus`, NOT `rate == 0`. A player that is buffering has a
+    /// rate of zero and is not paused; drawing it as paused offers the author a
+    /// play button that does nothing, because it is already trying.
+    public func isPaused(in view: VideoRenderView) -> Bool? {
+        guard let player = watchedPlayer(in: view) else { return nil }
+        return player.timeControlStatus == .paused
     }
 
     /// Toggles play/pause for the player bound to `view` (a user tapping the
@@ -1132,6 +1229,10 @@ public final class VideoPlaybackController {
         // fresh playhead against it and seek the NEW clip to wherever the OLD
         // one was paused.
         pausedAnchors.removeValue(forKey: ObjectIdentifier(player))
+        // ⚠️ A CHASE OUTLIVING ITS LOAN WOULD SEEK A POOLED PLAYER SOMEBODY ELSE
+        // IS NOW USING — the same reason the anchor above is dropped here.
+        chased.removeValue(forKey: ObjectIdentifier(player))
+        seeking.remove(ObjectIdentifier(player))
         player.replaceCurrentItem(with: nil)
         // The renderer stays in the map, keyed to this player, and is reused
         // when the player is loaned out again. Invalidating only drops its
@@ -1247,6 +1348,30 @@ public final class VideoPlaybackController {
     /// because the hero-transition audit reads them from the app target; each
     /// is a leak the moment it exceeds the live state it mirrors.
     public var debugPausedAnchorCount: Int { pausedAnchors.count }
+    /// Internal for tests: how many players have a seek in flight.
+    public var debugSeeksInFlight: Int { seeking.count }
+    /// Internal for tests: how many positions are queued behind a seek.
+    /// ⚠️ **Internal for tests: the position QUEUED behind the seek in flight.**
+    /// The count of the dictionary is one entry per PLAYER and can never exceed
+    /// one with a single-player fixture, so asserting it is structurally true —
+    /// a real backlog regression would change `Chase` to an array and the outer
+    /// count would still read 1. The queued target can actually be wrong.
+    public func debugChasedTarget(in view: VideoRenderView) -> Double? {
+        guard let player = watchedPlayer(in: view) else { return nil }
+        return chased[ObjectIdentifier(player)]?.target.seconds
+    }
+    /// Internal for tests: seeks that ran to completion.
+    public var debugSeeksLanded: Int { seeksLanded }
+    /// ⚠️ **Internal for tests: the tolerance the LAST seek was asked with.** An
+    /// adapter that accepts a tolerance and forwards nothing compiles without a
+    /// warning and is invisible to any test that reads the value off a stub —
+    /// which is exactly what happened. This is what an adapter can be asked.
+    public var debugLastSeekToleranceSeconds: Double? { lastSeekTolerance }
+    /// ⚠️ **Internal for tests: seeks KILLED BY A LATER ONE.** This is the whole
+    /// measurement behind the chase pattern — a scrub asking sixty times a second
+    /// without it cancels almost every request it makes, and the picture sits
+    /// still and then jumps.
+    public var debugSeeksCancelled: Int { seeksCancelled }
     public var debugStallObserverCount: Int { stallObservers.count }
     public var debugGenerationEntryCount: Int { generation.count }
     public var debugIdlePlayerCount: Int { idlePlayers.count }
