@@ -19,6 +19,10 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// What each album actually holds, built once — see the note in `init`.
     private let contents: [String: [MediaLibraryItem]]
 
+    /// How long a synthesised clip runs, and how big its long edge is.
+    private let clipSeconds: Double
+    private let clipLongEdge: Int
+
     /// First frames of the synthetic clips, kept so a grid scroll does not
     /// re-open an `AVAssetImageGenerator` per cell per pass.
     private var videoPosters: [String: UIImage] = [:]
@@ -30,7 +34,18 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// two implicit enum members and an interpolated id inside it, and the
     /// compiler gave up type-checking it — the error names a time limit, not a
     /// mistake, and the fix is always to give the pieces names.
-    init(count: Int) {
+    /// ⚠️ **`clip` IS A TEST SEAM, AND CI IS WHY IT EXISTS.** The defaults are
+    /// what a simulator should show: two and a half seconds at a real size, so a
+    /// picked clip behaves like a picked clip. A CI runner is another matter —
+    /// the video suite really synthesises H.264 and really runs an
+    /// `AVAssetExportSession`, nine package lanes share one machine, and every
+    /// suite here is `@MainActor`, so wall-clock time is not work time. The
+    /// first run of these tests took 105-137 seconds EACH there against six
+    /// locally, and timed out mid-publish. Shrinking the fixture is the half of
+    /// the fix that lowers the cost rather than just waiting longer for it.
+    init(count: Int, clipSeconds: Double = 2.5, clipLongEdge: Int = 960) {
+        self.clipSeconds = clipSeconds
+        self.clipLongEdge = clipLongEdge
         let total = max(count, 1)
         var items: [MediaLibraryItem] = []
         items.reserveCapacity(total)
@@ -258,12 +273,15 @@ final class DebugMediaLibrary: MediaLibraryReading {
         }
 
         let portrait = Self.isPortrait(index)
-        let width = portrait ? 720 : 960
-        let height = portrait ? 960 : 720
+        let long = max(clipLongEdge, 16)
+        let short = max(Int(Double(long) * 0.75), 16)
+        let width = portrait ? short : long
+        let height = portrait ? long : short
         guard let source = URL(string: "mock://video/\(item)?w=\(width)&h=\(height)") else {
             return nil
         }
-        return try? await fetcher.playableURL(for: source)
+        return try? await PlaceholderVideoFetcher(durationSeconds: clipSeconds)
+            .playableURL(for: source)
     }
 
     // MARK: - Real clips

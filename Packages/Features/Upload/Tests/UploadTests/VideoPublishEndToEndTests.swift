@@ -61,7 +61,7 @@ struct VideoPublishEndToEndTests {
     /// gives exactly one clip among three photographs — the mixed selection the
     /// publish loop's ordering rules are about.
     private func open(_ chosen: [Int], of count: Int = 4) async -> Harness {
-        let library = DebugMediaLibrary(count: count)
+        let library = DebugMediaLibrary(count: count, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
         let all = await library.items(in: "recents")
         let items = chosen.map { all[$0] }
 
@@ -98,10 +98,31 @@ struct VideoPublishEndToEndTests {
         )
     }
 
-    /// Generous: this one really encodes H.264, really runs an
-    /// `AVAssetExportSession` and really walks the ticket/commit/resolve dance.
+    /// ⚠️ **THE SMALLEST FIXTURE THAT IS STILL A REAL ENCODE.** Every test here
+    /// synthesises H.264 for real and transcodes it through an
+    /// `AVAssetExportSession` for real — that is the point, and it is also the
+    /// cost. The simulator's default (2.5 s, 960px) is right for a person
+    /// looking at the picker and wrong for a CI runner sharing one machine with
+    /// eight other package lanes.
+    static let clipSeconds = 0.4
+    static let clipLongEdge = 160
+
+    /// ⚠️ **SIXTY SECONDS, AND THAT IS NOT PARANOIA — IT IS A MEASUREMENT.**
+    /// This was twelve, which is generous against the six seconds the suite
+    /// takes locally and was nowhere near enough on CI: the same tests ran
+    /// 105-137 seconds EACH there and timed out mid-publish, leaving
+    /// `publishedIDs == ["photo-0"]` and `videoRequests == ["video-1"]` —
+    /// partial results, which is what says "still working" rather than "wrong".
+    ///
+    /// Wall-clock is not work here. Every suite in this target is `@MainActor`
+    /// and Swift Testing runs them in parallel, so a test waiting on its own
+    /// condition is also lending the main actor to 262 others.
+    ///
+    /// A bound that is too large costs nothing when the condition holds, and
+    /// costs one slow failure when it does not. A bound that is too small costs
+    /// a red CI lane that looks like a logic bug.
     private func settle(until condition: () -> Bool) async throws {
-        for _ in 0..<1200 {
+        for _ in 0..<6000 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -115,7 +136,7 @@ struct VideoPublishEndToEndTests {
     /// enough to fool every test that only ever looked at the grid. Everything
     /// downstream opens the file for real.
     @Test func theDeviceMockVendsAPlayableClipForItsVideos() async throws {
-        let library = DebugMediaLibrary(count: 4)
+        let library = DebugMediaLibrary(count: 4, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
         let items = await library.items(in: "recents")
         let video = try #require(items.first(where: { $0.isVideo }))
 
@@ -130,7 +151,7 @@ struct VideoPublishEndToEndTests {
     /// The witness: a photograph answers nothing, so the line above is about
     /// videos and not about the method answering a file for anything at all.
     @Test func theDeviceMockVendsNoFileForAPhotograph() async throws {
-        let library = DebugMediaLibrary(count: 4)
+        let library = DebugMediaLibrary(count: 4, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
         let items = await library.items(in: "recents")
         let photo = try #require(items.first(where: { !$0.isVideo }))
 
@@ -148,7 +169,7 @@ struct VideoPublishEndToEndTests {
     /// So it is asked against a PHOTOGRAPH of the same parity: same rule, two
     /// independent implementations of it.
     @Test func aMockVideoFollowsTheSameShapeRuleAsAPhotographOfItsParity() async throws {
-        let library = DebugMediaLibrary(count: 8)
+        let library = DebugMediaLibrary(count: 8, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
         let items = await library.items(in: "recents")
         // 3 and 7 are the videos; one is odd-indexed, the other odd too — so
         // reach for a photograph whose index has the SAME parity as each.
@@ -179,7 +200,7 @@ struct VideoPublishEndToEndTests {
     ///
     /// Measured on the raw frame, before the tile's number is drawn over it.
     @Test func aMockVideosPosterHasActualColourInIt() async throws {
-        let library = DebugMediaLibrary(count: 4)
+        let library = DebugMediaLibrary(count: 4, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
         let items = await library.items(in: "recents")
         let video = try #require(items.first(where: { $0.isVideo }))
         let file = try #require(await library.videoFile(for: video.id))

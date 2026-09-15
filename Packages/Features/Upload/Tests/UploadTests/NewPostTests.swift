@@ -181,8 +181,14 @@ struct NewPostTests {
         )
     }
 
+    /// ⚠️ **RAISED FROM 300 BECAUSE VIDEO ARRIVED.** Three seconds was ample
+    /// while this screen only fetched images. The video tests synthesise real
+    /// H.264 behind their stub, and on CI — one machine, nine package lanes,
+    /// every suite `@MainActor` — they timed out mid-publish with partial
+    /// results. A bound that is too large costs nothing when the condition
+    /// holds.
     private func settle(until condition: () -> Bool) async throws {
-        for _ in 0..<300 {
+        for _ in 0..<3000 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(10))
         }
