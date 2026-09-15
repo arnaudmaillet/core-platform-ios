@@ -68,6 +68,15 @@ final class MediaEditorViewController: UIViewController {
         /// narrowest phone this app is built for. Only a first thumbnail request
         /// can ever land on it.
         static let canvasFallback = CGSize(width: 375, height: 812)
+
+        /// How long the picture takes to settle into the crop frame and back.
+        /// Short enough to feel like a response, long enough to be followed.
+        static let cropTransition: TimeInterval = 0.28
+
+        /// How much larger the editing surface starts, so entering reads as the
+        /// picture settling in rather than appearing. A few percent: any more and
+        /// it reads as a zoom the author did not ask for.
+        static let cropEntryScale: CGFloat = 1.06
     }
 
 
@@ -99,11 +108,12 @@ final class MediaEditorViewController: UIViewController {
     private let library: any MediaLibraryReading
     /// What "Next" hands the media to. The step that writes a caption and
     /// publishes is still a stand-in, so the builder passes a screen saying so.
-    /// ⚠️ CARRIES THE FIT CHOICES AND THE LOOKS TOO. The step after this one
-    /// draws the same pictures as thumbnails — a picture the author chose to show
-    /// WHOLE must not reappear cropped — and it is where a look is baked into the
-    /// full-resolution image that is uploaded.
-    private let onNext: ([MediaLibraryItem], [String: ContentFit], [String: MediaFilter]) -> UIViewController
+    /// ⚠️ CARRIES EVERY DECISION THE AUTHOR MADE — see `MediaEdits`. The step
+    /// after this one draws the same pictures as thumbnails, where a picture the
+    /// author chose to show WHOLE must not reappear cropped, and it is where the
+    /// crop and the look are baked into the full-resolution image that is
+    /// uploaded.
+    private let onNext: ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController
 
     /// ⚠️ A `CarouselCollectionView`, NOT A PLAIN ONE: on its first page it
     /// declines a rightward drag so the stack's back-swipe can carry the screen
@@ -129,23 +139,161 @@ final class MediaEditorViewController: UIViewController {
         primaryAction: UIAction { [weak self] _ in self?.goNext() }
     )
 
-    /// ⚠️ **PER ITEM, NOT PER SCREEN.** "Fill or fit the current media" is a
-    /// decision about one picture: a portrait shot and a landscape one in the
-    /// same carousel want opposite answers, and a single screen-wide flag would
-    /// make choosing for one of them undo the choice for the other. Absent means
-    /// `.fill`, which is what the canvas has always done.
-    private var fits: [String: ContentFit] = [:]
-
-    /// Which look each picture is being shown in. Per item for the same reason
-    /// `fits` is: a carousel holds several pictures and a screen-wide choice
-    /// would make dressing one of them undress another. Absent means
-    /// `.original`, which is the picture untouched.
+    /// Undoes every cut and every degree on the picture in front of the author.
     ///
-    /// ⚠️ **CARRIED TO THE PUBLISH PATH, AND BAKED THERE.** `onNext` hands these
-    /// on with the fits, and the finalisation screen applies the look to the
-    /// FULL-RESOLUTION picture it uploads — not to the preview. A look chosen
+    /// ⚠️ **ON THE LEADING SIDE, AFTER "Save draft".** It began as a third button
+    /// in the band beside the quarter turn and the row of shapes — which put "undo
+    /// everything" a few points from "hold the box to 4:5", two acts of very
+    /// different weight in one row — and then briefly took the fill/fit glyph's
+    /// slot on the trailing side. It sits with the other things that act on the
+    /// whole screen rather than on the picture: `[‹][Save draft][undo] ⋯ [Next]`,
+    /// leaving the trailing side to the one action that moves the flow forward.
+    /// ⚠️ **`arrow.trianglehead.counterclockwise.rotate` DOES NOT EXIST, AND A
+    /// SYMBOL THAT DOES NOT EXIST IS AN EMPTY BUTTON, NOT AN ERROR.**
+    /// `UIImage(systemName:)` answers nil and the bar draws a blank capsule that
+    /// still takes taps — shipped, it reads as a rendering bug on someone's phone.
+    /// This SDK's catalogue holds `arrow.trianglehead.counterclockwise` (this one,
+    /// the undo arrow) and `arrow.trianglehead.counterclockwise.rotate.90`, which
+    /// means "turn by ninety degrees" and is the QUARTER-TURN button's job, not
+    /// undo's. `everyGlyphInTheCropToolsExists` is what stops the next one being
+    /// invisible.
+    private lazy var resetCropItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.trianglehead.counterclockwise"),
+            primaryAction: UIAction { [weak self] _ in self?.resetCrop() }
+        )
+        item.accessibilityLabel = "Undo every change to this crop"
+        return item
+    }()
+
+    private func resetCrop() {
+        guard let id = croppingID else { return }
+        cropRatios[id] = .free
+        cropSurface.reset()
+        cropTools.adopt(angle: 0, ratio: .free)
+    }
+
+    /// What the author has decided about each picture: how it is laid, the look
+    /// it wears, and what is kept of it.
+    ///
+    /// ⚠️ **PER ITEM, NOT PER SCREEN.** Every one of those is a decision about
+    /// ONE picture: a portrait shot and a landscape one in the same carousel want
+    /// opposite answers, and a single screen-wide value would make choosing for
+    /// one of them undo the choice for the other.
+    ///
+    /// ⚠️ **CARRIED TO THE PUBLISH PATH, AND BAKED THERE.** `onNext` hands this
+    /// on, and the finalisation screen applies the crop and the look to the
+    /// FULL-RESOLUTION picture it uploads — not to the preview. What is chosen
     /// here is therefore in the post, which is why nothing may quietly drop it.
-    private var filters: [String: MediaFilter] = [:]
+    ///
+    /// ⚠️ **AND ONLY WHAT WAS ACTUALLY CHOSEN IS IN HERE.** Reading with
+    /// `edits[id, default: .untouched]` would write an entry for every page that
+    /// merely scrolled past, and "nothing was changed, so nothing is carried"
+    /// would stop being true — `nextHandsOnWhatWasChosenInTheOrderItWasChosen`
+    /// pins it. Read through `edits(for:)`, write through `change(_:_:)`.
+    private var edits: [String: MediaEdits] = [:]
+
+    private func edits(for id: String) -> MediaEdits { edits[id] ?? .untouched }
+
+    /// The canvas-sized picture the library last answered with, undressed and
+    /// uncut.
+    ///
+    /// ⚠️ **THIS IS WHAT MAKES AN EDIT LAND AT ONCE.** Leaving crop mode used to
+    /// ask the library for the picture all over again before it could paint the
+    /// result, so the canvas showed the OLD framing for as long as
+    /// `PHImageManager` took to answer — a visible beat, and longer on an iCloud
+    /// asset. The author has already been looking at this exact render inside the
+    /// crop surface; keeping it means the cut can be drawn in the same turn the
+    /// mode is left.
+    ///
+    /// ⚠️ **ONE ENTRY, NOT A CACHE.** A canvas-sized render is ~1.4MB, and this
+    /// flow carries up to twenty pictures; keeping them all would be 28MB held for
+    /// a convenience. Edits happen on the picture in front of the author, so one
+    /// entry covers every case that matters and a swipe simply falls back to the
+    /// asynchronous path that has always been there.
+    private var lastSource: (id: String, image: UIImage)?
+
+    private func remember(_ image: UIImage?, for id: String) {
+        guard let image else { return }
+        lastSource = (id, image)
+    }
+
+    /// How many renders are in flight, and the spinner that eventually says so.
+    ///
+    /// ⚠️ **A COUNT, NOT A FLAG.** Two renders can overlap — a look chosen while a
+    /// crop is still drawing — and a flag would let the first one to finish stop
+    /// the indicator for both.
+    private var rendersInFlight = 0
+
+    private let busy: UIActivityIndicatorView = {
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.color = .label
+        spinner.hidesWhenStopped = true
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        return spinner
+    }()
+
+    /// ⚠️ **THE SPINNER WAITS BEFORE IT APPEARS, AND MOST OF THE TIME IT NEVER
+    /// DOES.** A render from the held picture finishes in a few milliseconds; a
+    /// spinner shown the instant work begins would flash on every tap of the
+    /// selector, which reads worse than the wait it is reporting.
+    private static let spinnerDelay: TimeInterval = 0.15
+
+    private func beginRender() {
+        rendersInFlight += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.spinnerDelay) { [weak self] in
+            guard let self, rendersInFlight > 0 else { return }
+            busy.startAnimating()
+        }
+    }
+
+    private func endRender() {
+        rendersInFlight = max(0, rendersInFlight - 1)
+        if rendersInFlight == 0 { busy.stopAnimating() }
+    }
+
+    /// Draws a picture as the author left it, off the main thread, and hands it to
+    /// its page when it is ready.
+    ///
+    /// ⚠️ **OFF THE MAIN ACTOR, AND THAT IS THE WHOLE POINT.** Cutting and
+    /// filtering a canvas-sized picture is a Core Image round trip. Doing it in the
+    /// same turn as the tap made the selector's pill stutter as it travelled: the
+    /// animation and the render were competing for one thread, and the mode felt
+    /// heavy. Reported from a device. The work is the same work — it simply no
+    /// longer happens where the animation lives.
+    private func render(_ source: UIImage, as chosen: MediaEdits, for id: String) {
+        beginRender()
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let drawn = Self.draw(source, as: chosen)
+            await MainActor.run {
+                guard let self else { return }
+                // ⚠️ RE-READ AT LANDING: two renders can be in flight and whichever
+                // lands last must paint what is chosen NOW, not what was chosen when
+                // it started. A render that has been overtaken is simply redone.
+                if self.edits(for: id) == chosen {
+                    self.show(drawn, for: id)
+                } else {
+                    self.render(source, as: self.edits(for: id), for: id)
+                }
+                self.endRender()
+            }
+        }
+    }
+
+    /// ⚠️ `nonisolated`, so it may run anywhere: everything it touches is a value
+    /// or a renderer that documents itself as thread-safe.
+    nonisolated private static func draw(_ source: UIImage, as chosen: MediaEdits) -> UIImage {
+        chosen.applied(to: source)
+    }
+
+    /// ⚠️ AN ENTRY THAT SAYS NOTHING IS WORSE THAN NO ENTRY: it makes "was this
+    /// picture edited?" answerable two ways. Undoing every change removes the
+    /// entry rather than storing a neutral one.
+    private func change(_ id: String, _ mutate: (inout MediaEdits) -> Void) {
+        var value = edits[id] ?? .untouched
+        mutate(&value)
+        edits[id] = value.isUntouched ? nil : value
+    }
 
     /// The row of looks the band holds while "Filters" is the chosen category.
     /// Built once, because rebuilding it per selection would re-render nine
@@ -236,7 +384,7 @@ final class MediaEditorViewController: UIViewController {
     init(
         items: [MediaLibraryItem],
         library: any MediaLibraryReading,
-        onNext: @escaping ([MediaLibraryItem], [String: ContentFit], [String: MediaFilter]) -> UIViewController
+        onNext: @escaping ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController
     ) {
         self.items = items
         self.itemsByID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -257,9 +405,20 @@ final class MediaEditorViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // A media canvas is black. The picture is the subject, and a light ground
-        // around a portrait photo reads as a letterbox nobody asked for.
-        view.backgroundColor = .black
+        // ⚠️ **THE GROUND FOLLOWS THE DEVICE, IT IS NOT ALWAYS BLACK.** It was:
+        // "a media canvas is black, and a light ground around a portrait photo
+        // reads as a letterbox nobody asked for". True of the letterbox and wrong
+        // about the screen — an editor whose ground ignores the system's
+        // appearance is the one surface in the app that does. `systemBackground`
+        // is white in light and black in dark, which is exactly the rule asked
+        // for, and it resolves itself on every trait change with no observer.
+        //
+        // ⚠️ **AND IT DRAGS EVERY INK ON THIS SCREEN WITH IT.** The dial, the
+        // shapes, the notice and the spinner were all stated in literal white
+        // BECAUSE the ground was literally black — see `StraightenDialView`, where
+        // that was measured. White on white is the same defect wearing the other
+        // colour, so all of them are semantic now.
+        view.backgroundColor = .systemBackground
         // ⚠️ **THE BARS WERE INSETTING THE CANVAS, NOT MERELY COVERING IT — AND
         // A TRANSPARENT APPEARANCE ALONE DID NOT FIX IT.** Measured from a
         // screenshot: the sheet spans 63→874pt while the picture spanned only
@@ -295,14 +454,27 @@ final class MediaEditorViewController: UIViewController {
         configureBarAppearance()
     }
 
+    /// ⚠️ **CROP MODE IS UNWOUND HERE TOO, NOT ONLY WHEN ANOTHER MODE IS
+    /// CHOSEN.** "Next" pushes straight from the middle of a crop, and nothing
+    /// else would put the canvas, the sheet and the stack's back-swipe back — the
+    /// finalisation screen would inherit a locked canvas and a sheet that cannot
+    /// be pulled shut.
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        exitCrop()
         restoreToolbar?()
         restoreToolbar = nil
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // ⚠️ **THE MODE OUTLIVES THE SCREEN'S DISAPPEARANCE, SO IT HAS TO BE
+        // REOPENED.** `viewWillDisappear` unwinds crop mode — it must, or "Next"
+        // would push with the canvas locked and the sheet pinned — and stepping
+        // back from the finalisation screen used to land on an editor whose pill
+        // said Crop over an empty band, with no way to reopen it: selecting the
+        // index the strip already rests on announces nothing.
+        if selectedCategory == "Crop", !isCropping { enterCrop() }
         #if DEBUG
         logCanvas("didAppear")
         // ⚠️ **THE FINALISATION SCREEN HAD NO SCRIPTED WAY IN.** `-upload-edit`
@@ -450,6 +622,14 @@ final class MediaEditorViewController: UIViewController {
         // whether there is a carousel.
         pageDots.configure(count: items.count, current: 0)
 
+        // ⚠️ ABOVE EVERYTHING A PICTURE IS DRAWN IN, so it shows whether it is the
+        // canvas or the crop surface that is waiting.
+        view.addSubview(busy)
+        NSLayoutConstraint.activate([
+            busy.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            busy.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+
         // The canvas reports its own paging, so the bar glyph and the dots can
         // follow whichever picture the viewer has swiped to.
         canvas.delegate = self
@@ -459,17 +639,24 @@ final class MediaEditorViewController: UIViewController {
             cell.prepare(for: item)
             // ⚠️ RE-STATED ON EVERY REGISTRATION, because a cell is recycled and
             // would otherwise arrive wearing the previous picture's choice.
-            cell.setContentMode((fits[id] ?? .fill).mode, animated: false)
+            let chosen = edits(for: id)
+            cell.lay(chosen.fit, within: self.fitWindow, animated: false)
             let size = canvasSize
-            // ⚠️ AND THE LOOK IS RE-APPLIED FOR THE SAME REASON, on the same
-            // beat. A filtered page that scrolls off and comes back would
-            // otherwise return undressed — the recycled cell knows nothing of
-            // what was chosen for the picture it now carries.
-            let look = filters[id] ?? .original
+            // ⚠️ AND THE CUT AND THE LOOK ARE RE-APPLIED FOR THE SAME REASON, on
+            // the same beat. A cropped, filtered page that scrolls off and comes
+            // back would otherwise return whole and undressed — the recycled cell
+            // knows nothing of what was chosen for the picture it now carries.
+            // ⚠️ **RE-READ AT LANDING, NOT APPLIED FROM THE CAPTURE.** A cell is
+            // configured, the author changes the crop, `redraw` fetches and lands —
+            // and then this slower fetch lands too, painting the picture as it was
+            // before the change. Reading the edits again at the moment the pixels
+            // arrive makes the last render the correct one whichever order they
+            // come back in, which a `guard … == chosen` cannot: that would leave
+            // the cell showing nothing at all.
             Task { [weak cell] in
                 let image = await self.library.thumbnail(for: id, size: size)
-                let shown = image.flatMap { MediaFilterRenderer.apply(look, to: $0) } ?? image
-                cell?.show(shown, for: id)
+                self.remember(image, for: id)
+                cell?.show(image.map { self.edits(for: id).applied(to: $0) }, for: id)
             }
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: canvas) { view, indexPath, id in
@@ -500,6 +687,35 @@ final class MediaEditorViewController: UIViewController {
         // own idea of where the content may go.
         section.contentInsetsReference = .none
         return UICollectionViewCompositionalLayout(section: section, configuration: configuration)
+    }
+
+    /// The window a FITTED picture is centred in: from the foot of the top bar to
+    /// the head of the page indicator.
+    ///
+    /// ⚠️ **IT MOVES WHEN THE BAND DOES**, because the indicator sits on the band's
+    /// top edge — so this is read at layout rather than stored.
+    private var fitWindow: UIEdgeInsets {
+        let head = view.safeAreaInsets.top
+        let foot = max(0, view.bounds.height - pageDots.frame.minY)
+        return UIEdgeInsets(top: head, left: 0, bottom: foot, right: 0)
+    }
+
+    /// ⚠️ **EVERY VISIBLE PAGE, NOT JUST THE CURRENT ONE.** The neighbours are
+    /// already laid out and a swipe reveals them instantly; leaving them behind
+    /// would show the previous window sliding in beside the new one.
+    private func layPagesInTheirWindow(animated: Bool) {
+        let window = fitWindow
+        for cell in canvas.visibleCells {
+            guard let page = cell as? MediaEditorPageCell,
+                  let id = page.representedID
+            else { continue }
+            page.lay(edits(for: id).fit, within: window, animated: animated)
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layPagesInTheirWindow(animated: false)
     }
 
     /// The size a full-page picture is asked for, in points.
@@ -631,13 +847,20 @@ final class MediaEditorViewController: UIViewController {
         return Self.categories.indices.contains(index) ? Self.categories[index].title : nil
     }
 
+    /// ⚠️ **LEAVING CROP IS AN ACT, NOT AN ABSENCE.** Choosing another mode has
+    /// to put the canvas, the sheet and the stack back before the new band opens
+    /// — the surface holds three suspensions and none of them unwinds itself.
     private func showAccessory(for category: String?) {
-        guard category == "Filters" else {
+        if isCropping, category != "Crop" { exitCrop() }
+        switch category {
+        case "Filters":
+            setEditingAccessory(filterRow)
+            refreshFilterRow()
+        case "Crop":
+            enterCrop()
+        default:
             setEditingAccessory(nil)
-            return
         }
-        setEditingAccessory(filterRow)
-        refreshFilterRow()
     }
 
     /// Feeds the row the picture it is choosing a look for, and restores the
@@ -648,7 +871,7 @@ final class MediaEditorViewController: UIViewController {
     /// `PHImageManager` round trips for one photograph.
     private func refreshFilterRow() {
         guard let id = currentItemID else { return }
-        filterRow.setSelected(filters[id] ?? .original)
+        filterRow.setSelected(edits(for: id).filter)
         // ⚠️ THE THUMBNAIL'S SIDE, NOT THE ROW'S HEIGHT. The row is taller than
         // its pictures by a caption, and asking for that size would fetch a
         // picture bigger than anything shown.
@@ -657,7 +880,14 @@ final class MediaEditorViewController: UIViewController {
             guard let self else { return }
             let source = await self.library.thumbnail(for: id, size: CGSize(width: side, height: side))
             guard self.currentItemID == id else { return }
-            self.filterRow.show(source)
+            // ⚠️ **CUT HERE, AND NEVER INSIDE THE ROW.** The row is handed ONE
+            // picture and renders nine looks from it locally; teaching it about
+            // crops would make it learn a second concept it exists not to know.
+            // Handing it the uncut picture instead is the invisible version of
+            // this bug: nine chips previewing looks on a photograph that no
+            // longer matches the canvas above them.
+            let crop = self.edits(for: id).crop
+            self.filterRow.show(source.flatMap { MediaCropRenderer.apply(crop, to: $0) } ?? source)
         }
     }
 
@@ -670,22 +900,61 @@ final class MediaEditorViewController: UIViewController {
         refreshFilterRow()
     }
 
-    /// Applies a look to the picture on screen.
-    ///
-    /// ⚠️ **A SECOND RENDER, AT CANVAS SIZE.** The thumbnail the look was chosen
-    /// from is 56pt; pushing that onto the page would show a blurred picture. The
-    /// canvas asks the library for its own size and filters that.
+    /// ⚠️ **A VIDEO LEAVES CROP MODE STANDING ON ITS NOTICE, AND ONLY A SETTLE
+    /// CAN CLEAR IT.** Choosing "Crop" on a video puts a line of text in the band
+    /// and returns without locking anything — so the canvas still pages. Swiping
+    /// on to a photograph used to change nothing: the band kept the notice, the
+    /// pill kept saying Crop, and tapping Crop again announced nothing because the
+    /// selection had not changed. The mode was unreachable for that picture until
+    /// another one was chosen and come back from.
+    private func reopenCropIfWaiting() {
+        guard !isCropping, selectedCategory == "Crop" else { return }
+        showAccessory(for: "Crop")
+    }
+
     private func applyFilter(_ filter: MediaFilter, to id: String) {
-        filters[id] = filter
+        change(id) { $0.filter = filter }
+        redraw(id)
+    }
+
+    /// Re-renders one page for everything the author has chosen for it.
+    ///
+    /// ⚠️ **A SECOND RENDER, AT CANVAS SIZE.** The thumbnail a look was chosen
+    /// from is 56pt and the crop surface works at its own; pushing either onto the
+    /// page would show a blurred picture. The canvas asks the library for its own
+    /// size and renders that.
+    ///
+    /// ⚠️ **AND THE PAGE IS FOUND BY IDENTITY, NOT BY THE CURRENT INDEX.** This
+    /// used to read `currentIndex` at the moment the picture came back, which is
+    /// a different page if the author swiped while the library was answering —
+    /// the render would land on whichever picture happened to be in front.
+    ///
+    /// ⚠️ NOTHING IS CAPTURED BEFORE THE AWAIT, on purpose — see the note inside.
+    private func redraw(_ id: String) {
+        // ⚠️ **NO LIBRARY ROUND TRIP WHEN THE PICTURE IS ALREADY IN HAND.** Asking
+        // for it again put the result a `PHImageManager` request away, and the
+        // canvas showed the OLD framing until it answered.
+        if let held = lastSource, held.id == id {
+            render(held.image, as: edits(for: id), for: id)
+            return
+        }
         let size = canvasSize
         Task { [weak self] in
             guard let self else { return }
             let source = await self.library.thumbnail(for: id, size: size)
-            guard self.filters[id] == filter else { return }
-            let shown = source.flatMap { MediaFilterRenderer.apply(filter, to: $0) } ?? source
-            let page = self.canvas.cellForItem(at: IndexPath(item: self.currentIndex, section: 0))
-            (page as? MediaEditorPageCell)?.show(shown, for: id)
+            self.remember(source, for: id)
+            guard let source else { return }
+            self.render(source, as: self.edits(for: id), for: id)
         }
+    }
+
+    /// Hands a rendered picture to the page that carries `id`.
+    ///
+    /// ⚠️ **FOUND BY IDENTITY, NOT BY THE CURRENT INDEX** — see `redraw`'s note.
+    private func show(_ image: UIImage?, for id: String) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
+        (page as? MediaEditorPageCell)?.show(image, for: id)
     }
 
     // MARK: - Fill or fit
@@ -704,15 +973,15 @@ final class MediaEditorViewController: UIViewController {
     }
 
     private var currentFit: ContentFit {
-        currentItemID.flatMap { fits[$0] } ?? .fill
+        currentItemID.map { edits(for: $0).fit } ?? .fill
     }
 
     private func toggleFit() {
         guard let id = currentItemID else { return }
-        let next = (fits[id] ?? .fill).toggled
-        fits[id] = next
+        let next = edits(for: id).fit.toggled
+        change(id) { $0.fit = next }
         let page = canvas.cellForItem(at: IndexPath(item: currentIndex, section: 0))
-        (page as? MediaEditorPageCell)?.setContentMode(next.mode, animated: true)
+        (page as? MediaEditorPageCell)?.lay(next, within: fitWindow, animated: true)
         updateFitItem(animated: true)
     }
 
@@ -739,14 +1008,327 @@ final class MediaEditorViewController: UIViewController {
     /// settle would animate the item while swiping between two pictures that
     /// share a fit state, which reads as a flicker for no reason.
     private func updateFitItem(animated: Bool) {
+        // ⚠️ **NOT WHILE THE CROP SURFACE HOLDS THAT SLOT.** Undo stands where the
+        // fill/fit glyph does, and a settle arriving mid-crop would quietly put the
+        // glyph back over it. The canvas is locked while cropping so no settle
+        // should arrive — this is the guard that makes "should" unnecessary.
+        guard !isCropping else { return }
         let fit = currentFit
         guard fit != shownFit else { return }
         shownFit = fit
         navigationItem.setRightBarButtonItems([nextItem, makeFitItem(for: fit)], animated: animated)
     }
 
+    /// Puts undo in the bar while the crop surface is up, and the fill/fit glyph
+    /// back when it goes.
+    ///
+    /// ⚠️ **THE FILL/FIT GLYPH LEAVES FOR THE DURATION, AND THAT IS DELIBERATE.**
+    /// Filling or fitting is a decision about how a picture is laid in the frame it
+    /// will be shown in; while the author is deciding what that picture even IS,
+    /// the control has nothing meaningful to act on. It comes back with the mode.
+    ///
+    /// ⚠️ **`shownFit` IS RE-SEEDED ON THE WAY BACK, NOT TRUSTED.** It records
+    /// which glyph the bar is WEARING, and while the mode was up the bar was
+    /// wearing neither — so restoring through `updateFitItem`'s "only when it
+    /// changes" rule would leave the slot empty whenever the fit had not moved.
+    private func showCropBarItems(_ isCropping: Bool, animated: Bool) {
+        if isCropping {
+            navigationItem.setLeftBarButtonItems([saveDraftItem, resetCropItem], animated: animated)
+            navigationItem.setRightBarButtonItems([nextItem], animated: animated)
+        } else {
+            navigationItem.setLeftBarButtonItems([saveDraftItem], animated: animated)
+            shownFit = currentFit
+            navigationItem.setRightBarButtonItems(
+                [nextItem, makeFitItem(for: shownFit)], animated: animated
+            )
+        }
+    }
+
     private func goNext() {
-        navigationController?.pushViewController(onNext(items, fits, filters), animated: true)
+        navigationController?.pushViewController(onNext(items, edits), animated: true)
+    }
+
+    // MARK: - Cropping
+
+    /// The tools the band holds while "Crop" is the chosen mode.
+    ///
+    /// ⚠️ BUILT ONCE, like the filter row and for the same reason: reopening a
+    /// band should not rebuild the controls inside it.
+    private lazy var cropTools: MediaCropToolsView = {
+        let tools = MediaCropToolsView()
+        tools.onTurn = { [weak self] angle in self?.cropSurface.setAngle(angle) }
+        tools.onRatio = { [weak self] ratio in
+            guard let self, let id = currentItemID else { return }
+            cropRatios[id] = ratio
+            cropSurface.choose(ratio)
+        }
+        tools.onQuarterTurn = { [weak self] in self?.cropSurface.turnQuarter() }
+        tools.onFlip = { [weak self] in self?.cropSurface.flipAcross() }
+        return tools
+    }()
+
+    private lazy var cropSurface: MediaCropSurfaceView = {
+        let surface = MediaCropSurfaceView()
+        surface.onChange = { [weak self] crop in self?.cropChanged(crop) }
+        return surface
+    }()
+
+    /// What the band says instead, for a picture this mode cannot serve.
+    private lazy var cropUnavailable = BandNoticeView(
+        "A video can't be cropped yet — only the photos in this selection will go."
+    )
+
+    /// The shape each picture's box is being held to.
+    ///
+    /// ⚠️ **NOT PART OF `MediaEdits`, ON PURPOSE.** It is how the author is
+    /// working, not what they decided: a 4:5 rectangle IS a 4:5 crop whether it
+    /// was reached through the chip or dragged there by hand, and neither the
+    /// renderer nor the post can tell the two apart. Carrying it would be
+    /// carrying a mode, and the next screen has no mode.
+    private var cropRatios: [String: CropRatio] = [:]
+
+    private var isCropping = false
+
+    /// Which picture the surface is cutting.
+    ///
+    /// ⚠️ **CAPTURED ON THE WAY IN, NEVER RE-READ.** `currentItemID` is derived
+    /// from the canvas's content offset, and an offset divided by a width is not
+    /// stable across a device rotation — this app allows landscape. A crop landing
+    /// on a different item than the one the author is looking at is not a visual
+    /// glitch, it is a rectangle stored against somebody else's photograph. The
+    /// canvas cannot be paged while the surface is up, so one capture is enough.
+    private var croppingID: String?
+
+    /// What the screen borrowed on the way into crop mode, ready to be given
+    /// back. ⚠️ CAPTURED ONCE AND CAPTURED AS IT WAS — restoring to `true`
+    /// instead of to the prior value is how a suspension becomes permanent.
+    private var cropRestore: (() -> Void)?
+
+    /// Black behind the editing tools, for as long as they are up.
+    ///
+    /// ⚠️ **THE BAND IS CHROME HERE, NOT MORE PICTURE.** Everywhere else on this
+    /// screen the canvas runs full-bleed beneath the controls and the dissolve
+    /// softens it — that is the design, and the filter row depends on it. While a
+    /// crop is being made it read wrong: the strip showed the UNCUT photograph
+    /// under a ruler measuring the cut one. Reported from a device as "on aperçoit
+    /// par derrière les outils d'édition le media". The dissolve stays and now has
+    /// black to dissolve.
+    private let cropChrome: UIView = {
+        let chrome = UIView()
+        chrome.backgroundColor = .systemBackground
+        chrome.isUserInteractionEnabled = false
+        chrome.translatesAutoresizingMaskIntoConstraints = false
+        return chrome
+    }()
+
+    private func enterCrop() {
+        guard let id = currentItemID, let item = itemsByID[id] else { return }
+        guard !item.isVideo else {
+            // ⚠️ SAID, NOT SILENTLY DROPPED. `MediaLibraryReading` vends images
+            // and `MediaCropRenderer` takes one, so the only thing a video could
+            // offer here is its poster frame — and `post()` discards videos
+            // entirely, so a crop chosen on one would be a control that appears
+            // to work and reaches nothing.
+            setEditingAccessory(cropUnavailable)
+            return
+        }
+        guard !isCropping else { return }
+        isCropping = true
+
+        let wasScrolling = canvas.isScrollEnabled
+        let wasModal = navigationController?.isModalInPresentation ?? false
+        cropRestore = { [weak self] in
+            guard let self else { return }
+            canvas.isScrollEnabled = wasScrolling
+            navigationController?.isModalInPresentation = wasModal
+        }
+        // ⚠️ **A LOCK, NOT A REFUSAL.** `CarouselCollectionView` declines a drag
+        // by answering false in `gestureRecognizerShouldBegin`, which hands the
+        // touch to the stack's full-width pan — so refusing here would page
+        // nothing and pop the screen instead. `IconSelectorBar` states the same
+        // choice, and states why a `require(toFail:)` into a scroll view's
+        // recogniser graph is not the tool either.
+        canvas.isScrollEnabled = false
+        // ⚠️ **AND THIS IS WHAT KEEPS A DOWNWARD DRAG ON THE PICTURE FROM
+        // CLOSING THE SHEET.** Dismissal is velocity-dominated — measured on the
+        // filter row at 139pt/~3000pt/s — so no amount of gesture arbitration
+        // makes it safe; the sheet has to be told it is not dismissible. Set on
+        // the NAVIGATION CONTROLLER, which is the presented screen.
+        navigationController?.isModalInPresentation = true
+        updateStackGestures()
+
+        cropSurface.translatesAutoresizingMaskIntoConstraints = false
+        // ⚠️ ABOVE THE CANVAS AND BELOW THE DISSOLVE: the chrome keeps its lift
+        // over the editing surface exactly as it has over the picture.
+        view.insertSubview(cropSurface, aboveSubview: canvas)
+        NSLayoutConstraint.activate([
+            cropSurface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            cropSurface.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            cropSurface.topAnchor.constraint(equalTo: view.topAnchor),
+            cropSurface.bottomAnchor.constraint(equalTo: band.topAnchor)
+        ])
+        // ⚠️ ABOVE THE SURFACE AND BELOW THE DISSOLVE, so the ramp still runs over
+        // it — see `cropChrome`.
+        view.insertSubview(cropChrome, aboveSubview: cropSurface)
+        NSLayoutConstraint.activate([
+            cropChrome.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            cropChrome.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            cropChrome.topAnchor.constraint(equalTo: band.topAnchor),
+            cropChrome.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        // The dots count pages nobody can turn while this is open.
+        pageDots.isHidden = true
+        croppingID = id
+        showCropBarItems(true, animated: true)
+        setEditingAccessory(cropTools)
+        showCropPicture(for: id)
+        settleIntoCrop()
+    }
+
+    /// The picture shrinking into the frame it is about to be cut in.
+    ///
+    /// ⚠️ **A CROSSFADE, NOT A SWAP — AND THE CANVAS STAYS UP FOR IT.** The
+    /// surface is inset to the safe area and the canvas is full-bleed, so hiding
+    /// one and showing the other is the same photograph jumping to a smaller
+    /// frame in a single frame. Holding the canvas until the fade completes gives
+    /// the eye something to follow, and the surface starting a little larger is
+    /// what makes the move read as settling in rather than appearing.
+    ///
+    /// ⚠️ **LAID OUT BEFORE THE ANIMATION BEGINS.** The surface was added to the
+    /// hierarchy two statements ago and has no frame yet; animating a transform on
+    /// a zero-sized view animates nothing, and the first layout pass would then
+    /// snap it into place — the exact from-value trap this repository has paid for
+    /// before.
+    private func settleIntoCrop() {
+        view.layoutIfNeeded()
+        cropSurface.alpha = 0
+        cropChrome.alpha = 0
+        cropSurface.transform = CGAffineTransform(scaleX: Metrics.cropEntryScale, y: Metrics.cropEntryScale)
+        // ⚠️ **ONE THING FADES, AND NOTHING IS HIDDEN — MEASURED TWICE BEFORE IT
+        // WAS WRITTEN THIS WAY.** The first cut crossfaded the canvas against the
+        // surface and put a BLACK FRAME on screen (frame 450 of 677 on a
+        // recording: the canvas reached zero before the surface had left it). The
+        // second kept the canvas at full strength and hid it in the animation's
+        // COMPLETION — and the completion fires immediately, which a unit test
+        // catches and a screenshot never would (`theCanvasIsStillThereWhileTheSurfaceFadesIn`).
+        // So nothing is hidden at all: the surface is opaque and spans the whole
+        // view, and a thing that is covered needs no hiding. One extra composited
+        // layer is the entire cost.
+        UIView.animate(withDuration: Metrics.cropTransition, delay: 0, options: [.curveEaseOut]) {
+            self.cropSurface.alpha = 1
+            self.cropChrome.alpha = 1
+            self.cropSurface.transform = .identity
+        }
+    }
+
+    private func exitCrop() {
+        guard isCropping else { return }
+        isCropping = false
+        croppingID = nil
+        // ⚠️ **THE TOOLS LEAVE WITH THE SURFACE, AND THIS WAS A REAL DEFECT.**
+        // Choosing another mode replaces the band's tenant on its way past, but
+        // `viewWillDisappear` does not — so pressing "Next" from inside a crop and
+        // stepping back left the dial standing in the band with no surface behind
+        // it. Turning it then wrote crops computed from a detached view's stale
+        // bounds, onto whichever picture happened to be in front. Invisible while
+        // it happened, and in the post afterwards.
+        if band.content === cropTools { setEditingAccessory(nil) }
+        cropRestore?()
+        cropRestore = nil
+        updateStackGestures()
+        showCropBarItems(false, animated: true)
+        // ⚠️ BACK TO ITS OWN RULE, NOT TO `false`: the indicator hides itself
+        // under two pictures, and a single-medium screen has no dots to show.
+        pageDots.isHidden = items.count < 2
+        // ⚠️ **RE-RENDERED BEFORE THE FADE, NOT AFTER.** The canvas is about to
+        // be faded back in, and it must already be showing the result — fading in
+        // the OLD framing and correcting it a beat later is the delay this whole
+        // path exists to remove. `redraw` answers in the same turn when the
+        // picture is already held, which it is: the surface has been showing it.
+        if let id = croppingID ?? currentItemID { redraw(id) }
+        leaveCropGracefully()
+    }
+
+    /// The reverse of `settleIntoCrop`: the frame lets go and the picture opens
+    /// back out to the canvas.
+    private func leaveCropGracefully() {
+        // ⚠️ **ONLY THE SURFACE ANIMATES, AND WHAT IT UNCOVERS IS ALREADY
+        // CORRECT.** The canvas has been there the whole time, redrawn a statement
+        // ago with the cut applied; the fade merely stops covering it.
+        UIView.animate(withDuration: Metrics.cropTransition, delay: 0, options: [.curveEaseOut]) {
+            self.cropSurface.alpha = 0
+            self.cropChrome.alpha = 0
+            self.cropSurface.transform = CGAffineTransform(
+                scaleX: Metrics.cropEntryScale, y: Metrics.cropEntryScale
+            )
+        } completion: { _ in
+            // ⚠️ REMOVED ONLY AT THE END, and put back as it was found: a surface
+            // left wearing a transform and no alpha would open its next crop
+            // invisible and enlarged.
+            self.cropSurface.removeFromSuperview()
+            self.cropChrome.removeFromSuperview()
+            self.cropSurface.transform = .identity
+            self.cropSurface.alpha = 1
+            self.cropChrome.alpha = 1
+        }
+    }
+
+    /// Hands the surface the picture to cut.
+    ///
+    /// ⚠️ **NOTHING MAY BE TOUCHED UNTIL THE PICTURE LANDS.** The library answers
+    /// on its own turn — `PHImageManager` with iCloud allowed can take a visible
+    /// moment — and until it does, the surface holds a placeholder source of one
+    /// point square. A drag in that window would compute a crop against nothing,
+    /// store it, and then have it overwritten by the arrival below; a turn of the
+    /// dial would do the same. Both controls are dead for exactly as long as there
+    /// is nothing to cut.
+    private func showCropPicture(for id: String) {
+        let chosen = edits(for: id)
+        let ratio = cropRatios[id] ?? .free
+        let size = canvasSize
+        cropTools.adopt(angle: MediaCropGeometry.split(chosen.crop.angle).fine, ratio: ratio)
+        resetCropItem.isEnabled = !chosen.crop.isUntouched
+        // ⚠️ THE SAME SHORTCUT AS `redraw`: the picture the canvas is showing is
+        // the picture the surface wants, so opening the mode need not wait for the
+        // library to answer a question it has already answered.
+        if let held = lastSource, held.id == id {
+            dress(held.image, in: chosen, crop: edits(for: id).crop, ratio: ratio)
+            return
+        }
+        cropSurface.isUserInteractionEnabled = false
+        cropTools.isUserInteractionEnabled = false
+        Task { [weak self] in
+            guard let self else { return }
+            let source = await library.thumbnail(for: id, size: size)
+            remember(source, for: id)
+            guard isCropping, croppingID == id else { return }
+            // ⚠️ RE-READ, NOT THE VALUES CAPTURED BEFORE THE AWAIT. Nothing can
+            // have changed them while the controls were dead, but reading them
+            // again is what makes that true by construction rather than by
+            // argument.
+            let now = edits(for: id)
+            dress(source, in: now, crop: now.crop, ratio: cropRatios[id] ?? .free)
+        }
+    }
+
+    /// Puts a picture on the surface wearing its look, and wakes the controls.
+    private func dress(_ source: UIImage?, in chosen: MediaEdits, crop: MediaCrop, ratio: CropRatio) {
+        // ⚠️ **DRESSED BUT NOT CUT.** The look is shown so the author crops the
+        // photograph they will actually publish; the CUT is the surface's own job,
+        // live under the finger. Applying the crop here too would cut a picture
+        // that is already cut.
+        let dressed = source.flatMap { MediaFilterRenderer.apply(chosen.filter, to: $0) } ?? source
+        cropSurface.show(dressed, crop: crop, ratio: ratio)
+        cropSurface.isUserInteractionEnabled = true
+        cropTools.isUserInteractionEnabled = true
+    }
+
+    private func cropChanged(_ crop: MediaCrop) {
+        guard let id = croppingID else { return }
+        change(id) { $0.crop = crop }
+        // ⚠️ ONLY THE UNDO BUTTON, NEVER THE DIAL — see `setCanReset`. Re-stating
+        // the dial's angle from here would fight the finger that is turning it.
+        resetCropItem.isEnabled = !crop.isUntouched
     }
 
     // MARK: - The strip wins its own touches
@@ -756,7 +1338,22 @@ final class MediaEditorViewController: UIViewController {
     /// is pushed, so a sideways drag on the strip is a drag the back-swipe wants
     /// for itself.
     private lazy var touchProbe = SelectorTouchProbe { [weak self] isTouching in
-        self?.setStackGesturesEnabled(!isTouching)
+        self?.isTouchingStrip = isTouching
+        self?.updateStackGestures()
+    }
+
+    private var isTouchingStrip = false
+
+    /// ⚠️ **ONE PREDICATE, TWO OWNERS — AND WITH TWO OWNERS IT WAS A DEFECT.**
+    /// `setStackGesturesEnabled` keeps a single list of suspended recognisers and
+    /// refuses to suspend twice (`suspendedPans.isEmpty`), while the strip's probe
+    /// announces `false` on every lift and restored them unconditionally. Enter
+    /// crop mode, then brush the category strip, and the back-swipe came back
+    /// alive underneath a live crop surface — a rightward drag on the picture
+    /// would have taken the screen away. Asking one question with both answers in
+    /// it is what makes the single slot correct.
+    private func updateStackGestures() {
+        setStackGesturesEnabled(!(isCropping || isTouchingStrip))
     }
 
     private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
@@ -799,12 +1396,30 @@ final class MediaEditorPageCell: UICollectionViewCell {
 
     private let picture = UIImageView()
 
+    /// ⚠️ **HELD, BECAUSE A FITTED PICTURE DOES NOT LIVE IN THE SAME RECTANGLE AS
+    /// A FILLED ONE.** Filling means the whole window, bars included — that is what
+    /// full-bleed is for. Fitting means showing the picture WHOLE, and a whole
+    /// picture centred in the window puts its middle behind the toolbar and its
+    /// edges under the chrome: it reads as hanging low. The window a fitted picture
+    /// is centred in runs from the foot of the top bar to the head of the page
+    /// indicator, and these four constants are how it gets there.
+    private var top: NSLayoutConstraint!
+    private var bottom: NSLayoutConstraint!
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
         picture.contentMode = .scaleAspectFill
         picture.clipsToBounds = true
-        picture.pin(to: contentView)
+        picture.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(picture)
+        top = picture.topAnchor.constraint(equalTo: contentView.topAnchor)
+        bottom = picture.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        NSLayoutConstraint.activate([
+            top, bottom,
+            picture.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            picture.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
+        ])
         isAccessibilityElement = true
         accessibilityTraits = .image
     }
@@ -848,10 +1463,37 @@ final class MediaEditorPageCell: UICollectionViewCell {
         }
     }
 
+    /// Lays the picture the way the author left it, in the window a fitted one is
+    /// centred in.
+    ///
+    /// ⚠️ **THE INSETS APPLY TO `fit` ONLY.** A filled picture keeps the whole
+    /// window on purpose — it is cropped by the frame either way, so insetting it
+    /// would only show less of it for nothing.
+    func lay(_ fit: ContentFit, within window: UIEdgeInsets, animated: Bool) {
+        setContentMode(fit.mode, animated: animated)
+        let applied = fit == .fit ? window : .zero
+        guard top.constant != applied.top || bottom.constant != -applied.bottom else { return }
+        top.constant = applied.top
+        bottom.constant = -applied.bottom
+        guard animated else {
+            contentView.layoutIfNeeded()
+            return
+        }
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
+            self.contentView.layoutIfNeeded()
+        }
+    }
+
+    /// Internal for tests: where the picture actually sits in its page.
+    var debugPictureFrame: CGRect { picture.frame }
+
     /// Internal for tests: whether a picture has actually landed.
     var debugHasPicture: Bool { picture.image != nil }
     /// Internal for tests: how the picture is currently laid in its page.
     var debugContentMode: UIView.ContentMode { picture.contentMode }
+    /// Internal for tests: the size of what is actually on the page — the only
+    /// thing that can tell a rendered crop from the picture it was cut from.
+    var debugPictureSize: CGSize { picture.image?.size ?? .zero }
 }
 
 // MARK: - The canvas reports its paging
@@ -871,6 +1513,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateFitItem(animated: true)
         refreshFilterRowIfShowing()
+        reopenCropIfWaiting()
     }
 
     /// ⚠️ **BOTH SETTLE HOOKS, NOT JUST THE DRAGGED ONE.** A canvas that arrives
@@ -880,6 +1523,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         updateFitItem(animated: true)
         refreshFilterRowIfShowing()
+        reopenCropIfWaiting()
     }
 }
 
@@ -917,6 +1561,11 @@ extension MediaEditorViewController {
             backdropFromBand.isActive = false
             backdropFromChrome.isActive = true
         }
+        // ⚠️ THE BAND JUST MOVED THE INDICATOR, AND THE INDICATOR IS THE FOOT OF A
+        // FITTED PICTURE'S WINDOW. Laying out first is what makes `fitWindow` true
+        // rather than one band-height out of date.
+        view.layoutIfNeeded()
+        layPagesInTheirWindow(animated: true)
     }
 }
 
@@ -958,7 +1607,7 @@ extension MediaEditorViewController {
         navigationItem.rightBarButtonItems?.last?.accessibilityLabel
     }
     /// Internal for tests: the fit chosen for an item, defaulting as the screen does.
-    func debugFit(for id: String) -> ContentFit { fits[id] ?? .fill }
+    func debugFit(for id: String) -> ContentFit { edits(for: id).fit }
     /// Internal for tests: the path the fill/fit button takes, without a bar to tap.
     func debugTapFit() { toggleFit() }
 
@@ -980,5 +1629,81 @@ extension MediaEditorViewController {
     var debugCategoryBar: IconSelectorBar { categoryBar }
     /// Internal for tests: the path "Next" takes, without a bar to tap.
     func debugTapNext() { goNext() }
+
+    /// Internal for tests: whether the screen is in crop mode.
+    var debugIsCropping: Bool { isCropping }
+    /// Internal for tests: the editing surface, to drive a drag without a finger.
+    var debugCropSurface: MediaCropSurfaceView { cropSurface }
+    /// Internal for tests: the tools in the band, to turn the dial without one.
+    var debugCropTools: MediaCropToolsView { cropTools }
+    /// Internal for tests: the crop stored for an item, defaulting as the screen does.
+    func debugCrop(for id: String) -> MediaCrop { edits(for: id).crop }
+    /// Internal for tests: whether anything at all is stored for an item — the
+    /// difference between "chose the default" and "never chose".
+    func debugHasEdits(for id: String) -> Bool { edits[id] != nil }
+    /// Internal for tests: paging the canvas the way a swipe does, settle
+    /// included — the canvas cannot be dragged without a finger.
+    func debugScrollToPage(_ index: Int) {
+        canvas.setContentOffset(
+            CGPoint(x: canvas.bounds.width * CGFloat(index), y: 0), animated: false
+        )
+        scrollViewDidEndDecelerating(canvas)
+    }
+
+    /// Internal for tests: where the picture sits on screen, in the editor's own
+    /// coordinates — the only thing that can say whether a fitted picture is
+    /// centred between the chrome or hanging behind it.
+    func debugPictureFrame(for id: String) -> CGRect {
+        guard let index = items.firstIndex(where: { $0.id == id }),
+              let page = canvas.cellForItem(at: IndexPath(item: index, section: 0)) as? MediaEditorPageCell
+        else { return .zero }
+        return page.convert(page.debugPictureFrame, to: view)
+    }
+
+    /// Internal for tests: the black the crop tools stand on, if it is up at all.
+    var debugCropChrome: UIView? { cropChrome.superview == nil ? nil : cropChrome }
+
+    /// Internal for tests: where the page indicator sits, which is the foot of a
+    /// fitted picture's window.
+    var debugPageDotsTop: CGFloat { pageDots.frame.minY }
+
+    /// Internal for tests: the size of the picture currently on a page.
+    func debugPageImageSize(for id: String) -> CGSize {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return .zero }
+        let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
+        return (page as? MediaEditorPageCell)?.debugPictureSize ?? .zero
+    }
+
+    /// Internal for tests: the path the bar's undo takes, without a bar to tap.
+    func debugTapResetCrop() { resetCrop() }
+    /// Internal for tests: whether undo is offered, and where it lives now.
+    var debugCanResetCrop: Bool { resetCropItem.isEnabled }
+    /// Internal for tests: whether the bar is offering undo, and on which side.
+    var debugBarOffersCropReset: Bool {
+        navigationItem.leftBarButtonItems?.contains(where: { $0 === resetCropItem }) ?? false
+    }
+    /// Internal for tests: the order the leading side spells, after the chevron.
+    var debugLeadingBarItems: [UIBarButtonItem] { navigationItem.leftBarButtonItems ?? [] }
+    /// Internal for tests: the item undo actually is, to read its glyph.
+    var debugCropResetItem: UIBarButtonItem { resetCropItem }
+
+    /// Internal for tests: whether the canvas is the thing being looked at.
+    var debugCanvasIsShowing: Bool { !canvas.isHidden }
+    /// Internal for tests: how visible the canvas is, which `isHidden` cannot say.
+    var debugCanvasAlpha: CGFloat { canvas.alpha }
+    /// Internal for tests: whether the canvas can still be paged.
+    var debugCanvasScrolls: Bool { canvas.isScrollEnabled }
+    /// Internal for tests: how many of the stack's pans are currently suspended.
+    var debugSuspendedPans: Int { suspendedPans.count }
+    /// Internal for tests: whether the sheet has been told it cannot be dismissed.
+    var debugSheetIsPinned: Bool { navigationController?.isModalInPresentation ?? false }
+    /// Internal for tests: the path the strip's touch probe takes.
+    func debugSetTouchingStrip(_ isTouching: Bool) {
+        isTouchingStrip = isTouching
+        updateStackGestures()
+    }
+    /// Internal for tests: whether the surface is in the hierarchy at all — the
+    /// half of "left crop mode" that a flag cannot answer.
+    var debugCropSurfaceIsShowing: Bool { cropSurface.superview != nil }
 }
 #endif

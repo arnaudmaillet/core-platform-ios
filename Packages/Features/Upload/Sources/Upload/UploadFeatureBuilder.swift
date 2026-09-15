@@ -12,7 +12,8 @@ import UIKit
 /// UPLOAD MEDIA IS THIS PACKAGE'S OWN SCREEN. It opens on the device library
 /// (`MediaPickerViewController`), goes on to the editor
 /// (`MediaEditorViewController`), which shows what was chosen full-bleed in the
-/// order it was chosen and can lay each one filled or whole, and ends at
+/// order it was chosen and can lay each one filled or whole, dress it in a look
+/// and cut or straighten it, and ends at
 /// `NewPostViewController` — the cover, a title, a caption and the post's
 /// settings — which publishes through `PostComposer`.
 ///
@@ -59,14 +60,14 @@ public struct UploadFeatureBuilder {
         // with it — session-scoped, nothing on disk, nothing global.
         let draft = PostDraft()
         let picker = MediaPickerViewController(library: library) { chosen in
-            MediaEditorViewController(items: chosen, library: library) { editing, fits, looks in
+            MediaEditorViewController(items: chosen, library: library) { editing, edits in
                 // ⚠️ THE SCREEN DISMISSES ITSELF. This closure cannot reach the
                 // navigation controller — it is built below, after the picker
                 // that owns this one — and a published post is broadcast on
                 // `ComposedPostChannel`, so the feed already has it and nobody
                 // here needs telling.
                 NewPostViewController(
-                    items: editing, fits: fits, filters: looks,
+                    items: editing, edits: edits,
                     library: library, composer: composer, draft: draft
                 ) { _ in }
             }

@@ -23,8 +23,7 @@ struct MediaEditorTests {
     @MainActor
     private final class Handed {
         var items: [MediaLibraryItem]?
-        var fits: [String: ContentFit]?
-        var filters: [String: MediaFilter]?
+        var edits: [String: MediaEdits]?
         let destination = UIViewController()
     }
 
@@ -56,10 +55,9 @@ struct MediaEditorTests {
     private func open(_ items: [MediaLibraryItem]) -> Screen {
         let library = StubLibrary()
         let handed = Handed()
-        let editor = MediaEditorViewController(items: items, library: library) { editing, fits, looks in
+        let editor = MediaEditorViewController(items: items, library: library) { editing, edits in
             handed.items = editing
-            handed.fits = fits
-            handed.filters = looks
+            handed.edits = edits
             return handed.destination
         }
         let navigation = UINavigationController(rootViewController: editor)
@@ -352,7 +350,7 @@ struct MediaEditorTests {
         screen.editor.debugTapNext()
 
         #expect(screen.handedOn.items?.map(\.id) == ["item-0", "item-1", "item-2"])
-        #expect(screen.handedOn.fits?.isEmpty == true, "nothing was changed, so nothing is carried")
+        #expect(screen.handedOn.edits?.isEmpty == true, "nothing was changed, so nothing is carried")
         #expect(
             screen.navigation.viewControllers.last === screen.handedOn.destination,
             "and the step after this one is on top"
@@ -369,8 +367,8 @@ struct MediaEditorTests {
         screen.editor.debugTapFit()
         screen.editor.debugTapNext()
 
-        #expect(screen.handedOn.fits?["item-0"] == .fit, "the one the author changed")
-        #expect(screen.handedOn.fits?["item-1"] == nil, "and no opinion about the rest")
+        #expect(screen.handedOn.edits?["item-0"]?.fit == .fit, "the one the author changed")
+        #expect(screen.handedOn.edits?["item-1"] == nil, "and no opinion about the rest")
     }
 
     private static func pages(in view: UIView) -> [MediaEditorPageCell] {

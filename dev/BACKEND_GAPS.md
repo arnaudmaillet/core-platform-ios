@@ -28,6 +28,8 @@ full functionality.
 | 18 | No semantic geo clusters (city/country/region) | Map cluster gallery — mocked client-side in DEBUG | Medium |
 | 19 | `search.v1`: no date filter, no viewer scope, no engagement sorts | Search filter tray (7 of 12 segments disabled) | Medium |
 | 20 | `CreatePost` carries no audience / visibility | Text Post "who can see this" control (shown, only "Everyone" enabled) | Medium |
+| 21 | `CreatePost` carries no title | New Post "title" field (drawn, kept on the device only) | Medium |
+| 22 | `CreatePost` carries no post-level policy, and no AI disclosure | New Post's six settings toggles (drawn, honoured by the screen alone) | Medium |
 
 ---
 

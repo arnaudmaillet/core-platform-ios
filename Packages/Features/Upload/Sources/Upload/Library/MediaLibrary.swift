@@ -85,6 +85,17 @@ protocol MediaLibraryReading: AnyObject {
 
     /// A thumbnail at roughly `size` in POINTS, or nil when it could not be
     /// read. Implementations scale by the screen themselves.
+    ///
+    /// ⚠️ **THE SHAPE IS THE PHOTOGRAPH'S, NOT THE REQUEST'S — AND A CROP DEPENDS
+    /// ON IT.** `size` is a bound, not a shape: whatever is returned must wear the
+    /// item's own proportions. The editor chooses a crop against a canvas-sized
+    /// render (say 402x874) and `NewPostViewController.post()` bakes it against a
+    /// 1080x1080 one; `MediaCrop` is fractions, so the two agree only while both
+    /// renders share an aspect ratio. An implementation that stretched a picture
+    /// to fill the size it was asked for would publish a rectangle nobody chose,
+    /// and every test here would still pass. `PhotosMediaLibrary` gets this from
+    /// `PHImageContentMode.aspectFit`; `DebugMediaLibrary` derives both sides from
+    /// the long edge.
     func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage?
 
     /// Warms the thumbnails a scroll is about to reach, and lets them go again.

@@ -135,7 +135,18 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
 - **P2 — needs backend:** `asset_id` on `CreatePost`, the "processing" poster
   state, real fleet `upload → transcode → play`.
 - **P3:** camera capture UI + permissions.
-- **P4:** trim / edit / cover-frame selection.
+- **P4:** trim / edit / cover-frame selection — **including crop and straighten,
+  which photos already have.** `MediaEditorViewController` offers a "Crop" mode
+  with an interactive box, a straightening dial and quarter turns; on a video page
+  it draws a notice instead. What blocks it is the library seam, not the publish
+  path: `MediaLibraryReading` (`Packages/Features/Upload/Sources/Upload/Library/MediaLibrary.swift`)
+  vends `UIImage` only, and `MediaCropRenderer.apply` is `UIImage`-to-`UIImage` by
+  signature, so the editor can reach a video's POSTER frame and nothing else.
+  Cropping a real clip needs an `AVMutableVideoComposition` with a `renderSize`,
+  run through `AVAssetExportSession` — which needs an `AVAsset` the seam does not
+  vend. The composer end is already built (`ComposeMedia.video`, `PostComposer`'s
+  `.video` branch, the injected `VideoExporter`), so P4 is gated on widening the
+  seam, not on the server.
 
 P1 delivers a working "pick a video → it publishes and plays (locally)" flow end
 to end in mock mode, de-risking everything before the backend lands — the same

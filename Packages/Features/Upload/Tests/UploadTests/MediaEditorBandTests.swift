@@ -24,7 +24,7 @@ struct MediaEditorBandTests {
         let items = (0..<count).map {
             MediaLibraryItem(id: "item-\($0)", kind: .photo)
         }
-        let editor = MediaEditorViewController(items: items, library: StubLibrary()) { _, _, _ in
+        let editor = MediaEditorViewController(items: items, library: StubLibrary()) { _, _ in
             UIViewController()
         }
         let navigation = UINavigationController(rootViewController: editor)
