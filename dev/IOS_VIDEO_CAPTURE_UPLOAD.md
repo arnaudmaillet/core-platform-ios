@@ -143,6 +143,16 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
   drive the whole path. A video also uploads a **poster still** for
   `thumbnail_url`; without it the thumbnail was the .mp4, which is a black feed
   rather than a missing picture (see `BACKEND_GAPS.md` §23).
+
+  ⚠️ **AND CI NOW RUNS THE WHOLE CREATION PATH FOR VIDEO**, which it never
+  could before: `VideoPublishEndToEndTests` drives the real `DebugMediaLibrary`
+  (synthesising genuine H.264, its tiles drawn from the clip's own first frame
+  so the grid shows what the post will carry) through the real
+  `NewPostViewController` into a real `PostComposer` against `MockBFF`. Only
+  the transport is fake, and it is fake exactly as the app's own mock mode is.
+  "There is no photo library on a runner" was the reason the video path went
+  four screens' worth of work without anyone noticing `where !item.isVideo`;
+  it is no longer a reason.
 - **P2 — needs backend:** `asset_id` on `CreatePost`, the "processing" poster
   state, real fleet `upload → transcode → play`.
 - **P3:** camera capture UI + permissions.

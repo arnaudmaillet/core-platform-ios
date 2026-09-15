@@ -19,6 +19,10 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// What each album actually holds, built once — see the note in `init`.
     private let contents: [String: [MediaLibraryItem]]
 
+    /// First frames of the synthetic clips, kept so a grid scroll does not
+    /// re-open an `AVAssetImageGenerator` per cell per pass.
+    private var videoPosters: [String: UIImage] = [:]
+
     /// Every fourth item is a video, so the "Videos" pill has a count and the
     /// grid has durations to stamp.
     ///
@@ -120,35 +124,83 @@ final class DebugMediaLibrary: MediaLibraryReading {
     ///
     /// Real photographs are 3:4 or 4:3. These alternate by index, so filling
     /// crops and fitting letterboxes — in both directions, over a run of tiles.
+    /// ⚠️ **A VIDEO'S TILE IS A FRAME OF THE CLIP THAT WILL BE PUBLISHED, NOT A
+    /// COLOURED SQUARE WITH A DURATION STAMPED ON IT.** It was the latter, and a
+    /// stand-in that only *claims* to be a video hides the two things that go
+    /// wrong with real ones: a grid that shows one picture while the post
+    /// carries another, and a thumbnail whose aspect disagrees with the file's.
+    /// Drawn by `VideoExporter.posterImage` — the very call the publish path
+    /// uses for `thumbnail_url` — on the very file `videoFile(for:)` hands over,
+    /// so what the grid shows IS what the post gets. Built once per id; the
+    /// clip underneath is cached on disk by the fetcher.
     func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage? {
-        let index = Int(item.dropFirst("debug-".count)) ?? 0
+        let index = Self.index(of: item)
+        if items.first(where: { $0.id == item })?.isVideo == true {
+            if let cached = videoPosters[item] { return cached }
+            guard let file = await videoFile(for: item),
+                  let frame = await VideoExporter().posterImage(for: file)
+            else { return nil }
+            let numbered = Self.numbered(index, over: frame, in: frame.size)
+            videoPosters[item] = numbered
+            return numbered
+        }
+
         // A hue per index, spun by the golden angle so that neighbouring tiles
         // never land on the same colour.
         let spun = CGFloat(index) * 0.618_034
         let hue = spun.truncatingRemainder(dividingBy: 1)
         let fill = UIColor(hue: hue, saturation: 0.55, brightness: 0.85, alpha: 1)
-        let number = String(index + 1) as NSString
 
         // The long edge follows what was asked for, so a full-screen request
         // still yields a full-screen-scale picture; only the SHAPE is the
         // photograph's own.
         let longEdge = max(size.width, size.height, 1)
-        let rendered = index.isMultiple(of: 2)
+        let rendered = Self.isPortrait(index)
             ? CGSize(width: longEdge * 0.75, height: longEdge)
             : CGSize(width: longEdge, height: longEdge * 0.75)
 
+        return Self.numbered(index, over: nil, in: rendered, ground: fill)
+    }
+
+    /// Whether the item at `index` is drawn 3:4 rather than 4:3.
+    ///
+    /// ⚠️ **ONE RULE, TWO USERS — THE TILE AND THE CLIP.** A synthetic video
+    /// whose file was 3:4 while its tile was 4:3 would break the seam's aspect
+    /// contract in the one place the contract exists for: the editor chooses a
+    /// crop against a canvas-sized render and the publish path bakes it against
+    /// another, and `MediaCrop` is fractions, so the two agree only while both
+    /// wear the same proportions.
+    private static func isPortrait(_ index: Int) -> Bool { index.isMultiple(of: 2) }
+
+    private static func index(of item: MediaLibraryItem.ID) -> Int {
+        Int(item.dropFirst("debug-".count)) ?? 0
+    }
+
+    /// The tile's number, over a picture or over a flat colour.
+    ///
+    /// The number is why these exist: it makes the ORDER a selection ended up in
+    /// legible in a still screenshot. A video frame keeps it for the same reason
+    /// a photograph does.
+    private static func numbered(
+        _ index: Int, over picture: UIImage?, in size: CGSize, ground: UIColor? = nil
+    ) -> UIImage {
+        let number = String(index + 1) as NSString
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: rendered.height * 0.32, weight: .heavy),
+            .font: UIFont.systemFont(ofSize: size.height * 0.32, weight: .heavy),
             .foregroundColor: UIColor.white.withAlphaComponent(0.85)
         ]
-
-        return UIGraphicsImageRenderer(size: rendered).image { context in
-            fill.setFill()
-            context.fill(CGRect(origin: .zero, size: rendered))
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = picture?.scale ?? UITraitCollection.current.displayScale
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            if let ground {
+                ground.setFill()
+                context.fill(CGRect(origin: .zero, size: size))
+            }
+            picture?.draw(in: CGRect(origin: .zero, size: size))
             let measured = number.size(withAttributes: attributes)
             let origin = CGPoint(
-                x: (rendered.width - measured.width) / 2,
-                y: (rendered.height - measured.height) / 2
+                x: (size.width - measured.width) / 2,
+                y: (size.height - measured.height) / 2
             )
             number.draw(at: origin, withAttributes: attributes)
         }
@@ -167,12 +219,17 @@ final class DebugMediaLibrary: MediaLibraryReading {
     /// deterministic and costs one write per id. It lives in `MediaPlayback`,
     /// which `PostComposer` already depends on for `VideoExporter`.
     ///
-    /// 3:4 to match the odd-indexed thumbnails, and even on both sides because
-    /// H.264 requires it — the fetcher rounds down, but asking correctly keeps
-    /// the shape the grid promised.
+    /// ⚠️ **THE CLIP WEARS THE SHAPE ITS TILE PROMISED**, via `isPortrait` — see
+    /// the note there. Even on both sides because H.264 requires it; the fetcher
+    /// rounds down anyway, but asking correctly keeps the aspect exact.
     func videoFile(for item: MediaLibraryItem.ID) async -> URL? {
         guard items.first(where: { $0.id == item })?.isVideo == true else { return nil }
-        guard let source = URL(string: "mock://video/\(item)?w=720&h=960") else { return nil }
+        let portrait = Self.isPortrait(Self.index(of: item))
+        let width = portrait ? 720 : 960
+        let height = portrait ? 960 : 720
+        guard let source = URL(string: "mock://video/\(item)?w=\(width)&h=\(height)") else {
+            return nil
+        }
         return try? await PlaceholderVideoFetcher().playableURL(for: source)
     }
 }

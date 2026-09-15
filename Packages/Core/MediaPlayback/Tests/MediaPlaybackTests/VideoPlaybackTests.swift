@@ -19,6 +19,52 @@ struct PlaceholderVideoFetcherTests {
         #expect(!tracks.isEmpty)
     }
 
+    /// ⚠️ **THE TEST ABOVE IS TRUE OF A BLACK RECTANGLE, AND FOR A LONG TIME
+    /// THAT IS EXACTLY WHAT THIS FIXTURE PRODUCED.** A track exists, a duration
+    /// is positive, the file opens and plays — every one of those held while
+    /// `makeFrame` painted nothing but opaque black, because it asked
+    /// `UIColor.setFill()` to colour a `CGContext` that had never been pushed as
+    /// the current UIKit context.
+    ///
+    /// Two things kept it invisible. A video does not appear in a simulator
+    /// screen capture at all (`AVPlayerLayer` is composited elsewhere), so a
+    /// black clip looked like the artefact everyone expected; and no test had
+    /// ever read a PIXEL back out of a generated clip. This one does, which is
+    /// the only kind of assertion that can tell a picture from an absence.
+    ///
+    /// A fresh path on purpose: clips are cached on disk by URL, so reusing one
+    /// another test has already resolved would measure whatever was encoded
+    /// then — including, once, the black.
+    @Test func theSynthesisedClipActuallyCarriesAPicture() async throws {
+        let fetcher = PlaceholderVideoFetcher(durationSeconds: 0.5)
+        let url = URL(string: "mock://video/pixel-check?w=160&h=160")!
+
+        let fileURL = try await fetcher.playableURL(for: url)
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: fileURL))
+        generator.appliesPreferredTrackTransform = true
+        // ⚠️ ZERO ON BOTH SIDES. The default tolerance is infinite and returns
+        // the nearest keyframe, which for a half-second clip is a different
+        // question from "what is at t=0".
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let cgImage = try generator.copyCGImage(at: .zero, actualTime: nil)
+
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try #require(CGContext(
+            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let total = Int(pixel[0]) + Int(pixel[1]) + Int(pixel[2])
+
+        #expect(total > 90, "the clip is black: r=\(pixel[0]) g=\(pixel[1]) b=\(pixel[2])")
+        // And it is a COLOUR, not grey — the hue is what makes each mock post
+        // keep its own identity across a run.
+        let spread = Int(pixel[0..<3].max() ?? 0) - Int(pixel[0..<3].min() ?? 0)
+        #expect(spread > 20, "the clip is grey: r=\(pixel[0]) g=\(pixel[1]) b=\(pixel[2])")
+    }
+
     @Test func cachesByURLSoTheSecondResolveReturnsTheSameFile() async throws {
         let fetcher = PlaceholderVideoFetcher(durationSeconds: 0.5)
         let url = URL(string: "mock://video/9?w=120&h=120")!

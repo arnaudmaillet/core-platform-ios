@@ -170,18 +170,27 @@ public struct PlaceholderVideoFetcher: VideoSource {
         return String(hash, radix: 16)
     }
 
+    /// ⚠️ **`stableHash`, NOT `Hasher` — AND THIS CACHE HAD NEVER ONCE HIT
+    /// ACROSS LAUNCHES.** Swift's `Hasher` is randomly seeded PER PROCESS, so
+    /// the filename it produced was different on every launch: the existence
+    /// check below could only ever miss, every run re-encoded every clip, and
+    /// the temp directory collected a fresh set each time. `locallyCached`
+    /// sixty lines above documents exactly this trap and switched to FNV-1a for
+    /// it; this function was left behind, and the symptom — work being redone —
+    /// is invisible in a way a wrong picture is not.
+    ///
+    /// The version below is what abandons clips written by an older encoder.
+    /// It was doing nothing at all while the key was per-process random, which
+    /// is the second reason v3 matters: **v2's black clips are real files on
+    /// real machines**, and a cache that outlives the bug it stored is worse
+    /// than no cache.
     private static func cacheURL(for url: URL, width: Int, height: Int) -> URL {
-        var hasher = Hasher()
-        hasher.combine(url.absoluteString)
-        hasher.combine(width)
-        hasher.combine(height)
-        // Bumped when the encoder settings change, because clips are cached on
-        // disk across launches: without it, every machine that ran the old
-        // untagged encoder keeps serving those files forever and the fix looks
-        // like it did nothing.
-        hasher.combine(2) // v2: explicit Rec. 709 colour tagging
-        let name = "synthvid-\(UInt(bitPattern: hasher.finalize())).mp4"
-        return FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        // v3: `makeFrame` painted opaque black — `UIColor.setFill()` against a
+        //     CGContext that was never the current UIKit context.
+        // v2: explicit Rec. 709 colour tagging.
+        let key = "v3|\(url.absoluteString)|\(width)x\(height)"
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("synthvid-\(Self.stableHash(key)).mp4")
     }
 
     private func synthesize(to outputURL: URL, width: Int, height: Int, hue: CGFloat) async throws {
@@ -287,13 +296,33 @@ public struct PlaceholderVideoFetcher: VideoSource {
             bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
         ) else { return nil }
 
-        UIColor(hue: hue, saturation: 0.5, brightness: 0.8, alpha: 1).setFill()
+        // ⚠️ **`setFillColor` ON THE CONTEXT, NEVER `UIColor.setFill()` — AND
+        // THIS WAS WRONG FOR THE WHOLE LIFE OF THE FIXTURE.** `setFill()` sets
+        // the fill on the CURRENT UIKit context, the one `UIGraphicsGetCurrentContext`
+        // returns. This `CGContext` is built by hand and never pushed, so the
+        // call reached nothing and `fill(_:)` painted with a bare CGContext's
+        // default — **opaque black**. Every synthesised clip was therefore a
+        // black rectangle from the day it was written.
+        //
+        // Nothing caught it, and the two reasons are worth keeping: a video
+        // renders black in a simulator screen capture anyway (`AVPlayerLayer`
+        // does not appear in `simctl io screenshot`), so a black clip looks
+        // exactly like the capture artefact everyone had learned to expect; and
+        // no test had ever read a PIXEL back out of a generated clip — they
+        // asserted a track existed, a duration was positive, a file was
+        // playable. All true of a black rectangle.
+        //
+        // Same family as the `UIImage.draw(in:)`-ignores-`setAlpha` trap: a
+        // UIKit drawing convenience silently does nothing outside a UIKit
+        // context, and the failure is a plausible-looking picture rather than an
+        // error.
+        context.setFillColor(UIColor(hue: hue, saturation: 0.5, brightness: 0.8, alpha: 1).cgColor)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
 
         // A lighter band sweeping left→right and wrapping.
         let bandWidth = CGFloat(width) * 0.25
         let x = CGFloat(progress) * CGFloat(width) * 1.25 - bandWidth
-        UIColor(hue: hue, saturation: 0.35, brightness: 0.95, alpha: 1).setFill()
+        context.setFillColor(UIColor(hue: hue, saturation: 0.35, brightness: 0.95, alpha: 1).cgColor)
         context.fill(CGRect(x: x, y: 0, width: bandWidth, height: CGFloat(height)))
 
         return buffer
