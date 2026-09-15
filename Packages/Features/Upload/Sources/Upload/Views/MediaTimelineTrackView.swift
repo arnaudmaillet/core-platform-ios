@@ -418,9 +418,24 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// it is the cheapest possible improvement to how the strip feels.
     private var anyFrame: UIImage?
 
+    /// Which film the tiles in flight were asked for. Bumped whenever a tile
+    /// index stops meaning what it meant — a new clip, or a new scale.
+    private var framesGeneration = 0
+
     /// Throws away every picture and asks again — for a clip that changed under
     /// the track.
     func forgetFrames() {
+        // ⚠️ **THE TOKEN IS WHAT ACTUALLY CANCELS A REQUEST, AND CLEARING THE
+        // CACHES DOES NOT.** A batch is an unstructured `Task` that has already
+        // captured its tile INDICES; emptying `decoded` and `requesting` leaves
+        // it running, and when it lands it writes those indices back — into a
+        // strip that is now showing a DIFFERENT CLIP, or the same clip at a
+        // different zoom where an index means a different moment. The pictures
+        // stay until the cache is evicted, which on a short clip is never.
+        // Measured as a real sequence by the review: scroll clip A (a 16-tile
+        // batch is ~170ms in flight), swipe to clip B, and B's strip shows A's
+        // film.
+        framesGeneration &+= 1
         decoded.removeAll()
         requesting.removeAll()
         anyFrame = nil
@@ -496,9 +511,13 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
 
         let spacing = MediaTimelining.tileSpacingSeconds(pointsPerSecond: pointsPerSecond)
         let seconds = wanted.map { MediaTimelining.sourceSeconds(ofTile: $0, pointsPerSecond: pointsPerSecond) }
+        let generation = framesGeneration
         Task { [weak self] in
             guard let self else { return }
             let arrived = await framesProvider(seconds, Metrics.strip, spacing)
+            // The film this batch was asked for is gone — a new clip, or a new
+            // scale. Its indices mean something else now.
+            guard generation == framesGeneration else { return }
             for (index, second) in zip(wanted, seconds) {
                 requesting.remove(index)
                 guard let picture = arrived[second] else { continue }
@@ -765,7 +784,17 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
 
     private func stopEasing() {
         guard isEasing else { return }
+        // ⚠️ **THE MODEL VALUE IS ALREADY AT THE TARGET, SO REMOVING THE
+        // ANIMATION SNAPS THERE.** `UIView.animate { contentOffset = target }`
+        // sets the model at once and animates only the presentation;
+        // `removeAllAnimations` drops the presentation and the film jumps the
+        // rest of the way — the opposite of leaving it where it visibly is, which
+        // is what this used to claim. Reading the presentation layer first and
+        // assigning THAT is what makes the finger pick the film up where it sees
+        // it. `uiview-animate-from-value-trap` is the same lesson about `alpha`.
+        let visible = scroller.layer.presentation()?.bounds.origin.x
         scroller.layer.removeAllAnimations()
+        if let visible { scroller.contentOffset.x = visible }
         isEasing = false
         isFollowingPlayback = false
     }
@@ -910,32 +939,52 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     @objc private func pinched(_ gesture: UIPinchGestureRecognizer) {
         switch gesture.state {
         case .began:
-            zoomAnchorSeconds = secondsUnderNeedle
-            isZooming = true
+            beginZoom()
+        case .changed:
+            let next = MediaTimelining.zoomed(pointsPerSecond, by: gesture.scale)
+            gesture.scale = 1
+            zoom(to: next)
+        case .ended, .cancelled, .failed:
+            endZoom()
+        default:
+            break
+        }
+    }
+
+    // ⚠️ **THE THREE ROUTINES A PINCH USES, NAMED — SO THE DEBUG HOOK GOES
+    // THROUGH THEM RATHER THAN ALONGSIDE.** `debugPinch` was a shortcut that set
+    // the scale and moved the film, and skipped `beginZoom` entirely: it never
+    // retired the frames in flight, so the test written to prove that a zoom
+    // retires them passed on a path that does not. The crop surface states the
+    // same rule — a test re-entering by a copy of the logic is a test of the copy.
+    private func beginZoom() {
+        zoomAnchorSeconds = secondsUnderNeedle
+        isZooming = true
             // ⚠️ **THE PICTURES ARE DROPPED ONCE, AT THE START.** A tile's index
             // means a different moment at every scale, so what is cached is
             // wrong the instant the scale moves. Dropping them per sample would
             // re-request sixty times a second; dropping them once and asking
             // again on release costs one refill, and in between every tile shows
             // the nearest frame it has, which is charter F14 doing its job.
-            decoded.removeAll()
-            requesting.removeAll()
-            onScrubbing?(true)
-        case .changed:
-            let next = MediaTimelining.zoomed(pointsPerSecond, by: gesture.scale)
-            gesture.scale = 1
-            guard abs(next - pointsPerSecond) > 0.01 else { return }
-            pointsPerSecond = next
-            setNeedsLayout()
-            layoutIfNeeded()
-            keepTheNeedleOnTheAnchor()
-        case .ended, .cancelled, .failed:
-            isZooming = false
-            onScrubbing?(false)
-            setNeedsLayout()
-        default:
-            break
-        }
+            // Through `forgetFrames`, so the generation is bumped: a tile index
+            // means a different moment at every scale, and a batch in flight has
+            // already captured its indices.
+        forgetFrames()
+        onScrubbing?(true)
+    }
+
+    private func zoom(to scale: CGFloat) {
+        guard abs(scale - pointsPerSecond) > 0.01 else { return }
+        pointsPerSecond = scale
+        setNeedsLayout()
+        layoutIfNeeded()
+        keepTheNeedleOnTheAnchor()
+    }
+
+    private func endZoom() {
+        isZooming = false
+        onScrubbing?(false)
+        setNeedsLayout()
     }
 
     /// Holds the moment the pinch began on under the needle, so the film grows
@@ -1028,6 +1077,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     var debugContentOffset: CGFloat { scroller.contentOffset.x }
     /// Internal for tests: whether the film is in the middle of an eased move.
     var debugIsEasing: Bool { isEasing }
+    var debugFramesGeneration: Int { framesGeneration }
     /// ⚠️ **Internal for tests: whether an animation is ACTUALLY ON THE LAYER.**
     /// `contentOffset` is the model value and `UIView.animate` sets it at once —
     /// reading it back says where the film is GOING, never whether it is easing
@@ -1073,11 +1123,9 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// Internal for tests: pinches the way two fingers would, through the very
     /// routine the recogniser calls.
     func debugPinch(by scale: CGFloat) {
-        zoomAnchorSeconds = secondsUnderNeedle
-        pointsPerSecond = MediaTimelining.zoomed(pointsPerSecond, by: scale)
-        setNeedsLayout()
-        layoutIfNeeded()
-        keepTheNeedleOnTheAnchor()
+        beginZoom()
+        zoom(to: MediaTimelining.zoomed(pointsPerSecond, by: scale))
+        endZoom()
     }
     var debugHasGrip: Bool { grip != nil }
 
@@ -1242,6 +1290,13 @@ private final class RulerView: UIView {
 
     #if DEBUG
     var debugMarks: [String] { pieces.compactMap(\.label.text) }
-    var debugDotCount: Int { pieces.count }
+    /// ⚠️ **DOTS THAT ARE ACTUALLY DRAWN SOMEWHERE, NOT DOTS THAT EXIST.** This
+    /// was `pieces.count`, and `debugMarks` is also derived from `pieces` — so
+    /// the test comparing them read `pieces.count == pieces.count` and stayed
+    /// green with the dot's positioning deleted, or with `addSubview(dot)`
+    /// deleted. A dot at the origin with no size is not a mark on a ruler.
+    var debugDotCount: Int {
+        pieces.filter { $0.dot.frame.width > 0 && $0.dot.superview != nil }.count
+    }
     #endif
 }

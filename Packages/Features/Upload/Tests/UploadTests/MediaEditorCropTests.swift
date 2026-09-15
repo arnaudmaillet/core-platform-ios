@@ -291,6 +291,24 @@ struct MediaEditorCropTests {
                 "the leading side is the draft and the undo arrow")
     }
 
+    /// ⚠️ **THE ARROW STANDS IN THE BAR PERMANENTLY NOW, SO IT HAS TO SAY WHEN IT
+    /// CANNOT ACT.** `resetCrop` begins `guard let id = croppingID`, and that is
+    /// set only between `enterCrop` and `exitCrop` — so outside the surface the
+    /// arrow drew ENABLED over a photograph carrying a crop and did nothing when
+    /// tapped. It used to be hidden by living only in the crop bar.
+    @Test func theUndoArrowIsDeadOnceTheCropSurfaceIsGone() async throws {
+        let screen = open(Self.items(1))
+        choose(Mode.crop, on: screen)
+        try await settle(until: { screen.editor.debugCropSurface.debugHasPicture })
+        screen.editor.debugCropSurface.setAngle(8)
+        #expect(screen.editor.debugCanResetCrop, "guard: there is something to undo while cropping")
+
+        choose(Mode.filters, on: screen)
+
+        #expect(screen.editor.debugCanResetCrop == false,
+                "the arrow offers to undo a crop it can no longer reach")
+    }
+
     @Test func undoIsOfferedOnlyWhenThereIsSomethingToUndo() async throws {
         let screen = open(Self.items(1))
         choose(Mode.crop, on: screen)

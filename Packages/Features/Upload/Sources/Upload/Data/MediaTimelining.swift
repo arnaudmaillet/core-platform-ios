@@ -118,6 +118,15 @@ enum MediaTimelining {
     }
 
     // MARK: - Splitting, and rates
+    //
+    // ⚠️ **NOTHING ON SCREEN REACHES THESE YET, AND THAT IS DELIBERATE RATHER
+    // THAN FORGOTTEN.** The control that offers them is the second selector
+    // (charter F18). They are here first because the EXPORT had to be able to
+    // honour a split before one could be offered: `PickedVideo` carried a single
+    // range and the exporter a single `insertTimeRange`, so a split would have
+    // published its first piece and dropped the rest — silently, because what
+    // comes out is a perfectly good video. Arithmetic and export first, button
+    // second, is the order that makes the button safe to draw.
 
     /// Which piece a moment falls in, if any.
     ///

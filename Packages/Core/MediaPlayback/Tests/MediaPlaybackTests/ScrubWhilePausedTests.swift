@@ -144,8 +144,16 @@ struct ChasedSeekTests {
             )
             #expect(controller.debugSeeksInFlight <= 1,
                     "two seeks at once is one of them being cancelled")
-            #expect(controller.debugChasedCount <= 1,
-                    "the queue is a LATEST, not a backlog: \(controller.debugChasedCount)")
+            // ⚠️ **THE QUEUED TARGET, NOT THE COUNT.** `chased` holds one entry
+            // per PLAYER, so with a single-player fixture `count <= 1` is
+            // structurally true whatever the implementation does — a backlog
+            // regression would make the VALUE an array and the outer count would
+            // still read 1. What can be wrong is which position is queued: it
+            // must be the latest asked for, never an earlier one held back.
+            if let queued = controller.debugChasedTarget(in: surface) {
+                #expect(abs(queued - 3 * Double(step) / 24) < 0.01,
+                        "the queue is holding an older position: \(queued)")
+            }
         }
         try await Task.sleep(for: .milliseconds(600))
 
@@ -187,6 +195,11 @@ struct ChasedSeekTests {
         }
         try await Task.sleep(for: .milliseconds(600))
 
+        // ⚠️ **THE WITNESS ITS FORWARD TWIN HAD AND THIS ONE DID NOT.** With
+        // `seek` neutered to `return`, nothing is cancelled and nothing is
+        // coalesced either — both assertions below pass on a completely dead
+        // seek path. Reported by a review that tried exactly that.
+        #expect(controller.debugSeeksLanded > 0, "guard: seeks were actually run")
         #expect(controller.debugSeeksCancelled == 0,
                 "\(controller.debugSeeksCancelled) reverse seeks were killed")
         #expect(controller.debugSeeksLanded < 24,

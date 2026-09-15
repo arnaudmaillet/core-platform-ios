@@ -734,6 +734,68 @@ struct MediaEditorTimelineTests {
                 "the step did not land: \(bar.debugSecondsUnderNeedle)")
     }
 
+    /// ⚠️ **A BATCH IN FLIGHT HAS ALREADY CAPTURED ITS TILE INDICES.** Clearing
+    /// the caches does not stop it — when it lands it writes those indices back,
+    /// into a strip now showing a DIFFERENT clip, or the same clip at a scale
+    /// where an index means a different moment. The pictures then stay until the
+    /// cache evicts them, which on a short clip is never.
+    @Test func framesAskedForOneFilmNeverLandInAnother() async throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        try await settle(until: { screen.preview.asked.isEmpty == false })
+        let bar = try track(in: screen)
+        screen.window.layoutIfNeeded()
+        try await settle(until: { bar.debugDecodedCount > 0 })
+        let generation = bar.debugFramesGeneration
+
+        bar.forgetFrames()
+
+        #expect(bar.debugFramesGeneration != generation,
+                "nothing tells a batch in flight that the film it was asked for is gone")
+        #expect(bar.debugDecodedCount == 0, "guard: the caches were dropped")
+    }
+
+    /// And a pinch bumps it too — the caches are dropped there for the same
+    /// reason, and dropping them without the token leaves the same race.
+    @Test func aPinchAlsoRetiresTheFramesInFlight() async throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        try await settle(until: { screen.preview.asked.isEmpty == false })
+        let bar = try track(in: screen)
+        screen.window.layoutIfNeeded()
+        let generation = bar.debugFramesGeneration
+
+        bar.debugPinch(by: 2)
+
+        #expect(bar.debugFramesGeneration != generation,
+                "a zoom left the batch in flight believing its indices still mean something")
+    }
+
+    /// ⚠️ **CHARTER T3, WHICH NOTHING WAS READING.** `debugDecodedCount` existed
+    /// and no test asked it, so the bound on pictures alive at once — the whole
+    /// reason the strip is lazy — rested on a constant nobody checked.
+    @Test func thePicturesAliveAtOnceStayBounded() async throws {
+        let fourMinutes = MediaLibraryItem(id: "video-0", kind: .video(duration: 240))
+        let screen = open([fourMinutes])
+        choose(Mode.trim, on: screen)
+        try await settle(until: { screen.preview.asked.isEmpty == false })
+        let bar = try track(in: screen)
+        screen.window.layoutIfNeeded()
+
+        // Walk the length of the film, which is what fills a cache that has no
+        // ceiling: every window decoded and never given back.
+        for second in stride(from: 0.0, through: 220.0, by: 8.0) {
+            bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
+                forSourceSeconds: second, trackWidth: bar.bounds.width
+            ))
+            try await Task.sleep(for: .milliseconds(4))
+        }
+
+        #expect(bar.debugDecodedCount <= 48,
+                "\(bar.debugDecodedCount) pictures alive after walking a four-minute clip")
+        #expect(bar.debugDecodedCount > 0, "guard: the strip decoded anything at all")
+    }
+
     // MARK: - Pinch to zoom (charter F15)
 
     /// ⚠️ **INSTAGRAM'S OWN ON-SCREEN HINT READS "Tap on track to trim. Pinch to

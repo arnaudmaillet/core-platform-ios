@@ -5,8 +5,14 @@ import CoreGraphics
 /// ⚠️ **PURE, BECAUSE A TOOLBAR CANNOT BE MEASURED IN A TEST.** `toolbarItems`
 /// are laid out by a `UIToolbar` the screen does not own, inside a navigation
 /// controller, after a layout pass that needs a window — so a rule expressed as
-/// constraints is a rule no test can ask about. The rule is here; the screen
-/// applies it.
+/// constraints is a rule no test can ask about.
+///
+/// ⚠️ **AND NOTHING APPLIES IT YET.** There is one selector in the bar today;
+/// this rule is for the second one, which arrives with split and speed. It is
+/// stated here rather than in the slice that needs it because the RULE was given
+/// and settled separately from the control — but until that control exists this
+/// file is answered only by its own tests, and saying otherwise would be the
+/// stale comment this repository treats as a defect.
 ///
 /// ⚠️ **AND IT IS NOT "SHARE WHAT IS THERE".** With one selector the answer is
 /// "as much as it wants, up to most of the bar" — a strip that shrank to half a

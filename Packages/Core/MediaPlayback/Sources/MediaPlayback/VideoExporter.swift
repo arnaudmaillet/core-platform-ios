@@ -106,6 +106,18 @@ public struct VideoExporter: Sendable {
         self.preset = preset
     }
 
+    /// Whether a plan can be served by a `timeRange` alone.
+    ///
+    /// ⚠️ **NAMED, BECAUSE IT CANNOT BE SEEN FROM OUTSIDE.** Whether a
+    /// composition was built is invisible in the exported file: one piece at 1x
+    /// through a composition produces the same pictures and the same duration as
+    /// one piece through a `timeRange`. A test comparing the two outputs
+    /// therefore proves nothing — and one did, comparing a plan with ITSELF,
+    /// since `init(sourceURL:timeRange:)` is sugar over exactly this segment.
+    static func needsComposition(for segments: [VideoExportSegment]) -> Bool {
+        segments.count > 1 || segments.contains { !$0.isAsShot }
+    }
+
     /// The kept pieces, laid end to end, each scaled to the rate it plays at.
     ///
     /// ⚠️ **BUILT HERE AND USED ONCE, WHICH IS THE ONLY WAY IT CAN EXIST.**
@@ -199,8 +211,7 @@ public struct VideoExporter: Sendable {
         // a second reader, a second set of tracks and a second thing to get
         // wrong for a result that is identical. The composition exists for what
         // a `timeRange` CANNOT say: several pieces, or a rate other than as-shot.
-        let needsComposition = plan.segments.count > 1
-            || plan.segments.contains { !$0.isAsShot }
+        let needsComposition = Self.needsComposition(for: plan.segments)
         let subject: AVAsset = needsComposition
             ? try await Self.composition(of: asset, cut: plan.segments)
             : asset

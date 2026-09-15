@@ -65,18 +65,26 @@ struct VideoFilmstripTests {
                 "only \(Set(prints).count) distinct pictures across \(prints.count) frames")
     }
 
-    /// ⚠️ **KEYED BY THE REQUEST, NOT BY WHERE THE GENERATOR LANDED.** Two
-    /// requests can settle on one frame, and keying by `actualTime` would collapse
-    /// them into a single entry — a hole in the strip that reads as a decode
-    /// failure. Asking for two moments a long way apart and getting two keys back
-    /// is the cheap version of that assertion; the picture test above is the
-    /// expensive one.
-    @Test func twoMomentsAreTwoEntriesEvenWhenTheyShareAKeyframe() async throws {
+    /// ⚠️ **THE TOLERANCE RULE HAS A FLOOR, AND IT IS MEASURED RATHER THAN
+    /// REASONED.** Below roughly one frame interval the window stops containing a
+    /// frame and the generator returns nothing at all — probed on this 30fps
+    /// fixture: spacing 0.050 gives 3 of 3 and spacing 0.033 gives **1 of 3**.
+    /// This pins the near side of the working range; `MediaTimeliningTests` pins
+    /// that the timeline's own zoom cannot reach past it.
+    ///
+    /// (It replaces a test called "…even when they share a keyframe" whose
+    /// fixture could not produce a shared keyframe: 0.30 and 0.34 at a tolerance
+    /// of 0.018 are windows that do not overlap, so an implementation keyed by
+    /// `actualTime` would have returned two entries as well.)
+    @Test func aTightlySpacedStripStillGetsAPictureForEveryTile() async throws {
+        let wanted = [0.30, 0.35, 0.40]
+
         let frames = await VideoFilmstrip().frames(
-            of: try await clip(), atSourceSeconds: [0.30, 0.34], height: 40, spacing: 0.04
+            of: try await clip(), atSourceSeconds: wanted, height: 40, spacing: 0.05
         )
 
-        #expect(frames.count == 2, "got \(frames.keys.sorted())")
+        #expect(Set(frames.keys) == Set(wanted),
+                "a tile was left with no picture: \(frames.keys.sorted())")
     }
 
     @Test func askingForNothingReturnsNothing() async throws {

@@ -208,12 +208,26 @@ final class MediaEditorViewController: UIViewController {
 
     /// The arrow is dead when there is nothing to undo — a control that reaches
     /// nothing has to say so.
+    /// ⚠️ **ENABLED ONLY WHERE THE TAP CAN ACT, AND IT WAS ENABLED EVERYWHERE.**
+    /// `resetCrop` begins `guard let id = croppingID`, and `croppingID` is set in
+    /// `enterCrop` and cleared in `exitCrop` — so outside the crop surface the
+    /// arrow drew ENABLED over a photograph carrying a crop and did nothing at
+    /// all when tapped. That is the shape this screen has removed three times
+    /// now: a control that reaches nothing. It used to be hidden by living only
+    /// in the crop bar; standing in the bar permanently, it has to say so itself.
     private func refreshResetItem() {
-        guard let id = currentItemID else { return }
+        guard let id = currentItemID else {
+            resetItem.isEnabled = false
+            return
+        }
         let edited = edits(for: id)
-        resetItem.isEnabled = band.content === timelineTrack
-            ? MediaTimelining.cuts(edited.timeline, withinSource: trackSeconds)
-            : !edited.crop.isUntouched
+        if band.content === timelineTrack {
+            resetItem.isEnabled = MediaTimelining.cuts(
+                edited.timeline, withinSource: trackSeconds
+            )
+        } else {
+            resetItem.isEnabled = croppingID != nil && !edited.crop.isUntouched
+        }
     }
 
     private func resetCrop() {
@@ -534,6 +548,20 @@ final class MediaEditorViewController: UIViewController {
     /// else would put the canvas, the sheet and the stack's back-swipe back — the
     /// finalisation screen would inherit a locked canvas and a sheet that cannot
     /// be pulled shut.
+    /// ⚠️ **THE LINK IS INVALIDATED WHEN THE SCREEN GOES, AND THE PROXY ALONE
+    /// WAS NOT ENOUGH.** The proxy's reference back is weak, so the editor can be
+    /// deallocated — but the proxy's only `invalidate()` is inside `tick()`, and
+    /// a PAUSED link never ticks. `setEditingAccessory` builds and schedules the
+    /// link on every band change, including the one that shuts it, so opening
+    /// Crop or Filters and then leaving left a link on the main run loop forever.
+    /// One per editor session.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard isBeingDismissed || isMovingFromParent || navigationController == nil else { return }
+        followerProxy.link?.invalidate()
+        followerProxy.link = nil
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         // ⚠️ BEFORE `exitCrop`, WHICH SETTLES THE CANVAS AND WOULD START IT AGAIN.
@@ -1064,13 +1092,12 @@ final class MediaEditorViewController: UIViewController {
     /// above exists for.
     private var trackSeconds: Double = 0
 
-    /// Follows the playing clip with the needle, about fifteen times a second.
+    /// Follows the playing clip with the needle, at the display's own rate.
     ///
     /// ⚠️ **A NEEDLE NAILED TO THE CENTRE THAT NEVER MOVES READS AS BROKEN.** The
     /// film has to travel under it while the clip runs, and nothing in AVFoundation
-    /// pushes that: `playhead(in:)` is a poll. Fifteen a second is smooth at this
-    /// scale (60pt a second means four points a tick) and costs a fraction of a
-    /// display link's full rate.
+    /// pushes that: `playhead(in:)` is a poll. What rate it must run at is not a
+    /// judgement — see the note on the link itself, and charter T1.
     ///
     /// ⚠️ **AND IT IS PAUSED WHENEVER THE TRACK IS NOT THE TENANT.** A link left
     /// running would poll a player nobody is watching for as long as the editor
@@ -2333,6 +2360,8 @@ extension MediaEditorViewController {
     func debugTapResetCrop() { resetCrop() }
     /// Internal for tests: whether undo is offered, and where it lives now.
     var debugCanResetCrop: Bool { resetItem.isEnabled }
+    /// Internal for tests: whether a display link is still scheduled.
+    var debugFollowerIsScheduled: Bool { followerProxy.link != nil }
     /// Internal for tests: whether the bar is offering undo, and on which side.
     var debugBarOffersCropReset: Bool {
         navigationItem.leftBarButtonItems?.contains(where: { $0 === resetItem }) ?? false

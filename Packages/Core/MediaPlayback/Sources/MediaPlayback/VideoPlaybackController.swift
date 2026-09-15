@@ -794,6 +794,7 @@ public final class VideoPlaybackController {
         // `setPaused(false)` an anchor it never took.
         let key = ObjectIdentifier(player)
         if pausedAnchors[key] != nil { pausedAnchors[key] = target }
+        lastSeekTolerance = toleranceSeconds
         chased[key] = Chase(target: target, tolerance: tolerance)
         guard !seeking.contains(key) else { return }
         chase(player)
@@ -808,6 +809,7 @@ public final class VideoPlaybackController {
 
     private var chased: [ObjectIdentifier: Chase] = [:]
     private var seeking: Set<ObjectIdentifier> = []
+    private var lastSeekTolerance: Double?
     private var seeksLanded = 0
     private var seeksCancelled = 0
 
@@ -1349,9 +1351,22 @@ public final class VideoPlaybackController {
     /// Internal for tests: how many players have a seek in flight.
     public var debugSeeksInFlight: Int { seeking.count }
     /// Internal for tests: how many positions are queued behind a seek.
-    public var debugChasedCount: Int { chased.count }
+    /// ⚠️ **Internal for tests: the position QUEUED behind the seek in flight.**
+    /// The count of the dictionary is one entry per PLAYER and can never exceed
+    /// one with a single-player fixture, so asserting it is structurally true —
+    /// a real backlog regression would change `Chase` to an array and the outer
+    /// count would still read 1. The queued target can actually be wrong.
+    public func debugChasedTarget(in view: VideoRenderView) -> Double? {
+        guard let player = watchedPlayer(in: view) else { return nil }
+        return chased[ObjectIdentifier(player)]?.target.seconds
+    }
     /// Internal for tests: seeks that ran to completion.
     public var debugSeeksLanded: Int { seeksLanded }
+    /// ⚠️ **Internal for tests: the tolerance the LAST seek was asked with.** An
+    /// adapter that accepts a tolerance and forwards nothing compiles without a
+    /// warning and is invisible to any test that reads the value off a stub —
+    /// which is exactly what happened. This is what an adapter can be asked.
+    public var debugLastSeekToleranceSeconds: Double? { lastSeekTolerance }
     /// ⚠️ **Internal for tests: seeks KILLED BY A LATER ONE.** This is the whole
     /// measurement behind the chase pattern — a scrub asking sixty times a second
     /// without it cancels almost every request it makes, and the picture sits

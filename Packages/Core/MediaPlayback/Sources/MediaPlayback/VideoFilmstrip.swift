@@ -47,6 +47,23 @@ public final class VideoFilmstrip {
     /// automatically gets the cheap keyframe path because its half-spacing window
     /// is wide enough to contain one.
     ///
+    /// ⚠️ **AND THE RULE HAS A FLOOR IT DOES NOT ENFORCE — MEASURED.** Below
+    /// roughly one frame interval the window stops containing a frame at all and
+    /// the generator returns NOTHING rather than something near. Probed on a
+    /// 30fps clip, asking for three moments one spacing apart:
+    ///
+    /// ```
+    /// spacing 0.500  tolerance 0.2250  ->  3 of 3
+    /// spacing 0.100  tolerance 0.0450  ->  3 of 3
+    /// spacing 0.050  tolerance 0.0225  ->  3 of 3
+    /// spacing 0.033  tolerance 0.0149  ->  1 of 3
+    /// ```
+    ///
+    /// It is not reachable from the timeline: a tile is 54pt and the closest zoom
+    /// is 320 points a second, so the tightest spacing that can be asked for is
+    /// 0.169s — five times the cliff. `MediaTimeliningTests` pins that, so raising
+    /// the zoom ceiling past it turns a test red rather than emptying the strip.
+    ///
     /// A single frame has no spacing and gets the exact answer.
     public static func tolerance(forSpacingSeconds spacing: Double) -> Double {
         guard spacing.isFinite, spacing > 0 else { return 0 }
@@ -106,11 +123,4 @@ public final class VideoFilmstrip {
         return made
     }
 
-    /// How long the clip runs, for a caller laying a strip out against it.
-    public func duration(of url: URL) async -> Double? {
-        guard let seconds = try? await AVURLAsset(url: url).load(.duration).seconds,
-              seconds.isFinite, seconds > 0
-        else { return nil }
-        return seconds
-    }
 }

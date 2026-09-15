@@ -48,11 +48,12 @@ protocol MediaVideoPreviewing: AnyObject {
 
     /// Moves the clip in `surface` to `fraction` of its length.
     ///
-    /// ⚠️ **TOLERANT BY A QUARTER SECOND, AND THAT IS THE POINT.** An exact seek
-    /// decodes forward from the nearest keyframe, and a track being scrolled asks
-    /// again long before that finishes — the picture would lag a gesture it is
-    /// supposed to follow. The recorded reason lives on
-    /// `VideoPlaybackController.seek`.
+    /// ⚠️ **AS TOLERANT AS THE CALLER SAYS, AND THE CALLER KNOWS HOW FAST THE
+    /// FINGER IS GOING.** An exact seek decodes forward from the nearest keyframe
+    /// and a track being scrolled asks again long before that finishes; a loose
+    /// one lands on a keyframe and does not move at all under a slow drag. See
+    /// `MediaTimelining.seekTolerance`, which turns the distance a sample moved
+    /// into the slack it is worth.
     func seek(toFraction fraction: Double, in surface: VideoRenderView, toleranceSeconds: Double)
 
     /// Frames of `file` at the given SOURCE seconds, keyed by the second asked
@@ -119,7 +120,24 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
     }
 
     func seek(toFraction fraction: Double, in surface: VideoRenderView, toleranceSeconds: Double) {
-        controller.seek(toFraction: fraction, in: surface)
+        // ⚠️ **FORWARDED, AND FOR ONE COMMIT IT WAS NOT.** This body read
+        // `controller.seek(toFraction:in:)` — the parameter accepted and
+        // dropped, with no warning of any kind — so every seek took the
+        // controller's 0.25s default. That killed charter T7 outright (a
+        // creeping finger asks for 0.02 and got 0.25, which lands on keyframes,
+        // which is the dead-feeling track the rule exists to prevent) and broke
+        // the loop-back's invariant: it asks for 0.02 precisely so the landing
+        // is inside the cut, and 0.25 is four times `loopback`'s 0.06 slack, so
+        // the landing could fall back OUTSIDE and re-trigger on every beat.
+        //
+        // ⚠️ **AND NO TEST COULD SEE IT.** The charter-T7 assertions read the
+        // tolerance off a STUB that records it faithfully, while the one real
+        // implementation threw it away — the repository's own
+        // `laundered-assertion-trap`, wearing an adapter. `MediaPreviewPlayerTests`
+        // now asks this object.
+        controller.seek(
+            toFraction: fraction, in: surface, toleranceSeconds: toleranceSeconds
+        )
     }
 
     func isPaused(in surface: VideoRenderView) -> Bool? {
@@ -148,5 +166,7 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
     #if DEBUG
     /// Internal for tests: how many players this screen's pool is holding.
     var debugActivePlayerCount: Int { controller.activePlayerCount }
+    /// Internal for tests: what the controller underneath was actually asked for.
+    var debugLastSeekToleranceSeconds: Double? { controller.debugLastSeekToleranceSeconds }
     #endif
 }

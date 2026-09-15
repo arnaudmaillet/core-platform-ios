@@ -587,6 +587,22 @@ struct MediaTimeliningTests {
     /// not begun reports a scale of 1, and a recogniser that is cancelled can
     /// report nonsense; either answering zero would collapse the film to no width
     /// at all, which is a division by zero everywhere downstream.
+    /// ⚠️ **THE ZOOM CEILING KEEPS THE STRIP OUT OF THE GENERATOR'S CLIFF.**
+    /// `VideoFilmstrip.tolerance` is derived from the tile spacing, and below
+    /// roughly one frame interval the window stops containing a frame at all —
+    /// measured on a 30fps clip: spacing 0.050 returns 3 frames of 3, spacing
+    /// 0.033 returns ONE. A 54pt tile at the closest zoom is 0.169s apart, five
+    /// times clear of it. Raising the ceiling past about 1000 points a second
+    /// would empty the strip silently, so it turns this red first.
+    @Test func theClosestZoomStaysClearOfTheGeneratorsFloor() {
+        let tightest = MediaTimelining.tileSpacingSeconds(
+            pointsPerSecond: MediaTimelining.closestPointsPerSecond
+        )
+
+        #expect(tightest >= 0.05,
+                "at \(tightest)s between tiles the generator returns nothing for most of them")
+    }
+
     @Test func anImpossiblePinchChangesNothing() {
         #expect(MediaTimelining.zoomed(60, by: 0) == 60)
         #expect(MediaTimelining.zoomed(60, by: .nan) == 60)

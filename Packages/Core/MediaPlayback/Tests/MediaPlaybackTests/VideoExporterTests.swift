@@ -224,18 +224,33 @@ struct VideoExporterTests {
 
     /// ⚠️ **ONE PIECE AT 1x MUST NOT BUILD A COMPOSITION** — it is the trim every
     /// clip takes, and a composition there is a second reader and a second set of
-    /// tracks for an identical result. Asserted through the only thing visible
-    /// from outside: it still produces the same film as the `timeRange` spelling.
-    @Test func onePieceAtOneRateMatchesTheRangeSpelling() async throws {
-        let source = try await longerClip()
+    /// tracks for an identical result.
+    ///
+    /// ⚠️ **AND THIS USED TO COMPARE A PLAN WITH ITSELF.** It exported the
+    /// segment spelling against the `timeRange` spelling and compared durations —
+    /// but `init(sourceURL:timeRange:)` is sugar that builds exactly that
+    /// segment, so both plans were the same value taking the same branch, and
+    /// flipping the route would not have moved either number. Whether a
+    /// composition was built is INVISIBLE in the output; it has to be asked of
+    /// the decision.
+    @Test func onePieceAtOneRateTakesNoComposition() {
+        #expect(VideoExporter.needsComposition(for: []) == false, "an untouched clip")
+        #expect(VideoExporter.needsComposition(
+            for: [VideoExportSegment(start: 0.5, end: 1.5)]
+        ) == false, "a plain trim")
 
-        let asSegment = try await VideoExporter().export(VideoExportPlan(
-            sourceURL: source, segments: [VideoExportSegment(start: 0.5, end: 1.5)]
-        ))
-        let asRange = try await VideoExporter()
-            .export(VideoExportPlan(sourceURL: source, timeRange: 0.5...1.5))
+        #expect(VideoExporter.needsComposition(for: [
+            VideoExportSegment(start: 0, end: 1), VideoExportSegment(start: 2, end: 3)
+        ]), "two pieces cannot be one time range")
+        #expect(VideoExporter.needsComposition(
+            for: [VideoExportSegment(start: 0, end: 1, speed: 2)]
+        ), "a rate cannot be a time range either")
+    }
 
-        #expect(abs(asSegment.durationSeconds - asRange.durationSeconds) < 0.2,
-                "\(asSegment.durationSeconds) against \(asRange.durationSeconds)")
+    /// And the two spellings still agree, which is the sugar's own promise.
+    @Test func theRangeSpellingIsTheOnePieceSpelling() {
+        let sugar = VideoExportPlan(sourceURL: URL(filePath: "/x"), timeRange: 0.5...1.5)
+
+        #expect(sugar.segments == [VideoExportSegment(start: 0.5, end: 1.5)])
     }
 }
