@@ -168,7 +168,13 @@ final class MediaFilterRowView: UIView {
 /// Reported from a device: scrolling worked from some places and not others,
 /// which is exactly the shape of a row that only moves when the finger misses a
 /// button.
-private final class ChipScrollView: UIScrollView {
+/// ⚠️ **ONE DEFINITION, TWO USERS.** It was file-private while the filter row was
+/// the only strip of chips in this band; `MediaCropToolsView`'s row of shapes sits
+/// in the same band, competes with the same three outside pans, and would have
+/// needed a byte-for-byte copy of every rule below. `CarouselBackSwipe.edgeWidth`
+/// states the same reasoning: two copies of an arbitration rule drift, and the
+/// drift is invisible until a drag goes missing on one of them.
+final class ChipScrollView: UIScrollView {
     override func touchesShouldCancel(in view: UIView) -> Bool { true }
 
     /// ⚠️ **THE ROW IS ASKED BEFORE ANYTHING OUTSIDE IT.** A drag that begins in

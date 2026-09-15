@@ -33,6 +33,13 @@ struct NewPostTests {
     private final class StubLibrary: MediaLibraryReading {
         private(set) var requests: [(id: String, size: CGSize)] = []
 
+        /// ⚠️ **A FLAT COLOUR CANNOT SHOW A CROP.** Every other test here is
+        /// served by 2x2 of pure red — a look changes its colour, so a pixel is
+        /// enough. A crop changes WHICH pixels, and a picture that is red
+        /// everywhere is red wherever you cut it. Set this and the stub answers
+        /// red over blue, large enough to cut.
+        var answersTwoColours = false
+
         var access: MediaLibraryAccess { .granted }
         func requestAccess() async -> MediaLibraryAccess { .granted }
         /// Nothing to present against a stub — the seam exists so the picker can
@@ -43,9 +50,17 @@ struct NewPostTests {
 
         func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage? {
             requests.append((item, size))
-            return UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            guard answersTwoColours else {
+                return UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+                    UIColor.red.setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+                }
+            }
+            return UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { context in
                 UIColor.red.setFill()
-                context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+                context.fill(CGRect(x: 0, y: 0, width: 40, height: 20))
+                UIColor.blue.setFill()
+                context.fill(CGRect(x: 0, y: 20, width: 40, height: 20))
             }
         }
 
@@ -101,14 +116,13 @@ struct NewPostTests {
 
     private func open(
         _ items: [MediaLibraryItem],
-        fits: [String: ContentFit] = [:],
-        filters: [String: MediaFilter] = [:]
+        edits: [String: MediaEdits] = [:]
     ) -> Screen {
         let library = StubLibrary()
         let composer = RecordingComposer()
         let handed = Handed()
         let post = NewPostViewController(
-            items: items, fits: fits, filters: filters, library: library, composer: composer
+            items: items, edits: edits, library: library, composer: composer
         ) { handed.entry = $0 }
         let navigation = UINavigationController(rootViewController: post)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -176,7 +190,7 @@ struct NewPostTests {
     /// actually goes, and it reads its PIXELS — "an image was published" is
     /// satisfied just as well by an untouched photograph.
     @Test func aChosenLookIsBakedIntoThePictureThatIsPublished() async throws {
-        let screen = open(Self.items(1), filters: ["photo-0": .mono])
+        let screen = open(Self.items(1), edits: ["photo-0": MediaEdits(filter: .mono)])
 
         screen.post.debugTapPost()
         let images = try await publishedImages(from: screen.composer)
@@ -201,6 +215,41 @@ struct NewPostTests {
         let pixel = try #require(Self.centrePixel(of: picture.image))
         #expect(pixel.r > pixel.g + 60, "still the red the library answered with: \(pixel)")
         #expect(pixel.r > pixel.b + 60, "untouched, not levelled: \(pixel)")
+    }
+
+    /// ⚠️ **THE CROP MUST REACH THE UPLOAD TOO, AND NOTHING ASSERTED THAT UNTIL
+    /// THIS EXISTED.** The look had `aChosenLookIsBakedIntoThePictureThatIsPublished`
+    /// from the day it shipped; the crop travelled through four render paths with
+    /// only the preview ones checked. This reads the PIXELS of the picture handed
+    /// to the composer, which is the only place the author's rectangle actually
+    /// matters.
+    @Test func aChosenCropIsBakedIntoThePictureThatIsPublished() async throws {
+        let top = MediaCrop(rect: CGRect(x: 0, y: 0, width: 1, height: 0.5))
+        let screen = open(Self.items(1), edits: ["photo-0": MediaEdits(crop: top)])
+        screen.library.answersTwoColours = true
+
+        screen.post.debugTapPost()
+        let images = try await publishedImages(from: screen.composer)
+
+        let picture = try #require(images.first, "nothing reached the composer")
+        let pixel = try #require(Self.centrePixel(of: picture.image))
+        #expect(pixel.r > pixel.b + 60, "the top half is red: \(pixel)")
+    }
+
+    /// The half that makes it mean something: move the rectangle and the
+    /// published pixels move with it. Without this, a bake that ignored the crop
+    /// entirely would satisfy the line above — the source's centre is red too.
+    @Test func aCropOfTheBottomPublishesTheBottom() async throws {
+        let bottom = MediaCrop(rect: CGRect(x: 0, y: 0.5, width: 1, height: 0.5))
+        let screen = open(Self.items(1), edits: ["photo-0": MediaEdits(crop: bottom)])
+        screen.library.answersTwoColours = true
+
+        screen.post.debugTapPost()
+        let images = try await publishedImages(from: screen.composer)
+
+        let picture = try #require(images.first, "nothing reached the composer")
+        let pixel = try #require(Self.centrePixel(of: picture.image))
+        #expect(pixel.b > pixel.r + 60, "the bottom half is blue: \(pixel)")
     }
 
     // MARK: - The cover
@@ -358,7 +407,7 @@ struct NewPostTests {
     /// and a device capture proves nothing either way. This asks the view
     /// directly, so the geometry cannot hide the answer.
     @Test func theThumbnailsWearTheFitChosenInTheEditor() async throws {
-        let screen = open(Self.items(3), fits: ["photo-1": .fit])
+        let screen = open(Self.items(3), edits: ["photo-1": MediaEdits(fit: .fit)])
         try await settle(until: { !Self.strips(in: screen.window).isEmpty })
         screen.window.layoutIfNeeded()
 

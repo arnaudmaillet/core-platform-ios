@@ -35,6 +35,15 @@ final class MediaPageDotsView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
+        // ⚠️ **A `CGColor` DOES NOT FOLLOW AN APPEARANCE CHANGE.** The dot's fill
+        // is a `UIColor` and re-resolves itself; its HALO is a `layer.shadowColor`,
+        // resolved once at the moment it was read. Without this the halo would keep
+        // the colour the device had when the screen was built, and a dot switched
+        // to dark would carry a dark halo — the one combination that is invisible
+        // on both. `MediaFilterRowView`'s chip ring states the same rule.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (dots: MediaPageDotsView, _) in
+            dots.restateHaloes()
+        }
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = Metrics.spacing
@@ -67,14 +76,21 @@ final class MediaPageDotsView: UIView {
         }
     }
 
-    /// ⚠️ INK THAT SURVIVES THE PICTURE. These sit on media of any brightness,
-    /// so a white dot carries a dark halo — the same answer the card's dots
-    /// reached, restated in four lines rather than imported with a package.
+    /// ⚠️ INK THAT SURVIVES THE PICTURE — AND, SINCE THE EDITOR'S GROUND STARTED
+    /// FOLLOWING THE DEVICE, THE GROUND TOO. These sit on media of any brightness,
+    /// so a dot carries a halo of the opposite colour; a white dot with a dark halo
+    /// was right while the ground was always black, and invisible the moment a
+    /// fitted picture left white showing behind it. Semantic ink and a semantic
+    /// halo are legible over both.
+    private func restateHaloes() {
+        for dot in dots { dot.layer.shadowColor = UIColor.systemBackground.cgColor }
+    }
+
     private func makeDot() -> UIView {
         let dot = UIView()
-        dot.backgroundColor = .white
+        dot.backgroundColor = .label
         dot.layer.cornerRadius = Metrics.diameter / 2
-        dot.layer.shadowColor = UIColor.black.cgColor
+        dot.layer.shadowColor = UIColor.systemBackground.cgColor
         dot.layer.shadowOffset = .zero
         dot.layer.shadowRadius = 2
         dot.layer.shadowOpacity = 0.45

@@ -77,19 +77,29 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// feed will show this post by — badging index 0 would promise a cover that
     /// never arrives, which is the very thing §22 exists to stop. The screen
     /// says which item is the cover and this draws that one.
-    /// ⚠️ **THE THUMBNAILS HONOUR THE EDITOR'S CHOICE.** A picture the author
-    /// chose to show WHOLE must not come back cropped one screen later — the
-    /// strip is the same media, so it obeys the same decision.
+    /// ⚠️ **THE THUMBNAILS HONOUR THE EDITOR'S CHOICES — ALL OF THEM.** A picture
+    /// the author chose to show WHOLE must not come back cropped one screen later,
+    /// and one they cut or dressed must not come back whole or undressed. The strip
+    /// is the same media, so it obeys the same decisions.
+    ///
+    /// ⚠️ **IT HONOURED ONE OF THREE UNTIL THE CROP WORK, AND THAT WAS A BUG THIS
+    /// ROW SHIPPED.** The fit was read; the look was not applied at all, so a
+    /// picture made mono in the editor came back in colour on this screen. Adding
+    /// the crop alone would have made it two of three. `MediaEdits.applied(to:)` is
+    /// now the one render both this strip and `post()` go through.
     func show(
         _ items: [MediaLibraryItem],
         coverID: String?,
-        fits: [String: ContentFit] = [:],
+        edits: [String: MediaEdits] = [:],
         thumbnail: @escaping @MainActor (String, CGSize) async -> UIImage?
     ) {
-        // ⚠️ THE KEY CARRIES EACH TILE'S FIT, NOT JUST ITS IDENTITY. The same
-        // pictures in the same order can still need redrawing, because the
-        // author may have changed one from filled to whole in the editor.
-        let wanted = items.map { "\($0.id)=\(fits[$0.id] ?? .fill)" }
+        // ⚠️ **THE KEY CARRIES EVERY DECISION, NOT JUST THE IDENTITY** — the same
+        // pictures in the same order can still need redrawing, because the author
+        // may have changed one of them in the editor. This `guard` is the only
+        // thing that redraws the strip, so a decision missing from the key is a
+        // thumbnail that silently keeps showing the previous one; `signature`
+        // spells the fields rather than hashing them for exactly that reason.
+        let wanted = items.map { "\($0.id)=\((edits[$0.id] ?? .untouched).signature)" }
         guard wanted != shown else { return }
         shown = wanted
         for view in row.arrangedSubviews { view.removeFromSuperview() }
@@ -97,7 +107,7 @@ final class NewPostMediaCell: UICollectionViewListCell {
         let size = CGSize(width: Metrics.width * 2, height: Metrics.height * 2)
         for item in items {
             let picture = UIImageView()
-            picture.contentMode = (fits[item.id] ?? .fill).mode
+            picture.contentMode = (edits[item.id] ?? .untouched).fit.mode
             picture.clipsToBounds = true
             // ⚠️ BLACK, NOT A GREY FILL. In a 9:16 frame a fitted picture shows
             // its ground on two sides, and that ground IS the letterbox — it
@@ -131,9 +141,10 @@ final class NewPostMediaCell: UICollectionViewListCell {
 
             row.addArrangedSubview(picture)
             let id = item.id
+            let chosen = edits[id] ?? .untouched
             Task { [weak picture] in
                 let image = await thumbnail(id, size)
-                picture?.image = image
+                picture?.image = image.map { chosen.applied(to: $0) }
             }
         }
     }

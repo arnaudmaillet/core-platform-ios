@@ -17,8 +17,20 @@ import UIKit
 /// the picture — which is why `MediaCropTests` crops a two-colour image rather
 /// than only checking that the dimensions changed.
 struct MediaCrop: Equatable, Sendable {
-    /// The kept rectangle, in fractions of the source: `(0,0)` is its top-left
-    /// corner and `(1,1)` its bottom-right.
+    /// The kept rectangle, in fractions of the **straightened** picture's
+    /// bounding box: `(0,0)` is its top-left corner and `(1,1)` its
+    /// bottom-right.
+    ///
+    /// ⚠️ **"OF THE SOURCE" IS WHAT THIS COMMENT USED TO SAY, AND IT IS TRUE
+    /// ONLY AT ZERO DEGREES.** `MediaCropRenderer` turns the picture FIRST and
+    /// then cuts in fractions of `straightened.extent` — the upright box that
+    /// CONTAINS the turned picture, which at any other angle is strictly larger
+    /// than the source on both axes and carries four transparent corners. A crop
+    /// UI written against the old wording lands a different photograph at every
+    /// non-zero angle, and no test in `MediaCropTests` could see it: every case
+    /// there but one uses angle zero, where the two readings coincide.
+    /// `MediaCropGeometry` is where the distinction is actually honoured, and
+    /// `MediaCropGeometryTests` is what pins it.
     var rect: CGRect
 
     /// Straightening, in degrees, **positive turns the picture clockwise** as the
@@ -31,15 +43,39 @@ struct MediaCrop: Equatable, Sendable {
     /// here will catch it — look at the picture.
     var angle: CGFloat
 
-    /// The whole picture, unturned: the absence of a crop rather than a crop that
-    /// does nothing, so the renderer can hand the source straight back.
+    /// Whether the picture is shown as its own reflection, left for right.
+    ///
+    /// ⚠️ **THIS TYPE COULD NOT EXPRESS A MIRROR UNTIL IT HAD THIS FIELD, AND
+    /// THAT WAS A DELIBERATE LIMIT, NOT AN OVERSIGHT.** A crop is a rectangle and
+    /// an angle; both are similarities, and every piece of arithmetic in
+    /// `MediaCropGeometry` assumes a positive uniform scale. A reflection is the
+    /// one transform that breaks that assumption — it is why reading an angle back
+    /// off a matrix needs a positive-determinant guard. It is carried as a flag
+    /// rather than as a negative scale for exactly that reason: the flag is applied
+    /// at one named moment on each side, and nothing else has to know.
+    ///
+    /// ⚠️ **MIRRORED FIRST, THEN TURNED — ON BOTH SIDES.** The renderer reflects
+    /// the source before it straightens it, and the editing surface composes its
+    /// transform in the same order (`rotation.scaledBy(x: -scale, …)` scales before
+    /// it rotates). Reversing either one alone puts the reflection about a
+    /// different axis, and the result is a photograph, not an error.
+    var isMirrored: Bool
+
+    /// The whole picture, unturned and unreflected: the absence of a crop rather
+    /// than a crop that does nothing, so the renderer can hand the source straight
+    /// back.
     static let untouched = MediaCrop(rect: CGRect(x: 0, y: 0, width: 1, height: 1), angle: 0)
 
     var isUntouched: Bool { self == .untouched }
 
-    init(rect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1), angle: CGFloat = 0) {
+    init(
+        rect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1),
+        angle: CGFloat = 0,
+        isMirrored: Bool = false
+    ) {
         self.rect = rect
         self.angle = angle
+        self.isMirrored = isMirrored
     }
 }
 
@@ -62,19 +98,27 @@ enum MediaCropRenderer {
     /// always returns the source itself and pays no GPU cost.
     static func apply(_ crop: MediaCrop, to image: UIImage) -> UIImage? {
         guard !crop.isUntouched else { return image }
-        guard let source = CIImage(image: image) else { return nil }
+        let upright = upturned(image)
+        guard let source = CIImage(image: upright) else { return nil }
 
-        // Straighten first, so the kept rectangle is expressed against the
+        // ⚠️ REFLECTED BEFORE ANYTHING ELSE — see `MediaCrop.isMirrored`. The
+        // surface composes its transform in the same order, and the two agree only
+        // because both do this first.
+        let facing = crop.isMirrored
+            ? source.transformed(by: CGAffineTransform(scaleX: -1, y: 1))
+            : source
+
+        // Straighten next, so the kept rectangle is expressed against the
         // picture the author was actually looking at.
         let straightened: CIImage
         if crop.angle == 0 {
-            straightened = source
+            straightened = facing
         } else {
             // ⚠️ NEGATED. Core Image's y axis points up, so a positive rotation
             // there turns the image anticlockwise — the opposite of the clockwise
             // convention `angle` declares.
             let radians = -crop.angle * .pi / 180
-            straightened = source.transformed(by: CGAffineTransform(rotationAngle: radians))
+            straightened = facing.transformed(by: CGAffineTransform(rotationAngle: radians))
         }
 
         let extent = straightened.extent
@@ -95,10 +139,46 @@ enum MediaCropRenderer {
               let rendered = context.createCGImage(cut, from: cut.extent)
         else { return nil }
 
-        // ⚠️ SCALE AND ORIENTATION CARRIED OVER, NOT DEFAULTED — `UIImage(cgImage:)`
-        // alone lands at scale 1 and `.up`, which doubles a Retina thumbnail's
-        // apparent size and rotates anything the camera recorded sideways. Stated
-        // in `MediaFilterRenderer` for the same reason.
-        return UIImage(cgImage: rendered, scale: image.scale, orientation: image.imageOrientation)
+        // ⚠️ SCALE CARRIED OVER, NOT DEFAULTED — `UIImage(cgImage:)` alone lands at
+        // scale 1, which doubles a Retina thumbnail's apparent size. Stated in
+        // `MediaFilterRenderer` for the same reason.
+        //
+        // ⚠️ AND THE ORIENTATION IS `upright`'s, WHICH IS ALWAYS `.up`. A filter
+        // leaves the geometry alone, so carrying the source's flag through is
+        // right there; a crop does not, and `upturned` has already spent the
+        // turn. Stamping the original flag back on would turn the picture a
+        // second time.
+        return UIImage(cgImage: rendered, scale: upright.scale, orientation: upright.imageOrientation)
+    }
+
+    /// The same photograph with the camera's turn spent, so the pixels are laid
+    /// out the way the author saw them.
+    ///
+    /// ⚠️ **`CIImage(image:)` READS THE BUFFER AND NOT THE FLAG — MEASURED, NOT
+    /// ASSUMED.** A two-colour picture declared `.right` and cut down its top
+    /// half came back holding BOTH colours in equal measure (r=128, b=127): the
+    /// cut had been taken across the raw buffer while the author had aimed it at
+    /// the picture as drawn. Nothing about that failure looks like a failure —
+    /// the dimensions are right, the render succeeds, the orientation flag comes
+    /// back intact, and the post simply carries a rectangle nobody chose.
+    /// `keepingTheTopOfASidewaysPhotographReturnsItsTop` is the colour that
+    /// catches it.
+    ///
+    /// ⚠️ **AND `image.size` IS ALREADY THE TURNED SIZE.** For a `.left` or
+    /// `.right` photograph UIKit reports the size the viewer sees, with the axes
+    /// swapped relative to the buffer — so drawing into a context of that size
+    /// is what makes the two agree, and it is also why a crop UI may go on using
+    /// `image.size` as the source's proportions without a second thought.
+    ///
+    /// Free for a picture that is already upright, which is what `PHImageManager`
+    /// usually vends.
+    private static func upturned(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = image.scale
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
     }
 }

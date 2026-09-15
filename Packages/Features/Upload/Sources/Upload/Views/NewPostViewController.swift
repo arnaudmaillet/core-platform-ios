@@ -130,13 +130,10 @@ final class NewPostViewController: UIViewController {
     static let dismissTapName = "newPost.dismissKeyboard"
 
     private let items: [MediaLibraryItem]
-    /// How the author left each picture in the editor. Absent means `.fill`,
-    /// which is where the canvas starts.
-    private let fits: [String: ContentFit]
-
-    /// The look chosen for each picture in the editor, baked into what is
-    /// uploaded — see `post()`. Absent means `.original`.
-    private let filters: [String: MediaFilter]
+    /// How the author left each picture in the editor — see `MediaEdits`. Absent
+    /// means untouched. The crop and the look are baked into what is uploaded
+    /// (see `post()`); the fit is honoured by the screens that draw the picture.
+    private let edits: [String: MediaEdits]
     private let library: any MediaLibraryReading
     private let composer: any PostComposing
     /// Where a published post hands back to — the flow's own dismissal.
@@ -184,16 +181,14 @@ final class NewPostViewController: UIViewController {
 
     init(
         items: [MediaLibraryItem],
-        fits: [String: ContentFit] = [:],
-        filters: [String: MediaFilter] = [:],
+        edits: [String: MediaEdits] = [:],
         library: any MediaLibraryReading,
         composer: any PostComposing,
         draft: PostDraft = PostDraft(),
         onPublished: @escaping (FeedEntry) -> Void
     ) {
         self.items = items
-        self.fits = fits
-        self.filters = filters
+        self.edits = edits
         self.library = library
         self.composer = composer
         self.draft = draft
@@ -284,7 +279,7 @@ final class NewPostViewController: UIViewController {
 
         let media = UICollectionView.CellRegistration<NewPostMediaCell, Row> { [weak self] cell, _, _ in
             guard let self else { return }
-            cell.show(publishOrder, coverID: coverID, fits: fits) { [weak self] id, size in
+            cell.show(publishOrder, coverID: coverID, edits: edits) { [weak self] id, size in
                 await self?.library.thumbnail(for: id, size: size)
             }
         }
@@ -623,17 +618,21 @@ final class NewPostViewController: UIViewController {
                         continue
                     }
                     // ⚠️ **BAKED HERE, ON THE FULL-RESOLUTION PICTURE.** The editor
-                    // showed the look on a canvas-sized render and on a 56pt chip;
-                    // neither of those is what gets uploaded. The filter is applied
-                    // to the publish-sized image and BEFORE `MediaEncoder`, which
-                    // downscales and compresses — filtering after that would work
-                    // on pixels the viewer never approved.
+                    // showed the crop and the look on a canvas-sized render and on a
+                    // 56pt chip; neither of those is what gets uploaded. Both are
+                    // applied to the publish-sized image and BEFORE `MediaEncoder`,
+                    // which downscales and compresses — rendering after that would
+                    // work on pixels the viewer never approved.
+                    //
+                    // ⚠️ THE ORDER IS CUT THEN DRESS, and it lives in one place:
+                    // `MediaEdits.applied(to:)`, which four render paths share so
+                    // they cannot drift apart.
                     //
                     // ⚠️ A FAILED RENDER PUBLISHES THE ORIGINAL RATHER THAN NOTHING.
-                    // Dropping the picture because a filter could not be rasterised
-                    // would lose the author's photograph over a decoration.
-                    let look = filters[item.id] ?? .original
-                    let baked = MediaFilterRenderer.apply(look, to: image) ?? image
+                    // Dropping the picture because a crop or a filter could not be
+                    // rasterised would lose the author's photograph over a
+                    // decoration. `applied(to:)` carries that rule.
+                    let baked = (edits[item.id] ?? .untouched).applied(to: image)
                     media.append(.image(PickedImage(baked)))
                 }
                 let entry = try await composer.publish(media: media, caption: caption, as: nil)

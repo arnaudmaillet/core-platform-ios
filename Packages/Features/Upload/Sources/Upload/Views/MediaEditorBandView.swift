@@ -74,3 +74,40 @@ final class MediaEditorBandView: UIView {
     /// Internal for tests: whether the band is standing open.
     var debugIsShowing: Bool { !isHidden && content != nil }
 }
+
+/// A line of text where a control would be, for a mode the picture in front of
+/// the author cannot use.
+///
+/// ⚠️ **SAYING SO IS THE POINT.** The alternative — offering the tools and
+/// quietly dropping what they produce — is the failure mode the finalisation
+/// screen's own footer exists to avoid ("Videos can't be posted yet — only the
+/// photos in this selection will go"), and the one `dev/BACKEND_GAPS.md` §22
+/// names as the line a local control must not cross.
+@MainActor
+final class BandNoticeView: UIView {
+    private let caption = UILabel()
+
+    init(_ text: String) {
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        caption.text = text
+        caption.font = .systemFont(ofSize: 13)
+        // The editor's ground follows the device's appearance, so the ink that
+        // follows it too is the one that is never wrong. See the note in
+        // `StraightenDialView` for the version of this that was measured.
+        caption.textColor = .secondaryLabel
+        caption.textAlignment = .center
+        caption.numberOfLines = 2
+        caption.constrain(in: self) { view in
+            caption.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg)
+            caption.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg)
+            caption.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        }
+        heightAnchor.constraint(equalToConstant: 44).isActive = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Internal for tests: what the band is saying.
+    var debugText: String? { caption.text }
+}
