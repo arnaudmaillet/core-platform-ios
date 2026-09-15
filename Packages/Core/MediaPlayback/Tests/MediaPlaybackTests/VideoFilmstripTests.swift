@@ -4,6 +4,7 @@ import Testing
 import UIKit
 @testable import MediaPlayback
 
+@MainActor
 struct VideoFilmstripTests {
     private func clip(seconds: Double = 2) async throws -> URL {
         try await PlaceholderVideoFetcher(durationSeconds: seconds)
@@ -24,70 +25,65 @@ struct VideoFilmstripTests {
         return pixels
     }
 
-    @Test func itReturnsAsManyFramesAsAskedFor() async throws {
-        let frames = await VideoFilmstrip().frames(of: try await clip(), count: 6, height: 40)
-        #expect(frames.count == 6, "got \(frames.count)")
-        #expect(frames.allSatisfy { $0.size.height > 0 })
+    private static func fingerprint(_ image: UIImage) -> String? {
+        row(image).map { $0.map(String.init).joined(separator: ",") }
+    }
+
+    // MARK: - Asking by time
+
+    @Test func everyMomentAskedForComesBackUnderItsOwnKey() async throws {
+        let wanted = [0.2, 0.7, 1.2, 1.7]
+
+        let frames = await VideoFilmstrip().frames(
+            of: try await clip(), atSourceSeconds: wanted, height: 40, spacing: 0.5
+        )
+
+        #expect(Set(frames.keys) == Set(wanted), "got \(frames.keys.sorted())")
+        #expect(frames.values.allSatisfy { $0.size.height > 0 })
     }
 
     /// ⚠️ **THE TRAP THIS SAMPLER EXISTS TO AVOID, AND THIS REPO HAS PAID FOR IT
-    /// ONCE ALREADY.** `AVAssetImageGenerator` defaults to INFINITE tolerance in
-    /// both directions and will happily answer every request with the nearest
-    /// keyframe. `IconBaker`'s `VideoDocument` records the result: a 24-frame
-    /// sample came back as **three images repeated eight times**, nothing
-    /// erroring, nothing looking wrong until someone counted.
+    /// TWICE.** `AVAssetImageGenerator` defaults to INFINITE tolerance both ways
+    /// and answers every request with the nearest keyframe. `IconBaker`'s
+    /// `VideoDocument` records a 24-frame sample coming back as three images
+    /// repeated eight times; measured again on a 10-minute clip with a 2s GOP,
+    /// 600 requests one second apart returned 300 distinct frames.
     ///
-    /// Every structural assertion — the right count, the right size, real
-    /// `UIImage`s — passes on a strip of eight identical pictures. Only reading
-    /// the pixels can tell a filmstrip from a wallpaper.
+    /// Every structural assertion — the right keys, real `UIImage`s — passes on
+    /// a strip of identical pictures. Only reading the pixels can tell a
+    /// filmstrip from a wallpaper.
     @Test func theFramesAreDifferentPicturesAndNotOneRepeated() async throws {
-        let frames = await VideoFilmstrip().frames(of: try await clip(), count: 6, height: 40)
-        #expect(frames.count == 6, "guard: the strip was built")
+        let wanted = [0.2, 0.7, 1.2, 1.7]
 
-        let rows = frames.compactMap { Self.row($0) }
-        #expect(rows.count == frames.count, "guard: every frame could be read")
+        let frames = await VideoFilmstrip().frames(
+            of: try await clip(), atSourceSeconds: wanted, height: 40, spacing: 0.5
+        )
 
-        let distinct = Set(rows.map { $0.map(String.init).joined(separator: ",") })
-        #expect(distinct.count >= 4,
-                "only \(distinct.count) distinct pictures across \(frames.count) frames")
+        let prints = frames.values.compactMap { Self.fingerprint($0) }
+        #expect(prints.count == wanted.count, "guard: every frame could be read")
+        #expect(Set(prints).count >= 3,
+                "only \(Set(prints).count) distinct pictures across \(prints.count) frames")
     }
 
-    /// Ordered by time, not by whatever order the generator finished in. A
-    /// shuffled filmstrip is a lie about the clip, and the generator makes no
-    /// promise about delivery order.
-    ///
-    /// The band sweeps left to right, so the picture's brightest column marches
-    /// across the strip; a shuffle would break the march.
-    @Test func theFramesComeBackInClipOrder() async throws {
-        let frames = await VideoFilmstrip().frames(of: try await clip(), count: 5, height: 40)
-        let brightest = frames.compactMap { Self.brightestColumn(of: $0) }
-        #expect(brightest.count == frames.count, "guard: every frame was read")
-        #expect(brightest == brightest.sorted(),
-                "the bright band does not march in order: \(brightest)")
-    }
+    /// ⚠️ **KEYED BY THE REQUEST, NOT BY WHERE THE GENERATOR LANDED.** Two
+    /// requests can settle on one frame, and keying by `actualTime` would collapse
+    /// them into a single entry — a hole in the strip that reads as a decode
+    /// failure. Asking for two moments a long way apart and getting two keys back
+    /// is the cheap version of that assertion; the picture test above is the
+    /// expensive one.
+    @Test func twoMomentsAreTwoEntriesEvenWhenTheyShareAKeyframe() async throws {
+        let frames = await VideoFilmstrip().frames(
+            of: try await clip(), atSourceSeconds: [0.30, 0.34], height: 40, spacing: 0.04
+        )
 
-    /// Which of the eight samples is the lightest — the sweeping band's place.
-    ///
-    /// ⚠️ SPELLED OUT RATHER THAN CHAINED. This was one `compactMap` holding a
-    /// `stride().map` and a `firstIndex(of:)`, and the compiler gave up type
-    /// checking it — the error names a time limit, not a mistake, and the fix is
-    /// always to give the pieces names. `DebugMediaLibrary`'s init carries the
-    /// same note for the same reason.
-    private static func brightestColumn(of image: UIImage) -> Int? {
-        guard let row = Self.row(image) else { return nil }
-        var sums: [Int] = []
-        for sample in stride(from: 0, to: row.count, by: 4) {
-            let red = Int(row[sample])
-            let green = Int(row[sample + 1])
-            let blue = Int(row[sample + 2])
-            sums.append(red + green + blue)
-        }
-        guard let peak = sums.max() else { return nil }
-        return sums.firstIndex(of: peak)
+        #expect(frames.count == 2, "got \(frames.keys.sorted())")
     }
 
     @Test func askingForNothingReturnsNothing() async throws {
-        #expect(await VideoFilmstrip().frames(of: try await clip(), count: 0, height: 40).isEmpty)
+        let frames = await VideoFilmstrip().frames(
+            of: try await clip(), atSourceSeconds: [], height: 40, spacing: 1
+        )
+        #expect(frames.isEmpty)
     }
 
     /// A file with no clip behind it answers empty rather than throwing at a
@@ -95,6 +91,42 @@ struct VideoFilmstripTests {
     @Test func anUnreadableFileAnswersEmpty() async {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("no-such-clip-\(UUID().uuidString).mp4")
-        #expect(await VideoFilmstrip().frames(of: missing, count: 4, height: 40).isEmpty)
+        let frames = await VideoFilmstrip().frames(
+            of: missing, atSourceSeconds: [0.1, 0.2], height: 40, spacing: 0.1
+        )
+        #expect(frames.isEmpty)
+    }
+
+    // MARK: - Tolerance (charter T5)
+
+    /// ⚠️ **JUST UNDER HALF THE SPACING, AND BOTH CONSTANTS ARE WRONG.** Measured
+    /// on a 10-minute 1080p30 clip with a 2-second GOP: tolerance strictly below
+    /// half the sampling interval is fully distinct at ~8.5 ms a frame; tolerance
+    /// at or above the interval snaps to keyframes at ~1.5 ms — six times
+    /// cheaper, and a strip that repeats itself. Deriving it from the spacing
+    /// buys distinctness always and the cheap path automatically, because a
+    /// coarse strip's half-spacing window is wide enough to hold a keyframe.
+    @Test func theToleranceIsAlwaysUnderHalfTheSpacing() {
+        for spacing in [0.04, 0.5, 1.0, 2.0, 30.0] {
+            let tolerance = VideoFilmstrip.tolerance(forSpacingSeconds: spacing)
+            #expect(tolerance < spacing / 2,
+                    "at \(spacing)s spacing a tolerance of \(tolerance)s repeats frames")
+            #expect(tolerance > 0, "at \(spacing)s spacing the generator pays full price")
+        }
+    }
+
+    /// And it GROWS with the spacing — a constant would be either wrong or
+    /// needlessly exact at one end of the range.
+    @Test func aCoarserStripBuysACheaperTolerance() {
+        let tight = VideoFilmstrip.tolerance(forSpacingSeconds: 0.1)
+        let loose = VideoFilmstrip.tolerance(forSpacingSeconds: 10)
+
+        #expect(loose > tight * 10, "the tolerance is effectively a constant")
+    }
+
+    @Test func aSpacingThatMeansNothingAsksExactly() {
+        #expect(VideoFilmstrip.tolerance(forSpacingSeconds: 0) == 0)
+        #expect(VideoFilmstrip.tolerance(forSpacingSeconds: -1) == 0)
+        #expect(VideoFilmstrip.tolerance(forSpacingSeconds: .nan) == 0)
     }
 }

@@ -1,6 +1,7 @@
 // `AVURLAsset` — the trim is resolved against the FILE's length, not the item's
 // declared one. See the note in `post()`.
 import AVFoundation
+import MediaPlayback
 import CoreModels
 import DesignSystem
 import UIKit
@@ -168,9 +169,24 @@ final class NewPostViewController: UIViewController {
     /// ⚠️ DRAWN AND INERT, like the editor's. Media drafts do not exist —
     /// `MediaDraftsViewController` is an empty list waiting for the notion — and
     /// `PostDraftStore` holds text only.
-    private lazy var saveDraftItem = UIBarButtonItem(
-        title: "Save draft", style: .plain, target: nil, action: nil
-    )
+    /// ⚠️ **AN ICON, NOT THE WORDS "Save draft" — AND THE REASON IS THE BAR'S
+    /// WIDTH BUDGET.** A navigation bar lays its leading items out from the
+    /// chevron inwards and collapses what will not fit into a `•••` overflow;
+    /// `navbar-leading-selector-collapse` records this screen family losing a
+    /// control to exactly that on an SE. Two words cost more than sixty points
+    /// beside a chevron and a reset arrow, which is more than a small phone has
+    /// to give. `square.and.arrow.down.badge.clock` is the system's own drawing
+    /// for "put this away for later" and was verified against the RUNTIME, not a
+    /// catalogue — a symbol that does not exist draws an empty capsule that still
+    /// takes taps, which reads as a rendering fault on somebody's phone.
+    private lazy var saveDraftItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "square.and.arrow.down.badge.clock"),
+            style: .plain, target: nil, action: nil
+        )
+        item.accessibilityLabel = "Save draft"
+        return item
+    }()
 
 
     /// What will actually be published, in order: the cover first, then the rest
@@ -667,19 +683,33 @@ final class NewPostViewController: UIViewController {
                         // say 52 seconds over a file of two and a half.
                         // Resolving against the declaration would hand the
                         // exporter a range past the end and publish nothing.
-                        // The editor's strip asks the same question of the same
+                        // The editor's track asks the same question of the same
                         // asset, so the two cannot drift apart.
-                        var kept: ClosedRange<Double>?
+                        var kept: [VideoExportSegment] = []
                         let declared: Double
                         if case .video(let seconds) = item.kind { declared = seconds } else { declared = 0 }
                         let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
                         let length = real.isFinite && real > 0 ? real : declared
-                        let trim = (edits[item.id] ?? .untouched).trim
-                        if MediaTrimming.cuts(trim, within: length) {
-                            kept = MediaTrimming.resolved(trim, within: length)
+                        let timeline = (edits[item.id] ?? .untouched).timeline
+                        if MediaTimelining.cuts(timeline, withinSource: length) {
+                            // ⚠️ **EVERY PIECE, AND THIS LINE USED TO TAKE ONLY
+                            // THE FIRST.** `PickedVideo` carried a single range
+                            // and the exporter a single `insertTimeRange`, so a
+                            // timeline of several pieces published its opening
+                            // one and dropped the rest — silently, because what
+                            // came out was a perfectly good video. The composer
+                            // and the exporter both take a list now, which is
+                            // what makes offering a split honest.
+                            kept = MediaTimelining
+                                .resolved(timeline, withinSource: length)
+                                .map {
+                                    VideoExportSegment(
+                                        start: $0.start, end: $0.end, speed: $0.speed
+                                    )
+                                }
                         }
                         media.append(
-                            .video(PickedVideo(sourceURL: file, keptSeconds: kept))
+                            .video(PickedVideo(sourceURL: file, keptPieces: kept))
                         )
                         continue
                     }

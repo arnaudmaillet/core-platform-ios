@@ -28,15 +28,52 @@ protocol MediaVideoPreviewing: AnyObject {
     /// its place.
     func setPaused(_ paused: Bool, in surface: VideoRenderView)
 
+    /// Whether the clip in `surface` is stopped. Nil when nothing is bound.
+    func isPaused(in surface: VideoRenderView) -> Bool?
+
     /// Whether this surface currently holds a player at all.
     func isBound(_ surface: VideoRenderView) -> Bool
 
-    /// `count` frames spread evenly across the clip, for a trim strip.
+    /// How far through the clip in `surface` the player has got.
     ///
-    /// ⚠️ Best-effort and ORDERED. An empty answer is a strip with no pictures,
-    /// which is a plain rectangle the handles still work on — the frames are how
-    /// the author aims, not what they are editing.
-    func filmstrip(of file: URL, count: Int, height: CGFloat) async -> [UIImage]
+    /// ⚠️ **THE SECOND ELEMENT IS THE CLIP'S LENGTH, NOT THE ELAPSED TIME.** The
+    /// pair reads as (where, when) and is (where, how long) — the controller's
+    /// own signature, kept rather than reshaped so the two cannot drift.
+    ///
+    /// ⚠️ **AND NIL IS AN ORDINARY ANSWER, NOT A FAILURE.** Nothing bound yet, or
+    /// an asset that has not said how long it is — both happen on the first
+    /// frames after a page settles. A caller draws nil as "not yet", never as an
+    /// error.
+    func playhead(in surface: VideoRenderView) -> (fraction: Double, seconds: Double)?
+
+    /// Moves the clip in `surface` to `fraction` of its length.
+    ///
+    /// ⚠️ **TOLERANT BY A QUARTER SECOND, AND THAT IS THE POINT.** An exact seek
+    /// decodes forward from the nearest keyframe, and a track being scrolled asks
+    /// again long before that finishes — the picture would lag a gesture it is
+    /// supposed to follow. The recorded reason lives on
+    /// `VideoPlaybackController.seek`.
+    func seek(toFraction fraction: Double, in surface: VideoRenderView, toleranceSeconds: Double)
+
+    /// Frames of `file` at the given SOURCE seconds, keyed by the second asked
+    /// for.
+    ///
+    /// ⚠️ **BY TIME, NOT BY COUNT — AND THAT IS CHARTER T2.** This used to be
+    /// "give me N frames across the clip", which forces the caller to decide the
+    /// whole strip at once. A timeline that scrolls cannot afford to: a
+    /// four-minute clip is two hundred and sixty tiles, 52 MB of decoded pixels
+    /// for a band 74pt tall, nearly all of it off screen. Asking by time lets the
+    /// track decode the window a person is looking at and nothing else.
+    ///
+    /// `spacing` is how far apart the strip's tiles are, which is what the
+    /// generator's tolerance is derived from — see `VideoFilmstrip.tolerance`.
+    ///
+    /// ⚠️ Best-effort. A missing entry is a tile that keeps whatever it had, and
+    /// an empty answer is a plain rectangle the handles still work on: the frames
+    /// are how the author aims, not what they are editing.
+    func frames(
+        of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
+    ) async -> [Double: UIImage]
 }
 
 /// The real one: a `VideoPlaybackController` of this screen's very own.
@@ -77,6 +114,18 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
         _ = controller.setPaused(paused, in: surface)
     }
 
+    func playhead(in surface: VideoRenderView) -> (fraction: Double, seconds: Double)? {
+        controller.playhead(in: surface)
+    }
+
+    func seek(toFraction fraction: Double, in surface: VideoRenderView, toleranceSeconds: Double) {
+        controller.seek(toFraction: fraction, in: surface)
+    }
+
+    func isPaused(in surface: VideoRenderView) -> Bool? {
+        controller.isPaused(in: surface)
+    }
+
     func isBound(_ surface: VideoRenderView) -> Bool {
         controller.hasPlayer(in: surface)
     }
@@ -88,8 +137,12 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
     /// filmstrip asks for many exact times on a file that may not be playing.
     private let filmstrip = VideoFilmstrip()
 
-    func filmstrip(of file: URL, count: Int, height: CGFloat) async -> [UIImage] {
-        await filmstrip.frames(of: file, count: count, height: height)
+    func frames(
+        of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
+    ) async -> [Double: UIImage] {
+        await filmstrip.frames(
+            of: file, atSourceSeconds: seconds, height: height, spacing: spacing
+        )
     }
 
     #if DEBUG
