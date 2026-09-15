@@ -172,6 +172,16 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
   with an interactive box, a straightening dial, quarter turns and a mirror; on a
   video page it draws a notice instead.
 
+  **In-editor PLAYBACK landed 2026-09-15** and is not part of what remains: the
+  settled page plays its clip through an Upload-owned
+  `VideoPlaybackController(poolSize: 1, capacity: 1)` behind a
+  `MediaPreviewPlaying` seam — never the feed's pool, because a pool owned by the
+  screen dies with the screen. One page plays at a time; the fill/fit choice
+  drives `VideoRenderView.videoGravity`, which had been hardcoded to
+  `.resizeAspectFill` and is now the caller's to set. What P4 still needs is
+  EDITING, which is a different problem: `MediaCrop.apply` and `MediaFilter` are
+  `UIImage`-to-`UIImage` by signature.
+
   **The library seam is no longer what blocks this** — P1 closed it. What blocks
   it now is that the edit types are `UIImage`-shaped: `MediaCrop.apply` and
   `MediaFilter` are `UIImage`-to-`UIImage` by signature, so the editor can bake a

@@ -104,10 +104,10 @@ public final class VideoRenderView: UIView {
         addSubview(posterView)
 
         if let sampleBufferLayer {
-            sampleBufferLayer.videoGravity = .resizeAspectFill
+            sampleBufferLayer.videoGravity = videoGravity
             updatePosterVisibility(ready: false) // no frames yet → hidden (no image either)
         } else if let playerLayer {
-            playerLayer.videoGravity = .resizeAspectFill
+            playerLayer.videoGravity = videoGravity
             updatePosterVisibility(ready: playerLayer.isReadyForDisplay)
             readinessObservation = playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] _, _ in
                 DispatchQueue.main.async {
@@ -139,6 +139,27 @@ public final class VideoRenderView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// How the picture sits in this surface.
+    ///
+    /// ⚠️ **`.resizeAspectFill` IS THE FEED'S ANSWER, NOT EVERY SCREEN'S.** It
+    /// was hardcoded in both backings, which is right for a cell that wants a
+    /// full-bleed picture and wrong for an editor whose whole job is to let the
+    /// author choose between filling the window and seeing the clip WHOLE. The
+    /// poster tracks it, or a fitted video would sit letterboxed inside a poster
+    /// that is still cropped, and the swap to live playback would visibly jump.
+    ///
+    /// The two backings both have `videoGravity`; this is the one place that has
+    /// to know which of them is present.
+    public var videoGravity: AVLayerVideoGravity = .resizeAspectFill {
+        didSet {
+            guard videoGravity != oldValue else { return }
+            sampleBufferLayer?.videoGravity = videoGravity
+            playerLayer?.videoGravity = videoGravity
+            posterView.contentMode =
+                videoGravity == .resizeAspect ? .scaleAspectFit : .scaleAspectFill
+        }
+    }
 
     /// The poster shown until the video is ready to display. Pass `nil` to clear.
     /// Fired whenever this surface's answer to "is there a real picture here"
