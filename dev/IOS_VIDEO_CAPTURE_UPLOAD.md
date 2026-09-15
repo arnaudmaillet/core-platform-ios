@@ -194,16 +194,31 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
      (`AVVideoComposition.h:263`; same for the mutable Instruction and
      LayerInstruction at `:558` / `:654`). An earlier draft of this section
      prescribed it. Do not.
-  2. ⚠️ **CI filters OR an arbitrary output ratio — not both, without writing an
-     `AVVideoCompositing`.** The CIFilter-applier constructor's own documentation
-     says the returned composition's "properties are private and support only
-     CIFilter-based operations… If rotations or other transformations are
-     desired, they must be accomplished via the application of CIFilters", with a
-     `renderSize` derived from the first enabled video track
-     (`AVVideoComposition.h:213-219`, repeated on the non-deprecated variant at
-     `:248`). `Configuration` exposes `renderSize` and `instructions` but has no
-     CI-applier slot. **Measure this on a synthetic clip before committing to a
-     shape.**
+  2. ⚠️ **CI FILTERS OR AN ARBITRARY OUTPUT RATIO — NOT BOTH. MEASURED
+     2026-09-15, NOT INFERRED** (`VideoCompositionRouteTests`, MediaPlayback).
+     On a 160x120 source:
+
+     | route | renderSize | exported |
+     |---|---|---|
+     | `AVVideoComposition(applyingFiltersTo:applier:)`, applier returning a **120x120** image | 160x120 | **160x120** |
+     | `AVVideoComposition.Configuration` with `renderSize = 120x120` | 120x120 | — (no filter slot) |
+
+     So **a CI applier cannot crop; it can only letterbox.** The square came back
+     placed inside the source's rectangle. "Cut this clip to that rectangle" is
+     not expressible through the filter route at all, and a design that assumed
+     otherwise would publish bars baked into the pixels.
+
+     The modern spelling is `init(applyingFiltersTo:applier:)` — the
+     `completionHandler:` variant is itself deprecated now. `Configuration`
+     exposes `renderSize`, `instructions` and `customVideoCompositorClass`, and
+     no Core Image slot.
+
+     **Three ways out, and the choice is still open:** two export passes (filter,
+     then crop — simple, one extra encode); a custom `AVVideoCompositing` (one
+     pass, most work, most control); or express the crop as an
+     `AVMutableVideoCompositionLayerInstruction` transform under `Configuration`
+     and do the look some other way. Pick when the trim slice lands, not before —
+     trim needs none of this.
   3. **Trim needs no composition at all** — `AVAssetExportSession.timeRange` —
      so it can ship regardless of how (2) lands, and it is the most-used video
      edit. `VideoExporter.export` takes a `URL` today and would need to accept a
