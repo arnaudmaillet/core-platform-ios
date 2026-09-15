@@ -219,12 +219,28 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
      `AVMutableVideoCompositionLayerInstruction` transform under `Configuration`
      and do the look some other way. Pick when the trim slice lands, not before —
      trim needs none of this.
-  3. **Trim needs no composition at all** — `AVAssetExportSession.timeRange` —
-     so it can ship regardless of how (2) lands, and it is the most-used video
-     edit. `VideoExporter.export` takes a `URL` today and would need to accept a
-     plan (time range, and a composition BUILDER rather than a composition: a
-     composition must be built where the asset lives, and `AVComposition` is not
-     `Sendable` while `AVVideoComposition` is only `@unchecked` so).
+  3. **Trim is DONE (2026-09-15) and needed no composition at all** —
+     `AVAssetExportSession.timeRange`. `MediaEdits` carries a `MediaTrim` in
+     SECONDS (a clip is the same length whatever size it is drawn at, so the
+     "normalised, never pixels" rule does not apply); `MediaTrimming` holds the
+     arithmetic, pure, because a pan's translation cannot be set from a test;
+     `MediaTrimStripView` is a band tenant that announces on release like the
+     crop surface; `VideoFilmstrip` samples frames with **tolerance zero on both
+     sides** — reproduced here, the default returns six requests as two
+     pictures. `VideoExporter` now takes a `VideoExportPlan`, which is where the
+     composition builder will go.
+
+     Two fixture defects fell out of it: `DebugMediaLibrary` declared invented
+     durations over clips of a different length, and
+     `PlaceholderVideoFetcher`'s cache key omitted the duration, so asking for a
+     shorter clip silently returned a longer one already on disk.
+
+  4. **What is actually left is crop and filters**, which is the only part that
+     needs (2). `VideoExportPlan` is where the composition slot goes, and it must
+     be a BUILDER rather than a composition: a composition has to be built where
+     its asset lives, `AVComposition` is not `Sendable`, and `AVVideoComposition`
+     is `Sendable` only `@unchecked`. It is deliberately not there yet — an
+     unused slot is dead code.
 
   When crop does land, `MediaCrop.rect` is fractions of the **turned bounding
   box**, which is invisible at angle zero where nearly every existing test lives

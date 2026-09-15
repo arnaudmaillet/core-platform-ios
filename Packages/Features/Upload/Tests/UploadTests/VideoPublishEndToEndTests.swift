@@ -60,8 +60,14 @@ struct VideoPublishEndToEndTests {
     /// `DebugMediaLibrary` marks every fourth item a video, so a run of four
     /// gives exactly one clip among three photographs — the mixed selection the
     /// publish loop's ordering rules are about.
-    private func open(_ chosen: [Int], of count: Int = 4) async -> Harness {
-        let library = DebugMediaLibrary(count: count, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge)
+    private func open(
+        _ chosen: [Int], of count: Int = 4,
+        clipSeconds: Double = Self.clipSeconds,
+        edits: [String: MediaEdits] = [:]
+    ) async -> Harness {
+        let library = DebugMediaLibrary(
+            count: count, clipSeconds: clipSeconds, clipLongEdge: Self.clipLongEdge
+        )
         let all = await library.items(in: "recents")
         let items = chosen.map { all[$0] }
 
@@ -87,7 +93,7 @@ struct VideoPublishEndToEndTests {
 
         let handed = Handed()
         let screen = NewPostViewController(
-            items: items, edits: [:], library: library, composer: composer
+            items: items, edits: edits, library: library, composer: composer
         ) { handed.entry = $0 }
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = UINavigationController(rootViewController: screen)
@@ -279,6 +285,30 @@ struct VideoPublishEndToEndTests {
         }
     }
 
+    /// ⚠️ **A TILE MUST NOT SAY 0:18 OVER A CLIP THAT RUNS TWO AND A HALF
+    /// SECONDS.** The declared duration was `7 + (index % 53)` — a pleasing
+    /// spread of invented numbers — while every synthetic clip ran the same
+    /// length. Merely untidy while nothing read it, and a defect the moment trim
+    /// arrived: the handles are laid out against the declared length, so a strip
+    /// built on ten seconds would resolve a cut that is not inside the file.
+    @Test func aMockVideosDeclaredLengthMatchesTheClipItVends() async throws {
+        let library = DebugMediaLibrary(
+            count: 4, clipSeconds: Self.clipSeconds, clipLongEdge: Self.clipLongEdge
+        )
+        let items = await library.items(in: "recents")
+        let video = try #require(items.first(where: { $0.isVideo }))
+        guard case .video(let declared) = video.kind else {
+            Issue.record("not a video")
+            return
+        }
+
+        let file = try #require(await library.videoFile(for: video.id))
+        let actual = try await AVURLAsset(url: file).load(.duration).seconds
+
+        #expect(abs(declared - actual) < 0.2,
+                "the tile says \(declared)s over a clip of \(actual)s")
+    }
+
     // MARK: - Picking a video and posting it
 
     /// ⚠️ **THE QUESTION THIS WHOLE SLICE EXISTS TO ANSWER, ASKED ONCE, END TO
@@ -323,6 +353,49 @@ struct VideoPublishEndToEndTests {
         ] {
             #expect(paths.contains(step), "never reached \(step)")
         }
+    }
+
+    /// ⚠️ **THE TRIM HAS TO REACH THE PIXELS, OR IT IS A CONTROL THAT REACHES
+    /// NOTHING** — the defect this whole sequence of work has been removing, one
+    /// screen at a time. Asked end to end: a trim stored against the item, a
+    /// real `AVAssetExportSession`, and the DURATION of the clip that actually
+    /// came out the other side.
+    ///
+    /// The clip is longer here than the rest of the suite's, because
+    /// `MediaTrimming` will not cut below its floor and a four-tenths-of-a-second
+    /// fixture is already shorter than that. A trim test on it would pass by
+    /// refusing to trim.
+    @Test func aTrimChosenInTheEditorShortensThePublishedClip() async throws {
+        var edited = MediaEdits.untouched
+        edited.trim = MediaTrim(start: 0.5, end: 1.5)
+        let harness = await open(
+            [3], of: 4, clipSeconds: 2.5, edits: ["debug-3": edited]
+        )
+
+        harness.screen.debugTapPost()
+        try await settle(until: { harness.handed.entry != nil })
+
+        let entry = try #require(harness.handed.entry)
+        let clip = try #require(entry.post.attachments.first { $0.mimeType == "video/mp4" })
+        let published = try #require(clip.url)
+        let seconds = try await AVURLAsset(url: published).load(.duration).seconds
+
+        #expect(abs(seconds - 1) < 0.1, "expected about a second, got \(seconds)")
+    }
+
+    /// The witness: the same clip with no trim publishes whole, so the line
+    /// above is the cut and not the exporter shortening everything.
+    @Test func anUntrimmedClipPublishesWhole() async throws {
+        let harness = await open([3], of: 4, clipSeconds: 2.5)
+
+        harness.screen.debugTapPost()
+        try await settle(until: { harness.handed.entry != nil })
+
+        let entry = try #require(harness.handed.entry)
+        let clip = try #require(entry.post.attachments.first { $0.mimeType == "video/mp4" })
+        let seconds = try await AVURLAsset(url: try #require(clip.url)).load(.duration).seconds
+
+        #expect(abs(seconds - 2.5) < 0.2, "expected the whole clip, got \(seconds)")
     }
 
     /// ⚠️ **AND THE ORDER SURVIVES, BECAUSE THE ORDER IS THE CAROUSEL.**

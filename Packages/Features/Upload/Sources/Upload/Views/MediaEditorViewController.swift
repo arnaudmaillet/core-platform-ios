@@ -1,3 +1,6 @@
+// `AVURLAsset` — the trim strip asks the FILE how long it is rather than
+// trusting the item's declared duration. See `refreshTrimStrip`.
+import AVFoundation
 import DesignSystem
 // `VideoRenderView` — the surface a picked clip plays in, one page at a time.
 // See `MediaPreviewPlayer` for why this screen owns its player rather than
@@ -106,14 +109,21 @@ final class MediaEditorViewController: UIViewController {
         Category(title: "Filters", symbol: "camera.filters"),
         // Crop and straighten are one mode and one icon: the viewer reaches for
         // the same tool to square a horizon and to cut a border away.
-        Category(title: "Crop", symbol: "crop.rotate")
+        Category(title: "Crop", symbol: "crop.rotate"),
+        // ⚠️ `timeline.selection` EXISTS — ASKED OF THE RUNTIME, NOT ASSUMED.
+        // A name that does not resolve draws an empty capsule and nothing
+        // errors; this strip shipped one once
+        // (`arrow.trianglehead.counterclockwise.rotate`). The plist lookups are
+        // unreliable across bundles; `UIImage(systemName:)` inside the simulator
+        // is the instrument that cannot be wrong.
+        Category(title: "Trim", symbol: "timeline.selection")
     ]
 
     private let items: [MediaLibraryItem]
     private let itemsByID: [String: MediaLibraryItem]
     private let library: any MediaLibraryReading
     /// Plays the settled page's clip. Owned by this screen, pool and all.
-    private let preview: any MediaPreviewPlaying
+    private let preview: any MediaVideoPreviewing
     /// Which item the preview is currently bound to, if any — so a settle that
     /// lands back on the same page does not restart it.
     private var playingID: String?
@@ -395,7 +405,7 @@ final class MediaEditorViewController: UIViewController {
     init(
         items: [MediaLibraryItem],
         library: any MediaLibraryReading,
-        preview: any MediaPreviewPlaying = MediaPreviewPlayer(),
+        preview: any MediaVideoPreviewing = MediaPreviewPlayer(),
         onNext: @escaping ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController
     ) {
         self.items = items
@@ -889,6 +899,13 @@ final class MediaEditorViewController: UIViewController {
                 setEditingAccessory(filterRow)
                 refreshFilterRow()
             }
+        case "Trim":
+            guard let id = currentItemID, case .video(let seconds)? = itemsByID[id]?.kind else {
+                setEditingAccessory(trimUnavailable)
+                return
+            }
+            setEditingAccessory(trimStrip)
+            refreshTrimStrip(id: id, duration: seconds)
         case "Crop":
             enterCrop()
         default:
@@ -924,6 +941,67 @@ final class MediaEditorViewController: UIViewController {
         }
     }
 
+    /// Hands the strip the clip it is cutting, then its pictures.
+    ///
+    /// ⚠️ **THE HANDLES ARE LAID OUT BEFORE THE FRAMES ARRIVE.** Reading a file
+    /// and decoding a dozen exact times takes a moment — longer for an iCloud
+    /// clip — and a strip that waited for them would open empty and jump. The
+    /// duration and the stored trim are known at once, so the selection is drawn
+    /// straight away over a blank strip and the pictures fill in behind it.
+    ///
+    /// ⚠️ **RE-ASKED AFTER THE AWAIT, TWICE.** The author may have swiped to
+    /// another page or left the mode entirely while the frames were being
+    /// decoded, and `band.content` is the only thing that says the strip is
+    /// still the tenant.
+    private func refreshTrimStrip(id: String, duration: Double) {
+        trimStrip.configure(duration: duration, trim: edits(for: id).trim)
+        trimStrip.showFrames([])
+        Task { [weak self] in
+            guard let self else { return }
+            guard let file = await library.videoFile(for: id) else { return }
+            guard currentItemID == id, band.content === trimStrip else { return }
+            // ⚠️ **THE FILE'S OWN LENGTH, NOT THE ITEM'S DECLARED ONE.** The
+            // declared duration is what the grid stamps on a tile and is only as
+            // good as whatever vended it — under `-rich-media` a fixture whose
+            // download failed falls back to a synthetic clip, so an item can
+            // truthfully say 52 seconds while the file on disk runs two and a
+            // half. Handles laid out against the declaration would then resolve
+            // a cut that is not inside the clip, and the export would come back
+            // empty. Asked of the asset, this cannot drift.
+            let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? duration
+            guard currentItemID == id, band.content === trimStrip else { return }
+            let length = real.isFinite && real > 0 ? real : duration
+            // Decided on the FILE's length, not the declaration — the whole
+            // reason the real duration is loaded above.
+            guard length > MediaTrimming.shortestSeconds else {
+                setEditingAccessory(trimTooShort)
+                return
+            }
+            trimStrip.configure(duration: length, trim: edits(for: id).trim)
+            view.layoutIfNeeded()
+            let pictures = await preview.filmstrip(
+                of: file,
+                count: Self.filmstripCount(across: trimStrip.bounds.width),
+                height: MediaTrimStripView.height
+            )
+            guard currentItemID == id, band.content === trimStrip else { return }
+            // ⚠️ FRAMES ONLY. `configure` refuses while a finger is down; this
+            // must be safe at any moment, because it lands whenever it lands.
+            trimStrip.showFrames(pictures)
+        }
+    }
+
+    /// How many frames fit across a strip, at roughly square cells.
+    ///
+    /// ⚠️ **AT LEAST ONE, EVEN UNLAID.** Every band tenant is asked this before
+    /// its first `layoutSubviews`, and a count of zero would decode nothing and
+    /// leave a strip that never fills — the kind of emptiness that reads as a
+    /// broken feature rather than a pending one.
+    static func filmstripCount(across width: CGFloat) -> Int {
+        guard width > 0 else { return 1 }
+        return max(Int((width / MediaTrimStripView.height).rounded()), 1)
+    }
+
     /// ⚠️ **SILENT WHEN THE BAND IS SHUT, AND THAT IS THE POINT.** Both settle
     /// hooks call this on every swipe; without the guard each one would run a
     /// full `PHImageManager` request — iCloud access allowed — to dress a row
@@ -931,6 +1009,35 @@ final class MediaEditorViewController: UIViewController {
     private func refreshFilterRowIfShowing() {
         guard band.content === filterRow else { return }
         refreshFilterRow()
+    }
+
+    /// ⚠️ **THE TRIM TENANT HAS TO BE RE-DECIDED ON EVERY SETTLE, AND NOT
+    /// DECIDING IT WAS A HIGH-SEVERITY DEFECT.** `refreshTrimStrip` was
+    /// reachable only from the category bar's `.valueChanged`, so paging with
+    /// Trim open left the strip holding the PREVIOUS clip's frames, duration and
+    /// handles — while `onChange` read `currentItemID` live. Measured: open Trim
+    /// on a 52-second clip, swipe to a four-second one, drag 60pt and release,
+    /// and `MediaTrim(start: 8.0, end: 52.0)` is stored against the short clip
+    /// (60/390 × 52 = 8.0 exactly). It then publishes its last second, and the
+    /// clip actually being trimmed publishes whole. Swiping onto a PHOTOGRAPH
+    /// was worse: it gained a `trim` it never earned, moving its
+    /// `MediaEdits.signature` and therefore its thumbnail cache key.
+    ///
+    /// `croppingID` carries the mirror of this warning — "a crop landing on a
+    /// different item than the one the author is looking at is not a visual
+    /// glitch, it is a rectangle stored against somebody else's photograph". The
+    /// same sentence is true of a cut.
+    ///
+    /// Re-running `showAccessory` rather than only re-targeting the strip, so
+    /// the strip/notice choice is re-made too: a photograph settled onto after a
+    /// video must lose the strip, and a video settled onto after a photograph
+    /// must lose the notice.
+    private func refreshTrimStripIfShowing() {
+        guard band.content === trimStrip
+                || band.content === trimUnavailable
+                || band.content === trimTooShort
+        else { return }
+        showAccessory(for: "Trim")
     }
 
     /// ⚠️ **A VIDEO LEAVES CROP MODE STANDING ON ITS NOTICE, AND ONLY A SETTLE
@@ -1114,6 +1221,34 @@ final class MediaEditorViewController: UIViewController {
     /// posts it — a notice outliving its reason, which is worse than no notice.
     private lazy var cropUnavailable = BandNoticeView(
         "A video can't be cropped yet — it'll be posted as it is."
+    )
+
+    /// The clip laid out end to end, with a handle at each end of what is kept.
+    private lazy var trimStrip: MediaTrimStripView = {
+        let strip = MediaTrimStripView()
+        strip.onChange = { [weak self] trim in
+            guard let self, let id = currentItemID else { return }
+            change(id) { $0.trim = trim }
+        }
+        return strip
+    }()
+
+    /// ⚠️ **THE MIRROR IMAGE OF THE OTHER TWO NOTICES.** Crop and Filters refuse
+    /// a video; Trim refuses a photograph. Same rule — a mode that cannot serve
+    /// the medium in front of the author says so rather than offering a control
+    /// that reaches nothing.
+    private lazy var trimUnavailable = BandNoticeView(
+        "A photo has nothing to trim."
+    )
+
+    /// ⚠️ **HANDLES THAT CANNOT MOVE ARE WORSE THAN NO HANDLES.**
+    /// `MediaTrimming` will not leave less than `shortestSeconds` behind, so on
+    /// a clip already at or below that floor every drag resolves back to where
+    /// it started. The strip looked operable and was inert, which is the same
+    /// shape of lie as a control that reaches nothing — it just fails one step
+    /// earlier.
+    private lazy var trimTooShort = BandNoticeView(
+        "This clip is too short to trim."
     )
 
     /// The same, for the look. See the note in `showAccessory(for:)`.
@@ -1689,6 +1824,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateFitItem(animated: true)
         refreshFilterRowIfShowing()
+        refreshTrimStripIfShowing()
         reopenCropIfWaiting()
         playSettledPage()
     }
@@ -1701,6 +1837,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
         guard !decelerate else { return }
         updateFitItem(animated: true)
         refreshFilterRowIfShowing()
+        refreshTrimStripIfShowing()
         reopenCropIfWaiting()
         playSettledPage()
     }
@@ -1712,6 +1849,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         updateFitItem(animated: true)
         refreshFilterRowIfShowing()
+        refreshTrimStripIfShowing()
         reopenCropIfWaiting()
         playSettledPage()
     }

@@ -61,6 +61,74 @@ struct VideoExporterTests {
         return Array(pixel[0..<3])
     }
 
+    /// A longer source, so a trim has somewhere to cut.
+    private func longerClip() async throws -> URL {
+        try await PlaceholderVideoFetcher(durationSeconds: 2.5)
+            .playableURL(for: URL(string: "mock://video/trim?w=160&h=120")!)
+    }
+
+    // MARK: - Trim
+
+    /// ⚠️ **THE WHOLE FAILURE MODE IS THAT A TRIM LOOKS LIKE IT WORKED.** An
+    /// ignored `timeRange` exports a perfectly good file at the full length: it
+    /// plays, it uploads, it publishes. Only the DURATION says the cut never
+    /// happened, which is why every assertion here is about seconds.
+    @Test func aTrimmedExportIsOnlyTheKeptPart() async throws {
+        let exported = try await VideoExporter()
+            .export(VideoExportPlan(sourceURL: try await longerClip(), timeRange: 0.5...1.5))
+
+        #expect(abs(exported.durationSeconds - 1) < 0.05,
+                "expected about a second, got \(exported.durationSeconds)")
+    }
+
+    /// ⚠️ **BOTH EDGES, EXPLICITLY.** A range that starts at zero and one that
+    /// runs to the exact duration are the two an off-by-one hides in: the first
+    /// looks like "no trim" and the second like "past the end", and either can
+    /// be silently widened back to the whole clip without anything erroring.
+    @Test func aTrimFromTheVeryStartStillCuts() async throws {
+        let exported = try await VideoExporter()
+            .export(VideoExportPlan(sourceURL: try await longerClip(), timeRange: 0...1))
+
+        #expect(abs(exported.durationSeconds - 1) < 0.05,
+                "expected about a second, got \(exported.durationSeconds)")
+    }
+
+    @Test func aTrimRunningToTheVeryEndStillCuts() async throws {
+        let source = try await longerClip()
+        let whole = try await AVURLAsset(url: source).load(.duration).seconds
+
+        let exported = try await VideoExporter()
+            .export(VideoExportPlan(sourceURL: source, timeRange: (whole - 1)...whole))
+
+        #expect(abs(exported.durationSeconds - 1) < 0.05,
+                "expected about a second, got \(exported.durationSeconds)")
+    }
+
+    /// The witness for all three: with no range the clip comes back whole, so
+    /// "about a second" above is the trim and not the exporter shortening
+    /// everything it touches.
+    @Test func anUntrimmedExportIsStillTheWholeClip() async throws {
+        let source = try await longerClip()
+        let whole = try await AVURLAsset(url: source).load(.duration).seconds
+
+        let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: source))
+
+        #expect(abs(exported.durationSeconds - whole) < 0.05,
+                "expected \(whole), got \(exported.durationSeconds)")
+    }
+
+    /// A trim shortens the clip; it does not shrink its pictures. The dimensions
+    /// are read from the SOURCE track for that reason.
+    @Test func aTrimLeavesThePicturesTheSizeTheyWere() async throws {
+        let source = try await longerClip()
+        let whole = try await VideoExporter().export(VideoExportPlan(sourceURL: source))
+        let cut = try await VideoExporter()
+            .export(VideoExportPlan(sourceURL: source, timeRange: 0.5...1.5))
+
+        #expect(cut.pixelWidth == whole.pixelWidth)
+        #expect(cut.pixelHeight == whole.pixelHeight)
+    }
+
     @Test func exportProducesAPlayableMp4WithMetadata() async throws {
         let source = try await sourceClip()
         let exported = try await VideoExporter().export(source)

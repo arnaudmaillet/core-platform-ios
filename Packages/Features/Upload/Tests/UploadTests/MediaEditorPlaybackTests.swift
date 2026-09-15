@@ -59,7 +59,7 @@ struct MediaEditorPlaybackTests {
     }
 
     /// Records what it was asked to do, which is the whole subject.
-    private final class StubPreview: MediaPreviewPlaying {
+    private final class StubPreview: MediaVideoPreviewing {
         private(set) var played: [URL] = []
         private(set) var stopCount = 0
         private var boundSurfaces: Set<ObjectIdentifier> = []
@@ -75,6 +75,22 @@ struct MediaEditorPlaybackTests {
         }
 
         func setPaused(_ paused: Bool, in surface: VideoRenderView) {}
+
+        /// Frames the strip can lay out, without decoding anything: the editor's
+        /// subject is what it ASKS for and where it puts the answer.
+        private(set) var filmstripRequests: [(file: URL, count: Int)] = []
+        var answersFilmstrip = true
+
+        func filmstrip(of file: URL, count: Int, height: CGFloat) async -> [UIImage] {
+            filmstripRequests.append((file, count))
+            guard answersFilmstrip else { return [] }
+            return (0..<count).map { _ in
+                UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+                    UIColor.green.setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+                }
+            }
+        }
 
         func isBound(_ surface: VideoRenderView) -> Bool {
             boundSurfaces.contains(ObjectIdentifier(surface))

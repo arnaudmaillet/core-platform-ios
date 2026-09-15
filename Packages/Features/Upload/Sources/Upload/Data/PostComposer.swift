@@ -17,7 +17,24 @@ public struct PickedImage: @unchecked Sendable {
 /// A picked video (a local file URL from the photo library) ready to compose.
 public struct PickedVideo: Sendable, Equatable {
     public let sourceURL: URL
-    public init(sourceURL: URL) { self.sourceURL = sourceURL }
+
+    /// The part of the clip to publish, in seconds. Nil is the whole of it.
+    ///
+    /// ⚠️ **SECONDS, NOT `MediaTrim` — AND THE BOUNDARY IS THE POINT.** A trim
+    /// is an editor idea: two handles, a minimum length, a stored value that can
+    /// outlive the clip it was made for. None of that is the composer's
+    /// business. What crosses is the answer, already resolved against the real
+    /// duration, in the only unit an exporter accepts.
+    ///
+    /// Nil rather than a range covering everything, for the reason
+    /// `VideoExportPlan.timeRange` gives: the two are different instructions,
+    /// and only nil takes the passthrough.
+    public let keptSeconds: ClosedRange<Double>?
+
+    public init(sourceURL: URL, keptSeconds: ClosedRange<Double>? = nil) {
+        self.sourceURL = sourceURL
+        self.keptSeconds = keptSeconds
+    }
 }
 
 /// The media attached to a compose draft.
@@ -230,7 +247,9 @@ public actor PostComposer: PostComposing {
     ) {
         let exported: ExportedVideo
         do {
-            exported = try await videoExporter.export(picked.sourceURL)
+            exported = try await videoExporter.export(
+                VideoExportPlan(sourceURL: picked.sourceURL, timeRange: picked.keptSeconds)
+            )
         } catch {
             throw ComposeError.media("couldn't prepare the video: \(error)")
         }

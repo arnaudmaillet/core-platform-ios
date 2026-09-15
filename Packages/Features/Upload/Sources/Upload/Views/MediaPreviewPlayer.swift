@@ -1,7 +1,13 @@
 import MediaPlayback
 import UIKit
 
-/// Playing a picked clip while the author is editing it, behind a seam.
+/// What the editor needs of a picked clip: playing it, and sampling it.
+///
+/// ⚠️ **NAMED FOR THE MEDIUM, NOT THE VERB — IT WAS `MediaPreviewPlaying` AND
+/// GREW A SECOND JOB.** The trim strip needs frames, which is not playback but
+/// is exactly as much "what this screen needs of a video", and exactly as
+/// impossible for a test to do for real. Two seams would have meant two stubs
+/// per test for one subject.
 ///
 /// ⚠️ **A SEAM RATHER THAN A DIRECT CALL, BECAUSE A TEST CANNOT PLAY VIDEO.**
 /// CI has no photo library and no camera, and a real `AVPlayer` bound to a
@@ -10,7 +16,7 @@ import UIKit
 /// page ask for playback, did the page it left get stopped, and does a
 /// photograph ask for nothing at all. That is this protocol.
 @MainActor
-protocol MediaPreviewPlaying: AnyObject {
+protocol MediaVideoPreviewing: AnyObject {
     /// Binds `file` to `surface` and starts it. Repeatable; a second call for
     /// the same surface supersedes the first.
     func play(_ file: URL, in surface: VideoRenderView) async
@@ -24,6 +30,13 @@ protocol MediaPreviewPlaying: AnyObject {
 
     /// Whether this surface currently holds a player at all.
     func isBound(_ surface: VideoRenderView) -> Bool
+
+    /// `count` frames spread evenly across the clip, for a trim strip.
+    ///
+    /// ⚠️ Best-effort and ORDERED. An empty answer is a strip with no pictures,
+    /// which is a plain rectangle the handles still work on — the frames are how
+    /// the author aims, not what they are editing.
+    func filmstrip(of file: URL, count: Int, height: CGFloat) async -> [UIImage]
 }
 
 /// The real one: a `VideoPlaybackController` of this screen's very own.
@@ -45,7 +58,7 @@ protocol MediaPreviewPlaying: AnyObject {
 /// to resolve, and a source that synthesises over `mock://` would be answering a
 /// question this screen never asks.
 @MainActor
-final class MediaPreviewPlayer: MediaPreviewPlaying {
+final class MediaPreviewPlayer: MediaVideoPreviewing {
     private let controller = VideoPlaybackController(
         source: PassthroughVideoSource(), poolSize: 1, capacity: 1
     )
@@ -66,6 +79,17 @@ final class MediaPreviewPlayer: MediaPreviewPlaying {
 
     func isBound(_ surface: VideoRenderView) -> Bool {
         controller.hasPlayer(in: surface)
+    }
+
+    /// ⚠️ **A SEPARATE GENERATOR, NOT THE CONTROLLER'S.**
+    /// `VideoPlaybackController.previewFrame` caches generators and would be the
+    /// obvious reuse — but it takes a FRACTION, needs a `VideoRenderView` already
+    /// bound to that same controller, and re-sets `maximumSize` per call. A
+    /// filmstrip asks for many exact times on a file that may not be playing.
+    private let filmstrip = VideoFilmstrip()
+
+    func filmstrip(of file: URL, count: Int, height: CGFloat) async -> [UIImage] {
+        await filmstrip.frames(of: file, count: count, height: height)
     }
 
     #if DEBUG
