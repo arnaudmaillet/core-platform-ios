@@ -47,9 +47,38 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         /// strip reads as a border drawn on a thing; 1.5 reads as the edge of the
         /// thing itself, which is what CapCut and Instagram both draw.
         static let bar: CGFloat = 1.5
-        /// One radius for the selection AND for the film's own ends, so the two
-        /// agree wherever they meet.
-        static let corner: CGFloat = 8
+        /// The corner every piece's film is rounded to at its own two ends —
+        /// preferred, then clamped per piece by `MediaTimelining.endRadius`.
+        /// ⚠️ **THE FRAME'S INNER CORNERS ARE THIS CORNER**: the plates behind the
+        /// held film show through exactly where it is rounded away, so the two
+        /// can never disagree.
+        static let filmCorner: CGFloat = 8
+        /// ⚠️ **THE CAPS' OUTER CORNERS, AND 8 WAS A SPIKE.** Core Animation does
+        /// not clamp a radius: on a 12pt cap rounded on one side only, anything
+        /// past half its width draws a partial row instead of a curve (measured on
+        /// the simulator), and exactly half draws clean. IMG.LY's editor ships the
+        /// same pair — 6 outside, 8 inside.
+        static let capCorner: CGFloat = grab / 2
+        /// Where a rail starts inside a cap: past the cap's outer curve, still
+        /// under the cap, so a rail never shows as a hair beside the curve.
+        static let railInset: CGFloat = 8
+        /// How far the inner-corner plates reach under the cap beside them, so
+        /// their own edge is never the one on screen.
+        static let filletTuck: CGFloat = 2
+        /// The caps' shadow, and how far it is kept off their inner side.
+        static let capShadowBlur: CGFloat = 2
+        /// ⚠️ **A CUT IS DAYLIGHT BETWEEN TWO ROUNDED PIECES, NOT A WHITE BAR.**
+        /// Asked for in those words — *"plutôt séparer les segments avec un léger
+        /// espace et arrondir les bords"*. The daylight is CARVED OUT OF THE FILM
+        /// (`MediaTimelining.spans`), centred on the cut, and the clock keeps none
+        /// of it. Two points, so each half is a whole pixel at 1x, 2x and 3x and
+        /// the needle, which is as wide, still hides the cut it stands on.
+        ///
+        /// ⚠️ **AND A SPLIT HAS TO BE SEEN.** Cutting a clip keeps both halves, so
+        /// a split that drew nothing would change the export and leave the track
+        /// looking exactly as it did — a cut nobody can aim. The daylight and the
+        /// two rounded ends are what say it happened.
+        static let seamGap: CGFloat = 2
         /// The play/pause button at the head of the ruler row.
         static let control: CGFloat = 22
         /// How far past an overlay the ruler takes to come back — the crop tools'
@@ -60,9 +89,6 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         static let readout = CGSize(width: 78, height: 15)
         static let needle: CGFloat = 2
         static let needleCap: CGFloat = 7
-        /// The seam a split leaves behind. Twice a rail, so a cut reads as a
-        /// deliberate division of the film and not as one of its edges.
-        static let cut: CGFloat = 3
         /// The stamp a piece carries when it is not playing as shot.
         static let stampInset: CGFloat = 3
         /// Daylight between two chips of the shot list, so a row of them reads as
@@ -177,10 +203,11 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// show. Without it the track opens as a white selection drawn around
     /// nothing, which is exactly how it was reported — "the timeline does not
     /// appear when it loads".
-    private let skeleton = SkeletonBoneView(rounding: .fixed(Metrics.corner))
-    /// One seam per interior boundary, so a split is something the author can
-    /// SEE. A cut that changes only the export is a cut nobody can aim.
-    private var cutMarks: [UIView] = []
+    private let skeleton = SkeletonBoneView(rounding: .fixed(Metrics.filmCorner))
+    /// The four plates behind the held piece's film that round the frame's
+    /// inner corners — top leading, top trailing, bottom leading, bottom
+    /// trailing. See `MediaTimelining.fillets`.
+    private let innerCorners: [UIView] = (0..<4).map { _ in UIView() }
     /// ⚠️ **WHILE A PIECE IS CARRIED THE TRACK BECOMES A SHOT LIST.** Reported as
     /// the carry working "partially": it did work — the order changed and the
     /// export followed — and nothing on screen said a piece had been picked up,
@@ -367,16 +394,24 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         scroller.decelerationRate = .fast
         scroller.delegate = self
 
-        // ⚠️ THE ORDER OF THESE BLOCKS IS THE Z-ORDER. Film first, then what dims
-        // it, then the selection's ink, then its handles.
+        // ⚠️ THE Z-ORDER, BOTTOM UP: the inner-corner plates, the film (one
+        // rounded window per piece, its squares inside), the rate stamps, the
+        // rails, the caps and their grips.
         // ⚠️ **NO CORNER RADIUS AND NO CLIPPING ON THE FILM — CHARTER T6.** This
         // view is as wide as the clip is long: four minutes at sixty points a
         // second is 14400pt, which at 3x is 43200px, and a rounded, clipping
         // layer at that width asks Core Animation for a mask far past the 16384px
-        // Metal hard-asserts at. The rounded ends the eye actually reads come
-        // from the two grab bars, which are 13pt wide and carry the radius
-        // themselves.
+        // Metal hard-asserts at. The rounded ends are drawn by each piece's
+        // WINDOW, which is only as wide as the squares laid out in it — the
+        // visible band and its margin, whatever the clip's length.
         film.isUserInteractionEnabled = false
+        // ⚠️ **PLAIN WHITE, NO RADIUS, NO SHADOW — THE FILM IN FRONT DOES THE
+        // SHAPING.**
+        for plate in innerCorners {
+            plate.backgroundColor = .white
+            plate.isUserInteractionEnabled = false
+            plate.isHidden = true
+        }
 
         // ⚠️ **WHITE, NOT `.label` — AND IT IS NOT A DARK-MODE OVERSIGHT.** The
         // selection is drawn ON the film, which is a photograph and not a
@@ -391,7 +426,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             ink.isUserInteractionEnabled = false
         }
         for handle in [startGrab, endGrab] {
-            handle.layer.cornerRadius = Metrics.corner
+            handle.layer.cornerRadius = Metrics.capCorner
             handle.layer.cornerCurve = .continuous
         }
         startGrab.layer.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
@@ -437,6 +472,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             lifted.layer.shadowRadius = 2
             lifted.layer.shadowOffset = .zero
         }
+        // The caps' blur is the one their shadow path is cut back by.
+        for cap in [startGrab, endGrab] { cap.layer.shadowRadius = Metrics.capShadowBlur }
 
         needle.backgroundColor = .tintColor
         needle.layer.cornerRadius = Metrics.needle / 2
@@ -445,6 +482,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         for part in [needle, needleCap] { part.isUserInteractionEnabled = false }
 
         content.addSubview(film)
+        for plate in innerCorners { content.insertSubview(plate, belowSubview: film) }
         content.addSubview(topBar)
         content.addSubview(bottomBar)
         content.addSubview(startGrab)
@@ -549,6 +587,11 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         accessibilityLabel = "Trim, adjusts the end"
 
         heightAnchor.constraint(equalToConstant: Self.height).isActive = true
+
+        // Each half of the daylight is floored to the screen's pixels.
+        registerForTraitChanges([UITraitDisplayScale.self]) { (self: Self, _) in
+            self.setNeedsLayout()
+        }
     }
 
     @available(*, unavailable)
@@ -659,9 +702,11 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // had held all along moved. Which is exactly "on ne raisonne pas par
         // clip". The band still protects a finger that misses a handle PAST the
         // film, which is what it was for.
+        // ⚠️ **AND THE DAYLIGHT IS NOT A DEAD ZONE.** Which piece a finger is
+        // on is asked of the CLOCK, where the pieces touch; a tap in the two
+        // points carved between them takes the piece on that side of the cut.
         let under = MediaTimelining.piece(atPoints: x, in: placed)
-        if let held = selected, let chosen = placed.first(where: { $0.index == held }),
-           x >= chosen.from - Metrics.grab, x <= chosen.to + Metrics.grab,
+        if let held = selected, let caps = heldCaps(), caps.claims(x),
            under == nil || under == held {
             return
         }
@@ -688,6 +733,17 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     private var squares: [MediaTimelining.Square] = []
     /// Retired views, kept to be filled in again rather than rebuilt.
     private var spareTiles: [FilmSquare] = []
+    /// One rounded, clipping window per piece that has squares laid out, keyed
+    /// by the piece — the same number a square's place carries, so a kept
+    /// square never changes window, even after a carry renumbers the pieces.
+    private var windows: [Int: PieceFilmView] = [:]
+    private var spareWindows: [PieceFilmView] = []
+    /// What the last `refreshTiles` laid out: where each piece's TIME is, where
+    /// its FILM is drawn, and the windows that show it. Read by the layout and
+    /// the scroll so nothing is resolved twice a beat.
+    private var laidPlacements: [MediaTimelining.Placement] = []
+    private var drawnSpans: [MediaTimelining.Span] = []
+    private var openWindows: [MediaTimelining.FilmWindow] = []
     /// The pictures that have arrived, keyed by THE SECOND OF FILM THEY SHOW.
     /// Bounded by `Metrics.mostDecoded`.
     ///
@@ -785,13 +841,22 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// piece along carries its squares with it.
     private func refreshTiles() {
         let seen = scroller.contentOffset.x
+        laidPlacements = MediaTimelining.placements(
+            timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
+        )
+        drawnSpans = MediaTimelining.spans(
+            of: laidPlacements, gap: Metrics.seamGap, holding: selected,
+            corner: Metrics.filmCorner, height: Metrics.strip,
+            scale: traitCollection.displayScale
+        )
         squares = MediaTimelining.squares(
-            in: timeline, withinSource: duration,
+            along: drawnSpans, withinSource: duration,
             visible: (seen - MediaTimelining.filmMargin)...(
                 seen + bounds.width + MediaTimelining.filmMargin
             ),
             pointsPerSecond: pointsPerSecond
         )
+        openWindows = MediaTimelining.windows(of: squares, along: drawnSpans)
         let wanted = Set(squares.map(\.place))
 
         for (place, view) in tiles where !wanted.contains(place) {
@@ -806,62 +871,146 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             if spareTiles.count < 8 { spareTiles.append(view) }
         }
 
-        let filmWidth = MediaTimelining.contentWidth(
-            of: timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
-        )
-        for square in squares {
-            let view = tiles[square.place] ?? takeTile()
-            tiles[square.place] = view
-            view.frame = CGRect(
-                x: square.from, y: 0, width: square.width, height: Metrics.strip
-            )
-            // The picture keeps its own size and simply hangs out of the part the
-            // window shows: that is the crop.
-            view.show(at: square.filmFrom - square.from, width: square.filmWidth)
-            // ⚠️ **A SQUARE KEEPS WHAT IT IS SHOWING UNTIL SOMETHING BETTER
-            // ARRIVES.** Blanking a square back to the poster while its frame
-            // decodes turns a scroll into a strobe. One that has never shown
-            // anything takes whatever picture is at hand, which is what fills the
-            // strip in the turn the mode opens.
-            if let picture = decoded[square.seconds] {
-                view.picture.image = picture
-            } else if view.picture.image == nil {
-                view.picture.image = anyFrame ?? posterFrame
+        // ⚠️ **NOTHING ON THE FILM IS EVER ANIMATED HERE.** A scroll does not move
+        // film in content coordinates — it only changes which squares exist — and
+        // this runs inside every animation that moves the offset: the eased
+        // follow at a loop, the carry's crossings, the drop. Animated, a window
+        // slid towards its new hull while the squares born in it were placed
+        // against where it was going, a window from the pool rounded its corners
+        // up from nothing, and a spare square's picture slid in from wherever it
+        // last was. The scroller's own movement is the only motion the film has.
+        UIView.performWithoutAnimation {
+            // ⚠️ **ONE WINDOW PER PIECE, ROUNDED AT THE ENDS IT ACTUALLY SHOWS.** The
+            // window clips its squares, so a piece's corner is drawn whole however
+            // many squares it runs across — a six-point sliver at the end of the
+            // film no longer has to carry an eight-point curve on its own.
+            let open = Set(openWindows.map(\.piece))
+            for (piece, window) in windows where !open.contains(piece) {
+                window.removeFromSuperview()
+                windows[piece] = nil
+                window.layer.cornerRadius = 0
+                if spareWindows.count < 4 { spareWindows.append(window) }
             }
-            // ⚠️ **THE FILM'S ENDS ARE ROUNDED ON THE END SQUARES, NOT ON THE
-            // FILM.** Rounding the strip itself would ask Core Animation for a
-            // mask as wide as the clip is long — 43200px at four minutes, far
-            // past the 16384 Metal hard-asserts at, which is charter T6. Only two
-            // squares in the whole strip have a corner to draw, and they are at
-            // most 54pt wide.
-            let corners = Self.roundedCorners(of: square, filmWidth: filmWidth)
-            view.layer.maskedCorners = corners
-            view.layer.cornerRadius = corners.isEmpty ? 0 : Metrics.corner
+            for opening in openWindows {
+                let frame = CGRect(
+                    x: opening.from, y: 0, width: opening.width, height: Metrics.strip
+                )
+                let window: PieceFilmView
+                if let known = windows[opening.piece] {
+                    window = known
+                } else {
+                    window = spareWindows.popLast() ?? PieceFilmView(frame: .zero)
+                    windows[opening.piece] = window
+                    film.addSubview(window)
+                }
+                window.frame = frame
+                window.layer.cornerRadius = opening.radius
+                window.layer.maskedCorners = Self.corners(
+                    leading: opening.roundsLeading, trailing: opening.roundsTrailing
+                )
+            }
+
+            for square in squares {
+                guard let window = windows[square.piece] else { continue }
+                let frame = CGRect(
+                    x: square.from - window.frame.minX, y: 0,
+                    width: square.width, height: Metrics.strip
+                )
+                let view: FilmSquare
+                if let known = tiles[square.place] {
+                    view = known
+                    if view.superview !== window { window.addSubview(view) }
+                } else {
+                    view = takeTile(into: window, at: frame)
+                    tiles[square.place] = view
+                }
+                view.frame = frame
+                // The picture keeps its own size and simply hangs out of the part the
+                // window shows: that is the crop.
+                view.show(at: square.filmFrom - square.from, width: square.filmWidth)
+                // ⚠️ **A SQUARE KEEPS WHAT IT IS SHOWING UNTIL SOMETHING BETTER
+                // ARRIVES.** Blanking a square back to the poster while its frame
+                // decodes turns a scroll into a strobe. One that has never shown
+                // anything takes whatever picture is at hand, which is what fills the
+                // strip in the turn the mode opens.
+                if let picture = decoded[square.seconds] {
+                    view.picture.image = picture
+                } else if view.picture.image == nil {
+                    view.picture.image = anyFrame ?? posterFrame
+                }
+            }
         }
 
         askForMissingTiles()
     }
 
-    /// Which corners a square rounds: the leading pair on whichever square is
-    /// drawn at the very start of the film, the trailing pair on whichever is
-    /// drawn at its end, none in between — the seams inside the strip are drawn,
-    /// not rounded.
-    static func roundedCorners(
-        of square: MediaTimelining.Square, filmWidth: CGFloat
-    ) -> CACornerMask {
+    /// The corners a window rounds: the leading pair where it shows its piece's
+    /// drawn start, the trailing pair where it shows its end.
+    ///
+    /// ⚠️ **A TEST CANNOT SEE THIS IN PIXELS.** The CPU renderer a test can use
+    /// rounds all four corners whatever `maskedCorners` says (measured), so the
+    /// mask is asserted as a property and pixels are only read off windows that
+    /// round all four.
+    static func corners(leading: Bool, trailing: Bool) -> CACornerMask {
         var corners: CACornerMask = []
-        if square.from <= 0.5 {
-            corners.formUnion([.layerMinXMinYCorner, .layerMinXMaxYCorner])
-        }
-        if square.from + square.width >= filmWidth - 0.5 {
-            corners.formUnion([.layerMaxXMinYCorner, .layerMaxXMaxYCorner])
-        }
+        if leading { corners.formUnion([.layerMinXMinYCorner, .layerMinXMaxYCorner]) }
+        if trailing { corners.formUnion([.layerMaxXMinYCorner, .layerMaxXMaxYCorner]) }
         return corners
     }
 
-    private func takeTile() -> FilmSquare {
+    /// The caps' shadow: the cap less `blur` twice on its inner side, rounded on
+    /// its outer side.
+    ///
+    /// ⚠️ **AN EXPLICIT PATH, AND IT KEEPS THE SHADOW OFF THE FILM.** Without one
+    /// Core Animation derives the shadow from the layer's alpha in an offscreen
+    /// pass, and casts it inwards too — over the inner-corner plates and the
+    /// held piece's first frames. Built by hand with tangent arcs so no path
+    /// helper's capsule rule decides the shape.
+    static func capShadowPath(
+        size: CGSize, outerIsLeading: Bool, radius: CGFloat, blur: CGFloat
+    ) -> CGPath {
+        let width = max(size.width - 2 * blur, 0)
+        let rect = CGRect(
+            x: outerIsLeading ? 0 : size.width - width, y: 0,
+            width: width, height: size.height
+        )
+        let corner = max(0, min(radius, rect.width, rect.height / 2))
+        let path = CGMutablePath()
+        if outerIsLeading {
+            path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+            path.addArc(
+                tangent1End: CGPoint(x: rect.minX, y: rect.minY),
+                tangent2End: CGPoint(x: rect.minX, y: rect.maxY), radius: corner
+            )
+            path.addArc(
+                tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
+                tangent2End: CGPoint(x: rect.maxX, y: rect.maxY), radius: corner
+            )
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        } else {
+            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            path.addArc(
+                tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
+                tangent2End: CGPoint(x: rect.maxX, y: rect.maxY), radius: corner
+            )
+            path.addArc(
+                tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
+                tangent2End: CGPoint(x: rect.minX, y: rect.maxY), radius: corner
+            )
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    /// A square's view, standing in its piece's window.
+    ///
+    /// ⚠️ **IN THE WINDOW, NOT IN THE FILM**, or the window's rounded corners
+    /// clip nothing.
+    private func takeTile(into window: PieceFilmView, at frame: CGRect) -> FilmSquare {
         let view = spareTiles.popLast() ?? FilmSquare(frame: .zero)
-        film.addSubview(view)
+        view.frame = frame
+        window.addSubview(view)
         return view
     }
 
@@ -888,6 +1037,10 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             // else invalidates a picture any more: a second of film is the same
             // second whatever the track has been edited into since.
             guard generation == framesGeneration else { return }
+            // ⚠️ **THE FIRST PICTURE OF ANY KIND IS A LAYOUT EVENT.** The frame's
+            // inner corners are plates BEHIND the film, and they wait for film
+            // that is not transparent before they show.
+            let hadNone = anyFrame == nil && posterFrame == nil
             for second in seconds {
                 requesting.remove(second)
                 guard let picture = arrived[second] else { continue }
@@ -901,6 +1054,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
                 }
             }
             forgetTheFurthestPictures()
+            if hadNone && anyFrame != nil { setNeedsLayout() }
         }
     }
 
@@ -1017,11 +1171,11 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         layOutTheRuler(width: width)
 
         film.frame = CGRect(x: 0, y: stripY, width: width, height: Metrics.strip)
+        // ⚠️ **BEFORE THE SELECTION, ALWAYS.** The frame's inner corners are
+        // plates behind the film and assume the film in front of them is laid.
         refreshTiles()
 
-        let placed = MediaTimelining.placements(
-            timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
-        )
+        let placed = laidPlacements
         let frameTop = stripY - Metrics.bar
         let frameHeight = Metrics.strip + Metrics.bar * 2
 
@@ -1040,8 +1194,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         layOutTheRulerFade()
 
         layOutTheCarry(placed, stripY: stripY)
-        layOutTheSelection(placed, frameTop: frameTop, frameHeight: frameHeight)
-        layOutTheCuts(placed, frameTop: frameTop, frameHeight: frameHeight, stripY: stripY)
+        layOutTheSelection(drawnSpans, frameTop: frameTop, frameHeight: frameHeight)
+        layOutTheRateStamps(drawnSpans, stripY: stripY)
         layOutTheSkeleton(filmWidth: width, stripY: stripY)
 
         needle.frame = CGRect(
@@ -1239,8 +1393,14 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         for (at, frame) in zip(placed, asAShotList(list, stripY: stripY)) {
             // The piece's own first square, wherever it is — a shot list shows
             // every piece, including the ones off screen.
+            // ⚠️ **FROM THE STRIP AS IT IS DRAWN.** Asked of the uncarved sheet,
+            // the first square of a piece can be one the daylight hid — never
+            // decoded for this piece, and decoded for the one BEFORE it, whose
+            // film it then showed.
+            let spans = drawnSpans.isEmpty
+                ? MediaTimelining.spans(of: placed) : drawnSpans
             let film = MediaTimelining.squares(
-                in: timeline, withinSource: duration,
+                along: spans, withinSource: duration,
                 visible: at.from...(at.from + MediaTimelining.tileWidth),
                 pointsPerSecond: pointsPerSecond
             ).first { $0.piece == at.index }?.seconds
@@ -1277,26 +1437,53 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// segments. It is also what makes per-piece handles possible at all — two
     /// caps can only belong to one piece.
     private func layOutTheSelection(
-        _ placed: [MediaTimelining.Placement], frameTop: CGFloat, frameHeight: CGFloat
+        _ drawn: [MediaTimelining.Span], frameTop: CGFloat, frameHeight: CGFloat
     ) {
-        guard let index = selected, let chosen = placed.first(where: { $0.index == index }) else {
+        guard let index = selected, let held = drawn.first(where: { $0.index == index }) else {
             for part in [topBar, bottomBar, startGrab, endGrab] { part.isHidden = true }
+            for plate in innerCorners { plate.isHidden = true }
+            laidOutHeld = nil
             return
         }
+        // ⚠️ **A FRAME THAT APPEARS, OR JUMPS TO ANOTHER PIECE, IS PLACED AT ONCE.**
+        // A lift selects inside the carry's spring: animated, the caps and rails
+        // grew out of the content's origin (or slid across from the last piece)
+        // while the plates they hide stood already in place, and the plates'
+        // tucked edges showed for the length of it. The frame of a piece that
+        // stays held still moves with whatever animation is running — a drop,
+        // a crossing.
+        let jumps = laidOutHeld != index || startGrab.isHidden
+        laidOutHeld = index
         for part in [topBar, bottomBar, startGrab, endGrab] { part.isHidden = false }
+        if jumps {
+            UIView.performWithoutAnimation {
+                placeTheFrame(around: held, frameTop: frameTop, frameHeight: frameHeight)
+            }
+        } else {
+            placeTheFrame(around: held, frameTop: frameTop, frameHeight: frameHeight)
+        }
+    }
+
+    /// Which piece the frame was last laid out around.
+    private var laidOutHeld: Int?
+
+    private func placeTheFrame(
+        around held: MediaTimelining.Span, frameTop: CGFloat, frameHeight: CGFloat
+    ) {
         // ⚠️ **THE CAPS STAND OUTSIDE THE PIECE, NOT ON TOP OF IT.** Laid over the
         // film they eat twelve points of picture at each end — and those are the
         // twelve the author is aiming with, the frames right at the edge of the
-        // decision being made.
-        // ⚠️ **AND THE RAILS STOP SHORT OF BOTH CAPS.** Drawn the obvious way —
-        // rails spanning the whole selection, caps laid on top — the straight
-        // rail runs past the cap's ROUNDED corner and shows as a hair of white
-        // sticking out beyond the curve at all four corners. Reported from the
-        // device as the borders overshooting at the ends.
-        let frameFrom = chosen.from - Metrics.grab
-        let frameTo = chosen.to + Metrics.grab
-        let railFrom = frameFrom + Metrics.corner
-        let railTo = max(frameTo - Metrics.corner, railFrom)
+        // decision being made. The held piece is never carved, so its drawn film
+        // IS its cut, and the caps stand on it.
+        // ⚠️ **AND THE RAILS STOP SHORT OF BOTH CAPS' OUTER CURVES.** Drawn the
+        // obvious way — rails spanning the whole selection, caps laid on top — the
+        // straight rail runs past the cap's ROUNDED corner and shows as a hair of
+        // white sticking out beyond the curve at all four corners. Reported from
+        // the device as the borders overshooting at the ends.
+        let caps = MediaTimelining.caps(around: held, grab: Metrics.grab)
+        let inset = max(Metrics.railInset, Metrics.capCorner)
+        let railFrom = caps.start.lowerBound + inset
+        let railTo = max(caps.end.upperBound - inset, railFrom)
         topBar.frame = CGRect(
             x: railFrom, y: frameTop, width: railTo - railFrom, height: Metrics.bar
         )
@@ -1305,11 +1492,20 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             width: railTo - railFrom, height: Metrics.bar
         )
         startGrab.frame = CGRect(
-            x: frameFrom, y: frameTop, width: Metrics.grab, height: frameHeight
+            x: caps.start.lowerBound, y: frameTop, width: Metrics.grab, height: frameHeight
         )
         endGrab.frame = CGRect(
-            x: chosen.to, y: frameTop, width: Metrics.grab, height: frameHeight
+            x: caps.end.lowerBound, y: frameTop, width: Metrics.grab, height: frameHeight
         )
+        for (grab, outerIsLeading) in [(startGrab, true), (endGrab, false)] {
+            let size = grab.bounds.size
+            if grab.layer.shadowPath?.boundingBoxOfPath.height != size.height {
+                grab.layer.shadowPath = Self.capShadowPath(
+                    size: size, outerIsLeading: outerIsLeading,
+                    radius: Metrics.capCorner, blur: Metrics.capShadowBlur
+                )
+            }
+        }
         for (grab, line) in [(startGrab, startGrip), (endGrab, endGrip)] {
             line.frame = CGRect(
                 x: (grab.bounds.width - Metrics.grip.width) / 2,
@@ -1317,6 +1513,54 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
                 width: Metrics.grip.width, height: Metrics.grip.height
             )
         }
+
+        // ⚠️ **THE INNER CORNERS ARE THE FILM'S OWN.** Asked for as *"le cadre
+        // intérieur des pinces… ait aussi des bordures intérieures arrondies, ce
+        // qui matcherait avec les coins arrondis des segments"*. White plates
+        // BEHIND the held film show exactly where its window is rounded away, so
+        // the frame's inner curve is the piece's curve by construction, at any
+        // clamped radius.
+        // ⚠️ **HIDDEN UNTIL THERE IS FILM IN FRONT OF THEM.** A square with no
+        // picture of any kind is transparent, and a plate behind it would show as
+        // a white block inside the frame.
+        let plates = MediaTimelining.fillets(
+            around: held, top: stripY, bottom: stripY + Metrics.strip,
+            rail: Metrics.bar, tuck: Metrics.filletTuck
+        )
+        let showsPlates = plates.count == innerCorners.count
+            && (anyFrame != nil || posterFrame != nil)
+        for (offset, plate) in innerCorners.enumerated() {
+            guard showsPlates else {
+                plate.isHidden = true
+                continue
+            }
+            if plate.isHidden {
+                // ⚠️ Framed before it is seen: the carry and the drop lay the
+                // track out inside their animations.
+                UIView.performWithoutAnimation { plate.frame = plates[offset] }
+                plate.isHidden = false
+            } else {
+                plate.frame = plates[offset]
+            }
+        }
+    }
+
+    /// The held piece's caps, from the very arithmetic that draws them.
+    ///
+    /// ⚠️ **ONE SOURCE FOR THE DRAWING, THE REACH AND THE TAP BAND.** A cap that
+    /// moved in one of three copies was a handle whose reach sat beside it.
+    private func heldCaps() -> MediaTimelining.Caps? {
+        guard let index = selected else { return nil }
+        let placed = MediaTimelining.placements(
+            timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
+        )
+        let drawn = MediaTimelining.spans(
+            of: placed, gap: Metrics.seamGap, holding: index,
+            corner: Metrics.filmCorner, height: Metrics.strip,
+            scale: traitCollection.displayScale
+        )
+        guard let held = drawn.first(where: { $0.index == index }) else { return nil }
+        return MediaTimelining.caps(around: held, grab: Metrics.grab)
     }
 
     private static func spoken(_ pieces: [MediaSegment]) -> String {
@@ -1375,7 +1619,6 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // While a piece is carried the ruler counts the list, which does not
         // scroll.
         if reordering == nil { ruler.frame.origin.x = -scroller.contentOffset.x }
-        let stripY = Metrics.ruler + Metrics.gap + Metrics.bar
         layOutTheSkeleton(
             filmWidth: MediaTimelining.contentWidth(
                 of: timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
@@ -1384,12 +1627,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         )
         // The stamps are clamped into the viewport, so they move with it.
         if !rateStamps.isEmpty {
-            layOutTheRateStamps(
-                MediaTimelining.placements(
-                    timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
-                ),
-                stripY: stripY
-            )
+            layOutTheRateStamps(drawnSpans, stripY: stripY)
         }
         guard !isFollowingPlayback, hasOpened, let moment = momentUnderNeedle else { return }
         onScrub?(moment)
@@ -1483,40 +1721,6 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         CATransaction.commit()
     }
 
-    /// The seams a split left behind, and the stamp a piece carries when it is
-    /// not playing as shot.
-    ///
-    /// ⚠️ **A SPLIT THAT CANNOT BE SEEN IS A SPLIT NOBODY CAN AIM.** Cutting a
-    /// clip in two keeps both halves, so without these the author taps the
-    /// scissors, the export changes, and the track looks exactly as it did. The
-    /// same is true of a rate: the readout's total shortens, which says SOMETHING
-    /// happened but not to which piece.
-    ///
-    /// ⚠️ **INTERIOR BOUNDARIES ONLY.** A seam is where two pieces MEET on the
-    /// track; the outer ends of the whole result are not seams, and drawing one
-    /// there would put a white bar under the first and last frame.
-    private func layOutTheCuts(
-        _ placed: [MediaTimelining.Placement], frameTop: CGFloat, frameHeight: CGFloat,
-        stripY: CGFloat
-    ) {
-        let seams = placed.dropLast().map(\.to)
-        while cutMarks.count > seams.count { cutMarks.removeLast().removeFromSuperview() }
-        while cutMarks.count < seams.count {
-            let mark = UIView()
-            mark.backgroundColor = .white
-            mark.isUserInteractionEnabled = false
-            content.insertSubview(mark, aboveSubview: film)
-            cutMarks.append(mark)
-        }
-        for (mark, x) in zip(cutMarks, seams) {
-            mark.frame = CGRect(
-                x: x - Metrics.cut / 2, y: frameTop, width: Metrics.cut, height: frameHeight
-            )
-        }
-
-        layOutTheRateStamps(placed, stripY: stripY)
-    }
-
     /// The rate a piece carries, kept where it can be read.
     ///
     /// ⚠️ **CLAMPED INTO THE VIEWPORT, NOT PINNED TO THE PIECE'S START.** A stamp
@@ -1527,8 +1731,13 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// author chose the rate. It slides along the piece instead, the way the
     /// fixed readout does, and stops at both of its ends so it never speaks for a
     /// piece it is not over.
-    private func layOutTheRateStamps(_ placed: [MediaTimelining.Placement], stripY: CGFloat) {
-        let stamped = placed.filter { abs($0.piece.speed - 1) > 0.001 }
+    ///
+    /// ⚠️ **ON ITS OWN FILM AND UNDER THE FRAME.** Clamped to where the piece's
+    /// film is DRAWN, so it never sits in the daylight; past the held piece's
+    /// closing cap when that piece is the one before; and inserted under the
+    /// selection's ink, which is always the thing on top.
+    private func layOutTheRateStamps(_ drawn: [MediaTimelining.Span], stripY: CGFloat) {
+        let stamped = drawn.filter { abs($0.placement.piece.speed - 1) > 0.001 }
         while rateStamps.count > stamped.count { rateStamps.removeLast().removeFromSuperview() }
         while rateStamps.count < stamped.count {
             let stamp = UILabel()
@@ -1539,14 +1748,21 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             stamp.layer.shadowOpacity = 0.4
             stamp.layer.shadowRadius = 2
             stamp.layer.shadowOffset = .zero
-            content.addSubview(stamp)
+            content.insertSubview(stamp, belowSubview: topBar)
             rateStamps.append(stamp)
         }
-        for (stamp, at) in zip(rateStamps, stamped) {
-            stamp.text = MediaTimelining.rateLabel(at.piece.speed)
+        let caps = heldCaps()
+        for (stamp, span) in zip(rateStamps, stamped) {
+            stamp.text = MediaTimelining.rateLabel(span.placement.piece.speed)
             stamp.sizeToFit()
-            let from = at.from
-            let to = at.to
+            var from = span.from
+            var to = span.to
+            if let caps, selected == span.index - 1 {
+                from = max(from, caps.end.upperBound)
+            }
+            if let caps, selected == span.index + 1 {
+                to = min(to, caps.start.lowerBound)
+            }
             // Pinned to the piece's leading edge and never wider than the piece:
             // a stamp that overran its own segment would sit on its neighbour and
             // say the wrong thing about it.
@@ -1681,8 +1897,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// thing it controls: inside the held piece's caps the answer is the held
     /// piece, and everywhere else it is whichever piece the film belongs to.
     private func pieceAimedAt(_ x: CGFloat, in placed: [MediaTimelining.Placement]) -> Int? {
-        if let held = selected, let chosen = placed.first(where: { $0.index == held }),
-           x >= chosen.from - Metrics.grab, x <= chosen.to + Metrics.grab {
+        if let held = selected, let caps = heldCaps(), caps.claims(x) {
             return held
         }
         return MediaTimelining.piece(atPoints: x, in: placed)
@@ -1737,12 +1952,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// fight a handle for its own touch would select the wrong thing half the
     /// time.
     private func handleCentres() -> (start: CGFloat, end: CGFloat)? {
-        guard let index = selected else { return nil }
-        let placed = MediaTimelining.placements(
-            timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
-        )
-        guard let chosen = placed.first(where: { $0.index == index }) else { return nil }
-        return (chosen.from - Metrics.grab / 2, chosen.to + Metrics.grab / 2)
+        heldCaps()?.centres
     }
 
     /// Carries a piece to another place in the composition.
@@ -2199,22 +2409,146 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// Every square of film on screen: where it is DRAWN and what it is SHOWING.
     /// A test pairs this with a provider that hands back a different object per
     /// second, which is how it can ask whether a piece's film travelled with it.
+    ///
+    /// ⚠️ **DRAWN**: where a square has a view, `from`/`width` are that view's
+    /// rectangle in film coordinates (which are content x), read through the
+    /// window it stands in.
     var debugFilm: [(piece: Int, from: CGFloat, width: CGFloat, picture: UIImage?)] {
-        squares.map { ($0.piece, $0.from, $0.width, tiles[$0.place]?.picture.image) }
+        squares.map { square in
+            guard let view = tiles[square.place] else {
+                return (square.piece, square.from, square.width, nil)
+            }
+            let drawn = view.convert(view.bounds, to: film)
+            return (square.piece, drawn.minX, drawn.width, view.picture.image)
+        }
     }
     /// Internal for tests: where each square's PICTURE is laid inside it. ⚠️ THE
     /// DRAWN EVIDENCE OF THE CROP — a square the window cuts in half must hold a
     /// full-width picture hanging out of itself, not a squeezed one.
     var debugFilmCrop: [(width: CGFloat, picture: CGRect)] {
         squares.compactMap { square in
-            tiles[square.place].map { (square.width, $0.picture.frame) }
+            tiles[square.place].map { ($0.bounds.width, $0.picture.frame) }
         }
+    }
+    /// Internal for tests: every piece's window, read off its layer — frames in
+    /// film coordinates, in play order.
+    var debugFilmWindows: [(
+        piece: Int, frame: CGRect, radius: CGFloat, corners: CACornerMask,
+        clips: Bool, curve: CALayerCornerCurve
+    )] {
+        windows.sorted { $0.key < $1.key }.map { piece, window in
+            (
+                piece, window.frame, window.layer.cornerRadius, window.layer.maskedCorners,
+                window.clipsToBounds, window.layer.cornerCurve
+            )
+        }
+    }
+    /// Internal for tests: every square's view — where it is drawn in film
+    /// coordinates, which window it stands in, and whether it carries a radius
+    /// of its own (it must not).
+    var debugTiles: [(
+        place: MediaTimelining.Square.Place, frame: CGRect, windowPiece: Int?, cornerRadius: CGFloat
+    )] {
+        tiles.map { place, view in
+            let window = windows.first { $0.value === view.superview }?.key
+            return (place, view.convert(view.bounds, to: film), window, view.layer.cornerRadius)
+        }
+        .sorted { $0.frame.minX < $1.frame.minX }
+    }
+    /// Internal for tests: for each square on screen, where the sheet puts its
+    /// picture and where the picture is actually drawn — both in film
+    /// coordinates. Carving daylight must move neither.
+    var debugPictureOnTheSheet: [(sheet: CGFloat, drawn: CGFloat)] {
+        squares.compactMap { square in
+            tiles[square.place].map { view in
+                (square.filmFrom, view.convert(view.picture.frame, to: film).minX)
+            }
+        }
+    }
+    /// Internal for tests: the four inner-corner plates, in content coordinates.
+    var debugFillets: [(
+        frame: CGRect, isShowing: Bool, isBehindTheFilm: Bool, isWhite: Bool,
+        hasCorners: Bool, hasShadow: Bool
+    )] {
+        let filmAt = content.subviews.firstIndex(of: film) ?? -1
+        return innerCorners.map { plate in
+            (
+                plate.frame, !plate.isHidden,
+                (content.subviews.firstIndex(of: plate) ?? .max) < filmAt,
+                plate.backgroundColor == .white,
+                plate.layer.cornerRadius > 0, plate.layer.shadowOpacity > 0
+            )
+        }
+    }
+    /// Internal for tests: whether ANY part of the selection's ink is showing.
+    var debugSelectionInkShowing: Bool {
+        ([topBar, bottomBar, startGrab, endGrab] + innerCorners).contains { !$0.isHidden }
+    }
+    /// Internal for tests: the caps' own shapes — their outer radius and which
+    /// corners it rounds, and the shadow's extent in the cap's coordinates.
+    var debugCapShapes: [(
+        width: CGFloat, height: CGFloat, radius: CGFloat, corners: CACornerMask,
+        shadowRadius: CGFloat, shadowPath: CGPath?
+    )] {
+        [startGrab, endGrab].map { cap in
+            (
+                cap.bounds.width, cap.bounds.height, cap.layer.cornerRadius, cap.layer.maskedCorners,
+                cap.layer.shadowRadius, cap.layer.shadowPath
+            )
+        }
+    }
+    /// Internal for tests: the reach's source, to compare with the drawn caps.
+    var debugHeldCaps: (start: ClosedRange<CGFloat>, end: ClosedRange<CGFloat>)? {
+        heldCaps().map { ($0.start, $0.end) }
+    }
+    /// ⚠️ **Internal for tests: CHARTER T6, WALKED.** Every layer in the track
+    /// wider or taller than the Metal limit at `scale` that is decorated in a
+    /// way that needs a texture that size — rounded, masked, clipping
+    /// sublayers, rasterised, shadowed, or holding contents.
+    func debugLayersPastTheMetalLimit(scale: CGFloat) -> [String] {
+        var found: [String] = []
+        func walk(_ layer: CALayer) {
+            let longest = max(layer.bounds.width, layer.bounds.height) * scale
+            if longest > 16384 {
+                let decorated = layer.cornerRadius > 0 || layer.mask != nil
+                    || (layer.masksToBounds && !(layer.sublayers ?? []).isEmpty)
+                    || layer.shouldRasterize || layer.shadowOpacity > 0
+                    || layer.contents != nil
+                    || ((layer as? CAShapeLayer)?.path.map {
+                        max($0.boundingBoxOfPath.width, $0.boundingBoxOfPath.height) * scale > 16384
+                    } ?? false)
+                if decorated {
+                    let owner = layer.delegate.map { String(describing: type(of: $0)) } ?? "CALayer"
+                    found.append("\(owner) \(Int(layer.bounds.width))x\(Int(layer.bounds.height))")
+                }
+            }
+            for sublayer in layer.sublayers ?? [] { walk(sublayer) }
+        }
+        walk(layer)
+        return found
+    }
+    static var debugSeamGap: CGFloat { Metrics.seamGap }
+    static var debugFilmCorner: CGFloat { Metrics.filmCorner }
+    static var debugCapCorner: CGFloat { Metrics.capCorner }
+    static var debugCapShadowBlur: CGFloat { Metrics.capShadowBlur }
+    static var debugFilletTuck: CGFloat { Metrics.filletTuck }
+    static var debugBar: CGFloat { Metrics.bar }
+    static var debugStampInset: CGFloat { Metrics.stampInset }
+    static var debugStrip: CGFloat { Metrics.strip }
+    /// Internal for tests: where the film row starts, in the track's coordinates.
+    var debugStripY: CGFloat { stripY }
+    /// Internal for tests: the rate stamps THEMSELVES, to ask where they stand in
+    /// the z-order.
+    var debugStampIsUnderTheFrame: Bool {
+        guard let rail = content.subviews.firstIndex(of: topBar) else { return false }
+        return rateStamps.allSatisfy { (content.subviews.firstIndex(of: $0) ?? .max) < rail }
     }
     /// Internal for tests: how many pictures are decoded and alive (charter T3).
     var debugDecodedCount: Int { decoded.count }
-    /// Internal for tests: where the squares of film are, so a test can ask
-    /// whether the last one stops at the end of the result.
-    var debugTileFrames: [CGRect] { tiles.values.map(\.frame) }
+    /// Internal for tests: where the squares of film are DRAWN, in film
+    /// coordinates, so a test can ask whether the last one stops at the end of
+    /// the result.
+    var debugTileFrames: [CGRect] { tiles.values.map { $0.convert($0.bounds, to: film) } }
     /// Internal for tests: which squares of film have a view on screen right
     /// now, in the order they are drawn.
     var debugTileIndices: [MediaTimelining.Square.Place] {
@@ -2328,6 +2662,18 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     var debugShotAnimations: [[String]] { shots.map(\.debugAnimations) }
     var debugShotPictureAnimations: [[String]] { shots.map(\.debugPictureAnimations) }
     var debugShotPictureFrames: [CGRect] { shots.map(\.debugPictureFrame) }
+    /// Internal for tests: the picture each chip shows.
+    var debugShotPictures: [UIImage?] { shots.map(\.debugPicture) }
+    /// Internal for tests: what is animating on the film — every window and
+    /// every square — and on the frame.
+    var debugFilmAnimations: [String] {
+        (Array(windows.values) as [UIView] + Array(tiles.values) as [UIView])
+            .flatMap { $0.layer.animationKeys() ?? [] }
+    }
+    var debugFrameAnimations: [String] {
+        ([topBar, bottomBar, startGrab, endGrab] + innerCorners)
+            .flatMap { $0.layer.animationKeys() ?? [] }
+    }
     /// Internal for tests: where the ruler's marks are DRAWN, in the track's own
     /// coordinates, and what they say.
     var debugRulerMarkCentres: [CGFloat] {
@@ -2364,6 +2710,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// selection test green.
     var debugSelectionIsDrawn: Bool {
         !topBar.isHidden && !bottomBar.isHidden && !startGrab.isHidden && !endGrab.isHidden
+            && (innerCorners.allSatisfy { !$0.isHidden } || (anyFrame == nil && posterFrame == nil))
     }
     /// Internal for tests: which piece is held, and where every piece is drawn.
     var debugSelectedPiece: Int? { selected }
@@ -2439,8 +2786,20 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         scroller.contentOffset.x = x
     }
 
-    /// Internal for tests: where the seams a split left are, in content points.
-    var debugCutMarks: [CGFloat] { cutMarks.map(\.frame.midX).sorted() }
+    /// Internal for tests: the daylight between two pieces' drawn film, in
+    /// content points — read off the WINDOWS, for each pair of neighbours that
+    /// both have one and both round the ends that face each other. A negative
+    /// width is an overlap, never daylight.
+    var debugSeamGaps: [(from: CGFloat, to: CGFloat)] {
+        let open = debugFilmWindows
+        return zip(open, open.dropFirst()).compactMap { left, right in
+            guard right.piece == left.piece + 1,
+                  left.corners.contains(.layerMaxXMinYCorner),
+                  right.corners.contains(.layerMinXMinYCorner)
+            else { return nil }
+            return (left.frame.maxX, right.frame.minX)
+        }
+    }
     /// Internal for tests: what the pieces that are not as shot are stamped with.
     var debugRateStamps: [String] { rateStamps.compactMap { $0.isHidden ? nil : $0.text } }
     /// Internal for tests: where those stamps are, in content points — which is
@@ -2481,7 +2840,6 @@ private final class FilmSquare: UIView {
         addSubview(picture)
         clipsToBounds = true
         isUserInteractionEnabled = false
-        layer.cornerCurve = .continuous
     }
 
     @available(*, unavailable)
@@ -2491,6 +2849,26 @@ private final class FilmSquare: UIView {
     func show(at offset: CGFloat, width: CGFloat) {
         picture.frame = CGRect(x: offset, y: 0, width: width, height: bounds.height)
     }
+}
+
+/// The part of one piece's film that is laid out: a rounded window its squares
+/// stand in.
+///
+/// ⚠️ **ROUNDED HERE AND NOWHERE ELSE.** The squares carry no radius, so a
+/// piece's corner is one curve however many squares it crosses. Bounded by the
+/// squares inside it, never by the piece — charter T6.
+@MainActor
+private final class PieceFilmView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+        isUserInteractionEnabled = false
+        backgroundColor = nil
+        layer.cornerCurve = .continuous
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
 /// ⚠️ **A WEAK HOP, BECAUSE A DISPLAY LINK KEEPS ITS TARGET ALIVE** — the
@@ -2590,6 +2968,7 @@ private final class ShotView: UIView {
     }
 
     var debugIsShaded: Bool { shade.alpha > 0.01 }
+    var debugPicture: UIImage? { picture.image }
     /// What is animating on the chip, and on the picture INSIDE it.
     var debugAnimations: [String] { layer.animationKeys() ?? [] }
     var debugPictureAnimations: [String] { picture.layer.animationKeys() ?? [] }

@@ -698,6 +698,10 @@ struct MediaEditorTimelineTests {
                 "the cap does not reach the top rail: \(start) against \(film)")
         #expect(abs(start.maxY - (film.maxY + bottom.height)) < 0.01,
                 "the cap does not reach the bottom rail: \(start) against \(film)")
+        // ⚠️ And the outside is rounded no further than a cap this narrow draws
+        // cleanly — Core Animation does not clamp.
+        #expect(bar.debugCapShapes.first?.radius == MediaTimelineTrackView.debugCapCorner,
+                "the caps are rounded to \(String(describing: bar.debugCapShapes.first?.radius))")
         #expect(abs(top.minY - start.minY) < 0.01, "the rail and the cap start at different heights")
     }
 
@@ -1016,6 +1020,11 @@ struct MediaEditorTimelineTests {
         func drawn(_ at: Double, in track: MediaTimelineTrackView) -> CGFloat? {
             showing(track).first { abs($0.seconds - at) < 0.001 }?.x
         }
+
+        /// The second of film a picture stands for, if it is one of this film's.
+        func second(of picture: UIImage?) -> Double? {
+            picture.flatMap { second[ObjectIdentifier($0)] }
+        }
     }
 
     /// A two-piece track of its own, with a provider that hands back a
@@ -1092,6 +1101,41 @@ struct MediaEditorTimelineTests {
         }
         #expect(cut.contains { $0.picture.minX < -0.01 },
                 "no picture hangs out of its square, so nothing is being cropped")
+
+        // ⚠️ **AND THE DAYLIGHT MOVES NO PICTURE.** With nothing held, every
+        // piece gives up a point at its cut; the pictures stay where the sheet
+        // puts them.
+        #expect(track.debugSelectedPiece == nil, "guard: nothing is held")
+        let seam = try #require(track.debugPieceFrames.first?.upperBound)
+        #expect(track.debugFilmWindows.contains {
+            abs($0.frame.minX - (seam + MediaTimelineTrackView.debugSeamGap / 2)) < 0.01
+        }, "guard: no window starts on a carved edge")
+        for square in track.debugPictureOnTheSheet {
+            #expect(abs(square.sheet - square.drawn) < 0.01,
+                    "a picture moved off the sheet: \(square)")
+        }
+    }
+
+    /// ⚠️ **A CARRIED CHIP SHOWS ITS OWN PIECE'S FILM.** Cut at 4.49s, the second
+    /// piece's first square of film (3.6–4.5s) is 0.6pt of it — all inside the
+    /// daylight, so the strip never makes that square for the second piece. The
+    /// same square IS decoded for the first piece, and a chip that looked it up
+    /// on the uncarved sheet showed the first piece's last frame.
+    @Test func aCarriedChipShowsItsOwnPiecesFilm() async throws {
+        let film = Film()
+        let track = cutTrack(film, at: 4.49)
+        try await settle(until: { film.showing(track).count > 4 })
+        try #require(film.showing(track).count > 4, "the film never arrived")
+        let second = try #require(track.debugPieceFrames.last)
+
+        track.debugLift(atContentX: second.lowerBound + 20)
+        try #require(track.debugCarrying == 1, "guard: the second piece was not lifted")
+        let pictures = track.debugShotPictures
+        try #require(pictures.count == 2)
+
+        let shown = try #require(film.second(of: pictures[1]), "the chip shows no frame of the film")
+        #expect(shown >= 4.49, "the second piece's chip shows \(shown)s — the first piece's film")
+        track.debugDrop()
     }
 
     /// ⚠️ **AND CROPPING ONE SECTION SLIDES THE NEXT ONE'S FILM WITH IT.**

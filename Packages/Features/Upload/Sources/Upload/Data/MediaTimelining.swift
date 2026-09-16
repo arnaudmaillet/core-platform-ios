@@ -570,13 +570,36 @@ enum MediaTimelining {
         visible: ClosedRange<CGFloat>,
         tileWidth: CGFloat = tileWidth, pointsPerSecond: CGFloat = pointsPerSecond
     ) -> [Square] {
+        squares(
+            along: spans(of: placements(
+                timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
+            )),
+            withinSource: duration, visible: visible,
+            tileWidth: tileWidth, pointsPerSecond: pointsPerSecond
+        )
+    }
+
+    /// The squares of film to draw across `visible` content points, each cut off
+    /// where its piece's film is DRAWN.
+    ///
+    /// ⚠️ **THE SHEET IS PLACED BY THE CLOCK AND CUT BY THE DRAWING.** Where a
+    /// square's picture sits — `filmFrom` — comes from the piece's PLACEMENT, so
+    /// carving daylight off a piece's end hides a point of film and moves none;
+    /// how much of the square shows comes from the SPAN. A square that falls
+    /// wholly in the daylight is not made at all, so it is never decoded.
+    static func squares(
+        along spans: [Span], withinSource duration: Double,
+        visible: ClosedRange<CGFloat>,
+        tileWidth: CGFloat = tileWidth, pointsPerSecond: CGFloat = pointsPerSecond
+    ) -> [Square] {
         guard tileWidth > 0, pointsPerSecond > 0, visible.upperBound > visible.lowerBound
         else { return [] }
         var made: [Square] = []
-        for at in placements(timeline, withinSource: duration, pointsPerSecond: pointsPerSecond) {
+        for span in spans {
+            let at = span.placement
             let rate = speed(of: at.piece)
             let film = Double(tileWidth / pointsPerSecond) * rate
-            guard at.width > 0, rate > 0, film > 0 else { continue }
+            guard at.width > 0, span.width > 0, rate > 0, film > 0 else { continue }
             // Where a second of the FILE is drawn inside this piece.
             let x = { (second: Double) -> CGFloat in
                 at.from + CGFloat((second - at.piece.start) / rate) * pointsPerSecond
@@ -587,8 +610,8 @@ enum MediaTimelining {
                 let opens = Double(index) * film
                 let closes = opens + film
                 let filmFrom = x(opens)
-                let from = max(filmFrom, at.from)
-                let to = min(x(closes), at.to)
+                let from = max(filmFrom, span.from)
+                let to = min(x(closes), span.to)
                 guard to > from, to > visible.lowerBound, from < visible.upperBound else { continue }
                 made.append(
                     Square(
@@ -601,6 +624,200 @@ enum MediaTimelining {
             }
         }
         return made
+    }
+
+    // MARK: - What is drawn between the pieces
+
+    /// Where one piece's FILM is drawn, beside where its TIME is.
+    ///
+    /// ⚠️ **A SPAN NEVER FEEDS THE CLOCK.** `placement` is the piece on the
+    /// composition's axis — what the needle, the ruler, a seek and a tap all
+    /// read. `from`/`to` is only how much of that the film fills once daylight
+    /// has been carved off its ends. Reading a span where a placement belongs
+    /// would put a gap in time that the result does not have.
+    struct Span: Equatable, Sendable {
+        let placement: Placement
+        let from: CGFloat
+        let to: CGFloat
+        /// The corner the piece's film is rounded to, already clamped to it.
+        let radius: CGFloat
+
+        var index: Int { placement.index }
+        var width: CGFloat { max(to - from, 0) }
+    }
+
+    /// Where each piece's film is drawn: its placement, less half a daylight at
+    /// every seam it shares — except on the piece that is HELD.
+    ///
+    /// ⚠️ **ASKED FOR IN THOSE WORDS**: *"plutôt séparer les segments avec un léger
+    /// espace et arrondir les bords"*, in place of the white bar a cut used to
+    /// draw. The daylight is CARVED OUT OF THE FILM, centred on the cut, and the
+    /// clock keeps none of it: `placements` stays end to end, so the needle, the
+    /// ruler and every seek are exactly what they were. The cost is a point of
+    /// film hidden at each carved end.
+    ///
+    /// ⚠️ **THE HELD PIECE KEEPS ALL ITS FILM, AND HOLDING IT MOVES NOTHING
+    /// ELSE.** Its caps stand on its cut, and the half-daylight its neighbours
+    /// give up sits under them. Each half is worked out WITHOUT asking which
+    /// piece is held, so taking a piece changes that piece's film and no other.
+    ///
+    /// ⚠️ **A HALF IS A WHOLE NUMBER OF PIXELS.** Floored per half at `scale`, so
+    /// the daylight never lands on a half pixel and shimmer as the film scrolls;
+    /// 1pt halves are whole at 1x, 2x and 3x alike. A piece too narrow to give
+    /// up its daylight keeps `minimum` points of film and gives less.
+    static func spans(
+        of placed: [Placement], gap: CGFloat = 0, holding held: Int? = nil,
+        corner: CGFloat = 0, height: CGFloat = .infinity, scale: CGFloat = 0,
+        keepingAtLeast minimum: CGFloat = 1
+    ) -> [Span] {
+        let count = placed.count
+        guard count > 0 else { return [] }
+        let wanted = gap.isFinite && gap > 0 ? gap / 2 : 0
+        let keep = minimum.isFinite ? max(minimum, 0) : 0
+        func ends(_ index: Int) -> Int { (index > 0 ? 1 : 0) + (index < count - 1 ? 1 : 0) }
+        func room(_ index: Int) -> CGFloat {
+            let shared = ends(index)
+            guard shared > 0 else { return .infinity }
+            return max(placed[index].width - keep, 0) / CGFloat(shared)
+        }
+        func pixelFloor(_ value: CGFloat) -> CGFloat {
+            guard scale > 0, scale.isFinite else { return value }
+            return (value * scale + 1e-6).rounded(.down) / scale
+        }
+        let halves: [CGFloat] = (0..<max(count - 1, 0)).map { seam in
+            pixelFloor(max(0, min(wanted, room(seam), room(seam + 1))))
+        }
+        return placed.enumerated().map { index, at in
+            let carvesLeading = index > 0 && index != held
+            let carvesTrailing = index < count - 1 && index != held
+            let from = at.from + (carvesLeading ? halves[index - 1] : 0)
+            let to = max(at.to - (carvesTrailing ? halves[index] : 0), from)
+            return Span(
+                placement: at, from: from, to: to,
+                radius: endRadius(width: to - from, height: height, preferred: corner)
+            )
+        }
+    }
+
+    /// The corner a piece's ends can take.
+    ///
+    /// ⚠️ **CLAMPED HERE BECAUSE CORE ANIMATION DOES NOT.** Measured on the
+    /// simulator: a radius past half the width draws a spike rather than a pill,
+    /// and exactly half draws clean, `.continuous` included. A piece zoomed out
+    /// to a sliver is a capsule, never a thorn.
+    static func endRadius(width: CGFloat, height: CGFloat, preferred: CGFloat) -> CGFloat {
+        guard width.isFinite, height.isFinite || height == .infinity, preferred.isFinite
+        else { return 0 }
+        return max(0, min(preferred, width / 2, height / 2))
+    }
+
+    /// The part of one piece's film that is laid out right now: a rounded,
+    /// clipping window the piece's squares sit in.
+    struct FilmWindow: Equatable, Sendable {
+        let piece: Int
+        let from: CGFloat
+        let to: CGFloat
+        let radius: CGFloat
+        /// Whether the window's leading edge IS the piece's drawn start — only
+        /// then is there a corner to draw there.
+        let roundsLeading: Bool
+        let roundsTrailing: Bool
+
+        var width: CGFloat { max(to - from, 0) }
+    }
+
+    /// One window per piece that has squares: the HULL of those squares.
+    ///
+    /// ⚠️ **CHARTER T6: A WINDOW IS AS WIDE AS WHAT IS LAID OUT, NEVER AS THE
+    /// PIECE.** A four-minute piece is 14400pt, and a rounded clipping layer
+    /// that wide is 43200px at 3x — far past the 16384 Metal asserts at. The
+    /// squares already stop at the visible band plus its margin, so their hull
+    /// is bounded by the track, whatever the clip's length or the zoom. And
+    /// because the window is MADE of its squares, no square can exist without a
+    /// window to stand in.
+    static func windows(of squares: [Square], along spans: [Span]) -> [FilmWindow] {
+        var bounds: [Int: (from: CGFloat, to: CGFloat)] = [:]
+        for square in squares {
+            let known = bounds[square.piece]
+            bounds[square.piece] = (
+                min(known?.from ?? square.from, square.from),
+                max(known?.to ?? square.from + square.width, square.from + square.width)
+            )
+        }
+        return spans.compactMap { span in
+            guard let hull = bounds[span.index] else { return nil }
+            let leading = hull.from <= span.from + 0.001
+            let trailing = hull.to >= span.to - 0.001
+            let radius = leading || trailing
+                ? min(span.radius, max(hull.to - hull.from, 0) / 2) : 0
+            return FilmWindow(
+                piece: span.index, from: hull.from, to: hull.to, radius: radius,
+                roundsLeading: leading, roundsTrailing: trailing
+            )
+        }
+    }
+
+    /// The two caps around the held piece.
+    struct Caps: Equatable, Sendable {
+        let start: ClosedRange<CGFloat>
+        let end: ClosedRange<CGFloat>
+
+        var centres: (start: CGFloat, end: CGFloat) {
+            (
+                start.lowerBound + (start.upperBound - start.lowerBound) / 2,
+                end.lowerBound + (end.upperBound - end.lowerBound) / 2
+            )
+        }
+
+        /// Whether a touch at `x` is on the selection — its caps included.
+        func claims(_ x: CGFloat) -> Bool {
+            x >= start.lowerBound && x <= end.upperBound
+        }
+    }
+
+    /// ⚠️ **ONE SOURCE FOR WHERE THE CAPS ARE DRAWN, WHERE A FINGER TAKES THEM,
+    /// AND WHICH TOUCHES THE SELECTION KEEPS.** Three inline copies of this
+    /// arithmetic used to exist; a cap moved in one and not the others is a
+    /// handle whose reach is beside it.
+    static func caps(around span: Span, grab: CGFloat) -> Caps {
+        Caps(
+            start: (span.from - grab)...span.from,
+            end: span.to...(span.to + grab)
+        )
+    }
+
+    /// How far a `.continuous` corner runs along each edge, per point of radius.
+    /// Measured: at r = 8 the top row reaches full coverage about 11pt in, and
+    /// 1.528665 × 8 is 12.2 — a safe upper bound, and any excess is hidden by
+    /// the film that stands in front of it.
+    static let cornerReach: CGFloat = 1.528665
+
+    /// The four white plates that turn the frame's inner corners into curves:
+    /// top leading, top trailing, bottom leading, bottom trailing.
+    ///
+    /// ⚠️ **THEY STAND BEHIND THE FILM, SO THE CURVE IS THE FILM'S OWN.** The
+    /// held piece's window is rounded at its ends; a white plate behind each
+    /// corner shows through exactly where the film has been rounded away, and
+    /// nowhere else. No path has to be matched to Core Animation's continuous
+    /// curve, and a clamped radius — even zero — still closes the frame. The
+    /// plates tuck under the cap by `tuck` and reach up under the rail, so their
+    /// own edges are never seen.
+    static func fillets(
+        around span: Span, top: CGFloat, bottom: CGFloat, rail: CGFloat, tuck: CGFloat,
+        reach: CGFloat = cornerReach
+    ) -> [CGRect] {
+        guard span.radius > 0, span.width > 0, bottom > top else { return [] }
+        let extent = reach * span.radius + 1
+        let wide = min(extent, span.width)
+        let tall = min(extent, (bottom - top) / 2)
+        let width = wide + tuck
+        let height = tall + rail
+        return [
+            CGRect(x: span.from - tuck, y: top - rail, width: width, height: height),
+            CGRect(x: span.to - wide, y: top - rail, width: width, height: height),
+            CGRect(x: span.from - tuck, y: bottom - tall, width: width, height: height),
+            CGRect(x: span.to - wide, y: bottom - tall, width: width, height: height),
+        ]
     }
 
     /// How far either side of the middle of the track the strip is laid, so a

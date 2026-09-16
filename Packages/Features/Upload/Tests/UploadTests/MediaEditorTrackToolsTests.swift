@@ -355,30 +355,65 @@ struct MediaEditorTrackToolsTests {
         ))
     }
 
-    /// ⚠️ **A SPLIT THAT CANNOT BE SEEN IS A SPLIT NOBODY CAN AIM.** The outer
-    /// selection does not move when a clip is cut in two — both halves are kept —
-    /// so the seam is the only evidence on screen that the tap did anything.
-    @Test func aCutDrawsASeamOnTheFilm() throws {
+    /// ⚠️ **A SPLIT THAT CANNOT BE SEEN IS A SPLIT NOBODY CAN AIM — AND WHAT
+    /// SHOWS IT IS DAYLIGHT, NOT A WHITE BAR.** Asked for in those words: *"plutôt
+    /// séparer les segments avec un léger espace et arrondir les bords"*. The
+    /// outer selection does not move when a clip is cut in two — both halves are
+    /// kept — so the two rounded ends and the gap between them are the only
+    /// evidence on screen that the tap did anything.
+    @Test func aCutPartsTheFilmWithDaylight() throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
         let track = try tools(in: screen).track
         putTheNeedle(at: 5, on: track, in: screen)
-        #expect(track.debugCutMarks.isEmpty, "guard: an uncut clip has no seams")
+        #expect(track.debugSeamGaps.isEmpty, "guard: an uncut clip has no seams")
 
         screen.editor.debugActionBar.debugTap(
             MediaEditorViewController.TrackAction.split.rawValue
         )
         screen.window.layoutIfNeeded()
+        let seam = try #require(track.debugPieceFrames.first?.upperBound)
+        let half = MediaTimelineTrackView.debugSeamGap / 2
+        // ⚠️ **A NUMBER THE EYE CAN SEE, WRITTEN DOWN.** Every other width here
+        // is read off the same constant the track draws with — measured: set it
+        // to zero and they all agreed with each other, and nothing went red.
+        #expect(half >= 0.5, "a cut leaves \(half * 2)pt of daylight, which nobody can see")
 
-        let seams = track.debugCutMarks
-        #expect(seams.count == 1, "got \(seams)")
+        // The left half is held after a cut: it keeps all its film, and the
+        // daylight its neighbour gives up sits under its closing cap.
+        let heldWindows = track.debugFilmWindows
+        try #require(heldWindows.count == 2, "got \(heldWindows.map(\.frame))")
+        #expect(abs(heldWindows[0].frame.maxX - seam) < 0.01,
+                "the held half was carved: it ends at \(heldWindows[0].frame.maxX), the cut is \(seam)")
+        #expect(abs(heldWindows[1].frame.minX - (seam + half)) < 0.01,
+                "the other half starts at \(heldWindows[1].frame.minX), not half a daylight past \(seam)")
+        #expect(track.debugEndGrip.minX <= seam + 0.01 && track.debugEndGrip.maxX >= seam + half,
+                "the daylight is not under the closing cap: \(track.debugEndGrip)")
+
+        // Put down, the cut is two rounded ends and the daylight between them.
+        track.debugTap(atContentX: 100_000)
+        screen.window.layoutIfNeeded()
+        let gaps = track.debugSeamGaps
+        try #require(gaps.count == 1, "got \(gaps)")
+        #expect(abs((gaps[0].to - gaps[0].from) - MediaTimelineTrackView.debugSeamGap) < 0.01,
+                "the daylight is \(gaps[0].to - gaps[0].from)pt")
+        #expect(abs((gaps[0].from + gaps[0].to) / 2 - seam) < 0.01,
+                "the daylight is not centred on the cut: \(gaps[0]) against \(seam)")
         let at5 = MediaTimelining.x(
             atPlayedSeconds: MediaTimelining.playedSeconds(
                 atSourceSeconds: 5, in: track.debugTimeline, withinSource: 10
             ),
             pointsPerSecond: track.debugPointsPerSecond
         )
-        #expect(abs((seams.first ?? 0) - at5) < 2, "the seam is not on the cut: \(seams) vs \(at5)")
+        #expect(abs(seam - at5) < 2, "the cut is not at five seconds: \(seam) vs \(at5)")
+        #expect(abs(track.debugContentWidth - 600) < 0.01,
+                "the daylight entered the clock: \(track.debugContentWidth)")
+        let open = Dictionary(uniqueKeysWithValues: track.debugFilmWindows.map { ($0.piece, $0.frame) })
+        for tile in track.debugTiles {
+            let window = try #require(open[tile.place.piece], "a square with no window")
+            #expect(tile.frame.minX >= window.minX - 0.01 && tile.frame.maxX <= window.maxX + 0.01,
+                    "a square at \(tile.frame) stands outside its window \(window)")
+        }
     }
 
     // MARK: - Speed
@@ -746,6 +781,7 @@ struct MediaEditorTrackToolsTests {
         // framed the first piece whatever `selected` said left this green,
         // because both assertions read the same variable the break did not touch.
         #expect(track.debugSelectionIsDrawn == false, "a frame is drawn around something")
+        #expect(track.debugSelectionInkShowing == false, "part of a frame is on screen")
     }
 
     @Test func tappingAPieceTakesHoldOfIt() throws {
@@ -786,6 +822,7 @@ struct MediaEditorTrackToolsTests {
 
         #expect(track.debugSelectedPiece == nil)
         #expect(track.debugSelectionIsDrawn == false, "the frame stayed on screen")
+        #expect(track.debugSelectionInkShowing == false, "part of the frame stayed on screen")
     }
 
     /// ⚠️ **A FINGER THAT LANDS ON A CAP IS AIMING AT ITS PIECE.** The caps are
@@ -995,6 +1032,21 @@ struct MediaEditorTrackToolsTests {
         let last = try? #require(track.debugTileFrames.max { $0.maxX < $1.maxX })
         #expect((last?.maxX ?? 0) <= film + 0.01,
                 "the film runs \((last?.maxX ?? 0) - film)pt past its own end")
+
+        // ⚠️ **AND THE END IS ONE WHOLE CORNER, DRAWN BY THE PIECE'S WINDOW.**
+        // The last square is a sliver; rounded on its own it could not carry an
+        // eight-point curve.
+        track.debugScroll(toContentOffset: 600 - 195)
+        track.layoutIfNeeded()
+        let window = track.debugFilmWindows.last
+        #expect((window?.frame.maxX ?? .infinity) <= film + 0.01,
+                "the window runs past the film: \(String(describing: window?.frame))")
+        #expect(window?.corners.contains(.layerMaxXMaxYCorner) == true,
+                "the end of the film is not rounded: \(String(describing: window?.corners))")
+        #expect(window?.radius == MediaTimelineTrackView.debugFilmCorner,
+                "the end is rounded to \(String(describing: window?.radius))")
+        #expect(track.debugTiles.allSatisfy { $0.cornerRadius == 0 },
+                "a square carries a radius of its own")
     }
 
     /// ⚠️ **THERE IS NOTHING BETWEEN THE PIECES TO MARK, AND A ROUND OF THIS
@@ -1004,7 +1056,7 @@ struct MediaEditorTrackToolsTests {
     /// Trimming ripples instead: the pieces stay touching and the result's clock
     /// runs without a break. What is thrown away is off the track, and the way
     /// back to it is to drag the edge out again.
-    @Test func thePiecesAreLaidEndToEndWithNothingBetweenThem() {
+    @Test func theClockLaysThePiecesEndToEndWhateverIsDrawnBetweenThem() {
         let track = MediaTimelineTrackView()
         track.frame = CGRect(x: 0, y: 0, width: 390, height: MediaTimelineTrackView.height)
         // Two pieces of a ten-second clip with four seconds cut out between them.
@@ -1018,9 +1070,18 @@ struct MediaEditorTrackToolsTests {
         let pieces = track.debugPieceFrames
         #expect(pieces.count == 2, "got \(pieces)")
         #expect(abs(pieces[0].upperBound - pieces[1].lowerBound) < 0.01,
-                "there is a gap on the track between \(pieces[0]) and \(pieces[1])")
+                "the ARITHMETIC has a gap between \(pieces[0]) and \(pieces[1])")
         #expect(abs(track.debugContentWidth - 360) < 0.01,
                 "the track is not the length of the result: \(track.debugContentWidth)")
+        // ⚠️ The daylight is DRAWN, centred on the seam, and nothing else.
+        let gaps = track.debugSeamGaps
+        #expect(gaps.count == 1, "got \(gaps)")
+        #expect(abs((gaps.first.map { $0.to - $0.from } ?? 0) - MediaTimelineTrackView.debugSeamGap) < 0.01,
+                "got \(gaps)")
+        #expect((gaps.first.map { $0.to - $0.from } ?? 0) >= 1,
+                "the daylight between the pieces cannot be seen: \(gaps)")
+        #expect(abs((gaps.first.map { ($0.from + $0.to) / 2 } ?? 0) - 120) < 0.01,
+                "the daylight is not centred on the seam: \(gaps)")
     }
 
     // MARK: - Crop or continue, and only the clip on that side
@@ -1028,18 +1089,7 @@ struct MediaEditorTrackToolsTests {
     /// A three-piece track, laid out, with `piece` held — the shape the author is
     /// working in once they have cut more than once.
     private func cutInThree(holding piece: Int) -> MediaTimelineTrackView {
-        let track = MediaTimelineTrackView()
-        track.frame = CGRect(x: 0, y: 0, width: 390, height: MediaTimelineTrackView.height)
-        track.configure(duration: 12, timeline: MediaTimeline(segments: [
-            MediaSegment(start: 0, end: 3, speed: 1),
-            MediaSegment(start: 3, end: 6, speed: 1),
-            MediaSegment(start: 6, end: 9, speed: 1)
-        ]))
-        track.setNeedsLayout()
-        track.layoutIfNeeded()
-        track.select(piece)
-        track.layoutIfNeeded()
-        return track
+        TrackFixture.cutInThree(holding: piece)
     }
 
     private func segments(of track: MediaTimelineTrackView) -> [MediaSegment] {

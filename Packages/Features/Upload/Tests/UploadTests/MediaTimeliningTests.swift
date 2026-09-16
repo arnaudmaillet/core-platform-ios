@@ -854,6 +854,280 @@ struct MediaTimeliningTests {
         ) == 0)
     }
 
+    // MARK: - Daylight between the pieces
+
+    private func laid(_ widths: [CGFloat]) -> [MediaTimelining.Placement] {
+        var x: CGFloat = 0
+        return widths.enumerated().map { index, width in
+            defer { x += width }
+            return MediaTimelining.Placement(
+                index: index, piece: MediaSegment(start: Double(index), end: Double(index + 1)),
+                from: x, to: x + width
+            )
+        }
+    }
+
+    /// ⚠️ **THE DAYLIGHT IS CARVED FROM THE FILM AND NEVER FROM THE CLOCK.** Asked
+    /// for as *"séparer les segments avec un léger espace"*: two points between
+    /// neighbours, centred on the cut, and the outer ends of the result untouched.
+    @Test func daylightIsCarvedFromTheFilmAndNeverFromTheClock() {
+        let placed = laid([180, 180, 180])
+        let spans = MediaTimelining.spans(of: placed, gap: 2, scale: 3)
+
+        #expect(spans.count == 3)
+        #expect(spans[0].from == 0 && spans[2].to == 540, "an outer end was carved: \(spans)")
+        for seam in 0..<2 {
+            let gap = spans[seam + 1].from - spans[seam].to
+            #expect(abs(gap - 2) < 0.0001, "seam \(seam) has \(gap)pt of daylight")
+            #expect(abs((spans[seam].to + spans[seam + 1].from) / 2 - placed[seam].to) < 0.0001,
+                    "seam \(seam)'s daylight is not centred on its cut")
+        }
+        for (span, at) in zip(spans, placed) {
+            #expect(span.from >= at.from && span.to <= at.to, "a span leaves its placement: \(span)")
+            #expect(span.placement == at, "the clock was rewritten: \(span.placement)")
+        }
+    }
+
+    /// ⚠️ **THE HELD PIECE KEEPS ALL ITS FILM, AND ITS NEIGHBOURS KEEP WHAT THEY
+    /// HAD.** Its caps stand on its cut; holding it must move nothing else.
+    @Test func theHeldPieceKeepsAllItsFilmAndItsNeighboursKeepTheirs() {
+        let placed = laid([180, 180, 180])
+        let free = MediaTimelining.spans(of: placed, gap: 2, scale: 3)
+        let held = MediaTimelining.spans(of: placed, gap: 2, holding: 1, scale: 3)
+
+        #expect(held[1].from == 180 && held[1].to == 360, "the held piece was carved: \(held[1])")
+        #expect(held[0] == free[0] && held[2] == free[2],
+                "holding the middle moved a neighbour: \(free) → \(held)")
+        #expect(held[0].to == 179 && held[2].from == 361)
+    }
+
+    /// A piece too narrow for its daylight keeps a hair of film, and gives up
+    /// what it cannot spare — never a negative width.
+    @Test func aPieceTooNarrowForItsDaylightKeepsAHairOfFilm() {
+        let three = MediaTimelining.spans(of: laid([100, 3, 100]), gap: 2)
+        #expect(abs(three[1].width - 1) < 0.0001, "got \(three[1])")
+
+        let sliver = MediaTimelining.spans(of: laid([100, 1.5, 100]), gap: 2)
+        #expect(abs(sliver[1].width - 1) < 0.0001, "got \(sliver[1])")
+        #expect(abs((sliver[0].to + sliver[1].from) / 2 - 100) < 0.0001, "not centred: \(sliver)")
+        #expect(abs((sliver[1].to + sliver[2].from) / 2 - 101.5) < 0.0001, "not centred: \(sliver)")
+
+        let floored = MediaTimelining.spans(of: laid([100, 1.5, 100]), gap: 2, scale: 3)
+        #expect(floored[0].to == 100 && floored[1].from == 100, "a quarter point was not floored: \(floored)")
+        for span in three + sliver + floored {
+            #expect(span.width >= 0, "a negative width: \(span)")
+        }
+    }
+
+    /// ⚠️ **EACH HALF IS A WHOLE NUMBER OF PIXELS**, so the daylight never sits
+    /// on a half pixel and shimmers as the film scrolls.
+    @Test func eachHalfOfTheDaylightIsAWholeNumberOfPixels() {
+        let clamped = MediaTimelining.spans(of: laid([100, 2.1, 100]), gap: 2, scale: 3)
+        let half = clamped[1].from - 100
+        #expect(abs(half - 1.0 / 3) < 0.0001, "got \(half)")
+        for scale in [CGFloat(2), 3] {
+            let spans = MediaTimelining.spans(of: laid([180, 180, 180]), gap: 2, scale: scale)
+            #expect(spans[0].to == 179 && spans[1].from == 181, "at \(scale)x: \(spans)")
+            // A half that floors differently at each scale.
+            let narrow = MediaTimelining.spans(of: laid([100, 2.1, 100]), gap: 2, scale: scale)
+            let floored = narrow[1].from - 100
+            #expect(abs(floored - (0.55 * scale).rounded(.down) / scale) < 0.0001,
+                    "at \(scale)x the half is \(floored)")
+        }
+        for (span, at) in zip(clamped, laid([100, 2.1, 100])) {
+            for edge in [(span.from - at.from) * 3, (at.to - span.to) * 3] {
+                #expect(abs(edge - edge.rounded()) < 0.0001, "an edge off the pixel grid: \(span)")
+            }
+        }
+    }
+
+    /// ⚠️ **A CORNER NEVER OUTGROWS ITS PIECE.** Core Animation does not clamp: a
+    /// radius past half the width draws a spike.
+    @Test func aPiecesCornersNeverOutgrowIt() {
+        let radius = { (width: CGFloat) in
+            MediaTimelining.endRadius(width: width, height: 54, preferred: 8)
+        }
+        #expect(radius(100) == 8 && radius(16) == 8 && radius(12) == 6)
+        #expect(radius(1) == 0.5 && radius(0) == 0 && radius(.nan) == 0)
+        #expect(MediaTimelining.endRadius(width: 100, height: 10, preferred: 8) == 5)
+        for span in MediaTimelining.spans(of: laid([100, 3, 12, 1]), gap: 2, corner: 8, height: 54) {
+            #expect(span.radius <= span.width / 2 + 0.0001, "a spike: \(span)")
+        }
+    }
+
+    /// ⚠️ **THE SQUARES STOP AT THE DAYLIGHT, AND THE SHEET DOES NOT MOVE.** A
+    /// square's picture is placed by the clock; carving only hides a point of it.
+    @Test func theSquaresStopAtTheDaylightAndTheSheetStaysPut() {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4.15), MediaSegment(start: 4.15, end: 10)
+        ])
+        let placed = MediaTimelining.placements(cut, withinSource: duration, pointsPerSecond: 61)
+        let whole = MediaTimelining.squares(
+            along: MediaTimelining.spans(of: placed), withinSource: duration,
+            visible: -1000...2000, pointsPerSecond: 61
+        )
+        let carved = MediaTimelining.squares(
+            along: MediaTimelining.spans(of: placed, gap: 2), withinSource: duration,
+            visible: -1000...2000, pointsPerSecond: 61
+        )
+        let sheet = Dictionary(uniqueKeysWithValues: whole.map { ($0.place, $0.filmFrom) })
+        for square in carved {
+            #expect(sheet[square.place] == square.filmFrom, "a square moved on the sheet: \(square)")
+            let seam = placed[0].to
+            #expect(!(square.from < seam + 1 && square.from + square.width > seam - 1),
+                    "a square is drawn in the daylight: \(square)")
+        }
+
+        // A 1s piece at 4× at 12pt/s is 3pt: a square of its that lies wholly
+        // inside the carved half is not made at all.
+        let fast = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 5), MediaSegment(start: 5, end: 6, speed: 4),
+            MediaSegment(start: 6, end: 10)
+        ])
+        let slow = MediaTimelining.placements(fast, withinSource: duration, pointsPerSecond: 12)
+        let spans = MediaTimelining.spans(of: slow, gap: 2)
+        let made = MediaTimelining.squares(
+            along: spans, withinSource: duration, visible: -1000...2000, pointsPerSecond: 12
+        )
+        for square in made where square.piece == 1 {
+            #expect(square.from >= spans[1].from - 0.0001
+                    && square.from + square.width <= spans[1].to + 0.0001,
+                    "a square outside its drawn film: \(square) in \(spans[1])")
+        }
+    }
+
+    /// The squares as they were cut before any daylight existed — an independent
+    /// copy of that loop, kept as the oracle.
+    private func squaresAsTheyWere(
+        _ timeline: MediaTimeline, visible: ClosedRange<CGFloat>, pointsPerSecond: CGFloat
+    ) -> [MediaTimelining.Square] {
+        let tile = MediaTimelining.tileWidth
+        var made: [MediaTimelining.Square] = []
+        for at in MediaTimelining.placements(timeline, withinSource: duration, pointsPerSecond: pointsPerSecond) {
+            let rate = at.piece.speed
+            let film = Double(tile / pointsPerSecond) * rate
+            let x = { (second: Double) in at.from + CGFloat((second - at.piece.start) / rate) * pointsPerSecond }
+            let first = Int((at.piece.start / film).rounded(.down))
+            let last = Int((at.piece.end / film).rounded(.up))
+            for index in first..<max(last, first + 1) {
+                let opens = Double(index) * film
+                let filmFrom = x(opens)
+                let from = max(filmFrom, at.from)
+                let to = min(x(opens + film), at.to)
+                guard to > from, to > visible.lowerBound, from < visible.upperBound else { continue }
+                made.append(MediaTimelining.Square(
+                    place: .init(piece: at.index, index: index), from: from, width: to - from,
+                    filmFrom: filmFrom, filmWidth: tile,
+                    seconds: min(max(opens + film / 2, 0), duration)
+                ))
+            }
+        }
+        return made
+    }
+
+    /// ⚠️ **WITH NO DAYLIGHT, THE SQUARES ARE EXACTLY WHAT THEY WERE** — the shot
+    /// list and every older test read this wrapper.
+    @Test func withNoGapTheSquaresAreExactlyTodays() {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4.15), MediaSegment(start: 4.15, end: 10, speed: 2)
+        ])
+        let now = MediaTimelining.squares(
+            in: cut, withinSource: duration, visible: -500...900, pointsPerSecond: 61
+        )
+        let then = squaresAsTheyWere(cut, visible: -500...900, pointsPerSecond: 61)
+        #expect(!now.isEmpty)
+        #expect(now == then, "the gap-free squares changed")
+    }
+
+    /// ⚠️ **A WINDOW IS THE HULL OF ITS SQUARES — CHARTER T6 — AND ROUNDS ONLY
+    /// THE ENDS IT SHOWS.**
+    @Test func aWindowIsTheHullOfItsSquaresAndRoundsOnlyTheEndsItHolds() {
+        let long = MediaTimelining.spans(
+            of: MediaTimelining.placements(.whole, withinSource: 240, pointsPerSecond: 60),
+            corner: 8, height: 54
+        )
+        let middle = MediaTimelining.windows(
+            of: MediaTimelining.squares(
+                along: long, withinSource: 240, visible: 7000...7822, pointsPerSecond: 60
+            ),
+            along: long
+        )
+        #expect(middle.count == 1)
+        #expect(middle.first.map { !$0.roundsLeading && !$0.roundsTrailing && $0.radius == 0 } == true,
+                "the middle of a long piece is rounded: \(middle)")
+        #expect((middle.first?.width ?? .infinity) <= 822 + 108, "the window follows the piece: \(middle)")
+
+        let start = MediaTimelining.windows(
+            of: MediaTimelining.squares(
+                along: long, withinSource: 240, visible: -411...411, pointsPerSecond: 60
+            ),
+            along: long
+        )
+        #expect(start.first.map { $0.roundsLeading && !$0.roundsTrailing && $0.radius == 8 } == true,
+                "got \(start)")
+
+        let three = MediaTimelining.spans(of: laid([180, 180, 180]), gap: 2, corner: 8, height: 54)
+        var squares: [MediaTimelining.Square] = []
+        for span in three {
+            // A hand-laid sheet: squares every 54pt from each placement's start.
+            for x in stride(from: span.placement.from, to: span.placement.to, by: CGFloat(54)) {
+                let from = max(x, span.from)
+                let to = min(x + 54, span.to)
+                guard to > from, from < 432 else { continue }
+                squares.append(MediaTimelining.Square(
+                    place: .init(piece: span.index, index: Int(x)), from: from, width: to - from,
+                    filmFrom: x, filmWidth: 54, seconds: 0
+                ))
+            }
+        }
+        let open = MediaTimelining.windows(of: squares, along: three)
+        let froms: [CGFloat] = open.map { $0.from }
+        let tos: [CGFloat] = open.map { $0.to }
+        #expect(froms == [0, 181, 361], "got \(open)")
+        // The band stops laying squares at 432, so the last window ends on the
+        // square that crosses it — not on its piece's end.
+        #expect(tos == [179, 359, 468], "got \(open)")
+        #expect(open.map { $0.roundsLeading } == [true, true, true])
+        #expect(open.map { $0.roundsTrailing } == [true, true, false])
+    }
+
+    /// The caps stand on the held film, and that is also the band a tap keeps.
+    @Test func theCapsStandOnTheHeldFilm() {
+        let held = MediaTimelining.spans(of: laid([180, 180, 180]), gap: 2, holding: 1)[1]
+        let caps = MediaTimelining.caps(around: held, grab: 12)
+
+        let start: ClosedRange<CGFloat> = 168...180
+        let end: ClosedRange<CGFloat> = 360...372
+        #expect(caps.start == start && caps.end == end, "got \(caps)")
+        #expect(caps.centres.start == 174 && caps.centres.end == 366)
+        #expect(caps.claims(168) && caps.claims(372))
+        #expect(!caps.claims(167.9) && !caps.claims(372.1))
+    }
+
+    /// ⚠️ **A PLATE COVERS THE WHOLE CORNER THE FILM GIVES UP**, tucked under the
+    /// cap and the rail.
+    @Test func aFilletCoversTheCornerTheFilmGivesUp() throws {
+        let held = MediaTimelining.spans(
+            of: laid([180, 180, 180]), gap: 2, holding: 1, corner: 8, height: 54
+        )[1]
+        let plates = MediaTimelining.fillets(around: held, top: 19.5, bottom: 73.5, rail: 1.5, tuck: 2)
+        try #require(plates.count == 4)
+        let reach = MediaTimelining.cornerReach * 8 + 1
+        #expect(abs(plates[0].minX - 178) < 0.001 && abs(plates[0].minY - 18) < 0.001)
+        #expect(abs(plates[0].width - (reach + 2)) < 0.001 && abs(plates[0].height - (reach + 1.5)) < 0.001)
+        #expect(abs(plates[1].minX - (360 - reach)) < 0.001 && abs(plates[1].maxX - 362) < 0.001)
+        #expect(abs(plates[2].maxY - 75) < 0.001 && abs(plates[3].maxY - 75) < 0.001)
+
+        let thin = MediaTimelining.spans(
+            of: laid([100, 3, 100]), gap: 2, holding: 1, corner: 8, height: 54
+        )[1]
+        let narrow = MediaTimelining.fillets(around: thin, top: 19.5, bottom: 73.5, rail: 1.5, tuck: 2)
+        #expect(abs((narrow.first?.width ?? 0) - (3 + 2)) < 0.001, "got \(narrow)")
+
+        let square = MediaTimelining.spans(of: laid([180]), corner: 0, height: 54)[0]
+        #expect(MediaTimelining.fillets(around: square, top: 19.5, bottom: 73.5, rail: 1.5, tuck: 2).isEmpty)
+    }
+
     /// A track with no width yet — which is every track before its first layout
     /// — has nowhere to lay a list out.
     @Test func aShotListNeedsATrackToStandOn() {
