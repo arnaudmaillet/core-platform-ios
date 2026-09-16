@@ -18,21 +18,37 @@ import Foundation
 enum MediaTimelining {
     // MARK: - The scale
 
-    /// How wide one SOURCE second is drawn.
+    /// How wide one PLAYED second is drawn.
     ///
     /// A judgement, not a measurement: at 60 a ten-second clip is 600pt, which
     /// scrolls on every phone this ships to and still shows enough of itself to
-    /// aim with. It is the one number a zoom would later vary, which is why
-    /// nothing below hard-codes it.
+    /// aim with. It is the one number a zoom varies, which is why nothing below
+    /// hard-codes it.
     ///
-    /// ⚠️ **SOURCE, BECAUSE THE TRACK IS A PICTURE OF THE FILE.** The strip shows
-    /// the WHOLE clip with the kept part bracketed — the discarded head and tail
-    /// have to be on screen or there is nothing to drag a handle back across, and
-    /// they exist in source time only. The ruler above it marks source time for
-    /// the same reason. At 1x that is also played time, which is why C1 can have
-    /// one pair of functions; the day a segment plays at 2x the two stop agreeing
-    /// and the PLAYED pair arrives with it. Until then a played-time
-    /// point-conversion would be a synonym nobody calls.
+    /// ⚠️ **PLAYED, AND THE ROUTE HERE WENT THROUGH BOTH ALTERNATIVES.** The
+    /// track is a picture of the RESULT: the composition, laid out in the seconds
+    /// a viewer will experience.
+    ///
+    /// - a piece at 2× is drawn HALF as wide as the film it covers, and one at
+    ///   0.5× twice as wide — asked for in those words ("il faut le stretch");
+    /// - the needle crosses the track at a CONSTANT points-per-second whatever
+    ///   rates the pieces carry, and it never leaps: there is nothing between the
+    ///   pieces to leap over. *"Le curseur ne devrait jamais faire de saut et
+    ///   toujours se deplacer a la meme vitesse"*;
+    /// - trimming a piece therefore RIPPLES — everything after it slides along —
+    ///   and the discarded film is not drawn at all. It comes back by dragging
+    ///   the edge out again.
+    ///
+    /// ⚠️ **THE OTHER TWO ARRANGEMENTS WERE BUILT AND MEASURED, AND BOTH FAIL ON
+    /// SOMETHING THE AUTHOR CAN SEE.** The file at ONE scale cannot stretch a
+    /// rate. The file at PER-PIECE scales — the whole clip on the track with the
+    /// cut parts greyed — makes an edge drag free of any scrolling, and puts a
+    /// hole in the middle of the track for the playhead to jump. Only the
+    /// composition keeps the playhead honest, and what it costs is the head-trim
+    /// gesture: a piece begins where the one before it ends, so dragging its
+    /// START shortens it from the inside and the cap would stand still. The track
+    /// pays that by scrolling under the finger, and the scroller's leading inset
+    /// grows for the length of the gesture so that the first piece can do it too.
     static let pointsPerSecond: CGFloat = 60
 
     /// The shortest piece a cut may leave behind, in SOURCE seconds.
@@ -46,37 +62,55 @@ enum MediaTimelining {
         return min(shortestSourceSeconds, duration)
     }
 
-    static func x(atSourceSeconds seconds: Double, pointsPerSecond: CGFloat = pointsPerSecond) -> CGFloat {
+    static func x(atPlayedSeconds seconds: Double, pointsPerSecond: CGFloat = pointsPerSecond) -> CGFloat {
         guard seconds.isFinite, seconds > 0 else { return 0 }
         return CGFloat(seconds) * pointsPerSecond
     }
 
-    static func sourceSeconds(atX x: CGFloat, pointsPerSecond: CGFloat = pointsPerSecond) -> Double {
+    static func playedSeconds(atX x: CGFloat, pointsPerSecond: CGFloat = pointsPerSecond) -> Double {
         guard pointsPerSecond > 0 else { return 0 }
         return Double(max(x, 0) / pointsPerSecond)
     }
 
-    /// A DISTANCE in points as a distance in seconds — signed.
+    /// A DISTANCE in points as a distance in played seconds — signed.
     ///
-    /// ⚠️ **NOT `sourceSeconds(atX:)`, AND THE DIFFERENCE IS INVISIBLE UNTIL A
+    /// ⚠️ **NOT `playedSeconds(atX:)`, AND THE DIFFERENCE IS INVISIBLE UNTIL A
     /// DRAG GOES LEFT.** That one answers "which moment is here", so it floors at
-    /// zero: no clip has a moment before its start. This one answers "how far did
-    /// the finger travel", and a leftward drag is a negative number. Feeding a
-    /// drag delta to the position converter turns every leftward sample into
+    /// zero: no result has a moment before its start. This one answers "how far
+    /// did the finger travel", and a leftward drag is a negative number. Feeding
+    /// a drag delta to the position converter turns every leftward sample into
     /// `max(-12, 0) == 0`, so a handle would open outwards and refuse to come
     /// back — a control that is half dead in a way that looks like a clamp.
-    static func sourceSeconds(ofPoints points: CGFloat, pointsPerSecond: CGFloat = pointsPerSecond) -> Double {
+    static func playedSeconds(ofPoints points: CGFloat, pointsPerSecond: CGFloat = pointsPerSecond) -> Double {
         guard pointsPerSecond > 0 else { return 0 }
         return Double(points / pointsPerSecond)
     }
 
+    /// The same distance as SOURCE seconds, for a piece playing at `speed`.
+    ///
+    /// ⚠️ **THE STRETCH, SEEN FROM THE FINGER.** A piece at 2× is drawn half as
+    /// wide as the film it covers, so trimming one second out of it takes twice
+    /// the drag. Converting a drag straight to source seconds — which is what the
+    /// single-clock version did — would move a fast piece's edge twice as far as
+    /// the finger went.
+    static func sourceSeconds(
+        ofPoints points: CGFloat, atSpeed rate: Double,
+        pointsPerSecond: CGFloat = pointsPerSecond
+    ) -> Double {
+        playedSeconds(ofPoints: points, pointsPerSecond: pointsPerSecond) * speed(of: rate)
+    }
+
     // MARK: - The scrolling track
 
-    /// How wide the strip has to be to hold the whole clip.
+    /// How wide the strip has to be to hold the RESULT.
     static func contentWidth(
-        ofSourceSeconds duration: Double, pointsPerSecond: CGFloat = pointsPerSecond
+        of timeline: MediaTimeline, withinSource duration: Double,
+        pointsPerSecond: CGFloat = pointsPerSecond
     ) -> CGFloat {
-        x(atSourceSeconds: duration, pointsPerSecond: pointsPerSecond)
+        x(
+            atPlayedSeconds: playedSeconds(of: timeline, withinSource: duration),
+            pointsPerSecond: pointsPerSecond
+        )
     }
 
     /// The padding at each end of the strip.
@@ -93,40 +127,142 @@ enum MediaTimelining {
         max(width, 0) / 2
     }
 
-    /// Which moment of the file is under the needle, at a given scroll offset.
+    /// How far into the RESULT the needle is, at a given scroll offset.
     ///
-    /// Clamped into the clip: a scroll view rubber-bands past both ends, and the
-    /// time under the needle there is a moment the file does not have.
-    static func sourceSeconds(
+    /// Clamped into the result: a scroll view rubber-bands past both ends, and
+    /// the time under the needle there is a moment the post will not have.
+    static func playedSeconds(
         atContentOffset offset: CGFloat, trackWidth: CGFloat,
-        pointsPerSecond: CGFloat = pointsPerSecond, withinSource duration: Double
+        pointsPerSecond: CGFloat = pointsPerSecond,
+        of timeline: MediaTimeline, withinSource duration: Double
     ) -> Double {
         guard duration.isFinite, duration > 0 else { return 0 }
         let atNeedle = offset + centringInset(forTrackWidth: trackWidth)
-        let seconds = sourceSeconds(atX: atNeedle, pointsPerSecond: pointsPerSecond)
-        return min(max(seconds, 0), duration)
+        return min(
+            max(playedSeconds(atX: atNeedle, pointsPerSecond: pointsPerSecond), 0),
+            playedSeconds(of: timeline, withinSource: duration)
+        )
     }
 
-    /// The offset that brings `seconds` under the needle — the inverse of the
-    /// above, for following playback and for opening on a stored cut.
+    /// The offset that brings a moment of the RESULT under the needle.
     static func contentOffset(
-        forSourceSeconds seconds: Double, trackWidth: CGFloat,
+        forPlayedSeconds seconds: Double, trackWidth: CGFloat,
         pointsPerSecond: CGFloat = pointsPerSecond
     ) -> CGFloat {
-        x(atSourceSeconds: seconds, pointsPerSecond: pointsPerSecond)
+        x(atPlayedSeconds: seconds, pointsPerSecond: pointsPerSecond)
             - centringInset(forTrackWidth: trackWidth)
+    }
+
+    // MARK: - The composition, piece by piece
+
+    /// Where one piece of the composition is drawn.
+    struct Placement: Equatable, Sendable {
+        let index: Int
+        let piece: MediaSegment
+        let from: CGFloat
+        let to: CGFloat
+
+        var width: CGFloat { max(to - from, 0) }
+        func contains(_ x: CGFloat) -> Bool { x >= from && x <= to }
+        var middle: CGFloat { (from + to) / 2 }
+    }
+
+    /// The kept pieces laid END TO END, in the order they will play.
+    ///
+    /// ⚠️ **NOTHING SITS BETWEEN THEM, AND FOR ONE ROUND THE DISCARDED FILM DID.**
+    /// The track carried the whole file, holes and all, greyed — which made an
+    /// edge drag free of any scrolling and cost the one thing that matters more:
+    /// *"le curseur fait un saut sur la timeline alors qu'il ne devrait jamais en
+    /// faire et toujours se deplacer a la meme vitesse"*. A hole is a stretch of
+    /// track the playhead has to leap, and no arrangement of the drawing can hide
+    /// that. So the track is the RESULT again, end to end: trimming a piece
+    /// shortens it and everything after it slides along, which is the ripple every
+    /// editor does and what was asked for in the same breath.
+    ///
+    /// ⚠️ **AND THE ORDER IS THE COMPOSITION'S, NOT THE FILE'S.** Pieces can be
+    /// dragged past one another, so piece 1 may well start earlier in the file
+    /// than piece 0. Nothing here may sort, and nothing may assume a piece's
+    /// neighbour is adjacent in the source.
+    static func placements(
+        _ timeline: MediaTimeline, withinSource duration: Double,
+        pointsPerSecond: CGFloat = pointsPerSecond
+    ) -> [Placement] {
+        var placed: [Placement] = []
+        var played: Double = 0
+        for (index, piece) in resolved(timeline, withinSource: duration).enumerated() {
+            let from = x(atPlayedSeconds: played, pointsPerSecond: pointsPerSecond)
+            played += piece.playedSeconds
+            let to = x(atPlayedSeconds: played, pointsPerSecond: pointsPerSecond)
+            placed.append(Placement(index: index, piece: piece, from: from, to: to))
+        }
+        return placed
+    }
+
+    /// Which piece a touch at `x` content points landed on, if any.
+    static func piece(atPoints x: CGFloat, in placed: [Placement]) -> Int? {
+        placed.first { $0.contains(x) }?.index
+    }
+
+    /// A moment of the RESULT, as the piece that is playing and where in the FILE
+    /// it has got to.
+    ///
+    /// ⚠️ **THE PIECE IS PART OF THE ANSWER, NOT AN IMPLEMENTATION DETAIL.** Once
+    /// pieces can be re-ordered, a moment of the file no longer says where in the
+    /// result it is — the same second can appear twice, or in a piece that plays
+    /// third. Everything downstream (the preview's seeks, the rate the player
+    /// runs at, which piece an action targets) needs the piece, so it is carried
+    /// rather than recovered.
+    struct Moment: Equatable, Sendable {
+        let piece: Int
+        let sourceSeconds: Double
+    }
+
+    static func moment(
+        atPlayedSeconds seconds: Double, in timeline: MediaTimeline, withinSource duration: Double
+    ) -> Moment? {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard let first = pieces.first else { return nil }
+        guard seconds.isFinite, seconds > 0 else { return Moment(piece: 0, sourceSeconds: first.start) }
+        var remaining = seconds
+        for (index, piece) in pieces.enumerated() {
+            let played = piece.playedSeconds
+            if remaining > played {
+                remaining -= played
+                continue
+            }
+            return Moment(
+                piece: index,
+                sourceSeconds: min(piece.start + remaining * speed(of: piece), piece.end)
+            )
+        }
+        let last = pieces.count - 1
+        return Moment(piece: last, sourceSeconds: pieces[last].end)
+    }
+
+    /// And back: how far into the result a moment inside a known piece is.
+    static func playedSeconds(
+        ofPiece index: Int, atSourceSeconds seconds: Double,
+        in timeline: MediaTimeline, withinSource duration: Double
+    ) -> Double {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard pieces.indices.contains(index) else { return 0 }
+        var played: Double = 0
+        for piece in pieces[..<index] { played += piece.playedSeconds }
+        let piece = pieces[index]
+        let into = min(max(seconds, piece.start), piece.end) - piece.start
+        return played + into / speed(of: piece)
     }
 
     // MARK: - Splitting, and rates
     //
-    // ⚠️ **NOTHING ON SCREEN REACHES THESE YET, AND THAT IS DELIBERATE RATHER
-    // THAN FORGOTTEN.** The control that offers them is the second selector
-    // (charter F18). They are here first because the EXPORT had to be able to
-    // honour a split before one could be offered: `PickedVideo` carried a single
-    // range and the exporter a single `insertTimeRange`, so a split would have
-    // published its first piece and dropped the rest — silently, because what
-    // comes out is a perfectly good video. Arithmetic and export first, button
-    // second, is the order that makes the button safe to draw.
+    // ⚠️ **THE BUTTONS THAT REACH THESE ARRIVED AFTER THEY DID, AND THAT ORDER
+    // WAS THE POINT.** `IconActionBar` in the editor's toolbar now calls `split`
+    // and `setRate` (charter F18). They were written first because the EXPORT had
+    // to be able to honour a split before one could be offered: `PickedVideo`
+    // carried a single range and the exporter a single `insertTimeRange`, so a
+    // split would have published its first piece and dropped the rest —
+    // silently, because what comes out is a perfectly good video. Arithmetic and
+    // export first, button second, is what made the button safe to draw.
 
     /// Which piece a moment falls in, if any.
     ///
@@ -150,13 +286,15 @@ enum MediaTimelining {
     /// piece whose handles cannot move and whose export is a single frame — the
     /// same "control that reaches nothing" a too-short clip already says out loud.
     /// Returning the timeline unchanged is what lets the caller say so.
+    /// ⚠️ **THE PIECE IS NAMED, NOT LOOKED UP BY TIME.** Pieces can be
+    /// re-ordered, so a moment of the file no longer says which piece is under
+    /// the needle — the same second can belong to two of them.
     static func split(
-        _ timeline: MediaTimeline, atSourceSeconds seconds: Double, withinSource duration: Double
+        _ timeline: MediaTimeline, atPiece index: Int, atSourceSeconds seconds: Double,
+        withinSource duration: Double
     ) -> MediaTimeline {
         let pieces = resolved(timeline, withinSource: duration)
-        guard let index = pieceIndex(atSourceSeconds: seconds, within: pieces) else {
-            return timeline
-        }
+        guard pieces.indices.contains(index) else { return timeline }
         let piece = pieces[index]
         let floor = shortest(withinSource: duration)
         guard seconds - piece.start >= floor, piece.end - seconds >= floor else { return timeline }
@@ -178,11 +316,12 @@ enum MediaTimelining {
     /// always looked splittable, including a tenth of a second from its end. The
     /// question is whether there is one more piece afterwards.
     static func canSplit(
-        _ timeline: MediaTimeline, atSourceSeconds seconds: Double, withinSource duration: Double
+        _ timeline: MediaTimeline, atPiece index: Int, atSourceSeconds seconds: Double,
+        withinSource duration: Double
     ) -> Bool {
         let before = resolved(timeline, withinSource: duration).count
         let after = resolved(
-            split(timeline, atSourceSeconds: seconds, withinSource: duration),
+            split(timeline, atPiece: index, atSourceSeconds: seconds, withinSource: duration),
             withinSource: duration
         ).count
         return after > before
@@ -192,17 +331,80 @@ enum MediaTimelining {
     /// for; these are the detents every reference ships.
     static let rates: [Double] = [0.25, 0.5, 1, 2, 4]
 
-    /// Sets the rate of the piece under `seconds`, leaving the others alone.
+    /// How a rate is written.
+    ///
+    /// ⚠️ **ONE SPELLING, TWO PLACES THAT SHOW IT.** The chips offer a rate and
+    /// the track stamps the piece that carries one; written twice, "0.5×" on the
+    /// chip and "0.50×" on the stamp is the kind of disagreement nobody reports
+    /// and everybody sees. The symbol is a multiplication sign, not the letter x
+    /// — which is what every reference sets it in.
+    static func rateLabel(_ rate: Double) -> String {
+        guard rate.isFinite else { return "1×" }
+        let whole = rate.rounded()
+        if abs(rate - whole) < 0.001 { return "\(Int(whole))×" }
+        return String(format: "%g×", (rate * 100).rounded() / 100)
+    }
+
+    /// Sets one piece's rate, leaving the others alone.
+    static func setRate(
+        _ rate: Double, atPiece index: Int, in timeline: MediaTimeline, withinSource duration: Double
+    ) -> MediaTimeline {
+        var pieces = resolved(timeline, withinSource: duration)
+        guard pieces.indices.contains(index) else { return timeline }
+        pieces[index].speed = rate
+        return MediaTimeline(segments: pieces)
+    }
+
+    /// The same, for the piece under a moment — what the needle asks when the
+    /// author has not taken hold of anything.
     static func setRate(
         _ rate: Double, at seconds: Double, in timeline: MediaTimeline, withinSource duration: Double
     ) -> MediaTimeline {
-        var pieces = resolved(timeline, withinSource: duration)
+        let pieces = resolved(timeline, withinSource: duration)
         guard let index = pieceIndex(atSourceSeconds: seconds, within: pieces) else {
             return timeline
         }
-        let piece = pieces[index]
-        pieces[index] = MediaSegment(start: piece.start, end: piece.end, speed: rate)
-        return MediaTimeline(segments: pieces)
+        return setRate(rate, atPiece: index, in: timeline, withinSource: duration)
+    }
+
+    /// The rate one piece plays at.
+    static func rate(atPiece index: Int, in timeline: MediaTimeline, withinSource duration: Double) -> Double {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard pieces.indices.contains(index) else { return 1 }
+        return pieces[index].speed
+    }
+
+    /// Where a moment of the FILE falls in the RESULT.
+    ///
+    /// ⚠️ **THE READOUT'S TWO HALVES ARE THE SAME CLOCK, AND FOR ONE BUILD THEY
+    /// WERE NOT.** It read `stamp(secondsUnderNeedle) + " / " + stamp(played)` —
+    /// the position in SOURCE seconds beside the length in PLAYED ones. At 1×
+    /// they agree and the defect is invisible; at 2× a seven-second clip showed
+    /// "0:04 / 0:04" with the needle half way through, and at 4× the left number
+    /// can pass the right one. Measured on the device, which is where it was
+    /// seen. `MediaSegment`'s own note says a function taking a bare `seconds` is
+    /// a bug waiting to be written; this is the version where the CALLER mixed
+    /// them.
+    ///
+    /// Moments outside what is kept collapse onto the nearest edge of it: a
+    /// needle parked in the discarded head of a clip is at 0:00 of the result,
+    /// because that is what a viewer will see.
+    static func playedSeconds(
+        atSourceSeconds seconds: Double, in timeline: MediaTimeline, withinSource duration: Double
+    ) -> Double {
+        guard seconds.isFinite else { return 0 }
+        var played = 0.0
+        for piece in resolved(timeline, withinSource: duration) {
+            if seconds >= piece.end {
+                played += piece.playedSeconds
+                continue
+            }
+            if seconds > piece.start {
+                played += (seconds - piece.start) / speed(of: piece)
+            }
+            break
+        }
+        return played
     }
 
     /// The rate the piece under `seconds` plays at — what a chosen chip shows.
@@ -214,36 +416,18 @@ enum MediaTimelining {
         return pieces[index].speed
     }
 
-    // MARK: - Playback stays inside the cut
+    // MARK: - Playing the composition
 
-    /// Where playback should jump back to, if it has run outside what is kept.
-    ///
-    /// ⚠️ **A CUT IS A PROMISE ABOUT WHAT THE POST WILL BE, AND PREVIEW HAS TO
-    /// KEEP IT.** A clip that plays on past the end handle is showing the author
-    /// footage they have just decided to throw away, and showing it as though it
-    /// were part of the result. The same is true at the head: a trimmed opening
-    /// that still plays first means the preview and the export disagree about
-    /// where the post begins.
-    ///
-    /// ⚠️ **AND THE SLACK IS WHAT STOPS IT THRASHING.** Turning back at exactly
-    /// the end handle races the player, which may report a time a frame past it
-    /// and be sent back again and again; turning back a little early is
-    /// invisible and settles. Coming back to the start, the playhead is inside
-    /// by construction, so the return trip cannot re-trigger.
-    ///
-    /// Nil is the ordinary answer — the playhead is inside the cut and nothing
-    /// needs to happen.
-    static func loopback(
-        playheadSeconds playhead: Double, within pieces: [MediaSegment], slack: Double = 0.06
-    ) -> Double? {
-        guard playhead.isFinite,
-              let start = pieces.first?.start, let end = pieces.last?.end,
-              end > start
-        else { return nil }
-        if playhead >= end - slack { return start }
-        if playhead < start - slack { return start }
-        return nil
-    }
+    // ⚠️ **THE PREVIEW PLAYS THE ARRANGEMENT AS ONE ITEM, AND THERE IS NOTHING
+    // HERE ANY MORE.** This section used to hold `next(afterPiece:…)`: the
+    // preview played the FILE, and at each piece's end it was SENT to the next
+    // piece's start — a seek in the file on every boundary. After a re-order
+    // every one of those seeks was a jump across the file, asynchronous and
+    // decoded forward from a keyframe, and the author saw it as *"une mini pause
+    // / glitch"* between the pieces. The canvas now plays the composition the
+    // export builds (`VideoPlaybackController.load`), whose seconds ARE the
+    // track's played seconds; a boundary is an edit inside one item, and the
+    // only seek left is the loop back to the start.
 
     // MARK: - Following smoothly
 
@@ -301,56 +485,130 @@ enum MediaTimelining {
     /// tiles off screen are never decoded.
     static let tileWidth: CGFloat = 54
 
-    /// How many tiles a clip is worth.
-    static func tileCount(acrossContentWidth width: CGFloat, tileWidth: CGFloat = tileWidth) -> Int {
-        guard width > 0, tileWidth > 0 else { return 0 }
-        return Int((width / tileWidth).rounded(.up))
-    }
-
     /// How far apart two tiles are in SOURCE seconds — what the generator's
     /// tolerance is derived from.
+    ///
+    /// ⚠️ **THE TIGHTEST SPACING IN THE WHOLE TIMELINE, NOT THE AVERAGE.** A tile
+    /// is a fixed width of RESULT, so the film it covers depends on the rate of
+    /// the piece it falls in: at 4× one tile is four times as much film as at 1×.
+    /// The tolerance is derived from this (charter T5: strictly under half the
+    /// spacing, or the strip repeats itself), and half of the AVERAGE spacing is
+    /// wider than half of the smallest — so a slow piece next to a fast one would
+    /// get a tolerance that lands two of its tiles on the same frame. The
+    /// slowest piece sets it for everyone.
     static func tileSpacingSeconds(
+        in timeline: MediaTimeline, withinSource duration: Double,
         tileWidth: CGFloat = tileWidth, pointsPerSecond: CGFloat = pointsPerSecond
     ) -> Double {
         guard pointsPerSecond > 0 else { return 0 }
-        return Double(tileWidth / pointsPerSecond)
+        let played = Double(tileWidth / pointsPerSecond)
+        let rates = resolved(timeline, withinSource: duration).map { speed(of: $0) }
+        return played * (rates.min() ?? 1)
     }
 
-    /// The moment a tile should show: the MIDDLE of the stretch it covers.
+    /// ONE SQUARE OF FILM.
     ///
-    /// ⚠️ **THE MIDDLE, NOT THE EDGE.** Asking at a tile's leading edge lands the
-    /// first tile on exactly zero, which is the opening fade so much real film
-    /// starts with — the same reason `VideoExporter.posterImage` stopped sampling
-    /// there — and the last tile on the instant the clip ends, where there is
-    /// frequently no frame at all.
-    static func sourceSeconds(
-        ofTile index: Int, tileWidth: CGFloat = tileWidth,
-        pointsPerSecond: CGFloat = pointsPerSecond
-    ) -> Double {
-        guard pointsPerSecond > 0 else { return 0 }
-        return Double((CGFloat(index) + 0.5) * tileWidth / pointsPerSecond)
+    /// ⚠️ **THE SQUARES ARE A FIXED SHEET AND THE HANDLES ARE A WINDOW ON IT —
+    /// THIS IS THE WHOLE MODEL, AND GETTING IT WRONG TWICE IS WHAT THE AUTHOR
+    /// KEPT REPORTING.** Stated by them, finally, in one sentence: *"les frames
+    /// ne bougent/se déplacent jamais, elles sont ancrées dans un
+    /// container/section et c'est cette section qui bouge… quand on joue avec les
+    /// pinces on révèle la suite de la piste, comme si le clip était en entier,
+    /// seule la partie visible se trouve entre les pinces."*
+    ///
+    /// So the grid the squares sit on is cut on the **SOURCE**, not on the track:
+    /// square `index` always covers source seconds `index × film ..< (index+1) ×
+    /// film`, whatever the piece's in and out points happen to be. Opening a
+    /// piece's end REVEALS the next squares of that sheet and moves nothing;
+    /// closing it hides them again. Two earlier arrangements both failed here:
+    /// one row of squares across the whole TRACK re-labelled every square after a
+    /// cut, so the pictures changed in place and only the containers moved
+    /// (*"c'est le container de la section qui se déplace"*); squares anchored to
+    /// a piece's IN POINT kept their places and slid their film, which is the
+    /// unfolding the author asked to be rid of.
+    struct Square: Equatable, Sendable {
+        /// ⚠️ **A PIECE AND AN INDEX ON THE SOURCE GRID, NOT A PLACE ON THE
+        /// TRACK** — this is what lets one view keep one frame of film for the
+        /// whole of an edit, and simply be moved.
+        struct Place: Hashable, Sendable {
+            let piece: Int
+            let index: Int
+        }
+
+        let place: Place
+        /// Where the square is DRAWN: the part of it the piece's window shows.
+        let from: CGFloat
+        let width: CGFloat
+        /// Where the WHOLE square would be if the window hid none of it. The
+        /// picture is laid at this size inside the drawn rectangle, so a square
+        /// the window cuts in half is CROPPED rather than squeezed — and the film
+        /// does not shift when the window opens.
+        let filmFrom: CGFloat
+        let filmWidth: CGFloat
+        /// The second of film in the middle of the square — a point on the source
+        /// grid, so the same frame is asked for once however many pieces show it.
+        let seconds: Double
+
+        var piece: Int { place.piece }
+        var index: Int { place.index }
     }
 
-    /// Which tiles are on screen, widened by a margin so a scroll does not
-    /// arrive at an empty edge.
+    /// The squares of film to draw across `visible` content points.
     ///
-    /// ⚠️ **THIS IS THE WHOLE OF CHARTER T2.** A 54pt tile across a 393pt track
-    /// is eight on screen; with the margin, sixteen. That number does not change
-    /// when the clip gets longer, which is what makes a four-minute clip cost the
-    /// same at rest as a ten-second one. Measured elsewhere: a thumbnail at this
-    /// size is 198 KB, so six hundred of them — an eager ten-minute strip — is
-    /// 116 MB for a band 74pt tall.
-    static func visibleTiles(
-        contentOffset: CGFloat, trackWidth: CGFloat, tileWidth: CGFloat = tileWidth,
-        count: Int, margin: Int = 4
-    ) -> Range<Int> {
-        guard count > 0, tileWidth > 0, trackWidth > 0 else { return 0..<0 }
-        let first = Int((contentOffset / tileWidth).rounded(.down)) - margin
-        let last = Int(((contentOffset + trackWidth) / tileWidth).rounded(.up)) + margin
-        let low = min(max(first, 0), count)
-        let high = min(max(last, low), count)
-        return low..<high
+    /// ⚠️ **NO SQUARE STRADDLES A SEAM**: a square belongs to one piece and is cut
+    /// off at that piece's edge, so the last frame before a cut is the piece's
+    /// real out-point rather than a blend of the two.
+    ///
+    /// ⚠️ **AND NOTHING IS SNAPPED OR ROUNDED ANY MORE.** An earlier version
+    /// asked for the middle of whatever the square happened to cover and rounded
+    /// it onto a grid, so that a drag would not ask for sixty new decodes a
+    /// second. With the sheet cut on the source, a handle drag changes which
+    /// squares are VISIBLE and never what any of them shows: the film a piece has
+    /// already decoded is still the film it needs.
+    static func squares(
+        in timeline: MediaTimeline, withinSource duration: Double,
+        visible: ClosedRange<CGFloat>,
+        tileWidth: CGFloat = tileWidth, pointsPerSecond: CGFloat = pointsPerSecond
+    ) -> [Square] {
+        guard tileWidth > 0, pointsPerSecond > 0, visible.upperBound > visible.lowerBound
+        else { return [] }
+        var made: [Square] = []
+        for at in placements(timeline, withinSource: duration, pointsPerSecond: pointsPerSecond) {
+            let rate = speed(of: at.piece)
+            let film = Double(tileWidth / pointsPerSecond) * rate
+            guard at.width > 0, rate > 0, film > 0 else { continue }
+            // Where a second of the FILE is drawn inside this piece.
+            let x = { (second: Double) -> CGFloat in
+                at.from + CGFloat((second - at.piece.start) / rate) * pointsPerSecond
+            }
+            let first = Int((at.piece.start / film).rounded(.down))
+            let last = Int((at.piece.end / film).rounded(.up))
+            for index in first..<max(last, first + 1) {
+                let opens = Double(index) * film
+                let closes = opens + film
+                let filmFrom = x(opens)
+                let from = max(filmFrom, at.from)
+                let to = min(x(closes), at.to)
+                guard to > from, to > visible.lowerBound, from < visible.upperBound else { continue }
+                made.append(
+                    Square(
+                        place: Square.Place(piece: at.index, index: index),
+                        from: from, width: to - from,
+                        filmFrom: filmFrom, filmWidth: tileWidth,
+                        seconds: min(max(opens + film / 2, 0), duration)
+                    )
+                )
+            }
+        }
+        return made
     }
+
+    /// How far either side of the middle of the track the strip is laid, so a
+    /// scroll does not arrive at an empty edge. ⚠️ **CHARTER T2 AND T3 LIVE
+    /// HERE**: what bounds the decoding is this margin, not the length of the
+    /// clip — a four-minute clip is asked for exactly as many squares as a
+    /// ten-second one.
+    static let filmMargin: CGFloat = 4 * tileWidth
 
     /// How far either side of the asked-for moment a scrub's seek may land —
     /// charter T7.
@@ -380,6 +638,21 @@ enum MediaTimelining {
         return min(max(abs(moved), tightest), loosest)
     }
 
+    /// The same rule, for a seek asked in PLAYED seconds — the preview's own
+    /// clock — over a piece running at `speed`.
+    ///
+    /// ⚠️ **T7 IS ABOUT FILM, AND A PLAYED SECOND OF A FAST PIECE IS SEVERAL
+    /// SECONDS OF IT.** A quarter-second of slack on a 4× piece is a whole second
+    /// of film, which lands the picture on keyframes and makes the scrub jump —
+    /// the very thing the ceiling exists to prevent. So the distance is measured
+    /// in film, the rule applied there, and the answer brought back to the
+    /// item's clock.
+    static func seekTolerance(movedPlayedSeconds moved: Double, atSpeed rate: Double) -> Double {
+        // Clamped where rates enter, so never zero and never infinite.
+        let speed = speed(of: rate)
+        return seekTolerance(movedSeconds: moved * speed) / speed
+    }
+
     // MARK: - Who owns the time
 
     /// What the track is waiting for before it lets the player move it again.
@@ -394,8 +667,13 @@ enum MediaTimelining {
     /// back to where the scrub started, which looks exactly like the scrub being
     /// ignored.
     struct Handover: Equatable, Sendable {
-        /// Where the author left the needle, in SOURCE seconds. Nil means the
+        /// Where the author left the needle, in seconds of the preview ITEM —
+        /// the played seconds of the arrangement it is running. Nil means the
         /// player owns the time and the track simply follows.
+        ///
+        /// ⚠️ **IT WAS SOURCE SECONDS, AND AFTER A RE-ORDER THAT WAS AMBIGUOUS:**
+        /// the same second of film can stand in two pieces, while a played second
+        /// names exactly one moment of the result.
         var target: Double?
         /// How many times we have looked and not seen the player arrive.
         var ticksWaited: Int = 0
@@ -457,7 +735,7 @@ enum MediaTimelining {
     /// too few marks is still a ruler.
     static func rulerStep(
         pointsPerSecond: CGFloat = pointsPerSecond,
-        acrossSourceSeconds duration: Double,
+        acrossPlayedSeconds duration: Double,
         minimumSpacing: CGFloat = 64,
         maximumTicks: Int = 64
     ) -> Double {
@@ -468,17 +746,22 @@ enum MediaTimelining {
         return rulerSteps.first(where: fits) ?? rulerSteps[rulerSteps.count - 1]
     }
 
-    /// The moments to mark, from zero, at most one past the end of the clip.
+    /// The moments to mark, from zero to the end of the RESULT and no further.
     ///
-    /// ⚠️ **ONE PAST THE END, DELIBERATELY.** The last mark before the end can sit
-    /// most of a step short of it, and a ruler that simply stops there leaves the
-    /// tail of the clip looking unmeasured. The overshoot is drawn inside the
-    /// trailing inset, where there is room for it.
-    static func rulerSeconds(upToSourceSeconds duration: Double, step: Double) -> [Double] {
+    /// ⚠️ **IT USED TO OVERSHOOT BY ONE, AND THE AXIS CHANGE MADE THAT A LIE.**
+    /// The extra mark existed because the last one can sit most of a step short
+    /// of the end, leaving the tail looking unmeasured — and it was drawn inside
+    /// the trailing inset, where there was room. A mark is now placed at the film
+    /// that plays AT that moment, and past the end of the result there is no such
+    /// film: every overshoot mark clamps onto the last piece's end and piles up
+    /// on the one before it. Seen on the device as "0:06" and "0:08" printed on
+    /// top of each other. What fills the tail instead is the discarded film,
+    /// greyed — which says "not part of this" more plainly than a timecode could.
+    static func rulerSeconds(upToPlayedSeconds duration: Double, step: Double) -> [Double] {
         guard duration.isFinite, duration > 0, step.isFinite, step > 0 else { return [] }
         var marks: [Double] = []
         var at: Double = 0
-        while at <= duration + step {
+        while at <= duration {
             marks.append(at)
             at += step
             // The count is bounded by `rulerStep` above; this is the backstop for
@@ -520,7 +803,21 @@ enum MediaTimelining {
             let end = min(max(segment.end, 0), duration)
             // The start yields to the end, never the other way around — an
             // inverted range is the one shape an exporter cannot be handed.
-            let start = min(max(segment.start, 0), max(end - floor, 0))
+            //
+            // ⚠️ **BUT ONLY WHEN IT IS ACTUALLY CROSSED — THE UNCONDITIONAL
+            // VERSION GREW A CLIP NOBODY HAD TOUCHED.** This read
+            // `min(max(start, 0), end - floor)` for every piece, so one that
+            // arrived SHORTER than a second had its start pulled earlier to make
+            // it one: [3.5…4.0] against a ten-second file came back as
+            // [3.0…4.0] — half a second of film the author had cut away handed
+            // back to them, in a piece they had not touched, with a total that
+            // disagreed with the edit they left. The floor is a refusal, enforced
+            // where a piece is MADE (`moved`, `canSplit`); reading one back is
+            // not the place to rewrite it. A CROSSED range is different: it is
+            // corrupt rather than short, and the repair is the documented one —
+            // the start yields, the end holds.
+            let asked = max(segment.start, 0)
+            let start = asked < end ? asked : max(end - floor, 0)
             guard end > start else { continue }
             kept.append(
                 MediaSegment(start: start, end: end, speed: speed(of: segment))
@@ -534,9 +831,13 @@ enum MediaTimelining {
     /// ⚠️ **A SPEED OF ZERO IS A CLIP THAT NEVER ENDS.** `playedSeconds` divides
     /// by it, and an exporter handed an infinite target duration does not fail
     /// politely. Clamped where the value enters, not where it is used.
-    static func speed(of segment: MediaSegment) -> Double {
-        guard segment.speed.isFinite, segment.speed > 0 else { return 1 }
-        return min(max(segment.speed, slowest), fastest)
+    static func speed(of segment: MediaSegment) -> Double { speed(of: segment.speed) }
+
+    /// The same clamp on a bare rate — the drag converter needs it before there
+    /// is a segment to ask.
+    static func speed(of rate: Double) -> Double {
+        guard rate.isFinite, rate > 0 else { return 1 }
+        return min(max(rate, slowest), fastest)
     }
 
     /// The range AVFoundation's pitch algorithms actually cover
@@ -566,56 +867,252 @@ enum MediaTimelining {
             || abs(only.speed - 1) > 0.001
     }
 
-    // MARK: - The outer handles
+    // MARK: - Carrying a piece to a new place
 
-    /// Which end of the whole timeline a touch took hold of.
+    /// The same pieces, one of them moved.
     ///
-    /// ⚠️ **TWO, BECAUSE C1 HAS ONE PIECE.** A split timeline has *n+1*
-    /// boundaries and an interior one is shared by two pieces — moving it must
-    /// shorten one and lengthen its neighbour, which is a different rule and
-    /// arrives with the split. This is the outer pair only, and says so.
+    /// ⚠️ **THE ORDER IS THE COMPOSITION'S, AND NOTHING ELSE MAY SORT.** A
+    /// re-ordered timeline can have piece 1 starting earlier in the file than
+    /// piece 0; `resolved` keeps what it is given, `placements` lays them out in
+    /// that order, and the exporter inserts them in it.
+    static func reordered(
+        _ timeline: MediaTimeline, move from: Int, to: Int, withinSource duration: Double
+    ) -> MediaTimeline {
+        var pieces = resolved(timeline, withinSource: duration)
+        guard pieces.indices.contains(from), pieces.indices.contains(to), from != to else {
+            return timeline
+        }
+        let carried = pieces.remove(at: from)
+        pieces.insert(carried, at: to)
+        return MediaTimeline(segments: pieces)
+    }
+
+    /// Where the pieces sit while one of them is in the author's hand: THE SHOT
+    /// LIST — every piece the same width, the whole composition across `width`
+    /// points, whatever each one will run for.
+    ///
+    /// ⚠️ **ASKED FOR, AND THE REASON IT IS ASKED FOR IS THE REAL ONE**: *"reduire
+    /// au grab tout les segments a des largeurs egales pour pouvoir plus
+    /// facilement inserer sans avoir a parcourir toute la timeline"*. On the
+    /// track a piece is drawn at the length it will play for, so a ten-second
+    /// piece is 600pt and the place a carried piece has to reach is off screen —
+    /// and the track cannot scroll while it is being carried, because the film
+    /// and the finger would move at once. Every editor that solves this solves it
+    /// the same way: a second arrangement where duration stops deciding width.
+    /// NCH's VideoPad says it plainly — *"the width of each clip is the same,
+    /// regardless of its duration"* (storyboard mode) against *"proportional to
+    /// its duration"* (timeline mode); Premiere Elements' Sceneline, iMovie's
+    /// shot list, Instagram's Re-Order Mode and InShot's rearranging mode are the
+    /// same idea, and Resolve's Cut page keeps one on screen permanently.
+    ///
+    /// ⚠️ **AND IT MAKES THE DROP RULE RIGHT BY CONSTRUCTION.** The carried piece
+    /// is the one under the finger, so "which piece is the finger over" IS "which
+    /// piece has the carried one's centre crossed" — the centre-crossing rule
+    /// every drag-and-drop guide insists on, because triggering on the EDGES
+    /// makes the neighbours oscillate while a finger hovers on a boundary.
+    ///
+    /// ⚠️ **AND NO NARROWER THAN `minimum`, WHICH MAKES THE LIST WIDER THAN THE
+    /// TRACK WHEN THERE ARE MANY PIECES.** Shared out evenly, twelve pieces left
+    /// chips twenty points wide — a sliver of picture nobody can tell apart from
+    /// its neighbour, and a target no finger can aim at. Asked for in those
+    /// words: *"avoir une largeur minimale pour les segments compressés … la
+    /// largeur totale peut donc dépasser la largeur de l'écran"*; the list
+    /// scrolls instead, which is what iMovie's and InShot's re-order rows do.
+    static func shots(
+        _ timeline: MediaTimeline, withinSource duration: Double, across width: CGFloat,
+        startingAt leading: CGFloat = 0, atLeast minimum: CGFloat = 0
+    ) -> [Placement] {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard !pieces.isEmpty, width.isFinite, width > 0, leading.isFinite else { return [] }
+        let each = max(width / CGFloat(pieces.count), minimum.isFinite ? minimum : 0)
+        return pieces.enumerated().map { index, piece in
+            Placement(
+                index: index, piece: piece,
+                from: leading + CGFloat(index) * each, to: leading + CGFloat(index + 1) * each
+            )
+        }
+    }
+
+    /// Where a shot list opens: the chip being lifted under the finger that lifted
+    /// it, as far as the list's two ends allow.
+    ///
+    /// ⚠️ **THE PIECE STAYS UNDER THE FINGER.** A list wider than the track has to
+    /// open SOMEWHERE, and opened at its start the piece the author has just
+    /// picked up could be a screen away from their finger — the one thing a
+    /// lift must never do. A list that fits opens at zero, as before.
+    static func shotListOffset(
+        centring shot: Placement?, underTrackX x: CGFloat,
+        listWidth: CGFloat, trackWidth: CGFloat
+    ) -> CGFloat {
+        let most = max(listWidth - trackWidth, 0)
+        guard let shot, x.isFinite, most > 0 else { return 0 }
+        return min(max((shot.from + shot.to) / 2 - x, 0), most)
+    }
+
+    /// How fast the shot list scrolls by itself while a carried chip is held near
+    /// one of the track's ends — points a second, negative towards the start,
+    /// zero anywhere else.
+    ///
+    /// ⚠️ **ASKED FOR: A CHIP HELD AT THE EDGE OF THE SCREEN SLIDES THE LIST**
+    /// (*"avoir en grab un segment compressé et le bouger vers les extrémités des
+    /// bords de l'écran fait slider la scrollview"*). The finger cannot scroll
+    /// the list and carry a piece at once, so the edge does it for them — the
+    /// rule every drag-to-reorder list on the platform follows.
+    ///
+    /// ⚠️ **SQUARED, SO THE EDGE OF THE ZONE IS A CRAWL.** A finger that strays a
+    /// few points into it should nudge the list, not send it; a finger pressed
+    /// against the bezel wants the far end. Past the edge — a finger can be
+    /// reported outside the view — the speed holds at its fastest.
+    static func edgeScrollSpeed(
+        atTrackX x: CGFloat, trackWidth width: CGFloat, zone: CGFloat, fastest: CGFloat
+    ) -> CGFloat {
+        guard x.isFinite, width > 0, zone > 0, fastest > 0 else { return 0 }
+        let zone = min(zone, width / 2)
+        if x < zone {
+            let depth = min((zone - x) / zone, 1)
+            return -fastest * depth * depth
+        }
+        if x > width - zone {
+            let depth = min((x - (width - zone)) / zone, 1)
+            return fastest * depth * depth
+        }
+        return 0
+    }
+
+    /// One time mark above the shot list: where it is drawn, and the second of
+    /// the RESULT it names.
+    struct ShotMark: Equatable, Sendable {
+        let x: CGFloat
+        let seconds: Double
+    }
+
+    /// The time marks above the shot list: the moment of the RESULT at which each
+    /// piece begins, over the edge of the chip that stands for it, and the end of
+    /// the result over the last chip's far edge.
+    ///
+    /// ⚠️ **THE RULER HAS TO TELL THE TRUTH ABOUT THE LIST, NOT ABOUT THE TRACK
+    /// IT REPLACED.** Asked for in those words: *"mettre à jour les crans /
+    /// indications de temps juste au-dessus pour que ça corresponde bien —
+    /// attention lorsqu'on réorganise, il faut bien mettre à jour cette barre de
+    /// temps"*. The chips are all the same width whatever they run for, so a
+    /// ruler of evenly spaced seconds would lie about every one of them; the only
+    /// honest marks are the SEAMS, labelled with where each piece starts in the
+    /// order as it stands — which is also what changes when a piece is carried
+    /// past another.
+    ///
+    /// ⚠️ **AND A MARK IS DROPPED RATHER THAN DRAWN ON TOP OF ANOTHER.** With many
+    /// pieces the chips get narrower than a timecode; the first and last marks
+    /// always stay, and the ones between are kept only where there is room.
+    static func shotMarks(_ shots: [Placement], minimumSpacing: CGFloat) -> [ShotMark] {
+        guard let last = shots.last else { return [] }
+        var all: [ShotMark] = []
+        var played: Double = 0
+        for shot in shots {
+            all.append(ShotMark(x: shot.from, seconds: played))
+            played += shot.piece.playedSeconds
+        }
+        let end = ShotMark(x: last.to, seconds: played)
+        var kept: [ShotMark] = []
+        for mark in all {
+            let clearOfThePrevious = kept.last.map { mark.x - $0.x >= minimumSpacing } ?? true
+            let clearOfTheEnd = end.x - mark.x >= minimumSpacing || kept.isEmpty
+            if clearOfThePrevious && clearOfTheEnd { kept.append(mark) }
+        }
+        return kept + [end]
+    }
+
+    /// Where a piece being carried would land if it were dropped at `x`.
+    ///
+    /// ⚠️ **THE PLACE THE FINGER IS OVER, MEASURED ON THE RE-FLOWED TRACK.** The
+    /// pieces move as soon as they are crossed, so after each swap the carried
+    /// piece occupies the span the finger is in — which is what stops a drag
+    /// oscillating between two positions at the boundary.
+    static func dropIndex(forPoints x: CGFloat, in placed: [Placement], moving from: Int) -> Int {
+        guard !placed.isEmpty else { return from }
+        if let over = piece(atPoints: x, in: placed) { return over }
+        // Past either end of the whole track: the ends are where a carry that
+        // has run out of track belongs.
+        return x < (placed.first?.from ?? 0) ? 0 : placed.count - 1
+    }
+
+    // MARK: - The handles
+
+    /// Which end of a piece a touch took hold of.
     enum Edge: Equatable, Sendable {
         case start
         case end
     }
 
-    /// Moves the timeline's first start or last end by a number of SOURCE
-    /// seconds, keeping the piece inside the file and no shorter than the floor.
+    /// Moves ONE piece's start or end by a number of SOURCE seconds.
     ///
-    /// ⚠️ **INCREMENTAL, LIKE THE DIAL — NOT MEASURED FROM TOUCH-DOWN.** The
-    /// view zeroes the recogniser's translation every sample and hands over the
-    /// delta, so a drag that runs into an end and comes back does not first have
-    /// to undo the distance it overshot by. Measured-from-origin dragging is what
-    /// makes a control feel stuck at its limits.
+    /// ⚠️ **ANY PIECE, AND IT USED TO BE THE OUTER PAIR ONLY.** A timeline of *n*
+    /// pieces has *2n* edges, and every one of them is something the author can
+    /// take hold of — asked for in those words ("il faut pouvoir redimensionner
+    /// les segments"). The note that stood here said an interior boundary was
+    /// shared by two pieces and that moving it must shorten one and lengthen its
+    /// neighbour; that is the RIPPLE model, and it is not what a split of one
+    /// source wants. Each piece owns its two edges: pulling one in leaves a GAP
+    /// in the file that the result simply skips, which is a real edit (cutting
+    /// the middle out of a clip) and exports exactly as it reads — `VideoExporter`
+    /// inserts each piece separately.
+    ///
+    /// ⚠️ **THE ONLY LIMITS ARE THE FILE AND THE FLOOR — THE NEIGHBOUR IS NOT
+    /// ONE, AND MAKING IT ONE WAS THE DEFECT.** A cut does not divide the film
+    /// between the two halves: each half is an independent CLIP with its own in
+    /// and out points into the whole source, and the material beyond them is
+    /// still there — every editor calls it the clip's handles. So dragging a
+    /// piece's END out again reveals the film past the cut and PUSHES the pieces
+    /// after it along the track; dragging a piece's START back reveals the film
+    /// before it. Clamping each edge to the facing edge of the piece next door
+    /// meant a cut clip could never be re-opened: reported as *"si on etire sur
+    /// la pince de droite, le clip doit pousser le segment suivant et reveler le
+    /// reste de la video"*.
+    ///
+    /// ⚠️ **AND THE TWO HALVES MAY THEREFORE COVER THE SAME FILM.** That is not a
+    /// contradiction to guard against — it is what an editor does when the same
+    /// moment is wanted twice. The pieces are a PLAYLIST, not a partition, and
+    /// `placements` lays them out in the order they play rather than by where
+    /// they sit in the file.
     static func moved(
-        _ timeline: MediaTimeline, edge: Edge, bySourceSeconds delta: Double,
-        withinSource duration: Double
+        _ timeline: MediaTimeline, piece index: Int, edge: Edge,
+        bySourceSeconds delta: Double, withinSource duration: Double
     ) -> MediaTimeline {
-        guard duration.isFinite, duration > 0 else { return timeline }
         var pieces = resolved(timeline, withinSource: duration)
+        guard pieces.indices.contains(index), delta.isFinite else { return timeline }
         let floor = shortest(withinSource: duration)
+        let piece = pieces[index]
         switch edge {
         case .start:
-            guard var first = pieces.first else { return timeline }
-            let limit = max(first.end - floor, 0)
-            first.start = min(max(first.start + delta, 0), limit)
-            pieces[0] = first
+            let limit = max(piece.end - floor, 0)
+            pieces[index].start = min(max(piece.start + delta, 0), limit)
         case .end:
-            guard var last = pieces.last else { return timeline }
-            let limit = min(last.start + floor, duration)
-            last.end = max(min(last.end + delta, duration), limit)
-            pieces[pieces.count - 1] = last
+            let limit = min(piece.start + floor, duration)
+            pieces[index].end = max(min(piece.end + delta, duration), limit)
         }
         return MediaTimeline(segments: pieces)
     }
 
+    /// The outer pair, for the spoken adjustment — which has no notion of which
+    /// piece is selected and means "the end of the whole thing".
+    static func moved(
+        _ timeline: MediaTimeline, edge: Edge, bySourceSeconds delta: Double,
+        withinSource duration: Double
+    ) -> MediaTimeline {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard !pieces.isEmpty else { return timeline }
+        return moved(
+            timeline, piece: edge == .start ? 0 : pieces.count - 1, edge: edge,
+            bySourceSeconds: delta, withinSource: duration
+        )
+    }
+
     /// Which edge a touch at `x` takes, if either. `x` is in the track's own
-    /// coordinates, so both ends are PLAYED positions.
+    /// content coordinates, and so are both ends.
     ///
     /// ⚠️ **THE NEARER ONE WINS A TIE, AND THE TIE IS REAL.** Cut to the
-    /// minimum, the two handles are a few points apart and one touch is within
-    /// reach of both. Answering `.start` by default would make the end handle
-    /// unreachable exactly when the author wants to widen the selection again.
+    /// minimum, a piece's two handles are a few points apart and one touch is
+    /// within reach of both. Answering `.start` by default would make the end
+    /// handle unreachable exactly when the author wants to widen the piece again.
     static func edge(
         at x: CGFloat, startX: CGFloat, endX: CGFloat, reach: CGFloat = 44
     ) -> Edge? {

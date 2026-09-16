@@ -71,6 +71,26 @@ struct MediaTimeliningTests {
         #expect(only.start < only.end)
     }
 
+    /// ⚠️ **READING A TIMELINE BACK MAY NOT REWRITE IT.** The floor is a refusal,
+    /// enforced where a piece is made; applying it again on the way back pulled
+    /// the START of anything shorter than a second EARLIER to make it one — half
+    /// a second of film the author had cut away, handed back inside a piece they
+    /// had not touched, with a total that disagreed with the edit they left.
+    @Test func aPieceShorterThanTheFloorComesBackAsItWasLeft() throws {
+        let short = MediaTimeline(segments: [
+            MediaSegment(start: 3.5, end: 4),
+            MediaSegment(start: 4, end: 10)
+        ])
+
+        let pieces = MediaTimelining.resolved(short, withinSource: duration)
+
+        #expect(pieces.count == 2, "got \(pieces)")
+        #expect(abs(try #require(pieces.first).start - 3.5) < 0.001,
+                "a piece nobody touched grew: \(pieces)")
+        #expect(abs(MediaTimelining.playedSeconds(of: short, withinSource: duration) - 6.5) < 0.001,
+                "the result does not run for what the pieces say")
+    }
+
     /// ⚠️ **A TIMELINE WHOSE EVERY PIECE FELL AWAY IS BROKEN, NOT EMPTY.**
     /// Returning `[]` would export nothing at all, and an empty file is the one
     /// outcome that loses the author's video outright.
@@ -128,6 +148,50 @@ struct MediaTimeliningTests {
         ])
 
         #expect(MediaTimelining.playedSeconds(of: timeline, withinSource: duration) == 6)
+    }
+
+    /// ⚠️ **AND A MOMENT OF THE FILE HAS A PLACE IN THE RESULT, WHICH IS NOT THE
+    /// SAME NUMBER.** The readout asks this: "where is the playhead" has to be
+    /// answered in the seconds a viewer will experience, or it cannot be set
+    /// beside "how long the result runs". For one build it was not, and a
+    /// seven-second clip at 2× read "0:04 / 0:04" with the needle half way along.
+    @Test func aMomentOfTheFileHasAPlaceInTheResult() {
+        let timeline = MediaTimeline(segments: [MediaSegment(start: 0, end: 10, speed: 2)])
+
+        #expect(MediaTimelining.playedSeconds(
+            atSourceSeconds: 4, in: timeline, withinSource: duration
+        ) == 2)
+    }
+
+    /// And the conversion changes at every boundary, which is what makes it
+    /// arithmetic rather than a division.
+    @Test func eachPieceContributesItsOwnRateToThePosition() {
+        let timeline = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4, speed: 1),     // 4 played
+            MediaSegment(start: 4, end: 10, speed: 2)     // 3 played
+        ])
+
+        // Seven seconds in: all of the first piece, then half of the three
+        // seconds of the second that have gone by.
+        #expect(MediaTimelining.playedSeconds(
+            atSourceSeconds: 7, in: timeline, withinSource: duration
+        ) == 5.5)
+    }
+
+    @Test func aMomentInTheDiscardedHeadIsTheStartOfTheResult() {
+        let timeline = MediaTimeline(segments: [MediaSegment(start: 4, end: 10, speed: 1)])
+
+        #expect(MediaTimelining.playedSeconds(
+            atSourceSeconds: 2, in: timeline, withinSource: duration
+        ) == 0)
+    }
+
+    @Test func aMomentPastTheCutIsTheWholeResult() {
+        let timeline = MediaTimeline(segments: [MediaSegment(start: 0, end: 6, speed: 2)])
+
+        #expect(MediaTimelining.playedSeconds(
+            atSourceSeconds: 9, in: timeline, withinSource: duration
+        ) == 3)
     }
 
     /// ⚠️ **A SPEED OF ZERO IS A CLIP THAT NEVER ENDS.** `playedSeconds` divides
@@ -276,16 +340,16 @@ struct MediaTimeliningTests {
     // MARK: - Points and played seconds
 
     @Test func aMomentAndItsPlaceAgree() {
-        let x = MediaTimelining.x(atSourceSeconds: 2.5, pointsPerSecond: 60)
+        let x = MediaTimelining.x(atPlayedSeconds: 2.5, pointsPerSecond: 60)
         #expect(x == 150)
-        #expect(abs(MediaTimelining.sourceSeconds(atX: x, pointsPerSecond: 60) - 2.5) < 0.001)
+        #expect(abs(MediaTimelining.playedSeconds(atX: x, pointsPerSecond: 60) - 2.5) < 0.001)
     }
 
     /// ⚠️ A ZERO SCALE IS NOT A CRASH. Every band tenant is asked where things go
     /// before its first layout.
     @Test func anUnlaidTrackAnswersZeroRatherThanNaN() {
-        #expect(MediaTimelining.sourceSeconds(atX: 10, pointsPerSecond: 0) == 0)
-        #expect(MediaTimelining.x(atSourceSeconds: .nan) == 0)
+        #expect(MediaTimelining.playedSeconds(atX: 10, pointsPerSecond: 0) == 0)
+        #expect(MediaTimelining.x(atPlayedSeconds: .nan) == 0)
         #expect(MediaTimelining.resolved(.whole, withinSource: 0).isEmpty)
     }
 
@@ -362,12 +426,14 @@ struct MediaTimeliningTests {
     @Test func theStartOfTheClipSitsUnderTheNeedleAtRest() {
         let width: CGFloat = 400
 
-        let atRest = MediaTimelining.contentOffset(forSourceSeconds: 0, trackWidth: width)
+        let atRest = MediaTimelining.contentOffset(
+            forPlayedSeconds: 0, trackWidth: width
+        )
 
         #expect(atRest == -200, "the clip would open half a screen past its start")
         #expect(
-            MediaTimelining.sourceSeconds(
-                atContentOffset: atRest, trackWidth: width, withinSource: 10
+            MediaTimelining.playedSeconds(
+                atContentOffset: atRest, trackWidth: width, of: .whole, withinSource: 10
             ) == 0
         )
     }
@@ -381,9 +447,11 @@ struct MediaTimeliningTests {
     @Test func scrollingAndSeekingAreInverses() {
         let width: CGFloat = 393
 
-        let offset = MediaTimelining.contentOffset(forSourceSeconds: 3.5, trackWidth: width)
-        let back = MediaTimelining.sourceSeconds(
-            atContentOffset: offset, trackWidth: width, withinSource: duration
+        let offset = MediaTimelining.contentOffset(
+            forPlayedSeconds: 3.5, trackWidth: width
+        )
+        let back = MediaTimelining.playedSeconds(
+            atContentOffset: offset, trackWidth: width, of: .whole, withinSource: duration
         )
 
         #expect(abs(back - 3.5) < 0.001)
@@ -395,13 +463,13 @@ struct MediaTimeliningTests {
         let width: CGFloat = 400
 
         #expect(
-            MediaTimelining.sourceSeconds(
-                atContentOffset: -900, trackWidth: width, withinSource: duration
+            MediaTimelining.playedSeconds(
+                atContentOffset: -900, trackWidth: width, of: .whole, withinSource: duration
             ) == 0
         )
         #expect(
-            MediaTimelining.sourceSeconds(
-                atContentOffset: 5000, trackWidth: width, withinSource: duration
+            MediaTimelining.playedSeconds(
+                atContentOffset: 5000, trackWidth: width, of: .whole, withinSource: duration
             ) == duration
         )
     }
@@ -411,21 +479,47 @@ struct MediaTimeliningTests {
     /// zero — the handle opens outwards and will not come back, which reads as a
     /// clamp rather than as the dead control it is.
     @Test func aLeftwardDragIsANegativeNumberOfSeconds() {
-        #expect(MediaTimelining.sourceSeconds(ofPoints: -120, pointsPerSecond: 60) == -2)
-        #expect(MediaTimelining.sourceSeconds(ofPoints: 120, pointsPerSecond: 60) == 2)
-        #expect(MediaTimelining.sourceSeconds(atX: -120, pointsPerSecond: 60) == 0,
+        #expect(MediaTimelining.playedSeconds(ofPoints: -120, pointsPerSecond: 60) == -2)
+        #expect(MediaTimelining.playedSeconds(ofPoints: 120, pointsPerSecond: 60) == 2)
+        #expect(MediaTimelining.playedSeconds(atX: -120, pointsPerSecond: 60) == 0,
                 "the position converter still floors, which is why it is not this one")
     }
 
-    @Test func theStripIsAsWideAsTheClipIsLong() {
-        #expect(MediaTimelining.contentWidth(ofSourceSeconds: 10, pointsPerSecond: 60) == 600)
-        #expect(MediaTimelining.contentWidth(ofSourceSeconds: 0, pointsPerSecond: 60) == 0)
+    /// ⚠️ **AND THE SAME DRAG IS WORTH MORE FILM IN A FAST PIECE.** A piece at 2×
+    /// is drawn half as wide as the film it covers, so one point of finger is two
+    /// frames rather than one. Converting a drag straight to source seconds moves
+    /// a fast piece's edge twice as far as the finger went — invisible at 1×,
+    /// which is the only rate that existed when the converter was written.
+    @Test func aDragIsWorthTheFilmTheStretchPutsUnderIt() {
+        #expect(MediaTimelining.sourceSeconds(ofPoints: 120, atSpeed: 1, pointsPerSecond: 60) == 2)
+        #expect(MediaTimelining.sourceSeconds(ofPoints: 120, atSpeed: 2, pointsPerSecond: 60) == 4)
+        #expect(MediaTimelining.sourceSeconds(ofPoints: 120, atSpeed: 0.5, pointsPerSecond: 60) == 1)
+        #expect(MediaTimelining.sourceSeconds(ofPoints: 120, atSpeed: 0, pointsPerSecond: 60) == 2,
+                "a nonsense rate is one, not a division by zero")
+    }
+
+    @Test func theStripIsAsWideAsTheResultIsLong() {
+        #expect(MediaTimelining.contentWidth(of: .whole, withinSource: 10, pointsPerSecond: 60) == 600)
+        #expect(MediaTimelining.contentWidth(of: .whole, withinSource: 0, pointsPerSecond: 60) == 0)
+    }
+
+    /// ⚠️ **THE STRETCH, WHICH IS THE WHOLE AXIS CHANGE.** The same film at twice
+    /// the speed takes half the room, and at half the speed twice — so the needle
+    /// crosses the track at a constant points-per-second whatever rates the pieces
+    /// carry. Asked for in those words: the timeline must always advance at the
+    /// same rate.
+    @Test func aPieceIsDrawnAtTheLengthItWillRunFor() {
+        let fast = MediaTimeline(segments: [MediaSegment(start: 0, end: 10, speed: 2)])
+        let slow = MediaTimeline(segments: [MediaSegment(start: 0, end: 10, speed: 0.5)])
+
+        #expect(MediaTimelining.contentWidth(of: fast, withinSource: duration, pointsPerSecond: 60) == 300)
+        #expect(MediaTimelining.contentWidth(of: slow, withinSource: duration, pointsPerSecond: 60) == 1200)
     }
 
     // MARK: - Splitting, and rates
 
     @Test func splittingMakesTwoPiecesOutOfOne() throws {
-        let split = MediaTimelining.split(.whole, atSourceSeconds: 4, withinSource: duration)
+        let split = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 4, withinSource: duration)
 
         let pieces = MediaTimelining.resolved(split, withinSource: duration)
         #expect(pieces.count == 2, "got \(pieces)")
@@ -443,22 +537,22 @@ struct MediaTimeliningTests {
     /// Refusing is what lets the screen say so, rather than making a segment that
     /// exports to a single frame.
     @Test func aSplitTooCloseToAnEndIsRefused() {
-        let tooEarly = MediaTimelining.split(.whole, atSourceSeconds: 0.4, withinSource: duration)
-        let tooLate = MediaTimelining.split(.whole, atSourceSeconds: 9.7, withinSource: duration)
+        let tooEarly = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 0.4, withinSource: duration)
+        let tooLate = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 9.7, withinSource: duration)
 
         #expect(MediaTimelining.resolved(tooEarly, withinSource: duration).count == 1)
         #expect(MediaTimelining.resolved(tooLate, withinSource: duration).count == 1)
-        #expect(MediaTimelining.canSplit(.whole, atSourceSeconds: 0.4, withinSource: duration) == false)
-        #expect(MediaTimelining.canSplit(.whole, atSourceSeconds: 4, withinSource: duration),
+        #expect(MediaTimelining.canSplit(.whole, atPiece: 0, atSourceSeconds: 0.4, withinSource: duration) == false)
+        #expect(MediaTimelining.canSplit(.whole, atPiece: 0, atSourceSeconds: 4, withinSource: duration),
                 "witness: a split in the middle is offered")
     }
 
     /// Splitting the SECOND piece must not disturb the first — the commonest way
     /// to get an insert wrong is to put it at the wrong index.
     @Test func splittingOnePieceLeavesTheOthersAlone() throws {
-        let once = MediaTimelining.split(.whole, atSourceSeconds: 3, withinSource: duration)
+        let once = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 3, withinSource: duration)
 
-        let twice = MediaTimelining.split(once, atSourceSeconds: 7, withinSource: duration)
+        let twice = MediaTimelining.split(once, atPiece: 1, atSourceSeconds: 7, withinSource: duration)
 
         let pieces = MediaTimelining.resolved(twice, withinSource: duration)
         #expect(pieces.count == 3, "got \(pieces)")
@@ -469,7 +563,7 @@ struct MediaTimeliningTests {
     @Test func splittingKeepsTheRateOfThePieceItCuts() throws {
         let sped = MediaTimeline(segments: [MediaSegment(start: 0, end: duration, speed: 2)])
 
-        let split = MediaTimelining.split(sped, atSourceSeconds: 5, withinSource: duration)
+        let split = MediaTimelining.split(sped, atPiece: 0, atSourceSeconds: 5, withinSource: duration)
 
         let pieces = MediaTimelining.resolved(split, withinSource: duration)
         #expect(pieces.count == 2)
@@ -479,7 +573,7 @@ struct MediaTimeliningTests {
     // MARK: - Rates
 
     @Test func aRateAppliesToThePieceUnderTheNeedleAndNoOther() throws {
-        let split = MediaTimelining.split(.whole, atSourceSeconds: 4, withinSource: duration)
+        let split = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 4, withinSource: duration)
 
         let sped = MediaTimelining.setRate(2, at: 6, in: split, withinSource: duration)
 
@@ -490,7 +584,7 @@ struct MediaTimeliningTests {
     }
 
     @Test func theRateUnderTheNeedleIsWhatIsRead() {
-        let split = MediaTimelining.split(.whole, atSourceSeconds: 4, withinSource: duration)
+        let split = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 4, withinSource: duration)
         let sped = MediaTimelining.setRate(4, at: 1, in: split, withinSource: duration)
 
         #expect(MediaTimelining.rate(at: 1, in: sped, withinSource: duration) == 4)
@@ -511,46 +605,421 @@ struct MediaTimeliningTests {
         #expect(MediaTimelining.rates == MediaTimelining.rates.sorted())
     }
 
-    // MARK: - Playback stays inside the cut
+    // MARK: - A cut leaves both halves their handles
 
-    /// ⚠️ **A CUT IS A PROMISE ABOUT WHAT THE POST WILL BE.** A preview that
-    /// plays on past the end handle shows the author footage they have just
-    /// decided to throw away, as though it were part of the result.
-    @Test func playbackTurnsBackWhenItReachesTheEndOfTheCut() {
-        let kept = [MediaSegment(start: 2, end: 6)]
+    /// ⚠️ **A CUT IS NOT A PARTITION OF THE FILM.** Each half is an independent
+    /// clip with its own in and out points into the WHOLE source — what every
+    /// editor calls its handles — so pulling a piece's end back out reveals the
+    /// film past the cut. Reported as *"si on etire sur la pince de droite, le
+    /// clip doit pousser le segment suivant et reveler le reste de la video"*;
+    /// the edge was clamped to the next piece's start, so a cut clip could never
+    /// be re-opened.
+    @Test func apieceCanBeStretchedBackOverTheFilmTheCutTookAway() throws {
+        let cut = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 4, withinSource: duration)
 
-        #expect(MediaTimelining.loopback(playheadSeconds: 6, within: kept) == 2)
-        #expect(MediaTimelining.loopback(playheadSeconds: 5.99, within: kept) == 2,
-                "the slack has to turn back a little early or it races the player")
+        let stretched = MediaTimelining.moved(
+            cut, piece: 0, edge: .end, bySourceSeconds: 3, withinSource: duration
+        )
+
+        let pieces = MediaTimelining.resolved(stretched, withinSource: duration)
+        #expect(pieces.count == 2, "got \(pieces)")
+        #expect(abs(pieces[0].end - 7) < 0.001,
+                "the first piece stopped at the cut instead of reaching into the film beyond it")
+        #expect(abs(pieces[1].start - 4) < 0.001,
+                "the second piece's own film moved when only the first was dragged")
     }
 
-    /// And at the head too: a trimmed opening that still plays first means the
-    /// preview and the export disagree about where the post begins.
-    @Test func playbackJumpsForwardWhenItIsBeforeTheCut() {
-        let kept = [MediaSegment(start: 4, end: 9)]
+    /// And the same at the other end: a piece's start reaches back over the film
+    /// the piece before it is showing.
+    @Test func apieceCanBeStretchedBackBeforeTheCut() throws {
+        let cut = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 4, withinSource: duration)
 
-        #expect(MediaTimelining.loopback(playheadSeconds: 0, within: kept) == 4)
-        #expect(MediaTimelining.loopback(playheadSeconds: 3.5, within: kept) == 4)
+        let stretched = MediaTimelining.moved(
+            cut, piece: 1, edge: .start, bySourceSeconds: -3, withinSource: duration
+        )
+
+        let pieces = MediaTimelining.resolved(stretched, withinSource: duration)
+        #expect(abs(pieces[1].start - 1) < 0.001, "got \(pieces)")
+        #expect(abs(pieces[0].end - 4) < 0.001, "the first piece was shortened to make room")
     }
 
-    /// ⚠️ **AND IT MUST SETTLE, NOT THRASH.** Coming back to the start, the
-    /// playhead is inside the cut by construction; if the return trip could
-    /// re-trigger, the clip would be seeked on every beat and never play at all.
-    @Test func theTurnBackDoesNotTriggerItself() {
-        let kept = [MediaSegment(start: 2, end: 6)]
-        let back = try? #require(MediaTimelining.loopback(playheadSeconds: 6, within: kept))
+    /// ⚠️ **AND THE TWO HALVES MAY THEN COVER THE SAME FILM.** That is not a
+    /// state to guard against: the pieces are a playlist, not a partition, and
+    /// showing the same moment twice is something an editor does on purpose.
+    @Test func twoPiecesMayShowTheSameFilm() throws {
+        let cut = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 4, withinSource: duration)
+        let stretched = MediaTimelining.moved(
+            cut, piece: 0, edge: .end, bySourceSeconds: 3, withinSource: duration
+        )
 
-        #expect(MediaTimelining.loopback(playheadSeconds: back ?? 0, within: kept) == nil,
-                "arriving at the start asks to go to the start again")
-        #expect(MediaTimelining.loopback(playheadSeconds: 4, within: kept) == nil,
-                "the middle of the cut is not a reason to seek")
+        let pieces = MediaTimelining.resolved(stretched, withinSource: duration)
+
+        #expect(pieces[0].end > pieces[1].start, "guard: they really do overlap: \(pieces)")
+        // And the result is as long as the two of them together — seven seconds
+        // then six — because the track is a playlist: the shared film plays
+        // twice rather than being shared out between them.
+        #expect(abs(MediaTimelining.playedSeconds(of: stretched, withinSource: duration) - 13) < 0.001,
+                "got \(MediaTimelining.playedSeconds(of: stretched, withinSource: duration))")
     }
 
-    @Test func thereIsNothingToTurnBackFromWithoutACut() {
-        #expect(MediaTimelining.loopback(playheadSeconds: 3, within: []) == nil)
-        #expect(MediaTimelining.loopback(
-            playheadSeconds: .nan, within: [MediaSegment(start: 0, end: 5)]
-        ) == nil)
+    /// What DOES stop an edge: the file's own bounds and the one-second floor.
+    @Test func anEdgeStopsAtTheFilmAndAtTheFloor() throws {
+        let cut = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 4, withinSource: duration)
+
+        let past = MediaTimelining.moved(
+            cut, piece: 1, edge: .end, bySourceSeconds: 50, withinSource: duration
+        )
+        #expect(MediaTimelining.resolved(past, withinSource: duration)[1].end == duration,
+                "an edge ran off the end of the file")
+
+        let crushed = MediaTimelining.moved(
+            cut, piece: 0, edge: .end, bySourceSeconds: -50, withinSource: duration
+        )
+        let floor = MediaTimelining.resolved(crushed, withinSource: duration)[0]
+        #expect(abs(floor.end - floor.start - MediaTimelining.shortestSourceSeconds) < 0.001,
+                "the piece was crushed past the floor: \(floor)")
+    }
+
+    // MARK: - Carrying a piece to a new place
+
+    @Test func aPieceCanBeCarriedPastItsNeighbour() {
+        let three = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 2),
+            MediaSegment(start: 3, end: 5),
+            MediaSegment(start: 6, end: 8)
+        ])
+
+        let moved = MediaTimelining.reordered(three, move: 0, to: 2, withinSource: duration)
+
+        #expect(MediaTimelining.resolved(moved, withinSource: duration).map(\.start) == [3, 6, 0],
+                "got \(moved)")
+    }
+
+    /// ⚠️ **THE ORDER IS THE COMPOSITION'S, AND NOTHING MAY SORT IT BACK.** A
+    /// carried piece can start later in the file than the one after it; every
+    /// reader from `resolved` to the exporter has to keep what it is given.
+    @Test func aCarriedPieceKeepsItsPlaceThroughResolving() {
+        let swapped = MediaTimeline(segments: [
+            MediaSegment(start: 6, end: 9),
+            MediaSegment(start: 0, end: 3)
+        ])
+
+        #expect(MediaTimelining.resolved(swapped, withinSource: duration).map(\.start) == [6, 0])
+    }
+
+    @Test func carryingAPieceNowhereChangesNothing() {
+        let two = MediaTimelining.split(.whole, atPiece: 0, atSourceSeconds: 4, withinSource: duration)
+
+        #expect(MediaTimelining.reordered(two, move: 1, to: 1, withinSource: duration) == two)
+        #expect(MediaTimelining.reordered(two, move: 0, to: 9, withinSource: duration) == two)
+        #expect(MediaTimelining.reordered(two, move: -1, to: 0, withinSource: duration) == two)
+    }
+
+    /// Where a carried piece would land: the place the finger is over, measured
+    /// on the track as it has already re-flowed.
+    @Test func aCarriedPieceLandsWhereTheFingerIs() {
+        let three = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 2),      // drawn 0–120
+            MediaSegment(start: 3, end: 5),      // drawn 120–240
+            MediaSegment(start: 6, end: 8)       // drawn 240–360
+        ])
+        let placed = MediaTimelining.placements(three, withinSource: duration)
+
+        #expect(MediaTimelining.dropIndex(forPoints: 300, in: placed, moving: 0) == 2)
+        #expect(MediaTimelining.dropIndex(forPoints: 60, in: placed, moving: 2) == 0)
+        // Past either end, a carry that has run out of track belongs to the end
+        // it ran out at.
+        #expect(MediaTimelining.dropIndex(forPoints: -400, in: placed, moving: 2) == 0)
+        #expect(MediaTimelining.dropIndex(forPoints: 9000, in: placed, moving: 0) == 2)
+    }
+
+    // MARK: - The shot list
+
+    /// ⚠️ **DURATION STOPS DECIDING WIDTH, AND THAT IS THE WHOLE POINT.** On the
+    /// track a piece is drawn at the length it will run for, so a short piece
+    /// beside a long one is a few points wide and the long one's far end is off
+    /// screen. While one is being carried every piece is the same width and the
+    /// whole composition is on the track at once.
+    @Test func theShotListGivesEveryPieceTheSameWidth() {
+        let three = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 1),      // one second
+            MediaSegment(start: 2, end: 8),      // six
+            MediaSegment(start: 8, end: 9)       // one
+        ])
+
+        let shots = MediaTimelining.shots(three, withinSource: duration, across: 300)
+
+        #expect(shots.map(\.width) == [100, 100, 100], "got \(shots.map(\.width))")
+        #expect(shots.map(\.from) == [0, 100, 200])
+        #expect(shots.last?.to == 300, "the list does not fill the track: \(shots)")
+    }
+
+    /// The list is the composition's order, not the film's — a carried piece can
+    /// start later in the file than the one drawn after it.
+    @Test func theShotListIsInPlayOrder() {
+        let swapped = MediaTimeline(segments: [
+            MediaSegment(start: 6, end: 9),
+            MediaSegment(start: 0, end: 3)
+        ])
+
+        let shots = MediaTimelining.shots(swapped, withinSource: duration, across: 200)
+
+        #expect(shots.map(\.piece.start) == [6, 0], "got \(shots.map(\.piece.start))")
+        #expect(shots.map(\.index) == [0, 1])
+    }
+
+    /// ⚠️ **A FLOOR UNDER EVERY CHIP, AND THE LIST RUNS PAST THE TRACK FOR IT.**
+    /// Twelve pieces shared out over 358 points are thirty points each — a sliver
+    /// nobody can aim at. Asked for: a minimum width, and a list that scrolls.
+    @Test func aShotListIsNeverNarrowerThanItsFloor() {
+        let twelve = MediaTimeline(segments: (0..<12).map {
+            MediaSegment(start: Double($0), end: Double($0 + 1))
+        })
+
+        let shots = MediaTimelining.shots(
+            twelve, withinSource: 12, across: 358, startingAt: 16, atLeast: 64
+        )
+
+        #expect(shots.map(\.width) == Array(repeating: 64, count: 12), "got \(shots.map(\.width))")
+        #expect(shots.first?.from == 16)
+        // ⚠️ NAMED, NOT WRITTEN INLINE: inside `#expect` the sum is not inferred
+        // as a `CGFloat`, and 784 was reported as not equal to 784.
+        let end: CGFloat = 16 + 12 * 64
+        #expect(shots.last?.to == end, "the list stops at \(shots.last?.to ?? 0)")
+    }
+
+    /// The witness: a floor that is not reached changes nothing — two pieces
+    /// still share the track between them.
+    @Test func aFloorThatIsNotReachedLeavesTheListAlone() {
+        let two = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 3), MediaSegment(start: 3, end: 9)
+        ])
+
+        let shots = MediaTimelining.shots(
+            two, withinSource: duration, across: 358, startingAt: 16, atLeast: 64
+        )
+
+        #expect(shots.map(\.width) == [179, 179], "got \(shots.map(\.width))")
+        let end: CGFloat = 16 + 358
+        #expect(shots.last?.to == end)
+    }
+
+    /// ⚠️ **THE PIECE THAT WAS LIFTED OPENS UNDER THE FINGER THAT LIFTED IT**, as
+    /// far as the list's ends allow — and a list that fits does not move at all.
+    @Test func aLongListOpensWithTheLiftedChipUnderTheFinger() {
+        let chip = MediaTimelining.Placement(
+            index: 9, piece: MediaSegment(start: 9, end: 10), from: 592, to: 656
+        )
+
+        #expect(MediaTimelining.shotListOffset(
+            centring: chip, underTrackX: 265, listWidth: 784, trackWidth: 390
+        ) == 359)
+        // Past either end, it stops at the end.
+        #expect(MediaTimelining.shotListOffset(
+            centring: chip, underTrackX: 10, listWidth: 784, trackWidth: 390
+        ) == 394)
+        #expect(MediaTimelining.shotListOffset(
+            centring: chip, underTrackX: 1000, listWidth: 784, trackWidth: 390
+        ) == 0)
+        // A list that fits, or no chip at all, stays where it is.
+        #expect(MediaTimelining.shotListOffset(
+            centring: chip, underTrackX: 265, listWidth: 390, trackWidth: 390
+        ) == 0)
+        #expect(MediaTimelining.shotListOffset(
+            centring: nil, underTrackX: 265, listWidth: 784, trackWidth: 390
+        ) == 0)
+    }
+
+    /// ⚠️ **THE LIST SCROLLS BY ITSELF ONLY NEAR AN END, TOWARDS THAT END, AND
+    /// FASTER THE CLOSER THE FINGER GETS.**
+    @Test func theListScrollsByItselfOnlyNearAnEnd() {
+        func speed(_ x: CGFloat) -> CGFloat {
+            MediaTimelining.edgeScrollSpeed(atTrackX: x, trackWidth: 390, zone: 56, fastest: 600)
+        }
+
+        #expect(speed(195) == 0, "the middle of the track moved the list")
+        #expect(speed(57) == 0 && speed(333) == 0, "the zone is wider than it says")
+        #expect(speed(40) < 0 && speed(350) > 0, "the list runs the wrong way")
+        #expect(abs(speed(20)) > abs(speed(40)), "deeper into the zone is not faster")
+        #expect(speed(390 - 20) > speed(390 - 40), "deeper into the zone is not faster")
+        #expect(abs(speed(28) + 150) < 0.01, "half way in is not a quarter speed: \(speed(28))")
+        #expect(abs(speed(390 - 28) - 150) < 0.01,
+                "half way in is not a quarter speed: \(speed(390 - 28))")
+        #expect(speed(0) == -600 && speed(390) == 600)
+        // A finger reported past the edge holds the fastest speed.
+        #expect(speed(-30) == -600 && speed(430) == 600)
+        // A zone wider than half the track does not run both ways at once.
+        #expect(MediaTimelining.edgeScrollSpeed(
+            atTrackX: 50, trackWidth: 100, zone: 80, fastest: 600
+        ) == 0)
+    }
+
+    /// A track with no width yet — which is every track before its first layout
+    /// — has nowhere to lay a list out.
+    @Test func aShotListNeedsATrackToStandOn() {
+        #expect(MediaTimelining.shots(.whole, withinSource: duration, across: 0).isEmpty)
+        #expect(MediaTimelining.shots(.whole, withinSource: 0, across: 300).isEmpty)
+    }
+
+    /// The list may be inset from the track's edges, to leave room for the
+    /// timecodes centred on its ends.
+    @Test func theShotListCanStandInsideTheTrack() {
+        let two = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 2),
+            MediaSegment(start: 2, end: 8)
+        ])
+
+        let shots = MediaTimelining.shots(two, withinSource: duration, across: 200, startingAt: 16)
+
+        #expect(shots.map(\.from) == [16, 116])
+        #expect(shots.last?.to == 216)
+    }
+
+    /// ⚠️ **THE MARKS OVER THE LIST ARE ITS SEAMS, LABELLED WITH WHERE EACH PIECE
+    /// BEGINS IN THE RESULT.** Evenly spaced seconds over chips of one width would
+    /// lie about every chip; the seams are the only honest marks.
+    @Test func theShotListIsMarkedAtItsSeams() {
+        let two = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 2),
+            MediaSegment(start: 2, end: 8)
+        ])
+        let shots = MediaTimelining.shots(two, withinSource: duration, across: 200, startingAt: 16)
+
+        let marks = MediaTimelining.shotMarks(shots, minimumSpacing: 30)
+
+        #expect(marks == [
+            MediaTimelining.ShotMark(x: 16, seconds: 0),
+            MediaTimelining.ShotMark(x: 116, seconds: 2),
+            MediaTimelining.ShotMark(x: 216, seconds: 8)
+        ], "got \(marks)")
+    }
+
+    /// ⚠️ **AND THE MARKS FOLLOW THE ORDER, WHICH IS THE WHOLE POINT DURING A
+    /// CARRY.** The same two pieces the other way round meet six seconds in.
+    @Test func theShotMarksFollowTheOrder() {
+        let swapped = MediaTimeline(segments: [
+            MediaSegment(start: 2, end: 8),
+            MediaSegment(start: 0, end: 2)
+        ])
+        let shots = MediaTimelining.shots(swapped, withinSource: duration, across: 200)
+
+        #expect(MediaTimelining.shotMarks(shots, minimumSpacing: 30).map(\.seconds) == [0, 6, 8])
+    }
+
+    /// ⚠️ **A MARK THAT WOULD SIT ON ANOTHER IS LEFT OUT — NEVER THE ENDS.** Ten
+    /// pieces across a hundred points leave ten points a chip, and a timecode is
+    /// twenty wide.
+    @Test func crowdedSeamsKeepTheirEndsAndDropWhatDoesNotFit() {
+        let ten = MediaTimeline(segments: (0..<10).map {
+            MediaSegment(start: Double($0), end: Double($0) + 1)
+        })
+        let shots = MediaTimelining.shots(ten, withinSource: 20, across: 100)
+
+        let marks = MediaTimelining.shotMarks(shots, minimumSpacing: 30)
+
+        #expect(marks.first?.seconds == 0, "the start of the result was dropped")
+        #expect(marks.last?.seconds == 10, "the end of the result was dropped")
+        for (one, next) in zip(marks, marks.dropFirst()) {
+            #expect(next.x - one.x >= 30 - 0.001, "\(one) and \(next) sit on each other")
+        }
+    }
+
+    /// ⚠️ **AND THE DROP RULE WORKS ON IT UNCHANGED** — which is what makes the
+    /// carried piece's CENTRE the thing that decides, since the carried chip is
+    /// the one under the finger.
+    @Test func aCarriedPieceLandsWhereTheFingerIsOnTheShotList() {
+        let three = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 1),
+            MediaSegment(start: 2, end: 8),
+            MediaSegment(start: 8, end: 9)
+        ])
+        let shots = MediaTimelining.shots(three, withinSource: duration, across: 300)
+
+        #expect(MediaTimelining.dropIndex(forPoints: 250, in: shots, moving: 0) == 2)
+        #expect(MediaTimelining.dropIndex(forPoints: 50, in: shots, moving: 2) == 0)
+    }
+
+    // MARK: - What the preview and the export are both built from
+
+    /// ⚠️ **AN UNCUT CLIP IS NO PIECES AT ALL** — the file as shot, which the
+    /// preview plays without a composition and the export copies without one.
+    @Test func anUncutClipHasNoPiecesToBuild() {
+        #expect(MediaTimelining.exportSegments(.whole, withinSource: duration).isEmpty)
+        #expect(MediaTimelining.exportSegments(
+            MediaTimeline(segments: [MediaSegment(start: 0, end: duration)]), withinSource: duration
+        ).isEmpty, "one piece at 1x spanning the file is the file as shot")
+    }
+
+    /// ⚠️ **AND A RE-ORDERED ONE KEEPS ITS ORDER.** The preview plays the pieces
+    /// in the order the author arranged; sorting them back would play the camera's.
+    @Test func aReorderedTimelineIsBuiltInItsOwnOrder() {
+        let swapped = MediaTimeline(segments: [
+            MediaSegment(start: 6, end: 9, speed: 2),
+            MediaSegment(start: 0, end: 3)
+        ])
+
+        let pieces = MediaTimelining.exportSegments(swapped, withinSource: duration)
+
+        #expect(pieces.map(\.start) == [6, 0], "got \(pieces)")
+        #expect(pieces.map(\.speed) == [2, 1])
+    }
+
+    /// ⚠️ **A SPLIT PLAYS THE SAME FILM, AND MUST NOT COST A NEW ITEM.** Two
+    /// touching halves at one rate are the piece they were cut from; rebuilding
+    /// the preview for them would be a visible hitch for no difference.
+    @Test func aSplitPlaysTheSameFilm() {
+        let whole = MediaTimeline(segments: [MediaSegment(start: 2, end: 8)])
+        let split = MediaTimelining.split(whole, atPiece: 0, atSourceSeconds: 5, withinSource: duration)
+        #expect(split != whole, "guard: the split did something")
+
+        #expect(MediaTimelining.playsTheSame(whole, split, withinSource: duration))
+    }
+
+    /// And the untouched clip is the one piece a rate chip leaves behind when it
+    /// is set back to 1.
+    @Test func anUntouchedClipPlaysTheSameAsOnePieceAtRateOne() {
+        let asShot = MediaTimeline(segments: [MediaSegment(start: 0, end: duration, speed: 1)])
+
+        #expect(MediaTimelining.playsTheSame(.whole, asShot, withinSource: duration))
+    }
+
+    /// ⚠️ **BUT A RE-ORDER, A RATE OR A TRIM IS A DIFFERENT FILM.** Each of these
+    /// is what the preview must rebuild for.
+    @Test func anOrderARateOrATrimIsADifferentFilm() {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4),
+            MediaSegment(start: 4, end: 10)
+        ])
+        let swapped = MediaTimeline(segments: [
+            MediaSegment(start: 4, end: 10),
+            MediaSegment(start: 0, end: 4)
+        ])
+        let faster = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4, speed: 2),
+            MediaSegment(start: 4, end: 10)
+        ])
+        let trimmed = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 3),
+            MediaSegment(start: 4, end: 10)
+        ])
+
+        #expect(!MediaTimelining.playsTheSame(cut, swapped, withinSource: duration))
+        #expect(!MediaTimelining.playsTheSame(cut, faster, withinSource: duration))
+        #expect(!MediaTimelining.playsTheSame(cut, trimmed, withinSource: duration))
+    }
+
+    /// ⚠️ **A SEEK ASKED IN PLAYED SECONDS IS AS TIGHT, IN FILM, AS T7 ALLOWS.**
+    /// A quarter second of slack on a 4× piece is a second of film — keyframe
+    /// steps, the jumping the ceiling exists to stop.
+    @Test func aSeekOverAFastPieceIsNoLooserInFilm() {
+        let played = MediaTimelining.seekTolerance(movedPlayedSeconds: 10, atSpeed: 4)
+
+        #expect(abs(played * 4 - 0.25) < 0.0001, "\(played)s of item is \(played * 4)s of film")
+        #expect(MediaTimelining.seekTolerance(movedPlayedSeconds: 0.1, atSpeed: 1)
+                == MediaTimelining.seekTolerance(movedSeconds: 0.1),
+                "at 1x the two clocks are the same one")
+        #expect(MediaTimelining.seekTolerance(movedPlayedSeconds: 0.1, atSpeed: 0).isFinite,
+                "a rate of zero reached the division")
     }
 
     // MARK: - Following smoothly
@@ -596,6 +1065,7 @@ struct MediaTimeliningTests {
     /// would empty the strip silently, so it turns this red first.
     @Test func theClosestZoomStaysClearOfTheGeneratorsFloor() {
         let tightest = MediaTimelining.tileSpacingSeconds(
+            in: .whole, withinSource: duration,
             pointsPerSecond: MediaTimelining.closestPointsPerSecond
         )
 
@@ -613,88 +1083,339 @@ struct MediaTimeliningTests {
     /// The whole point of zooming in: the same second of film is drawn wider, so
     /// a handle can be aimed at a moment a coarse strip cannot express.
     @Test func zoomingInDrawsASecondWider() {
-        let coarse = MediaTimelining.x(atSourceSeconds: 1, pointsPerSecond: 60)
-        let close = MediaTimelining.x(atSourceSeconds: 1, pointsPerSecond: 240)
+        let coarse = MediaTimelining.x(atPlayedSeconds: 1, pointsPerSecond: 60)
+        let close = MediaTimelining.x(atPlayedSeconds: 1, pointsPerSecond: 240)
 
         #expect(close == coarse * 4)
         // And the ruler coarsens or refines with it rather than staying put.
-        #expect(MediaTimelining.rulerStep(pointsPerSecond: 240, acrossSourceSeconds: 20)
-                < MediaTimelining.rulerStep(pointsPerSecond: 20, acrossSourceSeconds: 20))
+        #expect(MediaTimelining.rulerStep(pointsPerSecond: 240, acrossPlayedSeconds: 20)
+                < MediaTimelining.rulerStep(pointsPerSecond: 20, acrossPlayedSeconds: 20))
     }
 
-    // MARK: - The film, tile by tile (charter T2, T3)
+    // MARK: - The film, square by square (charter T2, T3)
 
-    @Test func aClipIsWorthOneTilePerTileWidthOfFilm() {
-        let tenSeconds = MediaTimelining.contentWidth(ofSourceSeconds: 10)   // 600pt
-
-        #expect(MediaTimelining.tileCount(acrossContentWidth: tenSeconds, tileWidth: 54) == 12)
-        #expect(MediaTimelining.tileCount(acrossContentWidth: 0) == 0)
+    /// The squares of a stretch of track, at a scale where the numbers are easy.
+    private func squares(
+        _ timeline: MediaTimeline, across visible: ClosedRange<CGFloat>,
+        tileWidth: CGFloat = 60, pointsPerSecond: CGFloat = 60, withinSource: Double = 10
+    ) -> [MediaTimelining.Square] {
+        MediaTimelining.squares(
+            in: timeline, withinSource: withinSource, visible: visible,
+            tileWidth: tileWidth, pointsPerSecond: pointsPerSecond
+        )
     }
 
-    /// ⚠️ **CHARTER T2, AND THE REASON THE WHOLE TILE SYSTEM EXISTS.** The number
-    /// of tiles worth decoding must not grow with the clip. The predecessor fitted
+    /// The film drawn at a point of the track.
+    private func film(at x: CGFloat, in timeline: MediaTimeline, tileWidth: CGFloat = 60) -> Double? {
+        squares(timeline, across: 0...2000, tileWidth: tileWidth)
+            .first { x >= $0.from && x < $0.from + $0.width }?.seconds
+    }
+
+    @Test func aPieceIsWorthOneSquarePerTileWidthOfFilm() throws {
+        let whole = squares(.whole, across: 0...600, tileWidth: 54)
+
+        #expect(whole.count == 12, "got \(whole.count)")
+        // ⚠️ AND THE LAST ONE IS CUT TO THE FILM'S OWN END: 600 is eleven whole
+        // squares and six points, and six points of overhang past the closing cap
+        // reads as a rendering fault.
+        let last = try #require(whole.last)
+        #expect(abs(last.width - 6) < 0.01, "the last square overhangs: \(last)")
+    }
+
+    /// ⚠️ **CHARTER T2, AND THE REASON THE WHOLE SYSTEM EXISTS.** The number of
+    /// squares worth decoding must not grow with the clip. The predecessor fitted
     /// a fixed count across the WHOLE clip, so every second of film cost a
     /// thumbnail however far off screen it was — 600 of them on a ten-minute clip,
     /// which is 116 MB of decoded pixels for a band 74pt tall.
-    @Test func aLongClipHasNoMoreTilesOnScreenThanAShortOne() {
-        let width: CGFloat = 393
-        let short = MediaTimelining.tileCount(
-            acrossContentWidth: MediaTimelining.contentWidth(ofSourceSeconds: 10)
-        )
-        let long = MediaTimelining.tileCount(
-            acrossContentWidth: MediaTimelining.contentWidth(ofSourceSeconds: 240)
-        )
-        #expect(long > short * 10, "guard: the long clip really is much longer")
-
-        let onScreenShort = MediaTimelining.visibleTiles(
-            contentOffset: 0, trackWidth: width, count: short
-        )
-        let onScreenLong = MediaTimelining.visibleTiles(
-            contentOffset: 0, trackWidth: width, count: long
+    @Test func aLongClipHasNoMoreSquaresOnScreenThanAShortOne() {
+        let window: ClosedRange<CGFloat> = -MediaTimelining.filmMargin...(
+            393 + MediaTimelining.filmMargin
         )
 
-        #expect(onScreenLong.count <= onScreenShort.count + 1,
-                "\(onScreenLong.count) tiles for four minutes against \(onScreenShort.count) for ten seconds")
-        #expect(onScreenLong.count <= 48, "charter T3: \(onScreenLong.count) tiles alive at once")
+        let short = squares(.whole, across: window, tileWidth: 54, withinSource: 10)
+        let long = squares(.whole, across: window, tileWidth: 54, withinSource: 240)
+
+        #expect(MediaTimelining.contentWidth(of: .whole, withinSource: 240)
+                > MediaTimelining.contentWidth(of: .whole, withinSource: 10) * 10,
+                "guard: the long clip really is much longer")
+        #expect(long.count <= short.count + 1,
+                "\(long.count) squares for four minutes against \(short.count) for ten seconds")
+        #expect(long.count <= 48, "charter T3: \(long.count) squares alive at once")
     }
 
-    @Test func theWindowFollowsTheScrollAndKeepsAMargin() {
-        let count = MediaTimelining.tileCount(
-            acrossContentWidth: MediaTimelining.contentWidth(ofSourceSeconds: 240)
+    @Test func theWindowFollowsTheScrollAndKeepsAMargin() throws {
+        let atRest = squares(
+            .whole, across: -MediaTimelining.filmMargin...(393 + MediaTimelining.filmMargin),
+            tileWidth: 54, withinSource: 240
+        )
+        let scrolled = squares(
+            .whole,
+            across: (3000 - MediaTimelining.filmMargin)...(3000 + 393 + MediaTimelining.filmMargin),
+            tileWidth: 54, withinSource: 240
         )
 
-        let atRest = MediaTimelining.visibleTiles(contentOffset: 0, trackWidth: 393, count: count)
-        let scrolled = MediaTimelining.visibleTiles(
-            contentOffset: 3000, trackWidth: 393, count: count
-        )
+        let first = try #require(atRest.first)
+        let lastAtRest = try #require(atRest.last)
+        let firstScrolled = try #require(scrolled.first)
+        #expect(first.from == 0, "the margin ran off the front of the film")
+        #expect(firstScrolled.from > lastAtRest.from, "the window did not follow the scroll")
+        #expect(firstScrolled.from >= 3000 - MediaTimelining.filmMargin - 54,
+                "the window reached further back than its margin")
+    }
 
-        #expect(atRest.lowerBound == 0, "the margin ran off the front of the film")
-        #expect(scrolled.lowerBound > atRest.upperBound, "the window did not follow the scroll")
-        #expect(scrolled.upperBound <= count, "the margin ran off the end of the film")
+    /// ⚠️ **A SQUARE BELONGS TO ITS PIECE, AND THAT IS WHAT MAKES THE FILM TRAVEL
+    /// WITH THE CLIP.** Laid across the track instead, the squares stand still
+    /// while the pieces move: cropping one re-labels every square after the cut
+    /// and only the containers move, which is what was reported — *"c'est le
+    /// container de la section qui se déplace"*.
+    @Test func everySquareIsWhollyInsideItsOwnPiece() {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 2, speed: 1),     // drawn 0–120
+            MediaSegment(start: 6, end: 10, speed: 1)     // drawn 120–360
+        ])
+        let placed = MediaTimelining.placements(cut, withinSource: duration, pointsPerSecond: 60)
+
+        for square in squares(cut, across: 0...360) {
+            let mine = placed[square.piece]
+            #expect(square.from >= mine.from - 0.01 && square.from + square.width <= mine.to + 0.01,
+                    "\(square) sticks out of \(mine)")
+            // ⚠️ THE FRAME MAY BE CENTRED JUST OUTSIDE, AND THAT IS THE CROP: a
+            // square the window cuts in half keeps its own frame and is trimmed,
+            // which is what makes the sheet read as fixed. Half a square is the
+            // whole of the licence.
+            #expect(square.seconds >= mine.piece.start - 0.46
+                    && square.seconds <= mine.piece.end + 0.46,
+                    "\(square) shows film from well outside its piece")
+        }
+    }
+
+    /// And the squares of a piece move with it, by exactly what it moved.
+    @Test func aPiecesSquaresTravelWithIt() {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4),
+            MediaSegment(start: 4, end: 10)
+        ])
+        let cropped = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 3),               // one second taken off the first
+            MediaSegment(start: 4, end: 10)
+        ])
+
+        let before = squares(cut, across: 0...600).filter { $0.piece == 1 }
+        let after = squares(cropped, across: 0...600).filter { $0.piece == 1 }
+
+        #expect(before.count > 2 && after.count >= before.count, "guard: got \(before.count)")
+        for (was, now) in zip(before, after) {
+            #expect(abs(now.seconds - was.seconds) < 0.001,
+                    "the second piece's film changed: \(was.seconds) -> \(now.seconds)")
+            #expect(abs(now.from - (was.from - 60)) < 0.01,
+                    "its film did not travel with it: \(was.from) -> \(now.from)")
+        }
     }
 
     /// ⚠️ **THE MIDDLE OF THE TILE, NOT ITS EDGE.** A tile asking at its leading
     /// edge puts the first one on exactly zero — the opening fade most real film
     /// starts with — and the last on the instant the clip ends, where there is
     /// frequently no frame at all.
-    @Test func aTileShowsTheMiddleOfWhatItCovers() {
-        #expect(MediaTimelining.sourceSeconds(ofTile: 0, tileWidth: 60, pointsPerSecond: 60) == 0.5)
-        #expect(MediaTimelining.sourceSeconds(ofTile: 3, tileWidth: 60, pointsPerSecond: 60) == 3.5)
+    @Test func aSquareShowsTheMiddleOfWhatItCovers() {
+        #expect(film(at: 30, in: .whole) == 0.5)
+        #expect(film(at: 210, in: .whole) == 3.5)
+    }
+
+    /// ⚠️ **AND A TILE IN A FAST PIECE COVERS MORE FILM THAN ONE IN A SLOW ONE.**
+    /// A tile is a fixed width of RESULT; the film under it is that width times
+    /// the rate. Asked the old way — a straight division by the scale — every
+    /// tile of a 2× piece would show the frame from half way back, and the strip
+    /// would disagree with the picture the needle is standing on.
+    @Test func aSquareInAFastPieceReachesFurtherIntoTheFilm() {
+        let fast = MediaTimeline(segments: [MediaSegment(start: 0, end: 10, speed: 2)])
+
+        // The first square covers the first second of RESULT, which is the first
+        // two seconds of film; its middle is one second in.
+        #expect(film(at: 30, in: fast) == 1)
+        #expect(film(at: 150, in: fast) == 5)
+    }
+
+    /// ⚠️ **AND A TILE OVER A HOLE SHOWS THE FILM THAT IS THERE.** The whole file
+    /// ⚠️ **A TILE PAST A CUT READS FROM THE PIECE THAT IS THERE, NOT FROM THE
+    /// FILE.** The pieces are laid end to end: the film a trim removed is not on
+    /// the track at all, so the tile after the seam shows the next piece's
+    /// opening frames rather than the ones the cut threw away.
+    @Test func aSquarePastACutReadsFromThePieceThatFollowsIt() {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 2, speed: 1),     // drawn 0–120
+            MediaSegment(start: 6, end: 10, speed: 1)     // drawn 120–360
+        ])
+
+        // 60–120pt is the last square of the first piece.
+        #expect(film(at: 90, in: cut) == 1.5)
+        // 120–180 is the first square of the second, which begins at the file's 6s.
+        #expect(film(at: 150, in: cut) == 6.5)
     }
 
     /// The spacing the generator's tolerance is derived from — charter T5.
     @Test func theSpacingIsOneTileOfFilm() {
-        #expect(abs(MediaTimelining.tileSpacingSeconds(tileWidth: 60, pointsPerSecond: 60) - 1) < 0.001)
-        #expect(MediaTimelining.tileSpacingSeconds(pointsPerSecond: 0) == 0)
+        #expect(abs(MediaTimelining.tileSpacingSeconds(
+            in: .whole, withinSource: duration, tileWidth: 60, pointsPerSecond: 60
+        ) - 1) < 0.001)
+        #expect(MediaTimelining.tileSpacingSeconds(
+            in: .whole, withinSource: duration, pointsPerSecond: 0
+        ) == 0)
     }
 
-    @Test func anUnlaidTrackHasNoTiles() {
-        #expect(MediaTimelining.visibleTiles(
-            contentOffset: 0, trackWidth: 0, count: 10
-        ).isEmpty)
-        #expect(MediaTimelining.visibleTiles(
-            contentOffset: 0, trackWidth: 393, count: 0
-        ).isEmpty)
+    /// ⚠️ **THE SLOWEST PIECE SETS THE TOLERANCE FOR EVERYONE — CHARTER T5.**
+    /// The rule is "strictly under half the spacing, or the strip repeats
+    /// itself", and the spacing is not one number any more: a tile of a 4× piece
+    /// covers four times the film a 1× tile does. Deriving from the average, or
+    /// from the fastest, gives the slow piece a window wide enough to land two of
+    /// its tiles on the same frame.
+    @Test func theTightestSpacingInTheTimelineIsWhatCounts() {
+        let mixed = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4, speed: 4),
+            MediaSegment(start: 4, end: 10, speed: 0.5)
+        ])
+
+        #expect(abs(MediaTimelining.tileSpacingSeconds(
+            in: mixed, withinSource: duration, tileWidth: 60, pointsPerSecond: 60
+        ) - 0.5) < 0.001)
+    }
+
+    @Test func anUnlaidTrackHasNoSquares() {
+        #expect(squares(.whole, across: 0...393, tileWidth: 0).isEmpty)
+        #expect(squares(.whole, across: 0...393, withinSource: 0).isEmpty)
+        #expect(squares(.whole, across: 0...0).isEmpty)
+    }
+
+    // MARK: - Which film a square of the strip stands for
+
+    /// ⚠️ **OPENING A PIECE REVEALS THE NEXT SQUARES OF ITS SHEET AND MOVES NOT
+    /// ONE OF THEM.** The author's own words for what a handle does: *"on révèle
+    /// la suite de la piste, comme si le clip était en entier, seule la partie
+    /// visible se trouve entre les pinces"*. Two earlier arrangements failed it —
+    /// squares laid across the TRACK changed their film in place the moment
+    /// anything was cut, and squares anchored to a piece's IN POINT slid their
+    /// film as the piece grew.
+    @Test func continuingAPieceRevealsMoreOfItsSheetAndMovesNothing() throws {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4),
+            MediaSegment(start: 4, end: 10)
+        ])
+        let continued = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 5),      // the first piece carried on a second
+            MediaSegment(start: 4, end: 10)
+        ])
+
+        let before = squares(cut, across: 0...600, tileWidth: 54).filter { $0.piece == 0 }
+        let after = squares(continued, across: 0...600, tileWidth: 54).filter { $0.piece == 0 }
+
+        #expect(after.count == before.count + 1,
+                "no film was revealed: \(before.count) squares then \(after.count)")
+        for (was, now) in zip(before, after) {
+            #expect(now.seconds == was.seconds,
+                    "a square that was already there changed its film: \(was) -> \(now)")
+            #expect(now.from == was.from && now.filmFrom == was.filmFrom,
+                    "a square that was already there moved: \(was) -> \(now)")
+        }
+        let opened = try #require(after.last)
+        let was = try #require(before.last)
+        #expect(opened.seconds > was.seconds, "the square that was revealed shows no new film")
+    }
+
+    /// ⚠️ **AND TRIMMING A HEAD CHANGES WHAT NO SQUARE SHOWS.** The window closes
+    /// from the left: the squares it passes are hidden, the ones that remain keep
+    /// their own film and travel with the piece. Anchored to the piece's IN POINT
+    /// instead, every square of it would take on new film as the handle moved —
+    /// the sheet sliding under the window, which is what the author reported as
+    /// *"cet effet des frames qui se déplient"*.
+    @Test func trimmingAHeadHidesSquaresAndChangesWhatNoneOfThemShows() throws {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4),
+            MediaSegment(start: 4, end: 10)
+        ])
+        let cropped = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4),
+            MediaSegment(start: 5, end: 10)      // a second taken off the second's head
+        ])
+
+        let before = squares(cut, across: 0...600, tileWidth: 54).filter { $0.piece == 1 }
+        let after = squares(cropped, across: 0...600, tileWidth: 54).filter { $0.piece == 1 }
+
+        #expect(after.count < before.count, "nothing was hidden: \(after.count)")
+        for now in after {
+            let was = before.first { $0.index == now.index }
+            #expect(now.seconds == was?.seconds,
+                    "a square that is still shown took on new film: \(now)")
+        }
+        // And the piece carries them: every one is a second of film further left,
+        // because the piece itself is.
+        for now in after where now.width > 53 {
+            let was = try #require(before.first { $0.index == now.index })
+            #expect(abs(now.filmFrom - (was.filmFrom - 60)) < 0.01,
+                    "\(now) did not travel with its piece")
+        }
+    }
+
+    /// And the same in the other direction: cropping HIDES squares and moves none
+    /// of the ones that remain.
+    @Test func croppingAPieceHidesSquaresAndMovesNoneOfTheRest() {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4),
+            MediaSegment(start: 4, end: 10)
+        ])
+        let cropped = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 3),
+            MediaSegment(start: 4, end: 10)
+        ])
+
+        let before = squares(cut, across: 0...600, tileWidth: 54).filter { $0.piece == 0 }
+        let after = squares(cropped, across: 0...600, tileWidth: 54).filter { $0.piece == 0 }
+
+        #expect(after.count < before.count, "nothing was hidden: \(after.count)")
+        for now in after {
+            let was = before.first { $0.index == now.index }
+            #expect(now.seconds == was?.seconds, "a square kept on changed its film: \(now)")
+            #expect(now.from == was?.from, "a square kept on moved: \(now)")
+        }
+    }
+
+    /// ⚠️ **AND A DRAG ASKS FOR NOTHING NEW AT ALL.** A finger moving an edge
+    /// reports sixty times a second; squares that re-mapped as it went would make
+    /// each of those samples sixteen fresh decodes. Cut on the SOURCE, the sheet
+    /// does not move under a handle: every frame the strip has is still a frame
+    /// it needs.
+    @Test func aTilesFilmStandsStillWhileAnEdgeInchesAlong() {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4),
+            MediaSegment(start: 4, end: 10)
+        ])
+        let nudged = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4.05),   // three points of finger
+            MediaSegment(start: 4, end: 10)
+        ])
+
+        #expect(film(at: 250, in: cut, tileWidth: 54) == film(at: 250, in: nudged, tileWidth: 54))
+    }
+
+    /// ⚠️ **AND A SQUARE THE WINDOW CUTS IN HALF IS CROPPED, NOT MOVED.** Its
+    /// frame is the frame of that stretch of film — which is why it may be
+    /// centred a little outside the piece — and the part of it the window shows
+    /// is drawn where it has always been. Anything else makes the sheet slide as
+    /// a handle moves, which is the whole of the complaint.
+    @Test func aSquareTheWindowCutsInHalfKeepsItsOwnFrame() throws {
+        let cut = MediaTimeline(segments: [
+            MediaSegment(start: 0, end: 4),
+            MediaSegment(start: 4.15, end: 10)
+        ])
+
+        let first = try #require(
+            squares(cut, across: 0...600, tileWidth: 54).first { $0.piece == 1 }
+        )
+
+        #expect(first.from >= 240 - 0.01, "it is drawn outside its own piece: \(first)")
+        #expect(first.width < 54, "guard: the window really does cut this one: \(first)")
+        #expect(first.filmFrom < first.from,
+                "its picture was pulled into the visible part instead of being cropped")
+        #expect(abs(first.seconds - (Double(first.index) * 0.9 + 0.45)) < 0.001,
+                "it is not showing its own stretch of the sheet: \(first)")
     }
 
     // MARK: - Seeking while scrubbing (charter T7)
@@ -793,7 +1514,7 @@ struct MediaTimeliningTests {
     /// puts "0:01" 60pt from "0:02" and the timecodes touch.
     @Test func theRulerSkipsSecondsRatherThanLetTimecodesTouch() {
         let step = MediaTimelining.rulerStep(
-            pointsPerSecond: 60, acrossSourceSeconds: 20, minimumSpacing: 64
+            pointsPerSecond: 60, acrossPlayedSeconds: 20, minimumSpacing: 64
         )
 
         #expect(step == 2, "a 1s step would be 60pt apart, under the 64pt minimum")
@@ -806,7 +1527,7 @@ struct MediaTimeliningTests {
     /// says two seconds is fine, because at 60pt a second it is.
     @Test func aLongClipIsMarkedCoarselyRatherThanWithAThousandTicks() {
         let spacingWouldAllow = MediaTimelining.rulerStep(
-            pointsPerSecond: 60, acrossSourceSeconds: 2400,
+            pointsPerSecond: 60, acrossPlayedSeconds: 2400,
             minimumSpacing: 64, maximumTicks: 64
         )
 
@@ -818,21 +1539,25 @@ struct MediaTimeliningTests {
     /// that looks like a design.
     @Test func aClipLongerThanEveryOfferedStepStillGetsARuler() {
         let step = MediaTimelining.rulerStep(
-            pointsPerSecond: 60, acrossSourceSeconds: 100_000, maximumTicks: 8
+            pointsPerSecond: 60, acrossPlayedSeconds: 100_000, maximumTicks: 8
         )
 
         #expect(step == MediaTimelining.rulerSteps.last)
     }
 
-    @Test func theMarksRunFromZeroPastTheEnd() {
-        let marks = MediaTimelining.rulerSeconds(upToSourceSeconds: 10, step: 4)
-
-        #expect(marks == [0, 4, 8, 12], "the tail of the clip would look unmeasured")
+    /// ⚠️ **AND NOT ONE STEP FURTHER — IT USED TO.** A mark is placed at the film
+    /// that plays at that moment, and past the end of the result there is none:
+    /// an overshoot clamps onto the last piece's end and prints on top of the
+    /// mark before it. Seen on the device as "0:06" and "0:08" overlapping.
+    @Test func theMarksRunFromZeroToTheEndOfTheResult() {
+        #expect(MediaTimelining.rulerSeconds(upToPlayedSeconds: 10, step: 4) == [0, 4, 8])
+        #expect(MediaTimelining.rulerSeconds(upToPlayedSeconds: 12, step: 4) == [0, 4, 8, 12],
+                "a mark that lands exactly on the end is a mark, not an overshoot")
     }
 
     @Test func anUnmeasurableClipIsNotMarked() {
-        #expect(MediaTimelining.rulerSeconds(upToSourceSeconds: 0, step: 1).isEmpty)
-        #expect(MediaTimelining.rulerSeconds(upToSourceSeconds: 10, step: 0).isEmpty)
-        #expect(MediaTimelining.rulerSeconds(upToSourceSeconds: .infinity, step: 1).isEmpty)
+        #expect(MediaTimelining.rulerSeconds(upToPlayedSeconds: 0, step: 1).isEmpty)
+        #expect(MediaTimelining.rulerSeconds(upToPlayedSeconds: 10, step: 0).isEmpty)
+        #expect(MediaTimelining.rulerSeconds(upToPlayedSeconds: .infinity, step: 1).isEmpty)
     }
 }

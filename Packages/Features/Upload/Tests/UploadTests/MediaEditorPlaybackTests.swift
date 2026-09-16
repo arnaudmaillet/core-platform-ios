@@ -64,10 +64,23 @@ struct MediaEditorPlaybackTests {
         private(set) var stopCount = 0
         private var boundSurfaces: Set<ObjectIdentifier> = []
 
-        func play(_ file: URL, in surface: VideoRenderView) async {
-            played.append(file)
+        /// Every arrangement the screen asked to be played.
+        private(set) var plans: [VideoExportPlan] = []
+
+        /// ⚠️ **`at()` FIRST, AND ONLY A LOAD IT ACCEPTS COUNTS AS BOUND** — the
+        /// real controller binds nothing for a load its caller abandons, and the
+        /// bound count is this suite's leak assertion.
+        func load(
+            _ plan: VideoExportPlan, in surface: VideoRenderView,
+            at start: @escaping @MainActor () -> Double?
+        ) async {
+            guard start() != nil else { return }
+            plans.append(plan)
+            played.append(plan.sourceURL)
             boundSurfaces.insert(ObjectIdentifier(surface))
         }
+
+        func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {}
 
         func stop(_ surface: VideoRenderView) {
             stopCount += 1
@@ -95,10 +108,10 @@ struct MediaEditorPlaybackTests {
 
         /// Playback's subject is binding and pausing, not the playhead — the
         /// track's suite is where scrubbing is asked about.
-        func playhead(in surface: VideoRenderView) -> (fraction: Double, seconds: Double)? { nil }
+        func playheadSeconds(in surface: VideoRenderView) -> Double? { nil }
 
         func seek(
-            toFraction fraction: Double, in surface: VideoRenderView, toleranceSeconds: Double
+            toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double
         ) {}
 
         /// What the stub player says about being stopped. Tests that care set

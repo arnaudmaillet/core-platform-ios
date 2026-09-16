@@ -17,9 +17,28 @@ import UIKit
 /// photograph ask for nothing at all. That is this protocol.
 @MainActor
 protocol MediaVideoPreviewing: AnyObject {
-    /// Binds `file` to `surface` and starts it. Repeatable; a second call for
-    /// the same surface supersedes the first.
-    func play(_ file: URL, in surface: VideoRenderView) async
+    /// Plays an ARRANGEMENT of a file in `surface`: its pieces end to end, in
+    /// order, each at its own rate, as one item — the very composition the
+    /// export builds. An empty plan is the file as shot.
+    ///
+    /// ⚠️ **THE ITEM'S SECONDS ARE THE ARRANGEMENT'S PLAYED SECONDS** — the
+    /// track's own clock. A piece boundary is an edit inside the item, not a seek
+    /// in the file, which is what ended the pause the author saw between
+    /// re-ordered pieces.
+    ///
+    /// ⚠️ **BINDS IF NOTHING IS BOUND, OTHERWISE SWAPS THE ITEM IN PLACE**, keeping
+    /// the surface's last frame and a pause the author asked for. `start` is read
+    /// after everything asynchronous, just before the item goes in: where to
+    /// begin, or nil to abandon a load the screen has moved past.
+    func load(
+        _ plan: VideoExportPlan, in surface: VideoRenderView,
+        at start: @escaping @MainActor () -> Double?
+    ) async
+
+    /// Shows the file as shot, AT ONCE, in place of the arrangement — for a trim
+    /// handle being dragged, which may stand on film the arrangement does not
+    /// contain. While it is shown, the item's seconds are the FILE's.
+    func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double)
 
     /// Unbinds whatever this surface holds and returns the player.
     func stop(_ surface: VideoRenderView)
@@ -34,19 +53,18 @@ protocol MediaVideoPreviewing: AnyObject {
     /// Whether this surface currently holds a player at all.
     func isBound(_ surface: VideoRenderView) -> Bool
 
-    /// How far through the clip in `surface` the player has got.
+    /// Where the player in `surface` has got to, in seconds of its ITEM.
     ///
-    /// ⚠️ **THE SECOND ELEMENT IS THE CLIP'S LENGTH, NOT THE ELAPSED TIME.** The
-    /// pair reads as (where, when) and is (where, how long) — the controller's
-    /// own signature, kept rather than reshaped so the two cannot drift.
-    ///
-    /// ⚠️ **AND NIL IS AN ORDINARY ANSWER, NOT A FAILURE.** Nothing bound yet, or
-    /// an asset that has not said how long it is — both happen on the first
-    /// frames after a page settles. A caller draws nil as "not yet", never as an
-    /// error.
-    func playhead(in surface: VideoRenderView) -> (fraction: Double, seconds: Double)?
+    /// ⚠️ **NIL IS AN ORDINARY ANSWER, NOT A FAILURE.** Nothing bound yet happens
+    /// on the first frames after a page settles. A caller draws nil as "not
+    /// yet", never as an error.
+    func playheadSeconds(in surface: VideoRenderView) -> Double?
 
-    /// Moves the clip in `surface` to `fraction` of its length.
+    /// Moves the player in `surface` to `seconds` of its ITEM.
+    ///
+    /// ⚠️ **BY SECONDS, NOT BY A FRACTION OF THE LENGTH.** A fraction needs the
+    /// item to know how long it is, and an item swapped in a moment ago may not
+    /// — every seek asked in that window used to be dropped.
     ///
     /// ⚠️ **AS TOLERANT AS THE CALLER SAYS, AND THE CALLER KNOWS HOW FAST THE
     /// FINGER IS GOING.** An exact seek decodes forward from the nearest keyframe
@@ -54,7 +72,7 @@ protocol MediaVideoPreviewing: AnyObject {
     /// one lands on a keyframe and does not move at all under a slow drag. See
     /// `MediaTimelining.seekTolerance`, which turns the distance a sample moved
     /// into the slack it is worth.
-    func seek(toFraction fraction: Double, in surface: VideoRenderView, toleranceSeconds: Double)
+    func seek(toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double)
 
     /// Frames of `file` at the given SOURCE seconds, keyed by the second asked
     /// for.
@@ -101,10 +119,17 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
         source: PassthroughVideoSource(), poolSize: 1, capacity: 1
     )
 
-    func play(_ file: URL, in surface: VideoRenderView) async {
-        // `scope: nil` means "share with nobody". There is one player and one
-        // page; sharing is a feed concern.
-        await controller.play(file, in: surface)
+    func load(
+        _ plan: VideoExportPlan, in surface: VideoRenderView,
+        at start: @escaping @MainActor () -> Double?
+    ) async {
+        // An arrangement is never shared — the controller registers it under no
+        // URL. There is one player and one page; sharing is a feed concern.
+        await controller.load(plan, in: surface, at: start)
+    }
+
+    func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {
+        controller.showAsShot(file, in: surface, at: seconds)
     }
 
     func stop(_ surface: VideoRenderView) {
@@ -115,20 +140,17 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
         _ = controller.setPaused(paused, in: surface)
     }
 
-    func playhead(in surface: VideoRenderView) -> (fraction: Double, seconds: Double)? {
-        controller.playhead(in: surface)
+    func playheadSeconds(in surface: VideoRenderView) -> Double? {
+        controller.playheadSeconds(in: surface)
     }
 
-    func seek(toFraction fraction: Double, in surface: VideoRenderView, toleranceSeconds: Double) {
+    func seek(toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double) {
         // ⚠️ **FORWARDED, AND FOR ONE COMMIT IT WAS NOT.** This body read
         // `controller.seek(toFraction:in:)` — the parameter accepted and
         // dropped, with no warning of any kind — so every seek took the
         // controller's 0.25s default. That killed charter T7 outright (a
         // creeping finger asks for 0.02 and got 0.25, which lands on keyframes,
-        // which is the dead-feeling track the rule exists to prevent) and broke
-        // the loop-back's invariant: it asks for 0.02 precisely so the landing
-        // is inside the cut, and 0.25 is four times `loopback`'s 0.06 slack, so
-        // the landing could fall back OUTSIDE and re-trigger on every beat.
+        // which is the dead-feeling track the rule exists to prevent).
         //
         // ⚠️ **AND NO TEST COULD SEE IT.** The charter-T7 assertions read the
         // tolerance off a STUB that records it faithfully, while the one real
@@ -136,7 +158,7 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
         // `laundered-assertion-trap`, wearing an adapter. `MediaPreviewPlayerTests`
         // now asks this object.
         controller.seek(
-            toFraction: fraction, in: surface, toleranceSeconds: toleranceSeconds
+            toSeconds: seconds, in: surface, toleranceSeconds: toleranceSeconds
         )
     }
 
@@ -166,6 +188,10 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
     #if DEBUG
     /// Internal for tests: how many players this screen's pool is holding.
     var debugActivePlayerCount: Int { controller.activePlayerCount }
+    /// Internal for tests: how long the item the controller is running lasts.
+    func debugItemSeconds(in surface: VideoRenderView) -> Double? {
+        controller.playhead(in: surface)?.seconds
+    }
     /// Internal for tests: what the controller underneath was actually asked for.
     var debugLastSeekToleranceSeconds: Double? { controller.debugLastSeekToleranceSeconds }
     #endif

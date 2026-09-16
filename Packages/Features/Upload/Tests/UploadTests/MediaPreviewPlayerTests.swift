@@ -26,9 +26,9 @@ struct MediaPreviewPlayerTests {
         let player = MediaPreviewPlayer()
         let surface = VideoRenderView()
         surface.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
-        await player.play(try await clip(), in: surface)
+        await player.load(VideoExportPlan(sourceURL: try await clip()), in: surface) { 0 }
         for _ in 0..<400 {
-            if player.playhead(in: surface) != nil { break }
+            if player.debugItemSeconds(in: surface) != nil { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         return (player, surface)
@@ -40,9 +40,9 @@ struct MediaPreviewPlayerTests {
     /// film scrolls under it.
     @Test func theTolerancePassedInIsTheToleranceTheSeekUses() async throws {
         let (player, surface) = try await bound()
-        _ = try #require(player.playhead(in: surface), "guard: the item reported a length")
+        _ = try #require(player.debugItemSeconds(in: surface), "guard: the item reported a length")
 
-        player.seek(toFraction: 0.5, in: surface, toleranceSeconds: 0.02)
+        player.seek(toSeconds: 1, in: surface, toleranceSeconds: 0.02)
 
         #expect(player.debugLastSeekToleranceSeconds == 0.02,
                 "got \(String(describing: player.debugLastSeekToleranceSeconds))")
@@ -52,21 +52,37 @@ struct MediaPreviewPlayerTests {
     /// the tight value would pass the test above and break a fast scrub.
     @Test func aLooseToleranceIsForwardedToo() async throws {
         let (player, surface) = try await bound()
-        _ = try #require(player.playhead(in: surface))
+        _ = try #require(player.debugItemSeconds(in: surface))
 
-        player.seek(toFraction: 0.5, in: surface, toleranceSeconds: 0.25)
+        player.seek(toSeconds: 1, in: surface, toleranceSeconds: 0.25)
 
         #expect(player.debugLastSeekToleranceSeconds == 0.25)
     }
 
-    /// The loop-back asks for 0.02 because `MediaTimelining.loopback`'s slack is
-    /// 0.06: a landing further out than the slack falls back OUTSIDE the cut and
-    /// asks to be moved again, every beat, forever.
-    @Test func theTightestToleranceIsInsideTheLoopBacksOwnSlack() {
-        let tightest = MediaTimelining.seekTolerance(movedSeconds: 0.001)
-        let slack: Double = 0.06
+    /// ⚠️ **THE ARRANGEMENT REACHES THE CONTROLLER.** The editor's suites read
+    /// what a STUB was handed; only this can say the one adapter that ships
+    /// passes the plan on rather than, say, the file alone — which would look
+    /// exactly like a working preview of an uncut clip.
+    @Test func anArrangementReachesThePlayerAsOneItem() async throws {
+        let player = MediaPreviewPlayer()
+        let surface = VideoRenderView()
+        surface.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
 
-        #expect(tightest <= slack,
-                "a creeping scrub can land outside the cut and re-trigger the loop every beat")
+        await player.load(
+            VideoExportPlan(sourceURL: try await clip(), segments: [
+                VideoExportSegment(start: 1, end: 2, speed: 2),
+                VideoExportSegment(start: 0, end: 1)
+            ]),
+            in: surface
+        ) { 0 }
+
+        var length: Double?
+        for _ in 0..<400 {
+            length = player.debugItemSeconds(in: surface)
+            if length != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let played = try #require(length, "the item never reported a length")
+        #expect(abs(played - 1.5) < 0.02, "the player is running \(played)s, not the 1.5s arrangement")
     }
 }

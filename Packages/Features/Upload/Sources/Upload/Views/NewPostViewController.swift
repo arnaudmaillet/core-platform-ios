@@ -685,29 +685,20 @@ final class NewPostViewController: UIViewController {
                         // exporter a range past the end and publish nothing.
                         // The editor's track asks the same question of the same
                         // asset, so the two cannot drift apart.
-                        var kept: [VideoExportSegment] = []
                         let declared: Double
                         if case .video(let seconds) = item.kind { declared = seconds } else { declared = 0 }
                         let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
                         let length = real.isFinite && real > 0 ? real : declared
                         let timeline = (edits[item.id] ?? .untouched).timeline
-                        if MediaTimelining.cuts(timeline, withinSource: length) {
-                            // ⚠️ **EVERY PIECE, AND THIS LINE USED TO TAKE ONLY
-                            // THE FIRST.** `PickedVideo` carried a single range
-                            // and the exporter a single `insertTimeRange`, so a
-                            // timeline of several pieces published its opening
-                            // one and dropped the rest — silently, because what
-                            // came out was a perfectly good video. The composer
-                            // and the exporter both take a list now, which is
-                            // what makes offering a split honest.
-                            kept = MediaTimelining
-                                .resolved(timeline, withinSource: length)
-                                .map {
-                                    VideoExportSegment(
-                                        start: $0.start, end: $0.end, speed: $0.speed
-                                    )
-                                }
-                        }
+                        // ⚠️ **EVERY PIECE, AND THIS LINE USED TO TAKE ONLY THE
+                        // FIRST.** `PickedVideo` carried a single range and the
+                        // exporter a single `insertTimeRange`, so a timeline of
+                        // several pieces published its opening one and dropped
+                        // the rest — silently, because what came out was a
+                        // perfectly good video. The mapping is shared with the
+                        // editor's preview, so what is published is what was
+                        // watched.
+                        let kept = MediaTimelining.exportSegments(timeline, withinSource: length)
                         media.append(
                             .video(PickedVideo(sourceURL: file, keptPieces: kept))
                         )

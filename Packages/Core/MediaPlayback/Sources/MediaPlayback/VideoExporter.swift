@@ -140,7 +140,14 @@ public struct VideoExporter: Sendable {
     /// Scaling a piece changes how long it occupies the timeline, so the place
     /// the next piece starts is wherever the composition now ends. Adding up
     /// source durations would lay every later piece over the one before it.
-    private static func composition(
+    ///
+    /// ⚠️ **SHARED WITH THE PREVIEW, AND EACH CALLER BUILDS ITS OWN.** The
+    /// editor's canvas plays exactly this arrangement (`VideoPlaybackController
+    /// .load`), so what the author watches is what the export produces — and a
+    /// piece boundary is an edit inside one item rather than a seek in the file.
+    /// A composition is never handed from one caller to the other; nothing that
+    /// only one of them needs (a render size, a video composition) belongs here.
+    static func composition(
         of asset: AVAsset, cut segments: [VideoExportSegment]
     ) async throws -> AVComposition {
         guard let sourceVideo = try? await asset.loadTracks(withMediaType: .video).first else {

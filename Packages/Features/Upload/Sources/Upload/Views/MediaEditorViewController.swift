@@ -155,6 +155,57 @@ final class MediaEditorViewController: UIViewController {
         }
     )
 
+    /// What the leading end of the toolbar offers while the timeline is open.
+    ///
+    /// ⚠️ **AN ACTION BAR, NOT A SECOND SELECTOR — AND A SELECTOR COULD NOT DO
+    /// IT.** `IconSelectorBar.select(_:notify:)` announces only when the index
+    /// CHANGES, which is the right contract for "which mode am I in" and the
+    /// wrong one for "cut here": the second tap on the scissors would be silent,
+    /// so a clip could be split exactly once and the failure would read as a dead
+    /// button. `IconActionBar` is the same capsule, the same 36pt segments and
+    /// the same tint, momentary.
+    enum TrackAction: Int, CaseIterable {
+        case split
+        case speed
+
+        var symbolName: String {
+            switch self {
+            case .split: "scissors"
+            case .speed: "speedometer"
+            }
+        }
+
+        var spoken: String {
+            switch self {
+            case .split: "Split at the playhead"
+            case .speed: "Playback speed"
+            }
+        }
+    }
+
+    private lazy var actionBar: IconActionBar = {
+        let bar = IconActionBar(
+            items: TrackAction.allCases.map {
+                IconActionBar.Item(symbolName: $0.symbolName, accessibilityLabel: $0.spoken)
+            }
+        )
+        // ⚠️ THE TOOLBAR ALREADY SUPPLIES A CAPSULE — see `configureCategoryStrip`
+        // for what a bubble inside a bubble looks like.
+        bar.suppressesBackdrop = true
+        bar.onTap = { [weak self] index in
+            guard let action = TrackAction(rawValue: index) else { return }
+            switch action {
+            case .split: self?.splitAtTheNeedle()
+            case .speed: self?.toggleTheRateChips()
+            }
+        }
+        // ⚠️ **IT KEEPS ITS WIDTH AND THE SELECTOR GIVES**, which is the rule the
+        // sound pill already stands on: two icons cannot scroll their overflow
+        // away, and the six-mode strip can.
+        bar.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return bar
+    }()
+
     private lazy var nextItem = UIBarButtonItem(
         title: "Next",
         primaryAction: UIAction { [weak self] _ in self?.goNext() }
@@ -192,7 +243,7 @@ final class MediaEditorViewController: UIViewController {
     /// would put two undo arrows a few points apart, each undoing a different
     /// thing, and nothing on screen to say which is which.
     private func resetTheCurrentMode() {
-        if band.content === timelineTrack {
+        if isTimelineShowing {
             resetTimeline()
         } else {
             resetCrop()
@@ -203,7 +254,10 @@ final class MediaEditorViewController: UIViewController {
         guard let id = currentItemID else { return }
         change(id) { $0.timeline = .whole }
         timelineTrack.configure(duration: trackSeconds, timeline: .whole)
+        timelineTrack.select(nil, notify: false)
         refreshResetItem()
+        refreshTrackActions()
+        refreshPreview()
     }
 
     /// The arrow is dead when there is nothing to undo — a control that reaches
@@ -221,7 +275,7 @@ final class MediaEditorViewController: UIViewController {
             return
         }
         let edited = edits(for: id)
-        if band.content === timelineTrack {
+        if isTimelineShowing {
             resetItem.isEnabled = MediaTimelining.cuts(
                 edited.timeline, withinSource: trackSeconds
             )
@@ -280,6 +334,15 @@ final class MediaEditorViewController: UIViewController {
     private func remember(_ image: UIImage?, for id: String) {
         guard let image else { return }
         lastSource = (id, image)
+    }
+
+    /// Lends the strip the page's own picture, if the strip is up and the
+    /// picture is of the clip it is showing.
+    private func offerThePosterToTheTrack(for id: String) {
+        guard isTimelineShowing, currentItemID == id,
+              let source = lastSource, source.id == id
+        else { return }
+        timelineTrack.showPoster(source.image)
     }
 
     /// How many renders are in flight, and the spinner that eventually says so.
@@ -767,6 +830,13 @@ final class MediaEditorViewController: UIViewController {
                 let image = await self.library.thumbnail(for: id, size: size)
                 self.remember(image, for: id)
                 cell?.show(image.map { self.edits(for: id).applied(to: $0) }, for: id)
+                // ⚠️ **AND THE TRACK IS WAITING FOR THIS SAME PICTURE.** Opening
+                // the timeline hands over whatever `lastSource` holds, which on a
+                // page that has just been swiped to is still the PREVIOUS clip's
+                // — so it hands over nothing rather than the wrong film, and the
+                // strip would stand on its skeleton until a decoded frame
+                // arrived. This is the moment the right one exists.
+                self.offerThePosterToTheTrack(for: id)
             }
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: canvas) { view, indexPath, id in
@@ -826,6 +896,9 @@ final class MediaEditorViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layPagesInTheirWindow(animated: false)
+        // The toolbar's width is only knowable once something has laid it out,
+        // and it changes with rotation and with the sheet's own size.
+        shareTheBarBetweenTheTwoStrips()
     }
 
     /// The size a full-page picture is asked for, in points.
@@ -923,17 +996,76 @@ final class MediaEditorViewController: UIViewController {
         // being short by scrolling its overflow, where the pill can only lose
         // letters.
         categoryBar.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // ⚠️ **BOTH STRIPS, ONE PROBE — AND THE PROBE COUNTS.** A finger sliding
+        // off one bar onto the other used to announce "nothing is being touched"
+        // while a finger was still down, which put the stack's back-swipe back
+        // underneath it. See `SelectorTouchProbe`.
+        touchProbe.attach(to: actionBar)
         // [song][categories], both leading, with the flexible space pushing them
         // left together. The fixed space keeps them two bubbles rather than one
         // platter — the same spacing the composer's own footer uses between its
         // pill and the buttons beside it.
-        toolbarItems = [
-            UIBarButtonItem(customView: soundPill),
-            .fixedSpace(Spacing.sm),
-            UIBarButtonItem(customView: categoryBar),
-            .flexibleSpace()
-        ]
+        refreshToolbarItems(animated: false)
     }
+
+    /// ⚠️ **THE LEADING CONTROL IS THE MODE'S, AND "Add a song" IS THE DEFAULT
+    /// RATHER THAN THE FIXTURE.** The pill has no destination — this repository
+    /// holds no audio seam of any kind — so while the timeline is open the slot
+    /// goes to the actions that DO reach something. Charter F18, asked for in
+    /// exactly those words: with the mode on, the bottom-left pill is replaced by
+    /// a second bar carrying split and speed.
+    private func refreshToolbarItems(animated: Bool) {
+        let leading: UIView = isTimelineShowing ? actionBar : soundPill
+        setToolbarItems(
+            [
+                UIBarButtonItem(customView: leading),
+                .fixedSpace(Spacing.sm),
+                UIBarButtonItem(customView: categoryBar),
+                .flexibleSpace()
+            ],
+            animated: animated
+        )
+        shareTheBarBetweenTheTwoStrips()
+    }
+
+    /// Holds the two strips to the share `EditorSelectorLayout` gives them.
+    ///
+    /// ⚠️ **MEASURED FROM THE TOOLBAR, WHICH THIS SCREEN DOES NOT OWN.** The rule
+    /// is pure precisely because `toolbarItems` are laid out by a `UIToolbar`
+    /// inside the navigation controller, after a pass that needs a window — so it
+    /// cannot be stated as constraints between the two views. It is read here,
+    /// applied as two widths, and re-applied on every layout.
+    ///
+    /// ⚠️ **AND ONLY BETWEEN THE TWO STRIPS.** With the sound pill in the leading
+    /// slot the arrangement that ships today already works — the pill states a
+    /// width floor and the strip is told it may give — so the constraints come
+    /// off rather than being applied to a control the rule was not written for.
+    private func shareTheBarBetweenTheTwoStrips() {
+        guard isTimelineShowing, let toolbar = navigationController?.toolbar,
+              toolbar.bounds.width > 0
+        else {
+            actionBarWidth.isActive = false
+            categoryBarWidth.isActive = false
+            return
+        }
+        let margins = toolbar.layoutMargins
+        let available = toolbar.bounds.width - margins.left - margins.right - Spacing.sm
+        let held = EditorSelectorLayout.widths(
+            leadingWants: actionBar.intrinsicContentSize.width,
+            trailingWants: categoryBar.intrinsicContentSize.width,
+            available: available
+        )
+        actionBarWidth.constant = held.leading
+        categoryBarWidth.constant = held.trailing
+        actionBarWidth.isActive = true
+        categoryBarWidth.isActive = true
+    }
+
+    private lazy var actionBarWidth: NSLayoutConstraint =
+        actionBar.widthAnchor.constraint(equalToConstant: IconActionBar.height)
+
+    private lazy var categoryBarWidth: NSLayoutConstraint =
+        categoryBar.widthAnchor.constraint(equalToConstant: IconSelectorBar.height)
 
     /// Moves the pill onto the category that was tapped — see the note in
     /// `configureCategoryStrip` for why a tap does not do this by itself.
@@ -987,7 +1119,7 @@ final class MediaEditorViewController: UIViewController {
                 setEditingAccessory(trimUnavailable)
                 return
             }
-            setEditingAccessory(timelineTrack)
+            setEditingAccessory(timelineTools)
             refreshTimelineTrack(id: id, duration: seconds)
         case "Crop":
             enterCrop()
@@ -1032,6 +1164,17 @@ final class MediaEditorViewController: UIViewController {
     /// duration and the stored timeline are known at once, so the selection is
     /// drawn straight away over a blank strip and the pictures fill in behind it.
     ///
+    /// ⚠️ **AND THE STRIP IS NOT BLANK WHILE THAT HAPPENS, WHICH IS WHAT THE
+    /// POSTER IS FOR.** Reported from the device as "the timeline does not appear
+    /// when it loads": two asynchronous steps — `PHImageManager` vending the
+    /// file, then the first batch of exact-time decodes — stand between the tap
+    /// and the first picture, and until both land the film is a row of
+    /// transparent boxes. This screen is already holding the answer:
+    /// `lastSource` is the canvas-sized picture of the clip the author is looking
+    /// at, which for a video IS its poster frame. Handed over here it fills every
+    /// visible tile in the same turn the mode opens, and each tile replaces it
+    /// with its own frame as that arrives.
+    ///
     /// ⚠️ **RE-ASKED AFTER THE AWAIT, TWICE.** The author may have swiped to
     /// another page or left the mode entirely while the frames were being
     /// decoded, and `band.content` is the only thing that says the track is still
@@ -1040,10 +1183,29 @@ final class MediaEditorViewController: UIViewController {
         trackSeconds = duration
         timelineTrack.configure(duration: duration, timeline: edits(for: id).timeline)
         timelineTrack.forgetFrames()
+        // ⚠️ **AND THE PROVIDER GOES WITH THEM — FOUND BY
+        // `settlingOnAnotherClipRetargetsTheTrack`, WHICH TURNED RED.** The
+        // replacement is installed below, after two awaits; until then the track
+        // is still holding a closure over the PREVIOUS clip's file, and anything
+        // that lays it out in between — a toolbar pass, a poster landing, any
+        // run-loop turn at all — asks that closure for this clip's tiles. The
+        // answer arrives under the CURRENT generation, so the token cannot reject
+        // it: the strip fills with the wrong film, `decoded` is full, and the
+        // right provider is then never asked for anything. Nil is the honest
+        // state for the gap, and `askForMissingTiles` already refuses to ask
+        // through one.
+        timelineTrack.framesProvider = nil
+        // ⚠️ **RESTATED EVERY TIME, `nil` INCLUDED.** A poster left over from the
+        // previous page is a picture of the wrong film, and `forgetFrames` keeps
+        // the poster on purpose — it is a fact about the clip, not about the
+        // scale a pinch left behind.
+        timelineTrack.showPoster(lastSource?.id == id ? lastSource?.image : nil)
+        timelineTrack.select(nil, notify: false)
+        refreshTrackActions()
         Task { [weak self] in
             guard let self else { return }
             guard let file = await library.videoFile(for: id) else { return }
-            guard currentItemID == id, band.content === timelineTrack else { return }
+            guard currentItemID == id, isTimelineShowing else { return }
             // ⚠️ **THE FILE'S OWN LENGTH, NOT THE ITEM'S DECLARED ONE.** The
             // declared duration is what the grid stamps on a tile and is only as
             // good as whatever vended it — under `-rich-media` a fixture whose
@@ -1052,9 +1214,8 @@ final class MediaEditorViewController: UIViewController {
             // half. Handles laid out against the declaration would then resolve a
             // cut that is not inside the clip, and the export would come back
             // empty. Asked of the asset, this cannot drift.
-            let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? duration
-            guard currentItemID == id, band.content === timelineTrack else { return }
-            let length = real.isFinite && real > 0 ? real : duration
+            let length = await realLength(of: file, id: id, declared: duration)
+            guard currentItemID == id, isTimelineShowing else { return }
             // Decided on the FILE's length, not the declaration — the whole
             // reason the real duration is loaded above.
             guard length > MediaTimelining.shortestSourceSeconds else {
@@ -1080,6 +1241,9 @@ final class MediaEditorViewController: UIViewController {
                 playingSurface.flatMap { preview.isPaused(in: $0) } ?? pausedByAuthor
             )
             view.layoutIfNeeded()
+            // The real length is only known here, and this is an answer about
+            // it: what a split would do from where the needle stands.
+            refreshTrackActions()
         }
     }
 
@@ -1172,9 +1336,7 @@ final class MediaEditorViewController: UIViewController {
 
     fileprivate func followPlayhead() {
         probeFollowBeat()
-        guard band.content === timelineTrack, let surface = playingSurface,
-              let head = preview.playhead(in: surface)
-        else { return }
+        guard isTimelineShowing, let surface = playingSurface else { return }
         // ⚠️ **THE GLYPH IS BOUND TO THE PLAYER, NOT SET AT THE MOMENTS WE
         // HAPPEN TO KNOW ABOUT.** It was updated on a tap, on a scrub and on a
         // settle — which leaves it stale for everything else that stops a clip:
@@ -1182,33 +1344,172 @@ final class MediaEditorViewController: UIViewController {
         // over a stopped clip is a control that lies about the thing it controls.
         // One bool a beat, and the setter below is a no-op when nothing moved.
         timelineTrack.showPaused(preview.isPaused(in: surface) ?? true)
-        let seconds = head.fraction * head.seconds
+        // ⚠️ **THE ITEM'S SECONDS ARE THE TRACK'S SECONDS — WHEN, AND ONLY WHEN,
+        // THE ITEM IS RUNNING THE ARRANGEMENT THE TRACK IS SHOWING.** Not while a
+        // new one is on its way, not while a handle has the file on screen, and
+        // not in the instant between a gesture ending and the screen hearing
+        // about it: in each of those the player's clock describes something the
+        // track is not drawing.
+        guard !previewPending, let subject = previewSubject, !subject.aiming,
+              subject.timeline == timelineTrack.arrangement,
+              let seconds = preview.playheadSeconds(in: surface)
+        else { return }
         // ⚠️ **THE TRACK KEEPS THE TIME UNTIL THE PLAYER CATCHES UP.** A seek is
-        // tolerant by a quarter second and is not instant, so the first tick
-        // after a finger lifts reads a player that has not moved yet — and
-        // copying that back over the author's position is the "it jumps back to
-        // where I started" they reported. The rule and its give-up are in
-        // `MediaTimelining.handover`, which is where they can be tested.
+        // not instant, so the first tick after a finger lifts reads a player
+        // that has not moved yet — and copying that back over the author's
+        // position is the "it jumps back to where I started" they reported. The
+        // rule and its give-up are in `MediaTimelining.handover`, which is where
+        // they can be tested.
         let (mayFollow, next) = MediaTimelining.handover(handover, playerSeconds: seconds)
         handover = next
         guard mayFollow else { return }
-        // ⚠️ **THE PREVIEW STAYS INSIDE THE CUT.** Playing on past the end handle
-        // shows the author footage they have just decided to throw away, as
-        // though it were part of the post. Checked after the handover, so a
-        // scrub's own seek is never mistaken for playback running out.
-        if !pausedByAuthor, let id = currentItemID,
-           let back = MediaTimelining.loopback(
-               playheadSeconds: seconds,
-               within: MediaTimelining.resolved(
-                   edits(for: id).timeline, withinSource: trackSeconds
-               )
-           ), trackSeconds > 0 {
-            preview.seek(toFraction: back / trackSeconds, in: surface, toleranceSeconds: 0.02)
-            timelineTrack.follow(sourceSeconds: back)
+        // ⚠️ **NO BOUNDARY IS HANDLED HERE ANY MORE.** This routine used to SEEK
+        // the file to the next piece's start whenever the playhead reached the
+        // end of the one playing — after a re-order a jump across the file on
+        // every boundary, reported as a pause between the pieces. The item plays
+        // the arrangement itself; the loop back to the start is the player's.
+        timelineTrack.follow(playedSeconds: seconds)
+        theNeedleMoved(to: seconds)
+    }
+
+    /// What the preview item is running.
+    ///
+    /// ⚠️ **THE SCREEN HAS TO KNOW, BECAUSE THE PLAYER'S CLOCK MEANS WHATEVER THE
+    /// ITEM IS.** Played seconds of THIS arrangement, or — while a handle is held
+    /// — seconds of the file as shot. Everything that reads the player or seeks
+    /// it asks this first.
+    private struct PreviewSubject {
+        let id: String
+        let file: URL
+        /// The file's real length, which the arrangement was resolved against.
+        let fileSeconds: Double
+        /// The arrangement the item plays. Replaced without a new item when the
+        /// film it plays does not change — a split.
+        var timeline: MediaTimeline
+        /// Whether the item is the FILE as shot, shown while a handle is held.
+        var aiming: Bool
+    }
+
+    private var previewSubject: PreviewSubject?
+    /// Bumped for every load asked for: only the newest may land.
+    private var previewLoads = 0
+    /// Whether a load is on its way, during which the player's clock describes
+    /// an item that is about to go.
+    private var previewPending = false
+    /// Whether a finger is on the track — what a load that lands decides the
+    /// pause from.
+    private var fingerOnTrack = false
+    /// The FILE second a held handle last aimed at, so a creeping edge gets a
+    /// tight seek and a flung one a loose one.
+    private var lastAimedSeconds: Double?
+    /// The file's real length, per clip, once asked.
+    private var fileLengths: [String: Double] = [:]
+
+    /// ⚠️ **THE FILE'S OWN LENGTH, NOT THE ITEM'S DECLARED ONE.** The declared
+    /// duration is what the grid stamps on a tile and is only as good as
+    /// whatever vended it — under `-rich-media` a fixture whose download failed
+    /// falls back to a synthetic clip, so an item can truthfully say 52 seconds
+    /// while the file on disk runs two and a half. Asked of the asset, it cannot
+    /// drift; asked once per clip, it costs one header read.
+    private func realLength(of file: URL, id: String, declared: Double) async -> Double {
+        if let known = fileLengths[id] { return known }
+        let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
+        let length = real.isFinite && real > 0 ? real : declared
+        fileLengths[id] = length
+        return length
+    }
+
+    /// Loads the settled page's edit, as it stands now, into the preview.
+    ///
+    /// ⚠️ **ONE WAY IN, FOR THE FIRST LOAD AND FOR EVERY EDIT.** A load that is
+    /// overtaken — by a newer edit, a swipe, a handle taken hold of — abandons
+    /// itself when it lands; the newest always wins, and one that fails clears
+    /// the pending state so the track does not stop following for good.
+    private func loadPreview(startingAt start: @escaping @MainActor () -> Double) {
+        guard let id = playingID, let surface = playingSurface else { return }
+        previewLoads += 1
+        let load = previewLoads
+        previewPending = true
+        let declared: Double
+        if case .video(let seconds) = itemsByID[id]?.kind { declared = seconds } else { declared = 0 }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let file = await library.videoFile(for: id) else {
+                if previewLoads == load { previewPending = false }
+                return
+            }
+            let fileSeconds = await realLength(of: file, id: id, declared: declared)
+            guard playingID == id, previewLoads == load else { return }
+            let timeline = edits(for: id).timeline
+            var landedAt: Double?
+            await preview.load(
+                VideoExportPlan(
+                    sourceURL: file,
+                    segments: MediaTimelining.exportSegments(timeline, withinSource: fileSeconds)
+                ),
+                in: surface
+            ) { [weak self] in
+                guard let self, playingID == id, previewLoads == load else { return nil }
+                previewSubject = PreviewSubject(
+                    id: id, file: file, fileSeconds: fileSeconds, timeline: timeline, aiming: false
+                )
+                landedAt = start()
+                return landedAt
+            }
+            guard previewLoads == load else { return }
+            previewPending = false
+            guard let landedAt, playingID == id else { return }
+            // ⚠️ **THE LANDING DECIDES WHETHER THE CLIP RUNS.** A release that was
+            // owed a new item left the player stopped rather than let it run on
+            // the old one for a few frames; the pause is the author's, or the
+            // finger's if one has come down since.
+            let paused = fingerOnTrack || pausedByAuthor
+            preview.setPaused(paused, in: surface)
+            timelineTrack.showPaused(paused)
+            if !fingerOnTrack { handover = MediaTimelining.Handover(target: landedAt) }
+        }
+    }
+
+    /// Brings the preview to the edit as it now stands — with a new item only
+    /// when the film it plays would differ.
+    private func refreshPreview() {
+        guard let id = playingID, id == currentItemID else { return }
+        let wanted = edits(for: id).timeline
+        if let subject = previewSubject, subject.id == id, !subject.aiming, !previewPending,
+           MediaTimelining.playsTheSame(subject.timeline, wanted, withinSource: subject.fileSeconds) {
+            // Same film, same clock: only the screen's record of it changes.
+            previewSubject?.timeline = wanted
             return
         }
-        timelineTrack.follow(sourceSeconds: seconds)
+        loadPreview { [weak self] in
+            guard let self, isTimelineShowing else { return 0 }
+            return timelineTrack.playedSecondsUnderNeedle
+        }
     }
+
+    /// Whether the release that is happening now is owed a new item before the
+    /// clip may run again.
+    private var aLoadIsOwed: Bool {
+        guard let subject = previewSubject else { return previewPending }
+        return subject.aiming || previewPending
+            || !MediaTimelining.playsTheSame(
+                subject.timeline, timelineTrack.arrangement, withinSource: subject.fileSeconds
+            )
+    }
+
+    /// ⚠️ **THE ANSWERS THAT DEPEND ON WHERE THE NEEDLE IS, REFRESHED WITHOUT
+    /// ASKING THEM SIXTY TIMES A SECOND.** Both of them — whether a split would
+    /// do anything, and what rate the piece under the needle carries — resolve
+    /// the timeline, which allocates; charter T8 asks the follow path not to. A
+    /// tenth of a second of film is six frames at 60fps and 6pt at the resting
+    /// scale, which is finer than either answer can change.
+    private func theNeedleMoved(to seconds: Double) {
+        guard abs(seconds - lastAnsweredNeedle) > 0.1 else { return }
+        lastAnsweredNeedle = seconds
+        refreshTrackActions()
+    }
+
+    private var lastAnsweredNeedle: Double = .infinity
 
     /// What the track is waiting for before it lets the player move it again.
     private var handover: MediaTimelining.Handover = .settled
@@ -1226,20 +1527,64 @@ final class MediaEditorViewController: UIViewController {
         return page.videoSurface
     }
 
-    /// The film moved under the needle: put that moment on the canvas.
+    /// The film moved under the needle, or a handle moved: put that moment on
+    /// the canvas.
     ///
     /// ⚠️ **A SEEK, NOT A STORE.** Scrubbing changes what is on screen and
     /// nothing else; `onChange` is the channel that writes to `edits`, and it
     /// fires on release only.
-    private func scrubbed(toSourceSeconds seconds: Double) {
+    private func scrubbed(to moment: MediaTimelining.Moment) {
+        guard let surface = playingSurface, let subject = previewSubject,
+              subject.id == currentItemID
+        else { return }
+        if timelineTrack.isHoldingAnEdge {
+            return aim(atSourceSeconds: moment.sourceSeconds, subject: subject, surface: surface)
+        }
+        // ⚠️ **ONLY WHILE THE ITEM IS RUNNING WHAT THE TRACK SHOWS.** A carry or a
+        // handle release reports the needle in the NEW arrangement before the
+        // screen has been told about it; the load that follows lands there.
+        guard !subject.aiming, !previewPending, subject.timeline == timelineTrack.arrangement
+        else { return }
+        let played = timelineTrack.playedSecondsUnderNeedle
         // ⚠️ **HOW FAR THIS SAMPLE MOVED IS HOW FAST THE FINGER IS GOING**, and
-        // that is what the seek's tolerance is worth — charter T7. See
-        // `MediaTimelining.seekTolerance`.
-        let moved = lastScrubbedSeconds.map { seconds - $0 } ?? 0
-        lastScrubbedSeconds = seconds
-        guard let surface = playingSurface, trackSeconds > 0 else { return }
+        // that is what the seek's tolerance is worth — charter T7, measured in
+        // FILM, which on a fast piece is more than the played distance.
+        let moved = lastScrubbedSeconds.map { played - $0 } ?? 0
+        lastScrubbedSeconds = played
         preview.seek(
-            toFraction: seconds / trackSeconds, in: surface,
+            toSeconds: played, in: surface,
+            toleranceSeconds: MediaTimelining.seekTolerance(
+                movedPlayedSeconds: moved,
+                atSpeed: MediaTimelining.rate(
+                    atPiece: moment.piece, in: subject.timeline, withinSource: subject.fileSeconds
+                )
+            )
+        )
+    }
+
+    /// A held handle wants the canvas to show its edge.
+    ///
+    /// ⚠️ **THE FILE AS SHOT, SHOWN AT ONCE, BECAUSE THE EDGE MAY BE ON FILM THE
+    /// ARRANGEMENT DOES NOT CONTAIN.** Opening a piece reveals film that was cut
+    /// away, and no seek inside the loaded arrangement can reach it. The swap is
+    /// synchronous — an asynchronous one could land after the release that
+    /// replaces it and leave raw film on the canvas for good — and it happens
+    /// once per gesture; the release loads the new arrangement.
+    private func aim(atSourceSeconds seconds: Double, subject: PreviewSubject, surface: VideoRenderView) {
+        guard subject.aiming else {
+            preview.showAsShot(subject.file, in: surface, atSourceSeconds: seconds)
+            previewSubject?.aiming = true
+            // An arrangement still on its way would land in the middle of the
+            // drag and put the wrong film back.
+            previewLoads += 1
+            previewPending = false
+            lastAimedSeconds = seconds
+            return
+        }
+        let moved = lastAimedSeconds.map { seconds - $0 } ?? 0
+        lastAimedSeconds = seconds
+        preview.seek(
+            toSeconds: seconds, in: surface,
             toleranceSeconds: MediaTimelining.seekTolerance(movedSeconds: moved)
         )
     }
@@ -1250,21 +1595,31 @@ final class MediaEditorViewController: UIViewController {
     /// somewhere neither the author nor the player chose. The pause is what makes
     /// scrubbing feel like moving the film rather than arguing with it.
     private func scrubbing(_ scrubbing: Bool) {
+        fingerOnTrack = scrubbing
         if scrubbing {
             // A gesture that moves nothing must not arm a handover: the track
             // would then wait for an arrival at a position nobody asked for.
             lastScrubbedSeconds = nil
+            lastAimedSeconds = nil
             handover = .settled
-        } else {
-            handover = MediaTimelining.Handover(target: lastScrubbedSeconds)
         }
-        follower.isPaused = scrubbing || band.content !== timelineTrack
+        follower.isPaused = scrubbing || !isTimelineShowing
         guard let surface = playingSurface else { return }
-        // Stopped while the finger is down; afterwards it goes back to whatever
-        // the AUTHOR last asked for, which is not necessarily "playing".
-        let paused = scrubbing || pausedByAuthor
-        preview.setPaused(paused, in: surface)
-        timelineTrack.showPaused(paused)
+        guard !scrubbing else {
+            preview.setPaused(true, in: surface)
+            timelineTrack.showPaused(true)
+            return
+        }
+        // ⚠️ **A RELEASE THAT IS OWED A NEW ITEM LEAVES THE CLIP STOPPED.** Run
+        // now, it would play the OLD item — the file a handle had on screen, or
+        // the order before a carry — for the moment the new one takes to build;
+        // the landing resumes it instead.
+        guard !aLoadIsOwed else { return }
+        handover = MediaTimelining.Handover(target: lastScrubbedSeconds)
+        // Afterwards it goes back to whatever the AUTHOR last asked for, which
+        // is not necessarily "playing".
+        preview.setPaused(pausedByAuthor, in: surface)
+        timelineTrack.showPaused(pausedByAuthor)
     }
 
     /// ⚠️ **SILENT WHEN THE BAND IS SHUT, AND THAT IS THE POINT.** Both settle
@@ -1298,7 +1653,7 @@ final class MediaEditorViewController: UIViewController {
     /// video must lose the strip, and a video settled onto after a photograph
     /// must lose the notice.
     private func refreshTimelineTrackIfShowing() {
-        guard band.content === timelineTrack
+        guard isTimelineShowing
                 || band.content === trimUnavailable
                 || band.content === trimTooShort
         else { return }
@@ -1490,16 +1845,32 @@ final class MediaEditorViewController: UIViewController {
         "A video can't be cropped yet — it'll be posted as it is."
     )
 
-    /// The clip as a strip of film pushed past a fixed needle.
-    private lazy var timelineTrack: MediaTimelineTrackView = {
-        let track = MediaTimelineTrackView()
+    /// The clip as a strip of film pushed past a fixed needle, with the rate
+    /// chips above it when they have been asked for.
+    ///
+    /// ⚠️ **THE BAND'S TENANT IS THE HOST, NOT THE TRACK — AND EVERY IDENTITY
+    /// CHECK GOES THROUGH `isTimelineShowing` FOR THAT REASON.** Eight places ask
+    /// "is the band holding the timeline", and eight `band.content ===
+    /// timelineTrack` comparisons would ALL have gone quietly false the day a
+    /// second control joined the track inside it: the follower would stop, the
+    /// settle hooks would stop re-targeting, and the reset arrow would start
+    /// answering for crop. One name, one edit.
+    private lazy var timelineTools: MediaTimelineToolsView = {
+        let tools = MediaTimelineToolsView()
+        let track = tools.track
         track.onChange = { [weak self] timeline in
             guard let self, let id = currentItemID else { return }
             change(id) { $0.timeline = timeline }
             refreshResetItem()
+            refreshTrackActions()
+            // ⚠️ **THE PREVIEW PLAYS THE EDIT.** A handle release, a carry, a
+            // spoken adjustment: the arrangement changed, or a handle had the
+            // file on screen, and either way the item has to catch up.
+            refreshPreview()
         }
-        track.onScrub = { [weak self] seconds in
-            self?.scrubbed(toSourceSeconds: seconds)
+        track.onScrub = { [weak self] moment in
+            self?.scrubbed(to: moment)
+            self?.refreshTrackActions()
         }
         track.onScrubbing = { [weak self] scrubbing in
             self?.scrubbing(scrubbing)
@@ -1507,8 +1878,140 @@ final class MediaEditorViewController: UIViewController {
         track.onPlayPause = { [weak self] in
             self?.togglePreviewPlayback()
         }
-        return track
+        track.onSelect = { [weak self] _ in
+            // What the rate chips speak for has just changed, and so has what a
+            // tap on them will set.
+            self?.refreshTrackActions()
+        }
+        tools.speeds.onPick = { [weak self] rate in
+            self?.chooseRate(rate)
+        }
+        return tools
     }()
+
+    private var timelineTrack: MediaTimelineTrackView { timelineTools.track }
+
+    /// Whether the band is holding the timeline.
+    private var isTimelineShowing: Bool { band.content === timelineTools }
+
+    // MARK: - Cutting the clip up, and setting a piece's rate
+
+    /// Cuts the piece under the needle in two.
+    ///
+    /// ⚠️ **AT THE NEEDLE, WHICH IS WHERE THE AUTHOR IS LOOKING.** Every
+    /// reference cuts at the playhead and this track's playhead is nailed to the
+    /// centre of the screen, so "where" needs no aiming beyond the scroll that
+    /// has already happened.
+    ///
+    /// ⚠️ **AND IT CANNOT SILENTLY DO NOTHING.** `MediaTimelining.split` refuses
+    /// a cut that would leave either half under the floor and returns the
+    /// timeline it was given; the button is disabled for exactly those moments,
+    /// so this guard is the belt to `refreshTrackActions`' braces rather than the
+    /// only thing standing between a tap and a no-op.
+    private func splitAtTheNeedle() {
+        guard let id = currentItemID, trackSeconds > 0,
+              let moment = timelineTrack.momentUnderNeedle
+        else { return }
+        let before = edits(for: id).timeline
+        let after = MediaTimelining.split(
+            before, atPiece: moment.piece, atSourceSeconds: moment.sourceSeconds,
+            withinSource: trackSeconds
+        )
+        guard after != before else { return }
+        change(id) { $0.timeline = after }
+        timelineTrack.configure(duration: trackSeconds, timeline: after)
+        // A cut leaves the same film on the same clock: the preview's record of
+        // what it plays changes, and nothing it shows does.
+        refreshPreview()
+        // ⚠️ **THE CUT HANDS BACK THE LEFT HALF, HELD — AND LEAVING NOTHING HELD
+        // WAS THE DEFECT.** The handles exist only around the piece that is held
+        // (charter F7b), so a track with nothing held has no handles anywhere:
+        // the author cuts, reaches straight for the new seam, and the finger
+        // finds no control at all — the film just scrolls under it. Reported as
+        // the sections not being editable and as the whole track moving instead
+        // of one clip. A split is not an arrival; it is an edit the author has
+        // just made to ONE piece, and the half the needle has just left is the
+        // one they were watching. `split` keeps that half at the index it had.
+        timelineTrack.select(moment.piece, notify: false)
+        refreshResetItem()
+        refreshTrackActions()
+    }
+
+    private func toggleTheRateChips() {
+        let opening = !timelineTools.isOfferingSpeeds
+        timelineTools.isOfferingSpeeds = opening
+        actionBar.setActive(opening ? TrackAction.speed.rawValue : nil)
+        if opening { timelineTools.speeds.show(rate: rateOfTheTargetPiece) }
+        // ⚠️ THE BAND JUST CHANGED HEIGHT, AND THE BAND IS THE FOOT OF A FITTED
+        // PICTURE'S WINDOW — the same two lines `setEditingAccessory` ends with,
+        // and for the same reason.
+        view.layoutIfNeeded()
+        layPagesInTheirWindow(animated: true)
+    }
+
+    /// The rate of the piece the actions are pointed at.
+    ///
+    /// ⚠️ **THE PIECE THE AUTHOR IS HOLDING, AND THE NEEDLE'S ONLY IF THEY ARE
+    /// HOLDING NOTHING.** Tapping a segment and then choosing a rate has to
+    /// change THAT segment — the needle may be three pieces away, and applying
+    /// the rate there would be a control acting somewhere the author is not
+    /// looking. With nothing held, the needle is the only thing that says which
+    /// piece is meant, and it always says something.
+    private var targetPiece: Int? {
+        guard currentItemID != nil, trackSeconds > 0 else { return nil }
+        if let held = timelineTrack.selectedPiece { return held }
+        return timelineTrack.momentUnderNeedle?.piece
+    }
+
+    private var rateOfTheTargetPiece: Double {
+        guard let id = currentItemID, trackSeconds > 0, let index = targetPiece else { return 1 }
+        return MediaTimelining.rate(
+            atPiece: index, in: edits(for: id).timeline, withinSource: trackSeconds
+        )
+    }
+
+    /// ⚠️ **THE PIECE UNDER THE NEEDLE, NOT THE WHOLE CLIP.** A rate that applied
+    /// to everything would make the split pointless: cutting a clip in two exists
+    /// so that one half can run at a different speed from the other.
+    private func chooseRate(_ rate: Double) {
+        guard let id = currentItemID, trackSeconds > 0, let index = targetPiece else { return }
+        // ⚠️ **THE FRAME THE AUTHOR IS LOOKING AT STAYS UNDER THE NEEDLE.** The
+        // track is drawn in played seconds, so re-rating a piece changes the
+        // width of everything at or after it — and the needle, nailed to the
+        // centre, would end up on a different moment of film than the one on the
+        // canvas. Read before, restored after.
+        let watching = timelineTrack.momentUnderNeedle
+        let after = MediaTimelining.setRate(
+            rate, atPiece: index, in: edits(for: id).timeline, withinSource: trackSeconds
+        )
+        change(id) { $0.timeline = after }
+        timelineTrack.configure(duration: trackSeconds, timeline: after)
+        if let watching { timelineTrack.bringUnderTheNeedle(watching) }
+        timelineTools.speeds.show(rate: rate)
+        refreshResetItem()
+        refreshTrackActions()
+        // ⚠️ **THE RATE IS BUILT INTO THE ITEM, SO A NEW RATE IS A NEW ITEM** —
+        // landing on the needle, which `bringUnderTheNeedle` has just put back on
+        // the frame the author was looking at.
+        refreshPreview()
+    }
+
+    /// What the actions can do from where the needle now stands.
+    private func refreshTrackActions() {
+        guard isTimelineShowing, let id = currentItemID, trackSeconds > 0 else { return }
+        actionBar.setEnabled(
+            timelineTrack.momentUnderNeedle.map {
+                MediaTimelining.canSplit(
+                    edits(for: id).timeline, atPiece: $0.piece,
+                    atSourceSeconds: $0.sourceSeconds, withinSource: trackSeconds
+                )
+            } ?? false,
+            at: TrackAction.split.rawValue
+        )
+        if timelineTools.isOfferingSpeeds {
+            timelineTools.speeds.show(rate: rateOfTheTargetPiece)
+        }
+    }
 
     /// ⚠️ **WHETHER THE AUTHOR STOPPED THE CLIP, AS OPPOSED TO THE TRACK.**
     /// Scrubbing stops playback and lets it go again, and without this the
@@ -2094,27 +2597,22 @@ private extension MediaEditorViewController {
             if playingID == id { playingID = nil }
         }
 
-        let surface = page.videoSurface
-        Task { [weak self] in
-            guard let self else { return }
-            guard let file = await library.videoFile(for: id) else {
-                // Nothing to play — the poster stays, which is what this page
-                // showed before playback existed.
-                if playingID == id { stopPreview() }
-                return
-            }
-            // ⚠️ RE-ASKED AFTER THE AWAIT. Reading a file can take a moment —
-            // an iCloud clip can take much longer — and the author may have
-            // swiped on, or opened crop, while it did.
-            guard playingID == id else { return }
-            await preview.play(file, in: surface)
-        }
+        // ⚠️ **THE EDIT, NOT THE FILE — IN EVERY MODE.** The canvas plays the
+        // arrangement the author has made, from its start, whichever band is
+        // open; the funnel re-asks everything after its awaits, since a read can
+        // take a moment and the author may have swiped on while it did.
+        previewSubject = nil
+        loadPreview { 0 }
     }
 
     /// Unbinds whatever is playing and puts the page back to its poster.
     func stopPreview() {
         guard let id = playingID else { return }
         playingID = nil
+        // Whatever is on its way belongs to a page that is no longer playing.
+        previewSubject = nil
+        previewLoads += 1
+        previewPending = false
         guard let index = items.firstIndex(where: { $0.id == id }),
               let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
                 as? MediaEditorPageCell
@@ -2207,12 +2705,25 @@ extension MediaEditorViewController {
             backdropFromBand.isActive = false
             backdropFromChrome.isActive = true
         }
+        // ⚠️ **THE CHIPS BELONG TO THE TIMELINE AND LEAVE WITH IT.** They are
+        // laid out inside the tenant, so a band holding something else cannot
+        // show them — but the bar's lit speedometer and the tenant's own flag
+        // would come back on next time still saying "open", over a row nobody
+        // asked for.
+        if accessory !== timelineTools {
+            timelineTools.isOfferingSpeeds = false
+            actionBar.setActive(nil)
+        }
+        // The leading half of the toolbar is the mode's — see
+        // `refreshToolbarItems`.
+        refreshToolbarItems(animated: true)
+        refreshTrackActions()
         // ⚠️ **THE ONE FUNNEL EVERY BAND CHANGE GOES THROUGH, WHICH IS WHY THE
         // FOLLOWER IS STARTED AND STOPPED HERE.** Six routes install a tenant —
         // three settle hooks, the category bar, the too-short notice and crop's
         // own exit — and a link started next to only some of them would keep
         // polling a player nobody is watching for as long as the editor is open.
-        follower.isPaused = accessory !== timelineTrack
+        follower.isPaused = accessory !== timelineTools
         // The undo arrow's meaning changes with the band, so its enabled state
         // has to be re-decided here too.
         refreshResetItem()
@@ -2282,6 +2793,14 @@ extension MediaEditorViewController {
     var debugCanvasIgnoresInsets: Bool { canvas.contentInsetAdjustmentBehavior == .never }
     /// Internal for tests: the strip itself, to read what it is wearing.
     var debugCategoryBar: IconSelectorBar { categoryBar }
+    /// Internal for tests: the momentary bar the timeline mode puts opposite it.
+    var debugActionBar: IconActionBar { actionBar }
+    /// Internal for tests: the width each strip is being held to, or nil where
+    /// the rule is not being applied.
+    var debugStripWidths: (leading: CGFloat, trailing: CGFloat)? {
+        guard actionBarWidth.isActive, categoryBarWidth.isActive else { return nil }
+        return (actionBarWidth.constant, categoryBarWidth.constant)
+    }
 
     /// Internal for tests: the end of a scrub, through the very routine the
     /// track's own callback calls.
@@ -2302,8 +2821,22 @@ extension MediaEditorViewController {
 
     /// Internal for tests: what the track is waiting for, if anything.
     var debugHandover: MediaTimelining.Handover { handover }
+    /// Internal for tests: whether a load is on its way to the preview.
+    var debugPreviewIsPending: Bool { previewPending }
+    /// Internal for tests: whether the preview is showing the file as shot for a
+    /// held handle.
+    var debugPreviewIsAiming: Bool { previewSubject?.aiming ?? false }
+    /// Internal for tests: the arrangement the screen believes the preview plays.
+    var debugPreviewTimeline: MediaTimeline? { previewSubject?.timeline }
     /// Internal for tests: the path "Next" takes, without a bar to tap.
     func debugTapNext() { goNext() }
+    /// Internal for tests: the scissors, through the routine the bar calls.
+    func debugSplitAtTheNeedle() { splitAtTheNeedle() }
+    /// Internal for tests: the undo arrow, through the routine it actually calls.
+    func debugTapReset() { resetTheCurrentMode() }
+    /// Internal for tests: whether the screen is holding the current page's
+    /// picture — which is the poster the track borrows.
+    var debugHasSourcePicture: Bool { lastSource != nil }
 
     /// Internal for tests: whether the screen is in crop mode.
     var debugIsCropping: Bool { isCropping }

@@ -57,7 +57,27 @@ struct MediaEditorTimelineTests {
     /// where it puts the answer, and what it tells the player — not whether
     /// AVFoundation can read a file.
     private final class StubPreview: MediaVideoPreviewing {
-        func play(_ file: URL, in surface: VideoRenderView) async {}
+        /// Every arrangement the screen asked to be played, and where each was
+        /// asked to begin.
+        private(set) var plans: [VideoExportPlan] = []
+        private(set) var starts: [Double] = []
+        /// ⚠️ **`at()` IS ASKED, AS THE REAL CONTROLLER ASKS IT**, and a load it
+        /// abandons records nothing.
+        func load(
+            _ plan: VideoExportPlan, in surface: VideoRenderView,
+            at start: @escaping @MainActor () -> Double?
+        ) async {
+            guard let at = start() else { return }
+            plans.append(plan)
+            starts.append(at)
+        }
+
+        /// Every FILE second the screen showed the file as shot at — a held
+        /// handle aiming.
+        private(set) var shownAsShot: [Double] = []
+        func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {
+            shownAsShot.append(seconds)
+        }
         func stop(_ surface: VideoRenderView) {}
         /// What the stub player says about being stopped. Tests that care set
         /// it; nil is "nothing is bound", which is neither playing nor paused.
@@ -80,10 +100,11 @@ struct MediaEditorTimelineTests {
         /// The tolerance each seek was asked with — charter T7.
         private(set) var seekTolerances: [Double] = []
 
+        /// Every seek, in seconds of the ITEM the stub is pretending to play.
         func seek(
-            toFraction fraction: Double, in surface: VideoRenderView, toleranceSeconds: Double
+            toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double
         ) {
-            seeks.append(fraction)
+            seeks.append(seconds)
             seekTolerances.append(toleranceSeconds)
         }
 
@@ -91,9 +112,9 @@ struct MediaEditorTimelineTests {
         /// nothing is bound in a test, and that is exactly what the follower
         /// finds on the first frames after a real page settles. Tests that care
         /// about the handover set it.
-        var head: (fraction: Double, seconds: Double)?
+        var headSeconds: Double?
 
-        func playhead(in surface: VideoRenderView) -> (fraction: Double, seconds: Double)? { head }
+        func playheadSeconds(in surface: VideoRenderView) -> Double? { headSeconds }
 
         func frames(
             of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
@@ -155,8 +176,54 @@ struct MediaEditorTimelineTests {
         }
     }
 
+    /// Waits for the track to ask for film AND for the preview's first load to
+    /// land.
+    ///
+    /// ⚠️ **THE FOLLOWER AND THE SCRUB BOTH REFUSE A PLAYER WHOSE ITEM THE SCREEN
+    /// HAS NOT HEARD LAND**, so a test that drives either before the load lands
+    /// passes through a `guard` into silence. `settle` returns quietly when it
+    /// runs out of time; the `#require`s are what make that a failure.
+    private func ready(_ screen: Screen) async throws {
+        try await settle(until: {
+            !screen.preview.asked.isEmpty && !screen.preview.plans.isEmpty
+                && !screen.editor.debugPreviewIsPending
+        })
+        try #require(!screen.preview.asked.isEmpty, "the track never asked for film")
+        try #require(!screen.preview.plans.isEmpty, "the preview was never loaded")
+        try #require(!screen.editor.debugPreviewIsPending, "the preview's load never landed")
+    }
+
+    /// Waits for a load newer than the `count` already seen to land.
+    private func landed(_ screen: Screen, beyond count: Int) async throws {
+        try await settle(until: {
+            screen.preview.plans.count > count && !screen.editor.debugPreviewIsPending
+        })
+        try #require(screen.preview.plans.count > count, "no new arrangement reached the preview")
+        try #require(!screen.editor.debugPreviewIsPending, "the new arrangement never landed")
+    }
+
+    /// ⚠️ **THE BAND'S TENANT IS THE HOST, AND THE TRACK IS INSIDE IT.** The
+    /// rate chips stand above the film when the speedometer is lit, so the
+    /// timeline arrives in the band as one view holding two.
+    private func tools(in screen: Screen) throws -> MediaTimelineToolsView {
+        try #require(screen.editor.debugBand.content as? MediaTimelineToolsView)
+    }
+
     private func track(in screen: Screen) throws -> MediaTimelineTrackView {
-        try #require(screen.editor.debugBand.content as? MediaTimelineTrackView)
+        try tools(in: screen).track
+    }
+
+    /// Takes hold of a piece, which is what a finger does before it can drag an
+    /// edge.
+    ///
+    /// ⚠️ **NOTHING IS SELECTED AT REST ANY MORE, AND EVERY DRAG TEST NOW SAYS
+    /// SO.** The track used to draw its frame around the whole timeline whether
+    /// or not the author had touched it, so a test could grab a handle out of
+    /// nowhere. Selecting first is not test scaffolding: it is the gesture.
+    private func hold(_ track: MediaTimelineTrackView, piece: Int = 0) {
+        track.select(piece)
+        track.setNeedsLayout()
+        track.layoutIfNeeded()
     }
 
     // MARK: - Who gets the mode
@@ -166,7 +233,7 @@ struct MediaEditorTimelineTests {
 
         choose(Mode.trim, on: screen)
 
-        #expect(screen.editor.debugBand.content is MediaTimelineTrackView,
+        #expect(screen.editor.debugBand.content is MediaTimelineToolsView,
                 "got \(String(describing: screen.editor.debugBand.content))")
     }
 
@@ -195,7 +262,7 @@ struct MediaEditorTimelineTests {
         let screen = open(Self.items(2, videosAt: [0]))
 
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
 
         #expect(screen.preview.asked.first?.file == StubLibrary.file(for: "video-0"))
         #expect((screen.preview.asked.first?.count ?? 0) > 1,
@@ -229,10 +296,11 @@ struct MediaEditorTimelineTests {
         let asked = Set(screen.preview.askedSeconds)
         #expect(asked.count <= 48, "decoded \(asked.count) frames for one band")
         // And it really is a long clip, so the bound above is not trivially met.
-        let tiles = MediaTimelining.tileCount(
-            acrossContentWidth: MediaTimelining.contentWidth(ofSourceSeconds: 240)
-        )
-        #expect(tiles > 200, "guard: the clip is \(tiles) tiles long")
+        let squares = MediaTimelining.squares(
+            in: .whole, withinSource: 240,
+            visible: 0...MediaTimelining.contentWidth(of: .whole, withinSource: 240)
+        ).count
+        #expect(squares > 200, "guard: the clip is \(squares) squares long")
         #expect(asked.allSatisfy { $0 < 60 },
                 "it asked for film far past the opening screenful: \(asked.sorted().suffix(3))")
     }
@@ -250,7 +318,7 @@ struct MediaEditorTimelineTests {
 
         // Scroll somewhere nothing has been decoded for, and look immediately.
         bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
-            forSourceSeconds: 9, trackWidth: bar.bounds.width
+                forPlayedSeconds: 9, trackWidth: bar.bounds.width
         ))
 
         #expect(bar.debugFrameCount > 0, "guard: there are tiles to look at")
@@ -275,7 +343,7 @@ struct MediaEditorTimelineTests {
     @Test func settlingOnAnotherClipRetargetsTheTrack() async throws {
         let screen = open(Self.items(2, videosAt: [0, 1]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         #expect(screen.preview.asked.count == 1, "guard: one clip has been asked for")
 
         screen.editor.debugScrollToPage(1)
@@ -290,6 +358,36 @@ struct MediaEditorTimelineTests {
         // is never asked for at all.
         #expect(screen.preview.asked.contains { $0.file == StubLibrary.file(for: "video-1") },
                 "the strip still holds the previous clip: \(screen.preview.asked)")
+    }
+
+    /// ⚠️ **AND THE OUTGOING CLIP'S PROVIDER GOES AT ONCE, WHICH IS THE HALF
+    /// THAT WENT WRONG.** The provider is a closure over ONE file, and its
+    /// replacement is installed two awaits later. Anything that lays the track
+    /// out in that gap — a toolbar pass, a poster landing, a run-loop turn — asks
+    /// the OLD closure for the NEW clip's tiles; it answers empty (it guards on
+    /// the id it captured), the tiles are marked as asked for and then retired
+    /// with nothing, and unless something lays the track out again afterwards the
+    /// new provider is never asked for anything at all. That is what the test
+    /// above saw: the incoming clip was never requested.
+    ///
+    /// ⚠️ **AND THE OBVIOUS ASSERTION HERE CANNOT FAIL.** "The old file was not
+    /// asked for the new clip's frames" passes with the defect in place, because
+    /// the stale closure refuses by id before it ever reaches the library — it
+    /// costs a request that never happens. What discriminates is the provider
+    /// itself: between two clips there must not be one.
+    @Test func theTrackDoesNotHoldTheOutgoingClipsProvider() async throws {
+        let screen = open(Self.items(2, videosAt: [0, 1]))
+        choose(Mode.trim, on: screen)
+        try await ready(screen)
+        let strip = try track(in: screen)
+        #expect(strip.debugHasFramesProvider, "guard: the first clip gave it one")
+
+        screen.editor.debugScrollToPage(1)
+
+        #expect(strip.debugHasFramesProvider == false,
+                "it is still holding the previous clip's file")
+        try await settle(until: { strip.debugHasFramesProvider })
+        #expect(strip.debugHasFramesProvider, "and the new clip never gave it one")
     }
 
     /// ⚠️ **THE SECONDS, NOT THE ID — AND ASKING FOR THE ID PROVES NOTHING.**
@@ -312,11 +410,12 @@ struct MediaEditorTimelineTests {
         let short = MediaLibraryItem(id: "video-short", kind: .video(duration: 4))
         let screen = open([long, short])
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         screen.editor.debugScrollToPage(1)
         try await settle(until: { screen.preview.asked.count > 1 })
 
         let bar = try track(in: screen)
+        hold(bar)
         bar.debugTakeHold(at: 0)
         bar.debugDrag(byPoints: 600)   // ten seconds at the track's scale
         bar.debugRelease()
@@ -338,8 +437,8 @@ struct MediaEditorTimelineTests {
     @Test func settlingOntoAPhotographSwapsTheTrackForTheNotice() async throws {
         let screen = open(Self.items(2, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
-        #expect(screen.editor.debugBand.content is MediaTimelineTrackView, "guard: the strip is up")
+        try await ready(screen)
+        #expect(screen.editor.debugBand.content is MediaTimelineToolsView, "guard: the strip is up")
 
         screen.editor.debugScrollToPage(1)
         try await settle(until: { screen.editor.debugBand.content is BandNoticeView })
@@ -373,9 +472,9 @@ struct MediaEditorTimelineTests {
         let screen = open(Self.items(1, videosAt: [0]))
 
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
 
-        #expect(screen.editor.debugBand.content is MediaTimelineTrackView)
+        #expect(screen.editor.debugBand.content is MediaTimelineToolsView)
     }
 
     // MARK: - VoiceOver
@@ -388,7 +487,7 @@ struct MediaEditorTimelineTests {
     @Test func voiceOverCanActuallyMoveTheCut() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         let before = bar.debugTimeline
 
@@ -403,7 +502,7 @@ struct MediaEditorTimelineTests {
     @Test func voiceOverAnnouncesWhatIsKept() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
@@ -420,9 +519,10 @@ struct MediaEditorTimelineTests {
     @Test func framesLandingMidDragDoNotMoveTheHandle() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
 
+        hold(bar)
         bar.debugTakeHold(at: 0)
         bar.debugDrag(byPoints: 80)
         let midDrag = bar.debugTimeline
@@ -442,9 +542,10 @@ struct MediaEditorTimelineTests {
     @Test func aDragStoresNothingUntilTheFingerLifts() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
 
+        hold(bar)
         bar.debugTakeHold(at: 0)
         #expect(bar.debugHasGrip, "guard: the start handle was taken")
         bar.debugDrag(byPoints: 60)
@@ -456,9 +557,10 @@ struct MediaEditorTimelineTests {
     @Test func releasingAHandleStoresTheTimelineAndCarriesIt() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
 
+        hold(bar)
         bar.debugTakeHold(at: 0)
         bar.debugDrag(byPoints: 60)
         bar.debugRelease()
@@ -475,9 +577,10 @@ struct MediaEditorTimelineTests {
     @Test func cuttingOneClipLeavesTheOtherPagesAlone() async throws {
         let screen = open(Self.items(2, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
 
+        hold(bar)
         bar.debugTakeHold(at: 0)
         bar.debugDrag(byPoints: 60)
         bar.debugRelease()
@@ -486,27 +589,43 @@ struct MediaEditorTimelineTests {
         #expect(screen.handed.edits?["photo-1"] == nil)
     }
 
-    /// The selection has to be visible as a selection: something dimmed on at
-    /// least one side of it, or the handles are decoration.
-    @Test func aCutClipShowsWhatIsBeingDiscarded() async throws {
+    /// ⚠️ **THE CAP TRAVELS WITH THE FINGER, AND THE TRACK SCROLLS TO PAY FOR
+    /// IT.** A piece begins where the pieces before it end, so dragging its start
+    /// shortens it from the INSIDE: the cap would stand still and the other end
+    /// would move, which is exactly what was reported — *"quand on grab la
+    /// fenetre de selection depuis le bord gauche, ca deplace le bord droit de la
+    /// selection au lieu du bord gauche"*. The track shifts under the finger by
+    /// what the piece gave up, and for the FIRST piece that needs room the
+    /// scroller does not have at rest: the leading inset grows for the length of
+    /// the gesture.
+    @Test func trimmingAHeadCarriesTheCapWithTheFinger() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
-        #expect(bar.debugIsDimmedBefore == false, "guard: nothing is discarded yet")
+        screen.window.layoutIfNeeded()
+        let whole = bar.debugContentWidth
+        hold(bar)
+        let held = try #require(bar.debugSelectedRangeX)
+        // Where the cap is ON SCREEN: content x minus where the film is scrolled.
+        let onScreen = held.lowerBound - bar.debugContentOffset
 
         bar.debugTakeHold(at: 0)
-        bar.debugDrag(byPoints: 60)
-        bar.debugRelease()
-        screen.window.layoutIfNeeded()
+        bar.debugDrag(byPoints: 60)           // one second off the head
 
-        #expect(bar.debugIsDimmedBefore, "the discarded head is not dimmed")
-        // ⚠️ AGAINST THE CONTENT, NOT THE VIEW. The strip is as wide as the clip
-        // is long and scrolls inside a narrower track — a ten-second clip is
-        // 600pt of film in a 390pt window, so comparing with `bounds.width` would
-        // be true before any cut at all.
-        #expect(bar.debugSelectionFrame.width < bar.debugContentWidth,
-                "the selection still spans the whole strip: \(bar.debugSelectionFrame)")
+        // ⚠️ **MEASURED WHILE THE FINGER IS STILL DOWN.** The slack is the
+        // gesture's: on release the track settles back onto the composition and
+        // the preview takes the needle to the frame the edge came to rest on, so
+        // an assertion after the lift would be asking about the settle instead.
+        #expect(abs(bar.debugContentWidth - (whole - 60)) < 2,
+                "the result did not get a second shorter: \(bar.debugContentWidth) of \(whole)")
+        let after = try #require(bar.debugSelectedRangeX)
+        #expect(abs(after.lowerBound) < 0.01,
+                "the first piece no longer begins at the origin of the result: \(after)")
+        #expect(abs((after.lowerBound - bar.debugContentOffset) - (onScreen + 60)) < 1,
+                "the cap did not follow the finger: \(onScreen) then \(after.lowerBound - bar.debugContentOffset)")
+
+        bar.debugRelease()
     }
 
     // MARK: - The selection frames the film
@@ -519,7 +638,7 @@ struct MediaEditorTimelineTests {
     @Test func theTrackIsTallEnoughForTheFrameItDraws() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
@@ -539,8 +658,9 @@ struct MediaEditorTimelineTests {
     @Test func theSelectionClosesIntoOneFrameWithNothingSticking() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
+        hold(bar)
         screen.window.layoutIfNeeded()
 
         let top = bar.debugTopRail
@@ -565,7 +685,7 @@ struct MediaEditorTimelineTests {
         // twelve points of picture at each end — and those are the twelve the
         // author is aiming with, the frames right at the edge of the decision
         // being made. The kept film must be visible end to end.
-        let kept = bar.debugKeptRangeX
+        let kept = try #require(bar.debugSelectedRangeX)
         #expect(start.maxX <= kept.lowerBound + 0.01,
                 "the leading cap covers the first \(start.maxX - kept.lowerBound)pt of the cut")
         #expect(end.minX >= kept.upperBound - 0.01,
@@ -589,10 +709,10 @@ struct MediaEditorTimelineTests {
     @Test func theGlyphFollowsAPlayerThatStoppedOnItsOwn() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.preview.paused = false
-        screen.preview.head = (fraction: 0.5, seconds: 10)
+        screen.preview.headSeconds = 5
         screen.editor.debugFollowTick()
         #expect(bar.debugShowsPause, "guard: a running clip offers to pause")
 
@@ -604,39 +724,105 @@ struct MediaEditorTimelineTests {
                 "the button still offers to pause a clip that has stopped")
     }
 
-    /// ⚠️ **THE RULE IS IN `MediaTimelining`; THIS IS THAT IT IS WIRED.** A
-    /// preview that plays past the end handle shows the author footage they have
-    /// just thrown away, as part of the post.
-    @Test func playbackTurnsBackAtTheEndOfTheCut() async throws {
+    /// ⚠️ **A RELEASED CUT IS WHAT THE PREVIEW PLAYS, AS ONE ITEM.** The preview
+    /// used to run the whole file and seek it back at the end of the cut — a
+    /// turn the author saw every loop. Now the cut IS the item: there is nothing
+    /// past its end for the player to run into, so the end asks nothing.
+    @Test func aReleasedCutIsWhatThePreviewPlays() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
+        #expect(screen.preview.plans.last?.segments == [],
+                "guard: an untouched clip plays the file as shot")
+        let loads = screen.preview.plans.count
 
         // Cut the head off: keep from ~3s to the end of a ten-second clip.
+        hold(bar)
         bar.debugTakeHold(at: 0)
         bar.debugDrag(byPoints: 180)
         bar.debugRelease()
+        try await landed(screen, beyond: loads)
 
-        // ⚠️ THE HANDOVER COMES FIRST, AND SKIPPING IT IS NOT A SHORTCUT. After
-        // a release the track keeps the time until the player reports arriving at
-        // the scrubbed position; a tick before that is refused, which is the rule
-        // that stops a stale player dragging the film back. So: the player
-        // arrives, and only then does it play on to the end.
+        let plan = try #require(screen.preview.plans.last)
+        #expect(plan.segments.count == 1, "the item plays \(plan.segments)")
+        let kept = try #require(plan.segments.first)
+        #expect(abs(kept.start - 3) < 0.2 && abs(kept.end - 10) < 0.01,
+                "the item plays \(kept.start)–\(kept.end)s of the file")
+        // ⚠️ **AND IT LANDS UNDER THE NEEDLE**, in the played seconds of the new
+        // arrangement — not at zero, and not at the source second the handle
+        // left the canvas on.
+        let start = try #require(screen.preview.starts.last)
+        #expect(abs(start - bar.playedSecondsUnderNeedle) < 0.01,
+                "it landed at \(start)s with the needle at \(bar.playedSecondsUnderNeedle)s")
+
         screen.preview.paused = false
-        screen.preview.head = (fraction: 0.3, seconds: 10)
+        screen.preview.headSeconds = start
         screen.editor.debugFollowTick()
         #expect(screen.editor.debugHandover == .settled, "guard: the track has the player back")
         let seeksBefore = screen.preview.seeks.count
 
-        screen.preview.head = (fraction: 1.0, seconds: 10)
+        screen.preview.headSeconds = kept.end - kept.start
         screen.editor.debugFollowTick()
 
-        #expect(screen.preview.seeks.count > seeksBefore, "it played on past the cut")
-        let back = try #require(screen.preview.seeks.last)
-        #expect(abs(back * 10 - 3) < 0.3,
-                "it turned back to \(back * 10)s rather than to the start of the cut")
+        #expect(screen.preview.seeks.count == seeksBefore,
+                "the end of the cut was seeked: \(screen.preview.seeks.suffix(1))")
+        #expect(abs(bar.playedSecondsUnderNeedle - (kept.end - kept.start)) < 0.05,
+                "guard: the needle followed to the end: \(bar.playedSecondsUnderNeedle)s")
+    }
+
+    /// ⚠️ **A SEAM BETWEEN TWO PIECES IS NOT A SEEK.** The follower used to jump
+    /// the file to the next piece's start as the playhead reached the end of the
+    /// one before — after a re-order, a jump across the file at every seam,
+    /// reported as "une mini pause/glitch" between the clips. The item carries
+    /// the pieces end to end; the needle crosses the seam and nothing is asked.
+    @Test func aPieceBoundaryIsNotASeek() async throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        try await ready(screen)
+        let bar = try track(in: screen)
+        screen.window.layoutIfNeeded()
+
+        // Cut at five seconds, then pull the second piece's head to seven: the
+        // result runs 0–5 then 7–10, and the two seconds between are gone.
+        bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
+            forPlayedSeconds: 5, trackWidth: bar.bounds.width
+        ))
+        screen.editor.debugSplitAtTheNeedle()
+        let loads = screen.preview.plans.count
+        hold(bar, piece: 1)
+        let second = try #require(bar.debugSelectedRangeX)
+        bar.debugTakeHold(at: second.lowerBound)
+        bar.debugDrag(byPoints: 120)
+        bar.debugRelease()
+        try await landed(screen, beyond: loads)
+
+        let plan = try #require(screen.preview.plans.last)
+        #expect(plan.segments.count == 2, "the item plays \(plan.segments)")
+        #expect(abs((plan.segments.last?.start ?? 0) - 7) < 0.2,
+                "the second piece starts at \(plan.segments.last?.start ?? -1)s of the file")
+
+        bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
+            forPlayedSeconds: 2, trackWidth: bar.bounds.width
+        ))
+        screen.editor.debugEndScrub()
+        screen.preview.paused = false
+        screen.preview.headSeconds = 2
+        screen.editor.debugFollowTick()
+        #expect(screen.editor.debugHandover == .settled, "guard: the track has the player back")
+        let seeksBefore = screen.preview.seeks.count
+
+        // Half a second into the second piece, which is 7.5s of the file.
+        screen.preview.headSeconds = 5.5
+        screen.editor.debugFollowTick()
+
+        #expect(screen.preview.seeks.count == seeksBefore,
+                "the seam was seeked: \(screen.preview.seeks.suffix(1))")
+        #expect(abs(bar.playedSecondsUnderNeedle - 5.5) < 0.05,
+                "the needle did not cross the seam: \(bar.playedSecondsUnderNeedle)s")
+        #expect(abs(bar.debugSecondsUnderNeedle - 7.5) < 0.2,
+                "the film under the needle is \(bar.debugSecondsUnderNeedle)s, not the second piece's")
     }
 
     /// The witness: inside the cut, nothing is asked of the player at all — a
@@ -644,12 +830,12 @@ struct MediaEditorTimelineTests {
     @Test func playbackInsideTheCutIsLeftAlone() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         screen.window.layoutIfNeeded()
         let seeksBefore = screen.preview.seeks.count
 
         screen.preview.paused = false
-        screen.preview.head = (fraction: 0.5, seconds: 10)
+        screen.preview.headSeconds = 5
         screen.editor.debugFollowTick()
         screen.editor.debugFollowTick()
 
@@ -664,7 +850,7 @@ struct MediaEditorTimelineTests {
     @Test func theHandlesStayGrabbableAfterAZoom() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
@@ -673,22 +859,25 @@ struct MediaEditorTimelineTests {
         // and zero is zero at every scale, so a cap placed with the WRONG
         // `pointsPerSecond` lands in exactly the right spot. Measured: breaking
         // it turned no test red until the cut moved off the start.
+        hold(bar)
         bar.debugTakeHold(at: 0)
         bar.debugDrag(byPoints: 180)          // three seconds in
         bar.debugRelease()
         bar.debugPinch(by: 3)
         let centres = try #require(bar.debugHandleCentres)
 
-        // Asked against the scale the track says it is drawing at, from a
-        // source-second this test chose — not from the track's own answer.
-        let expected = MediaTimelining.x(
-            atSourceSeconds: 3, pointsPerSecond: bar.debugPointsPerSecond
-        )
+        // ⚠️ **THE FIRST PIECE BEGINS AT THE ORIGIN OF THE RESULT, WHATEVER WAS
+        // TRIMMED OFF ITS HEAD** — the track is the composition, so the film
+        // before the cut is not on it. What a zoom must not do is leave the two
+        // caps at different scales, which is what the reach below asks.
+        let expected: CGFloat = 0
         #expect(abs(centres.start - (expected - 6)) < 1,
                 "the leading cap is at \(centres.start), the cut at \(expected)")
         #expect(bar.debugWouldTakeAHandle(at: centres.start), "the leading cap is unreachable")
         #expect(bar.debugWouldTakeAHandle(at: centres.end), "the trailing cap is unreachable")
-        #expect(centres.end > 1500,
+        // Seven seconds left of a ten-second clip, drawn at three times the
+        // scale: the trailing cap is far past where it was.
+        #expect(centres.end > 1200,
                 "guard: the zoom really moved the trailing cap: \(centres.end)")
     }
 
@@ -699,12 +888,12 @@ struct MediaEditorTimelineTests {
     @Test func aBigMoveOfTheFilmIsEasedRatherThanSnapped() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
         let before = bar.debugContentOffset
 
-        bar.follow(sourceSeconds: 7)
+        bar.follow(MediaTimelining.Moment(piece: 0, sourceSeconds: 7))
 
         #expect(bar.debugIsEasing, "the film was moved in one frame")
         // ⚠️ **ASKED OF THE LAYER, NOT OF `contentOffset`.** `UIView.animate` sets
@@ -723,11 +912,11 @@ struct MediaEditorTimelineTests {
     @Test func aBeatOfPlaybackMovesTheFilmAtOnce() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
-        bar.follow(sourceSeconds: 0.1)
+        bar.follow(MediaTimelining.Moment(piece: 0, sourceSeconds: 0.1))
 
         #expect(bar.debugIsEasing == false, "a one-point step was animated")
         #expect(abs(bar.debugSecondsUnderNeedle - 0.1) < 0.02,
@@ -742,7 +931,7 @@ struct MediaEditorTimelineTests {
     @Test func framesAskedForOneFilmNeverLandInAnother() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
         try await settle(until: { bar.debugDecodedCount > 0 })
@@ -760,7 +949,7 @@ struct MediaEditorTimelineTests {
     @Test func aPinchAlsoRetiresTheFramesInFlight() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
         let generation = bar.debugFramesGeneration
@@ -778,7 +967,7 @@ struct MediaEditorTimelineTests {
         let fourMinutes = MediaLibraryItem(id: "video-0", kind: .video(duration: 240))
         let screen = open([fourMinutes])
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
@@ -786,7 +975,7 @@ struct MediaEditorTimelineTests {
         // ceiling: every window decoded and never given back.
         for second in stride(from: 0.0, through: 220.0, by: 8.0) {
             bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
-                forSourceSeconds: second, trackWidth: bar.bounds.width
+                forPlayedSeconds: second, trackWidth: bar.bounds.width
             ))
             try await Task.sleep(for: .milliseconds(4))
         }
@@ -794,6 +983,147 @@ struct MediaEditorTimelineTests {
         #expect(bar.debugDecodedCount <= 48,
                 "\(bar.debugDecodedCount) pictures alive after walking a four-minute clip")
         #expect(bar.debugDecodedCount > 0, "guard: the strip decoded anything at all")
+    }
+
+    // MARK: - The strip follows the edit
+
+    /// Hands back a different object for every second of film, and remembers
+    /// which is which — so a test can ask what a square is SHOWING.
+    @MainActor
+    private final class Film {
+        private var bySecond: [Double: UIImage] = [:]
+        private var second: [ObjectIdentifier: Double] = [:]
+
+        func picture(for at: Double) -> UIImage {
+            if let had = bySecond[at] { return had }
+            let made = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { _ in }
+            bySecond[at] = made
+            second[ObjectIdentifier(made)] = at
+            return made
+        }
+
+        /// Every square of the strip: which section it belongs to, where it is
+        /// drawn, and the second of film in it.
+        func showing(_ track: MediaTimelineTrackView) -> [(piece: Int, x: CGFloat, seconds: Double)] {
+            track.debugFilm.compactMap { square in
+                guard let picture = square.picture, let at = second[ObjectIdentifier(picture)]
+                else { return nil }
+                return (square.piece, square.from, at)
+            }
+        }
+
+        /// Where the square showing this exact second of film is drawn.
+        func drawn(_ at: Double, in track: MediaTimelineTrackView) -> CGFloat? {
+            showing(track).first { abs($0.seconds - at) < 0.001 }?.x
+        }
+    }
+
+    /// A two-piece track of its own, with a provider that hands back a
+    /// different picture for every second of film.
+    @MainActor
+    private func cutTrack(_ film: Film, at cut: Double = 4) -> MediaTimelineTrackView {
+        let track = MediaTimelineTrackView()
+        track.frame = CGRect(x: 0, y: 0, width: 390, height: MediaTimelineTrackView.height)
+        track.framesProvider = { seconds, _, _ in
+            await MainActor.run {
+                var made: [Double: UIImage] = [:]
+                for at in seconds { made[at] = film.picture(for: at) }
+                return made
+            }
+        }
+        track.configure(duration: 10, timeline: MediaTimeline(segments: [
+            MediaSegment(start: 0, end: cut),
+            MediaSegment(start: cut, end: 10)
+        ]))
+        track.setNeedsLayout()
+        track.layoutIfNeeded()
+        return track
+    }
+
+    /// ⚠️ **REPORTED AS THE CLIP NOT CONTINUING AT ALL.** The arithmetic was
+    /// right — the piece grew, the next one was pushed along, the total went up —
+    /// and the strip did not change one square, so on the device nothing about
+    /// the drag revealed any film. What a handle does is open a window on a fixed
+    /// sheet of film, so what this asks is that the film past the cut APPEARS:
+    /// the first section must end on later film than it did.
+    @Test func continuingASectionRevealsTheFilmPastTheCut() async throws {
+        let film = Film()
+        let track = cutTrack(film)
+        try await settle(until: { film.showing(track).count > 4 })
+        // ⚠️ **BY SECTION, NOT BY A POSITION TAKEN BEFORE THE DRAG.** The seam
+        // moves — that is the point of the gesture — so a filter on x asks about
+        // the wrong stretch of track the moment the handle has been pulled, and
+        // reads as the film not having been revealed at all.
+        let endOfTheFirst = { film.showing(track).filter { $0.piece == 0 }.map(\.seconds).max() }
+        let before = try #require(endOfTheFirst())
+        #expect(abs(before - 4) < 0.9, "guard: the first section ends on its cut, \(before)")
+
+        track.debugTap(atContentX: 100)
+        track.layoutIfNeeded()
+        let centres = try #require(track.debugHandleCentres)
+        track.debugTakeHold(at: centres.end)
+        track.debugDrag(byPoints: 60)
+        track.debugRelease()
+        track.setNeedsLayout()
+        track.layoutIfNeeded()
+
+        try await settle(until: { (endOfTheFirst() ?? 0) > before + 0.5 })
+        let after = try #require(endOfTheFirst())
+        #expect(after > before + 0.5,
+                "the first section still ends on \(after)s of film: nothing was revealed")
+        #expect(after < 5.01, "it reached past its own out point: \(after)")
+    }
+
+    /// ⚠️ **A SQUARE THE WINDOW CUTS IN HALF IS CROPPED ON SCREEN, NOT SQUEEZED.**
+    /// The drawn half of the rule: the picture keeps its own full width and hangs
+    /// out of the part that is shown. Laid into the shortened rectangle instead,
+    /// the frame would compress as the handle moved — the sheet would appear to
+    /// stretch rather than to be revealed.
+    @Test func aSquareCutByAHandleHoldsAFullWidthPicture() async throws {
+        let film = Film()
+        let track = cutTrack(film, at: 4.15)
+        try await settle(until: { film.showing(track).count > 4 })
+
+        let cut = track.debugFilmCrop.filter { $0.width < MediaTimelining.tileWidth - 1 }
+        #expect(cut.isEmpty == false, "guard: no square is cut by a window here")
+        for square in cut {
+            #expect(abs(square.picture.width - MediaTimelining.tileWidth) < 0.01,
+                    "the picture was squeezed into the visible part: \(square)")
+        }
+        #expect(cut.contains { $0.picture.minX < -0.01 },
+                "no picture hangs out of its square, so nothing is being cropped")
+    }
+
+    /// ⚠️ **AND CROPPING ONE SECTION SLIDES THE NEXT ONE'S FILM WITH IT.**
+    /// Reported from the device: *"quand je crop le clip 1, c'est la fin du clip
+    /// 2 qui est animé… c'est le container de la section qui se déplace"*. The
+    /// strip was one row of squares at fixed places, each re-labelled with
+    /// whatever film now stood there, so the pictures never moved — only the
+    /// frame, the seam and the end of the track did. A section's film belongs to
+    /// the section: when it moves, its pictures move with it, by exactly as much.
+    @Test func croppingASectionCarriesTheNextOnesFilmAlongWithIt() async throws {
+        let film = Film()
+        let track = cutTrack(film)
+        try await settle(until: { film.showing(track).count > 4 })
+        // The first square of the second section, and the film in it.
+        let inTheSecond = try #require(
+            film.showing(track).filter { $0.piece == 1 }.min { $0.x < $1.x }
+        )
+        #expect(inTheSecond.seconds > 4, "guard: that square holds the second section's film")
+
+        track.debugTap(atContentX: 100)
+        track.layoutIfNeeded()
+        let centres = try #require(track.debugHandleCentres)
+        track.debugTakeHold(at: centres.end)
+        track.debugDrag(byPoints: -60)
+        track.debugRelease()
+        track.setNeedsLayout()
+        track.layoutIfNeeded()
+
+        let moved = try #require(film.drawn(inTheSecond.seconds, in: track),
+                                 "the film that was in that square is no longer drawn at all")
+        #expect(abs(moved - (inTheSecond.x - 60)) < 0.01,
+                "that second of film was drawn at \(inTheSecond.x) and is now at \(moved) — it did not travel with its section")
     }
 
     // MARK: - Pinch to zoom (charter F15)
@@ -804,7 +1134,7 @@ struct MediaEditorTimelineTests {
     @Test func pinchingDrawsASecondOfFilmWider() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
         let before = bar.debugContentWidth
@@ -823,11 +1153,11 @@ struct MediaEditorTimelineTests {
     @Test func zoomingKeepsTheMomentUnderTheNeedle() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
         bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
-            forSourceSeconds: 6, trackWidth: bar.bounds.width
+                forPlayedSeconds: 6, trackWidth: bar.bounds.width
         ))
         #expect(abs(bar.debugSecondsUnderNeedle - 6) < 0.1, "guard: the needle is at six seconds")
 
@@ -842,7 +1172,7 @@ struct MediaEditorTimelineTests {
     @Test func theRulerFollowsTheZoom() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
         let coarse = bar.debugRulerMarks.count
@@ -861,7 +1191,7 @@ struct MediaEditorTimelineTests {
     @Test func thePlayButtonStopsAndStartsTheClip() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.preview.paused = false
         screen.window.layoutIfNeeded()
@@ -878,13 +1208,14 @@ struct MediaEditorTimelineTests {
     @Test func aScrubDoesNotRestartAClipTheAuthorStopped() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.preview.paused = false
         screen.window.layoutIfNeeded()
 
         bar.debugTapPlayPause()          // the author stops it
         screen.preview.paused = true
+        hold(bar)
         bar.debugTakeHold(at: 0)         // and then moves a handle
         bar.debugDrag(byPoints: 60)
         bar.debugRelease()
@@ -900,7 +1231,7 @@ struct MediaEditorTimelineTests {
     @Test func tappingTheMediaStopsAndStartsTheClip() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.preview.paused = false
         screen.window.layoutIfNeeded()
@@ -921,7 +1252,7 @@ struct MediaEditorTimelineTests {
     @Test func tappingStillWorksWhileCropSaysItCannotServeAVideo() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         screen.preview.paused = false
         choose(Mode.crop, on: screen)
         #expect(screen.editor.debugBand.content is BandNoticeView, "guard: crop refused the video")
@@ -948,20 +1279,20 @@ struct MediaEditorTimelineTests {
     @Test func aTickFromAPlayerThatHasNotArrivedDoesNotDragTheFilmBack() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
         // The author pushes the film to four seconds and lets go.
         bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
-            forSourceSeconds: 4, trackWidth: bar.bounds.width
+                forPlayedSeconds: 4, trackWidth: bar.bounds.width
         ))
         screen.editor.debugEndScrub()
         let afterRelease = bar.debugSecondsUnderNeedle
         #expect(abs(afterRelease - 4) < 0.1, "guard: the film is where it was left: \(afterRelease)")
 
         // The player has not moved yet — it is still where the scrub began.
-        screen.preview.head = (fraction: 0.02, seconds: 10)
+        screen.preview.headSeconds = 0.2
         screen.editor.debugFollowTick()
 
         #expect(abs(bar.debugSecondsUnderNeedle - 4) < 0.1,
@@ -973,21 +1304,21 @@ struct MediaEditorTimelineTests {
     @Test func aTickFromAnArrivedPlayerMovesTheFilmAgain() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
         bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
-            forSourceSeconds: 4, trackWidth: bar.bounds.width
+                forPlayedSeconds: 4, trackWidth: bar.bounds.width
         ))
         screen.editor.debugEndScrub()
 
         // It arrived, and then played on a little.
-        screen.preview.head = (fraction: 0.42, seconds: 10)
+        screen.preview.headSeconds = 4.2
         screen.editor.debugFollowTick()
         #expect(screen.editor.debugHandover == .settled, "still waiting: \(screen.editor.debugHandover)")
 
-        screen.preview.head = (fraction: 0.5, seconds: 10)
+        screen.preview.headSeconds = 5
         screen.editor.debugFollowTick()
 
         #expect(abs(bar.debugSecondsUnderNeedle - 5) < 0.1,
@@ -1003,7 +1334,7 @@ struct MediaEditorTimelineTests {
     @Test func theFilmOpensWithTheClipsStartUnderTheNeedle() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
@@ -1022,18 +1353,18 @@ struct MediaEditorTimelineTests {
     @Test func scrollingTheFilmSeeksTheClip() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
         #expect(screen.preview.seeks.isEmpty, "guard: nothing has been asked of the player yet")
 
         // Four seconds in, at the track's own scale.
         bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
-            forSourceSeconds: 4, trackWidth: bar.bounds.width
+                forPlayedSeconds: 4, trackWidth: bar.bounds.width
         ))
 
         let asked = try #require(screen.preview.seeks.last)
-        #expect(abs(asked - 0.4) < 0.01, "a ten-second clip four seconds in is 0.4: got \(asked)")
+        #expect(abs(asked - 4) < 0.1, "four seconds in is four seconds of the item: got \(asked)")
     }
 
     /// ⚠️ **PLAYBACK STOPS WHILE A FINGER IS ON THE TRACK.** A clip that keeps
@@ -1043,9 +1374,10 @@ struct MediaEditorTimelineTests {
     @Test func playbackPausesWhileAFingerIsOnTheTrackAndResumesAfter() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
 
+        hold(bar)
         bar.debugTakeHold(at: 0)
         let whileHeld = screen.preview.pauses
         bar.debugRelease()
@@ -1060,7 +1392,7 @@ struct MediaEditorTimelineTests {
     @Test func theTimeMarkingsAreTimecodes() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
@@ -1081,13 +1413,13 @@ struct MediaEditorTimelineTests {
     @Test func theReadoutSaysWhereYouAreAndHowLongItWillRun() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
         #expect(bar.debugKeptText == "0:00 / 0:10", "got \(bar.debugKeptText ?? "nil")")
 
         bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
-            forSourceSeconds: 4, trackWidth: bar.bounds.width
+                forPlayedSeconds: 4, trackWidth: bar.bounds.width
         ))
 
         #expect(bar.debugKeptText == "0:04 / 0:10",
@@ -1100,19 +1432,19 @@ struct MediaEditorTimelineTests {
     @Test func aFastScrubAsksThePlayerMoreLooselyThanASlowOne() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
 
         // Two samples a hair apart, then one a long way on.
         for seconds in [1.0, 1.01] {
             bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
-                forSourceSeconds: seconds, trackWidth: bar.bounds.width
+                forPlayedSeconds: seconds, trackWidth: bar.bounds.width
             ))
         }
         let crept = try #require(screen.preview.seekTolerances.last)
         bar.debugScroll(toContentOffset: MediaTimelining.contentOffset(
-            forSourceSeconds: 8, trackWidth: bar.bounds.width
+                forPlayedSeconds: 8, trackWidth: bar.bounds.width
         ))
         let flung = try #require(screen.preview.seekTolerances.last)
 
@@ -1126,7 +1458,7 @@ struct MediaEditorTimelineTests {
     @Test func theSelectionSaysHowLongTheResultWillRun() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
         screen.window.layoutIfNeeded()
         #expect(bar.debugKeptText == "0:00 / 0:10",
@@ -1136,6 +1468,7 @@ struct MediaEditorTimelineTests {
         // track on a ten-second clip — correct, and never once visible.
         #expect(bar.debugKeptIsOnScreen, "the number scrolled off the track")
 
+        hold(bar)
         bar.debugTakeHold(at: 0)
         bar.debugDrag(byPoints: 180)   // three seconds at the track's scale
         bar.debugRelease()
@@ -1149,11 +1482,37 @@ struct MediaEditorTimelineTests {
     /// an ordinary scroll free — `scroller.panGestureRecognizer` waits for it to
     /// fail, and a recogniser that never begins fails at once. Were it to accept
     /// everywhere, the film could not be scrolled at all.
+    /// ⚠️ **THE REACH IS MEASURED FROM WHERE THE FINGER LANDED, NOT FROM WHERE
+    /// THE RECOGNISER WOKE UP.** A pan is asked whether to begin only once it has
+    /// left its own slop, and when several touch samples arrive in one turn of
+    /// the run loop that is tens of points later. Measured in the simulator: a
+    /// drag that landed exactly on a cap (content x = 5, cap at -6) was evaluated
+    /// at x = 53 — outside the 44pt reach — so the handle refused a drag that
+    /// started on it and the film scrolled away instead. A fast flick off a cap
+    /// does this to a real finger too.
+    ///
+    /// What this CANNOT establish is that the delegate calls it: a recogniser's
+    /// location cannot be set from a test, so that half is checked on a device.
+    @Test func theReachIsMeasuredFromWhereTheFingerLanded() {
+        #expect(MediaTimelineTrackView.touchDown(location: 53, travelled: 48) == 5)
+        #expect(MediaTimelineTrackView.touchDown(location: 10, travelled: -30) == 40,
+                "a leftward drag started to the right of where it has got to")
+    }
+
     @Test func aTouchInTheMiddleOfTheFilmScrollsRatherThanGrabbingAHandle() async throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
-        try await settle(until: { screen.preview.asked.isEmpty == false })
+        try await ready(screen)
         let bar = try track(in: screen)
+        screen.window.layoutIfNeeded()
+
+        // ⚠️ **WITH NOTHING HELD THERE ARE NO HANDLES AT ALL**, which is the
+        // stronger half of this rule: every touch on an untouched track is a
+        // scroll, so the tap that selects a piece never has to fight one.
+        #expect(bar.debugHandleCentres == nil, "a track nobody has tapped has handles")
+        #expect(bar.debugWouldTakeAHandle(at: 0) == false)
+
+        hold(bar)
         screen.window.layoutIfNeeded()
 
         #expect(bar.debugHandlePanIsDelegatedHere,

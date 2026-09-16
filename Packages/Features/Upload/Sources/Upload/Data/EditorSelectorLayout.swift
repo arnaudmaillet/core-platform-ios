@@ -7,12 +7,13 @@ import CoreGraphics
 /// controller, after a layout pass that needs a window — so a rule expressed as
 /// constraints is a rule no test can ask about.
 ///
-/// ⚠️ **AND NOTHING APPLIES IT YET.** There is one selector in the bar today;
-/// this rule is for the second one, which arrives with split and speed. It is
-/// stated here rather than in the slice that needs it because the RULE was given
-/// and settled separately from the control — but until that control exists this
-/// file is answered only by its own tests, and saying otherwise would be the
-/// stale comment this repository treats as a defect.
+/// ⚠️ **APPLIED BY `MediaEditorViewController.shareTheBarBetweenTheTwoStrips`,
+/// AND ONLY WHILE THERE ARE TWO.** The second strip has arrived: with the
+/// timeline open the leading slot holds an `IconActionBar` and the trailing one
+/// the mode selector, and the two widths below are what they are held to. With
+/// the sound pill in that slot instead the constraints come off — the pill
+/// states a width FLOOR and the selector is told it may give, which is a
+/// different arrangement that already works and is not this rule's to re-decide.
 ///
 /// ⚠️ **AND IT IS NOT "SHARE WHAT IS THERE".** With one selector the answer is
 /// "as much as it wants, up to most of the bar" — a strip that shrank to half a
