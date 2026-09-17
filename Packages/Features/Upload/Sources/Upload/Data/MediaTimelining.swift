@@ -1136,9 +1136,13 @@ enum MediaTimelining {
         guard duration.isFinite, duration > 0 else { return false }
         let pieces = resolved(timeline, withinSource: duration)
         guard pieces.count == 1, let only = pieces.first else { return true }
+        // ⚠️ **A FILTER ON AN UNCUT CLIP IS AN EDIT TOO.** Left out, a look on
+        // the one piece of an untouched clip resolved to no segments at all, and
+        // the export played the file as shot — the look silently dropped.
         return only.start > 0.001
             || only.end < duration - 0.001
             || abs(only.speed - 1) > 0.001
+            || only.filter != nil
     }
 
     // MARK: - Carrying a piece to a new place
@@ -1234,6 +1238,41 @@ enum MediaTimelining {
         guard seam >= 0, seam < pieces.count - 1 else { return timeline }
         pieces[seam].transitionOut = kind
         return MediaTimeline(segments: pieces)
+    }
+
+    /// The same timeline, with piece `index` wearing `filter` — nil takes a
+    /// filter away, and `.original` is the same as nil.
+    ///
+    /// ⚠️ **ON THE RESOLVED PIECES, AS `settingTransition` IS.** An untouched
+    /// clip has no segments; the filter needs the one piece the track draws.
+    static func settingFilter(
+        _ filter: MediaFilter?, atPiece index: Int, in timeline: MediaTimeline,
+        withinSource duration: Double
+    ) -> MediaTimeline {
+        var pieces = resolved(timeline, withinSource: duration)
+        guard pieces.indices.contains(index) else { return timeline }
+        guard pieces[index].filter != (filter == .original ? nil : filter) else { return timeline }
+        pieces[index].filter = filter
+        return MediaTimeline(segments: pieces)
+    }
+
+    /// The longest stretch of a piece the preview loops while its filter is
+    /// being chosen — a long piece is shown by its opening seconds.
+    static let longestPieceRehearsal: Double = 6
+
+    /// What the preview plays while piece `index`'s filter is being chosen: the
+    /// piece itself, from its start, at most `longestPieceRehearsal` of it.
+    ///
+    /// ⚠️ **PLAYED SECONDS**, as every looped range is.
+    static func rehearsal(
+        ofPiece index: Int, in timeline: MediaTimeline, withinSource duration: Double
+    ) -> ClosedRange<Double>? {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard pieces.indices.contains(index) else { return nil }
+        let startsAt = pieces[..<index].reduce(0) { $0 + $1.playedSeconds }
+        let length = min(pieces[index].playedSeconds, longestPieceRehearsal)
+        guard length > 0, startsAt.isFinite else { return nil }
+        return startsAt...(startsAt + length)
     }
 
     /// What the preview plays while a cut's transition is being chosen: the
