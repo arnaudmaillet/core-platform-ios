@@ -17,7 +17,30 @@ public struct PickedImage: @unchecked Sendable {
 /// A picked video (a local file URL from the photo library) ready to compose.
 public struct PickedVideo: Sendable, Equatable {
     public let sourceURL: URL
-    public init(sourceURL: URL) { self.sourceURL = sourceURL }
+
+    /// The pieces of the clip to publish, in order, each with the rate it plays
+    /// at. Empty is the whole of it, untouched.
+    ///
+    /// ⚠️ **SECONDS, NOT A `MediaTimeline` — AND THE BOUNDARY IS THE POINT.** A cut
+    /// is an editor idea: handles, a minimum length, a stored value that can
+    /// outlive the clip it was made for. None of that is the composer's
+    /// business. What crosses is the answer, already resolved against the real
+    /// duration, in the only unit an exporter accepts.
+    ///
+    /// ⚠️ **AND IT IS A LIST, WHICH IT WAS NOT.** It carried ONE range, so a
+    /// timeline of several pieces could only ever publish its first — a split
+    /// that looked like it worked and silently threw the rest away. The list is
+    /// what makes the split safe to offer at all.
+    ///
+    /// Empty rather than one piece covering everything, for the reason
+    /// `VideoExportPlan.segments` gives: the two are different instructions, and
+    /// only empty takes the passthrough.
+    public let keptPieces: [VideoExportSegment]
+
+    public init(sourceURL: URL, keptPieces: [VideoExportSegment] = []) {
+        self.sourceURL = sourceURL
+        self.keptPieces = keptPieces
+    }
 }
 
 /// The media attached to a compose draft.
@@ -88,7 +111,7 @@ public actor PostComposer: PostComposing {
     /// always succeeds on a file it has just written itself, so that branch is
     /// unreachable through the normal seam — and an unreachable fallback is one
     /// nobody has ever seen run.
-    private let posterFrame: @Sendable (URL) async -> UIImage?
+    private let posterFrame: @Sendable (ExportedVideo) async -> UIImage?
     private let resolveMaxAttempts: Int
     private let resolvePollSeconds: Double
     private let now: @Sendable () -> Date
@@ -109,7 +132,7 @@ public actor PostComposer: PostComposing {
         composedChannel: ComposedPostChannel,
         encoder: MediaEncoder = MediaEncoder(),
         videoExporter: VideoExporter = VideoExporter(),
-        posterFrame: @escaping @Sendable (URL) async -> UIImage? = {
+        posterFrame: @escaping @Sendable (ExportedVideo) async -> UIImage? = {
             await VideoExporter().posterImage(for: $0)
         },
         resolveMaxAttempts: Int = 6,
@@ -230,7 +253,9 @@ public actor PostComposer: PostComposing {
     ) {
         let exported: ExportedVideo
         do {
-            exported = try await videoExporter.export(picked.sourceURL)
+            exported = try await videoExporter.export(
+                VideoExportPlan(sourceURL: picked.sourceURL, segments: picked.keptPieces)
+            )
         } catch {
             throw ComposeError.media("couldn't prepare the video: \(error)")
         }
@@ -293,7 +318,7 @@ public actor PostComposer: PostComposing {
     private func uploadPoster(
         for exported: ExportedVideo, ownerID: AccountID
     ) async -> (image: UIImage, url: URL)? {
-        guard let frame = await posterFrame(exported.fileURL) else {
+        guard let frame = await posterFrame(exported) else {
             logger.warning("no poster frame for the picked video; thumbnail falls back to the clip")
             return nil
         }

@@ -61,6 +61,74 @@ struct VideoExporterTests {
         return Array(pixel[0..<3])
     }
 
+    /// A longer source, so a trim has somewhere to cut.
+    private func longerClip() async throws -> URL {
+        try await PlaceholderVideoFetcher(durationSeconds: 2.5)
+            .playableURL(for: URL(string: "mock://video/trim?w=160&h=120")!)
+    }
+
+    // MARK: - Trim
+
+    /// ⚠️ **THE WHOLE FAILURE MODE IS THAT A TRIM LOOKS LIKE IT WORKED.** An
+    /// ignored `timeRange` exports a perfectly good file at the full length: it
+    /// plays, it uploads, it publishes. Only the DURATION says the cut never
+    /// happened, which is why every assertion here is about seconds.
+    @Test func aTrimmedExportIsOnlyTheKeptPart() async throws {
+        let exported = try await VideoExporter()
+            .export(VideoExportPlan(sourceURL: try await longerClip(), timeRange: 0.5...1.5))
+
+        #expect(abs(exported.durationSeconds - 1) < 0.05,
+                "expected about a second, got \(exported.durationSeconds)")
+    }
+
+    /// ⚠️ **BOTH EDGES, EXPLICITLY.** A range that starts at zero and one that
+    /// runs to the exact duration are the two an off-by-one hides in: the first
+    /// looks like "no trim" and the second like "past the end", and either can
+    /// be silently widened back to the whole clip without anything erroring.
+    @Test func aTrimFromTheVeryStartStillCuts() async throws {
+        let exported = try await VideoExporter()
+            .export(VideoExportPlan(sourceURL: try await longerClip(), timeRange: 0...1))
+
+        #expect(abs(exported.durationSeconds - 1) < 0.05,
+                "expected about a second, got \(exported.durationSeconds)")
+    }
+
+    @Test func aTrimRunningToTheVeryEndStillCuts() async throws {
+        let source = try await longerClip()
+        let whole = try await AVURLAsset(url: source).load(.duration).seconds
+
+        let exported = try await VideoExporter()
+            .export(VideoExportPlan(sourceURL: source, timeRange: (whole - 1)...whole))
+
+        #expect(abs(exported.durationSeconds - 1) < 0.05,
+                "expected about a second, got \(exported.durationSeconds)")
+    }
+
+    /// The witness for all three: with no range the clip comes back whole, so
+    /// "about a second" above is the trim and not the exporter shortening
+    /// everything it touches.
+    @Test func anUntrimmedExportIsStillTheWholeClip() async throws {
+        let source = try await longerClip()
+        let whole = try await AVURLAsset(url: source).load(.duration).seconds
+
+        let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: source))
+
+        #expect(abs(exported.durationSeconds - whole) < 0.05,
+                "expected \(whole), got \(exported.durationSeconds)")
+    }
+
+    /// A trim shortens the clip; it does not shrink its pictures. The dimensions
+    /// are read from the SOURCE track for that reason.
+    @Test func aTrimLeavesThePicturesTheSizeTheyWere() async throws {
+        let source = try await longerClip()
+        let whole = try await VideoExporter().export(VideoExportPlan(sourceURL: source))
+        let cut = try await VideoExporter()
+            .export(VideoExportPlan(sourceURL: source, timeRange: 0.5...1.5))
+
+        #expect(cut.pixelWidth == whole.pixelWidth)
+        #expect(cut.pixelHeight == whole.pixelHeight)
+    }
+
     @Test func exportProducesAPlayableMp4WithMetadata() async throws {
         let source = try await sourceClip()
         let exported = try await VideoExporter().export(source)
@@ -89,5 +157,126 @@ struct VideoExporterTests {
         let localClip = try await sourceClip()
         let resolved = try await PlaceholderVideoFetcher().playableURL(for: localClip)
         #expect(resolved == localClip)
+    }
+
+    // MARK: - More than one piece, and rates other than as-shot
+
+    /// ⚠️ **ASSERTED ON THE DURATION OF WHAT COMES OUT, BECAUSE THE FAILURE MODE
+    /// IS SILENCE.** A segment list that is ignored, or that collapses to the
+    /// first piece, produces a perfectly good file — it is simply the wrong film,
+    /// and nothing errors. Two pieces of one second each must give two seconds.
+    @Test func twoPiecesExportAsTheirSum() async throws {
+        let source = try await longerClip()
+
+        let exported = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source,
+            segments: [
+                VideoExportSegment(start: 0.1, end: 0.7),
+                VideoExportSegment(start: 1.6, end: 2.2)
+            ]
+        ))
+
+        #expect(abs(exported.durationSeconds - 1.2) < 0.25,
+                "got \(exported.durationSeconds)s for two six-tenths pieces")
+    }
+
+    /// The witness for the one above: the SAME two moments as a single span would
+    /// be nearly three seconds. Without it, "two seconds" could be a coincidence
+    /// of an exporter that ignored the list and trimmed once.
+    @Test func thePiecesAreJoined_notSpanned() async throws {
+        let source = try await longerClip()
+
+        let spanned = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source, segments: [VideoExportSegment(start: 0.1, end: 2.2)]
+        ))
+
+        #expect(spanned.durationSeconds > 1.8,
+                "guard: the span really is longer than the two pieces: \(spanned.durationSeconds)")
+    }
+
+    /// ⚠️ **THE ORDER IN THE LIST IS THE ORDER ON SCREEN.** The editor lets a
+    /// piece be carried past its neighbour, and this is the only place that can
+    /// honour it: an exporter that sorted the list, or inserted by source time,
+    /// would publish a video the author never arranged — and it would look
+    /// perfectly fine, right length and all, which is why the assertion has to
+    /// read a PICTURE rather than a duration.
+    @Test func thePiecesPlayInTheOrderTheyAreGiven() async throws {
+        let source = try await longerClip()
+        let early = VideoExportSegment(start: 0, end: 0.6)
+        let late = VideoExportSegment(start: 1.8, end: 2.4)
+
+        let asShot = try await VideoExporter().export(
+            VideoExportPlan(sourceURL: source, segments: [early, late])
+        )
+        let carried = try await VideoExporter().export(
+            VideoExportPlan(sourceURL: source, segments: [late, early])
+        )
+
+        #expect(abs(asShot.durationSeconds - carried.durationSeconds) < 0.25,
+                "guard: the two exports hold the same film")
+        let opening = try #require(await VideoExporter().posterImage(for: asShot.fileURL))
+        let swapped = try #require(await VideoExporter().posterImage(for: carried.fileURL))
+        #expect(Self.thumbBytes(opening) != Self.thumbBytes(swapped),
+                "both exports open on the same frame, so the order was ignored")
+    }
+
+    /// ⚠️ **A RATE IS A CUT TOO.** The same frames, end to end, are a different
+    /// video once they play at a different speed — and a `timeRange` cannot say
+    /// it, which is the whole reason the composition route exists.
+    @Test func aFasterPieceExportsShorter() async throws {
+        let source = try await longerClip()
+
+        let asShot = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source, segments: [VideoExportSegment(start: 0, end: 2)]
+        ))
+        let doubled = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source, segments: [VideoExportSegment(start: 0, end: 2, speed: 2)]
+        ))
+        #expect(asShot.durationSeconds > 1.7, "guard: the 1x export is a real two seconds")
+
+        #expect(abs(doubled.durationSeconds - asShot.durationSeconds / 2) < 0.3,
+                "\(asShot.durationSeconds)s at 1x became \(doubled.durationSeconds)s at 2x")
+    }
+
+    @Test func aSlowerPieceExportsLonger() async throws {
+        let source = try await longerClip()
+
+        let halved = try await VideoExporter().export(VideoExportPlan(
+            sourceURL: source, segments: [VideoExportSegment(start: 0, end: 1, speed: 0.5)]
+        ))
+
+        #expect(halved.durationSeconds > 1.6, "got \(halved.durationSeconds)s for 1s at 0.5x")
+    }
+
+    /// ⚠️ **ONE PIECE AT 1x MUST NOT BUILD A COMPOSITION** — it is the trim every
+    /// clip takes, and a composition there is a second reader and a second set of
+    /// tracks for an identical result.
+    ///
+    /// ⚠️ **AND THIS USED TO COMPARE A PLAN WITH ITSELF.** It exported the
+    /// segment spelling against the `timeRange` spelling and compared durations —
+    /// but `init(sourceURL:timeRange:)` is sugar that builds exactly that
+    /// segment, so both plans were the same value taking the same branch, and
+    /// flipping the route would not have moved either number. Whether a
+    /// composition was built is INVISIBLE in the output; it has to be asked of
+    /// the decision.
+    @Test func onePieceAtOneRateTakesNoComposition() {
+        #expect(VideoExporter.needsComposition(for: []) == false, "an untouched clip")
+        #expect(VideoExporter.needsComposition(
+            for: [VideoExportSegment(start: 0.5, end: 1.5)]
+        ) == false, "a plain trim")
+
+        #expect(VideoExporter.needsComposition(for: [
+            VideoExportSegment(start: 0, end: 1), VideoExportSegment(start: 2, end: 3)
+        ]), "two pieces cannot be one time range")
+        #expect(VideoExporter.needsComposition(
+            for: [VideoExportSegment(start: 0, end: 1, speed: 2)]
+        ), "a rate cannot be a time range either")
+    }
+
+    /// And the two spellings still agree, which is the sugar's own promise.
+    @Test func theRangeSpellingIsTheOnePieceSpelling() {
+        let sugar = VideoExportPlan(sourceURL: URL(filePath: "/x"), timeRange: 0.5...1.5)
+
+        #expect(sugar.segments == [VideoExportSegment(start: 0.5, end: 1.5)])
     }
 }

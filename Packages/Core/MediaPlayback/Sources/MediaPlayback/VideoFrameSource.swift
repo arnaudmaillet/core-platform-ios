@@ -60,7 +60,21 @@ final class VideoFrameSource {
         // and the colour attachments (primaries, transfer function, YCbCr
         // matrix) ride along on the buffer — so asking for nothing is both the
         // cheapest and the most correct request.
-        let output = AVPlayerItemVideoOutput(outputSettings: nil)
+        //
+        // ⚠️ **EXCEPT THAT A COMPOSED ITEM'S FRAMES ARE NOT IOSURFACE-BACKED
+        // UNLESS ASKED.** Measured: with a video composition attached (a
+        // transition, or the editor turning a phone clip upright), the
+        // compositor's buffers came back in the same 420v format with NO
+        // IOSurface, and `AVSampleBufferDisplayLayer` froze on them while the
+        // renderer went on dispatching thirty a second. Asking for the IOSurface
+        // property alone — no pixel format — gets IOSurface buffers in the same
+        // format, so nothing is converted; a plain decode keeps the request it
+        // always made.
+        let output = item.videoComposition == nil
+            ? AVPlayerItemVideoOutput(outputSettings: nil)
+            : AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                kCVPixelBufferIOSurfacePropertiesKey as String: [String: String]()
+            ])
         // We render the frames ourselves; without this the player also decodes
         // for a layer that does not exist.
         output.suppressesPlayerRendering = true

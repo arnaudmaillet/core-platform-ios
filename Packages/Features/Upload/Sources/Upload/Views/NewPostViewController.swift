@@ -1,3 +1,7 @@
+// `AVURLAsset` — the trim is resolved against the FILE's length, not the item's
+// declared one. See the note in `post()`.
+import AVFoundation
+import MediaPlayback
 import CoreModels
 import DesignSystem
 import UIKit
@@ -165,9 +169,24 @@ final class NewPostViewController: UIViewController {
     /// ⚠️ DRAWN AND INERT, like the editor's. Media drafts do not exist —
     /// `MediaDraftsViewController` is an empty list waiting for the notion — and
     /// `PostDraftStore` holds text only.
-    private lazy var saveDraftItem = UIBarButtonItem(
-        title: "Save draft", style: .plain, target: nil, action: nil
-    )
+    /// ⚠️ **AN ICON, NOT THE WORDS "Save draft" — AND THE REASON IS THE BAR'S
+    /// WIDTH BUDGET.** A navigation bar lays its leading items out from the
+    /// chevron inwards and collapses what will not fit into a `•••` overflow;
+    /// `navbar-leading-selector-collapse` records this screen family losing a
+    /// control to exactly that on an SE. Two words cost more than sixty points
+    /// beside a chevron and a reset arrow, which is more than a small phone has
+    /// to give. `square.and.arrow.down.badge.clock` is the system's own drawing
+    /// for "put this away for later" and was verified against the RUNTIME, not a
+    /// catalogue — a symbol that does not exist draws an empty capsule that still
+    /// takes taps, which reads as a rendering fault on somebody's phone.
+    private lazy var saveDraftItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "square.and.arrow.down.badge.clock"),
+            style: .plain, target: nil, action: nil
+        )
+        item.accessibilityLabel = "Save draft"
+        return item
+    }()
 
 
     /// What will actually be published, in order: the cover first, then the rest
@@ -614,10 +633,10 @@ final class NewPostViewController: UIViewController {
     ///
     /// Photos and videos take different routes out of the library and meet again
     /// as `ComposeMedia`: a photo is read at publish size and baked with its
-    /// edits, a video is read as a file and handed over untouched. Video editing
-    /// does not exist yet (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4), so there is
-    /// nothing to bake into one — which is why `edits` is consulted on one side
-    /// of the loop only.
+    /// edits, a video is read as a file and handed over with the part of it the
+    /// author kept. Both consult `edits`; they use different fields of it, and a
+    /// video uses only `trim` — crop and filters are still `UIImage`-to-`UIImage`
+    /// by signature (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4).
     ///
     /// The title and the six settings are NOT sent: nothing in the contract
     /// carries them (§21, §22).
@@ -649,7 +668,40 @@ final class NewPostViewController: UIViewController {
                                 "Couldn't read one of the videos. It may still be downloading from iCloud."
                             )
                         }
-                        media.append(.video(PickedVideo(sourceURL: file)))
+                        // ⚠️ **RESOLVED HERE, AGAINST THE DECLARED DURATION.**
+                        // A stored trim is two numbers that can outlive the clip
+                        // they were made for; what crosses to the composer is
+                        // the answer, already brought inside a real length.
+                        // `cuts` rather than `!isWhole`: a range covering the
+                        // whole clip is the same instruction as no range at all,
+                        // and only nil takes the exporter's passthrough.
+                        // ⚠️ **AGAINST THE FILE'S OWN LENGTH, NOT THE ITEM'S
+                        // DECLARED ONE.** The declaration is whatever vended the
+                        // item said, and it can disagree with the bytes — under
+                        // `-rich-media` a fixture whose download failed falls
+                        // back to a synthetic clip, so an item can truthfully
+                        // say 52 seconds over a file of two and a half.
+                        // Resolving against the declaration would hand the
+                        // exporter a range past the end and publish nothing.
+                        // The editor's track asks the same question of the same
+                        // asset, so the two cannot drift apart.
+                        let declared: Double
+                        if case .video(let seconds) = item.kind { declared = seconds } else { declared = 0 }
+                        let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
+                        let length = real.isFinite && real > 0 ? real : declared
+                        let timeline = (edits[item.id] ?? .untouched).timeline
+                        // ⚠️ **EVERY PIECE, AND THIS LINE USED TO TAKE ONLY THE
+                        // FIRST.** `PickedVideo` carried a single range and the
+                        // exporter a single `insertTimeRange`, so a timeline of
+                        // several pieces published its opening one and dropped
+                        // the rest — silently, because what came out was a
+                        // perfectly good video. The mapping is shared with the
+                        // editor's preview, so what is published is what was
+                        // watched.
+                        let kept = MediaTimelining.exportSegments(timeline, withinSource: length)
+                        media.append(
+                            .video(PickedVideo(sourceURL: file, keptPieces: kept))
+                        )
                         continue
                     }
                     guard let image = await library.thumbnail(for: item.id, size: Self.publishPixels) else {

@@ -267,22 +267,46 @@ struct MediaEditorCropTests {
     /// BACK AFTER.** Laying a picture into a frame is a decision about a picture
     /// the author is still choosing; leaving the glyph there offers an act with
     /// nothing to act on. Losing it permanently would be the real defect.
+    ///
+    /// ⚠️ **THE UNDO ARROW NO LONGER GOES WITH THE MODE, AND THAT IS A CHANGE
+    /// RATHER THAN A REGRESSION.** It used to belong to crop alone; it is now one
+    /// arrow whose MEANING is whichever mode is open — the rectangle and the
+    /// angle in crop, the cut in the timeline. Two arrows a few points apart,
+    /// each undoing a different thing, with nothing on screen to say which, is
+    /// the alternative. So what this asserts is that fill/fit steps aside and
+    /// comes back, and that the leading side keeps its two items throughout.
     @Test func fillAndFitStepAsideForTheModeAndReturnWithIt() async throws {
         let screen = open(Self.items(1))
         #expect(screen.editor.debugFitActionName != nil, "guard: the glyph is there to begin with")
 
         choose(Mode.crop, on: screen)
         let whileCropping = screen.editor.debugFitActionName
-        let undoWhileCropping = screen.editor.debugBarOffersCropReset
 
         choose(Mode.filters, on: screen)
 
-        #expect(undoWhileCropping, "undo was offered while the surface was up")
-        #expect(whileCropping == nil, "and fill/fit was not: \(String(describing: whileCropping))")
-        #expect(!screen.editor.debugBarOffersCropReset, "undo goes with the mode")
+        #expect(whileCropping == nil, "fill/fit stayed: \(String(describing: whileCropping))")
         #expect(screen.editor.debugFitActionName != nil,
                 "and fill/fit is back: \(String(describing: screen.editor.debugFitActionName))")
-        #expect(screen.editor.debugLeadingBarItems.count == 1, "the leading side is the draft again")
+        #expect(screen.editor.debugLeadingBarItems.count == 2,
+                "the leading side is the draft and the undo arrow")
+    }
+
+    /// ⚠️ **THE ARROW STANDS IN THE BAR PERMANENTLY NOW, SO IT HAS TO SAY WHEN IT
+    /// CANNOT ACT.** `resetCrop` begins `guard let id = croppingID`, and that is
+    /// set only between `enterCrop` and `exitCrop` — so outside the surface the
+    /// arrow drew ENABLED over a photograph carrying a crop and did nothing when
+    /// tapped. It used to be hidden by living only in the crop bar.
+    @Test func theUndoArrowIsDeadOnceTheCropSurfaceIsGone() async throws {
+        let screen = open(Self.items(1))
+        choose(Mode.crop, on: screen)
+        try await settle(until: { screen.editor.debugCropSurface.debugHasPicture })
+        screen.editor.debugCropSurface.setAngle(8)
+        #expect(screen.editor.debugCanResetCrop, "guard: there is something to undo while cropping")
+
+        choose(Mode.filters, on: screen)
+
+        #expect(screen.editor.debugCanResetCrop == false,
+                "the arrow offers to undo a crop it can no longer reach")
     }
 
     @Test func undoIsOfferedOnlyWhenThereIsSomethingToUndo() async throws {

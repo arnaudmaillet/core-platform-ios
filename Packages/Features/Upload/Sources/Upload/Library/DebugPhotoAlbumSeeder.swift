@@ -24,6 +24,14 @@ enum DebugPhotoAlbumSeeder {
 
     /// Which assets land in which album. The ranges overlap a little, exactly as
     /// real albums do — the same photograph is often in two of them.
+    ///
+    /// ⚠️ **THE FIRST WINDOW STARTS AT ZERO, AND WITH VIDEOS IN THE LIBRARY THAT
+    /// IS WHAT PUTS CLIPS IN AN ALBUM.** The fetch is newest-first and
+    /// `simctl addmedia` stamps what it adds as the newest thing there, so the
+    /// videos `Scripts/seed-simulator-videos.sh` puts in sit at the head of the
+    /// run and land in the leading windows. Said out loud because it is ordering
+    /// luck rather than a rule: an album is a slice of a sorted list, and nothing
+    /// here promises each album a clip.
     private static let plan: [(title: String, drop: Int, take: Int)] = [
         ("Paris 2026", 0, 8),
         ("Family", 5, 6),
@@ -94,7 +102,24 @@ enum DebugPhotoAlbumSeeder {
         try await PHPhotoLibrary.shared().performChanges {
             let options = PHFetchOptions()
             options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            let assets = PHAsset.fetchAssets(with: .image, options: options)
+            // ⚠️ **IMAGES *AND* VIDEOS, AND FETCHING ONLY IMAGES WAS A HOLE.**
+            // `PhotosMediaLibrary` admits both everywhere it looks, so an album
+            // seeded from stills alone showed a count and a grid that disagreed
+            // with what the same library reports for "Recents" — and the album
+            // tabs, which is where a person goes looking for a clip, had none.
+            //
+            // ⚠️ **AND THE PREDICATE IS WRITTEN OUT HERE RATHER THAN BORROWED.**
+            // `PhotosMediaLibrary.contents` is the same shape and cannot be
+            // reached: that type conforms to a `@MainActor` protocol, so its
+            // statics are main-actor isolated, and this function is deliberately
+            // `nonisolated` — see below for what happens when it is not. A
+            // `PHFetchOptions` is not `Sendable` either, so it could not cross
+            // even if it were reachable.
+            options.predicate = NSPredicate(
+                format: "mediaType == %d || mediaType == %d",
+                PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue
+            )
+            let assets = PHAsset.fetchAssets(with: options)
             guard assets.count > drop else { return }
 
             var picked: [PHAsset] = []

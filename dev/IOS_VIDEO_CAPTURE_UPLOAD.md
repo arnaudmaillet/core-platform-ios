@@ -219,12 +219,28 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
      `AVMutableVideoCompositionLayerInstruction` transform under `Configuration`
      and do the look some other way. Pick when the trim slice lands, not before —
      trim needs none of this.
-  3. **Trim needs no composition at all** — `AVAssetExportSession.timeRange` —
-     so it can ship regardless of how (2) lands, and it is the most-used video
-     edit. `VideoExporter.export` takes a `URL` today and would need to accept a
-     plan (time range, and a composition BUILDER rather than a composition: a
-     composition must be built where the asset lives, and `AVComposition` is not
-     `Sendable` while `AVVideoComposition` is only `@unchecked` so).
+  3. **Trim is DONE (2026-09-15) and needed no composition at all** —
+     `AVAssetExportSession.timeRange`. `MediaEdits` carries a `MediaTrim` in
+     SECONDS (a clip is the same length whatever size it is drawn at, so the
+     "normalised, never pixels" rule does not apply); `MediaTrimming` holds the
+     arithmetic, pure, because a pan's translation cannot be set from a test;
+     `MediaTrimStripView` is a band tenant that announces on release like the
+     crop surface; `VideoFilmstrip` samples frames with **tolerance zero on both
+     sides** — reproduced here, the default returns six requests as two
+     pictures. `VideoExporter` now takes a `VideoExportPlan`, which is where the
+     composition builder will go.
+
+     Two fixture defects fell out of it: `DebugMediaLibrary` declared invented
+     durations over clips of a different length, and
+     `PlaceholderVideoFetcher`'s cache key omitted the duration, so asking for a
+     shorter clip silently returned a longer one already on disk.
+
+  4. **What is actually left is crop and filters**, which is the only part that
+     needs (2). `VideoExportPlan` is where the composition slot goes, and it must
+     be a BUILDER rather than a composition: a composition has to be built where
+     its asset lives, `AVComposition` is not `Sendable`, and `AVVideoComposition`
+     is `Sendable` only `@unchecked`. It is deliberately not there yet — an
+     unused slot is dead code.
 
   When crop does land, `MediaCrop.rect` is fractions of the **turned bounding
   box**, which is invisible at angle zero where nearly every existing test lives
@@ -235,3 +251,68 @@ P1 delivered exactly what it promised: "pick a video → it publishes and plays
 (locally)", end to end in mock mode, de-risking everything before the backend
 lands — the same build-ahead pattern used for snap-feed Phases 1–2. Everything
 it cannot do against a real fleet is enumerated in `BACKEND_GAPS.md` §23.
+
+---
+
+## 6. What a real device clip found (2026-09-15)
+
+Until this date **no simulator in this project had ever held a video**. A fresh
+device ships 26 assets and every one is a still — `select ZKIND, count(*) from
+ZASSET group by ZKIND` returns `0|26`, kind 1 absent — and `-upload-fake-library`
+substitutes `DebugMediaLibrary`, which answers a different question. So the
+entire `PhotosMediaLibrary` → `PHAsset` → `AVURLAsset` path had never run.
+`Scripts/seed-simulator-videos.sh` puts eight real clips in, and the first launch
+against them found two defects.
+
+### 6.1 The picker crashed the process on the first real clip — FIXED
+
+`EXC_BREAKPOINT` on `com.apple.photos.requestAVAsset`:
+
+```
+_dispatch_assert_queue_fail
+swift_task_isCurrentExecutorWithFlagsImpl
+closure #1 in closure #1 in PhotosMediaLibrary.videoFile(for:)
+-[PHImageManager requestAVAssetForAsset:options:resultHandler:]_block_invoke_4
+```
+
+`MediaLibraryReading` is `@MainActor`, so a closure written inside the
+conforming type inherits main-actor isolation; `PHImageManager` imports its
+result handler as a bare block with no `@Sendable` and calls it on its own
+queue. The compiler accepts it and Swift's dynamic executor check fires.
+
+⚠️ **The repository already had this lesson written down, one file away.**
+`DebugPhotoAlbumSeeder.performCreate` carries the same stack and took
+`nonisolated` as its cure. `videoFile` fell into it anyway because nothing could
+reach it. Fixed by marking all three Photos handlers `@Sendable`; the export
+session then needs `nonisolated(unsafe)` to reach its `Task`, because
+`AVAssetExportSession`'s `Sendable` conformance is *unavailable*.
+
+### 6.2 The default render path drops `preferredTransform` — NOT FIXED
+
+⚠️ **A clip a phone recorded upright plays on its side.** A phone writes
+LANDSCAPE frames plus a 90° rotation in the track; `AVPlayerItemVideoOutput`
+hands out the decoded pixel buffers untransformed, and nothing between there and
+`AVSampleBufferDisplayLayer` re-applies it — `VideoFrameRenderer` never reads
+`preferredTransform`, and the only `load(.preferredTransform)` in the package is
+`VideoExporter`'s.
+
+Measured with `bunny-rotated-7s.mp4` (1280×720 pixels, `rotation=90` side data),
+picked in the Upload editor:
+
+| surface | applies the rotation |
+|---|---|
+| picker grid tile (`PHImageManager.requestImage`) | **yes** |
+| timeline filmstrip (`AVAssetImageGenerator`, `appliesPreferredTrackTransform`) | **yes** |
+| editor canvas, default `AVSampleBufferDisplayLayer` | **no** |
+| editor canvas, `-avplayer-render` | **yes** |
+
+The A/B on one build is what isolates it: `AVPlayerLayer` honours the transform
+and the sample-buffer path does not, so this is a regression the 2026-08-02
+pivot introduced and no fixture could see — every synthesized clip in this repo
+has an identity transform.
+
+It is not an Upload defect: `VideoRenderView` is the feed's, the profile
+gallery's and the map preview's surface too. The fix belongs in
+`Core/MediaPlayback`, and the cheap shape is a layer transform (swap the bounds,
+rotate, let `videoGravity` operate on the pre-rotation box) rather than rotating
+pixel buffers per frame.

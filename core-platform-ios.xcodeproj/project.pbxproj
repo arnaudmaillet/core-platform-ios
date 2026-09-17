@@ -320,6 +320,9 @@
 				DEVELOPMENT_TEAM = 4ZZ7J5Z8ZX;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Record a video to share in a post.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Capture sound while recording a video to share.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose photos and videos from your library to share in a post.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -351,6 +354,9 @@
 				DEVELOPMENT_TEAM = 4ZZ7J5Z8ZX;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Record a video to share in a post.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Capture sound while recording a video to share.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose photos and videos from your library to share in a post.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

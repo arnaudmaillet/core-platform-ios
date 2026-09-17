@@ -2,6 +2,19 @@ import AVFoundation
 import CoreMedia
 import Foundation
 
+/// Where a loaded arrangement begins, and what it loops.
+public struct VideoLoadLanding: Sendable, Equatable {
+    /// The played second the new item begins at.
+    public var seconds: Double
+    /// The stretch of played seconds to loop, or nil for the whole item.
+    public var loop: ClosedRange<Double>?
+
+    public init(seconds: Double, loop: ClosedRange<Double>? = nil) {
+        self.seconds = seconds
+        self.loop = loop
+    }
+}
+
 /// The app-wide video playback subsystem for the snap feed: a small pool of
 /// reused `AVPlayer`s (video playback is memory-heavy — never one player per
 /// cell), plus preroll for the next page. It plugs into the snap feed's
@@ -337,17 +350,12 @@ public final class VideoPlaybackController {
             return
         }
 
-        detach(key: key, view: view)
-        let player = idlePlayers.popLast() ?? AVPlayer()
         let item = AVPlayerItem(url: playableURL)
-        itemCreations += 1
         // Set BEFORE the item goes live, so the very first segment request
         // already asks for the capped rung — set afterwards, the player has
         // usually committed to a higher one and the cap only takes effect at
         // the next switch point.
         item.preferredPeakBitRate = peakBitRate
-        installLoop(for: player, item: item)
-        player.replaceCurrentItem(with: item)
         // ⚠️ AFTER the item is in and BEFORE `play`, so the first frame decoded
         // is the one the viewer left on rather than the clip's first.
         //
@@ -355,12 +363,37 @@ public final class VideoPlaybackController {
         // parked player and joining an active one — carry a live playhead
         // already, and seeking either would drag a picture the viewer is
         // currently watching.
-        if let resume = takeResume(scope: scope, url: mediaURL) {
+        bindFresh(
+            item, in: view, key: key, url: mediaURL, scope: scope,
+            startingAt: takeResume(scope: scope, url: mediaURL)
+        )
+        VideoPlaybackTrace.emit("bound \(mediaURL.lastPathComponent) scope=\(scope ?? "-")")
+    }
+
+    /// Loans a player, gives it `item`, binds it to `view` and starts it — the
+    /// tail every first start shares.
+    ///
+    /// ⚠️ **`url` IS NIL FOR AN ARRANGEMENT, AND THAT IS ITS IDENTITY RULE.** A
+    /// player registered under a URL can be joined, parked and resumed by any
+    /// surface asking for that URL; a player running an EDITED arrangement of
+    /// the file is not that file, and must not be handed to a surface that asked
+    /// for the file as shot.
+    private func bindFresh(
+        _ item: AVPlayerItem, in view: VideoRenderView, key: ObjectIdentifier,
+        url: URL?, scope: String?, startingAt start: CMTime?, looping loop: Looping? = nil
+    ) {
+        detach(key: key, view: view)
+        let player = idlePlayers.popLast() ?? AVPlayer()
+        itemCreations += 1
+        installLoop(for: player, item: item)
+        settle(loop, on: item, of: player)
+        player.replaceCurrentItem(with: item)
+        if let start {
             // ⚠️ The completion handler is what picks the SYNCHRONOUS overload.
-            // This runs inside an `async` function, where the bare call resolves
-            // to `await player.seek(...)` — which would suspend this start until
+            // This runs under an `async` caller, where the bare call resolves to
+            // `await player.seek(...)` — which would suspend this start until
             // the seek finished, between `replaceCurrentItem` and `play`.
-            player.seek(to: resume, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+            player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
         }
         renderer(for: player)?.setItem(item)
         player.isMuted = true
@@ -368,10 +401,241 @@ public final class VideoPlaybackController {
         bind(player, to: view)
         activePlayers[key] = player
         surfaces[key] = WeakSurface(view: view)
-        playingURL[key] = mediaURL
+        playingURL[key] = url
         playingScope[key] = scope
         player.play()
-        VideoPlaybackTrace.emit("bound \(mediaURL.lastPathComponent) scope=\(scope ?? "-")")
+    }
+
+    /// Plays an ARRANGEMENT of a file in `view`: its pieces laid end to end in
+    /// the order given, each at its own rate, as ONE item — the very composition
+    /// `VideoExporter` builds.
+    ///
+    /// ⚠️ **ONE ITEM, SO A PIECE BOUNDARY IS AN EDIT AND NOT A SEEK.** The
+    /// editor used to play the file and, at each piece's end, SEEK it to the
+    /// next piece's start — which after a re-order is a jump across the file,
+    /// asynchronous, decoded forward from a keyframe, and reported as *"une
+    /// mini pause / glitch"* between the pieces. Inside one composition
+    /// AVFoundation has the next piece ready before it is needed.
+    ///
+    /// ⚠️ **THE ITEM'S SECONDS ARE THE ARRANGEMENT'S PLAYED SECONDS.** Rates are
+    /// built into the item, so the player itself always runs at 1 — a `setRate`
+    /// on top would play a 2× piece at 4×.
+    ///
+    /// ⚠️ **ALREADY BOUND? THE ITEM IS SWAPPED IN PLACE.** No detach, no poster,
+    /// no restart: the surface keeps its last frame until the new item draws,
+    /// and a clip the author paused stays paused. An empty plan plays the file
+    /// as shot, where played seconds and file seconds are the same thing.
+    ///
+    /// `start` is asked AFTER everything asynchronous has happened, on the main
+    /// actor, just before the item goes in: where the new item should begin, or
+    /// nil to abandon a load that the world has moved past.
+    public func load(
+        _ plan: VideoExportPlan, in view: VideoRenderView,
+        at start: @MainActor () -> Double?
+    ) async {
+        await load(plan, in: view) { start().map { VideoLoadLanding(seconds: $0) } }
+    }
+
+    /// Plays an arrangement, as `load(_:in:at:)` does, landing where `landing`
+    /// says — and, when it names one, looping a stretch of the arrangement's
+    /// played seconds instead of the whole item.
+    ///
+    /// ⚠️ **THE RANGE IS ASKED WITH THE START, AFTER EVERYTHING ASYNCHRONOUS.**
+    /// A range decided when the load was asked for may belong to a cut the
+    /// author has since left.
+    ///
+    /// ⚠️ **AND A FILE NEVER TAKES ONE.** When the arrangement cannot be built
+    /// the item is the file as shot, whose seconds are not the arrangement's: a
+    /// range written on it would loop some other stretch of film.
+    public func load(
+        _ plan: VideoExportPlan, in view: VideoRenderView,
+        landing: @MainActor () -> VideoLoadLanding?
+    ) async {
+        forgetDeadSurfaces()
+        let key = ObjectIdentifier(view)
+        let token = nextGenerationToken()
+        generation[key] = token
+        let resolved: URL
+        do {
+            resolved = try await source.playableURL(for: plan.sourceURL)
+        } catch {
+            VideoPlaybackTrace.emit("load resolve FAILED \(plan.sourceURL.lastPathComponent): \(error)")
+            return
+        }
+        guard generation[key] == token else { return }
+        let asset = asShotAsset(resolved)
+        let item: AVPlayerItem
+        let built: Bool
+        // ⚠️ ANY PIECE AT ALL IS A COMPOSITION HERE, UNLIKE THE EXPORT. One piece
+        // at 1x is a `timeRange` to an export session, but a player's clock would
+        // then read the FILE's seconds, and the item's seconds are promised to be
+        // the arrangement's.
+        // ⚠️ AND ALWAYS UPRIGHT. The sample-buffer path ignores a track's
+        // transform, so a phone clip plays on its side unless a video composition
+        // turns it — and a canvas that turned upright only while it carried a
+        // transition would rotate under the author as they edited.
+        // ⚠️ AND ONE THAT CANNOT BE BUILT FALLS BACK TO THE FILE. Nothing bound at
+        // all is worse than the clip as shot: the author loses the picture, not
+        // just the edit.
+        if let arranged = try? await VideoExporter.arrangement(
+            of: asset, cut: plan.segments, orientation: .always
+        ) {
+            item = AVPlayerItem(asset: arranged.asset)
+            item.videoComposition = arranged.videoComposition
+            item.audioMix = arranged.audioMix
+            built = true
+            if plan.segments.isEmpty {
+                asShotOrientation = (resolved, arranged.videoComposition)
+            }
+        } else {
+            VideoPlaybackTrace.emit("load build FAILED \(plan.sourceURL.lastPathComponent)")
+            item = AVPlayerItem(asset: asset)
+            built = false
+            if asShotOrientation?.url == resolved {
+                item.videoComposition = asShotOrientation?.composition
+            }
+        }
+        guard generation[key] == token else { return }
+        if !plan.segments.isEmpty, asShotOrientation?.url != resolved {
+            // The handle's file-as-shot view needs the same turn; worked out
+            // once per file — a few header reads the asset has already made.
+            asShotOrientation = (
+                resolved,
+                try? await VideoExporter.arrangement(of: asset, cut: [], orientation: .always)
+                    .videoComposition
+            )
+            guard generation[key] == token else { return }
+        }
+        // ⚠️ SPECTRAL, AS THE EXPORT IS: a sped-up piece keeps its voice's pitch,
+        // and a scaled edit is governed by the item's algorithm even at 1x.
+        item.audioTimePitchAlgorithm = .spectral
+        guard let landed = landing(), generation[key] == token else { return }
+        let range = built ? landed.loop.flatMap(Self.loopable) : nil
+        let loops: Looping? = built ? range.map(Looping.range) ?? .wholeItem : nil
+        var seconds = landed.seconds.isFinite ? max(landed.seconds, 0) : 0
+        if let range, !range.contains(seconds) { seconds = range.lowerBound }
+        let at = CMTime(seconds: seconds, preferredTimescale: 600)
+        if let player = activePlayers[key] {
+            swap(item, into: player, at: at, looping: loops)
+        } else {
+            bindFresh(item, in: view, key: key, url: nil, scope: nil, startingAt: at, looping: loops)
+            player(in: view)?.defaultRate = 1
+        }
+        VideoPlaybackTrace.emit(
+            "loaded \(plan.sourceURL.lastPathComponent) pieces=\(plan.segments.count) at=\(seconds)"
+                + (range.map { " loop=\($0.lowerBound)...\($0.upperBound)" } ?? "")
+        )
+    }
+
+    private func player(in view: VideoRenderView) -> AVPlayer? {
+        activePlayers[ObjectIdentifier(view)]
+    }
+
+    /// Replaces the item a bound player is running, keeping everything else.
+    private func swap(
+        _ item: AVPlayerItem, into player: AVPlayer, at start: CMTime, looping loop: Looping? = nil
+    ) {
+        let key = ObjectIdentifier(player)
+        let wasPaused = player.timeControlStatus == .paused
+        // ⚠️ A SEEK CHASED ON THE OLD ITEM BELONGS TO THE OLD CLOCK — dropped, as
+        // `retire` drops it, or its completion would chase the new item to a
+        // position measured on the old one.
+        chased.removeValue(forKey: key)
+        seeking.remove(key)
+        item.preferredPeakBitRate = player.currentItem?.preferredPeakBitRate ?? 0
+        itemCreations += 1
+        installLoop(for: player, item: item)
+        settle(loop, on: item, of: player)
+        player.replaceCurrentItem(with: item)
+        player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+        // ⚠️ AND A PAUSE ANCHOR MOVES TO THE NEW START, or the next resume would
+        // pin the new item back to where the old one was stopped.
+        if pausedAnchors[key] != nil { pausedAnchors[key] = start }
+        // ⚠️ THE VIDEO OUTPUT IS PER ITEM: without this the renderer keeps
+        // reading the item that has just gone, and the picture freezes.
+        renderer(for: player)?.setItem(item)
+        // ⚠️ THE RATE IS IN THE ITEM NOW. A player reused from a clip that was
+        // told to run at 2x would otherwise play every arrangement twice over.
+        player.defaultRate = 1
+        if wasPaused {
+            player.pause()
+        } else {
+            player.rate = 1
+        }
+    }
+
+    /// What a player running an ARRANGEMENT loops.
+    enum Looping: Equatable {
+        /// The whole item, from its start.
+        case wholeItem
+        /// A stretch of the arrangement's played seconds.
+        case range(ClosedRange<Double>)
+    }
+
+    /// ⚠️ **AN ENTRY ONLY WHILE THE PLAYER RUNS AN ARRANGEMENT.** Every change
+    /// of item goes through `bindFresh`, `swap` or `retire`, and each of them
+    /// writes this: no entry means a file, whose seconds are not an
+    /// arrangement's, and a range written on it would loop some other film.
+    private var looping: [ObjectIdentifier: Looping] = [:]
+
+    /// Records what `player` loops, and ends `item` where its range ends.
+    private func settle(_ loop: Looping?, on item: AVPlayerItem, of player: AVPlayer) {
+        looping[ObjectIdentifier(player)] = loop
+        if case .range(let range) = loop {
+            item.forwardPlaybackEndTime = CMTime(seconds: range.upperBound, preferredTimescale: 600)
+        }
+    }
+
+    /// Where the player goes back to when its item ends.
+    private func loopStart(of player: AVPlayer) -> CMTime {
+        guard case .range(let range) = looping[ObjectIdentifier(player)] else { return .zero }
+        return CMTime(seconds: range.lowerBound, preferredTimescale: 600)
+    }
+
+    /// The shortest stretch worth looping: a tenth of a second is three frames,
+    /// and anything shorter would spend its time seeking.
+    static let shortestLoop: Double = 0.1
+
+    /// `range`, if a player can loop it.
+    static func loopable(_ range: ClosedRange<Double>) -> ClosedRange<Double>? {
+        guard range.lowerBound.isFinite, range.upperBound.isFinite else { return nil }
+        let lower = max(range.lowerBound, 0)
+        guard range.upperBound - lower >= shortestLoop else { return nil }
+        return lower...range.upperBound
+    }
+
+    /// Loops `range` of the arrangement playing in `view` — the few seconds
+    /// around a cut while its transition is being chosen — or, with `nil`, the
+    /// whole item again.
+    ///
+    /// ⚠️ **`forwardPlaybackEndTime`, SO THE PLAYER ITSELF STOPS AT THE END.** A
+    /// time observer that seeked back would see the playhead only after it had
+    /// passed the end, and show film from past the range for a frame or more.
+    /// The item posts its did-play-to-end at the forward end time, and the loop
+    /// observer takes it back to the range's start.
+    ///
+    /// ⚠️ **A NEW RANGE GOES TO ITS START, EXACTLY, AND NEVER STARTS THE CLIP.**
+    /// Whether it runs is the caller's to say; a paused clip is shown at the
+    /// start of what it will loop.
+    ///
+    /// Returns whether the range was taken: false when nothing is bound, when
+    /// the item is a file rather than an arrangement, or when the range is too
+    /// short to loop.
+    @discardableResult
+    public func setLoopRange(_ range: ClosedRange<Double>?, in view: VideoRenderView) -> Bool {
+        guard let player = watchedPlayer(in: view), let item = player.currentItem else { return false }
+        let key = ObjectIdentifier(player)
+        guard looping[key] != nil else { return false }
+        guard let range else {
+            looping[key] = .wholeItem
+            item.forwardPlaybackEndTime = .invalid
+            return true
+        }
+        guard let loop = Self.loopable(range) else { return false }
+        looping[key] = .range(loop)
+        item.forwardPlaybackEndTime = CMTime(seconds: loop.upperBound, preferredTimescale: 600)
+        seek(toSeconds: loop.lowerBound, in: view, toleranceSeconds: 0)
+        return true
     }
 
     /// Brings a clip to its first frame and stops there, so arriving at it
@@ -672,6 +936,31 @@ public final class VideoPlaybackController {
         return true
     }
 
+    /// Plays the clip in `view` at `rate` — 1 is as shot, 2 twice as fast.
+    ///
+    /// ⚠️ **`defaultRate` FIRST, AND `rate` ONLY IF IT IS ALREADY RUNNING.**
+    /// Assigning `player.rate` STARTS playback: a paused clip told to run at 2×
+    /// would begin playing on the spot, which is not what "set the speed" means
+    /// and would undo a pause the author asked for. `defaultRate` (iOS 16) is the
+    /// rate the next `play()` will use, so the two together give "from now on,
+    /// this fast" without deciding whether it is moving.
+    ///
+    /// ⚠️ **AND THE PITCH IS NOT THIS CALL'S TO SET.** `AVPlayerItem`'s
+    /// `audioTimePitchAlgorithm` defaults to `.spectral`, which keeps a voice at
+    /// its own pitch through a rate change — the same default `VideoExporter`
+    /// relies on, so what the author hears in the preview is what the export
+    /// produces.
+    ///
+    /// Returns whether there was a player to move.
+    @discardableResult
+    public func setRate(_ rate: Double, in view: VideoRenderView) -> Bool {
+        guard let player = watchedPlayer(in: view) else { return false }
+        guard rate.isFinite, rate > 0 else { return false }
+        player.defaultRate = Float(rate)
+        if player.timeControlStatus != .paused { player.rate = Float(rate) }
+        return true
+    }
+
     /// Where the clip `view` is drawing has got to, as a fraction of its
     /// length, with the length in seconds beside it.
     ///
@@ -761,16 +1050,195 @@ public final class VideoPlaybackController {
     /// then catches up in lurches. A quarter-second either way is inside what
     /// the eye reads as "there", and it lets the player answer from frames it
     /// already has.
-    public func seek(toFraction fraction: Double, in view: VideoRenderView) {
+    /// ⚠️ **`toleranceSeconds` DEFAULTS TO THE QUARTER SECOND THIS ALWAYS USED.**
+    /// A scrubber that knows how fast it is moving can do better — see
+    /// `MediaTimelining.seekTolerance` — but a caller that does not know should
+    /// keep getting the answer that has always worked.
+    public func seek(
+        toFraction fraction: Double, in view: VideoRenderView, toleranceSeconds: Double = 0.25
+    ) {
         guard let player = watchedPlayer(in: view), let item = player.currentItem else { return }
         let duration = item.duration.seconds
         guard duration.isFinite, duration > 0 else { return }
         let seconds = duration * min(max(fraction, 0), 1)
-        let tolerance = CMTime(seconds: 0.25, preferredTimescale: 600)
-        player.seek(
-            to: CMTime(seconds: seconds, preferredTimescale: 600),
-            toleranceBefore: tolerance, toleranceAfter: tolerance
+        let tolerance = CMTime(
+            seconds: max(toleranceSeconds, 0), preferredTimescale: 600
         )
+        let target = CMTime(seconds: seconds, preferredTimescale: 600)
+        // ⚠️ **THE PAUSE ANCHOR MOVES WITH A DELIBERATE SEEK, AND NOT MOVING IT
+        // UNDID EVERY SCRUB.** `setPaused(true)` files where the picture was so
+        // that a resume can pin an HLS stream back after its timebase ran on
+        // while stopped. A scrub wears exactly that shape — pause, go somewhere
+        // else, resume — and the resume found a difference of seconds and called
+        // it drift: the clip was dragged back to where the finger went DOWN.
+        // Reported from the editor's timeline as "the video goes back to its
+        // starting point instead of carrying on from the cursor", reproduced in
+        // `ScrubWhilePausedTests` at 0.098 after a scrub to 0.75.
+        //
+        // ⚠️ **MOVED, NOT DELETED — and deleting it is the fix that looks
+        // right.** Retiring the anchor here would fix the scrub and quietly give
+        // up the drift correction for any stream scrubbed while paused, which is
+        // the case most likely to need it. Only an EXISTING anchor is updated:
+        // filing one for a player that is not paused would hand
+        // `setPaused(false)` an anchor it never took.
+        let key = ObjectIdentifier(player)
+        if pausedAnchors[key] != nil { pausedAnchors[key] = target }
+        lastSeekTolerance = toleranceSeconds
+        chased[key] = Chase(target: target, tolerance: tolerance)
+        guard !seeking.contains(key) else { return }
+        chase(player)
+    }
+
+    /// Moves the clip in `view` to `seconds` of its ITEM.
+    ///
+    /// ⚠️ **BY SECONDS, BECAUSE A FRACTION NEEDS A DURATION THE ITEM MAY NOT HAVE
+    /// YET.** An item made from a URL does not know how long it is for its first
+    /// hundred milliseconds or so (measured), and `seek(toFraction:)` drops every
+    /// request made in that window — which is exactly the window after the
+    /// editor has swapped in a new item and the finger is still moving. A caller
+    /// that already knows where it wants to be should not need the length.
+    public func seek(
+        toSeconds seconds: Double, in view: VideoRenderView, toleranceSeconds: Double = 0.25
+    ) {
+        guard let player = watchedPlayer(in: view), player.currentItem != nil,
+              seconds.isFinite
+        else { return }
+        let target = CMTime(seconds: max(seconds, 0), preferredTimescale: 600)
+        let tolerance = CMTime(seconds: max(toleranceSeconds, 0), preferredTimescale: 600)
+        let key = ObjectIdentifier(player)
+        if pausedAnchors[key] != nil { pausedAnchors[key] = target }
+        lastSeekTolerance = toleranceSeconds
+        chased[key] = Chase(target: target, tolerance: tolerance)
+        guard !seeking.contains(key) else { return }
+        chase(player)
+    }
+
+    /// Where the clip in `view` has got to, in seconds of its ITEM — no length
+    /// needed, for the reason `seek(toSeconds:)` needs none.
+    public func playheadSeconds(in view: VideoRenderView) -> Double? {
+        guard let item = watchedPlayer(in: view)?.currentItem else { return nil }
+        let seconds = item.currentTime().seconds
+        return seconds.isFinite ? seconds : nil
+    }
+
+    /// Shows the FILE as shot in `view`, at once, in place of whatever it is
+    /// running — the editor's view of a trim handle being dragged, which may be
+    /// standing on film the loaded arrangement does not contain.
+    ///
+    /// ⚠️ **SYNCHRONOUS, AND THAT IS THE POINT.** An asynchronous swap to the
+    /// file could land AFTER the release that should have replaced it with the
+    /// new arrangement, and leave the editor showing raw film for good. Nothing
+    /// here waits: the URL must be one this controller's source resolves to
+    /// itself (the editor's files are local), and a surface with no player is
+    /// left alone.
+    ///
+    /// Returns whether there was a player to swap.
+    @discardableResult
+    public func showAsShot(_ file: URL, in view: VideoRenderView, at seconds: Double) -> Bool {
+        guard let player = watchedPlayer(in: view) else { return false }
+        let item = AVPlayerItem(asset: asShotAsset(file))
+        item.audioTimePitchAlgorithm = .spectral
+        // ⚠️ UPRIGHT, FROM THE TURN THE LAST LOAD OF THIS FILE WORKED OUT. It
+        // cannot be built here: the swap is synchronous on purpose.
+        if let known = asShotOrientation, known.url == file {
+            item.videoComposition = known.composition
+        } else {
+            VideoPlaybackTrace.emit("showAsShot without an orientation for \(file.lastPathComponent)")
+        }
+        swap(item, into: player, at: CMTime(seconds: max(seconds, 0), preferredTimescale: 600))
+        return true
+    }
+
+    /// ⚠️ ONE ASSET PER FILE, KEPT: an asset that has already read its header
+    /// hands a new item its length at once, which is the difference between a
+    /// swapped-in file that answers the next seek and one that drops it.
+    private func asShotAsset(_ file: URL) -> AVURLAsset {
+        if let cached = asShot, cached.url == file { return cached }
+        let asset = AVURLAsset(url: file)
+        asShot = asset
+        return asset
+    }
+
+    private var asShot: AVURLAsset?
+    /// The video composition that turns the file as shot upright — `nil` when
+    /// it is stored upright already — for the last file a load resolved.
+    private var asShotOrientation: (url: URL, composition: AVVideoComposition?)?
+
+    /// Where a scrub wants the picture next, waiting for the current seek to
+    /// finish.
+    private struct Chase {
+        let target: CMTime
+        let tolerance: CMTime
+    }
+
+    private var chased: [ObjectIdentifier: Chase] = [:]
+    private var seeking: Set<ObjectIdentifier> = []
+    private var lastSeekTolerance: Double?
+    private var seeksLanded = 0
+    private var seeksCancelled = 0
+
+    /// ⚠️ **ONE SEEK IN FLIGHT, ALWAYS CHASING THE LATEST POSITION — AND ASKING
+    /// SIXTY TIMES A SECOND WITHOUT THIS IS WHY SCRUBBING LURCHED.** A new
+    /// `seek` CANCELS the one still running. A finger on the track produces a
+    /// sample per vsync, so each request killed its predecessor and almost none
+    /// ever landed: the picture sat still and then jumped, which is exactly what
+    /// was reported — "if I scroll fast the video jumps instead of progressing
+    /// frame by frame", and worse in reverse, where every frame costs a decode
+    /// forward from the previous keyframe.
+    ///
+    /// This is Apple's documented scrubbing shape (their sample code calls the
+    /// stored position `chaseTime`): record where the finger is now, and when the
+    /// seek in flight reports back, go to wherever the finger has since got to.
+    /// Every request is honoured — either by being seeked to, or by being
+    /// superseded by a newer one — and none is cancelled midway.
+    ///
+    /// ⚠️ **THE COMPLETION HANDLER IS `NS_SWIFT_SENDABLE` AND
+    /// `NS_SWIFT_NONISOLATED`** — checked in `AVPlayer.h`, not assumed — so it
+    /// runs off the main actor and the hop below is required rather than
+    /// defensive. `PhotosMediaLibrary.videoFile` records what happens when a
+    /// framework is NOT annotated this way: the compiler accepts a main-actor
+    /// closure and the process traps at runtime. Here the compiler refuses
+    /// outright, which is the annotation doing its job.
+    private func chase(_ player: AVPlayer) {
+        let key = ObjectIdentifier(player)
+        guard let wanted = chased.removeValue(forKey: key) else {
+            seeking.remove(key)
+            return
+        }
+        seeking.insert(key)
+        let item = player.currentItem.map(ObjectIdentifier.init)
+        player.seek(
+            to: wanted.target,
+            toleranceBefore: wanted.tolerance, toleranceAfter: wanted.tolerance
+        ) { @Sendable [weak self, weak player] finished in
+            Task { @MainActor in
+                guard let self, let player else { return }
+                // ⚠️ A SEEK THAT WAS RUNNING ON AN ITEM WHICH HAS SINCE BEEN
+                // SWAPPED OUT REPORTS BACK LATE — measured: after the new item's
+                // own seek has landed. It speaks for a clock that is gone, and
+                // letting it clear `seeking` would let a second seek start while
+                // the new item's first is still in flight.
+                guard player.currentItem.map(ObjectIdentifier.init) == item else { return }
+                if finished { self.seeksLanded += 1 } else { self.seeksCancelled += 1 }
+                if self.chased[key] == nil {
+                    self.seeking.remove(key)
+                } else {
+                    self.chase(player)
+                }
+            }
+        }
+    }
+
+    /// Whether the clip in `view` is stopped. Nil when nothing is bound — which
+    /// is not "playing" and not "paused", and a caller drawing a glyph has to
+    /// tell the three apart.
+    ///
+    /// ⚠️ `timeControlStatus`, NOT `rate == 0`. A player that is buffering has a
+    /// rate of zero and is not paused; drawing it as paused offers the author a
+    /// play button that does nothing, because it is already trying.
+    public func isPaused(in view: VideoRenderView) -> Bool? {
+        guard let player = watchedPlayer(in: view) else { return nil }
+        return player.timeControlStatus == .paused
     }
 
     /// Toggles play/pause for the player bound to `view` (a user tapping the
@@ -1132,6 +1600,12 @@ public final class VideoPlaybackController {
         // fresh playhead against it and seek the NEW clip to wherever the OLD
         // one was paused.
         pausedAnchors.removeValue(forKey: ObjectIdentifier(player))
+        // ⚠️ A CHASE OUTLIVING ITS LOAN WOULD SEEK A POOLED PLAYER SOMEBODY ELSE
+        // IS NOW USING — the same reason the anchor above is dropped here.
+        chased.removeValue(forKey: ObjectIdentifier(player))
+        seeking.remove(ObjectIdentifier(player))
+        // And a pooled player runs no arrangement, and loops no range.
+        looping.removeValue(forKey: ObjectIdentifier(player))
         player.replaceCurrentItem(with: nil)
         // The renderer stays in the map, keyed to this player, and is reused
         // when the player is loaned out again. Invalidating only drops its
@@ -1187,10 +1661,20 @@ public final class VideoPlaybackController {
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
-        ) { [weak player] _ in
+        ) { [weak self, weak player] _ in
             MainActor.assumeIsolated {
-                player?.seek(to: .zero)
-                player?.play()
+                guard let player else { return }
+                // ⚠️ EXACT, OR THE LOOP SKIPS THE OPENING OF AN ARRANGEMENT. A
+                // bare `seek(to:)` is tolerant, and on a composition whose first
+                // piece starts between two keyframes it lands on the first
+                // keyframe INSIDE that piece — measured at 0.6s late for a piece
+                // cut from 1.4s of a clip keyed every two seconds. A plain file
+                // starts on a keyframe, so for it this changes nothing.
+                // ⚠️ AND TO THE START OF THE RANGE, WHEN ONE IS LOOPING: the item
+                // ended at the range's end, not at its own.
+                let start = self?.loopStart(of: player) ?? .zero
+                player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
+                player.play()
             }
         }
     }
@@ -1247,6 +1731,50 @@ public final class VideoPlaybackController {
     /// because the hero-transition audit reads them from the app target; each
     /// is a leak the moment it exceeds the live state it mirrors.
     public var debugPausedAnchorCount: Int { pausedAnchors.count }
+    /// Internal for tests: how many players have a seek in flight.
+    public var debugSeeksInFlight: Int { seeking.count }
+    /// Internal for tests: how many players are recorded as running an
+    /// arrangement — a table keyed by player, which must shrink with the pool.
+    var debugLoopEntryCount: Int { looping.count }
+    /// Internal for tests: how many positions are queued behind a seek.
+    /// ⚠️ **Internal for tests: the position QUEUED behind the seek in flight.**
+    /// The count of the dictionary is one entry per PLAYER and can never exceed
+    /// one with a single-player fixture, so asserting it is structurally true —
+    /// a real backlog regression would change `Chase` to an array and the outer
+    /// count would still read 1. The queued target can actually be wrong.
+    /// Internal for tests: the rate the player is running at, and the rate its
+    /// next `play()` will use.
+    ///
+    /// ⚠️ **TWO NUMBERS, AND THE DIFFERENCE IS THE WHOLE POINT.** Assigning
+    /// `rate` starts playback; `defaultRate` states the speed without deciding
+    /// whether anything is moving. A test that read only one of them could not
+    /// tell "set the speed" from "start playing at that speed".
+    /// The item `view` is running — what a test observes notifications on.
+    public func debugItem(in view: VideoRenderView) -> AVPlayerItem? {
+        watchedPlayer(in: view)?.currentItem
+    }
+
+    public func debugRates(in view: VideoRenderView) -> (rate: Float, next: Float)? {
+        guard let player = watchedPlayer(in: view) else { return nil }
+        return (player.rate, player.defaultRate)
+    }
+
+    public func debugChasedTarget(in view: VideoRenderView) -> Double? {
+        guard let player = watchedPlayer(in: view) else { return nil }
+        return chased[ObjectIdentifier(player)]?.target.seconds
+    }
+    /// Internal for tests: seeks that ran to completion.
+    public var debugSeeksLanded: Int { seeksLanded }
+    /// ⚠️ **Internal for tests: the tolerance the LAST seek was asked with.** An
+    /// adapter that accepts a tolerance and forwards nothing compiles without a
+    /// warning and is invisible to any test that reads the value off a stub —
+    /// which is exactly what happened. This is what an adapter can be asked.
+    public var debugLastSeekToleranceSeconds: Double? { lastSeekTolerance }
+    /// ⚠️ **Internal for tests: seeks KILLED BY A LATER ONE.** This is the whole
+    /// measurement behind the chase pattern — a scrub asking sixty times a second
+    /// without it cancels almost every request it makes, and the picture sits
+    /// still and then jumps.
+    public var debugSeeksCancelled: Int { seeksCancelled }
     public var debugStallObserverCount: Int { stallObservers.count }
     public var debugGenerationEntryCount: Int { generation.count }
     public var debugIdlePlayerCount: Int { idlePlayers.count }

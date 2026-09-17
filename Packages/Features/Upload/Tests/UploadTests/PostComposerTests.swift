@@ -44,7 +44,7 @@ struct PostComposerTests {
     /// `posterFrame` stands in for the one step whose FAILURE has to be
     /// exercised: a real exporter always finds a frame in a file it just wrote.
     private func makeHarness(
-        posterFrame: (@Sendable (URL) async -> UIImage?)? = nil
+        posterFrame: (@Sendable (ExportedVideo) async -> UIImage?)? = nil
     ) -> Harness {
         let bff = MockBFF()
         let blobStore = MockBlobStore()

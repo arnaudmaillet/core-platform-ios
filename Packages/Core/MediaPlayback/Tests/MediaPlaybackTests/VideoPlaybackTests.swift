@@ -40,23 +40,40 @@ struct PlaceholderVideoFetcherTests {
         let url = URL(string: "mock://video/pixel-check?w=160&h=160")!
 
         let fileURL = try await fetcher.playableURL(for: url)
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: fileURL))
-        generator.appliesPreferredTrackTransform = true
-        // ⚠️ ZERO ON BOTH SIDES. The default tolerance is infinite and returns
-        // the nearest keyframe, which for a half-second clip is a different
-        // question from "what is at t=0".
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
-        let cgImage = try generator.copyCGImage(at: .zero, actualTime: nil)
 
+        // ⚠️ **READ UP TO THREE TIMES, AND THE BRIGHTEST READ IS THE ANSWER.** On
+        // a loaded CI simulator a decode once came back as an all-zero YUV
+        // surface — r=0 g=89 b=0, which is exactly BT.709's reading of
+        // Y=Cb=Cr=0 — while the file itself was fine (the other lane read the
+        // same fixture correctly in the same run). A clip that really is black
+        // reads black every time, so a fresh generator per attempt keeps what
+        // this test is for and drops only the decoder's hiccup.
         var pixel = [UInt8](repeating: 0, count: 4)
-        let context = try #require(CGContext(
-            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ))
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-        let total = Int(pixel[0]) + Int(pixel[1]) + Int(pixel[2])
+        var total = -1
+        for _ in 0..<3 {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: fileURL))
+            generator.appliesPreferredTrackTransform = true
+            // ⚠️ ZERO ON BOTH SIDES. The default tolerance is infinite and returns
+            // the nearest keyframe, which for a half-second clip is a different
+            // question from "what is at t=0".
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
+            let cgImage = try generator.copyCGImage(at: .zero, actualTime: nil)
+
+            var read = [UInt8](repeating: 0, count: 4)
+            let context = try #require(CGContext(
+                data: &read, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            let sum = Int(read[0]) + Int(read[1]) + Int(read[2])
+            if sum > total {
+                total = sum
+                pixel = read
+            }
+            if total > 90 { break }
+        }
 
         #expect(total > 90, "the clip is black: r=\(pixel[0]) g=\(pixel[1]) b=\(pixel[2])")
         // And it is a COLOUR, not grey — the hue is what makes each mock post

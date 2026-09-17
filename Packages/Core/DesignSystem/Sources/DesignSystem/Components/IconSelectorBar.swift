@@ -94,10 +94,9 @@ public final class IconSelectorBar: UIView {
     private var lensSide: CGFloat { Metrics.segmentSide - lensClearance * 2 }
 
     private enum Metrics {
-        /// The square each icon occupies. 36 is `SoundPillView`'s height, and the
-        /// two sit side by side in Upload's toolbar — a different number would
-        /// misalign them by a visible point.
-        static let segmentSide: CGFloat = 36
+        /// The square each icon occupies. Stated once for every icon bar in
+        /// `IconBarMetrics`, because the action bar sits beside this one.
+        static var segmentSide: CGFloat { IconBarMetrics.segmentSide }
         /// Capsule edge to selection pill.
         ///
         /// ⚠️ **ONE NUMBER GOVERNS BOTH GAPS, AND THAT IS WHY IT IS SMALL.**
@@ -106,7 +105,7 @@ public final class IconSelectorBar: UIView {
         /// air inside it. Two numbers here would let the pill drift off centre
         /// vertically without any arithmetic disagreeing — the shape of the defect
         /// `PagedTabBar` records from having had 5 horizontally and 4 vertically.
-        static let lensInset: CGFloat = 2
+        static var lensInset: CGFloat { IconBarMetrics.clearance }
         /// The selection background, when this view draws its own capsule. What
         /// is left of a segment once the clearance is taken off both sides.
         ///
@@ -117,7 +116,7 @@ public final class IconSelectorBar: UIView {
         /// exactly this reason, reads 4. Matching the rest of the app is therefore
         /// not a smaller number picked by eye — it is the same rule.
         static var lensSide: CGFloat { segmentSide - lensInset * 2 }
-        static let interSegmentSpacing: CGFloat = 2
+        static var interSegmentSpacing: CGFloat { IconBarMetrics.interSegmentSpacing }
         static var capsuleHeight: CGFloat { segmentSide }
         /// How far a finger travels before a press on the pill stops being a tap.
         static let dragSlop: CGFloat = 3
@@ -140,7 +139,7 @@ public final class IconSelectorBar: UIView {
     /// The bar's own height, so a host can lay it out before it has items.
     public static var height: CGFloat { Metrics.capsuleHeight }
 
-    private static let lensTint = UIColor.label.withAlphaComponent(0.18)
+    private static var lensTint: UIColor { IconBarMetrics.lensTint }
 
     private var items: [Item]
     private let capsule = UIVisualEffectView(effect: nil)
@@ -348,11 +347,10 @@ public final class IconSelectorBar: UIView {
     // MARK: - Layout
 
     public override var intrinsicContentSize: CGSize {
-        let count = CGFloat(max(items.count, 1))
-        let width = count * Metrics.segmentSide
-            + max(0, count - 1) * Metrics.interSegmentSpacing
-            + outerInset * 2
-        return CGSize(width: width, height: Metrics.capsuleHeight)
+        CGSize(
+            width: IconBarMetrics.intrinsicWidth(count: items.count, outerInset: outerInset),
+            height: Metrics.capsuleHeight
+        )
     }
 
     public override func layoutSubviews() {
