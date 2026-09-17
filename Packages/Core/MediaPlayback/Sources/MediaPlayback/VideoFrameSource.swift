@@ -237,6 +237,13 @@ final class VideoFrameSource {
         return (buffer, displayTime.isValid ? displayTime : itemTime)
     }
 
+    /// Draws the moment on screen again, when the frames are composed — a look
+    /// changed live must reach a paused picture. A tapped item has nothing to
+    /// redraw: its frames are decoded, not composed.
+    func refresh() {
+        composed?.refresh()
+    }
+
     /// The composed frame for the item's clock at `hostTime` — the same clock
     /// an output would read, asked of the item's timebase directly.
     private func composedFrame(

@@ -117,8 +117,9 @@ struct VideoExporterTests {
                 "expected \(whole), got \(exported.durationSeconds)")
     }
 
-    /// A trim shortens the clip; it does not shrink its pictures. The dimensions
-    /// are read from the SOURCE track for that reason.
+    /// A trim shortens the clip; it does not shrink its pictures. (The
+    /// dimensions are read from the written file, which a crop does shrink —
+    /// `CompositorFinishTests`.)
     @Test func aTrimLeavesThePicturesTheSizeTheyWere() async throws {
         let source = try await longerClip()
         let whole = try await VideoExporter().export(VideoExportPlan(sourceURL: source))

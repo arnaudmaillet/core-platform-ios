@@ -10,13 +10,38 @@ import CoreVideo
 /// compositor decides is in here and in `VideoCompositor.draw`, which takes
 /// `CIImage`s and a time: the pixels a test reads come from the same function
 /// the export and the preview call.
+///
+/// ⚠️ **ONE STRETCH NEVER SPANS TWO PIECES** — each piece may wear its own
+/// look, and a stretch has one per lane (`VideoExporter.composed` splits at
+/// every piece boundary).
 struct VideoCompositionScene: Sendable, Equatable {
     /// Turns a source frame upright and puts it at the origin — in Core Image's
-    /// y-up space, already converted from the track's y-down transform.
+    /// y-up space, already converted from the track's y-down transform, and
+    /// already shrunk to `uprightSize`.
     var orientation: CGAffineTransform
+    /// The upright picture the lanes are drawn and blended on, before the crop.
+    var uprightSize: CGSize
+    /// What is rendered: the kept part of the upright picture, which is
+    /// `uprightSize` itself when nothing is cropped.
     var renderSize: CGSize
     /// The transition this stretch belongs to, if any.
     var transition: Transition?
+    /// The look each lane's piece wears, before any transition blends them.
+    var looks = Looks()
+    /// What is drawn over the finished film: the crop, the whole look and the
+    /// overlays.
+    var finish = FrameFinish.none
+
+    /// Which piece's look each lane wears.
+    ///
+    /// ⚠️ **THE LANES SWAP PIECES AT THE CUT, SO THEIR LOOKS SWAP TOO.** Before
+    /// the cut lane A plays the outgoing piece and lane B the incoming one's
+    /// lead-in; after it A plays the incoming piece and B the outgoing one's
+    /// run-on. A look follows its piece's film, whichever lane carries it.
+    struct Looks: Sendable, Equatable {
+        var a: LookPreset?
+        var b: LookPreset?
+    }
 
     struct Transition: Sendable, Equatable {
         var kind: VideoTransitionKind
@@ -54,23 +79,36 @@ final class VideoCompositorInstruction: NSObject, AVVideoCompositionInstructionP
     let laneA: CMPersistentTrackID
     let laneB: CMPersistentTrackID?
     let scene: VideoCompositionScene
+    /// Where sticker pictures come from; nil draws every overlay but those.
+    let artwork: (any OverlayArtwork)?
+    /// The preview's whole look, read on every frame in place of
+    /// `scene.finish.look`. Nil for an export, which draws what its plan says.
+    let live: VideoLiveLook?
 
     init(
         timeRange: CMTimeRange, laneA: CMPersistentTrackID, laneB: CMPersistentTrackID?,
-        scene: VideoCompositionScene
+        scene: VideoCompositionScene, artwork: (any OverlayArtwork)? = nil, live: VideoLiveLook? = nil
     ) {
         self.timeRange = timeRange
         self.laneA = laneA
         self.laneB = laneB
         self.scene = scene
-        self.containsTweening = scene.transition != nil
+        self.artwork = artwork
+        self.live = live
+        // ⚠️ A STRETCH WHOSE PICTURE CAN CHANGE WHILE ITS SOURCE STANDS STILL
+        // SAYS SO — a transition, a look that moves with time or may be changed
+        // live, overlays that animate. Otherwise AVFoundation is free to draw
+        // one frame and repeat it.
+        self.containsTweening = scene.transition != nil || live != nil
+            || !scene.finish.look.isNeutral || !scene.finish.overlays.isEmpty
         self.requiredSourceTrackIDs = ([laneA] + (laneB.map { [$0] } ?? []))
             .map { NSNumber(value: $0) }
     }
 }
 
-/// Draws every arrangement this app plays or exports: the picture upright and
-/// every transition at its cut.
+/// Draws every arrangement this app plays or exports: the picture upright, each
+/// piece in its own look, every transition at its cut, and the finish — crop,
+/// whole look, overlays — over the result.
 ///
 /// ⚠️ **ONE COMPOSITOR FOR THE PREVIEW AND THE EXPORT.** The editor's canvas
 /// reads its frames through an `AVAssetReaderVideoCompositionOutput` driven by
@@ -137,8 +175,12 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
         let b = instruction.laneB
             .flatMap { request.sourceFrame(byTrackID: $0) }
             .map(Self.picture)
+        // ⚠️ THE BOARD IS READ HERE, ONCE PER FRAME, so a look the author
+        // changes reaches the next frame composed — with no new item and no new
+        // reader.
         let picture = Self.draw(
-            instruction.scene, laneA: a, laneB: b, at: request.compositionTime.seconds
+            instruction.scene, laneA: a, laneB: b, at: request.compositionTime.seconds,
+            look: instruction.live?.look, artwork: instruction.artwork
         )
         CVBufferSetAttachment(output, kCVImageBufferColorPrimariesKey,
                               kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
@@ -172,17 +214,42 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
 
     /// The picture at `seconds`, from the two lanes' raw frames.
     ///
+    /// ⚠️ **IN THIS ORDER, PER FRAME:** each lane upright and in its piece's
+    /// look → the transition → the crop → the whole look → the overlays. A
+    /// dissolve therefore blends two pieces that already wear their looks
+    /// instead of snapping at the cut, and the whole look grades the finished
+    /// film the way an adjustment layer does.
+    ///
+    /// `look` replaces `scene.finish.look` — the preview's live board — and
+    /// `artwork` supplies the stickers.
+    ///
     /// ⚠️ **ALWAYS OVER AN OPAQUE BACKGROUND, CROPPED TO THE CANVAS.** A filter
     /// that reaches past the frame (a page curl, a zoom) would otherwise leave
     /// whatever the buffer held last in the margins.
     static func draw(
+        _ scene: VideoCompositionScene, laneA: CIImage?, laneB: CIImage?, at seconds: Double,
+        look: FrameLook? = nil, artwork: (any OverlayArtwork)? = nil
+    ) -> CIImage {
+        finished(
+            joined(scene, laneA: laneA, laneB: laneB, at: seconds), scene: scene,
+            look: look ?? scene.finish.look, at: seconds, artwork: artwork
+        )
+    }
+
+    /// The film at `seconds` on the upright canvas: the lanes in their pieces'
+    /// looks, and the transition between them.
+    private static func joined(
         _ scene: VideoCompositionScene, laneA: CIImage?, laneB: CIImage?, at seconds: Double
     ) -> CIImage {
-        let canvas = CGRect(origin: .zero, size: scene.renderSize)
-        func upright(_ image: CIImage?) -> CIImage? {
-            image?.transformed(by: scene.orientation).cropped(to: canvas)
+        let canvas = CGRect(origin: .zero, size: scene.uprightSize)
+        func upright(_ image: CIImage?, wearing preset: LookPreset?) -> CIImage? {
+            guard let turned = image?.transformed(by: scene.orientation).cropped(to: canvas) else {
+                return nil
+            }
+            guard let preset else { return turned }
+            return FrameLookRenderer.apply(FrameLook(preset: preset), to: turned, time: seconds)
         }
-        let a = upright(laneA)
+        let a = upright(laneA, wearing: scene.looks.a)
         let background = CIImage(color: .black).cropped(to: canvas)
         guard let transition = scene.transition else {
             return (a ?? background).composited(over: background).cropped(to: canvas)
@@ -211,7 +278,7 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
             let centre = CGPoint(x: canvas.midX, y: canvas.midY)
             drawn = (a ?? background).transformed(by: VideoExporter.zoom(about: centre, by: scale))
         default:
-            let other = upright(laneB) ?? a ?? background
+            let other = upright(laneB, wearing: scene.looks.b) ?? a ?? background
             let from = beforeCut ? (a ?? background) : other
             let to = beforeCut ? other : (a ?? background)
             drawn = cross(
@@ -220,6 +287,33 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
             )
         }
         return drawn.composited(over: background).cropped(to: canvas)
+    }
+
+    /// The joined film, cut, graded and dressed: what the frame shows.
+    ///
+    /// ⚠️ **THE CROP IS A FRACTION OF THE UPRIGHT PICTURE, SO IT COMES AFTER THE
+    /// TURN — AND AFTER THE BLEND,** which is drawn on the whole canvas: a page
+    /// curl crossing a cropped frame is the same curl, cut.
+    ///
+    /// ⚠️ **AND ITS EDGE IS STRETCHED OVER THE LAST PIXEL OF THE RENDER.** The
+    /// render size is the kept fraction rounded to even pixels, and the graph
+    /// keeps the exact fraction, moved to the origin by whole pixels: the two
+    /// can differ by up to a pixel on either side. Left alone, that pixel is a
+    /// black line down the edge of every frame.
+    private static func finished(
+        _ film: CIImage, scene: VideoCompositionScene, look: FrameLook, at seconds: Double,
+        artwork: (any OverlayArtwork)?
+    ) -> CIImage {
+        let frame = CGRect(origin: .zero, size: scene.renderSize)
+        var picture = film
+        if !scene.finish.crop.isUntouched, let kept = scene.finish.crop.applied(to: film) {
+            picture = kept.clampedToExtent().cropped(to: frame)
+        }
+        picture = FrameLookRenderer.apply(look, to: picture, time: seconds)
+        picture = OverlayRasterizer.composite(
+            scene.finish.overlays, over: picture, time: seconds, artwork: artwork
+        )
+        return picture.composited(over: CIImage(color: .black).cropped(to: frame)).cropped(to: frame)
     }
 
     /// A two-picture transition, `progress` of the way from `from` to `to`.

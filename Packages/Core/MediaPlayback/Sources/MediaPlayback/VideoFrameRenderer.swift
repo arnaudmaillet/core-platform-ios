@@ -106,6 +106,13 @@ final class VideoFrameRenderer {
         updateClockRegistration()
     }
 
+    /// Draws the current moment again from a fresh composed read — see
+    /// `ComposedFrameReader.refresh`. The surfaces keep their picture until the
+    /// new frame is dispatched, like any other.
+    func refresh() {
+        source.refresh()
+    }
+
     // MARK: - Surfaces
 
     func addSurface(_ surface: VideoRenderView) {
@@ -572,6 +579,10 @@ final class VideoFrameRenderer {
     }
 
     #if DEBUG
+    /// Internal for tests: the item time of `currentFrameBuffer` — which tells
+    /// a frame of a playing clip from the same moment drawn again.
+    var currentFrameTime: CMTime? { lastFrame?.itemTime }
+
     /// Whether this renderer is currently being ticked. Asserted per-renderer
     /// rather than by counting the clock's subscribers, because the test bundle
     /// runs suites in parallel and under `AVSBDL_RENDER=1` the controller suite

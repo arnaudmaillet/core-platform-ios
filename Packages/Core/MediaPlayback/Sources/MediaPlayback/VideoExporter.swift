@@ -45,16 +45,18 @@ public struct VideoExportPlan: Sendable {
     /// The pieces of the clip to keep, in order, each with the rate it plays at.
     ///
     /// ⚠️ **EMPTY IS NOT THE SAME AS "ONE PIECE COVERING EVERYTHING".** Empty
-    /// leaves `AVAssetExportSession.timeRange` alone and builds no composition,
-    /// which is the path every untouched clip has always taken; one piece
-    /// spanning the whole clip still makes the session re-encode it.
+    /// leaves `AVAssetExportSession.timeRange` alone and cuts nothing, which is
+    /// the path every untouched clip has always taken; one piece spanning the
+    /// whole clip still makes the session re-encode it.
     /// `MediaTimelining.cuts(_:withinSource:)` is what the caller asks to tell
-    /// the two apart.
+    /// the two apart. (An uncut clip is still composed when `finish` or
+    /// `soundtrack` asks for it — see `VideoExporter.needsComposition`.)
     ///
     /// ⚠️ **AND THE EXPORTER PICKS ITS OWN ROUTE FROM THIS, RATHER THAN BEING
-    /// TOLD.** One piece at 1x is a `timeRange` and no composition at all; more
-    /// than one, or any rate other than 1x, needs an `AVMutableComposition`.
-    /// Leaving that choice to the caller is how a second caller gets it wrong.
+    /// TOLD.** One piece at 1x with nothing drawn is a `timeRange` and no
+    /// composition at all; more than one, a rate other than 1x or a look needs
+    /// an `AVMutableComposition`. Leaving that choice to the caller is how a
+    /// second caller gets it wrong.
     public let segments: [VideoExportSegment]
 
     /// Nil takes the exporter's own preset.
@@ -354,11 +356,16 @@ public struct VideoExporter: Sendable {
         let windows: [ClosedRange<Double>]
         /// The video tracks the composition reads.
         var videoTracks: [AVAssetTrack] = []
+        /// The board the composition reads its whole look from, when it was
+        /// built with one.
+        var live: VideoLiveLook?
 
         /// What a preview reads its composed pictures from — nil when nothing
         /// is drawn.
         var composed: ComposedVideo? {
-            videoComposition.map { ComposedVideo(asset: asset, tracks: videoTracks, composition: $0) }
+            videoComposition.map {
+                ComposedVideo(asset: asset, tracks: videoTracks, composition: $0, live: live)
+            }
         }
     }
 
@@ -387,23 +394,35 @@ public struct VideoExporter: Sendable {
     ///
     /// ⚠️ **EVERYTHING IS DRAWN BY `VideoCompositor`.** A custom compositor
     /// takes over the whole composition, so the dips and the zoom are its too —
-    /// one drawing for every kind, in the preview and in the export.
+    /// one drawing for every kind, in the preview and in the export — and so
+    /// are the pieces' looks and the finish.
     ///
     /// ⚠️ **NO VIDEO COMPOSITION UNLESS SOMETHING IS DRAWN.** An arrangement with
-    /// no transition, from an upright source, is the composition it always was —
-    /// no compositor in the way of the seams charter T12 measured.
+    /// no transition, no look and no finish, from an upright source, is the
+    /// composition it always was — no compositor in the way of the seams
+    /// charter T12 measured.
+    ///
+    /// ⚠️ **EXCEPT UNDER A LIVE BOARD, WHICH ALWAYS COMPOSES.** `live` is the
+    /// preview's promise that its look can change at any moment without a new
+    /// item — including on a clip that wears nothing yet. An item left plain
+    /// has no compositor to hand the next look to, and the author's first
+    /// filter would reach the poster and never the playing picture.
     ///
     /// `longestSide` caps the composed picture — the preview's, which a phone
     /// screen shows at a fraction of a 4K frame's pixels. Nil composes at the
     /// source's own size, which is what an export must do.
     ///
+    /// ⚠️ **AN UNCUT CLIP IS THE FILE ITSELF, UNLESS A SONG GOES UNDER IT.**
+    /// Something drawn over it needs only a video composition over the file's
+    /// own track; a song needs a composition to be laid into, so the clip is
+    /// then built as one piece covering the whole of its picture.
+    ///
     /// ⚠️ **THE SONG GOES IN AFTER THE PIECES ARE SCALED** — see
-    /// `applySoundtrack`. An uncut clip has no pieces and takes the early return
-    /// below, so nothing is laid under it yet — nor drawn over it: the
-    /// export-route slice (S2) builds such a clip as one piece.
+    /// `applySoundtrack`.
     static func arrangement(
         of asset: AVURLAsset, cut segments: [VideoExportSegment], orientation: OrientationRule,
-        longestSide: CGFloat? = nil, soundtrack: VideoSoundtrack? = nil
+        longestSide: CGFloat? = nil, soundtrack: VideoSoundtrack? = nil,
+        finish: FrameFinish = .none, artwork: (any OverlayArtwork)? = nil, live: VideoLiveLook? = nil
     ) async throws -> Arrangement {
         guard let source = try? await asset.loadTracks(withMediaType: .video).first else {
             throw VideoExportError.noVideoTrack
@@ -413,26 +432,31 @@ public struct VideoExporter: Sendable {
         let natural = (try? await source.load(.naturalSize)) ?? .zero
         let shortestFrame = (try? await source.load(.minFrameDuration)) ?? .invalid
         let sourceRange = (try? await source.load(.timeRange)) ?? .invalid
-        let turned = !preferred.isIdentity
+        let upright = orientation == .always && !preferred.isIdentity
+        let dressed = !finish.isNone || live != nil
         let canvas = Canvas(
-            preferred: preferred, natural: natural, shortestFrame: shortestFrame, longestSide: longestSide
+            preferred: preferred, natural: natural, shortestFrame: shortestFrame,
+            longestSide: longestSide, crop: finish.crop
         )
+        let drawing = Drawing(canvas: canvas, finish: finish, artwork: artwork, live: live)
 
-        if segments.isEmpty {
-            guard orientation == .always, turned else {
+        if segments.isEmpty, soundtrack == nil {
+            guard upright || dressed else {
                 return Arrangement(asset: asset, videoComposition: nil, audioMix: nil, windows: [])
             }
             let duration = try await asset.load(.duration)
             let composition = try composed(
-                laneA: source.trackID, laneB: nil, canvas: canvas, windows: [], duration: duration
+                laneA: source.trackID, laneB: nil, drawing: drawing,
+                pieces: [Piece(start: .zero, look: nil)], windows: [], duration: duration
             )
             return Arrangement(
                 asset: asset, videoComposition: composition, audioMix: nil, windows: [],
-                videoTracks: [source]
+                videoTracks: [source], live: live
             )
         }
 
-        let kept = segments.filter { $0.sourceSeconds > 0 }
+        let kept = (segments.isEmpty ? [try await whole(range: sourceRange, of: asset)] : segments)
+            .filter { $0.sourceSeconds > 0 }
         let inserted = try insertPieces(of: source, audio: sourceAudio, cut: kept)
         // ⚠️ THE TRANSFORM TRAVELS WITH THE PICTURES. Without it a clip a phone
         // recorded upright exports on its side — the composition track starts
@@ -451,7 +475,8 @@ public struct VideoExporter: Sendable {
             soundtrack, to: composition, original: inserted.audio, dips: dips
         )
 
-        guard !windows.isEmpty || (orientation == .always && turned) else {
+        let looks = kept.map(\.look)
+        guard !windows.isEmpty || upright || dressed || looks.contains(where: { $0 != nil }) else {
             return Arrangement(asset: composition, videoComposition: nil, audioMix: music, windows: [])
         }
         let laneB = try otherSides(
@@ -459,15 +484,28 @@ public struct VideoExporter: Sendable {
             sourceRange: sourceRange, frame: canvas.frame, in: composition
         )
         let video = try composed(
-            laneA: inserted.video.trackID, laneB: laneB, canvas: canvas,
+            laneA: inserted.video.trackID, laneB: laneB, drawing: drawing,
+            pieces: zip(inserted.starts, looks).map { Piece(start: $0, look: $1) },
             windows: windows, duration: duration
         )
         return Arrangement(
             asset: composition, videoComposition: video,
             audioMix: music ?? inserted.audio.flatMap { soundMix(on: $0, dips: dips) },
             windows: windows.map { $0.opens.seconds...$0.closes.seconds },
-            videoTracks: composition.tracks(withMediaType: .video)
+            videoTracks: composition.tracks(withMediaType: .video), live: live
         )
+    }
+
+    /// The whole of a clip's picture, as one piece played as shot.
+    ///
+    /// ⚠️ **THE VIDEO TRACK'S RANGE, NOT THE ASSET'S LENGTH.** The asset lasts as
+    /// long as its longest track, and a sound track that runs on past the
+    /// picture would ask the video track for film it does not have.
+    private static func whole(range: CMTimeRange, of asset: AVURLAsset) async throws -> VideoExportSegment {
+        if range.isValid, range.duration.isNumeric, range.duration > .zero {
+            return VideoExportSegment(start: range.start.seconds, end: range.end.seconds)
+        }
+        return VideoExportSegment(start: 0, end: try await asset.load(.duration).seconds)
     }
 
     /// One transition, on the composition's own clock.
@@ -526,20 +564,31 @@ public struct VideoExporter: Sendable {
     static let zoomThroughScale: CGFloat = 2
 
     /// The picture's geometry, worked out once per source.
+    ///
+    /// ⚠️ **THE ONE PLACE ORIENTATION AND SIZE ARE WORKED OUT** — the upright
+    /// canvas the lanes are drawn on, and the render size the crop leaves of it.
     private struct Canvas {
+        /// The upright picture, as the lanes are drawn and blended.
+        let upright: CGSize
+        /// What is rendered: the kept part of `upright`.
         let size: CGSize
         /// Upright, at the origin, in Core Image's y-up space.
         let orientation: CGAffineTransform
         let frame: CMTime
 
         init(
-            preferred: CGAffineTransform, natural: CGSize, shortestFrame: CMTime, longestSide: CGFloat?
+            preferred: CGAffineTransform, natural: CGSize, shortestFrame: CMTime, longestSide: CGFloat?,
+            crop: FrameCrop
         ) {
             let bounds = CGRect(origin: .zero, size: natural).applying(preferred)
             let full = CGSize(width: abs(bounds.width).rounded(), height: abs(bounds.height).rounded())
+            // ⚠️ THE CAP IS ON WHAT IS RENDERED, WHICH IS WHAT THE CROP KEEPS: a
+            // square cut out of a 4K frame is composed at the cap, not at the
+            // cap's share of the whole frame.
+            let rendered = crop.isUntouched ? full : crop.outputSize(forUpright: full)
             // ⚠️ SCALED DOWN, NEVER UP, AND TO EVEN PIXELS — a 4:2:0 encoder and
             // the sample-buffer layer both want whole chroma samples.
-            let longest = max(full.width, full.height)
+            let longest = max(rendered.width, rendered.height)
             let factor = longestSide.map { longest > $0 && longest > 0 ? $0 / longest : 1 } ?? 1
             let size = factor < 1
                 ? CGSize(
@@ -547,7 +596,8 @@ public struct VideoExporter: Sendable {
                     height: max(2, (full.height * factor / 2).rounded() * 2)
                 )
                 : full
-            self.size = size
+            self.upright = size
+            self.size = crop.isUntouched ? size : crop.outputSize(forUpright: size)
             // ⚠️ UPRIGHT, THEN PUT BACK AT THE ORIGIN — a rotation alone leaves
             // the picture in negative coordinates and renders nothing.
             let oriented = preferred.concatenating(
@@ -638,51 +688,78 @@ public struct VideoExporter: Sendable {
         return lane.trackID
     }
 
-    /// The video composition: the picture upright, and every transition drawn,
-    /// by `VideoCompositor`.
+    /// Where a piece starts on the composition's clock, and the look it wears.
+    private struct Piece {
+        let start: CMTime
+        let look: LookPreset?
+    }
+
+    /// Everything drawn over the film that does not change from one stretch
+    /// to the next.
+    private struct Drawing {
+        let canvas: Canvas
+        let finish: FrameFinish
+        let artwork: (any OverlayArtwork)?
+        let live: VideoLiveLook?
+    }
+
+    /// The video composition: the picture upright, each piece in its look,
+    /// every transition drawn and the finish over it all, by `VideoCompositor`.
+    ///
+    /// ⚠️ **ONE INSTRUCTION PER STRETCH, SPLIT AT EVERY PIECE BOUNDARY AND AT
+    /// EVERY WINDOW'S EDGES.** A stretch carries one look per lane, so one that
+    /// ran across two pieces would dress the second in the first's look. A
+    /// window is split at its cut by the same rule — the cut IS a boundary —
+    /// which is also where the lanes swap roles, and where AVFoundation is sure
+    /// to hand over the frames of the pieces either side.
     private static func composed(
-        laneA: CMPersistentTrackID, laneB: CMPersistentTrackID?, canvas: Canvas,
-        windows: [Cut], duration: CMTime
+        laneA: CMPersistentTrackID, laneB: CMPersistentTrackID?, drawing: Drawing,
+        pieces: [Piece], windows: [Cut], duration: CMTime
     ) throws -> AVVideoComposition {
+        let canvas = drawing.canvas
         // ⚠️ POSITIVE OR NOTHING: an item handed a zero render size or frame
         // duration raises an Objective-C exception rather than an error.
         guard canvas.size.width > 0, canvas.size.height > 0, duration > .zero else {
             throw VideoExportError.exportFailed
         }
-        func scene(_ cut: Cut?) -> VideoCompositionScene {
-            VideoCompositionScene(
-                orientation: canvas.orientation, renderSize: canvas.size,
-                transition: cut.map {
-                    .init(kind: $0.kind, opens: $0.opens.seconds, cut: $0.at.seconds, closes: $0.closes.seconds)
+        func look(_ index: Int) -> LookPreset? {
+            pieces.indices.contains(index) ? pieces[index].look : nil
+        }
+        func instruction(from start: CMTime, to end: CMTime) -> VideoCompositorInstruction {
+            var scene = VideoCompositionScene(
+                orientation: canvas.orientation, uprightSize: canvas.upright, renderSize: canvas.size,
+                finish: drawing.finish
+            )
+            var other: CMPersistentTrackID?
+            if let cut = windows.first(where: { $0.opens <= start && start < $0.closes }) {
+                let beforeCut = start < cut.at
+                let outgoing = look(cut.outgoing)
+                let incoming = look(cut.outgoing + 1)
+                scene.transition = .init(
+                    kind: cut.kind, opens: cut.opens.seconds, cut: cut.at.seconds, closes: cut.closes.seconds
+                )
+                scene.looks.a = beforeCut ? outgoing : incoming
+                if cut.kind.needsBothPictures {
+                    other = laneB
+                    scene.looks.b = beforeCut ? incoming : outgoing
                 }
+            } else {
+                scene.looks.a = look(pieces.lastIndex { $0.start <= start } ?? 0)
+            }
+            return VideoCompositorInstruction(
+                timeRange: CMTimeRange(start: start, end: end), laneA: laneA, laneB: other,
+                scene: scene, artwork: drawing.artwork, live: drawing.live
             )
         }
-        var instructions: [VideoCompositorInstruction] = []
-        var cursor = CMTime.zero
-        func plain(until end: CMTime) {
-            guard end > cursor else { return }
-            instructions.append(VideoCompositorInstruction(
-                timeRange: CMTimeRange(start: cursor, end: end), laneA: laneA, laneB: nil, scene: scene(nil)
-            ))
-            cursor = end
+        // ⚠️ THE MARKS TILE [0, duration] WITH NO GAP AND NO OVERLAP: every
+        // stretch starts where the last one ended, on the composition's clock.
+        var marks: [CMTime] = []
+        for mark in ([.zero, duration] + pieces.map(\.start) + windows.flatMap { [$0.opens, $0.closes] })
+            .filter({ $0 >= .zero && $0 <= duration }).sorted()
+        where marks.last != mark {
+            marks.append(mark)
         }
-        for cut in windows {
-            plain(until: cut.opens)
-            let other = cut.kind.needsBothPictures ? laneB : nil
-            // ⚠️ TWO INSTRUCTIONS PER CUT, SPLIT AT IT: the lanes swap roles
-            // there, and an instruction boundary is where AVFoundation is sure
-            // to hand over the frames of the pieces either side.
-            instructions.append(VideoCompositorInstruction(
-                timeRange: CMTimeRange(start: cut.opens, end: cut.at),
-                laneA: laneA, laneB: other, scene: scene(cut)
-            ))
-            instructions.append(VideoCompositorInstruction(
-                timeRange: CMTimeRange(start: cut.at, end: cut.closes),
-                laneA: laneA, laneB: other, scene: scene(cut)
-            ))
-            cursor = cut.closes
-        }
-        plain(until: duration)
+        let instructions = zip(marks, marks.dropFirst()).map { instruction(from: $0, to: $1) }
 
         var configuration = AVVideoComposition.Configuration()
         configuration.customVideoCompositorClass = VideoCompositor.self
@@ -759,7 +836,7 @@ public struct VideoExporter: Sendable {
 
     public func export(_ plan: VideoExportPlan) async throws -> ExportedVideo {
         let asset = AVURLAsset(url: plan.sourceURL)
-        guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
+        guard (try? await asset.loadTracks(withMediaType: .video).first) != nil else {
             throw VideoExportError.noVideoTrack
         }
 
@@ -770,22 +847,26 @@ public struct VideoExporter: Sendable {
         // the session is what a trim has always been, and a composition would be
         // a second reader, a second set of tracks and a second thing to get
         // wrong for a result that is identical. The composition exists for what
-        // a `timeRange` CANNOT say: several pieces, or a rate other than as-shot.
+        // a `timeRange` CANNOT say: several pieces, a rate other than as-shot, a
+        // look, something drawn over the film or a song under it.
         let needsComposition = Self.needsComposition(for: plan)
         let arranged = needsComposition
             ? try await Self.arrangement(
                 of: asset, cut: plan.segments, orientation: .whenComposited,
-                soundtrack: plan.soundtrack
+                soundtrack: plan.soundtrack, finish: plan.finish, artwork: plan.artwork
             )
             : nil
         let subject: AVAsset = arranged?.asset ?? asset
         // ⚠️ **PASSTHROUGH DRAWS NOTHING, AND SAYS NOTHING.** It ignores a video
         // composition and an audio mix and still reports success — measured with
         // two tracks and no blend. A plan that asked for it gets this exporter's
-        // own preset the moment something has to be drawn.
+        // own preset the moment something has to be drawn or mixed — and a song
+        // counts even before its mix exists, since passthrough would drop it too.
         var presetName = plan.preset ?? preset
-        if arranged?.videoComposition != nil, presetName == AVAssetExportPresetPassthrough {
-            presetName = preset
+        let drawsOrMixes = arranged?.videoComposition != nil || arranged?.audioMix != nil
+            || plan.soundtrack != nil
+        if drawsOrMixes, presetName == AVAssetExportPresetPassthrough {
+            presetName = preset == AVAssetExportPresetPassthrough ? AVAssetExportPreset1280x720 : preset
         }
 
         guard let session = AVAssetExportSession(asset: subject, presetName: presetName) else {
@@ -821,16 +902,21 @@ public struct VideoExporter: Sendable {
         }
 
         // Natural size, transform-corrected so portrait clips report portrait.
-        // Read from the SOURCE track: a trim changes how long the clip runs, not
-        // how big its pictures are. The duration below is read from the OUTPUT
-        // for the opposite reason.
-        let naturalSize = try await track.load(.naturalSize)
-        let transform = try await track.load(.preferredTransform)
+        // ⚠️ **READ FROM THE OUTPUT, NOT THE SOURCE.** A crop changes how big
+        // the pictures are, a composition bakes the turn into them, and the
+        // preset may scale them down; only the written track knows what the
+        // server will receive. The duration is read from the output too.
+        let output = AVURLAsset(url: outputURL)
+        guard let written = try? await output.loadTracks(withMediaType: .video).first else {
+            throw VideoExportError.exportFailed
+        }
+        let naturalSize = try await written.load(.naturalSize)
+        let transform = try await written.load(.preferredTransform)
         let corrected = naturalSize.applying(transform)
         let width = Int(abs(corrected.width).rounded())
         let height = Int(abs(corrected.height).rounded())
 
-        let duration = try await AVURLAsset(url: outputURL).load(.duration)
+        let duration = try await output.load(.duration)
 
         let attrs = try FileManager.default.attributesOfItem(atPath: outputURL.path)
         let byteSize = (attrs[.size] as? UInt64) ?? 0
