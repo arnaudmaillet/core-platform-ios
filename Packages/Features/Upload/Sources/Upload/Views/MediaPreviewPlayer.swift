@@ -59,6 +59,10 @@ protocol MediaVideoPreviewing: AnyObject {
     /// Whether the clip in `surface` is stopped. Nil when nothing is bound.
     func isPaused(in surface: VideoRenderView) -> Bool?
 
+    /// How many seconds of its item the clip in `surface` covers per second:
+    /// zero unless it is really playing.
+    func advancingRate(in surface: VideoRenderView) -> Double
+
     /// Whether this surface currently holds a player at all.
     func isBound(_ surface: VideoRenderView) -> Bool
 
@@ -181,6 +185,10 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
 
     func isBound(_ surface: VideoRenderView) -> Bool {
         controller.hasPlayer(in: surface)
+    }
+
+    func advancingRate(in surface: VideoRenderView) -> Double {
+        controller.advancingRate(in: surface)
     }
 
     /// ⚠️ **A SEPARATE GENERATOR, NOT THE CONTROLLER'S.**

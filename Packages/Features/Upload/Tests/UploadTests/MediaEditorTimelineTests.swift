@@ -125,6 +125,9 @@ struct MediaEditorTimelineTests {
 
         func playheadSeconds(in surface: VideoRenderView) -> Double? { headSeconds }
 
+        var rate: Double = 0
+        func advancingRate(in surface: VideoRenderView) -> Double { rate }
+
         func frames(
             of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
         ) async -> [Double: UIImage] {
@@ -917,6 +920,78 @@ struct MediaEditorTimelineTests {
         // the same lesson about `alpha`.
         #expect(bar.debugScrollIsAnimating, "there is no animation on the layer at all")
         #expect(before != bar.debugContentOffset, "guard: it is going somewhere")
+    }
+
+    /// ⚠️ **THE BEAT AFTER AN EASE OF A RUNNING CLIP IS A STEP.** The ease used
+    /// to land where the clip had been, a quarter second behind it, and every
+    /// beat after that eased again — the film moved in jumps until a pause or a
+    /// scrub broke the cycle. Reported from the device on opening the timeline.
+    @Test func aRunningClipIsFollowedSmoothlyAfterAJump() async throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        try await ready(screen)
+        let bar = try track(in: screen)
+        screen.window.layoutIfNeeded()
+
+        bar.follow(playedSeconds: 7, advancing: 1)
+        #expect(bar.debugIsEasing, "guard: a jump is eased")
+        try await settle(until: { !bar.debugIsEasing })
+        try #require(!bar.debugIsEasing, "guard: the ease never ended")
+
+        // A quarter second later, one more frame of film along.
+        bar.follow(playedSeconds: 7 + MediaTimelining.followEaseSeconds + 1.0 / 60, advancing: 1)
+
+        #expect(bar.debugIsEasing == false, "the clip is being chased ease after ease")
+    }
+
+    /// ⚠️ **THE TRACK OPENS WHERE THE PLAYER IS, WITHOUT A SLIDE.** The clip has
+    /// been running on the canvas since the editor opened; the first beat after
+    /// the track appears puts the film there at once.
+    @Test func theTrackOpensOnThePlayersMoment() async throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        try await ready(screen)
+        // The author looks at something else while the clip plays on.
+        choose(Mode.filters, on: screen)
+        screen.preview.paused = false
+        screen.preview.headSeconds = 6
+        screen.preview.rate = 1
+        choose(Mode.trim, on: screen)
+        let bar = try track(in: screen)
+        screen.window.layoutIfNeeded()
+
+        screen.editor.debugFollowTick()
+
+        #expect(bar.debugIsEasing == false, "the film slid in from wherever it was")
+        #expect(abs(bar.playedSecondsUnderNeedle - 6) < 0.05,
+                "the film is not where the player is: \(bar.playedSecondsUnderNeedle)")
+    }
+
+    /// ⚠️ **THE SCREEN TELLS THE TRACK HOW FAST THE CLIP RUNS.** Without the
+    /// rate, the track cannot aim its ease ahead, and a wrap starts the chase
+    /// that `aRunningClipIsFollowedSmoothlyAfterAJump` pins down on the track.
+    @Test func theEditorPassesThePlayersRateToAJump() async throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        try await ready(screen)
+        let bar = try track(in: screen)
+        screen.window.layoutIfNeeded()
+        screen.preview.paused = false
+        screen.preview.rate = 1
+        // Where the load landed, so the handover is met and the film placed.
+        screen.preview.headSeconds = 0
+        screen.editor.debugFollowTick()
+        try #require(abs(bar.playedSecondsUnderNeedle) < 0.05, "guard: the film is not following")
+
+        // The clip wraps from its end — a jump.
+        screen.preview.headSeconds = 8
+        screen.editor.debugFollowTick()
+        try #require(bar.debugIsEasing, "guard: a jump is eased")
+        try await settle(until: { !bar.debugIsEasing })
+        screen.preview.headSeconds = 8 + MediaTimelining.followEaseSeconds + 1.0 / 60
+        screen.editor.debugFollowTick()
+
+        #expect(bar.debugIsEasing == false, "the film is chasing the clip ease after ease")
     }
 
     /// The witness: a beat of ordinary playback is NOT eased. Easing every move

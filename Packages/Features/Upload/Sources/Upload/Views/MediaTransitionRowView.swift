@@ -221,6 +221,7 @@ final class MediaTransitionRowView: UIView {
             isHidden = false
             layoutIfNeeded()
             scroller.contentOffset.x = -scroller.contentInset.left
+            revealChosen(animated: false)
             fadeHost.alpha = 0
             closeButton.alpha = 0
         }
@@ -246,6 +247,32 @@ final class MediaTransitionRowView: UIView {
             withDuration: 0.3, delay: 0, options: [.allowUserInteraction, .curveEaseOut],
             animations: changes
         ) { _ in landed() }
+    }
+
+    /// Scrolls the chosen card into the stretch before the ramp, and leaves the
+    /// row where it is when the card is already there.
+    ///
+    /// ⚠️ **FIFTEEN CARDS DO NOT FIT, SO THE ROW MUST GO TO THE CHOICE.** A cut
+    /// carrying Crumble opened on None, Black, White and Zoom, with nothing on
+    /// screen saying what the cut carries — the white card was scrolled away.
+    func revealChosen(animated: Bool) {
+        guard let card = cards.first(where: { $0.kind == chosen }), bounds.width > 0 else { return }
+        layoutIfNeeded()
+        let frame = card.convert(card.bounds, to: scroller)
+        let offset = scroller.contentOffset.x
+        let firstStop = offset + Spacing.sm
+        let lastStop = offset + closeMinX - Metrics.fade
+        var wanted = offset
+        if frame.maxX > lastStop {
+            wanted = frame.maxX - (closeMinX - Metrics.fade)
+        } else if frame.minX < firstStop {
+            wanted = frame.minX - Spacing.sm
+        }
+        let lowest = -scroller.contentInset.left
+        let highest = max(lowest, scroller.contentSize.width + scroller.contentInset.right - scroller.bounds.width)
+        wanted = min(max(wanted, lowest), highest)
+        guard abs(wanted - offset) > 0.5 else { return }
+        scroller.setContentOffset(CGPoint(x: wanted, y: scroller.contentOffset.y), animated: animated)
     }
 
     private static func makeGlass() -> UIGlassEffect {

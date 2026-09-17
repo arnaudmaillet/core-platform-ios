@@ -459,6 +459,52 @@ enum MediaTimelining {
         return abs(distance) > stepWithoutEasing
     }
 
+    /// How long an eased follow takes.
+    static let followEaseSeconds: Double = 0.22
+
+    /// Where an eased follow lands and how it arrives there.
+    struct FollowEase: Equatable {
+        /// The offset the film is animated to.
+        var landing: CGFloat
+        /// The second control point of the cubic timing curve; the first is
+        /// `firstControlPoint`.
+        var controlPoint: CGPoint
+
+        static let firstControlPoint = CGPoint(x: 0.2, y: 0.4)
+    }
+
+    /// The ease that brings the film from `current` to a player that stands at
+    /// `target` and will have moved `lead` points further by the time the ease
+    /// ends.
+    ///
+    /// ⚠️ **IT LANDS WHERE THE PLAYER WILL BE, NOT WHERE IT WAS, AND NOT DOING SO
+    /// WAS THE STUTTER.** Aimed at `target`, a quarter-second ease ended 13 to 15
+    /// points behind a clip that kept running — more than `stepWithoutEasing` —
+    /// so the next beat eased again, and again, for as long as the clip played.
+    /// Measured under `-timeline-probe` after a loop wrap: an ease of 15.1pt
+    /// every quarter second, for good. Reported from the device as the needle
+    /// and the film "moving in jumps" until a pause or a scrub broke the cycle.
+    ///
+    /// ⚠️ **AND IT ARRIVES AT THE PLAYER'S SPEED.** An ease-out stops dead at
+    /// its landing, and the film would then start again from rest. The second
+    /// control point sets the slope the curve ends on — `lead` over the
+    /// distance travelled — so the last frame of the ease moves as fast as the
+    /// first beat after it. Capped so the curve stays inside the unit square: a
+    /// short hop behind a running clip ends fast, never overshooting.
+    static func followEase(
+        from current: CGFloat, to target: CGFloat, lead: CGFloat
+    ) -> FollowEase {
+        let lead = lead.isFinite ? max(lead, 0) : 0
+        let landing = target + lead
+        let travel = landing - current
+        let reach: CGFloat = 0.35
+        let slope = travel > 0.5 ? min(lead / travel, 0.9 / reach) : 0
+        return FollowEase(
+            landing: landing,
+            controlPoint: CGPoint(x: 1 - reach, y: 1 - slope * reach)
+        )
+    }
+
     // MARK: - Zoom
 
     /// ⚠️ **THE RANGE A PINCH MAY REACH, AND BOTH ENDS ARE REASONED.** Below

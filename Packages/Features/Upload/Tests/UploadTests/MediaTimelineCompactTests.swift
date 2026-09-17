@@ -27,6 +27,23 @@ struct MediaTimelineCompactTests {
         return track
     }
 
+    /// ⚠️ **A PLACEMENT BEFORE THE TRACK'S FIRST LAYOUT SURVIVES IT.** The
+    /// first layout puts the film on the start of the result, once; the track
+    /// opening over a running clip is placed on the clip's moment in the same
+    /// turn it appears, and was sent back to zero by that pass — then eased
+    /// 300pt across the gap on the next beat.
+    @Test func aPlacementBeforeTheFirstLayoutHolds() {
+        let track = MediaTimelineTrackView()
+        track.frame = CGRect(x: 0, y: 0, width: 390, height: MediaTimelineTrackView.height)
+        track.configure(duration: 10, timeline: MediaTimeline(segments: []))
+
+        #expect(track.place(atPlayedSeconds: 5), "guard: nothing was placed")
+        track.layoutIfNeeded()
+
+        #expect(abs(track.playedSecondsUnderNeedle - 5) < 0.02,
+                "the opening layout moved the film to \(track.playedSecondsUnderNeedle)")
+    }
+
     @MainActor
     private final class Asked {
         var batches: [[Double]] = []
