@@ -60,3 +60,51 @@ enum EditorSelectorLayout {
         return min(max(wants, 0), available * ceiling)
     }
 }
+
+/// What the bottom bar charges around its items, which is what decides how
+/// much of it the two strips may share.
+///
+/// ⚠️ **NOT `toolbar.layoutMargins`.** Since iOS 26 the items are not hosted in
+/// the `UIToolbar` (`navbar-leading-selector-collapse`), and its margins answer
+/// 8 while the bar keeps 28. Charged 8, the two halves overran an iPhone SE's
+/// bar and iOS swept the mode selector into a `•••`.
+///
+/// ⚠️ **MEASURED FROM THE BAR WHEN IT CAN BE, AND THE SE'S NUMBERS OTHERWISE.**
+/// The bar hosts the pill and the selector side by side before any mode opens,
+/// so their platters are there to be read; `fallback` is what they read on an
+/// iPhone SE under iOS 27 — `28 + (pill + 10) + 20 + (strip + 10) + 28`, which
+/// is exactly 375.
+struct ToolbarGeometry: Equatable {
+    /// The bar's margin on each side.
+    var margin: CGFloat
+    /// How much wider a platter is than the view it holds.
+    var platter: CGFloat
+    /// The room between the leading and the trailing group.
+    var gap: CGFloat
+
+    static let fallback = ToolbarGeometry(margin: 28, platter: 10, gap: 20)
+
+    /// What is left for the two strips' own widths on a bar `width` wide.
+    func available(in width: CGFloat) -> CGFloat {
+        width - 2 * margin - 2 * platter - gap
+    }
+
+    /// The geometry read from two neighbouring platters, given each view's
+    /// frame and its platter's, in one coordinate space whose origin is the
+    /// bar's leading edge. Nil for an answer no bar would give — a measurement
+    /// taken mid-transition is worse than the fallback.
+    static func measured(
+        leading: CGRect, leadingPlatter: CGRect, trailingPlatter: CGRect
+    ) -> ToolbarGeometry? {
+        let geometry = ToolbarGeometry(
+            margin: leadingPlatter.minX,
+            platter: leadingPlatter.width - leading.width,
+            gap: trailingPlatter.minX - leadingPlatter.maxX
+        )
+        guard (0...64).contains(geometry.margin),
+              (0...24).contains(geometry.platter),
+              (0...64).contains(geometry.gap)
+        else { return nil }
+        return geometry
+    }
+}

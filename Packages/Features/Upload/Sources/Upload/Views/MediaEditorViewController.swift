@@ -1182,6 +1182,15 @@ final class MediaEditorViewController: UIViewController {
     private func refreshToolbarItems(animated: Bool) {
         let leading: UIView = isTimelineShowing ? actionBar : soundPill
         refreshSoundPill()
+        // ⚠️ **BEFORE THE HAND-OVER, NOT AFTER.** UIKit decides whether a bar
+        // item fits once, from the size its view has when it is handed over,
+        // and never reconsiders (`navbar-leading-selector-collapse`). Held
+        // afterwards, the two strips were measured at their full widths and
+        // swept into a `•••` on an iPhone SE.
+        shareTheBarBetweenTheTwoStrips()
+        #if DEBUG
+        debugOnToolbarHandover?()
+        #endif
         setToolbarItems(
             [
                 UIBarButtonItem(customView: leading),
@@ -1213,6 +1222,7 @@ final class MediaEditorViewController: UIViewController {
     /// width floor and the strip is told it may give — so the constraints come
     /// off rather than being applied to a control the rule was not written for.
     private func shareTheBarBetweenTheTwoStrips() {
+        measureTheBar()
         guard isTimelineShowing, let toolbar = navigationController?.toolbar,
               toolbar.bounds.width > 0
         else {
@@ -1220,8 +1230,11 @@ final class MediaEditorViewController: UIViewController {
             categoryBarWidth.isActive = false
             return
         }
-        let margins = toolbar.layoutMargins
-        let available = toolbar.bounds.width - margins.left - margins.right - Spacing.sm
+        // ⚠️ **WHAT THE BAR CHARGES AROUND THE TWO GROUPS, NOT A SPACING** —
+        // see `ToolbarGeometry`. Charged as one 8pt gap inside 8pt margins, the
+        // split fitted only while the action bar held two items; with the
+        // filter action as a third, the two halves overran an iPhone SE's bar.
+        let available = barGeometry.available(in: toolbar.bounds.width)
         let held = EditorSelectorLayout.widths(
             leadingWants: actionBar.intrinsicContentSize.width,
             trailingWants: categoryBar.intrinsicContentSize.width,
@@ -1231,6 +1244,53 @@ final class MediaEditorViewController: UIViewController {
         categoryBarWidth.constant = held.trailing
         actionBarWidth.isActive = true
         categoryBarWidth.isActive = true
+        // A bar item's view keeps its autoresizing mask, so the size UIKit
+        // reads at the hand-over is the frame's.
+        actionBar.frame.size.width = held.leading
+        categoryBar.frame.size.width = held.trailing
+    }
+
+    /// What the bar charges around its items — measured once it has hosted
+    /// two neighbours, the SE's numbers until then.
+    private(set) var barGeometry = ToolbarGeometry.fallback
+
+    #if DEBUG
+    /// Internal for tests: runs just before the bar is handed its items.
+    var debugOnToolbarHandover: (() -> Void)?
+    #endif
+
+    /// Reads `barGeometry` off whichever two items the bar is hosting.
+    ///
+    /// ⚠️ **ONLY WHILE BOTH ARE ON SCREEN.** A collapsed item has no platter,
+    /// and a geometry read from one would be the collapse measuring itself.
+    private func measureTheBar() {
+        let leading: UIView = isTimelineShowing ? actionBar : soundPill
+        guard let window = leading.window, categoryBar.window === window,
+              let leadingPlatter = Self.platter(of: leading),
+              let trailingPlatter = Self.platter(of: categoryBar),
+              let measured = ToolbarGeometry.measured(
+                  leading: leading.convert(leading.bounds, to: nil),
+                  leadingPlatter: leadingPlatter,
+                  trailingPlatter: trailingPlatter
+              )
+        else { return }
+        barGeometry = measured
+    }
+
+    /// The first ancestor wider than `view`, in window coordinates — the
+    /// platter a bar item sits on.
+    private static func platter(of view: UIView) -> CGRect? {
+        guard let window = view.window else { return nil }
+        let own = view.convert(view.bounds, to: nil)
+        var node = view.superview
+        while let current = node, current !== window {
+            let frame = current.convert(current.bounds, to: nil)
+            if frame.width > own.width + 0.5 {
+                return frame.width < window.bounds.width ? frame : nil
+            }
+            node = current.superview
+        }
+        return nil
     }
 
     private lazy var actionBarWidth: NSLayoutConstraint =
@@ -1686,12 +1746,16 @@ final class MediaEditorViewController: UIViewController {
     /// Nothing outside the track changes the film's clock — a new excerpt, a
     /// crop — so the author keeps the moment they were on rather than the film
     /// starting over under the control they just let go of.
+    ///
+    /// ⚠️ **`force` IS FOR A LOOK THE BACKING WOULD NOT TAKE.** It is not in the
+    /// predicate above precisely because it normally reaches the item live; a
+    /// backing that refuses it (`-avplayer-render`) has no other way in.
     @discardableResult
-    func refreshPreview() -> Bool {
+    func refreshPreview(force: Bool = false) -> Bool {
         guard let id = playingID, id == currentItemID else { return false }
         let edited = edits(for: id)
         let wanted = edited.timeline
-        if let subject = previewSubject, subject.id == id, !subject.aiming, !previewPending,
+        if !force, let subject = previewSubject, subject.id == id, !subject.aiming, !previewPending,
            subject.crop == edited.crop,
            VideoSoundtrack.laysTheSameAudio(subject.soundtrack, edited.soundtrack),
            MediaTimelining.playsTheSame(subject.timeline, wanted, withinSource: subject.fileSeconds) {
