@@ -1,11 +1,19 @@
+import MediaPlayback
 import UIKit
 
-/// Filters: one look over the whole picture, chosen from a row of thumbnails.
+/// Filters: one look over the whole picture, chosen from a row of thumbnails —
+/// on a photograph and on a video alike.
 ///
-/// ⚠️ **MOVED HERE FROM THE EDITOR'S FILE, UNCHANGED.** The row, the notice a
-/// video gets and the settle refresh are what `MediaEditorViewController` did
-/// itself; the only difference is that they reach the screen through
-/// `MediaEditorHosting`.
+/// ⚠️ **A VIDEO GETS THE ROW NOW, AND THIS WAS A NOTICE UNTIL THE LOOK
+/// REACHED ITS PIXELS.** For as long as `post()`'s video branch never read
+/// `edits`, offering the row on a clip let an author choose a look, watch it on
+/// the canvas, and publish the untouched film — so a video was told it could
+/// not be filtered. The look now travels in the clip's plan
+/// (`MediaEdits.exportPlan`) and plays live in the preview
+/// (`editsDidChange(.look)` → `setLiveLook`), so the refusal would be the lie.
+///
+/// ⚠️ **THE UNDO ARROW GOES BACK TO ORIGINAL** — the preset only; the dials and
+/// the effect are Effects'.
 @MainActor
 final class MediaEditorFiltersMode: MediaEditorMode {
     private weak var host: (any MediaEditorHosting)?
@@ -26,32 +34,11 @@ final class MediaEditorFiltersMode: MediaEditorMode {
         return row
     }()
 
-    /// What the band says instead, on a video. See the note in `open`.
-    private lazy var unavailable = BandNoticeView(
-        "A video can't be filtered yet — it'll be posted as it is."
-    )
-
-    var tenant: UIView? {
-        guard let host, let id = host.currentItemID else { return nil }
-        return host.item(id)?.isVideo == true ? unavailable : row
-    }
+    var tenant: UIView? { row }
 
     func open(for id: String, item: MediaLibraryItem) {
-        // ⚠️ **A VIDEO GETS THE NOTICE, NOT THE ROW — AND THIS BECAME TRUE THE
-        // DAY VIDEOS STARTED PUBLISHING.** The row was offered on every page for
-        // as long as a clip was dropped at publish: the look went nowhere, but so
-        // did the video, and the finalisation screen said so. Now the clip goes
-        // and `post()`'s video branch never reads `edits` — `MediaFilter` is
-        // `UIImage`-to-`UIImage` — so leaving the row here would let an author
-        // choose a look, watch it applied on the canvas, and publish the
-        // untouched clip. That is the exact defect `where !item.isVideo` was
-        // removed to end, wearing a different sleeve.
-        if item.isVideo {
-            host?.showInBand(unavailable)
-        } else {
-            host?.showInBand(row)
-            refresh()
-        }
+        host?.showInBand(row)
+        refresh()
     }
 
     func bandWillChange(to accessory: UIView?) {}
@@ -67,21 +54,32 @@ final class MediaEditorFiltersMode: MediaEditorMode {
 
     func screenWillDisappear() {}
 
-    /// Nothing to undo from here yet: the undo arrow has only ever reset the
-    /// crop and the timeline.
-    var canReset: Bool { false }
+    var canReset: Bool {
+        guard let host, let id = host.currentItemID else { return false }
+        return host.edits(for: id).filter != .original
+    }
 
-    func reset() {}
+    func reset() {
+        guard let id = host?.currentItemID, canReset else { return }
+        row.setSelected(.original)
+        apply(.original, to: id)
+    }
 
     /// Feeds the row the picture it is choosing a look for, and restores the
     /// look this item already carries.
     ///
-    /// ⚠️ **ONE FETCH, NOT NINE.** The row filters locally from a single source;
-    /// the library seam caches nothing, so nine thumbnail requests would be nine
-    /// `PHImageManager` round trips for one photograph.
+    /// ⚠️ **ONE PICTURE, NOT NINE — AND THE PAGE'S OWN WHEN IT IS IN HAND.** The
+    /// row filters locally from a single source. The canvas-sized picture the
+    /// screen holds (a video's poster, on a clip) is shrunk and used at once;
+    /// only a page the screen holds nothing for goes to the library, whose seam
+    /// caches nothing.
     private func refresh() {
         guard let current = host, let id = current.currentItemID else { return }
         row.setSelected(current.edits(for: id).filter)
+        if let held = current.heldPicture, held.id == id {
+            dress(from: held.image, for: id)
+            return
+        }
         // ⚠️ THE THUMBNAIL'S SIDE, NOT THE ROW'S HEIGHT. The row is taller than
         // its pictures by a caption, and asking for that size would fetch a
         // picture bigger than anything shown.
@@ -89,20 +87,30 @@ final class MediaEditorFiltersMode: MediaEditorMode {
         Task { [weak self] in
             guard let self, let host else { return }
             let source = await host.library.thumbnail(for: id, size: CGSize(width: side, height: side))
-            guard host.currentItemID == id else { return }
-            // ⚠️ **CUT HERE, AND NEVER INSIDE THE ROW.** The row is handed ONE
-            // picture and renders nine looks from it locally; teaching it about
-            // crops would make it learn a second concept it exists not to know.
-            // Handing it the uncut picture instead is the invisible version of
-            // this bug: nine chips previewing looks on a photograph that no
-            // longer matches the canvas above them.
-            let crop = host.edits(for: id).crop
-            row.show(source.flatMap { MediaCropRenderer.apply(crop, to: $0) } ?? source)
+            guard host.currentItemID == id, let source else { return }
+            dress(from: source, for: id)
         }
+    }
+
+    /// ⚠️ **CUT HERE, AND NEVER INSIDE THE ROW.** The row is handed ONE picture
+    /// and renders nine looks from it locally; teaching it about crops would
+    /// make it learn a second concept it exists not to know. Handing it the
+    /// uncut picture instead is the invisible version of this bug: nine chips
+    /// previewing looks on a photograph that no longer matches the canvas above
+    /// them.
+    private func dress(from source: UIImage, for id: String) {
+        guard let host else { return }
+        let edits = host.edits(for: id)
+        let pixels = MediaFilterRowView.thumbnailSide * max(1, row.traitCollection.displayScale)
+        let base = MediaLookThumbnails.base(source, crop: edits.crop, pixels: pixels)
+        row.show(base, wearing: edits.look)
     }
 
     private func apply(_ filter: MediaFilter, to id: String) {
         host?.change(id) { $0.filter = filter }
         host?.editsDidChange(id, .look)
     }
+
+    /// Internal for tests: the row, whether or not the band holds it.
+    var debugRow: MediaFilterRowView { row }
 }

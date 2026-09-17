@@ -394,10 +394,12 @@ final class MediaEditorViewController: UIViewController {
     /// selector, which reads worse than the wait it is reporting.
     private static let spinnerDelay: TimeInterval = 0.15
 
+    /// ⚠️ **NOT WHILE A SLIDER IS UNDER A FINGER** (`MediaEditorEffectsMode`):
+    /// a render is always in flight during a drag, and the spinner would flash.
     private func beginRender() {
         rendersInFlight += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.spinnerDelay) { [weak self] in
-            guard let self, rendersInFlight > 0 else { return }
+            guard let self, rendersInFlight > 0, !effectsMode.isTracking else { return }
             busy.startAnimating()
         }
     }

@@ -550,28 +550,21 @@ struct MediaEditorCropTests {
                 "and nothing is borrowed for a mode that is not running")
     }
 
-    /// ⚠️ **THE SAME RULE FOR THE LOOK, AND IT BECAME NECESSARY THE DAY VIDEOS
-    /// STARTED PUBLISHING.** The filter row was offered on every page, video
-    /// included, for as long as `post()` dropped clips: the look reached nothing,
-    /// but neither did the clip, and the last screen said so. Now the clip is
-    /// published and `post()`'s video branch never reads `edits` — `MediaFilter`
-    /// is `UIImage`-to-`UIImage` — so an author could choose a look, watch the
-    /// canvas apply it, and publish the untouched video.
-    ///
-    /// That is precisely the defect `where !item.isVideo` was deleted to end,
-    /// moved one screen earlier. A control that reaches nothing must say so.
-    @Test func aVideoSaysWhyItCannotBeFiltered() {
+    /// ⚠️ **A VIDEO IS OFFERED THE LOOKS NOW — IT WAS TOLD IT COULD NOT BE
+    /// FILTERED.** That notice existed because `post()`'s video branch never
+    /// read `edits`: an author could choose a look, watch the canvas apply it,
+    /// and publish the untouched clip. The look now travels in the clip's plan
+    /// and plays live in the preview, so the refusal would be the lie.
+    @Test func aVideoIsOfferedTheLooks() {
         let screen = open(Self.items(1, videoAt: 0))
 
         choose(Mode.filters, on: screen)
 
-        let notice = screen.editor.debugBand.content as? BandNoticeView
-        #expect(notice != nil, "got \(String(describing: screen.editor.debugBand.content))")
-        #expect(notice?.debugText?.contains("filtered") == true, "got \(notice?.debugText ?? "nil")")
+        #expect(screen.editor.debugBand.content is MediaFilterRowView,
+                "got \(String(describing: screen.editor.debugBand.content))")
     }
 
-    /// The witness for the line above: a photograph still gets the looks, so the
-    /// notice is about the video and not about the mode being broken.
+    /// The same row on a photograph.
     @Test func aPhotographInTheSamePlaceGetsTheLooks() {
         let screen = open(Self.items(1))
 
