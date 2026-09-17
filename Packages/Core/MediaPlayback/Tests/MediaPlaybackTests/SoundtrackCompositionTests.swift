@@ -171,8 +171,7 @@ struct SoundtrackCompositionTests {
     }
 
     /// An uncut clip with a song still carries it.
-    @Test(.disabled("TODO(S2): an uncut clip takes `arrangement`'s early return and drops its song; the export-route slice builds it as one piece — enable this then"))
-    func anUncutClipCarriesItsSong() async throws {
+    @Test func anUncutClipCarriesItsSong() async throws {
         let file = try await ColourClipWriter.clip()
         let arranged = try await VideoExporter.arrangement(
             of: AVURLAsset(url: file), cut: [], orientation: .whenComposited,
