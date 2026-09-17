@@ -16,6 +16,13 @@ public struct ExportedVideo: Sendable, Equatable {
     public let durationSeconds: Double
     public let byteSize: UInt64
     public let sha256Hex: String
+    /// Where the file's transitions draw, in seconds of the file.
+    public let transitionWindows: [ClosedRange<Double>]
+
+    /// The moment the poster is taken from — never inside a transition.
+    public var posterSeconds: Double {
+        VideoExporter.posterSeconds(duration: durationSeconds, avoiding: transitionWindows)
+    }
 }
 
 /// What to make of a picked clip on its way to the upload.
@@ -70,6 +77,28 @@ public struct VideoExportPlan: Sendable {
     }
 }
 
+/// A transition drawn at a cut.
+///
+/// ⚠️ **ONLY WHAT THE BUILDER DRAWS.** Every case here has a drawing in
+/// `VideoExporter`'s arrangement builder, which switches over this enum with no
+/// `default` — so a case cannot be added without one, and no chip can offer a
+/// transition that publishes as a plain cut. "No transition" is `nil`, never a
+/// case: two spellings of nothing would break every equality that compares
+/// timelines.
+public enum VideoTransitionKind: String, CaseIterable, Sendable {
+    /// The picture fades to black up to the cut and back from it.
+    case dipToBlack
+    /// The same, through white.
+    case dipToWhite
+    /// The outgoing picture zooms in to the cut, the incoming one out of it.
+    case zoom
+
+    /// How long every transition runs, in PLAYED seconds, centred on its cut.
+    /// ⚠️ **NOT STORED PER CUT** — a length no screen can change would be a
+    /// field nothing sets; it becomes one when a duration control exists.
+    public static let standardSeconds: Double = 0.5
+}
+
 /// One piece of the source, and how fast it plays.
 public struct VideoExportSegment: Sendable, Equatable {
     /// Seconds from the start of the SOURCE file.
@@ -77,11 +106,18 @@ public struct VideoExportSegment: Sendable, Equatable {
     public let end: Double
     /// 1 is as shot. 2 plays it twice as fast, so it lasts half as long.
     public let speed: Double
+    /// The transition at the cut AFTER this piece. ⚠️ Ignored on the last
+    /// piece, which has no cut after it.
+    public let transitionOut: VideoTransitionKind?
 
-    public init(start: Double, end: Double, speed: Double = 1) {
+    public init(
+        start: Double, end: Double, speed: Double = 1,
+        transitionOut: VideoTransitionKind? = nil
+    ) {
         self.start = start
         self.end = end
         self.speed = speed
+        self.transitionOut = transitionOut
     }
 
     var sourceSeconds: Double { max(end - start, 0) }
@@ -118,6 +154,28 @@ public struct VideoExporter: Sendable {
         segments.count > 1 || segments.contains { !$0.isAsShot }
     }
 
+    /// How far a transition reaches on EACH side of its cut, in played seconds.
+    ///
+    /// ⚠️ **ONE FUNCTION FOR THE TRACK, THE HIGHLIGHT, THE PREVIEW'S EQUALITY AND
+    /// THE BUILDER.** Written twice, the lit window and the drawn fade would
+    /// disagree the first time either changed.
+    ///
+    /// ⚠️ **NEVER MORE THAN HALF OF EITHER NEIGHBOUR.** A piece with a
+    /// transition at both ends gives each at most half of itself, so the two can
+    /// touch and never cross — crossing instructions fail the export. Floored to
+    /// the composition's 1/600 grid, and nothing at all below a frame at 30fps,
+    /// where a transition would be a flicker nobody chose.
+    public static func transitionHalf(
+        _ kind: VideoTransitionKind?, outgoingPlayedSeconds outgoing: Double,
+        incomingPlayedSeconds incoming: Double
+    ) -> Double {
+        guard kind != nil, outgoing.isFinite, incoming.isFinite, outgoing > 0, incoming > 0
+        else { return 0 }
+        let half = min(VideoTransitionKind.standardSeconds / 2, outgoing / 2, incoming / 2)
+        let floored = (half * 600).rounded(.down) / 600
+        return floored < 1.0 / 30 ? 0 : floored
+    }
+
     /// The kept pieces, laid end to end, each scaled to the rate it plays at.
     ///
     /// ⚠️ **BUILT HERE AND USED ONCE, WHICH IS THE ONLY WAY IT CAN EXIST.**
@@ -147,14 +205,19 @@ public struct VideoExporter: Sendable {
     /// piece boundary is an edit inside one item rather than a seek in the file.
     /// A composition is never handed from one caller to the other; nothing that
     /// only one of them needs (a render size, a video composition) belongs here.
-    static func composition(
-        of asset: AVAsset, cut segments: [VideoExportSegment]
-    ) async throws -> AVComposition {
-        guard let sourceVideo = try? await asset.loadTracks(withMediaType: .video).first else {
-            throw VideoExportError.noVideoTrack
-        }
-        let sourceAudio = try? await asset.loadTracks(withMediaType: .audio).first
+    private struct Inserted {
+        let composition: AVMutableComposition
+        /// Where each piece starts on the composition's own clock; the end of
+        /// the last is `composition.duration`.
+        let starts: [CMTime]
+        let video: AVMutableCompositionTrack
+        let audio: AVMutableCompositionTrack?
+    }
 
+    private static func insertPieces(
+        of source: AVAssetTrack, audio sourceAudio: AVAssetTrack?,
+        cut segments: [VideoExportSegment]
+    ) throws -> Inserted {
         let composition = AVMutableComposition()
         guard let videoTrack = composition.addMutableTrack(
             withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
@@ -167,14 +230,16 @@ public struct VideoExporter: Sendable {
             withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid
         )
 
+        var starts: [CMTime] = []
         for segment in segments where segment.sourceSeconds > 0 {
             let cursor = composition.duration
+            starts.append(cursor)
             let range = CMTimeRange(
                 start: CMTime(seconds: segment.start, preferredTimescale: 600),
                 end: CMTime(seconds: segment.end, preferredTimescale: 600)
             )
             do {
-                try videoTrack.insertTimeRange(range, of: sourceVideo, at: cursor)
+                try videoTrack.insertTimeRange(range, of: source, at: cursor)
                 if let audioTrack, let sourceAudio {
                     try audioTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
                 }
@@ -189,13 +254,289 @@ public struct VideoExporter: Sendable {
                 )
             )
         }
+        return Inserted(composition: composition, starts: starts, video: videoTrack, audio: audioTrack)
+    }
+
+    /// When the preview or the export needs a video composition for the
+    /// picture's orientation alone.
+    enum OrientationRule: Sendable {
+        /// Only where something must be drawn — the export, where an untouched
+        /// clip keeps its metadata transform and is re-encoded as it is.
+        case whenComposited
+        /// Whenever the source is not stored upright — the editor's canvas,
+        /// whose sample-buffer path ignores a track's transform: a clip that
+        /// turned upright only while it carried a transition would rotate under
+        /// the author as they edited.
+        case always
+    }
+
+    /// Everything one plan becomes: the asset to play or export, and what is
+    /// drawn over it.
+    ///
+    /// ⚠️ **NOT SENDABLE, AND IT IS NOT MEANT TO BE.** `AVMutableComposition` and
+    /// `AVMutableAudioMix` are `@_nonSendable`; the caller builds this in the
+    /// task that uses it and hands its pieces straight to one item or one export
+    /// session.
+    struct Arrangement {
+        let asset: AVAsset
+        let videoComposition: AVVideoComposition?
+        let audioMix: AVAudioMix?
+        /// Where the transitions draw, in played seconds.
+        let windows: [ClosedRange<Double>]
+    }
+
+    /// The kept pieces, laid end to end, each scaled to the rate it plays at,
+    /// with every transition drawn at its cut.
+    ///
+    /// ⚠️ **ONE BUILDER FOR THE PREVIEW AND THE EXPORT** — the editor's canvas
+    /// plays exactly what the post will be, transitions and sound included.
+    ///
+    /// ⚠️ **`scaleTimeRange` ON THE COMPOSITION, NEVER ON A TRACK.** The
+    /// track-level call scales that track alone, so a sped-up piece keeps its
+    /// audio at the original rate and the two drift apart for the rest of the
+    /// film. And the cursor is read back from the composition, not accumulated:
+    /// scaling a piece changes where the next one starts.
+    ///
+    /// ⚠️ **THE INSTRUCTIONS TILE THE WHOLE DURATION ON THE COMPOSITION'S OWN
+    /// CLOCK.** Cut times come from the cursors, never from a sum of source
+    /// seconds; a set that ends one tick short renders in an image generator and
+    /// FAILS THE EXPORT (-11841), and a gap renders black with no error at all.
+    ///
+    /// ⚠️ **A TRANSITION DRAWS INSIDE ITS OWN TWO PIECES.** The dips and the zoom
+    /// play on the single lane: the outgoing piece fades or zooms up to the cut,
+    /// the incoming one from it. Nothing overlaps, so the played length is
+    /// exactly what the track shows.
+    ///
+    /// ⚠️ **NO VIDEO COMPOSITION UNLESS SOMETHING IS DRAWN.** An arrangement with
+    /// no transition, from an upright source, is the composition it always was —
+    /// no compositor in the way of the seams charter T12 measured.
+    static func arrangement(
+        of asset: AVURLAsset, cut segments: [VideoExportSegment], orientation: OrientationRule
+    ) async throws -> Arrangement {
+        guard let source = try? await asset.loadTracks(withMediaType: .video).first else {
+            throw VideoExportError.noVideoTrack
+        }
+        let sourceAudio = try? await asset.loadTracks(withMediaType: .audio).first
+        let preferred = (try? await source.load(.preferredTransform)) ?? .identity
+        let natural = (try? await source.load(.naturalSize)) ?? .zero
+        let shortestFrame = (try? await source.load(.minFrameDuration)) ?? .invalid
+        let turned = !preferred.isIdentity
+
+        if segments.isEmpty {
+            guard orientation == .always, turned else {
+                return Arrangement(asset: asset, videoComposition: nil, audioMix: nil, windows: [])
+            }
+            let duration = try await asset.load(.duration)
+            let composition = try uprightComposition(
+                track: source.trackID, preferred: preferred, natural: natural,
+                shortestFrame: shortestFrame, windows: [], duration: duration
+            )
+            return Arrangement(asset: asset, videoComposition: composition, audioMix: nil, windows: [])
+        }
+
+        let inserted = try insertPieces(of: source, audio: sourceAudio, cut: segments)
         // ⚠️ THE TRANSFORM TRAVELS WITH THE PICTURES. Without it a clip a phone
         // recorded upright exports on its side — the composition track starts
         // with an identity transform whatever the source carried.
-        if let transform = try? await sourceVideo.load(.preferredTransform) {
-            videoTrack.preferredTransform = transform
+        inserted.video.preferredTransform = preferred
+        let composition = inserted.composition
+        let duration = composition.duration
+        let windows = cuts(of: segments.filter { $0.sourceSeconds > 0 }, starts: inserted.starts, duration: duration)
+
+        guard !windows.isEmpty || (orientation == .always && turned) else {
+            return Arrangement(asset: composition, videoComposition: nil, audioMix: nil, windows: [])
         }
-        return composition
+        let video = try uprightComposition(
+            track: inserted.video.trackID, preferred: preferred, natural: natural,
+            shortestFrame: shortestFrame, windows: windows, duration: duration
+        )
+        return Arrangement(
+            asset: composition, videoComposition: video,
+            audioMix: inserted.audio.flatMap { soundDips(on: $0, windows: windows) },
+            windows: windows.map { $0.opens.seconds...$0.closes.seconds }
+        )
+    }
+
+    /// One transition, on the composition's own clock.
+    private struct Cut {
+        let kind: VideoTransitionKind
+        let at: CMTime
+        let half: CMTime
+        /// Whether both pieces play as shot — the only place the sound may ramp.
+        let asShotBothSides: Bool
+
+        var opens: CMTime { at - half }
+        var closes: CMTime { at + half }
+    }
+
+    /// Where every transition draws.
+    ///
+    /// ⚠️ **MEASURED ON THE COMPOSITION'S OWN LENGTHS, NOT ON THE PLAN'S.** The
+    /// plan's seconds and the composition's can differ by a tick
+    /// (`CMTime(seconds:)` truncates — 0.6 is 359/600), and two windows around
+    /// one piece must never cross. Asked of the composition, a half is
+    /// `floor(length·600 / 2)` ticks, which is never more than half of the
+    /// length's whole ticks — `floor(y/2) == floor(floor(y)/2)` — so the two
+    /// halves around a piece fit inside it without a second clamp.
+    private static func cuts(
+        of pieces: [VideoExportSegment], starts: [CMTime], duration: CMTime
+    ) -> [Cut] {
+        guard pieces.count > 1, starts.count == pieces.count else { return [] }
+        var made: [Cut] = []
+        for index in 0..<(pieces.count - 1) {
+            guard let kind = pieces[index].transitionOut else { continue }
+            let opens = starts[index]
+            let at = starts[index + 1]
+            let closes = index + 2 < starts.count ? starts[index + 2] : duration
+            let outgoing = at - opens
+            let incoming = closes - at
+            let half = transitionHalf(
+                kind, outgoingPlayedSeconds: outgoing.seconds, incomingPlayedSeconds: incoming.seconds
+            )
+            let ticks = Int64((half * 600).rounded(.down))
+            guard ticks >= 20 else { continue }
+            made.append(Cut(
+                kind: kind, at: at, half: CMTime(value: ticks, timescale: 600),
+                asShotBothSides: pieces[index].isAsShot && pieces[index + 1].isAsShot
+            ))
+        }
+        return made
+    }
+
+    /// How far the zoom goes at the cut.
+    static let zoomThroughScale: CGFloat = 2
+
+    /// The video composition: the picture upright, and every transition drawn.
+    private static func uprightComposition(
+        track: CMPersistentTrackID, preferred: CGAffineTransform, natural: CGSize,
+        shortestFrame: CMTime, windows: [Cut], duration: CMTime
+    ) throws -> AVVideoComposition {
+        let bounds = CGRect(origin: .zero, size: natural).applying(preferred)
+        let size = CGSize(width: abs(bounds.width).rounded(), height: abs(bounds.height).rounded())
+        // ⚠️ POSITIVE OR NOTHING: an item handed a zero render size or frame
+        // duration raises an Objective-C exception rather than an error.
+        guard size.width > 0, size.height > 0, duration > .zero else {
+            throw VideoExportError.exportFailed
+        }
+        // ⚠️ UPRIGHT, THEN PUT BACK AT THE ORIGIN — a rotation alone leaves the
+        // picture in negative coordinates and renders nothing.
+        let oriented = preferred.concatenating(
+            CGAffineTransform(translationX: -bounds.minX, y: -bounds.minY)
+        )
+        let sixty = CMTime(value: 1, timescale: 60)
+        let frame = shortestFrame.isValid && shortestFrame > .zero
+            ? max(shortestFrame, sixty) : CMTime(value: 1, timescale: 30)
+        let centre = CGPoint(x: size.width / 2, y: size.height / 2)
+        let zoomed = oriented.concatenating(zoom(about: centre, by: zoomThroughScale))
+
+        // ⚠️ A LAYER CARRIES EITHER A FIXED TRANSFORM OR A TRANSFORM RAMP, NEVER
+        // BOTH AT ONE TIME — set together at the ramp's start, the fixed one wins
+        // and the zoom never moves.
+        func layer(
+            from start: CMTime, turning ramp: AVVideoCompositionLayerInstruction.TransformRamp?,
+            _ build: (inout AVVideoCompositionLayerInstruction.Configuration) -> Void
+        ) -> AVVideoCompositionLayerInstruction {
+            var configuration = AVVideoCompositionLayerInstruction.Configuration(trackID: track)
+            if let ramp {
+                configuration.addTransformRamp(ramp)
+            } else {
+                configuration.setTransform(oriented, at: start)
+            }
+            build(&configuration)
+            return AVVideoCompositionLayerInstruction(configuration: configuration)
+        }
+        func instruction(
+            _ range: CMTimeRange, background: CGColor? = nil,
+            turning ramp: AVVideoCompositionLayerInstruction.TransformRamp? = nil,
+            _ build: (inout AVVideoCompositionLayerInstruction.Configuration) -> Void = { _ in }
+        ) -> AVVideoCompositionInstruction {
+            var configuration = AVVideoCompositionInstruction.Configuration()
+            configuration.timeRange = range
+            configuration.layerInstructions = [layer(from: range.start, turning: ramp, build)]
+            configuration.enablePostProcessing = false
+            if let background { configuration.backgroundColor = background }
+            return AVVideoCompositionInstruction(configuration: configuration)
+        }
+
+        var instructions: [AVVideoCompositionInstruction] = []
+        var cursor = CMTime.zero
+        func plain(until end: CMTime) {
+            guard end > cursor else { return }
+            instructions.append(instruction(CMTimeRange(start: cursor, end: end)))
+            cursor = end
+        }
+        for cut in windows {
+            plain(until: cut.opens)
+            let before = CMTimeRange(start: cut.opens, end: cut.at)
+            let after = CMTimeRange(start: cut.at, end: cut.closes)
+            switch cut.kind {
+            case .dipToBlack, .dipToWhite:
+                let colour = cut.kind == .dipToBlack
+                    ? CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+                    : CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+                instructions.append(instruction(before, background: colour) {
+                    $0.addOpacityRamp(.init(timeRange: before, start: 1, end: 0))
+                })
+                instructions.append(instruction(after, background: colour) {
+                    $0.addOpacityRamp(.init(timeRange: after, start: 0, end: 1))
+                })
+            case .zoom:
+                instructions.append(instruction(
+                    before, turning: .init(timeRange: before, start: oriented, end: zoomed)
+                ))
+                instructions.append(instruction(
+                    after, turning: .init(timeRange: after, start: zoomed, end: oriented)
+                ))
+            }
+            cursor = cut.closes
+        }
+        plain(until: duration)
+
+        var configuration = AVVideoComposition.Configuration()
+        configuration.renderSize = size
+        configuration.frameDuration = frame
+        configuration.instructions = instructions
+        return AVVideoComposition(configuration: configuration)
+    }
+
+    /// A scale about a point, in the upright picture's space.
+    static func zoom(about centre: CGPoint, by scale: CGFloat) -> CGAffineTransform {
+        CGAffineTransform(translationX: -centre.x, y: -centre.y)
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: centre.x, y: centre.y))
+    }
+
+    /// The sound follows a dip down and back up; a zoom leaves it alone.
+    ///
+    /// ⚠️ **NEVER ACROSS A PIECE THAT IS NOT AS SHOT — A RAMP THERE CAN FREEZE THE
+    /// EXPORT FOR GOOD.** Measured on the iOS 26.5 simulator: a volume ramp at
+    /// the start of a piece played at 3x or 4x left `AVAssetExportSession` with
+    /// every remaker thread waiting and no error, once in twelve exports (the
+    /// offline mixer logs "AppendRateChange … previously did a conversion" as it
+    /// goes); ninety exports of the same ramps between pieces at 1x all finished.
+    /// A publish that never ends is worse than a dip heard as a plain cut, so a
+    /// cut touching a rated piece dips its picture only.
+    private static func soundDips(
+        on track: AVMutableCompositionTrack, windows: [Cut]
+    ) -> AVAudioMix? {
+        let dips = windows.filter {
+            ($0.kind == .dipToBlack || $0.kind == .dipToWhite) && $0.asShotBothSides
+        }
+        guard !dips.isEmpty else { return nil }
+        let parameters = AVMutableAudioMixInputParameters(track: track)
+        for dip in dips {
+            parameters.setVolumeRamp(
+                fromStartVolume: 1, toEndVolume: 0,
+                timeRange: CMTimeRange(start: dip.opens, end: dip.at)
+            )
+            parameters.setVolumeRamp(
+                fromStartVolume: 0, toEndVolume: 1,
+                timeRange: CMTimeRange(start: dip.at, end: dip.closes)
+            )
+        }
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [parameters]
+        return mix
     }
 
     /// The whole clip, unchanged — what every caller asked for before a trim
@@ -219,15 +560,24 @@ public struct VideoExporter: Sendable {
         // wrong for a result that is identical. The composition exists for what
         // a `timeRange` CANNOT say: several pieces, or a rate other than as-shot.
         let needsComposition = Self.needsComposition(for: plan.segments)
-        let subject: AVAsset = needsComposition
-            ? try await Self.composition(of: asset, cut: plan.segments)
-            : asset
+        let arranged = needsComposition
+            ? try await Self.arrangement(of: asset, cut: plan.segments, orientation: .whenComposited)
+            : nil
+        let subject: AVAsset = arranged?.asset ?? asset
+        // ⚠️ **PASSTHROUGH DRAWS NOTHING, AND SAYS NOTHING.** It ignores a video
+        // composition and an audio mix and still reports success — measured with
+        // two tracks and no blend. A plan that asked for it gets this exporter's
+        // own preset the moment something has to be drawn.
+        var presetName = plan.preset ?? preset
+        if arranged?.videoComposition != nil, presetName == AVAssetExportPresetPassthrough {
+            presetName = preset
+        }
 
-        guard let session = AVAssetExportSession(
-            asset: subject, presetName: plan.preset ?? preset
-        ) else {
+        guard let session = AVAssetExportSession(asset: subject, presetName: presetName) else {
             throw VideoExportError.exportFailed
         }
+        session.videoComposition = arranged?.videoComposition
+        session.audioMix = arranged?.audioMix
         session.outputURL = outputURL
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
@@ -277,7 +627,8 @@ public struct VideoExporter: Sendable {
             pixelHeight: height,
             durationSeconds: duration.seconds.isFinite ? duration.seconds : 0,
             byteSize: byteSize,
-            sha256Hex: try Self.sha256Hex(of: outputURL)
+            sha256Hex: try Self.sha256Hex(of: outputURL),
+            transitionWindows: arranged?.windows ?? []
         )
     }
 
@@ -301,6 +652,43 @@ public struct VideoExporter: Sendable {
     /// too short or too stubborn for the offset still gets a picture rather than
     /// nothing.
     public func posterImage(for url: URL) async -> UIImage? {
+        let seconds = (try? await AVURLAsset(url: url).load(.duration).seconds) ?? 0
+        return await posterImage(
+            for: url, atSeconds: Self.posterSeconds(duration: seconds, avoiding: []),
+            before: .infinity
+        )
+    }
+
+    /// The poster of a file this exporter has just written: never taken from
+    /// inside one of its transitions.
+    ///
+    /// ⚠️ **A DIP AT THE POSTER'S MOMENT WOULD PUBLISH A BLACK THUMBNAIL** — which
+    /// looks exactly like the no-thumbnail bug, and mock mode hides it. The
+    /// moment moves past the window, and the generator may not wander on into
+    /// the next one.
+    public func posterImage(for exported: ExportedVideo) async -> UIImage? {
+        let at = exported.posterSeconds
+        let next = exported.transitionWindows.map(\.lowerBound).filter { $0 >= at }.min()
+        return await posterImage(for: exported.fileURL, atSeconds: at, before: next ?? .infinity)
+    }
+
+    /// A tenth of the way in, capped at a second, and moved past any transition
+    /// it lands in; the start of the file when nothing else is left.
+    public static func posterSeconds(
+        duration: Double, avoiding windows: [ClosedRange<Double>]
+    ) -> Double {
+        guard duration.isFinite, duration > 0 else { return 0 }
+        var moment = min(1, duration / 10)
+        for window in windows.sorted(by: { $0.lowerBound < $1.lowerBound })
+        where window.lowerBound < moment && moment < window.upperBound {
+            moment = window.upperBound
+        }
+        return moment < duration ? moment : 0
+    }
+
+    private func posterImage(
+        for url: URL, atSeconds offset: Double, before limit: Double
+    ) async -> UIImage? {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -309,12 +697,11 @@ public struct VideoExporter: Sendable {
         // free to answer with the nearest keyframe, and on a short clip the
         // nearest keyframe to "a tenth of the way in" is frame zero. The whole
         // point is to be past the opening, so earlier is not an acceptable
-        // answer; later is.
+        // answer; later is — up to the next transition.
         generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .positiveInfinity
-
-        let seconds = (try? await asset.load(.duration).seconds) ?? 0
-        let offset = seconds.isFinite && seconds > 0 ? min(1, seconds / 10) : 0
+        generator.requestedTimeToleranceAfter = limit.isFinite
+            ? CMTime(seconds: max(limit - offset, 0), preferredTimescale: 600)
+            : .positiveInfinity
         if offset > 0,
            let frame = await Self.frame(from: generator, atSeconds: offset) {
             return frame

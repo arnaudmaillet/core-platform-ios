@@ -169,8 +169,9 @@ struct ArrangementPlaybackTests {
         let view = surface()
 
         await controller.load(
-            VideoExportPlan(sourceURL: try await clip(), segments: reordered), in: view
-        ) { nil }
+            VideoExportPlan(sourceURL: try await clip(), segments: reordered), in: view,
+            at: { nil }
+        )
 
         #expect(controller.hasPlayer(in: view) == false, "an abandoned load bound a player")
     }
