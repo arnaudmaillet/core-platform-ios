@@ -169,8 +169,8 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
 - **P3:** camera capture UI + permissions.
 - **P4:** trim / edit / cover-frame selection — **including crop and straighten,
   which photos already have.** `MediaEditorViewController` offers a "Crop" mode
-  with an interactive box, a straightening dial, quarter turns and a mirror; on a
-  video page it draws a notice instead.
+  with an interactive box, a straightening dial, quarter turns and a mirror, on a
+  video page as readily as on a photograph.
 
   **In-editor PLAYBACK landed 2026-09-15** and is not part of what remains: the
   settled page plays its clip through an Upload-owned
@@ -178,16 +178,21 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
   `MediaPreviewPlaying` seam — never the feed's pool, because a pool owned by the
   screen dies with the screen. One page plays at a time; the fill/fit choice
   drives `VideoRenderView.videoGravity`, which had been hardcoded to
-  `.resizeAspectFill` and is now the caller's to set. What P4 still needs is
-  EDITING, which is a different problem: `MediaCrop.apply` and `MediaFilter` are
-  `UIImage`-to-`UIImage` by signature.
+  `.resizeAspectFill` and is now the caller's to set.
 
-  **The library seam is no longer what blocks this** — P1 closed it. What blocks
-  it now is that the edit types are `UIImage`-shaped: `MediaCrop.apply` and
-  `MediaFilter` are `UIImage`-to-`UIImage` by signature, so the editor can bake a
-  crop into a video's POSTER frame and nothing else.
+  **EDITING landed too, and nothing blocks it any more.** What blocked it was the
+  edit types being `UIImage`-shaped, so the editor could bake a crop into a
+  video's POSTER frame and nothing else. They moved to MediaPlayback and became
+  Core Image — `FrameCrop.applied(to:)` takes and returns a `CIImage`, and a look
+  is a `CIImage -> CIImage` graph (`FrameLookRenderer`); Upload still spells the
+  two `MediaCrop` and `MediaFilter`. `VideoCompositor` draws both over the joined
+  film, so the crop and the look reach a clip's real pixels on the way out — and
+  the editor shows them live on the canvas. The crop's kept rectangle IS the
+  export's `renderSize`, which is what "cut to that rectangle" means and what the
+  filter route below could never express.
 
-  Three things to settle before writing any of it:
+  Four things were settled before any of it was written, and they are why it
+  looks as it does:
 
   1. ⚠️ **`AVMutableVideoComposition` is DEPRECATED in iOS 26.0** — this repo's
      deployment target — in favour of `AVVideoComposition.Configuration`
@@ -213,12 +218,14 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
      exposes `renderSize`, `instructions` and `customVideoCompositorClass`, and
      no Core Image slot.
 
-     **Three ways out, and the choice is still open:** two export passes (filter,
-     then crop — simple, one extra encode); a custom `AVVideoCompositing` (one
-     pass, most work, most control); or express the crop as an
-     `AVMutableVideoCompositionLayerInstruction` transform under `Configuration`
-     and do the look some other way. Pick when the trim slice lands, not before —
-     trim needs none of this.
+     **Of the three ways out, the custom compositor is the one taken:** not two
+     export passes (filter, then crop — simple, one extra encode), not the crop as
+     an `AVMutableVideoCompositionLayerInstruction` transform under
+     `Configuration` with the look done some other way, but one pass through
+     `VideoCompositor`, an `AVVideoCompositing` of this repo's own. It was the
+     most work and it is the only one that also had the transitions, the
+     per-piece looks and the overlays to draw — all of which want the same
+     `CIImage` at the same instant.
   3. **Trim is DONE (2026-09-15) and needed no composition at all** —
      `AVAssetExportSession.timeRange`. `MediaEdits` carries a `MediaTrim` in
      SECONDS (a clip is the same length whatever size it is drawn at, so the
@@ -228,24 +235,25 @@ Library pick (§2.A) needs no permissions and is the MVP. Recording:
      crop surface; `VideoFilmstrip` samples frames with **tolerance zero on both
      sides** — reproduced here, the default returns six requests as two
      pictures. `VideoExporter` now takes a `VideoExportPlan`, which is where the
-     composition builder will go.
+     rest of the edit went: the plan says WHAT to draw and
+     `VideoExporter.arrangement` builds the composition where the asset lives.
 
      Two fixture defects fell out of it: `DebugMediaLibrary` declared invented
      durations over clips of a different length, and
      `PlaceholderVideoFetcher`'s cache key omitted the duration, so asking for a
      shorter clip silently returned a longer one already on disk.
 
-  4. **What is actually left is crop and filters**, which is the only part that
-     needs (2). `VideoExportPlan` is where the composition slot goes, and it must
-     be a BUILDER rather than a composition: a composition has to be built where
-     its asset lives, `AVComposition` is not `Sendable`, and `AVVideoComposition`
-     is `Sendable` only `@unchecked`. It is deliberately not there yet — an
-     unused slot is dead code.
+  4. **Crop and filters were the part that needed (2)**, and they are done.
+     `VideoExportPlan` carries them as a `FrameFinish` of VALUES rather than a
+     composition: a composition has to be built where its asset lives,
+     `AVComposition` is not `Sendable`, and `AVVideoComposition` is `Sendable`
+     only `@unchecked`.
 
-  When crop does land, `MediaCrop.rect` is fractions of the **turned bounding
-  box**, which is invisible at angle zero where nearly every existing test lives
-  — so a video path that reads it differently from the photo path will agree on
-  every test and disagree on every real rotation. One renderer, shared.
+  `MediaCrop.rect` is fractions of the **turned bounding box**, which is
+  invisible at angle zero where nearly every existing test lives — so a video
+  path that read it differently from the photo path would agree on every test and
+  disagree on every real rotation. One renderer, shared: `FrameCrop.applied(to:)`
+  answers both.
 
 P1 delivered exactly what it promised: "pick a video → it publishes and plays
 (locally)", end to end in mock mode, de-risking everything before the backend

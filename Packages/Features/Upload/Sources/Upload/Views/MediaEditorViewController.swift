@@ -52,20 +52,18 @@ enum ContentFit {
 /// handed them over — so nothing here has to ask which of them is "the" one
 /// being edited.
 ///
-/// ⚠️ **NOTHING HERE EDITS ANYTHING YET, AND THAT IS DELIBERATE.** The category
-/// pills select and drive nothing, and "Add a song" has no destination: this
-/// repository holds no audio seam of any kind — no track model, no picker, no
-/// mock, nothing behind `CoreNetworking`. Drawing the control and saying so in
-/// the source is the precedent Feed's own sound pill sets. Inventing a seam to
-/// put behind it would be inventing a product decision.
+/// ⚠️ **EVERY CATEGORY IS A MODE, AND THE SONG PILL IS NOT A CATEGORY.** Each
+/// icon in the strip opens a `MediaEditorMode` of its own (`Views/Editor/`) —
+/// Crop and Trim are the two the screen still serves itself. The pill beside
+/// them opens the soundtrack mode, which no icon selects: a song is not one of
+/// the six, and it has to be reachable from whichever one is resting.
 ///
-/// ⚠️ **A VIDEO DRAWS ITS POSTER FRAME, NOT PLAYBACK.** The seam can hand over a
-/// clip's file now (`MediaLibraryReading.videoFile(for:)`), but no player is
-/// injected into this package — `UploadFeatureBuilder.init` takes a composer and
-/// the text-post screens, nothing else — so a chosen video still shows the same
-/// frame the grid showed it by. No play glyph is laid over it, on purpose: a
-/// button that promises playback and does nothing is worse than a still that
-/// promises nothing.
+/// ⚠️ **A VIDEO PLAYS HERE, AND ONLY THE PAGE THAT HAS COME TO REST.** The
+/// screen owns its player behind `MediaVideoPreviewing` — one page, one binding,
+/// see `playSettledPage` for why a player per page is the shape of this repo's
+/// one recorded leak. No play glyph is laid over the picture: a tap on it is the
+/// control every video surface already has, and the explicit one stands on the
+/// trim ruler where the film is.
 ///
 /// **The sheet becomes the whole screen here.** The flow is a stack inside a
 /// page sheet that rests on a single album row, and a canvas one row tall is not
@@ -1133,8 +1131,8 @@ final class MediaEditorViewController: UIViewController {
         // action wired the tap looked dead — which is exactly how it was
         // reported. It states the position itself instead.
         //
-        // There is still nothing BEHIND a category: choosing one moves the pill
-        // and changes nothing else, because editing is not built yet.
+        // Choosing one now opens the mode behind it — `showAccessory(for:)` is
+        // where the strip's index becomes a band tenant.
         // ⚠️ **ONE CHANNEL FOR TAP AND SLIDE ALIKE.** The bar this replaced
         // announced a tap through `.valueChanged` and a drag through nothing at
         // all, on the reasoning that a pager would answer for the drag — correct
@@ -1173,12 +1171,14 @@ final class MediaEditorViewController: UIViewController {
         refreshToolbarItems(animated: false)
     }
 
-    /// ⚠️ **THE LEADING CONTROL IS THE MODE'S, AND "Add a song" IS THE DEFAULT
-    /// RATHER THAN THE FIXTURE.** The pill has no destination — this repository
-    /// holds no audio seam of any kind — so while the timeline is open the slot
-    /// goes to the actions that DO reach something. Charter F18, asked for in
-    /// exactly those words: with the mode on, the bottom-left pill is replaced by
-    /// a second bar carrying split and speed.
+    /// ⚠️ **THE LEADING CONTROL IS THE MODE'S, AND THE SONG PILL IS ONLY ITS
+    /// DEFAULT.** The pill opens the song tools, so the slot is never free — the
+    /// bar simply cannot hold both it and the track's actions on a phone (see
+    /// `shareTheBarBetweenTheTwoStrips`, where a third action already overran an
+    /// SE), and while the timeline is open the actions are what the finger is
+    /// reaching for. Charter F18, asked for in exactly those words: with the mode
+    /// on, the bottom-left pill is replaced by a second bar carrying split and
+    /// speed.
     private func refreshToolbarItems(animated: Bool) {
         let leading: UIView = isTimelineShowing ? actionBar : soundPill
         refreshSoundPill()
@@ -1938,13 +1938,14 @@ final class MediaEditorViewController: UIViewController {
         showAccessory(for: "Trim")
     }
 
-    /// ⚠️ **A VIDEO LEAVES CROP MODE STANDING ON ITS NOTICE, AND ONLY A SETTLE
-    /// CAN CLEAR IT.** Choosing "Crop" on a video puts a line of text in the band
-    /// and returns without locking anything — so the canvas still pages. Swiping
-    /// on to a photograph used to change nothing: the band kept the notice, the
-    /// pill kept saying Crop, and tapping Crop again announced nothing because the
-    /// selection had not changed. The mode was unreachable for that picture until
-    /// another one was chosen and come back from.
+    /// ⚠️ **A CATEGORY THE SCREEN RESTS ON WITHOUT HAVING ENTERED IT IS
+    /// UNREACHABLE BY TAP, AND ONLY A SETTLE CAN CLEAR THAT.** Choosing "Crop"
+    /// used to leave a video standing on a notice, with the canvas still paging;
+    /// swiping on to a photograph changed nothing, because tapping the icon the
+    /// strip already rests on announces no selection. The notice is gone — a clip
+    /// is cropped like a photograph — but `enterCrop` still returns without
+    /// entering when it cannot find the page's item, so the settle that brings a
+    /// page it can find has to try again.
     private func reopenCropIfWaiting() {
         guard !isCropping, selectedCategory == "Crop" else { return }
         showAccessory(for: "Crop")
@@ -2605,12 +2606,14 @@ final class MediaEditorViewController: UIViewController {
     ///
     /// ⚠️ **AND IT CARRIES NO `!isCropping` GUARD, WHICH IT DID FOR ONE BUILD.**
     /// The reasoning was sound — the crop surface owns the canvas, so a tap there
-    /// is aimed at the box rather than at the film — and the guard was
-    /// unreachable: `enterCrop` REFUSES videos, so a clip is never behind a crop
-    /// surface, and a photograph has no player for this to reach. This screen has
-    /// already removed one dead guard for exactly that reason (a `stopPreview()`
-    /// in `enterCrop` that could not run). It comes back with the compositor,
-    /// when a video can be cropped and there is something for it to protect.
+    /// is aimed at the box rather than at the film — and the guard has never had
+    /// anything to do. It used to be `enterCrop` REFUSING videos that made it
+    /// dead; a clip is cropped like a photograph now, and what makes it dead
+    /// instead is the `stopPreview()` `enterCrop` runs on its way in. Nothing is
+    /// bound while the surface is up, so `togglePreviewPlayback` finds no surface
+    /// to toggle. That `stopPreview()` was itself once deleted from `enterCrop`
+    /// as unreachable, for the same reason this guard was: it is back, and it is
+    /// doing the work.
     @objc private func mediaTapped() {
         togglePreviewPlayback()
     }
@@ -2635,10 +2638,13 @@ final class MediaEditorViewController: UIViewController {
         timelineTrack.showPaused(!paused)
     }
 
-    /// ⚠️ **THE MIRROR IMAGE OF THE OTHER TWO NOTICES.** Crop and Filters
-    /// (`MediaEditorFiltersMode`) refuse a video; Trim refuses a photograph. Same rule — a mode that cannot serve
-    /// the medium in front of the author says so rather than offering a control
-    /// that reaches nothing.
+    /// ⚠️ **THE MIRROR IMAGE OF THE SONG MODE'S NOTICE, AND THESE ARE THE LAST
+    /// OF THEM.** Trim refuses a photograph, and so does the soundtrack mode
+    /// (`MediaEditorSoundtrackMode.photoNotice`); Crop and Filters refused a
+    /// video until the compositor drew both into the export, and they refuse
+    /// nothing now. Same rule throughout — a mode that cannot serve the medium in
+    /// front of the author says so rather than offering a control that reaches
+    /// nothing.
     private lazy var trimUnavailable = BandNoticeView(
         "A photo has nothing to trim."
     )

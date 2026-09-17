@@ -83,12 +83,13 @@ final class MediaEditorBandView: UIView {
 /// names as the one a local control must not cross.
 ///
 /// The finalisation screen used to carry a footer of the same kind, apologising
-/// that videos could not be posted. It no longer does, because they can: that
-/// gap was `MediaLibraryReading` vending images only, and it is closed. What is
-/// still true here is narrower — a video publishes, but `MediaCrop` and
-/// `MediaFilter` are `UIImage`-to-`UIImage`, so there is nothing to bake an edit
-/// into (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4). A notice that outlives its
-/// reason is worse than none.
+/// that videos could not be posted, and the editor carried two more of its own
+/// over Crop and Filters on a video. All three are gone, because each reason
+/// closed: `MediaLibraryReading` vends a clip's file, and the crop and the look
+/// are drawn by `VideoCompositor` and burned into the export
+/// (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4). What is left has no seam behind it
+/// to close — a photograph has no film to cut and no sound to carry. A notice
+/// that outlives its reason is worse than none.
 @MainActor
 final class BandNoticeView: UIView {
     private let caption = UILabel()

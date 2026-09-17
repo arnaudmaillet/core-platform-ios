@@ -49,13 +49,15 @@ import UIKit
 ///   of. The footer says so in plain words, which is the privacy screen's rule
 ///   (§13a): a local honour-system control is acceptable only while it admits it.
 ///
-/// ⚠️ **VIDEOS PUBLISH, BUT THEY ARE NOT EDITABLE YET.** `MediaLibraryReading`
-/// grew `videoFile(for:)` and a chosen clip now uploads, leads the carousel if
-/// it is the cover, and carries a poster frame. What it does NOT carry is any of
-/// this flow's edits: crop, straighten, mirror and filters are `UIImage`-to-
-/// `UIImage` by signature, so the editor still shows a notice on a video page
-/// (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4). A video is published exactly as it
-/// was picked.
+/// ⚠️ **A VIDEO CARRIES ITS EDITS NOW, ALL OF THEM.** `MediaLibraryReading`
+/// grew `videoFile(for:)` and a chosen clip uploads, leads the carousel if it is
+/// the cover, and carries a poster frame. Everything the editor let the author
+/// decide travels with it in one `VideoExportPlan` (`MediaEdits.exportPlan`) —
+/// the pieces they kept and their rates, the crop and straighten, the look, the
+/// overlays and the song — and `VideoExporter`'s compositor burns them into the
+/// file (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4). It is the mapping the
+/// editor's canvas plays — asked here WITH the overlays, which the canvas draws
+/// as views instead — so what was watched is what is published.
 final class NewPostViewController: UIViewController {
     /// ⚠️ **THE SETTINGS ARE THREE SECTIONS, NOT ONE LIST.** Six switches in a
     /// single card is a wall: nothing in it tells the reader that hiding a
@@ -634,10 +636,12 @@ final class NewPostViewController: UIViewController {
     ///
     /// Photos and videos take different routes out of the library and meet again
     /// as `ComposeMedia`: a photo is read at publish size and baked with its
-    /// edits, a video is read as a file and handed over with the part of it the
-    /// author kept. Both consult `edits`; they use different fields of it, and a
-    /// video uses only `trim` — crop and filters are still `UIImage`-to-`UIImage`
-    /// by signature (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4).
+    /// edits here, a video is read as a file and handed over as the plan the
+    /// exporter draws. Both consult `edits`: a photograph takes the crop, the
+    /// look and the overlays, a clip takes those and its pieces and its song as
+    /// well. What differs is WHERE the pixels are made —
+    /// `MediaEdits.applied(to:artwork:)` on this screen for a picture,
+    /// `VideoCompositor` inside the export for a clip.
     ///
     /// The title and the six settings are NOT sent: nothing in the contract
     /// carries them (§21, §22).

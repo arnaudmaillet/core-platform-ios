@@ -233,8 +233,10 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
         )
     }
 
-    /// ⚠️ **FORWARDED AS-IS — THE CONTROLLER'S BODY IS STILL A STUB** that
-    /// changes nothing (the live-look slice fills it there, not here).
+    /// Forwarded. The controller writes the look onto the board the composition's
+    /// instructions read and restarts the frame reader where it stood, so the
+    /// change lands without a new item — and answers false when it could not,
+    /// which the protocol's note says the caller must act on.
     func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool {
         controller.setLiveLook(look, in: surface)
     }
