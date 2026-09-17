@@ -145,6 +145,12 @@ final class MediaFilterRowView: UIView {
     var debugAllChipsHaveAPicture: Bool { buttons.values.allSatisfy(\.hasPicture) }
     /// Internal for tests: the picture on one chip.
     func debugPicture(for filter: MediaFilter) -> UIImage? { buttons[filter]?.image }
+
+    /// Internal for tests: the ring a chip is wearing — its colour and its
+    /// width, which is zero when the chip is not the chosen one.
+    func debugRing(for filter: MediaFilter) -> (colour: UIColor?, width: CGFloat)? {
+        buttons[filter].map { ($0.ringColour, $0.ringWidth) }
+    }
     /// Internal for tests: presses a chip the way a finger would.
     func debugTap(_ filter: MediaFilter) { pick(filter) }
 
@@ -250,10 +256,15 @@ private final class FilterChip: UIView {
         picture.clipsToBounds = true
         picture.layer.cornerRadius = corner
         picture.layer.cornerCurve = .continuous
-        // ⚠️ A `CGColor`, SO IT IS RE-STATED ON EVERY TRAIT CHANGE. The tray's
-        // chosen ring carries the same note: a colour behind a layer property
-        // does not follow light and dark on its own.
-        picture.layer.borderColor = UIColor.tintColor.cgColor
+        // ⚠️ **WHITE, AND LITERALLY WHITE — THE BAND'S SELECTION COLOUR.** The
+        // ring used to be `.tintColor`, which drew it blue; every other row in
+        // this band marks its choice in white (charter F28: *"the chosen one is
+        // white with black ink, the white the selection is drawn in"*), and a
+        // chip ringed blue while the transitions beside it ringed white read as
+        // two different kinds of chosen. Being literal, it also needs no
+        // re-stating when light and dark change — which is why the trait
+        // registration that used to stand here is gone.
+        picture.layer.borderColor = UIColor.white.cgColor
         picture.layer.borderWidth = 0
         picture.translatesAutoresizingMaskIntoConstraints = false
 
@@ -273,13 +284,6 @@ private final class FilterChip: UIView {
         // the button lands in front of the picture and the caption and takes the
         // touch for both.
         button.pin(to: self)
-
-        // ⚠️ NOT `traitCollectionDidChange`, WHICH IS DEPRECATED SINCE iOS 17 and
-        // this app is on 26. A `CGColor` does not follow light and dark on its
-        // own, so the ring's colour is re-stated when the trait actually changes.
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (chip: FilterChip, _) in
-            chip.picture.layer.borderColor = UIColor.tintColor.cgColor
-        }
 
         NSLayoutConstraint.activate([
             picture.topAnchor.constraint(equalTo: topAnchor),
@@ -314,4 +318,8 @@ private final class FilterChip: UIView {
         picture.layer.borderWidth = chosen ? ring : 0
         caption.textColor = chosen ? .label : .secondaryLabel
     }
+
+    /// Internal for tests: what the ring is drawn in, and how wide it is.
+    var ringColour: UIColor? { picture.layer.borderColor.map(UIColor.init(cgColor:)) }
+    var ringWidth: CGFloat { picture.layer.borderWidth }
 }

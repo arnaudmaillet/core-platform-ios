@@ -108,6 +108,26 @@ struct MediaFilterTests {
         #expect(row.debugSelected == .noir)
     }
 
+    /// ⚠️ **THE RING IS WHITE, AND EVERY OTHER ROW IN THE BAND AGREES.** It was
+    /// `.tintColor` — blue — while the transitions and the per-piece looks
+    /// beside it ringed their choice in white, so one band showed two kinds of
+    /// chosen. Asked for in those words: *"l'élément sélectionné a un contour
+    /// bleu alors que je souhaite un contour blanc"*.
+    @Test func theChosenLookIsRingedInWhite() throws {
+        let row = MediaFilterRowView()
+
+        row.debugTap(.noir)
+
+        let chosen = try #require(row.debugRing(for: .noir))
+        let other = try #require(row.debugRing(for: .chrome))
+        #expect(chosen.width == 2, "the chosen chip wears no ring")
+        #expect(other.width == 0, "an unchosen chip wears one")
+        let ink = try #require(chosen.colour)
+        var white: CGFloat = 0, alpha: CGFloat = 0
+        #expect(ink.getWhite(&white, alpha: &alpha), "the ring is not a grey at all: \(ink)")
+        #expect(white == 1 && alpha == 1, "the ring is \(ink), not white")
+    }
+
     /// ⚠️ RESTORING A CHOICE MUST BE SILENT. `setSelected` is what a swipe to
     /// another picture calls; if it announced, arriving at an item would look
     /// like the viewer had just chosen its look and would re-render the canvas
