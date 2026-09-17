@@ -15,6 +15,9 @@ public final class ComposedVideo: @unchecked Sendable {
     /// was built, so no reader has to load them.
     let tracks: [AVAssetTrack]
     let composition: AVVideoComposition
+    /// Where the composition's pictures end — past it a reader finds nothing,
+    /// and that is not a failure.
+    let end: CMTime
     /// The board `composition`'s instructions read the whole look from — what
     /// a live look change is written to. Nil when it was built without one.
     let live: VideoLiveLook?
@@ -23,6 +26,7 @@ public final class ComposedVideo: @unchecked Sendable {
         self.asset = asset
         self.tracks = tracks
         self.composition = composition
+        self.end = composition.instructions.map(\.timeRange.end).max() ?? .positiveInfinity
         self.live = live
     }
 }
@@ -79,6 +83,13 @@ final class ComposedFrameReader: @unchecked Sendable {
         var producedAny = false
         /// A restart decided but held back by the throttle.
         var restartOwed = false
+        /// When the running reader failed — a reader that could not start or
+        /// broke off is tried again after `retryAfter`.
+        var failedAt: CFTimeInterval?
+        #if DEBUG
+        /// Test hook: how many starts to fail as a reader that cannot start.
+        var failingStarts = 0
+        #endif
         /// The moment `refresh` asked to draw again, until a reader is started
         /// for it — or until the clock moves on. Invalid when none is owed.
         var redrawAt: CMTime = .invalid
@@ -123,6 +134,13 @@ final class ComposedFrameReader: @unchecked Sendable {
         let answer: (buffer: CVPixelBuffer, time: CMTime)? = state.withLockUnchecked { state in
             guard !state.closed else { return nil }
             if Self.jumped(state, to: time, at: now) || Self.fellBehind(state, at: time) {
+                state.restartOwed = true
+            }
+            // ⚠️ **A FAILED READER IS TRIED AGAIN.** Left alone, a reader that
+            // could not start marked itself done, and a paused canvas stayed
+            // blank until the next seek — which, on a paused clip, may never come.
+            if let failed = state.failedAt, now - failed > Self.retryAfter {
+                state.failedAt = nil
                 state.restartOwed = true
             }
             state.wanted = time
@@ -218,7 +236,11 @@ final class ComposedFrameReader: @unchecked Sendable {
         state.producedAny = false
         state.handedOut = .invalid
         state.restartedAtHost = now
+        state.failedAt = nil
     }
+
+    /// How long after a failure a reader is tried again.
+    static let retryAfter: CFTimeInterval = 0.5
 
     /// How long a fresh reader is given to answer before a newer request
     /// replaces it.
@@ -275,24 +297,43 @@ final class ComposedFrameReader: @unchecked Sendable {
         func current() -> Bool { state.withLockUnchecked { $0.generation == generation && !$0.closed } }
         if Self.probes { print("[composed] read enter generation=\(generation) current=\(current())") }
         guard current() else { return }
-        guard let reader = try? AVAssetReader(asset: video.asset) else {
-            state.withLockUnchecked { if $0.generation == generation { $0.exhausted = true; $0.reading = false } }
-            return
+        // ⚠️ **PAST THE END IS NOT A FAILURE.** A reader asked to start after
+        // the last picture reads nothing; retried, it would spin for ever.
+        let pastTheEnd = video.end.isValid && start >= video.end - CMTime(value: 1, timescale: 600)
+        func failed() {
+            let now = CACurrentMediaTime()
+            state.withLockUnchecked {
+                guard $0.generation == generation else { return }
+                $0.reading = false
+                if pastTheEnd {
+                    $0.exhausted = true
+                } else {
+                    $0.failedAt = now
+                }
+            }
         }
+        #if DEBUG
+        let failing = state.withLockUnchecked { state -> Bool in
+            guard state.failingStarts > 0 else { return false }
+            state.failingStarts -= 1
+            return true
+        }
+        if failing { return failed() }
+        #endif
+        guard let reader = try? AVAssetReader(asset: video.asset) else { return failed() }
         let output = AVAssetReaderVideoCompositionOutput(videoTracks: video.tracks, videoSettings: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferIOSurfacePropertiesKey as String: [String: String]()
         ])
         output.videoComposition = video.composition
         output.alwaysCopiesSampleData = false
-        guard reader.canAdd(output) else { return }
+        guard reader.canAdd(output) else { return failed() }
         reader.add(output)
         reader.timeRange = CMTimeRange(start: start, duration: .positiveInfinity)
         guard reader.startReading() else {
             Self.trace("composed reader failed to start: \(String(describing: reader.error))")
             if Self.probes { print("[composed] failed to start: \(String(describing: reader.error))") }
-            state.withLockUnchecked { if $0.generation == generation { $0.exhausted = true; $0.reading = false } }
-            return
+            return failed()
         }
         defer { reader.cancelReading() }
         if Self.probes { print("[composed] reading generation=\(generation) status=\(reader.status.rawValue)") }
@@ -310,9 +351,11 @@ final class ComposedFrameReader: @unchecked Sendable {
                 continue
             }
             guard let sample = output.copyNextSampleBuffer() else {
-                state.withLockUnchecked { if $0.generation == generation { $0.exhausted = true; $0.reading = false } }
                 if reader.status == .failed {
                     Self.trace("composed reader failed: \(String(describing: reader.error))")
+                    failed()
+                } else {
+                    state.withLockUnchecked { if $0.generation == generation { $0.exhausted = true; $0.reading = false } }
                 }
                 if Self.probes {
                     print(String(format: "[composed] ended status=%d from=%.3f error=%@",
@@ -350,6 +393,11 @@ final class ComposedFrameReader: @unchecked Sendable {
     }
 
     #if DEBUG
+    /// Test hook: makes the next `count` readers fail to start.
+    func debugFailNextStarts(_ count: Int) {
+        state.withLockUnchecked { $0.failingStarts = count }
+    }
+
     /// How many frames are waiting, and whether a reader is running.
     var debugState: (frames: Int, reading: Bool, generation: Int) {
         state.withLockUnchecked { ($0.frames.count, $0.reading, $0.generation) }

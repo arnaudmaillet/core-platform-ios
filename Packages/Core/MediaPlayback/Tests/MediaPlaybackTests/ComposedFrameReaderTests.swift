@@ -330,4 +330,27 @@ struct ComposedFrameReaderTests {
         #expect(reader.debugState.frames == 0, "the closed reader still holds \(reader.debugState.frames) frames")
         #expect(reader.debugState.generation == generation, "the closed reader restarted")
     }
+
+    /// ⚠️ **A READER THAT CANNOT START IS TRIED AGAIN.** It used to mark itself
+    /// done, and a paused canvas stayed blank until the next seek — which a
+    /// paused clip may never get. Nobody asks for another time here.
+    @Test func aReaderThatCouldNotStartIsTriedAgain() async throws {
+        let (_, composed) = try await arranged()
+        let reader = ComposedFrameReader(composed)
+        defer { reader.close() }
+        reader.debugFailNextStarts(1)
+
+        _ = reader.frame(at: time(0.5))
+        var failed = false
+        for _ in 0..<400 where !failed {
+            try await Task.sleep(for: .milliseconds(5))
+            failed = !reader.debugState.reading
+        }
+        try #require(failed, "guard: the first reader did not fail")
+
+        let got = try await poll(reader, at: 0.5, within: 10)
+        #expect(got != nil, "the reader never tried again")
+        #expect(reader.debugState.generation == 2, "tried \(reader.debugState.generation - 1) times")
+    }
+
 }
