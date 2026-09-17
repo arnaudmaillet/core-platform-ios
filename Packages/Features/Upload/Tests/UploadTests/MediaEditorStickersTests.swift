@@ -55,7 +55,7 @@ struct MediaEditorStickersTests {
         ) async -> [Double: UIImage] { [:] }
         func playheadSeconds(in surface: VideoRenderView) -> Double? { nil }
         func advancingRate(in surface: VideoRenderView) -> Double { 0 }
-        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) {}
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool { true }
         func setMuted(_ muted: Bool, in surface: VideoRenderView) {}
         func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {}
         func seek(toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double) {}

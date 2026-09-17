@@ -109,9 +109,16 @@ protocol MediaVideoPreviewing: AnyObject {
     ) async -> [Double: UIImage]
 
     /// Draws the arrangement playing in `surface` with `look` over the whole of
-    /// it, WITHOUT a new item — a slider dragged across a video must not rebuild
+    /// it, WITHOUT a new item — a ruler dragged across a video must not rebuild
     /// the player sixty times a second. A paused clip shows the change too.
-    func setLiveLook(_ look: FrameLook, in surface: VideoRenderView)
+    ///
+    /// ⚠️ **FALSE IS AN ANSWER THE CALLER MUST ACT ON.** Under
+    /// `-avplayer-render` the composition belongs to the item and no live board
+    /// is put under it (MediaPlayback's `LiveLookOnEitherBackingTests` pins
+    /// both answers); the look then reaches the canvas only with a new item, so
+    /// a caller that drops the answer shows an edit that never arrives.
+    @discardableResult
+    func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool
 
     /// Lets the clip in `surface` be heard, or silences it. Every clip starts
     /// silent; one carrying a song is the reason to un-mute.
@@ -228,7 +235,7 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
 
     /// ⚠️ **FORWARDED AS-IS — THE CONTROLLER'S BODY IS STILL A STUB** that
     /// changes nothing (the live-look slice fills it there, not here).
-    func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) {
+    func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool {
         controller.setLiveLook(look, in: surface)
     }
 

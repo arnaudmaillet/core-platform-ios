@@ -84,7 +84,12 @@ struct MediaEditorSegmentFiltersTests {
         /// order — recorded, because a stub that swallowed them could not say
         /// whether the screen ever asked.
         private(set) var liveLooks: [FrameLook] = []
-        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) { liveLooks.append(look) }
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool {
+            liveLooks.append(look)
+            return takesLiveLook
+        }
+        /// What this backing answers — false is the legacy layer path's answer.
+        var takesLiveLook = true
         private(set) var mutes: [Bool] = []
         func setMuted(_ muted: Bool, in surface: VideoRenderView) { mutes.append(muted) }
         private(set) var mixLevels: [(music: Double, original: Double)] = []

@@ -319,8 +319,17 @@ struct CompositorFinishTests {
 ///
 /// A real player over the colour clip, and the frames its renderer hands the
 /// surface — the very buffer the canvas shows.
+///
+/// ⚠️ **THE DEFAULT BACKING ONLY, AND THAT IS WHAT "THE CANVAS SHOWS" MEANS
+/// HERE.** Every assertion below reads the pixel buffer the renderer handed
+/// the surface, and under `-avplayer-render` there is no renderer at all —
+/// `AVPlayerLayer` draws the item itself and a test cannot read what it drew.
+/// Left to run there, the suite failed on its own guard ("the red frame never
+/// showed") and said nothing about the legacy path. What that path can still
+/// be asked is asked by `LiveLookOnEitherBackingTests` below, which runs in
+/// both lanes.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
 struct LiveLookTests {
     typealias RGB = ColourClipWriter.RGB
 
@@ -488,6 +497,47 @@ struct LiveLookTests {
 
         let grey = try await waitFor(controller, view) { tint($0) <= 16 && $0.r < 200 }
         #expect(grey != nil, "the new item is not grey: \(diagnosis(controller, view))")
+    }
+}
+
+/// **WHAT `setLiveLook` ANSWERS ON EACH BACKING, WHICH IS NOT THE SAME THING.**
+///
+/// The pixels belong to `LiveLookTests`, which only the sample-buffer backing
+/// can be asked about. What both lanes can be asked is the ANSWER, and it
+/// differs by design: the default backing takes the look into the board its
+/// renderer composes through and keeps the item it has; the legacy backing
+/// hands its composition to the item, which the iOS 27 simulator refuses to
+/// play the moment anything renders it, so no board is put under it at all and
+/// the look reaches the canvas with a new item instead.
+///
+/// ⚠️ **SO THE ANSWER MUST BE READ.** A caller that ignores a `false` here
+/// shows the author an edit that never arrives — which is exactly what the
+/// editor's reload is for.
+@MainActor
+@Suite(.serialized)
+struct LiveLookOnEitherBackingTests {
+    private struct Passthrough: VideoSource {
+        func playableURL(for url: URL) async throws -> URL { url }
+    }
+
+    @Test func aLookIsTakenByTheBackingThatCanTakeIt() async throws {
+        let controller = VideoPlaybackController(source: Passthrough(), poolSize: 1, capacity: 1)
+        let view = VideoRenderView()
+        view.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
+        defer { controller.stop(view) }
+        await controller.load(VideoExportPlan(sourceURL: try await ColourClipWriter.clip()), in: view) { 0.5 }
+        controller.setPaused(true, in: view)
+        let item = try #require(controller.debugItem(in: view), "guard: nothing was loaded")
+        let creations = controller.itemCreations
+
+        let taken = controller.setLiveLook(FrameLook(preset: .mono), in: view)
+
+        #expect(taken == VideoRenderFlags.usesSampleBufferLayer,
+                "the sample-buffer backing takes a look live and the legacy one does not")
+        guard taken else { return }
+        #expect(controller.debugItem(in: view) === item, "the look brought a new item")
+        #expect(controller.itemCreations == creations, "the look made an item")
+        #expect(controller.isPaused(in: view) == true, "the look started the clip")
     }
 }
 

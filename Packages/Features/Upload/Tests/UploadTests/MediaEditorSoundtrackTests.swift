@@ -85,7 +85,7 @@ struct MediaEditorSoundtrackTests {
         func frames(
             of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
         ) async -> [Double: UIImage] { [:] }
-        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) {}
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool { true }
         func setMuted(_ muted: Bool, in surface: VideoRenderView) { mutes.append(muted) }
         func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {
             mixLevels.append((music, original))

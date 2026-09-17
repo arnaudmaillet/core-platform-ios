@@ -219,6 +219,12 @@ struct ComposedFrameReaderTests {
     /// judge; three silent ticks in a row end the walk, since a reader that
     /// has stopped answering will not start again.
     ///
+    /// ⚠️ **AND THE BUDGET IS THE LEGACY LANE'S, NOT THIS MACHINE'S.** CI runs
+    /// this suite a second time under `-avplayer-render`, where the player
+    /// composites every frame itself and the whole run takes twice as long; at
+    /// two seconds a tick the walk ended after 12 frames there and called a
+    /// loaded runner a skipping reader.
+    ///
     /// ⚠️ **AND THE READER IS STARTED ONCE.** A reader that restarts at every
     /// tick hands out a perfect sequence — each fresh reader's first frame is
     /// the one asked for — while decoding from a keyframe every frame. Measured
@@ -234,7 +240,7 @@ struct ComposedFrameReaderTests {
         let steps = 59
         for step in 0..<steps where silent < 3 {
             try await Task.sleep(for: .milliseconds(33))
-            if let frame = try await poll(reader, at: Double(step) / 30, within: 2) {
+            if let frame = try await poll(reader, at: Double(step) / 30, within: 8) {
                 handed.append(frame.time.seconds)
                 silent = 0
             } else {
@@ -262,8 +268,11 @@ struct ComposedFrameReaderTests {
         let (_, composed) = try await arranged()
         let reader = ComposedFrameReader(composed)
         defer { reader.close() }
-        _ = try #require(try await poll(reader, at: 1.8), "guard: nothing answered 1.8s")
-        let last = try #require(try await pollUntilReached(reader, 2 - Self.frame), "guard: nothing answered the last frame")
+        _ = try #require(try await poll(reader, at: 1.8, within: 8), "guard: nothing answered 1.8s")
+        let last = try #require(
+            try await pollUntilReached(reader, 2 - Self.frame, within: 8),
+            "guard: nothing answered the last frame"
+        )
         try #require(last == time(2 - Self.frame), "guard: the last frame handed out is at \(last.seconds)s")
 
         // ⚠️ THE FIRST REQUEST PAST THE END IS A JUMP, and a reader may

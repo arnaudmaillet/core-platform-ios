@@ -117,8 +117,13 @@ extension MediaEditorViewController: MediaEditorHosting {
         switch kind {
         case .look:
             redraw(id)
-            if id == playingID, let surface = playingSurface {
-                preview.setLiveLook(edits(for: id).look, in: surface)
+            if id == playingID, let surface = playingSurface,
+               !preview.setLiveLook(edits(for: id).look, in: surface) {
+                // ⚠️ **A BACKING THAT CANNOT TAKE A LOOK LIVE GETS A NEW ITEM.**
+                // The legacy layer path is the one that refuses; leaving it at
+                // that would draw the author's filter on the poster and not on
+                // the clip.
+                refreshPreview(force: true)
             }
         case .film:
             redraw(id)
