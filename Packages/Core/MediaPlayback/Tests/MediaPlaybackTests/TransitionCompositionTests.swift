@@ -503,11 +503,21 @@ struct TransitionPreviewTests {
         #expect(composition.renderSize == CGSize(width: 120, height: 160), "got \(composition.renderSize)")
     }
 
-    @Test func anIdentityUntouchedFileHasNoComposition() async throws {
-        let (item, controller, view, _) = try await item(loading: [])
+    /// ⚠️ **AN UNTOUCHED UPRIGHT FILE IS COMPOSED TOO, SO A LOOK CAN REACH IT
+    /// LIVE.** Played plain, it would have no compositor to hand the author's
+    /// first filter to (`LiveLookTests`). The legacy layer path, which would hand
+    /// the composition to its item, still plays it plain.
+    @Test func anIdentityUntouchedFileIsComposedForItsLiveLook() async throws {
+        let (_, controller, view, _) = try await item(loading: [])
         defer { controller.stop(view) }
 
-        #expect(controller.debugComposition(in: view) == nil, "an upright file went through a compositor")
+        let composition = controller.debugComposition(in: view)
+        if VideoRenderFlags.usesSampleBufferLayer {
+            #expect(composition?.renderSize == CGSize(width: 160, height: 120),
+                    "an upright file has no compositor for its look: \(String(describing: composition?.renderSize))")
+        } else {
+            #expect(composition == nil, "an upright file went through a compositor on the layer path")
+        }
     }
 
     @Test func aRotatedArrangementWithoutATransitionIsUprightToo() async throws {

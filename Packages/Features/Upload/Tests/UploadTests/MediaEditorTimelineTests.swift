@@ -127,6 +127,22 @@ struct MediaEditorTimelineTests {
 
         var rate: Double = 0
         func advancingRate(in surface: VideoRenderView) -> Double { rate }
+        /// Every live look, mute and pair of levels the screen asked for, in
+        /// order — recorded, because a stub that swallowed them could not say
+        /// whether the screen ever asked.
+        private(set) var liveLooks: [FrameLook] = []
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool {
+            liveLooks.append(look)
+            return takesLiveLook
+        }
+        /// What this backing answers — false is the legacy layer path's answer.
+        var takesLiveLook = true
+        private(set) var mutes: [Bool] = []
+        func setMuted(_ muted: Bool, in surface: VideoRenderView) { mutes.append(muted) }
+        private(set) var mixLevels: [(music: Double, original: Double)] = []
+        func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {
+            mixLevels.append((music, original))
+        }
 
         func frames(
             of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
@@ -1370,25 +1386,6 @@ struct MediaEditorTimelineTests {
         #expect(screen.preview.pauses.last == true, "nothing was asked of the player")
         #expect(bar.debugShowsPause == false,
                 "the ruler's glyph still offers to pause a stopped clip")
-    }
-
-    /// ⚠️ **AND IT KEEPS WORKING BEHIND CROP'S NOTICE, WHICH IS NOT AN
-    /// OVERSIGHT.** Choosing Crop on a video puts a line of text in the band and
-    /// locks nothing — `enterCrop` refuses videos — so the clip is still playing
-    /// and still the author's to stop. A guard against "cropping" here would be
-    /// unreachable code, and this screen has already removed one of those.
-    @Test func tappingStillWorksWhileCropSaysItCannotServeAVideo() async throws {
-        let screen = open(Self.items(1, videosAt: [0]))
-        choose(Mode.trim, on: screen)
-        try await ready(screen)
-        screen.preview.paused = false
-        choose(Mode.crop, on: screen)
-        #expect(screen.editor.debugBand.content is BandNoticeView, "guard: crop refused the video")
-
-        screen.editor.debugTapMedia()
-
-        #expect(screen.preview.pauses.last == true,
-                "the clip could not be stopped while the notice was up")
     }
 
     // MARK: - Who owns the time

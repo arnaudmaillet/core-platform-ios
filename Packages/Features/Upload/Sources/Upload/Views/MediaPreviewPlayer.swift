@@ -1,3 +1,4 @@
+import AVFoundation
 import MediaPlayback
 import UIKit
 
@@ -106,6 +107,25 @@ protocol MediaVideoPreviewing: AnyObject {
     func frames(
         of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
     ) async -> [Double: UIImage]
+
+    /// Draws the arrangement playing in `surface` with `look` over the whole of
+    /// it, WITHOUT a new item — a ruler dragged across a video must not rebuild
+    /// the player sixty times a second. A paused clip shows the change too.
+    ///
+    /// ⚠️ **FALSE IS AN ANSWER THE CALLER MUST ACT ON.** Under
+    /// `-avplayer-render` the composition belongs to the item and no live board
+    /// is put under it (MediaPlayback's `LiveLookOnEitherBackingTests` pins
+    /// both answers); the look then reaches the canvas only with a new item, so
+    /// a caller that drops the answer shows an edit that never arrives.
+    @discardableResult
+    func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool
+
+    /// Lets the clip in `surface` be heard, or silences it. Every clip starts
+    /// silent; one carrying a song is the reason to un-mute.
+    func setMuted(_ muted: Bool, in surface: VideoRenderView)
+
+    /// The song's level and the film's own, live, both 0...1.
+    func setMixLevels(music: Double, original: Double, in surface: VideoRenderView)
 }
 
 /// The real one: a `VideoPlaybackController` of this screen's very own.
@@ -139,6 +159,13 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
         // An arrangement is never shared — the controller registers it under no
         // URL. There is one player and one page; sharing is a feed concern.
         await controller.load(plan, in: surface, landing: landing)
+        // ⚠️ **HEARD EXACTLY WHEN THE ITEM PLAYING CARRIES A SONG** — asked of
+        // the item that is in, not of the plan: a load abandoned on the way
+        // leaves the previous item playing, and one whose song could not be
+        // read falls back to the film as shot. A fresh bind starts silent, so
+        // this is the one place a song gets its voice, on every way a clip is
+        // (re)loaded — a settle, a crop, a new excerpt.
+        controller.setMuted(!controller.carriesSoundtrack(in: surface), in: surface)
     }
 
     func setLoopRange(_ range: ClosedRange<Double>?, in surface: VideoRenderView) {
@@ -206,6 +233,26 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
         )
     }
 
+    /// Forwarded. The controller writes the look onto the board the composition's
+    /// instructions read and restarts the frame reader where it stood, so the
+    /// change lands without a new item — and answers false when it could not,
+    /// which the protocol's note says the caller must act on.
+    func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool {
+        controller.setLiveLook(look, in: surface)
+    }
+
+    /// Forwarded. The controller moves the audio session to `.playback` while a
+    /// clip is heard — a player un-muted under `.ambient` is silenced by the
+    /// ring switch — and back to `.ambient` when it is silenced or stopped.
+    func setMuted(_ muted: Bool, in surface: VideoRenderView) {
+        controller.setMuted(muted, in: surface)
+    }
+
+    /// Forwarded: the item's mix is replaced as it plays.
+    func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {
+        controller.setMixLevels(music: music, original: original, in: surface)
+    }
+
     #if DEBUG
     /// Internal for tests: how many players this screen's pool is holding.
     var debugActivePlayerCount: Int { controller.activePlayerCount }
@@ -223,5 +270,13 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
     }
     /// Internal for tests: what the controller underneath was actually asked for.
     var debugLastSeekToleranceSeconds: Double? { controller.debugLastSeekToleranceSeconds }
+    /// Internal for tests: whether the clip in `surface` is silenced — nil when
+    /// nothing is bound.
+    func debugIsMuted(in surface: VideoRenderView) -> Bool? { controller.isMuted(in: surface) }
+    /// Internal for tests: the mix the item in `surface` plays with, and the
+    /// asset it mixes.
+    func debugSound(in surface: VideoRenderView) -> (asset: AVAsset, mix: AVAudioMix?)? {
+        controller.debugItem(in: surface).map { ($0.asset, $0.audioMix) }
+    }
     #endif
 }

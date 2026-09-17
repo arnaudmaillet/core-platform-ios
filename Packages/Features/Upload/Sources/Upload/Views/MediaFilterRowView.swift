@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaPlayback
 import UIKit
 
 /// The row of looks that sits in the editing band: the picture being edited,
@@ -104,12 +105,23 @@ final class MediaFilterRowView: UIView {
         scroller.contentInset.right = side
     }
 
-    /// Hands every chip the picture to show itself in.
-    func show(_ image: UIImage?) {
+    /// Hands every chip the picture to show itself in, wearing the rest of
+    /// the page's look — its dials and its effect — under each chip's preset.
+    ///
+    /// ⚠️ **THE WHOLE LOOK, NOT THE PRESET ALONE.** A chip is a promise of what
+    /// the page will look like once it is tapped; a page whose brightness is
+    /// raised would otherwise be offered nine looks darker than any it can wear.
+    func show(_ image: UIImage?, wearing look: FrameLook = .neutral) {
+        dressedIn = look
         for (filter, chip) in buttons {
-            chip.show(image.flatMap { MediaFilterRenderer.apply(filter, to: $0) })
+            let chipLook = FrameLook(preset: filter, adjustments: look.adjustments, effect: look.effect)
+            chip.show(image.map { MediaLookThumbnails.dressed($0, in: chipLook) })
         }
     }
+
+    /// The dials and effect the chips were last dressed in (their presets are
+    /// their own).
+    private(set) var dressedIn = FrameLook.neutral
 
     /// States the selection without announcing it — for restoring a per-item
     /// choice when the viewer swipes to another picture.
@@ -131,6 +143,8 @@ final class MediaFilterRowView: UIView {
     var debugFilters: [MediaFilter] { MediaFilter.allCases }
     /// Internal for tests: whether every chip has a picture yet.
     var debugAllChipsHaveAPicture: Bool { buttons.values.allSatisfy(\.hasPicture) }
+    /// Internal for tests: the picture on one chip.
+    func debugPicture(for filter: MediaFilter) -> UIImage? { buttons[filter]?.image }
     /// Internal for tests: presses a chip the way a finger would.
     func debugTap(_ filter: MediaFilter) { pick(filter) }
 
@@ -227,6 +241,7 @@ private final class FilterChip: UIView {
 
     var onTap: (() -> Void)?
     var hasPicture: Bool { picture.image != nil }
+    var image: UIImage? { picture.image }
 
     init(filter: MediaFilter, side: CGFloat, corner: CGFloat, ring: CGFloat, captionHeight: CGFloat) {
         super.init(frame: .zero)

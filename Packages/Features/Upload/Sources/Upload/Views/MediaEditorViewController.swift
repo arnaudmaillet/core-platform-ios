@@ -52,20 +52,18 @@ enum ContentFit {
 /// handed them over — so nothing here has to ask which of them is "the" one
 /// being edited.
 ///
-/// ⚠️ **NOTHING HERE EDITS ANYTHING YET, AND THAT IS DELIBERATE.** The category
-/// pills select and drive nothing, and "Add a song" has no destination: this
-/// repository holds no audio seam of any kind — no track model, no picker, no
-/// mock, nothing behind `CoreNetworking`. Drawing the control and saying so in
-/// the source is the precedent Feed's own sound pill sets. Inventing a seam to
-/// put behind it would be inventing a product decision.
+/// ⚠️ **EVERY CATEGORY IS A MODE, AND THE SONG PILL IS NOT A CATEGORY.** Each
+/// icon in the strip opens a `MediaEditorMode` of its own (`Views/Editor/`) —
+/// Crop and Trim are the two the screen still serves itself. The pill beside
+/// them opens the soundtrack mode, which no icon selects: a song is not one of
+/// the six, and it has to be reachable from whichever one is resting.
 ///
-/// ⚠️ **A VIDEO DRAWS ITS POSTER FRAME, NOT PLAYBACK.** The seam can hand over a
-/// clip's file now (`MediaLibraryReading.videoFile(for:)`), but no player is
-/// injected into this package — `UploadFeatureBuilder.init` takes a composer and
-/// the text-post screens, nothing else — so a chosen video still shows the same
-/// frame the grid showed it by. No play glyph is laid over it, on purpose: a
-/// button that promises playback and does nothing is worse than a still that
-/// promises nothing.
+/// ⚠️ **A VIDEO PLAYS HERE, AND ONLY THE PAGE THAT HAS COME TO REST.** The
+/// screen owns its player behind `MediaVideoPreviewing` — one page, one binding,
+/// see `playSettledPage` for why a player per page is the shape of this repo's
+/// one recorded leak. No play glyph is laid over the picture: a tap on it is the
+/// control every video surface already has, and the explicit one stands on the
+/// trim ruler where the film is.
 ///
 /// **The sheet becomes the whole screen here.** The flow is a stack inside a
 /// page sheet that rests on a single album row, and a canvas one row tall is not
@@ -119,14 +117,19 @@ final class MediaEditorViewController: UIViewController {
         Category(title: "Trim", symbol: "timeline.selection")
     ]
 
-    private let items: [MediaLibraryItem]
-    private let itemsByID: [String: MediaLibraryItem]
-    private let library: any MediaLibraryReading
+    // ⚠️ **INTERNAL WHERE A MODE OR THE HOST FILE READS IT, PRIVATE ELSEWHERE.**
+    // The modes live in their own files (`Views/Editor/`) and reach the screen
+    // through `MediaEditorHosting`, whose conformance is in
+    // `MediaEditorViewController+Host.swift` — and a `private` member is
+    // invisible from another file.
+    let items: [MediaLibraryItem]
+    let itemsByID: [String: MediaLibraryItem]
+    let library: any MediaLibraryReading
     /// Plays the settled page's clip. Owned by this screen, pool and all.
-    private let preview: any MediaVideoPreviewing
+    let preview: any MediaVideoPreviewing
     /// Which item the preview is currently bound to, if any — so a settle that
     /// lands back on the same page does not restart it.
-    private var playingID: String?
+    private(set) var playingID: String?
     /// What "Next" hands the media to. The step that writes a caption and
     /// publishes is still a stand-in, so the builder passes a screen saying so.
     /// ⚠️ CARRIES EVERY DECISION THE AUTHOR MADE — see `MediaEdits`. The step
@@ -139,7 +142,7 @@ final class MediaEditorViewController: UIViewController {
     /// ⚠️ A `CarouselCollectionView`, NOT A PLAIN ONE: on its first page it
     /// declines a rightward drag so the stack's back-swipe can carry the screen
     /// back. See `CarouselBackSwipe`.
-    private var canvas: CarouselCollectionView!
+    private(set) var canvas: CarouselCollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
     /// ⚠️ **NOT `PagedTabBar`, AND THE DIFFERENCE IS THE CONTRACT.** That bar is
     /// built for tabs standing over a pager: a drag publishes a fractional page
@@ -164,14 +167,21 @@ final class MediaEditorViewController: UIViewController {
     /// so a clip could be split exactly once and the failure would read as a dead
     /// button. `IconActionBar` is the same capsule, the same 36pt segments and
     /// the same tint, momentary.
+    ///
+    /// ⚠️ **APPENDED, NEVER INSERTED.** The raw value is the bar's index, and the
+    /// tests address the actions by it.
     enum TrackAction: Int, CaseIterable {
         case split
         case speed
+        /// A look for the piece the author is holding, beside the whole-media
+        /// look the category bar offers.
+        case filter
 
         var symbolName: String {
             switch self {
             case .split: "scissors"
             case .speed: "speedometer"
+            case .filter: "camera.filters"
             }
         }
 
@@ -179,11 +189,12 @@ final class MediaEditorViewController: UIViewController {
             switch self {
             case .split: "Split at the playhead"
             case .speed: "Playback speed"
+            case .filter: "Filter this clip"
             }
         }
     }
 
-    private lazy var actionBar: IconActionBar = {
+    lazy var actionBar: IconActionBar = {
         let bar = IconActionBar(
             items: TrackAction.allCases.map {
                 IconActionBar.Item(symbolName: $0.symbolName, accessibilityLabel: $0.spoken)
@@ -192,11 +203,16 @@ final class MediaEditorViewController: UIViewController {
         // ⚠️ THE TOOLBAR ALREADY SUPPLIES A CAPSULE — see `configureCategoryStrip`
         // for what a bubble inside a bubble looks like.
         bar.suppressesBackdrop = true
+        // ⚠️ **THE FILTER STARTS DEAD.** It acts on a HELD piece, and nothing is
+        // held when the bar is built; `refreshTrackActions` decides it from then
+        // on, but only once a clip's length is known.
+        bar.setEnabled(false, at: TrackAction.filter.rawValue)
         bar.onTap = { [weak self] index in
             guard let action = TrackAction(rawValue: index) else { return }
             switch action {
             case .split: self?.splitAtTheNeedle()
             case .speed: self?.toggleTheRateChips()
+            case .filter: self?.segmentFilterMode.actionTapped()
             }
         }
         // ⚠️ **IT KEEPS ITS WIDTH AND THE SELECTOR GIVES**, which is the rule the
@@ -239,14 +255,17 @@ final class MediaEditorViewController: UIViewController {
     }()
 
     /// ⚠️ **ONE ARROW, WHOSE MEANING IS THE MODE THE AUTHOR IS IN.** Crop resets
-    /// the rectangle and the angle; the timeline resets the cut. Two bar items
-    /// would put two undo arrows a few points apart, each undoing a different
-    /// thing, and nothing on screen to say which is which.
+    /// the rectangle and the angle; the timeline resets the cut; every other
+    /// mode resets what it owns (`MediaEditorMode.reset`). Two bar items would
+    /// put two undo arrows a few points apart, each undoing a different thing,
+    /// and nothing on screen to say which is which.
     private func resetTheCurrentMode() {
         if isTimelineShowing {
             resetTimeline()
-        } else {
+        } else if isCropping {
             resetCrop()
+        } else {
+            showingMode?.reset()
         }
     }
 
@@ -269,22 +288,25 @@ final class MediaEditorViewController: UIViewController {
     /// all when tapped. That is the shape this screen has removed three times
     /// now: a control that reaches nothing. It used to be hidden by living only
     /// in the crop bar; standing in the bar permanently, it has to say so itself.
-    private func refreshResetItem() {
+    func refreshResetItem() {
         guard let id = currentItemID else {
             resetItem.isEnabled = false
             return
         }
         let edited = edits(for: id)
-        if transitionFocus != nil {
-            // ⚠️ **NOT WHILE A CUT'S TRANSITION IS BEING CHOSEN.** Undoing every
-            // cut would take away the very cut the row is open on.
+        if transitionFocus != nil || segmentFilterMode.isOpen {
+            // ⚠️ **NOT WHILE A CUT'S TRANSITION — OR A PIECE'S FILTER — IS BEING
+            // CHOSEN.** Undoing every cut would take away the very cut, or the
+            // very piece, the row is open on.
             resetItem.isEnabled = false
         } else if isTimelineShowing {
             resetItem.isEnabled = MediaTimelining.cuts(
                 edited.timeline, withinSource: trackSeconds
             )
+        } else if croppingID != nil {
+            resetItem.isEnabled = !edited.crop.isUntouched
         } else {
-            resetItem.isEnabled = croppingID != nil && !edited.crop.isUntouched
+            resetItem.isEnabled = showingMode?.canReset ?? false
         }
     }
 
@@ -315,7 +337,7 @@ final class MediaEditorViewController: UIViewController {
     /// pins it. Read through `edits(for:)`, write through `change(_:_:)`.
     private var edits: [String: MediaEdits] = [:]
 
-    private func edits(for id: String) -> MediaEdits { edits[id] ?? .untouched }
+    func edits(for id: String) -> MediaEdits { edits[id] ?? .untouched }
 
     /// The canvas-sized picture the library last answered with, undressed and
     /// uncut.
@@ -333,7 +355,7 @@ final class MediaEditorViewController: UIViewController {
     /// a convenience. Edits happen on the picture in front of the author, so one
     /// entry covers every case that matters and a swipe simply falls back to the
     /// asynchronous path that has always been there.
-    private var lastSource: (id: String, image: UIImage)?
+    private(set) var lastSource: (id: String, image: UIImage)?
 
     private func remember(_ image: UIImage?, for id: String) {
         guard let image else { return }
@@ -370,10 +392,12 @@ final class MediaEditorViewController: UIViewController {
     /// selector, which reads worse than the wait it is reporting.
     private static let spinnerDelay: TimeInterval = 0.15
 
+    /// ⚠️ **NOT WHILE A SLIDER IS UNDER A FINGER** (`MediaEditorEffectsMode`):
+    /// a render is always in flight during a drag, and the spinner would flash.
     private func beginRender() {
         rendersInFlight += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.spinnerDelay) { [weak self] in
-            guard let self, rendersInFlight > 0 else { return }
+            guard let self, rendersInFlight > 0, !effectsMode.isTracking else { return }
             busy.startAnimating()
         }
     }
@@ -401,7 +425,11 @@ final class MediaEditorViewController: UIViewController {
                 // ⚠️ RE-READ AT LANDING: two renders can be in flight and whichever
                 // lands last must paint what is chosen NOW, not what was chosen when
                 // it started. A render that has been overtaken is simply redone.
-                if self.edits(for: id) == chosen {
+                // ⚠️ COMPARED ON WHAT THE PAGE DRAWS — the finish without its
+                // overlays. An overlay dragged across the page is a view moving,
+                // and must not redo a render whose pixels it cannot change.
+                if self.edits(for: id).finish(includingOverlays: false)
+                    == chosen.finish(includingOverlays: false) {
                     self.show(drawn, for: id)
                 } else {
                     self.render(source, as: self.edits(for: id), for: id)
@@ -413,30 +441,91 @@ final class MediaEditorViewController: UIViewController {
 
     /// ⚠️ `nonisolated`, so it may run anywhere: everything it touches is a value
     /// or a renderer that documents itself as thread-safe.
+    ///
+    /// ⚠️ **NEVER THE OVERLAYS.** The page shows them as views over the picture
+    /// (`MediaEditorOverlayMode`); baked in here as well, each would be drawn
+    /// twice and the copy in the pixels would not follow a finger.
     nonisolated private static func draw(_ source: UIImage, as chosen: MediaEdits) -> UIImage {
-        chosen.applied(to: source)
+        chosen.applied(to: source, artwork: nil, includingOverlays: false)
     }
 
     /// ⚠️ AN ENTRY THAT SAYS NOTHING IS WORSE THAN NO ENTRY: it makes "was this
     /// picture edited?" answerable two ways. Undoing every change removes the
     /// entry rather than storing a neutral one.
-    private func change(_ id: String, _ mutate: (inout MediaEdits) -> Void) {
+    func change(_ id: String, _ mutate: (inout MediaEdits) -> Void) {
         var value = edits[id] ?? .untouched
         mutate(&value)
         edits[id] = value.isUntouched ? nil : value
     }
 
-    /// The row of looks the band holds while "Filters" is the chosen category.
-    /// Built once, because rebuilding it per selection would re-render nine
-    /// thumbnails for a band that is merely being reopened.
-    private lazy var filterRow: MediaFilterRowView = {
-        let row = MediaFilterRowView()
-        row.onPick = { [weak self] filter in
-            guard let self, let id = self.currentItemID else { return }
-            self.applyFilter(filter, to: id)
+    // MARK: - Modes
+
+    /// The categories that are objects of their own, each in `Views/Editor/`.
+    ///
+    /// ⚠️ **BUILT LAZILY AND HELD HERE, AND EACH HOLDS THIS SCREEN WEAKLY.** The
+    /// screen is the only owner; a mode that held its host strongly would be a
+    /// cycle nothing breaks.
+    ///
+    /// Trim and Crop are not among them: both are older than the split and live
+    /// in this file.
+    private(set) lazy var effectsMode = MediaEditorEffectsMode(host: self)
+    private(set) lazy var filtersMode = MediaEditorFiltersMode(host: self)
+    /// The look of one PIECE of a clip — opened from the timeline's action bar,
+    /// not from the category bar.
+    private(set) lazy var segmentFilterMode = MediaEditorSegmentFilterMode(host: self)
+    /// Text and Stickers: one mode, told which of the two it is before it opens.
+    private(set) lazy var overlayMode = MediaEditorOverlayMode(host: self)
+    /// The song under a clip — opened from the sound pill, not from the
+    /// category bar.
+    private(set) lazy var soundtrackMode = MediaEditorSoundtrackMode(host: self, sourcing: soundtracks)
+
+    /// Where "Add a song" finds the author's songs.
+    private let soundtracks: any MediaSoundtrackSourcing
+
+    /// Every mode, for the moments each of them has to hear about: the band
+    /// changing, a page settling, the screen going.
+    private var modes: [any MediaEditorMode] {
+        [effectsMode, filtersMode, segmentFilterMode, overlayMode, soundtrackMode]
+    }
+
+    /// The mode whose tools the band is holding, if any.
+    private var showingMode: (any MediaEditorMode)? {
+        guard let content = band.content else { return nil }
+        return modes.first { $0.tenant === content }
+    }
+
+    /// The mode behind the category the bar has chosen — nil for Trim and Crop,
+    /// which are not mode objects.
+    private var selectedMode: (any MediaEditorMode)? {
+        switch selectedCategory {
+        case "Effects": effectsMode
+        case "Text", "Stickers": overlayMode
+        case "Filters": filtersMode
+        default: nil
         }
-        return row
-    }()
+    }
+
+    /// Opens a category's mode on the page in front of the author.
+    private func open(_ mode: any MediaEditorMode) {
+        guard let id = currentItemID, let item = itemsByID[id] else {
+            setEditingAccessory(nil)
+            return
+        }
+        mode.open(for: id, item: item)
+    }
+
+    /// The category the bar has chosen was tapped again.
+    ///
+    /// ⚠️ **ONLY WHEN ITS TOOLS ARE NOT ALREADY UP.** A repeat tap on a mode that
+    /// is showing does nothing, as it always has; one whose tools were put away
+    /// while its icon stayed chosen — or never shown, like Effects, chosen at
+    /// launch over an empty band — opens again. A mode with nothing to show
+    /// (`tenant == nil`) is left alone, so the band is not re-stated for
+    /// nothing.
+    private func categoryReselected() {
+        guard let mode = selectedMode, let tenant = mode.tenant, band.content !== tenant else { return }
+        showAccessory(for: selectedCategory)
+    }
 
     /// Which glyph the bar is currently wearing, so the item is only re-stated
     /// when it actually changes — see `updateFitItem(animated:)`.
@@ -448,7 +537,7 @@ final class MediaEditorViewController: UIViewController {
     /// The reserved strip an editing control is put into — see
     /// `MediaEditorBandView`. It holds the row of looks while "Filters" is the
     /// chosen category, and collapses to nothing otherwise.
-    private let band = MediaEditorBandView()
+    let band = MediaEditorBandView()
 
     /// The dissolve the chrome sits on: clear where it begins, full material at
     /// the foot of the screen, so the picture runs on underneath and merely loses
@@ -541,10 +630,23 @@ final class MediaEditorViewController: UIViewController {
     }
     #endif
 
-    /// ⚠️ DRAWN, AND WIRED TO NOTHING — see the type comment. There is no audio
-    /// seam in this repository for it to reach. The same control the text-post
-    /// composer uses, which is why it lives in DesignSystem.
-    private let soundPill = SoundPillView(title: "Add a song", neverTruncates: true)
+    /// Opens the song tools (`MediaEditorSoundtrackMode`), and names the song
+    /// once one is chosen. The same control the text-post composer uses, which
+    /// is why it lives in DesignSystem.
+    ///
+    /// ⚠️ **CROP IS LEFT FIRST, AS CHOOSING ANY OTHER MODE LEAVES IT.** The pill
+    /// stays tappable under the crop surface, and a band handed to the song
+    /// tools with the surface still up would leave the canvas locked behind
+    /// tools that have nothing to do with it.
+    private lazy var soundPill: SoundPillView = {
+        let pill = SoundPillView(title: MediaEditorSoundtrackMode.addTitle, neverTruncates: true)
+        pill.onTap = { [weak self] in
+            guard let self else { return }
+            if isCropping { exitCrop() }
+            soundtrackMode.toggle()
+        }
+        return pill
+    }()
 
     /// ⚠️ DRAWN AND INERT TOO, and for a nearer reason: media drafts do not
     /// exist. `MediaDraftsViewController` is an empty list waiting for the
@@ -572,12 +674,14 @@ final class MediaEditorViewController: UIViewController {
         items: [MediaLibraryItem],
         library: any MediaLibraryReading,
         preview: any MediaVideoPreviewing = MediaPreviewPlayer(),
+        soundtracks: any MediaSoundtrackSourcing = SystemSoundtrackSource(),
         onNext: @escaping ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController
     ) {
         self.items = items
         self.itemsByID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.library = library
         self.preview = preview
+        self.soundtracks = soundtracks
         self.onNext = onNext
         super.init(nibName: nil, bundle: nil)
         // ⚠️ THE TOP BAR BELONGS TO THE SCREEN, NOT TO ITS VIEW. A navigation
@@ -674,7 +778,11 @@ final class MediaEditorViewController: UIViewController {
         super.viewWillDisappear(animated)
         // ⚠️ BEFORE `exitCrop`, WHICH SETTLES THE CANVAS AND WOULD START IT AGAIN.
         stopPreview()
-        exitCrop()
+        exitCrop(resuming: false)
+        // ⚠️ **AND EVERY MODE UNWINDS WHAT IT HOLDS, FOR THE REASON CROP DOES** —
+        // "Next" pushes from the middle of any of them, and a lock, a sheet or a
+        // keyboard left behind would be inherited by the finalisation screen.
+        for mode in modes { mode.screenWillDisappear() }
         restoreToolbar?()
         restoreToolbar = nil
     }
@@ -859,6 +967,9 @@ final class MediaEditorViewController: UIViewController {
             // would otherwise arrive wearing the previous picture's choice.
             let chosen = edits(for: id)
             cell.lay(chosen.fit, within: self.fitWindow, animated: false)
+            // ⚠️ AND ITS OVERLAYS, FOR THE SAME REASON: they are views over the
+            // picture, never pixels in it (`includingOverlays: false` below).
+            overlayMode.dress(cell, for: id)
             let size = canvasSize
             // ⚠️ AND THE CUT AND THE LOOK ARE RE-APPLIED FOR THE SAME REASON, on
             // the same beat. A cropped, filtered page that scrolls off and comes
@@ -874,7 +985,10 @@ final class MediaEditorViewController: UIViewController {
             Task { [weak cell] in
                 let image = await self.library.thumbnail(for: id, size: size)
                 self.remember(image, for: id)
-                cell?.show(image.map { self.edits(for: id).applied(to: $0) }, for: id)
+                cell?.show(
+                    image.map { self.edits(for: id).applied(to: $0, artwork: nil, includingOverlays: false) },
+                    for: id
+                )
                 // ⚠️ **AND THE TRACK IS WAITING FOR THIS SAME PICTURE.** Opening
                 // the timeline hands over whatever `lastSource` holds, which on a
                 // page that has just been swiped to is still the PREVIOUS clip's
@@ -947,7 +1061,7 @@ final class MediaEditorViewController: UIViewController {
     }
 
     /// The size a full-page picture is asked for, in points.
-    private var canvasSize: CGSize {
+    var canvasSize: CGSize {
         let bounds = view.bounds.size
         return bounds.width > 0 && bounds.height > 0 ? bounds : Metrics.canvasFallback
     }
@@ -1017,8 +1131,8 @@ final class MediaEditorViewController: UIViewController {
         // action wired the tap looked dead — which is exactly how it was
         // reported. It states the position itself instead.
         //
-        // There is still nothing BEHIND a category: choosing one moves the pill
-        // and changes nothing else, because editing is not built yet.
+        // Choosing one now opens the mode behind it — `showAccessory(for:)` is
+        // where the strip's index becomes a band tenant.
         // ⚠️ **ONE CHANNEL FOR TAP AND SLIDE ALIKE.** The bar this replaced
         // announced a tap through `.valueChanged` and a drag through nothing at
         // all, on the reasoning that a pager would answer for the drag — correct
@@ -1026,6 +1140,10 @@ final class MediaEditorViewController: UIViewController {
         // unheard and the viewer had to tap to finish what it had already
         // decided. Reported from a device.
         categoryBar.onSelect = { [weak self] _ in self?.categoryChanged() }
+        // ⚠️ **A TAP ON THE CHOSEN ICON IS HEARD TOO.** `onSelect` is silent on
+        // it, and Effects is chosen at launch over an empty band: without this
+        // the first mode could never be opened on first entry.
+        categoryBar.onReselect = { [weak self] _ in self?.categoryReselected() }
         touchProbe.attach(to: categoryBar)
         // ⚠️ **THE PILL KEEPS ITS WORD AND THE STRIP GIVES.** The two together
         // over-subscribe the band — a pill beside a four-segment strip does not
@@ -1053,14 +1171,26 @@ final class MediaEditorViewController: UIViewController {
         refreshToolbarItems(animated: false)
     }
 
-    /// ⚠️ **THE LEADING CONTROL IS THE MODE'S, AND "Add a song" IS THE DEFAULT
-    /// RATHER THAN THE FIXTURE.** The pill has no destination — this repository
-    /// holds no audio seam of any kind — so while the timeline is open the slot
-    /// goes to the actions that DO reach something. Charter F18, asked for in
-    /// exactly those words: with the mode on, the bottom-left pill is replaced by
-    /// a second bar carrying split and speed.
+    /// ⚠️ **THE LEADING CONTROL IS THE MODE'S, AND THE SONG PILL IS ONLY ITS
+    /// DEFAULT.** The pill opens the song tools, so the slot is never free — the
+    /// bar simply cannot hold both it and the track's actions on a phone (see
+    /// `shareTheBarBetweenTheTwoStrips`, where a third action already overran an
+    /// SE), and while the timeline is open the actions are what the finger is
+    /// reaching for. Charter F18, asked for in exactly those words: with the mode
+    /// on, the bottom-left pill is replaced by a second bar carrying split and
+    /// speed.
     private func refreshToolbarItems(animated: Bool) {
         let leading: UIView = isTimelineShowing ? actionBar : soundPill
+        refreshSoundPill()
+        // ⚠️ **BEFORE THE HAND-OVER, NOT AFTER.** UIKit decides whether a bar
+        // item fits once, from the size its view has when it is handed over,
+        // and never reconsiders (`navbar-leading-selector-collapse`). Held
+        // afterwards, the two strips were measured at their full widths and
+        // swept into a `•••` on an iPhone SE.
+        shareTheBarBetweenTheTwoStrips()
+        #if DEBUG
+        debugOnToolbarHandover?()
+        #endif
         setToolbarItems(
             [
                 UIBarButtonItem(customView: leading),
@@ -1071,6 +1201,12 @@ final class MediaEditorViewController: UIViewController {
             animated: animated
         )
         shareTheBarBetweenTheTwoStrips()
+    }
+
+    /// The pill names the page's song once it has one, and offers to add one
+    /// otherwise — `MediaEditorSoundtrackMode.pillTitle` decides which.
+    func refreshSoundPill() {
+        soundPill.setTitle(soundtrackMode.pillTitle)
     }
 
     /// Holds the two strips to the share `EditorSelectorLayout` gives them.
@@ -1086,6 +1222,7 @@ final class MediaEditorViewController: UIViewController {
     /// width floor and the strip is told it may give — so the constraints come
     /// off rather than being applied to a control the rule was not written for.
     private func shareTheBarBetweenTheTwoStrips() {
+        measureTheBar()
         guard isTimelineShowing, let toolbar = navigationController?.toolbar,
               toolbar.bounds.width > 0
         else {
@@ -1093,8 +1230,11 @@ final class MediaEditorViewController: UIViewController {
             categoryBarWidth.isActive = false
             return
         }
-        let margins = toolbar.layoutMargins
-        let available = toolbar.bounds.width - margins.left - margins.right - Spacing.sm
+        // ⚠️ **WHAT THE BAR CHARGES AROUND THE TWO GROUPS, NOT A SPACING** —
+        // see `ToolbarGeometry`. Charged as one 8pt gap inside 8pt margins, the
+        // split fitted only while the action bar held two items; with the
+        // filter action as a third, the two halves overran an iPhone SE's bar.
+        let available = barGeometry.available(in: toolbar.bounds.width)
         let held = EditorSelectorLayout.widths(
             leadingWants: actionBar.intrinsicContentSize.width,
             trailingWants: categoryBar.intrinsicContentSize.width,
@@ -1104,6 +1244,53 @@ final class MediaEditorViewController: UIViewController {
         categoryBarWidth.constant = held.trailing
         actionBarWidth.isActive = true
         categoryBarWidth.isActive = true
+        // A bar item's view keeps its autoresizing mask, so the size UIKit
+        // reads at the hand-over is the frame's.
+        actionBar.frame.size.width = held.leading
+        categoryBar.frame.size.width = held.trailing
+    }
+
+    /// What the bar charges around its items — measured once it has hosted
+    /// two neighbours, the SE's numbers until then.
+    private(set) var barGeometry = ToolbarGeometry.fallback
+
+    #if DEBUG
+    /// Internal for tests: runs just before the bar is handed its items.
+    var debugOnToolbarHandover: (() -> Void)?
+    #endif
+
+    /// Reads `barGeometry` off whichever two items the bar is hosting.
+    ///
+    /// ⚠️ **ONLY WHILE BOTH ARE ON SCREEN.** A collapsed item has no platter,
+    /// and a geometry read from one would be the collapse measuring itself.
+    private func measureTheBar() {
+        let leading: UIView = isTimelineShowing ? actionBar : soundPill
+        guard let window = leading.window, categoryBar.window === window,
+              let leadingPlatter = Self.platter(of: leading),
+              let trailingPlatter = Self.platter(of: categoryBar),
+              let measured = ToolbarGeometry.measured(
+                  leading: leading.convert(leading.bounds, to: nil),
+                  leadingPlatter: leadingPlatter,
+                  trailingPlatter: trailingPlatter
+              )
+        else { return }
+        barGeometry = measured
+    }
+
+    /// The first ancestor wider than `view`, in window coordinates — the
+    /// platter a bar item sits on.
+    private static func platter(of view: UIView) -> CGRect? {
+        guard let window = view.window else { return nil }
+        let own = view.convert(view.bounds, to: nil)
+        var node = view.superview
+        while let current = node, current !== window {
+            let frame = current.convert(current.bounds, to: nil)
+            if frame.width > own.width + 0.5 {
+                return frame.width < window.bounds.width ? frame : nil
+            }
+            node = current.superview
+        }
+        return nil
     }
 
     private lazy var actionBarWidth: NSLayoutConstraint =
@@ -1139,26 +1326,23 @@ final class MediaEditorViewController: UIViewController {
     /// ⚠️ **LEAVING CROP IS AN ACT, NOT AN ABSENCE.** Choosing another mode has
     /// to put the canvas, the sheet and the stack back before the new band opens
     /// — the surface holds three suspensions and none of them unwinds itself.
+    ///
+    /// ⚠️ **EVERY CATEGORY BUT TRIM AND CROP IS A MODE OBJECT, AND THIS SWITCH
+    /// ONLY DELEGATES TO IT.** What a mode shows — its tools, a notice, nothing
+    /// — is the mode's to decide, in its own file.
     private func showAccessory(for category: String?) {
         if isCropping, category != "Crop" { exitCrop() }
         switch category {
+        case "Effects":
+            open(effectsMode)
+        case "Text":
+            overlayMode.kind = .text
+            open(overlayMode)
+        case "Stickers":
+            overlayMode.kind = .stickers
+            open(overlayMode)
         case "Filters":
-            // ⚠️ **A VIDEO GETS THE NOTICE, NOT THE ROW — AND THIS BECAME TRUE
-            // THE DAY VIDEOS STARTED PUBLISHING.** The row was offered on every
-            // page for as long as a clip was dropped at publish: the look went
-            // nowhere, but so did the video, and the finalisation screen said so.
-            // Now the clip goes and `post()`'s video branch never reads `edits`
-            // — `MediaFilter` is `UIImage`-to-`UIImage` — so leaving the row here
-            // would let an author choose a look, watch it applied on the canvas,
-            // and publish the untouched clip. That is the exact defect
-            // `where !item.isVideo` was removed to end, wearing a different
-            // sleeve.
-            if currentItemID.flatMap({ itemsByID[$0] })?.isVideo == true {
-                setEditingAccessory(filtersUnavailable)
-            } else {
-                setEditingAccessory(filterRow)
-                refreshFilterRow()
-            }
+            open(filtersMode)
         case "Trim":
             guard let id = currentItemID, case .video(let seconds)? = itemsByID[id]?.kind else {
                 setEditingAccessory(trimUnavailable)
@@ -1170,34 +1354,6 @@ final class MediaEditorViewController: UIViewController {
             enterCrop()
         default:
             setEditingAccessory(nil)
-        }
-    }
-
-    /// Feeds the row the picture it is choosing a look for, and restores the
-    /// look this item already carries.
-    ///
-    /// ⚠️ **ONE FETCH, NOT NINE.** The row filters locally from a single source;
-    /// the library seam caches nothing, so nine thumbnail requests would be nine
-    /// `PHImageManager` round trips for one photograph.
-    private func refreshFilterRow() {
-        guard let id = currentItemID else { return }
-        filterRow.setSelected(edits(for: id).filter)
-        // ⚠️ THE THUMBNAIL'S SIDE, NOT THE ROW'S HEIGHT. The row is taller than
-        // its pictures by a caption, and asking for that size would fetch a
-        // picture bigger than anything shown.
-        let side = MediaFilterRowView.thumbnailSide
-        Task { [weak self] in
-            guard let self else { return }
-            let source = await self.library.thumbnail(for: id, size: CGSize(width: side, height: side))
-            guard self.currentItemID == id else { return }
-            // ⚠️ **CUT HERE, AND NEVER INSIDE THE ROW.** The row is handed ONE
-            // picture and renders nine looks from it locally; teaching it about
-            // crops would make it learn a second concept it exists not to know.
-            // Handing it the uncut picture instead is the invisible version of
-            // this bug: nine chips previewing looks on a photograph that no
-            // longer matches the canvas above them.
-            let crop = self.edits(for: id).crop
-            self.filterRow.show(source.flatMap { MediaCropRenderer.apply(crop, to: $0) } ?? source)
         }
     }
 
@@ -1312,7 +1468,7 @@ final class MediaEditorViewController: UIViewController {
     /// dividing by the declared duration instead would scrub to the wrong moment
     /// on exactly the clips whose declaration is wrong — the ones the reload
     /// above exists for.
-    private var trackSeconds: Double = 0
+    private(set) var trackSeconds: Double = 0
 
     /// Follows the playing clip with the needle, at the display's own rate.
     ///
@@ -1463,6 +1619,12 @@ final class MediaEditorViewController: UIViewController {
         var aiming: Bool
         /// The stretch of played seconds the item loops, or nil for all of it.
         var loop: ClosedRange<Double>?
+        /// The crop the item was built with — a new crop is a new render size,
+        /// and so a new item.
+        let crop: MediaCrop
+        /// The song the item was built with — a new song is a new audio track,
+        /// and so a new item.
+        let soundtrack: VideoSoundtrack?
     }
 
     private var previewSubject: PreviewSubject?
@@ -1478,7 +1640,7 @@ final class MediaEditorViewController: UIViewController {
     /// tight seek and a flung one a loose one.
     private var lastAimedSeconds: Double?
     /// The file's real length, per clip, once asked.
-    private var fileLengths: [String: Double] = [:]
+    private(set) var fileLengths: [String: Double] = [:]
 
     /// ⚠️ **THE FILE'S OWN LENGTH, NOT THE ITEM'S DECLARED ONE.** The declared
     /// duration is what the grid stamps on a tile and is only as good as
@@ -1522,26 +1684,29 @@ final class MediaEditorViewController: UIViewController {
             }
             let fileSeconds = await realLength(of: file, id: id, declared: declared)
             guard playingID == id, previewLoads == load else { return }
-            let timeline = edits(for: id).timeline
+            let edited = edits(for: id)
+            let timeline = edited.timeline
             var landed: VideoLoadLanding?
+            // ⚠️ **THE SAME MAPPING THE POST IS EXPORTED WITH**, minus what the
+            // canvas draws as views: overlays, and so the art for their stickers.
             await preview.load(
-                VideoExportPlan(
-                    sourceURL: file,
-                    segments: MediaTimelining.exportSegments(timeline, withinSource: fileSeconds)
+                edited.exportPlan(
+                    sourceURL: file, fileSeconds: fileSeconds, artwork: nil, includingOverlays: false
                 ),
                 in: surface
             ) { [weak self] in
                 guard let self, playingID == id, previewLoads == load else { return nil }
                 var wanted = landing(timeline, fileSeconds)
-                // ⚠️ **WHILE A CUT'S TRANSITION IS BEING CHOSEN, EVERY LOAD LOOPS
-                // IT** — asked HERE, as the item goes in, not when the load was
-                // asked for: a row closed in the meantime loops nothing.
-                if let rehearsal = rehearsal(in: timeline, fileSeconds: fileSeconds) {
-                    wanted = VideoLoadLanding(seconds: rehearsal.range.lowerBound, loop: rehearsal.range)
+                // ⚠️ **WHILE A CUT'S TRANSITION OR A PIECE'S FILTER IS BEING
+                // CHOSEN, EVERY LOAD LOOPS IT** — asked HERE, as the item goes in,
+                // not when the load was asked for: a row closed in the meantime
+                // loops nothing.
+                if let loop = activeLoop(in: timeline, fileSeconds: fileSeconds) {
+                    wanted = VideoLoadLanding(seconds: loop.lowerBound, loop: loop)
                 }
                 previewSubject = PreviewSubject(
                     id: id, file: file, fileSeconds: fileSeconds, timeline: timeline, aiming: false,
-                    loop: wanted.loop
+                    loop: wanted.loop, crop: edited.crop, soundtrack: edited.soundtrack
                 )
                 landed = wanted
                 return wanted
@@ -1560,20 +1725,50 @@ final class MediaEditorViewController: UIViewController {
         }
     }
 
+    /// What the playing item loops for the row that is open: the stretch around
+    /// a cut whose transition is being chosen, or the piece whose filter is.
+    /// Nil when neither row is open on this clip.
+    private func activeLoop(in timeline: MediaTimeline, fileSeconds: Double) -> ClosedRange<Double>? {
+        rehearsal(in: timeline, fileSeconds: fileSeconds)?.range
+            ?? segmentFilterMode.rehearsal(in: timeline, fileSeconds: fileSeconds)
+    }
+
     /// Brings the preview to the edit as it now stands — with a new item only
     /// when the film it plays would differ. Returns whether a load was asked for.
+    ///
+    /// ⚠️ **THE WHOLE LOOK IS NOT IN THE PREDICATE, ON PURPOSE.** It reaches a
+    /// playing item live (`setLiveLook`); the crop and the song cannot, because
+    /// one changes the render size and the other the item's tracks. A song's
+    /// LEVELS are left out for the look's reason — they reach the item live
+    /// (`setMixLevels`) — so only its file and its start count.
+    ///
+    /// ⚠️ **AWAY FROM THE TIMELINE, THE NEW ITEM LANDS WHERE THE OLD ONE WAS.**
+    /// Nothing outside the track changes the film's clock — a new excerpt, a
+    /// crop — so the author keeps the moment they were on rather than the film
+    /// starting over under the control they just let go of.
+    ///
+    /// ⚠️ **`force` IS FOR A LOOK THE BACKING WOULD NOT TAKE.** It is not in the
+    /// predicate above precisely because it normally reaches the item live; a
+    /// backing that refuses it (`-avplayer-render`) has no other way in.
     @discardableResult
-    private func refreshPreview() -> Bool {
+    func refreshPreview(force: Bool = false) -> Bool {
         guard let id = playingID, id == currentItemID else { return false }
-        let wanted = edits(for: id).timeline
-        if let subject = previewSubject, subject.id == id, !subject.aiming, !previewPending,
+        let edited = edits(for: id)
+        let wanted = edited.timeline
+        if !force, let subject = previewSubject, subject.id == id, !subject.aiming, !previewPending,
+           subject.crop == edited.crop,
+           VideoSoundtrack.laysTheSameAudio(subject.soundtrack, edited.soundtrack),
            MediaTimelining.playsTheSame(subject.timeline, wanted, withinSource: subject.fileSeconds) {
             // Same film, same clock: only the screen's record of it changes.
             previewSubject?.timeline = wanted
             return false
         }
         loadPreview { [weak self] _, _ in
-            guard let self, isTimelineShowing else { return VideoLoadLanding(seconds: 0) }
+            guard let self else { return VideoLoadLanding(seconds: 0) }
+            guard isTimelineShowing else {
+                let playhead = playingSurface.flatMap { preview.playheadSeconds(in: $0) }
+                return VideoLoadLanding(seconds: playhead ?? 0)
+            }
             return VideoLoadLanding(seconds: timelineTrack.playedSecondsUnderNeedle)
         }
         return true
@@ -1611,7 +1806,7 @@ final class MediaEditorViewController: UIViewController {
     private var lastScrubbedSeconds: Double?
 
     /// The surface the settled page is playing in, if it is playing at all.
-    private var playingSurface: VideoRenderView? {
+    var playingSurface: VideoRenderView? {
         guard let id = playingID, let index = items.firstIndex(where: { $0.id == id }),
               let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
                 as? MediaEditorPageCell
@@ -1714,15 +1909,6 @@ final class MediaEditorViewController: UIViewController {
         timelineTrack.showPaused(pausedByAuthor)
     }
 
-    /// ⚠️ **SILENT WHEN THE BAND IS SHUT, AND THAT IS THE POINT.** Both settle
-    /// hooks call this on every swipe; without the guard each one would run a
-    /// full `PHImageManager` request — iCloud access allowed — to dress a row
-    /// nobody is looking at.
-    private func refreshFilterRowIfShowing() {
-        guard band.content === filterRow else { return }
-        refreshFilterRow()
-    }
-
     /// ⚠️ **THE TRIM TENANT HAS TO BE RE-DECIDED ON EVERY SETTLE, AND NOT
     /// DECIDING IT WAS A HIGH-SEVERITY DEFECT.** `refreshTimelineTrack` was
     /// reachable only from the category bar's `.valueChanged`, so paging with
@@ -1752,21 +1938,17 @@ final class MediaEditorViewController: UIViewController {
         showAccessory(for: "Trim")
     }
 
-    /// ⚠️ **A VIDEO LEAVES CROP MODE STANDING ON ITS NOTICE, AND ONLY A SETTLE
-    /// CAN CLEAR IT.** Choosing "Crop" on a video puts a line of text in the band
-    /// and returns without locking anything — so the canvas still pages. Swiping
-    /// on to a photograph used to change nothing: the band kept the notice, the
-    /// pill kept saying Crop, and tapping Crop again announced nothing because the
-    /// selection had not changed. The mode was unreachable for that picture until
-    /// another one was chosen and come back from.
+    /// ⚠️ **A CATEGORY THE SCREEN RESTS ON WITHOUT HAVING ENTERED IT IS
+    /// UNREACHABLE BY TAP, AND ONLY A SETTLE CAN CLEAR THAT.** Choosing "Crop"
+    /// used to leave a video standing on a notice, with the canvas still paging;
+    /// swiping on to a photograph changed nothing, because tapping the icon the
+    /// strip already rests on announces no selection. The notice is gone — a clip
+    /// is cropped like a photograph — but `enterCrop` still returns without
+    /// entering when it cannot find the page's item, so the settle that brings a
+    /// page it can find has to try again.
     private func reopenCropIfWaiting() {
         guard !isCropping, selectedCategory == "Crop" else { return }
         showAccessory(for: "Crop")
-    }
-
-    private func applyFilter(_ filter: MediaFilter, to id: String) {
-        change(id) { $0.filter = filter }
-        redraw(id)
     }
 
     /// Re-renders one page for everything the author has chosen for it.
@@ -1782,7 +1964,7 @@ final class MediaEditorViewController: UIViewController {
     /// the render would land on whichever picture happened to be in front.
     ///
     /// ⚠️ NOTHING IS CAPTURED BEFORE THE AWAIT, on purpose — see the note inside.
-    private func redraw(_ id: String) {
+    func redraw(_ id: String) {
         // ⚠️ **NO LIBRARY ROUND TRIP WHEN THE PICTURE IS ALREADY IN HAND.** Asking
         // for it again put the result a `PHImageManager` request away, and the
         // canvas showed the OLD framing until it answered.
@@ -1820,7 +2002,7 @@ final class MediaEditorViewController: UIViewController {
         return min(max(page, 0), items.count - 1)
     }
 
-    private var currentItemID: String? {
+    var currentItemID: String? {
         items.indices.contains(currentIndex) ? items[currentIndex].id : nil
     }
 
@@ -1933,9 +2115,6 @@ final class MediaEditorViewController: UIViewController {
     /// go", AND IT IS NOW FALSE.** Videos publish. Leaving it would have the
     /// screen tell the author their clip is about to be dropped while it quietly
     /// posts it — a notice outliving its reason, which is worse than no notice.
-    private lazy var cropUnavailable = BandNoticeView(
-        "A video can't be cropped yet — it'll be posted as it is."
-    )
 
     /// The clip as a strip of film pushed past a fixed needle, with the rate
     /// chips above it when they have been asked for.
@@ -1947,7 +2126,7 @@ final class MediaEditorViewController: UIViewController {
     /// second control joined the track inside it: the follower would stop, the
     /// settle hooks would stop re-targeting, and the reset arrow would start
     /// answering for crop. One name, one edit.
-    private lazy var timelineTools: MediaTimelineToolsView = {
+    lazy var timelineTools: MediaTimelineToolsView = {
         let tools = MediaTimelineToolsView()
         let track = tools.track
         track.onChange = { [weak self] timeline in
@@ -1986,6 +2165,12 @@ final class MediaEditorViewController: UIViewController {
         }
         tools.transitions.onClose = { [weak self] in
             self?.closeTransitions(animated: true)
+        }
+        tools.segmentFilters.onPick = { [weak self] filter in
+            self?.chooseSegmentFilter(filter)
+        }
+        tools.segmentFilters.onClose = { [weak self] in
+            self?.closeSegmentFilters(animated: true)
         }
         return tools
     }()
@@ -2041,7 +2226,8 @@ final class MediaEditorViewController: UIViewController {
     /// ⚠️ **NOT BEFORE THE FILE'S REAL LENGTH IS KNOWN.** The stretch is worked
     /// out against it, and the declared one can be wrong (`realLength`).
     private func openTransitions(atSeam seam: Int) {
-        guard isTimelineShowing, let id = currentItemID, trackSeconds > 0,
+        // ⚠️ NEVER OVER A PIECE'S FILTER ROW — the two share the line.
+        guard pieceFocus == nil, isTimelineShowing, let id = currentItemID, trackSeconds > 0,
               fileLengths[id] == trackSeconds, !timelineTrack.isHoldingAnEdge
         else { return }
         let timeline = edits(for: id).timeline
@@ -2103,14 +2289,14 @@ final class MediaEditorViewController: UIViewController {
 
     /// Loops the focused stretch on the item that is playing, from its start.
     private func landOnTheFocus() {
-        guard let focus = transitionFocus, focus.id == currentItemID,
+        guard let focusID = transitionFocus?.id ?? pieceFocus?.id, focusID == currentItemID,
               let surface = playingSurface, let subject = previewSubject,
-              subject.id == focus.id, !subject.aiming, !previewPending,
-              let rehearsal = rehearsal(in: subject.timeline, fileSeconds: subject.fileSeconds)
+              subject.id == focusID, !subject.aiming, !previewPending,
+              let range = activeLoop(in: subject.timeline, fileSeconds: subject.fileSeconds)
         else { return }
-        preview.setLoopRange(rehearsal.range, in: surface)
-        previewSubject?.loop = rehearsal.range
-        handover = MediaTimelining.Handover(target: rehearsal.range.lowerBound)
+        preview.setLoopRange(range, in: surface)
+        previewSubject?.loop = range
+        handover = MediaTimelining.Handover(target: range.lowerBound)
         preview.setPaused(false, in: surface)
         timelineTrack.showPaused(false)
     }
@@ -2120,7 +2306,11 @@ final class MediaEditorViewController: UIViewController {
     ///
     /// ⚠️ **IT NEVER SEEKS.** The clip plays on from wherever the loop had got
     /// to, which is the moment the author was just looking at.
+    ///
+    /// ⚠️ **AND IT CLOSES THE PIECE'S FILTER ROW TOO.** Every way off the clip
+    /// calls this; the two rows are one surface as far as leaving is concerned.
     private func closeTransitions(animated: Bool) {
+        closeSegmentFilters(animated: animated)
         guard transitionFocus != nil || timelineTools.editingSeam != nil else { return }
         transitionFocus = nil
         if previewSubject?.loop != nil {
@@ -2135,6 +2325,139 @@ final class MediaEditorViewController: UIViewController {
         timelineTrack.showPaused(paused)
         refreshTrackActions()
         refreshResetItem()
+    }
+
+    // MARK: - Choosing a piece's filter
+
+    /// The piece whose filter is being chosen: piece `piece` of clip `id`.
+    ///
+    /// ⚠️ **RECORDED BEFORE THE TRACK COLLAPSES** — collapsing puts the held
+    /// piece down, and the piece is what the row is open on. Positional, and
+    /// safe for the reason `TransitionFocus` is.
+    private struct PieceFocus: Equatable {
+        let id: String
+        var piece: Int
+    }
+
+    private var pieceFocus: PieceFocus?
+
+    /// Whether the filter row is open on a piece of this clip.
+    var segmentFilterIsOpen: Bool { pieceFocus != nil }
+
+    /// ⚠️ **ONLY WHILE A PIECE IS HELD** — asked for in those words: *"qui sera
+    /// active que lorsqu'un segment sera sélectionné dans la timeline"*. While
+    /// the row is open the action stays live, lit, and closes it.
+    var segmentFilterActionEnabled: Bool {
+        guard isTimelineShowing, let id = currentItemID, trackSeconds > 0,
+              fileLengths[id] == trackSeconds, !timelineTrack.isHoldingAnEdge
+        else { return false }
+        return pieceFocus != nil || timelineTrack.selectedPiece != nil
+    }
+
+    /// What the preview loops while the filter row is open on this clip.
+    func segmentFilterRehearsal(in timeline: MediaTimeline, fileSeconds: Double) -> ClosedRange<Double>? {
+        guard let focus = pieceFocus, focus.id == currentItemID, focus.id == playingID else { return nil }
+        return MediaTimelining.rehearsal(ofPiece: focus.piece, in: timeline, withinSource: fileSeconds)
+    }
+
+    /// The filter action was tapped: open the row on the held piece — or, when
+    /// it is already open, put it away.
+    func toggleSegmentFilters() {
+        guard pieceFocus == nil else { return closeSegmentFilters(animated: true) }
+        guard transitionFocus == nil, segmentFilterActionEnabled, let id = currentItemID,
+              let piece = timelineTrack.selectedPiece
+        else { return }
+        let timeline = edits(for: id).timeline
+        let pieces = MediaTimelining.resolved(timeline, withinSource: trackSeconds)
+        guard pieces.indices.contains(piece) else { return }
+        if timelineTools.isOfferingSpeeds { toggleTheRateChips() }
+        let range = MediaTimelining.rehearsal(ofPiece: piece, in: timeline, withinSource: trackSeconds)
+        pieceFocus = PieceFocus(id: id, piece: piece)
+        guard timelineTools.openSegmentFilters(
+            forPiece: piece, chosen: pieces[piece].filter, rehearsal: range, animated: true
+        ) else {
+            pieceFocus = nil
+            return
+        }
+        actionBar.setActive(TrackAction.filter.rawValue)
+        pausedBeforeTransitions = pausedByAuthor
+        pausedByAuthor = false
+        dressSegmentFilterCards(id: id, piece: pieces[piece])
+        if !previewPending { landOnTheFocus() }
+        refreshTrackActions()
+        refreshResetItem()
+    }
+
+    /// A look was chosen for the focused piece — `nil` takes it away.
+    private func chooseSegmentFilter(_ filter: MediaFilter?) {
+        guard let focus = pieceFocus, focus.id == currentItemID, trackSeconds > 0 else { return }
+        let before = edits(for: focus.id).timeline
+        let after = MediaTimelining.settingFilter(
+            filter, atPiece: focus.piece, in: before, withinSource: trackSeconds
+        )
+        if after != before { change(focus.id) { $0.timeline = after } }
+        timelineTrack.configure(duration: trackSeconds, timeline: after)
+        timelineTools.showSegmentFilter(filter)
+        pausedByAuthor = false
+        refreshResetItem()
+        if !refreshPreview() { landOnTheFocus() }
+    }
+
+    /// Puts the filter row away, as `closeTransitions` puts its own.
+    private func closeSegmentFilters(animated: Bool) {
+        guard pieceFocus != nil || timelineTools.editingPiece != nil else { return }
+        pieceFocus = nil
+        pictureRequests += 1
+        if previewSubject?.loop != nil {
+            previewSubject?.loop = nil
+            if let surface = playingSurface { preview.setLoopRange(nil, in: surface) }
+        }
+        timelineTools.closeSegmentFilters(animated: animated)
+        actionBar.setActive(nil)
+        let paused = pausedBeforeTransitions ?? pausedByAuthor
+        pausedBeforeTransitions = nil
+        pausedByAuthor = paused
+        if let surface = playingSurface { preview.setPaused(paused, in: surface) }
+        timelineTrack.showPaused(paused)
+        refreshTrackActions()
+        refreshResetItem()
+    }
+
+    /// Bumped for every set of card pictures asked for: only the newest lands.
+    private var pictureRequests = 0
+
+    /// Dresses every card with the piece's own frame in that card's look — then
+    /// the whole media's look over it, which is the order the compositor draws.
+    ///
+    /// ⚠️ **ONE FRAME, NINE LOOKS, OFF THE MAIN THREAD** — the filter row's rule.
+    private func dressSegmentFilterCards(id: String, piece: MediaSegment) {
+        pictureRequests += 1
+        let request = pictureRequests
+        let whole = edits(for: id).look
+        let row = timelineTools.segmentFilters
+        let middle = (piece.start + piece.end) / 2
+        Task { [weak self] in
+            guard let self, let file = await library.videoFile(for: id) else { return }
+            let frames = await preview.frames(
+                of: file, atSourceSeconds: [middle], height: MediaTransitionRowView.height * 2, spacing: 0
+            )
+            guard let frame = frames.values.first, pictureRequests == request else { return }
+            let choices = MediaSegmentFilterRowView.filterChoices
+            let pictures = await Task.detached(priority: .userInitiated) {
+                choices.map { choice -> UIImage? in
+                    guard let source = CIImage(image: frame) else { return nil }
+                    var image = FrameLookRenderer.apply(FrameLook(preset: choice ?? .original), to: source, time: 0)
+                    image = FrameLookRenderer.apply(whole, to: image, time: 0)
+                    guard let cg = EditingRenderContext.shared.createCGImage(image, from: source.extent)
+                    else { return nil }
+                    return UIImage(cgImage: cg, scale: frame.scale, orientation: frame.imageOrientation)
+                }
+            }.value
+            guard pictureRequests == request, pieceFocus?.id == id else { return }
+            for (choice, picture) in zip(choices, pictures) {
+                row.setPicture(picture, for: choice)
+            }
+        }
     }
 
     /// Whether the band is holding the timeline.
@@ -2243,11 +2566,17 @@ final class MediaEditorViewController: UIViewController {
     }
 
     /// What the actions can do from where the needle now stands.
-    private func refreshTrackActions() {
+    func refreshTrackActions() {
         guard isTimelineShowing, let id = currentItemID, trackSeconds > 0 else { return }
-        // ⚠️ **A CUT OR A RATE WHILE THE ROW IS OPEN WOULD MOVE THE CUT IT IS
-        // OPEN ON.** Both wait for it to close.
-        let focused = transitionFocus != nil
+        // ⚠️ **A CUT OR A RATE WHILE A ROW IS OPEN WOULD MOVE THE CUT, OR THE
+        // PIECE, IT IS OPEN ON.** Both wait for it to close — the transitions
+        // row and the piece's filter row alike.
+        let focused = transitionFocus != nil || segmentFilterMode.isOpen
+        // ⚠️ **THE PIECE FILTER'S OWN RULE IS ITS MODE'S** (a piece held, the
+        // file's real length known); the transitions row still shuts it.
+        actionBar.setEnabled(
+            transitionFocus == nil && segmentFilterMode.actionEnabled, at: TrackAction.filter.rawValue
+        )
         actionBar.setEnabled(!focused, at: TrackAction.speed.rawValue)
         actionBar.setEnabled(
             !focused && timelineTrack.momentUnderNeedle.map {
@@ -2277,12 +2606,14 @@ final class MediaEditorViewController: UIViewController {
     ///
     /// ⚠️ **AND IT CARRIES NO `!isCropping` GUARD, WHICH IT DID FOR ONE BUILD.**
     /// The reasoning was sound — the crop surface owns the canvas, so a tap there
-    /// is aimed at the box rather than at the film — and the guard was
-    /// unreachable: `enterCrop` REFUSES videos, so a clip is never behind a crop
-    /// surface, and a photograph has no player for this to reach. This screen has
-    /// already removed one dead guard for exactly that reason (a `stopPreview()`
-    /// in `enterCrop` that could not run). It comes back with the compositor,
-    /// when a video can be cropped and there is something for it to protect.
+    /// is aimed at the box rather than at the film — and the guard has never had
+    /// anything to do. It used to be `enterCrop` REFUSING videos that made it
+    /// dead; a clip is cropped like a photograph now, and what makes it dead
+    /// instead is the `stopPreview()` `enterCrop` runs on its way in. Nothing is
+    /// bound while the surface is up, so `togglePreviewPlayback` finds no surface
+    /// to toggle. That `stopPreview()` was itself once deleted from `enterCrop`
+    /// as unreachable, for the same reason this guard was: it is back, and it is
+    /// doing the work.
     @objc private func mediaTapped() {
         togglePreviewPlayback()
     }
@@ -2307,10 +2638,13 @@ final class MediaEditorViewController: UIViewController {
         timelineTrack.showPaused(!paused)
     }
 
-    /// ⚠️ **THE MIRROR IMAGE OF THE OTHER TWO NOTICES.** Crop and Filters refuse
-    /// a video; Trim refuses a photograph. Same rule — a mode that cannot serve
-    /// the medium in front of the author says so rather than offering a control
-    /// that reaches nothing.
+    /// ⚠️ **THE MIRROR IMAGE OF THE SONG MODE'S NOTICE, AND THESE ARE THE LAST
+    /// OF THEM.** Trim refuses a photograph, and so does the soundtrack mode
+    /// (`MediaEditorSoundtrackMode.photoNotice`); Crop and Filters refused a
+    /// video until the compositor drew both into the export, and they refuse
+    /// nothing now. Same rule throughout — a mode that cannot serve the medium in
+    /// front of the author says so rather than offering a control that reaches
+    /// nothing.
     private lazy var trimUnavailable = BandNoticeView(
         "A photo has nothing to trim."
     )
@@ -2323,11 +2657,6 @@ final class MediaEditorViewController: UIViewController {
     /// earlier.
     private lazy var trimTooShort = BandNoticeView(
         "This clip is too short to trim."
-    )
-
-    /// The same, for the look. See the note in `showAccessory(for:)`.
-    private lazy var filtersUnavailable = BandNoticeView(
-        "A video can't be filtered yet — it'll be posted as it is."
     )
 
     /// The shape each picture's box is being held to.
@@ -2351,11 +2680,6 @@ final class MediaEditorViewController: UIViewController {
     /// canvas cannot be paged while the surface is up, so one capture is enough.
     private var croppingID: String?
 
-    /// What the screen borrowed on the way into crop mode, ready to be given
-    /// back. ⚠️ CAPTURED ONCE AND CAPTURED AS IT WAS — restoring to `true`
-    /// instead of to the prior value is how a suspension becomes permanent.
-    private var cropRestore: (() -> Void)?
-
     /// Black behind the editing tools, for as long as they are up.
     ///
     /// ⚠️ **THE BAND IS CHROME HERE, NOT MORE PICTURE.** Everywhere else on this
@@ -2374,43 +2698,17 @@ final class MediaEditorViewController: UIViewController {
     }()
 
     private func enterCrop() {
-        guard let id = currentItemID, let item = itemsByID[id] else { return }
-        guard !item.isVideo else {
-            // ⚠️ SAID, NOT SILENTLY DROPPED — AND THE REASON HAS NARROWED.
-            // `post()` no longer discards videos; a clip publishes. What it
-            // cannot carry is an EDIT: `MediaCrop.apply` and `MediaFilter` are
-            // `UIImage`-to-`UIImage`, so the only thing this mode could cut here
-            // is the poster frame, and the cut would never reach the file that
-            // gets uploaded. Still a control that reaches nothing — for a
-            // different reason, written down in
-            // `dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4.
-            setEditingAccessory(cropUnavailable)
-            return
-        }
+        guard let id = currentItemID, itemsByID[id] != nil else { return }
         guard !isCropping else { return }
         isCropping = true
-
-        let wasScrolling = canvas.isScrollEnabled
-        let wasModal = navigationController?.isModalInPresentation ?? false
-        cropRestore = { [weak self] in
-            guard let self else { return }
-            canvas.isScrollEnabled = wasScrolling
-            navigationController?.isModalInPresentation = wasModal
-        }
-        // ⚠️ **A LOCK, NOT A REFUSAL.** `CarouselCollectionView` declines a drag
-        // by answering false in `gestureRecognizerShouldBegin`, which hands the
-        // touch to the stack's full-width pan — so refusing here would page
-        // nothing and pop the screen instead. `IconSelectorBar` states the same
-        // choice, and states why a `require(toFail:)` into a scroll view's
-        // recogniser graph is not the tool either.
-        canvas.isScrollEnabled = false
-        // ⚠️ **AND THIS IS WHAT KEEPS A DOWNWARD DRAG ON THE PICTURE FROM
-        // CLOSING THE SHEET.** Dismissal is velocity-dominated — measured on the
-        // filter row at 139pt/~3000pt/s — so no amount of gesture arbitration
-        // makes it safe; the sheet has to be told it is not dismissible. Set on
-        // the NAVIGATION CONTROLLER, which is the presented screen.
-        navigationController?.isModalInPresentation = true
-        updateStackGestures()
+        // ⚠️ **A CLIP IS CROPPED ON ITS POSTER, AND IT STOPS WHILE IT IS.** The
+        // crop is a rectangle of the picture, the same on every frame, so the
+        // poster is enough to aim it; the playing item is put away because the
+        // surface covers it and its render size is about to change. Leaving the
+        // mode settles the canvas, which plays the clip again — composed with the
+        // crop the compositor now draws, and published with it.
+        stopPreview()
+        lockCanvas(by: .crop)
 
         cropSurface.translatesAutoresizingMaskIntoConstraints = false
         // ⚠️ ABOVE THE CANVAS AND BELOW THE DISSOLVE: the chrome keeps its lift
@@ -2476,7 +2774,10 @@ final class MediaEditorViewController: UIViewController {
         }
     }
 
-    private func exitCrop() {
+    ///
+    /// `resuming` plays the settled page's clip again — with the crop just
+    /// made, since the item is built anew — unless the screen is on its way out.
+    private func exitCrop(resuming: Bool = true) {
         guard isCropping else { return }
         isCropping = false
         croppingID = nil
@@ -2488,9 +2789,7 @@ final class MediaEditorViewController: UIViewController {
         // bounds, onto whichever picture happened to be in front. Invisible while
         // it happened, and in the post afterwards.
         if band.content === cropTools { setEditingAccessory(nil) }
-        cropRestore?()
-        cropRestore = nil
-        updateStackGestures()
+        unlockCanvas(by: .crop)
         showCropBarItems(false, animated: true)
         // ⚠️ BACK TO ITS OWN RULE, NOT TO `false`: the indicator hides itself
         // under two pictures, and a single-medium screen has no dots to show.
@@ -2502,6 +2801,9 @@ final class MediaEditorViewController: UIViewController {
         // picture is already held, which it is: the surface has been showing it.
         if let id = croppingID ?? currentItemID { redraw(id) }
         leaveCropGracefully()
+        // ⚠️ **NOT LEFT TO A SETTLE THAT MAY NEVER COME.** Entering stopped the
+        // clip; nothing scrolls on the way out, so nothing else would start it.
+        if resuming { playSettledPage() }
     }
 
     /// The reverse of `settleIntoCrop`: the frame lets go and the picture opens
@@ -2599,16 +2901,74 @@ final class MediaEditorViewController: UIViewController {
 
     private var isTouchingStrip = false
 
-    /// ⚠️ **ONE PREDICATE, TWO OWNERS — AND WITH TWO OWNERS IT WAS A DEFECT.**
-    /// `setStackGesturesEnabled` keeps a single list of suspended recognisers and
-    /// refuses to suspend twice (`suspendedPans.isEmpty`), while the strip's probe
-    /// announces `false` on every lift and restored them unconditionally. Enter
-    /// crop mode, then brush the category strip, and the back-swipe came back
-    /// alive underneath a live crop surface — a rightward drag on the picture
-    /// would have taken the screen away. Asking one question with both answers in
-    /// it is what makes the single slot correct.
+    /// Who is holding the canvas still. The canvas is locked while this is not
+    /// empty.
+    private(set) var canvasLocks: Set<CanvasLockOwner> = []
+
+    /// What the first lock borrowed, ready to be given back by the last unlock.
+    /// ⚠️ CAPTURED ONCE AND CAPTURED AS IT WAS — restoring to `true` instead of
+    /// to the prior value is how a suspension becomes permanent.
+    private var canvasRestore: (() -> Void)?
+
+    /// Holds the canvas still for `owner`: no paging, a sheet that cannot be
+    /// pulled shut, and the stack's back-swipe suspended.
+    ///
+    /// ⚠️ **OWNERS, NOT A FLAG — THE CROP SURFACE AND THE OVERLAYS BOTH NEED
+    /// IT.** A second owner locking an already-locked canvas borrows nothing (the
+    /// values it would capture are the lock's own), and the canvas is given back
+    /// only when the LAST owner lets go — otherwise the first to leave would
+    /// unlock the canvas under the other.
+    func lockCanvas(by owner: CanvasLockOwner) {
+        let wasUnlocked = canvasLocks.isEmpty
+        guard canvasLocks.insert(owner).inserted else { return }
+        if wasUnlocked {
+            let wasScrolling = canvas.isScrollEnabled
+            let wasModal = navigationController?.isModalInPresentation ?? false
+            canvasRestore = { [weak self] in
+                guard let self else { return }
+                canvas.isScrollEnabled = wasScrolling
+                navigationController?.isModalInPresentation = wasModal
+            }
+            // ⚠️ **A LOCK, NOT A REFUSAL.** `CarouselCollectionView` declines a
+            // drag by answering false in `gestureRecognizerShouldBegin`, which
+            // hands the touch to the stack's full-width pan — so refusing here
+            // would page nothing and pop the screen instead. `IconSelectorBar`
+            // states the same choice, and states why a `require(toFail:)` into a
+            // scroll view's recogniser graph is not the tool either.
+            canvas.isScrollEnabled = false
+            // ⚠️ **AND THIS IS WHAT KEEPS A DOWNWARD DRAG ON THE PICTURE FROM
+            // CLOSING THE SHEET.** Dismissal is velocity-dominated — measured on
+            // the filter row at 139pt/~3000pt/s — so no amount of gesture
+            // arbitration makes it safe; the sheet has to be told it is not
+            // dismissible. Set on the NAVIGATION CONTROLLER, which is the
+            // presented screen.
+            navigationController?.isModalInPresentation = true
+        }
+        updateStackGestures()
+    }
+
+    /// Lets go of the canvas for `owner`; the canvas moves again once nobody
+    /// holds it.
+    func unlockCanvas(by owner: CanvasLockOwner) {
+        guard canvasLocks.remove(owner) != nil else { return }
+        if canvasLocks.isEmpty {
+            canvasRestore?()
+            canvasRestore = nil
+        }
+        updateStackGestures()
+    }
+
+    /// ⚠️ **ONE PREDICATE, SEVERAL OWNERS — AND WITH TWO OWNERS IT WAS A
+    /// DEFECT.** `setStackGesturesEnabled` keeps a single list of suspended
+    /// recognisers and refuses to suspend twice (`suspendedPans.isEmpty`), while
+    /// the strip's probe announces `false` on every lift and restored them
+    /// unconditionally. Enter crop mode, then brush the category strip, and the
+    /// back-swipe came back alive underneath a live crop surface — a rightward
+    /// drag on the picture would have taken the screen away. Asking one question
+    /// with every answer in it — every canvas lock, and the strip — is what
+    /// makes the single slot correct.
     private func updateStackGestures() {
-        setStackGesturesEnabled(!(isCropping || isTouchingStrip))
+        setStackGesturesEnabled(canvasLocks.isEmpty && !isTouchingStrip)
     }
 
     private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
@@ -2641,174 +3001,6 @@ final class MediaEditorViewController: UIViewController {
         suspendedPans = pans.map { ($0, $0.isEnabled) }
         for recogniser in pans { recogniser.isEnabled = false }
     }
-}
-
-/// One page of the canvas: the media, filling it.
-final class MediaEditorPageCell: UICollectionViewCell {
-    /// ⚠️ A PICTURE ARRIVES LATE AND A CELL IS REUSED EARLY — the same guard the
-    /// grid's tile carries, for the same reason.
-    private(set) var representedID: String?
-
-    private let picture = UIImageView()
-    private let surface = VideoRenderView()
-
-    /// ⚠️ **HELD, BECAUSE A FITTED PICTURE DOES NOT LIVE IN THE SAME RECTANGLE AS
-    /// A FILLED ONE.** Filling means the whole window, bars included — that is what
-    /// full-bleed is for. Fitting means showing the picture WHOLE, and a whole
-    /// picture centred in the window puts its middle behind the toolbar and its
-    /// edges under the chrome: it reads as hanging low. The window a fitted picture
-    /// is centred in runs from the foot of the top bar to the head of the page
-    /// indicator, and these four constants are how it gets there.
-    private var top: NSLayoutConstraint!
-    private var bottom: NSLayoutConstraint!
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear
-        picture.contentMode = .scaleAspectFill
-        picture.clipsToBounds = true
-        picture.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(picture)
-        top = picture.topAnchor.constraint(equalTo: contentView.topAnchor)
-        bottom = picture.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
-        NSLayoutConstraint.activate([
-            top, bottom,
-            picture.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            picture.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
-        ])
-        // ⚠️ **PINNED TO THE PICTURE, NOT TO THE CONTENT VIEW.** The fit/fill
-        // window is four constants held on `picture`, and a surface that
-        // duplicated them would drift the first time one of the two was changed
-        // alone. Pinned here it inherits the geometry for free: when the author
-        // fits a clip, the video is laid in the same rectangle as the poster it
-        // replaces, and the swap from one to the other moves nothing.
-        surface.isHidden = true
-        surface.isUserInteractionEnabled = false
-        // The page draws its own ground (the editor paints behind everything);
-        // an opaque black surface would put a letterbox back under a fitted clip.
-        surface.paintsOpaqueGround = false
-        surface.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(surface)
-        NSLayoutConstraint.activate([
-            surface.topAnchor.constraint(equalTo: picture.topAnchor),
-            surface.bottomAnchor.constraint(equalTo: picture.bottomAnchor),
-            surface.leadingAnchor.constraint(equalTo: picture.leadingAnchor),
-            surface.trailingAnchor.constraint(equalTo: picture.trailingAnchor)
-        ])
-        isAccessibilityElement = true
-        accessibilityTraits = .image
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// ⚠️ **A REUSED CELL MUST NOT KEEP A SURFACE THAT IS STILL PLAYING.** The
-    /// canvas recycles pages, so the cell that carried page 2's clip becomes
-    /// page 5's without asking anyone. Whoever put a player here has to be told;
-    /// the editor sets this when it hands the cell a surface to play in.
-    var onReuse: ((VideoRenderView) -> Void)?
-
-    override func prepareForReuse() {
-        super.prepareForReuse()
-        representedID = nil
-        picture.image = nil
-        onReuse?(surface)
-        onReuse = nil
-        surface.isHidden = true
-    }
-
-    func prepare(for item: MediaLibraryItem) {
-        representedID = item.id
-        accessibilityLabel = item.isVideo ? "Video" : "Photo"
-    }
-
-    /// The surface a video plays in, for the editor to hand to its player.
-    /// Hidden until something is actually bound to it — an empty
-    /// `VideoRenderView` over the poster is a black rectangle.
-    var videoSurface: VideoRenderView { surface }
-
-    /// Reveals the video and lets the poster underneath show through until the
-    /// first decoded frame arrives.
-    func beginShowingVideo() {
-        // The poster is the picture this page already drew — the very frame the
-        // grid showed and the publish path will upload. Handing the surface the
-        // same one means the swap to live playback changes the motion and
-        // nothing else.
-        surface.setPoster(picture.image)
-        surface.isHidden = false
-        surface.fadeInOnFirstFrame(over: 0.2)
-    }
-
-    func stopShowingVideo() {
-        surface.isHidden = true
-        surface.setPoster(nil)
-    }
-
-    /// Hands over a picture fetched for `id`, and ignores one whose page has
-    /// moved on.
-    func show(_ image: UIImage?, for id: String) {
-        guard representedID == id else { return }
-        picture.image = image
-    }
-
-    /// ⚠️ **`contentMode` IS NOT AN ANIMATABLE PROPERTY.** Assigning it inside a
-    /// `UIView.animate` block changes the picture in one frame. A crossfade
-    /// through `UIView.transition` is how the jump is softened — the same move
-    /// the feed's render view makes when it swaps a poster for live playback.
-    func setContentMode(_ mode: UIView.ContentMode, animated: Bool) {
-        guard picture.contentMode != mode else { return }
-        guard animated else {
-            picture.contentMode = mode
-            return
-        }
-        UIView.transition(
-            with: picture, duration: 0.25,
-            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.picture.contentMode = mode
-        }
-    }
-
-    /// Lays the picture the way the author left it, in the window a fitted one is
-    /// centred in.
-    ///
-    /// ⚠️ **THE INSETS APPLY TO `fit` ONLY.** A filled picture keeps the whole
-    /// window on purpose — it is cropped by the frame either way, so insetting it
-    /// would only show less of it for nothing.
-    func lay(_ fit: ContentFit, within window: UIEdgeInsets, animated: Bool) {
-        setContentMode(fit.mode, animated: animated)
-        // ⚠️ THE VIDEO OBEYS THE SAME CHOICE AS THE PICTURE. Left at the feed's
-        // `.resizeAspectFill`, a clip the author asked to see WHOLE would carry
-        // on being cropped — and the poster beneath it would not be, so the swap
-        // to live playback would jump.
-        surface.videoGravity = fit == .fit ? .resizeAspect : .resizeAspectFill
-        let applied = fit == .fit ? window : .zero
-        guard top.constant != applied.top || bottom.constant != -applied.bottom else { return }
-        top.constant = applied.top
-        bottom.constant = -applied.bottom
-        guard animated else {
-            contentView.layoutIfNeeded()
-            return
-        }
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
-            self.contentView.layoutIfNeeded()
-        }
-    }
-
-    /// Internal for tests: where the picture actually sits in its page.
-    var debugPictureFrame: CGRect { picture.frame }
-
-    /// Internal for tests: whether a picture has actually landed.
-    var debugHasPicture: Bool { picture.image != nil }
-    /// Internal for tests: how the picture is currently laid in its page.
-    var debugContentMode: UIView.ContentMode { picture.contentMode }
-    /// Internal for tests: the size of what is actually on the page — the only
-    /// thing that can tell a rendered crop from the picture it was cut from.
-    var debugPictureSize: CGSize { picture.image?.size ?? .zero }
-    /// Internal for tests: whether this page is showing a video surface at all.
-    var debugIsShowingVideo: Bool { !surface.isHidden }
-    /// Internal for tests: how the video is laid, which must track the picture.
-    var debugVideoGravityIsFit: Bool { surface.videoGravity == .resizeAspect }
 }
 
 // MARK: - Playing the settled page
@@ -2894,11 +3086,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        updateFitItem(animated: true)
-        refreshFilterRowIfShowing()
-        refreshTimelineTrackIfShowing()
-        reopenCropIfWaiting()
-        playSettledPage()
+        pageSettled()
     }
 
     /// ⚠️ **A DRAG RELEASED WITH NO VELOCITY DECELERATES NOWHERE.** Neither hook
@@ -2907,11 +3095,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     /// A clip that never starts is not survivable in the same way.
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         guard !decelerate else { return }
-        updateFitItem(animated: true)
-        refreshFilterRowIfShowing()
-        refreshTimelineTrackIfShowing()
-        reopenCropIfWaiting()
-        playSettledPage()
+        pageSettled()
     }
 
     /// ⚠️ **BOTH SETTLE HOOKS, NOT JUST THE DRAGGED ONE.** A canvas that arrives
@@ -2919,8 +3103,19 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     /// dragged case would leave the row dressed in the previous picture while the
     /// canvas shows the next one.
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        pageSettled()
+    }
+
+    /// Everything a page coming to rest re-decides, for all three hooks.
+    ///
+    /// ⚠️ **ONE ROUTINE, BECAUSE THE HOOKS WERE THREE COPIES** — and a line
+    /// added to two of them is a settle that works by drag and not by
+    /// `scrollToItem`. Every mode hears it (a filter row re-dressed for the new
+    /// picture, an overlay layer rebuilt for it) before the page starts playing.
+    private func pageSettled() {
         updateFitItem(animated: true)
-        refreshFilterRowIfShowing()
+        let settled = currentItemID
+        for mode in modes { mode.pageDidSettle(on: settled) }
         refreshTimelineTrackIfShowing()
         reopenCropIfWaiting()
         playSettledPage()
@@ -2949,6 +3144,11 @@ extension MediaEditorViewController {
     /// wrong, which is why a comment is no substitute for the right side of a
     /// `#if`. Before pushing anything added near those accessors, build Release.
     func setEditingAccessory(_ accessory: UIView?) {
+        // ⚠️ **EVERY MODE HEARS IT FIRST, WHOEVER IS ASKING.** A row, a sheet or
+        // a lock a mode opened belongs to the band it opened in; this is the one
+        // funnel every band change goes through, so it is the one place a mode
+        // can be sure to hear it. A mode must not change the band from here.
+        for mode in modes { mode.bandWillChange(to: accessory) }
         // ⚠️ **DEACTIVATE BEFORE ACTIVATING.** Both anchors pin the same edge, so
         // leaving the old one alive for even one pass gives Auto Layout a conflict
         // to arbitrate — and it may keep the one being replaced.

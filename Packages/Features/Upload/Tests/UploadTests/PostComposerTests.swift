@@ -125,6 +125,27 @@ struct PostComposerTests {
         #expect(paths.contains("/post.v1.PostService/PublishPost"))
     }
 
+    /// ⚠️ **THE WHOLE EDIT IS PUBLISHED, NOT ONLY THE PIECES.** A crop drawn in
+    /// the editor reaches the exported file — which reports the cropped size,
+    /// read off the file itself.
+    @Test func aCroppedVideoIsPublishedCropped() async throws {
+        let harness = makeHarness()
+        let entries = await harness.channel.entries()
+        let source = try await PlaceholderVideoFetcher(durationSeconds: 1.0)
+            .playableURL(for: URL(string: "mock://video/cropped?w=240&h=320")!)
+        let halfWidth = FrameFinish(crop: FrameCrop(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1)))
+
+        try await harness.composer.publish(
+            media: .video(PickedVideo(sourceURL: source, finish: halfWidth)), caption: "cropped"
+        )
+
+        var iterator = entries.makeAsyncIterator()
+        let entry = try #require(await iterator.next())
+        let attachment = try #require(entry.post.attachments.first)
+        #expect(attachment.pixelWidth == 120 && attachment.pixelHeight == 320,
+                "published \(attachment.pixelWidth)x\(attachment.pixelHeight)")
+    }
+
     /// ⚠️ **THE DEFECT THIS EXISTS TO CATCH IS INVISIBLE IN MOCK MODE AND LOOKS
     /// LIKE NOTHING AT ALL.** `thumbnail_url` used to be the .mp4's own URL. That
     /// is not "no picture": every surface resolves a thumbnail through

@@ -233,6 +233,30 @@ struct MediaEditorCropTests {
         #expect(screen.editor.debugIsCropping, "guard: and the surface is still up")
     }
 
+    /// ⚠️ **TWO OWNERS, ONE CANVAS — THE SAME DEFECT, ONE LEVEL UP.** The
+    /// overlays hold the canvas the way the crop surface does. Whichever lets go
+    /// first must not unlock it under the other, and the last to let go gives
+    /// back what the FIRST one borrowed.
+    @Test func theCanvasStaysLockedUntilItsLastOwnerLetsGo() {
+        let screen = open(Self.items(2))
+        choose(Mode.crop, on: screen)
+        screen.editor.lockCanvas(by: .overlays)
+        #expect(!screen.editor.debugCanvasScrolls, "guard: locked")
+
+        choose(Mode.filters, on: screen)
+
+        #expect(!screen.editor.debugIsCropping, "guard: the crop surface went")
+        #expect(!screen.editor.debugCanvasScrolls, "leaving crop unlocked a canvas the overlays still hold")
+        #expect(screen.editor.debugSheetIsPinned)
+        #expect(screen.editor.debugSuspendedPans > 0)
+
+        screen.editor.unlockCanvas(by: .overlays)
+
+        #expect(screen.editor.debugCanvasScrolls, "and paging comes back with the last owner")
+        #expect(!screen.editor.debugSheetIsPinned)
+        #expect(screen.editor.debugSuspendedPans == 0)
+    }
+
     @Test func leavingTheScreenUnwindsCropModeWithIt() {
         let screen = open(Self.items(1))
         choose(Mode.crop, on: screen)
@@ -514,40 +538,44 @@ struct MediaEditorCropTests {
 
     // MARK: - A video
 
-    @Test func aVideoSaysWhyItCannotBeCropped() {
+    /// ⚠️ **A VIDEO IS CROPPED NOW — IT WAS TOLD IT COULD NOT BE.** The crop
+    /// travels in the clip's plan, the compositor draws it, and the export
+    /// publishes it; the refusal would be the lie.
+    @Test func aVideoCanBeCropped() {
         let screen = open(Self.items(1, videoAt: 0))
 
         choose(Mode.crop, on: screen)
 
-        let notice = screen.editor.debugBand.content as? BandNoticeView
-        #expect(notice != nil, "got \(String(describing: screen.editor.debugBand.content))")
-        #expect(notice?.debugText?.contains("video") == true, "got \(notice?.debugText ?? "nil")")
-        #expect(!screen.editor.debugIsCropping,
-                "and nothing is borrowed for a mode that is not running")
+        #expect(screen.editor.debugIsCropping, "the video was refused")
+        #expect(screen.editor.debugBand.content is MediaCropToolsView,
+                "got \(String(describing: screen.editor.debugBand.content))")
     }
 
-    /// ⚠️ **THE SAME RULE FOR THE LOOK, AND IT BECAME NECESSARY THE DAY VIDEOS
-    /// STARTED PUBLISHING.** The filter row was offered on every page, video
-    /// included, for as long as `post()` dropped clips: the look reached nothing,
-    /// but neither did the clip, and the last screen said so. Now the clip is
-    /// published and `post()`'s video branch never reads `edits` — `MediaFilter`
-    /// is `UIImage`-to-`UIImage` — so an author could choose a look, watch the
-    /// canvas apply it, and publish the untouched video.
-    ///
-    /// That is precisely the defect `where !item.isVideo` was deleted to end,
-    /// moved one screen earlier. A control that reaches nothing must say so.
-    @Test func aVideoSaysWhyItCannotBeFiltered() {
+    @Test func aVideosCropIsStoredAgainstTheClip() {
+        let screen = open(Self.items(1, videoAt: 0))
+        choose(Mode.crop, on: screen)
+        let cut = MediaCrop(rect: CGRect(x: 0.25, y: 0, width: 0.5, height: 1))
+
+        screen.editor.debugCropSurface.onChange?(cut)
+
+        #expect(screen.editor.debugCrop(for: "item-0") == cut, "got \(screen.editor.debugCrop(for: "item-0"))")
+    }
+
+    /// ⚠️ **A VIDEO IS OFFERED THE LOOKS NOW — IT WAS TOLD IT COULD NOT BE
+    /// FILTERED.** That notice existed because `post()`'s video branch never
+    /// read `edits`: an author could choose a look, watch the canvas apply it,
+    /// and publish the untouched clip. The look now travels in the clip's plan
+    /// and plays live in the preview, so the refusal would be the lie.
+    @Test func aVideoIsOfferedTheLooks() {
         let screen = open(Self.items(1, videoAt: 0))
 
         choose(Mode.filters, on: screen)
 
-        let notice = screen.editor.debugBand.content as? BandNoticeView
-        #expect(notice != nil, "got \(String(describing: screen.editor.debugBand.content))")
-        #expect(notice?.debugText?.contains("filtered") == true, "got \(notice?.debugText ?? "nil")")
+        #expect(screen.editor.debugBand.content is MediaFilterRowView,
+                "got \(String(describing: screen.editor.debugBand.content))")
     }
 
-    /// The witness for the line above: a photograph still gets the looks, so the
-    /// notice is about the video and not about the mode being broken.
+    /// The same row on a photograph.
     @Test func aPhotographInTheSamePlaceGetsTheLooks() {
         let screen = open(Self.items(1))
 
@@ -648,23 +676,6 @@ struct MediaEditorCropTests {
 
         #expect(screen.editor.debugCropSurface.isUserInteractionEnabled)
         #expect(screen.editor.debugCropTools.isUserInteractionEnabled)
-    }
-
-    /// ⚠️ **A VIDEO LEFT THE MODE UNREACHABLE FOR EVERY PICTURE AFTER IT.**
-    /// Choosing "Crop" on a video puts a notice in the band and locks nothing, so
-    /// the canvas still pages — and swiping on to a photograph changed nothing at
-    /// all: the band kept the notice, the pill kept saying Crop, and tapping Crop
-    /// again announced nothing because the selection had not changed.
-    @Test func swipingFromAVideoToAPhotographOpensTheToolsAtLast() {
-        let screen = open(Self.items(2, videoAt: 0))
-        choose(Mode.crop, on: screen)
-        #expect(screen.editor.debugBand.content is BandNoticeView, "guard: the notice is up")
-
-        screen.editor.debugScrollToPage(1)
-
-        #expect(screen.editor.debugBand.content is MediaCropToolsView,
-                "got \(String(describing: screen.editor.debugBand.content))")
-        #expect(screen.editor.debugIsCropping)
     }
 
     /// ⚠️ **THE MODE OUTLIVES A PUSH, SO IT HAS TO COME BACK.** Leaving the screen

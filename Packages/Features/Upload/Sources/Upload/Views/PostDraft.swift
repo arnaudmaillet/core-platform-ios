@@ -37,5 +37,13 @@ final class PostDraft {
     /// and the screen falls back to its own default when this is empty.
     var coverID: String?
 
+    /// The songs the editor imported for this post — the files themselves.
+    ///
+    /// ⚠️ **HERE, AND NOT IN THE EDITOR, SO THEY OUTLIVE PUBLISHING.** The
+    /// export reads a song while "Post" is working, and the sheet — with this
+    /// draft — is dismissed only once the post is out. The files are deleted
+    /// when the draft goes.
+    let soundtrackFiles = TempFileBag()
+
     init() {}
 }

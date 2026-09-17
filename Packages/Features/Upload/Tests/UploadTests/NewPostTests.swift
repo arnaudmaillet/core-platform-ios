@@ -412,6 +412,65 @@ struct NewPostTests {
         #expect(tracks.isEmpty == false, "the file handed over carries no video track")
     }
 
+    /// ⚠️ **A STICKER IS BAKED INTO THE PHOTOGRAPH THAT IS PUBLISHED.** Its
+    /// frames are baked before the render runs; without them the renderer
+    /// skips the sticker and the post goes out bare. The reader averages the
+    /// whole picture — here half red, half blue — so the sticker is laid at
+    /// five times its size, most of the frame, and the average turns towards
+    /// its yellow.
+    @Test func aStickerIsBakedIntoThePublishedPhotograph() async throws {
+        var edited = MediaEdits()
+        edited.overlays = [FrameOverlay(
+            content: .sticker(id: "Idea"), placement: OverlayPlacement(scale: 5)
+        )]
+        let bare = open(Self.items(1))
+        bare.library.answersTwoColours = true
+        bare.post.debugTapPost()
+        let bareImages = try await publishedImages(from: bare.composer)
+        let barePicture = try #require(bareImages.first, "guard: nothing bare was published")
+        let plain = try #require(Self.centrePixel(of: barePicture.image))
+        let screen = open(Self.items(1), edits: ["photo-0": edited])
+        screen.library.answersTwoColours = true
+
+        screen.post.debugTapPost()
+        let images = try await publishedImages(from: screen.composer)
+
+        let picture = try #require(images.first, "nothing reached the composer")
+        let pixel = try #require(Self.centrePixel(of: picture.image))
+        #expect(pixel.g > plain.g + 40, "no sticker was laid: \(pixel) against \(plain)")
+    }
+
+    /// ⚠️ **THE WHOLE EDIT OF A CLIP IS HANDED ON, NOT ONLY ITS PIECES.** A
+    /// look, a crop, the text and a song were shown in the editor and, until
+    /// this, published as if never made.
+    @Test func aClipsWholeEditReachesTheComposer() async throws {
+        let text = FrameOverlay(
+            id: "t", content: .text(TextOverlay(
+                text: "Hi", font: .classic, colour: .white, background: .none, alignment: .centre
+            )),
+            placement: .centred
+        )
+        let song = VideoSoundtrack(
+            fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("song.m4a"),
+            title: "Song", startSeconds: 2, musicVolume: 0.5, originalVolume: 0.25
+        )
+        var edited = MediaEdits(filter: .noir)
+        edited.crop = MediaCrop(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1))
+        edited.overlays = [text]
+        edited.soundtrack = song
+        let screen = open(Self.items(2, videosAt: [1]), edits: ["video-1": edited])
+
+        screen.post.debugTapPost()
+        try await settle(until: { screen.handed.entry != nil })
+
+        let calls = await screen.composer.calls
+        let clip = try #require(calls.first?.videos.first)
+        #expect(clip.finish.look.preset == .noir, "the look was left behind")
+        #expect(clip.finish.crop == edited.crop, "the crop was left behind")
+        #expect(clip.finish.overlays == [text], "the text was left behind")
+        #expect(clip.soundtrack == song, "the song was left behind")
+    }
+
     /// ⚠️ **A CLIP THAT CANNOT BE READ STOPS THE POST — IT DOES NOT SHRINK IT.**
     /// Publishing three of the four things the author assembled, with no word
     /// said, is the exact defect this slice removes; doing it again by way of an

@@ -38,9 +38,13 @@ final class MediaTimelineToolsView: UIView {
     let speeds = MediaSpeedRowView()
     let track = MediaTimelineTrackView()
     let transitions = MediaTransitionRowView()
+    /// The looks one piece can wear — the same row, under the same line.
+    let segmentFilters = MediaSegmentFilterRowView()
 
     /// The cut whose transition is being chosen, if the row is open.
     private(set) var editingSeam: Int?
+    /// The piece whose filter is being chosen, if that row is open.
+    private(set) var editingPiece: Int?
 
     private let stack = UIStackView()
 
@@ -64,12 +68,52 @@ final class MediaTimelineToolsView: UIView {
         // ⚠️ **NOT IN THE STACK.** The row stands in room the track already
         // owns — the film's, once collapsed — so the band never changes height
         // for it and the canvas above never moves.
-        transitions.constrain(in: self) { _ in
-            transitions.leadingAnchor.constraint(equalTo: track.leadingAnchor)
-            transitions.trailingAnchor.constraint(equalTo: track.trailingAnchor)
-            transitions.bottomAnchor.constraint(equalTo: track.bottomAnchor)
-            transitions.heightAnchor.constraint(equalToConstant: MediaTransitionRowView.height)
+        for row in [transitions as UIView, segmentFilters] {
+            row.constrain(in: self) { _ in
+                row.leadingAnchor.constraint(equalTo: track.leadingAnchor)
+                row.trailingAnchor.constraint(equalTo: track.trailingAnchor)
+                row.bottomAnchor.constraint(equalTo: track.bottomAnchor)
+                row.heightAnchor.constraint(equalToConstant: MediaTransitionRowView.height)
+            }
         }
+    }
+
+    /// Collapses the track and opens the filter row on piece `piece`, lighting
+    /// the stretch the preview will loop. Returns false when the track refused.
+    ///
+    /// ⚠️ **NEVER BOTH ROWS.** The screen closes one before opening the other;
+    /// this refuses if the transitions row is still up.
+    @discardableResult
+    func openSegmentFilters(
+        forPiece piece: Int, chosen: MediaFilter?, rehearsal: ClosedRange<Double>?, animated: Bool
+    ) -> Bool {
+        guard editingSeam == nil else { return false }
+        track.showRehearsal(rehearsal, window: nil, animated: editingPiece != nil && animated)
+        segmentFilters.show(kind: chosen)
+        guard editingPiece == nil else {
+            segmentFilters.revealChosen(animated: animated)
+            editingPiece = piece
+            return true
+        }
+        guard track.setCompact(
+            true, bringingUnderTheNeedle: rehearsal?.lowerBound, animated: animated
+        ) else { return false }
+        editingPiece = piece
+        segmentFilters.setOpen(true, animated: animated)
+        return true
+    }
+
+    /// States what the piece now wears.
+    func showSegmentFilter(_ filter: MediaFilter?) {
+        segmentFilters.show(kind: filter)
+    }
+
+    /// Puts the filter row away and opens the film again.
+    func closeSegmentFilters(animated: Bool) {
+        guard editingPiece != nil else { return }
+        editingPiece = nil
+        segmentFilters.setOpen(false, animated: animated)
+        track.setCompact(false, animated: animated)
     }
 
     /// Collapses the track and opens the row on cut `seam`, lighting the stretch
@@ -80,6 +124,7 @@ final class MediaTimelineToolsView: UIView {
         atSeam seam: Int, chosen: VideoTransitionKind?,
         rehearsal: ClosedRange<Double>?, window: ClosedRange<Double>?, animated: Bool
     ) -> Bool {
+        guard editingPiece == nil else { return false }
         track.showRehearsal(rehearsal, window: window, animated: editingSeam != nil && animated)
         transitions.show(kind: chosen)
         guard editingSeam == nil else {

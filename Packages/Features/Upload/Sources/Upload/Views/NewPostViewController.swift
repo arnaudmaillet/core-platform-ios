@@ -3,6 +3,7 @@
 import AVFoundation
 import MediaPlayback
 import CoreModels
+import StickerKit
 import DesignSystem
 import UIKit
 
@@ -48,13 +49,15 @@ import UIKit
 ///   of. The footer says so in plain words, which is the privacy screen's rule
 ///   (§13a): a local honour-system control is acceptable only while it admits it.
 ///
-/// ⚠️ **VIDEOS PUBLISH, BUT THEY ARE NOT EDITABLE YET.** `MediaLibraryReading`
-/// grew `videoFile(for:)` and a chosen clip now uploads, leads the carousel if
-/// it is the cover, and carries a poster frame. What it does NOT carry is any of
-/// this flow's edits: crop, straighten, mirror and filters are `UIImage`-to-
-/// `UIImage` by signature, so the editor still shows a notice on a video page
-/// (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4). A video is published exactly as it
-/// was picked.
+/// ⚠️ **A VIDEO CARRIES ITS EDITS NOW, ALL OF THEM.** `MediaLibraryReading`
+/// grew `videoFile(for:)` and a chosen clip uploads, leads the carousel if it is
+/// the cover, and carries a poster frame. Everything the editor let the author
+/// decide travels with it in one `VideoExportPlan` (`MediaEdits.exportPlan`) —
+/// the pieces they kept and their rates, the crop and straighten, the look, the
+/// overlays and the song — and `VideoExporter`'s compositor burns them into the
+/// file (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4). It is the mapping the
+/// editor's canvas plays — asked here WITH the overlays, which the canvas draws
+/// as views instead — so what was watched is what is published.
 final class NewPostViewController: UIViewController {
     /// ⚠️ **THE SETTINGS ARE THREE SECTIONS, NOT ONE LIST.** Six switches in a
     /// single card is a wall: nothing in it tells the reader that hiding a
@@ -633,10 +636,12 @@ final class NewPostViewController: UIViewController {
     ///
     /// Photos and videos take different routes out of the library and meet again
     /// as `ComposeMedia`: a photo is read at publish size and baked with its
-    /// edits, a video is read as a file and handed over with the part of it the
-    /// author kept. Both consult `edits`; they use different fields of it, and a
-    /// video uses only `trim` — crop and filters are still `UIImage`-to-`UIImage`
-    /// by signature (`dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4).
+    /// edits here, a video is read as a file and handed over as the plan the
+    /// exporter draws. Both consult `edits`: a photograph takes the crop, the
+    /// look and the overlays, a clip takes those and its pieces and its song as
+    /// well. What differs is WHERE the pixels are made —
+    /// `MediaEdits.applied(to:artwork:)` on this screen for a picture,
+    /// `VideoCompositor` inside the export for a clip.
     ///
     /// The title and the six settings are NOT sent: nothing in the contract
     /// carries them (§21, §22).
@@ -689,7 +694,7 @@ final class NewPostViewController: UIViewController {
                         if case .video(let seconds) = item.kind { declared = seconds } else { declared = 0 }
                         let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
                         let length = real.isFinite && real > 0 ? real : declared
-                        let timeline = (edits[item.id] ?? .untouched).timeline
+                        let edited = edits[item.id] ?? .untouched
                         // ⚠️ **EVERY PIECE, AND THIS LINE USED TO TAKE ONLY THE
                         // FIRST.** `PickedVideo` carried a single range and the
                         // exporter a single `insertTimeRange`, so a timeline of
@@ -698,10 +703,18 @@ final class NewPostViewController: UIViewController {
                         // perfectly good video. The mapping is shared with the
                         // editor's preview, so what is published is what was
                         // watched.
-                        let kept = MediaTimelining.exportSegments(timeline, withinSource: length)
-                        media.append(
-                            .video(PickedVideo(sourceURL: file, keptPieces: kept))
+                        //
+                        // ⚠️ **AND THE WHOLE EDIT, NOT ONLY THE PIECES** — the
+                        // one mapping the preview uses, overlays included here
+                        // because the editor draws them as views.
+                        let art = await Self.stickerArt(for: edited, motion: .loop)
+                        let plan = edited.exportPlan(
+                            sourceURL: file, fileSeconds: length, artwork: art, includingOverlays: true
                         )
+                        media.append(.video(PickedVideo(
+                            sourceURL: file, keptPieces: plan.segments,
+                            finish: plan.finish, soundtrack: plan.soundtrack, artwork: plan.artwork
+                        )))
                         continue
                     }
                     guard let image = await library.thumbnail(for: item.id, size: Self.publishPixels) else {
@@ -715,14 +728,19 @@ final class NewPostViewController: UIViewController {
                     // work on pixels the viewer never approved.
                     //
                     // ⚠️ THE ORDER IS CUT THEN DRESS, and it lives in one place:
-                    // `MediaEdits.applied(to:)`, which four render paths share so
-                    // they cannot drift apart.
+                    // `MediaEdits.applied(to:artwork:)`, which four render paths
+                    // share so they cannot drift apart.
                     //
                     // ⚠️ A FAILED RENDER PUBLISHES THE ORIGINAL RATHER THAN NOTHING.
                     // Dropping the picture because a crop or a filter could not be
                     // rasterised would lose the author's photograph over a
-                    // decoration. `applied(to:)` carries that rule.
-                    let baked = (edits[item.id] ?? .untouched).applied(to: image)
+                    // decoration. `applied(to:artwork:)` carries that rule.
+                    //
+                    // ⚠️ STICKERS ARE BAKED FIRST, AS STILLS: a photograph has no
+                    // time, and the render reads the frames off any thread.
+                    let edited = edits[item.id] ?? .untouched
+                    let stills = await Self.stickerArt(for: edited, motion: .still)
+                    let baked = edited.applied(to: image, artwork: stills)
                     media.append(.image(PickedImage(baked)))
                 }
                 let entry = try await composer.publish(media: media, caption: caption, as: nil)
@@ -735,6 +753,21 @@ final class NewPostViewController: UIViewController {
                 present(Self.failureAlert(error), animated: true)
             }
         }
+    }
+
+    /// The baked frames of the stickers an edit lays over its picture — nil
+    /// when it lays none, so nothing is baked for a post without stickers.
+    private static func stickerArt(
+        for edited: MediaEdits, motion: StickerFrameBaker.Motion
+    ) async -> (any OverlayArtwork)? {
+        let ids = edited.overlays.compactMap { overlay -> String? in
+            if case .sticker(let id) = overlay.content { return id }
+            return nil
+        }
+        guard !ids.isEmpty else { return nil }
+        return await StickerFrameBaker.shared.artwork(
+            for: ids, side: StickerFrameBaker.exportSide, motion: motion
+        )
     }
 
     private static func failureAlert(_ error: Error) -> UIAlertController {

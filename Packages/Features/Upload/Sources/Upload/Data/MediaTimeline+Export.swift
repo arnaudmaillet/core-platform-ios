@@ -21,7 +21,8 @@ extension MediaTimelining {
             VideoExportSegment(
                 start: piece.start, end: piece.end, speed: piece.speed,
                 // ⚠️ Nothing after the last piece: there is no cut there.
-                transitionOut: index < pieces.count - 1 ? piece.transitionOut : nil
+                transitionOut: index < pieces.count - 1 ? piece.transitionOut : nil,
+                look: piece.filter
             )
         }
     }
@@ -51,6 +52,7 @@ extension MediaTimelining {
             abs(x.start - y.start) < 0.0005 && abs(x.end - y.end) < 0.0005
                 && abs(x.speed - y.speed) < 0.0005
                 && x.kind == y.kind && abs(x.half - y.half) < 0.0005
+                && x.filter == y.filter
         }
     }
 
@@ -62,6 +64,10 @@ extension MediaTimelining {
         var speed: Double
         var kind: VideoTransitionKind?
         var half: Double
+        /// ⚠️ **A PIECE'S LOOK IS PART OF THE FILM** — two timelines that
+        /// differ only in it play different pictures, and two touching pieces
+        /// wearing different looks are never merged into one.
+        var filter: MediaFilter?
     }
 
     private static func film(of timeline: MediaTimeline, withinSource duration: Double) -> [Stretch] {
@@ -74,9 +80,9 @@ extension MediaTimelining {
             let half = cut?.half ?? 0
             let next = Stretch(
                 start: piece.start, end: piece.end, speed: speed(of: piece),
-                kind: half > 0 ? cut?.kind : nil, half: half
+                kind: half > 0 ? cut?.kind : nil, half: half, filter: piece.filter
             )
-            if let last = out.last, last.kind == nil,
+            if let last = out.last, last.kind == nil, last.filter == next.filter,
                abs(last.end - next.start) < 0.0005, abs(last.speed - next.speed) < 0.0005 {
                 out[out.count - 1].end = next.end
                 out[out.count - 1].kind = next.kind

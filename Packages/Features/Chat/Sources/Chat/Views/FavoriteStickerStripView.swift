@@ -1,5 +1,6 @@
 import DesignSystem
 import Lottie
+import StickerKit
 import UIKit
 
 /// The favorites row: a compact, horizontally scrolling strip of stickers that

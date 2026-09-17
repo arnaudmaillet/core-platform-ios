@@ -1,31 +1,20 @@
 import CoreImage
-import CoreImage.CIFilterBuiltins
+import MediaPlayback
 import UIKit
 
 /// One look a picture can be shown in.
 ///
-/// ⚠️ **APPLE'S OWN LOOKS, NOT LUTs — FOR NOW.** The intended end state is
-/// `CIColorCube` fed by `.cube` files, which is how filter packs are really
-/// built. That needs colour assets nobody has authored yet, so this first cut
-/// uses the `CIPhotoEffect` family: eight looks, shipped with the system, no
-/// assets to carry. The row and the per-item state below do not care which of
-/// the two is behind a case, so swapping in LUTs later touches `ciFilter` and
-/// nothing else.
+/// ⚠️ **THE VALUE LIVES IN MEDIAPLAYBACK NOW (`LookPreset`), AND THIS NAME
+/// STAYS.** A video's look is drawn by that package's compositor, which may not
+/// import a feature; the photo path and the video path read one type, and every
+/// screen here keeps saying `MediaFilter`. What the row SPELLS is a screen's
+/// business and stays below.
 ///
-/// The eight names were read out of this SDK's `CIFilterBuiltins.h` rather than
-/// recalled, and the typed spelling is the one `ProfileQRCode` already uses —
-/// `CIFilter(name:)` turns a typo into a crash at run time.
-enum MediaFilter: String, CaseIterable, Sendable {
-    case original
-    case chrome
-    case fade
-    case instant
-    case mono
-    case noir
-    case process
-    case tonal
-    case transfer
+/// ⚠️ **APPLE'S OWN LOOKS, NOT LUTs — FOR NOW.** See `LookPreset`: swapping in
+/// LUTs later touches `FrameLookRenderer` and nothing here.
+typealias MediaFilter = LookPreset
 
+extension LookPreset {
     /// What the row spells under each thumbnail.
     var name: String {
         switch self {
@@ -40,31 +29,14 @@ enum MediaFilter: String, CaseIterable, Sendable {
         case .transfer: "Transfer"
         }
     }
-
-    /// Nil for `.original`, which is the absence of a filter rather than a
-    /// filter that does nothing — the renderer returns the source untouched and
-    /// pays no GPU cost at all.
-    fileprivate var ciFilter: CIFilter? {
-        switch self {
-        case .original: nil
-        case .chrome: CIFilter.photoEffectChrome()
-        case .fade: CIFilter.photoEffectFade()
-        case .instant: CIFilter.photoEffectInstant()
-        case .mono: CIFilter.photoEffectMono()
-        case .noir: CIFilter.photoEffectNoir()
-        case .process: CIFilter.photoEffectProcess()
-        case .tonal: CIFilter.photoEffectTonal()
-        case .transfer: CIFilter.photoEffectTransfer()
-        }
-    }
 }
 
 /// Puts a `MediaFilter` through a picture.
 ///
-/// ⚠️ **ONE CONTEXT, CREATED ONCE, AS `VideoStillCapture` ALREADY ARGUES.** A
-/// `CIContext` allocates its own GPU resources, and building one per call is the
-/// documented way to make a cheap render expensive. It is thread-safe by
-/// contract, so one static serves every caller.
+/// ⚠️ **THE LOOK IS `FrameLookRenderer`'S, AND THE RENDER IS THE SHARED
+/// CONTEXT'S.** This used to hold its own `CIFilter` table and its own context;
+/// both moved to MediaPlayback so a video's look is the very graph a
+/// photograph's is. What stays here is the `UIImage` wrapping.
 ///
 /// ⚠️ **THE CALLER FETCHES ONE SOURCE IMAGE AND ASKS FOR MANY LOOKS.** The
 /// library seam caches nothing — `PhotosMediaLibrary.thumbnail` runs a full
@@ -72,17 +44,14 @@ enum MediaFilter: String, CaseIterable, Sendable {
 /// rendering a row of nine by asking it nine times would be nine round trips for
 /// one photograph. Ask once, filter locally.
 enum MediaFilterRenderer {
-    private static let context = CIContext(options: [.useSoftwareRenderer: false])
-
     /// Nil only when the source cannot be read as a `CIImage`; `.original`
     /// always returns the source itself.
     static func apply(_ filter: MediaFilter, to image: UIImage) -> UIImage? {
-        guard let ciFilter = filter.ciFilter else { return image }
+        guard filter != .original else { return image }
         guard let source = CIImage(image: image) else { return nil }
 
-        ciFilter.setValue(source, forKey: kCIInputImageKey)
-        guard let output = ciFilter.outputImage,
-              let rendered = context.createCGImage(output, from: output.extent)
+        let output = FrameLookRenderer.apply(FrameLook(preset: filter), to: source, time: 0)
+        guard let rendered = EditingRenderContext.shared.createCGImage(output, from: output.extent)
         else { return nil }
 
         // ⚠️ THE SOURCE'S SCALE AND ORIENTATION ARE CARRIED OVER, NOT DEFAULTED.

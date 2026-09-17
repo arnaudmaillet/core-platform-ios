@@ -91,6 +91,22 @@ struct MediaEditorTrackToolsTests {
         var headSeconds: Double?
         func playheadSeconds(in surface: VideoRenderView) -> Double? { headSeconds }
         func advancingRate(in surface: VideoRenderView) -> Double { 0 }
+        /// Every live look, mute and pair of levels the screen asked for, in
+        /// order — recorded, because a stub that swallowed them could not say
+        /// whether the screen ever asked.
+        private(set) var liveLooks: [FrameLook] = []
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool {
+            liveLooks.append(look)
+            return takesLiveLook
+        }
+        /// What this backing answers — false is the legacy layer path's answer.
+        var takesLiveLook = true
+        private(set) var mutes: [Bool] = []
+        func setMuted(_ muted: Bool, in surface: VideoRenderView) { mutes.append(muted) }
+        private(set) var mixLevels: [(music: Double, original: Double)] = []
+        func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {
+            mixLevels.append((music, original))
+        }
         private(set) var seeks: [Double] = []
         func seek(toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double) {
             seeks.append(seconds)
@@ -236,11 +252,36 @@ struct MediaEditorTrackToolsTests {
     /// ⚠️ **A SYMBOL THAT DOES NOT RESOLVE IS AN EMPTY BUTTON, NOT AN ERROR** —
     /// this repository has shipped one. The runtime is the instrument that cannot
     /// be wrong.
-    @Test func bothActionGlyphsExist() {
+    @Test func everyActionGlyphExists() {
         for action in MediaEditorViewController.TrackAction.allCases {
             #expect(UIImage(systemName: action.symbolName) != nil,
                     "\(action.symbolName) draws a blank capsule that still takes taps")
         }
+    }
+
+    /// ⚠️ **A LOOK FOR THE HELD PIECE, BESIDE THE SCISSORS AND THE SPEEDOMETER —
+    /// AND DEAD UNTIL IT CAN ACT.** Nothing is held when the bar is built, and
+    /// until the piece-filter row exists a held piece does not wake it either.
+    /// The scissors waking at the same moment is the witness that the bar was
+    /// really re-decided.
+    @Test func theFilterActionIsThirdAndStartsDisabled() throws {
+        let filter = MediaEditorViewController.TrackAction.filter
+        let split = MediaEditorViewController.TrackAction.split.rawValue
+        let screen = open(Self.items(1, videosAt: [0]))
+        let bar = screen.editor.debugActionBar
+
+        #expect(bar.debugSymbols == ["scissors", "speedometer", "camera.filters"])
+        #expect(filter.rawValue == 2)
+        #expect(filter.spoken == "Filter this clip")
+        #expect(!bar.isEnabled(at: filter.rawValue), "alive before the timeline even opened")
+
+        choose(Mode.trim, on: screen)
+        let track = try tools(in: screen).track
+        putTheNeedle(at: 5, on: track, in: screen)
+        track.select(0, notify: true)
+
+        #expect(bar.isEnabled(at: split), "witness: the bar was re-decided with a piece held")
+        #expect(!bar.isEnabled(at: filter.rawValue), "the filter woke with no row to open")
     }
 
     // MARK: - The two strips share the bar
@@ -257,16 +298,41 @@ struct MediaEditorTrackToolsTests {
 
         let bar = try #require(screen.navigation.toolbar.bounds.width > 0 ? screen.navigation.toolbar : nil)
         let held = try #require(screen.editor.debugStripWidths, "the rule is not being applied")
-        let ceiling = bar.bounds.width * EditorSelectorLayout.ceiling
+        let geometry = screen.editor.barGeometry
+        let available = geometry.available(in: bar.bounds.width)
         #expect(held.leading > 0 && held.trailing > 0)
-        #expect(held.leading <= ceiling && held.trailing <= ceiling,
-                "one strip took more than its ceiling: \(held) of \(bar.bounds.width)")
-        #expect(held.leading + held.trailing <= bar.bounds.width,
-                "together they overflow the bar: \(held)")
-        // Two icons cannot scroll their overflow away; six modes can, which is
-        // why the actions are the ones that keep their width.
-        #expect(held.leading == screen.editor.debugActionBar.intrinsicContentSize.width,
-                "the actions were squeezed: \(held.leading)")
+        #expect(held.leading <= available * EditorSelectorLayout.ceiling
+                && held.trailing <= available * EditorSelectorLayout.ceiling,
+                "one strip took more than its ceiling: \(held) of \(available)")
+        // ⚠️ **WHAT THE BAR IS CHARGED, NOT ITS BARE WIDTH** — the two halves
+        // of a bare 375 overran an SE's bar by the margins, platters and gap.
+        let used = 2 * geometry.margin + held.leading + held.trailing + 2 * geometry.platter + geometry.gap
+        #expect(used <= bar.bounds.width + 0.5, "together they overrun the bar: \(held), \(geometry)")
+        let expected = EditorSelectorLayout.widths(
+            leadingWants: screen.editor.debugActionBar.intrinsicContentSize.width,
+            trailingWants: screen.editor.debugCategoryBar.intrinsicContentSize.width,
+            available: available
+        )
+        #expect(held == expected, "not the rule's answer")
+    }
+
+    /// ⚠️ **HELD BEFORE THE HAND-OVER.** UIKit decides whether a bar item fits
+    /// from the size it has when it is handed over, and never again; widths
+    /// applied afterwards swept the selector into a `•••` on an SE. So by the
+    /// time the bar holds the action strip, both are already at their share.
+    @Test func theStripsAreHeldBeforeTheBarReceivesThem() throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        var seen: (leading: CGFloat, trailing: CGFloat)?
+        screen.editor.debugOnToolbarHandover = {
+            seen = (screen.editor.debugActionBar.frame.width, screen.editor.debugCategoryBar.frame.width)
+        }
+
+        choose(Mode.trim, on: screen)
+
+        let handedOver = try #require(seen, "the bar was never handed its items")
+        let held = try #require(screen.editor.debugStripWidths)
+        #expect(handedOver.leading == held.leading, "the actions went over at \(handedOver.leading)")
+        #expect(handedOver.trailing == held.trailing, "the selector went over at \(handedOver.trailing)")
     }
 
     @Test func thePillsArrangementIsLeftAloneWhenItIsTheOneInTheSlot() {

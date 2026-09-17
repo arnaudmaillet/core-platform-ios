@@ -37,9 +37,45 @@ public struct PickedVideo: Sendable, Equatable {
     /// only empty takes the passthrough.
     public let keptPieces: [VideoExportSegment]
 
-    public init(sourceURL: URL, keptPieces: [VideoExportSegment] = []) {
+    /// What is drawn over the whole clip — its crop, its look and its
+    /// overlays — as the editor showed it.
+    public let finish: FrameFinish
+
+    /// The author's own song under the clip, if any.
+    public let soundtrack: VideoSoundtrack?
+
+    /// The baked frames of the stickers the finish lays over the clip.
+    public let artwork: (any OverlayArtwork)?
+
+    public init(
+        sourceURL: URL, keptPieces: [VideoExportSegment] = [], finish: FrameFinish = .none,
+        soundtrack: VideoSoundtrack? = nil, artwork: (any OverlayArtwork)? = nil
+    ) {
         self.sourceURL = sourceURL
         self.keptPieces = keptPieces
+        self.finish = finish
+        self.soundtrack = soundtrack
+        self.artwork = artwork
+    }
+
+    /// ⚠️ **THE ARTWORK IS NOT COMPARED.** It is a cache of pictures baked from
+    /// the sticker identifiers the finish already names; two clips with equal
+    /// finishes show the same stickers.
+    public static func == (lhs: PickedVideo, rhs: PickedVideo) -> Bool {
+        lhs.sourceURL == rhs.sourceURL && lhs.keptPieces == rhs.keptPieces
+            && lhs.finish == rhs.finish && lhs.soundtrack == rhs.soundtrack
+    }
+
+    /// The export this clip asks for.
+    ///
+    /// ⚠️ **EVERY FIELD, OR THE PUBLISHED FILM IS NOT THE ONE WATCHED.** This
+    /// crossed with the pieces alone: a whole-clip look, a crop, the text and
+    /// the song were all shown in the editor and published as if never made.
+    var plan: VideoExportPlan {
+        VideoExportPlan(
+            sourceURL: sourceURL, segments: keptPieces, finish: finish, soundtrack: soundtrack,
+            artwork: artwork
+        )
     }
 }
 
@@ -253,9 +289,7 @@ public actor PostComposer: PostComposing {
     ) {
         let exported: ExportedVideo
         do {
-            exported = try await videoExporter.export(
-                VideoExportPlan(sourceURL: picked.sourceURL, segments: picked.keptPieces)
-            )
+            exported = try await videoExporter.export(picked.plan)
         } catch {
             throw ComposeError.media("couldn't prepare the video: \(error)")
         }

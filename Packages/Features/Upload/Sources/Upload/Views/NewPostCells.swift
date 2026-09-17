@@ -85,8 +85,9 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// ⚠️ **IT HONOURED ONE OF THREE UNTIL THE CROP WORK, AND THAT WAS A BUG THIS
     /// ROW SHIPPED.** The fit was read; the look was not applied at all, so a
     /// picture made mono in the editor came back in colour on this screen. Adding
-    /// the crop alone would have made it two of three. `MediaEdits.applied(to:)` is
-    /// now the one render both this strip and `post()` go through.
+    /// the crop alone would have made it two of three.
+    /// `MediaEdits.applied(to:artwork:)` is now the one render both this strip and
+    /// `post()` go through.
     func show(
         _ items: [MediaLibraryItem],
         coverID: String?,
@@ -151,7 +152,7 @@ final class NewPostMediaCell: UICollectionViewListCell {
             let chosen = edits[id] ?? .untouched
             Task { [weak picture] in
                 let image = await thumbnail(id, size)
-                picture?.image = image.map { chosen.applied(to: $0) }
+                picture?.image = image.map { chosen.applied(to: $0, artwork: nil) }
             }
         }
     }

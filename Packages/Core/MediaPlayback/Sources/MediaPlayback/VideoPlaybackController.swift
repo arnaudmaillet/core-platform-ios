@@ -179,6 +179,11 @@ public final class VideoPlaybackController {
     /// joining or leaving its surface set is bookkeeping that draws nothing.
     /// Empty when the flag is off.
     private var renderers: [ObjectIdentifier: VideoFrameRenderer] = [:]
+    /// What each player's arrangement laid for its sound, and which players
+    /// are being heard — kept for `VideoPlaybackController+Sound.swift`, keyed by
+    /// PLAYER and emptied by `retire` like every other per-player table here.
+    var soundBindings: [ObjectIdentifier: SoundBinding] = [:]
+    var audiblePlayers: Set<ObjectIdentifier> = []
 
     /// How many players may be bound to surfaces at once.
     ///
@@ -456,6 +461,13 @@ public final class VideoPlaybackController {
         let key = ObjectIdentifier(view)
         let token = nextGenerationToken()
         generation[key] = token
+        // ⚠️ A BOARD PER LOAD, SEEDED WITH THE PLAN'S LOOK — and reachable from
+        // before the first suspension, so a look set while the load is on its
+        // way reaches the item this load brings, not only the one it replaces.
+        // ⚠️ THE LEGACY LAYER PATH GETS NONE — see below.
+        let board = VideoRenderFlags.usesSampleBufferLayer ? VideoLiveLook(plan.finish.look) : nil
+        loadingBoards[key] = board
+        defer { if let board, loadingBoards[key] === board { loadingBoards[key] = nil } }
         let resolved: URL
         do {
             resolved = try await source.playableURL(for: plan.sourceURL)
@@ -465,9 +477,22 @@ public final class VideoPlaybackController {
         }
         guard generation[key] == token else { return }
         let asset = asShotAsset(resolved)
+        if asShotOrientation?.url != resolved {
+            // The handle's file-as-shot view needs the same turn, and nothing
+            // else — never a finish or a board. Worked out once per file: a few
+            // header reads the asset has already made.
+            asShotOrientation = (
+                resolved,
+                try? await VideoExporter.arrangement(
+                    of: asset, cut: [], orientation: .always, longestSide: Self.previewLongestSide
+                ).composed
+            )
+            guard generation[key] == token else { return }
+        }
         let item: AVPlayerItem
         let built: Bool
         var composed: ComposedVideo?
+        var sound: VideoExporter.SoundtrackLayout?
         // ⚠️ ANY PIECE AT ALL IS A COMPOSITION HERE, UNLIKE THE EXPORT. One piece
         // at 1x is a `timeRange` to an export session, but a player's clock would
         // then read the FILE's seconds, and the item's seconds are promised to be
@@ -476,20 +501,26 @@ public final class VideoPlaybackController {
         // transform, so a phone clip plays on its side unless a video composition
         // turns it — and a canvas that turned upright only while it carried a
         // transition would rotate under the author as they edited.
+        // ⚠️ AND ALWAYS UNDER A LIVE BOARD ON THE SAMPLE-BUFFER PATH, which
+        // composes even an untouched clip: the author's first filter must reach
+        // the playing picture without a new item. The legacy layer path would
+        // hand every such composition to its item, which fails on the iOS 27
+        // simulator, so it takes no live look — a look reaches it with a load.
+        // ⚠️ OVERLAYS ARE NOT DRAWN HERE: the editor shows them as views, and
+        // drawing them into the picture as well would show each one twice.
         // ⚠️ AND ONE THAT CANNOT BE BUILT FALLS BACK TO THE FILE. Nothing bound at
         // all is worse than the clip as shot: the author loses the picture, not
         // just the edit.
         if let arranged = try? await VideoExporter.arrangement(
             of: asset, cut: plan.segments, orientation: .always,
-            longestSide: Self.previewLongestSide
+            longestSide: Self.previewLongestSide, soundtrack: plan.soundtrack,
+            finish: FrameFinish(crop: plan.finish.crop, look: plan.finish.look), live: board
         ) {
             item = AVPlayerItem(asset: arranged.asset)
             composed = present(arranged.composed, on: item)
             item.audioMix = arranged.audioMix
+            sound = arranged.sound
             built = true
-            if plan.segments.isEmpty {
-                asShotOrientation = (resolved, arranged.composed)
-            }
         } else {
             VideoPlaybackTrace.emit("load build FAILED \(plan.sourceURL.lastPathComponent)")
             item = AVPlayerItem(asset: asset)
@@ -499,17 +530,6 @@ public final class VideoPlaybackController {
             }
         }
         guard generation[key] == token else { return }
-        if !plan.segments.isEmpty, asShotOrientation?.url != resolved {
-            // The handle's file-as-shot view needs the same turn; worked out
-            // once per file — a few header reads the asset has already made.
-            asShotOrientation = (
-                resolved,
-                try? await VideoExporter.arrangement(
-                    of: asset, cut: [], orientation: .always, longestSide: Self.previewLongestSide
-                ).composed
-            )
-            guard generation[key] == token else { return }
-        }
         // ⚠️ SPECTRAL, AS THE EXPORT IS: a sped-up piece keeps its voice's pitch,
         // and a scaled edit is governed by the item's algorithm even at 1x.
         item.audioTimePitchAlgorithm = .spectral
@@ -528,6 +548,8 @@ public final class VideoPlaybackController {
             )
             player(in: view)?.defaultRate = 1
         }
+        // ⚠️ AFTER THE ITEM IS IN: the binding names the item it describes.
+        if let player = player(in: view) { adoptSound(sound, on: player) }
         VideoPlaybackTrace.emit(
             "loaded \(plan.sourceURL.lastPathComponent) pieces=\(plan.segments.count) at=\(seconds)"
                 + (range.map { " loop=\($0.lowerBound)...\($0.upperBound)" } ?? "")
@@ -981,6 +1003,37 @@ public final class VideoPlaybackController {
         if player.timeControlStatus != .paused { player.rate = Float(rate) }
         return true
     }
+
+    /// Changes the look the arrangement playing in `view` is drawn with, without
+    /// a new item: the next composed frame wears it, and a paused frame is
+    /// drawn again.
+    ///
+    /// ⚠️ **A BOARD, NOT A RELOAD.** Every load gives its arrangement a
+    /// `VideoLiveLook` that the compositor reads on every frame; this writes it
+    /// and asks the frame reader to draw the moment on screen again, which it
+    /// does only while the clip is paused — a playing clip's next frames wear
+    /// the look anyway, a few frames late (`ComposedFrameReader.refresh`).
+    ///
+    /// ⚠️ **AND THE LOAD ON ITS WAY, IF ANY, TAKES IT TOO** — its plan was made
+    /// before this look, and its item would otherwise bring the old one back.
+    ///
+    /// Returns whether an arrangement took the look: false when nothing is
+    /// bound, when the item is the file as shot (a held handle), and on the
+    /// legacy layer path, which composes nothing live.
+    @discardableResult
+    public func setLiveLook(_ look: FrameLook, in view: VideoRenderView) -> Bool {
+        let loading = loadingBoards[ObjectIdentifier(view)]
+        loading?.set(look)
+        guard let player = watchedPlayer(in: view), let renderer = renderer(for: player),
+              let board = renderer.composedVideo?.live
+        else { return loading != nil }
+        board.set(look)
+        renderer.refresh()
+        return true
+    }
+
+    /// The board of the load on its way to each view, while it is on its way.
+    private var loadingBoards: [ObjectIdentifier: VideoLiveLook] = [:]
 
     /// Where the clip `view` is drawing has got to, as a fraction of its
     /// length, with the length in seconds beside it.
@@ -1560,7 +1613,9 @@ public final class VideoPlaybackController {
         return true
     }
 
-    private func watchedPlayer(in view: VideoRenderView) -> AVPlayer? {
+    /// ⚠️ **INTERNAL, NOT PRIVATE**, so the extensions in this module's other
+    /// files — the sound controls — ask the same player every control here asks.
+    func watchedPlayer(in view: VideoRenderView) -> AVPlayer? {
         activePlayers[ObjectIdentifier(view)] ?? view.boundPlayer
     }
 
@@ -1655,6 +1710,8 @@ public final class VideoPlaybackController {
         seeking.remove(ObjectIdentifier(player))
         // And a pooled player runs no arrangement, and loops no range.
         looping.removeValue(forKey: ObjectIdentifier(player))
+        // Nor carries a song, nor is heard.
+        forgetSound(of: player)
         player.replaceCurrentItem(with: nil)
         // The renderer stays in the map, keyed to this player, and is reused
         // when the player is loaned out again. Invalidating only drops its
@@ -1841,6 +1898,11 @@ public final class VideoPlaybackController {
     }
     func currentItem(in view: VideoRenderView) -> AVPlayerItem? {
         activePlayers[ObjectIdentifier(view)]?.currentItem
+    }
+    /// Internal for tests: the renderer drawing `view` — whose current frame is
+    /// what the surface shows.
+    func debugRenderer(in view: VideoRenderView) -> VideoFrameRenderer? {
+        watchedPlayer(in: view).flatMap { renderers[ObjectIdentifier($0)] }
     }
     #endif
 }
