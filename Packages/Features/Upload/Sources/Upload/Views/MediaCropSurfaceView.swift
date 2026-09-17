@@ -275,12 +275,37 @@ final class MediaCropSurfaceView: UIView {
     }
 
     /// Holds the box to a shape.
+    ///
+    /// ⚠️ **THE SHAPE IS MEASURED FROM THE WHOLE PICTURE EVERY TIME, NEVER FROM
+    /// THE RECTANGLE THE LAST SHAPE LEFT — REPORTED, AND THE REPORT WAS RIGHT.**
+    /// This used to settle the existing placement with `covering`, which only
+    /// ever enlarges: 1:1 then 4:5 kept the taller shape's scale, and coming back
+    /// to 1:1 framed 48% of the photograph where the first tap had framed 75%.
+    /// Playing with the chips zoomed in further and further and nothing gave the
+    /// room back. `filling` derives the scale and the centre from the picture
+    /// alone, so the same tap is always the same rectangle — the largest one of
+    /// that shape the picture can give, centred on the picture rather than on
+    /// whatever the author had framed.
+    ///
+    /// ⚠️ **AND THAT COSTS THE AUTHOR'S OWN ZOOM, DELIBERATELY — IT IS THE ONE
+    /// THING THAT CANNOT BE BOTH KEPT AND IDEMPOTENT.** A turn keeps it
+    /// (`MediaCropGeometry.zoom`) because a turn adjusts the framing the author
+    /// is holding; a chip is an absolute statement about shape, and the accrued
+    /// zoom IS the defect. Carrying the centre instead of recentring fails for
+    /// the same reason one step later: each shape clamps the slide to its own
+    /// room, and `min(min(x, roomB), roomA)` is not `min(x, roomA)` for a picture
+    /// the author has panned.
+    ///
+    /// "Free" returns before any of it, which is what keeps it meaning the
+    /// author's own rectangle rather than a shape in disguise.
     func choose(_ newRatio: CropRatio) {
         ratio = newRatio
         guard surface.width > 0 else { return }
         guard let value = newRatio.value(for: turnedSource) else { return }
         box = MediaCropGeometry.box(ratio: value, in: surface)
-        placement = MediaCropGeometry.covering(placement, source: source, box: box)
+        placement = MediaCropGeometry.filling(
+            box, source: source, angle: placement.angle, isMirrored: placement.isMirrored
+        )
         UIView.animate(withDuration: Metrics.settle, delay: 0, options: [.curveEaseOut]) {
             self.apply()
         }

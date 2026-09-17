@@ -290,6 +290,42 @@ enum MediaCropGeometry {
         )
     }
 
+    /// The placement that gives `box` the LARGEST rectangle of its shape the
+    /// picture can supply at `angle`, centred on the picture.
+    ///
+    /// ⚠️ **IT READS NOTHING OF WHERE THE PICTURE WAS, AND THAT IS THE WHOLE
+    /// POINT — CHOOSING A SHAPE IS IDEMPOTENT ONLY IF IT IS COMPUTED FROM THE
+    /// PICTURE RATHER THAN FROM THE LAST SHAPE.** `covering` is the other tool
+    /// for this job and it is the wrong one here: it only ever ENLARGES, so 1:1
+    /// then 4:5 then 1:1 kept the scale the tallest of the three had needed and
+    /// the square came back holding 48% of the photograph where a single tap
+    /// holds 75%. Every tap on a chip therefore throws away the scale and the
+    /// centre and re-derives both; the angle and the reflection are carried
+    /// because they are not what the chip is choosing.
+    ///
+    /// ⚠️ **"LARGEST" IS MEASURED AGAINST THE PICTURE, NOT AGAINST ITS TURNED
+    /// BOUNDING BOX.** `coveringScale` carries the box into the picture's own
+    /// upright space, where the box is the thing that leans — so at 12° this is
+    /// the largest TILTED rectangle of that shape inscribed in the photograph,
+    /// and none of it is the empty wedge the bounding box adds at the corners.
+    /// The `MediaCrop` it yields is nonetheless symmetric in the fractions the
+    /// renderer reads (`rect.midX == rect.midY == 0.5`), because the picture and
+    /// its bounding box share a centre.
+    ///
+    /// ⚠️ **AND IT SATISFIES `covering` BY CONSTRUCTION, SO IT IS NOT FOLLOWED BY
+    /// ONE.** The scale is exactly the covering minimum and the box's centre is
+    /// the picture's, which is the clamp's own fixed point.
+    static func filling(
+        _ box: CGRect, source: CGSize, angle: CGFloat, isMirrored: Bool
+    ) -> CropPlacement {
+        CropPlacement(
+            centre: CGPoint(x: box.midX, y: box.midY),
+            scale: coveringScale(source: source, box: box.size, angle: angle),
+            angle: angle,
+            isMirrored: isMirrored
+        )
+    }
+
     /// The largest box of `ratio` that fits in `surface`, centred in it.
     static func box(ratio: CGFloat, in surface: CGRect) -> CGRect {
         guard ratio > 0, surface.width > 0, surface.height > 0 else { return surface }
