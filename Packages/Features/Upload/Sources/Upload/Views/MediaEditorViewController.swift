@@ -1223,30 +1223,36 @@ final class MediaEditorViewController: UIViewController {
     /// off rather than being applied to a control the rule was not written for.
     private func shareTheBarBetweenTheTwoStrips() {
         measureTheBar()
-        guard isTimelineShowing, let toolbar = navigationController?.toolbar,
-              toolbar.bounds.width > 0
-        else {
+        guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else {
             actionBarWidth.isActive = false
             categoryBarWidth.isActive = false
             return
         }
         // ⚠️ **WHAT THE BAR CHARGES AROUND THE TWO GROUPS, NOT A SPACING** —
         // see `ToolbarGeometry`. Charged as one 8pt gap inside 8pt margins, the
-        // split fitted only while the action bar held two items; with the
-        // filter action as a third, the two halves overran an iPhone SE's bar.
+        // two strips overran an iPhone SE's bar and iOS swept the selector into
+        // a `•••`.
         let available = barGeometry.available(in: toolbar.bounds.width)
+        let leading: UIView = isTimelineShowing ? actionBar : soundPill
         let held = EditorSelectorLayout.widths(
-            leadingWants: actionBar.intrinsicContentSize.width,
-            trailingWants: categoryBar.intrinsicContentSize.width,
-            available: available
+            leadingWants: Self.wantedWidth(of: leading),
+            available: available,
+            trailingFloor: categoryBar.intrinsicContentSize.height
         )
+        // ⚠️ **THE ACTIONS ARE HELD, THE PILL IS ONLY CAPPED.** The strip states
+        // an intrinsic width and is pinned to it; the pill has none — it is laid
+        // out by its label and its disc — so a width constraint would be the
+        // screen deciding what the component already knows. What the screen owes
+        // it is a ceiling, and the ceiling is inert until a song title is long
+        // enough to leave the selector less than a bubble.
+        actionBarWidth.isActive = isTimelineShowing
         actionBarWidth.constant = held.leading
+        soundPillCap.constant = available - held.trailing + (isTimelineShowing ? 0 : 0)
         categoryBarWidth.constant = held.trailing
-        actionBarWidth.isActive = true
         categoryBarWidth.isActive = true
         // A bar item's view keeps its autoresizing mask, so the size UIKit
         // reads at the hand-over is the frame's.
-        actionBar.frame.size.width = held.leading
+        leading.frame.size.width = held.leading
         categoryBar.frame.size.width = held.trailing
     }
 
@@ -1295,6 +1301,26 @@ final class MediaEditorViewController: UIViewController {
 
     private lazy var actionBarWidth: NSLayoutConstraint =
         actionBar.widthAnchor.constraint(equalToConstant: IconActionBar.height)
+
+    /// The pill's ceiling — see `shareTheBarBetweenTheTwoStrips`. Always on,
+    /// and inert until a title is long enough to crowd the selector out.
+    private lazy var soundPillCap: NSLayoutConstraint = {
+        let cap = soundPill.widthAnchor.constraint(lessThanOrEqualToConstant: 10_000)
+        cap.isActive = true
+        return cap
+    }()
+
+    /// The width a strip would take on its own.
+    ///
+    /// ⚠️ **NOT `intrinsicContentSize` ALONE.** `IconActionBar` states one;
+    /// `SoundPillView` answers `noIntrinsicMetric` (-1) because its size comes
+    /// from its own subviews' constraints, and -1 read as a width gave the
+    /// selector the whole bar and the pill nothing.
+    private static func wantedWidth(of view: UIView) -> CGFloat {
+        let stated = view.intrinsicContentSize.width
+        guard stated == UIView.noIntrinsicMetric else { return stated }
+        return view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+    }
 
     private lazy var categoryBarWidth: NSLayoutConstraint =
         categoryBar.widthAnchor.constraint(equalToConstant: IconSelectorBar.height)
@@ -3252,11 +3278,17 @@ extension MediaEditorViewController {
     var debugCategoryBar: IconSelectorBar { categoryBar }
     /// Internal for tests: the momentary bar the timeline mode puts opposite it.
     var debugActionBar: IconActionBar { actionBar }
+    /// Internal for tests: the pill that holds the leading slot the rest of the
+    /// time.
+    var debugSoundPill: UIView { soundPill }
     /// Internal for tests: the width each strip is being held to, or nil where
     /// the rule is not being applied.
     var debugStripWidths: (leading: CGFloat, trailing: CGFloat)? {
-        guard actionBarWidth.isActive, categoryBarWidth.isActive else { return nil }
-        return (actionBarWidth.constant, categoryBarWidth.constant)
+        guard categoryBarWidth.isActive else { return nil }
+        let leading = isTimelineShowing
+            ? actionBarWidth.constant
+            : Self.wantedWidth(of: soundPill)
+        return (leading, categoryBarWidth.constant)
     }
 
     /// Internal for tests: the end of a scrub, through the very routine the
