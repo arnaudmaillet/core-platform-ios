@@ -67,6 +67,8 @@ final class MediaEditorEffectsMode: MediaEditorMode {
         tools.onTracking = { [weak self] tracking in
             self?.isTracking = tracking
         }
+        tools.onClear = { [weak self] in self?.reset() }
+        tools.onRevert = { [weak self] in self?.revert() }
         return tools
     }()
 
@@ -80,18 +82,31 @@ final class MediaEditorEffectsMode: MediaEditorMode {
         present(id)
     }
 
+    /// The look each page was wearing when this tab opened on it — what the ↺
+    /// icon puts back.
+    ///
+    /// ⚠️ **PER PAGE, AND TAKEN THE FIRST TIME THE TAB SHOWS THAT PAGE.** A
+    /// swipe to another picture while Effects is open is that picture's opening
+    /// too; taking one snapshot for the whole session would offer to put a
+    /// look back on a page that never wore it.
+    private var openedOn: [String: FrameLook] = [:]
+
     func bandWillChange(to accessory: UIView?) {
         guard accessory !== tools else { return }
         settleTheDrag()
-        tools.browse(animated: false)
+        tools.openOnTheFirstDial()
+        // The tab is closing: the next opening is a new one, and what it opened
+        // on then is not what it will open on next time.
+        openedOn.removeAll()
     }
 
-    /// ⚠️ **ANOTHER PAGE PUTS THE RULER AWAY.** A ruler left up would show the
-    /// previous page's value over a picture that does not carry it.
+    /// ⚠️ **ANOTHER PAGE PUTS THE RULER BACK ON THE FIRST DIAL.** A ruler left
+    /// where it was would show the previous page's value over a picture that
+    /// does not carry it.
     func pageDidSettle(on id: String?) {
         guard let host, host.bandContent === tools, let id, id != shownID else { return }
         settleTheDrag()
-        tools.browse(animated: false)
+        tools.openOnTheFirstDial()
         present(id)
     }
 
@@ -113,7 +128,24 @@ final class MediaEditorEffectsMode: MediaEditorMode {
             $0.effect = nil
         }
         host.editsDidChange(id, .look)
-        tools.browse(animated: true)
+        present(id)
+    }
+
+    /// The ↺ icon: the dials and the effect back to what this tab opened on.
+    ///
+    /// ⚠️ **THE PRESET IS NOT TOUCHED, EXACTLY AS THE ⊘ ICON DOES NOT TOUCH
+    /// IT.** The look Filters chose belongs to Filters; this tab owns the dials
+    /// and the effect and puts back only those.
+    private func revert() {
+        guard let host, let id = host.currentItemID, let opening = openedOn[id] else { return }
+        let edits = host.edits(for: id)
+        guard edits.adjustments != opening.adjustments || edits.effect != opening.effect else { return }
+        settleTheDrag()
+        host.change(id) {
+            $0.adjustments = opening.adjustments
+            $0.effect = opening.effect
+        }
+        host.editsDidChange(id, .look)
         present(id)
     }
 
@@ -124,6 +156,9 @@ final class MediaEditorEffectsMode: MediaEditorMode {
     private func write(tracking: Bool, _ mutate: (inout MediaEdits) -> Void) {
         guard let host, let id = shownID ?? host.currentItemID else { return }
         host.change(id, mutate)
+        // Cheap, and the ↺ icon is wrong the moment it is not asked: it lights
+        // as soon as the page differs from what the tab opened on.
+        tools.setCanRevert(canRevert(id, wearing: host.edits(for: id).look))
         guard tracking else {
             owed?.cancel()
             owed = nil
@@ -165,8 +200,18 @@ final class MediaEditorEffectsMode: MediaEditorMode {
     private func present(_ id: String) {
         guard let host else { return }
         shownID = id
-        tools.show(host.edits(for: id).look)
+        let look = host.edits(for: id).look
+        if openedOn[id] == nil { openedOn[id] = look }
+        tools.show(look)
+        tools.setCanRevert(canRevert(id, wearing: look))
         dressCards(for: id)
+    }
+
+    /// Whether this page is wearing something other than what the tab opened
+    /// on — the ↺ icon's whole question.
+    private func canRevert(_ id: String, wearing look: FrameLook) -> Bool {
+        guard let opening = openedOn[id] else { return false }
+        return look.adjustments != opening.adjustments || look.effect != opening.effect
     }
 
     /// Renders the effect pills' pictures from the page's own picture, cut and dressed
@@ -215,7 +260,7 @@ final class MediaEditorEffectsMode: MediaEditorMode {
         var pictures: [LookEffectKind: UIImage] = [:]
         for kind in LookEffectKind.allCases {
             var look = source.look
-            look.effect = LookEffect(kind: kind, intensity: MediaEffectsCatalog.startingIntensity)
+            look.effect = LookEffect(kind: kind, intensity: MediaEffectsCatalog.previewIntensity)
             pictures[kind] = MediaLookThumbnails.dressed(base, in: look)
         }
         return pictures

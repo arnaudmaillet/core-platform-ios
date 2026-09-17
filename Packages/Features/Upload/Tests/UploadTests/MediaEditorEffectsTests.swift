@@ -184,6 +184,9 @@ struct MediaEditorEffectsTests {
         tools.debugTapDial(.contrast)
         Self.slide(tools, to: -0.5)
         tools.debugTapEffect(.pixellate)
+        // An effect arrives at nothing; the author raising its ruler is what
+        // lays it on.
+        Self.slide(tools, to: 0.7)
 
         let before = screen.editor.edits(for: "photo-0")
         #expect(before.effect?.kind == .pixellate && before.adjustments.contrast != 0, "guard")
@@ -194,9 +197,60 @@ struct MediaEditorEffectsTests {
         #expect(after.adjustments.isNeutral)
         #expect(after.effect == nil)
         #expect(after.filter == .mono, "the preset is Filters', and it stays")
-        #expect(!tools.debugShowsRuler, "the ruler of an effect that is gone is put away")
         #expect(tools.debugChosenEffects.isEmpty)
-        #expect(!tools.debugNoneIsEnabled)
+        #expect(!tools.debugCanClear, "the ⊘ icon still offers to take something off")
+        #expect(tools.debugShowsRuler, "the row was left empty")
+    }
+
+    /// ⚠️ **THE ⊘ ICON TAKES OFF WHAT THIS TAB OWNS, AND NOT THE PRESET.** The
+    /// look Filters chose belongs to Filters; the dials and the effect are the
+    /// only things Effects put on and the only things it takes off.
+    @Test func theClearIconTakesEveryLookOffButLeavesThePreset() throws {
+        let screen = Self.open(video: false)
+        let row = try Self.openFilters(on: screen)
+        row.debugTap(.mono)
+        let tools = try Self.openEffects(on: screen)
+        tools.debugTapDial(.contrast)
+        Self.slide(tools, to: -0.5)
+        tools.debugTapEffect(.pixellate)
+        Self.slide(tools, to: 0.7)
+        #expect(tools.debugCanClear, "guard: nothing to take off")
+
+        tools.debugTapClear()
+
+        let after = screen.editor.edits(for: "photo-0")
+        #expect(after.adjustments.isNeutral, "a dial survived: \(after.adjustments)")
+        #expect(after.effect == nil)
+        #expect(after.filter == .mono, "the preset is Filters', and it stays")
+        #expect(!tools.debugCanClear, "the icon still offers to take something off")
+    }
+
+    /// ⚠️ **THE ↺ ICON GOES BACK TO WHAT THE TAB OPENED ON, NOT TO NOTHING.**
+    /// Asked for in those words: *"une icône arrow.counterclockwise qui
+    /// permettra de remettre les filtres au state où ils étaient à l'ouverture
+    /// de l'onglet des effets"*. So a look the author arrived with survives it,
+    /// and only what they did since is undone.
+    @Test func theRevertIconPutsBackTheLookTheTabOpenedOn() throws {
+        let screen = Self.open(video: false)
+        let first = try Self.openEffects(on: screen)
+        first.debugTapDial(.contrast)
+        Self.slide(first, to: -0.5)
+        // Leaving and coming back is what makes a new opening.
+        _ = try Self.openFilters(on: screen)
+        let tools = try Self.openEffects(on: screen)
+        #expect(!tools.debugCanRevert, "guard: nothing has changed since it opened")
+
+        tools.debugTapDial(.brightness)
+        Self.slide(tools, to: 0.4)
+        #expect(tools.debugCanRevert, "the icon is dead after a change")
+
+        tools.debugTapRevert()
+
+        let after = screen.editor.edits(for: "photo-0")
+        #expect(after.adjustments.brightness == 0, "what was done since is still on the page")
+        #expect(abs(after.adjustments.contrast + 0.5) < 0.0001,
+                "the look the tab opened on was thrown away too: \(after.adjustments)")
+        #expect(!tools.debugCanRevert)
     }
 
     // MARK: - What the page and the clip are told
@@ -237,12 +291,15 @@ struct MediaEditorEffectsTests {
         let tools = try Self.openEffects(on: screen)
         tools.debugTapDial(.warmth)
         Self.slide(tools, to: -0.3)
+        // ⚠️ AN EFFECT ARRIVES AT NOTHING, so choosing one announces nothing:
+        // the second look is the author raising its ruler.
         tools.debugTapEffect(.vhs)
+        Self.slide(tools, to: 0.6)
 
         let looks = screen.preview.liveLooks
         #expect(looks.count == 2, "got \(looks)")
         #expect(abs((looks.first?.adjustments.warmth ?? 0) + 0.3) < 0.0001)
-        #expect(looks.last?.effect == LookEffect(kind: .vhs, intensity: 1))
+        #expect(looks.last?.effect == LookEffect(kind: .vhs, intensity: 0.6))
         #expect(looks.last?.adjustments.warmth == looks.first?.adjustments.warmth, "the dial rides along")
         try await Task.sleep(for: .milliseconds(100))
         #expect(screen.preview.plans.count == 1, "no new item for a look")
