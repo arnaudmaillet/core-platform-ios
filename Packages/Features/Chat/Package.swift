@@ -24,8 +24,12 @@ let package = Package(
         // only — features never import each other — the same edge Maps and
         // Profile already have.
         .package(path: "../../FeatureInterfaces/FeedInterface"),
-        // Renders the composer's favorite-sticker strip. dotLottie (.lottie)
-        // is a zipped bundle of Bodymovin JSON, so a real player is required —
+        // The stickers the composer's favorite strip shows — files and
+        // catalogue — shared with the upload editor, which is why they are not
+        // Chat's resources any more.
+        .package(path: "../../Core/StickerKit"),
+        // The strip plays a tapped sticker itself. dotLottie (.lottie) is a
+        // zipped bundle of Bodymovin JSON, so a real player is required —
         // there is no UIImage path for it.
         .package(url: "https://github.com/airbnb/lottie-ios.git", from: "4.5.0")
     ],
@@ -42,12 +46,9 @@ let package = Package(
                 "DesignSystem",
                 "FeedInterface",
                 "MediaCore",
+                "StickerKit",
                 .product(name: "Lottie", package: "lottie-ios")
-            ],
-            // .copy, not .process: the sticker folder keeps its structure in
-            // the bundle so the catalog can address it by subdirectory, and
-            // .lottie is an opaque archive no build rule should touch.
-            resources: [.copy("Resources/Stickers")]
+            ]
         ),
         .testTarget(
             name: "ChatTests",
