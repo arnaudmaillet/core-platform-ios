@@ -78,6 +78,9 @@ final class VideoFrameRenderer {
     /// be two frames that could differ.
     var currentFrameBuffer: CVPixelBuffer? { lastFrame?.buffer }
 
+    /// The arrangement the frames are composed from, if they are.
+    var composedVideo: ComposedVideo? { source.composedVideo }
+
     private var lastItemTime: CMTime = .invalid
     private var lastDispatchHostTime: CFTimeInterval = 0
     private var maxGapSinceRateSample: CFTimeInterval = 0
@@ -90,8 +93,8 @@ final class VideoFrameRenderer {
 
     // MARK: - Item lifecycle
 
-    func setItem(_ item: AVPlayerItem?) {
-        source.setItem(item)
+    func setItem(_ item: AVPlayerItem?, composing video: ComposedVideo? = nil) {
+        source.setItem(item, composing: video)
         // A new item's first frame has nothing to do with the old item's, and
         // every attached surface is currently showing the latter.
         formatDescription = nil

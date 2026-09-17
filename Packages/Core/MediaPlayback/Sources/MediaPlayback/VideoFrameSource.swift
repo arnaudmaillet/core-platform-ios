@@ -22,6 +22,10 @@ final class VideoFrameSource {
 
     private var output: AVPlayerItemVideoOutput?
     private weak var observedItem: AVPlayerItem?
+    /// The reader of a composed arrangement, in place of `output`.
+    private var composed: ComposedFrameReader?
+    /// The arrangement `composed` reads.
+    private(set) var composedVideo: ComposedVideo?
 
     init(player: AVPlayer) {
         self.player = player
@@ -32,12 +36,15 @@ final class VideoFrameSource {
     /// The output is a property of the *item*, not the player, so it has to be
     /// re-installed every time the controller replaces one. Called from
     /// `VideoPlaybackController` alongside `replaceCurrentItem`.
-    func setItem(_ item: AVPlayerItem?) {
+    func setItem(_ item: AVPlayerItem?, composing video: ComposedVideo? = nil) {
         if let observedItem, let output {
             observedItem.remove(output)
         }
         output = nil
         observedItem = nil
+        composed?.close()
+        composed = nil
+        composedVideo = nil
         // ⚠️ THE CATCH-UP STATE BELONGS TO THE ITEM, NOT TO THE PLAYER.
         //
         // Players are pooled and reused, so without this the numbers a previous
@@ -51,6 +58,15 @@ final class VideoFrameSource {
         totalDrops = 0
         lastBehind = .infinity
         guard let item else { return }
+        // ⚠️ **A COMPOSED ARRANGEMENT IS READ, NOT TAPPED** — see
+        // `ComposedFrameReader` for why the item cannot draw it. The item then
+        // has no output at all: its clock is all this needs from it.
+        if let video {
+            composed = ComposedFrameReader(video)
+            composedVideo = video
+            observedItem = item
+            return
+        }
 
         // `outputSettings: nil` asks for the decoder's native format, which is
         // the whole point: any explicit pixel-format request inserts a
@@ -93,6 +109,9 @@ final class VideoFrameSource {
     /// `VideoFrameRenderer` for why holding one is the memory bug in this
     /// design.
     func copyFrame(atHostTime hostTime: CFTimeInterval) -> (buffer: CVPixelBuffer, itemTime: CMTime)? {
+        if let composed {
+            return composedFrame(from: composed, atHostTime: hostTime)
+        }
         guard let output else { noFrameReason = "no-output"; return nil }
         let itemTime = output.itemTime(forHostTime: hostTime)
         // `itemTime(forHostTime:)` reads the PLAYER's timebase — the same clock
@@ -218,6 +237,29 @@ final class VideoFrameSource {
         return (buffer, displayTime.isValid ? displayTime : itemTime)
     }
 
+    /// The composed frame for the item's clock at `hostTime` — the same clock
+    /// an output would read, asked of the item's timebase directly.
+    private func composedFrame(
+        from reader: ComposedFrameReader, atHostTime hostTime: CFTimeInterval
+    ) -> (buffer: CVPixelBuffer, itemTime: CMTime)? {
+        guard let item = observedItem, let timebase = item.timebase else {
+            noFrameReason = "no-timebase"
+            return nil
+        }
+        let host = CMTime(seconds: hostTime, preferredTimescale: 1_000_000_000)
+        let itemTime = CMSyncConvertTime(host, from: CMClockGetHostTimeClock(), to: timebase)
+        guard itemTime.isValid, itemTime >= .zero else {
+            noFrameReason = itemTime.isValid ? "negative-time" : "invalid-time"
+            return nil
+        }
+        guard let frame = reader.frame(at: itemTime) else {
+            noFrameReason = "composing"
+            return nil
+        }
+        lastClockTime = itemTime
+        return (frame.buffer, frame.time)
+    }
+
     /// How far behind the requested time a frame may be and still be shown.
     ///
     /// Generous on purpose. Normal delivery is within a frame or two, and the
@@ -338,5 +380,5 @@ final class VideoFrameSource {
 
     /// Whether there is an output installed at all — a player between items has
     /// nothing to pull and should not keep a renderer registered with the clock.
-    var hasItem: Bool { output != nil }
+    var hasItem: Bool { output != nil || composed != nil }
 }
