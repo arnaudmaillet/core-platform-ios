@@ -142,7 +142,10 @@ struct ComposedFrameReaderTests {
             _ = reader.frame(at: time(seconds))
             let waited = try await settle(reader)
             let held = reader.debugState.frames
-            #expect(held >= ComposedFrameReader.lookahead,
+            // ⚠️ TWO IS ENOUGH TO MAKE THE POINT — a newer frame than the one
+            // asked for is there to be handed out wrongly. A slow CI runner read
+            // only three of the six in the settle budget.
+            #expect(held >= 2,
                     "guard: at \(seconds)s the reader read \(held) frames ahead in \(waited)s")
             let got = try #require(try await poll(reader, at: seconds), "nothing answered \(seconds)s")
             let at = got.time.seconds
