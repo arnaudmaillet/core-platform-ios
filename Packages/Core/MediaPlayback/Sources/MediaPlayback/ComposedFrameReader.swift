@@ -81,8 +81,14 @@ final class ComposedFrameReader: @unchecked Sendable {
         var wantedAtHost: CFTimeInterval = 0
         /// Whether the running reader has produced anything yet.
         var producedAny = false
+        /// What the last start cost: from the restart to its first frame. The
+        /// lead a catch-up restart aims ahead by — see `catchUpStart`.
+        var lastStartCost: CFTimeInterval = 0
         /// A restart decided but held back by the throttle.
         var restartOwed = false
+        /// Whether that restart is a catch-up — one that must land ahead of the
+        /// clock rather than on it.
+        var restartAhead = false
         /// When the running reader failed — a reader that could not start or
         /// broke off is tried again after `retryAfter`.
         var failedAt: CFTimeInterval?
@@ -133,8 +139,12 @@ final class ComposedFrameReader: @unchecked Sendable {
         var restart = false
         let answer: (buffer: CVPixelBuffer, time: CMTime)? = state.withLockUnchecked { state in
             guard !state.closed else { return nil }
-            if Self.jumped(state, to: time, at: now) || Self.fellBehind(state, at: time) {
+            if Self.jumped(state, to: time, at: now) {
                 state.restartOwed = true
+                state.restartAhead = false
+            } else if Self.fellBehind(state, at: time) {
+                state.restartOwed = true
+                state.restartAhead = true
             }
             // ⚠️ **A FAILED READER IS TRIED AGAIN.** Left alone, a reader that
             // could not start marked itself done, and a paused canvas stayed
@@ -157,7 +167,13 @@ final class ComposedFrameReader: @unchecked Sendable {
                 guard !state.reading || state.producedAny
                         || now - state.restartedAtHost > Self.restartThrottle
                 else { return nil }
-                Self.restart(&state, at: time, now: now)
+                Self.restart(
+                    &state,
+                    at: state.restartAhead
+                        ? Self.catchUpStart(for: time, lastStartCost: state.lastStartCost)
+                        : time,
+                    now: now
+                )
                 restart = true
                 return nil
             }
@@ -224,9 +240,30 @@ final class ComposedFrameReader: @unchecked Sendable {
         return (buffer: chosen.buffer, time: chosen.time)
     }
 
+    /// Where a reader given up for falling behind should start.
+    ///
+    /// ⚠️ **AHEAD OF THE CLOCK, BY WHAT THE LAST START COST.** Started where the
+    /// clock stands, a fresh reader has to decode from the keyframe before it —
+    /// measured at 0.4 to 1.5s — and by the time its first frame exists the
+    /// clock has moved that far on, so it is behind again and gives up again.
+    /// Measured on a loaded machine: thirty-one restarts and a lag that reached
+    /// 9.1s, with the picture frozen throughout. Aiming at where the clock WILL
+    /// be lands the first frame in front of it instead. The film between is
+    /// skipped — which is what a player that cannot keep up must do, and it is
+    /// what freezing was hiding.
+    ///
+    /// ⚠️ **NEVER MORE THAN A SECOND**, or a single slow start would throw away
+    /// film the machine could have caught up with; and never less than the
+    /// throttle, so the lead is a lead.
+    static func catchUpStart(for time: CMTime, lastStartCost: CFTimeInterval) -> CMTime {
+        let lead = min(max(lastStartCost, restartThrottle), 1.0)
+        return time + CMTime(seconds: lead, preferredTimescale: 600)
+    }
+
     /// Everything read so far dropped, and a new reader due at `time`.
     private static func restart(_ state: inout State, at time: CMTime, now: CFTimeInterval) {
         state.restartOwed = false
+        state.restartAhead = false
         state.redrawAt = .invalid
         state.generation += 1
         state.frames.removeAll()
@@ -382,6 +419,10 @@ final class ComposedFrameReader: @unchecked Sendable {
             let time = CMSampleBufferGetPresentationTimeStamp(sample)
             state.withLockUnchecked { state in
                 guard state.generation == generation else { return }
+                if !state.producedAny {
+                    // What this start cost, for the next catch-up's lead.
+                    state.lastStartCost = max(CACurrentMediaTime() - state.restartedAtHost, 0)
+                }
                 state.frames.append((time: time, buffer: buffer))
                 state.producedAny = true
             }
@@ -401,6 +442,18 @@ final class ComposedFrameReader: @unchecked Sendable {
     /// How many frames are waiting, and whether a reader is running.
     var debugState: (frames: Int, reading: Bool, generation: Int) {
         state.withLockUnchecked { ($0.frames.count, $0.reading, $0.generation) }
+    }
+
+    /// Test hook: where the running reader was started, and what the last start
+    /// cost.
+    var debugStart: (at: CMTime, cost: CFTimeInterval) {
+        state.withLockUnchecked { ($0.startedAt, $0.lastStartCost) }
+    }
+
+    /// Test hook: states what a start cost, so a catch-up's lead can be aimed
+    /// without starving the machine to make one slow.
+    func debugSetLastStartCost(_ seconds: CFTimeInterval) {
+        state.withLockUnchecked { $0.lastStartCost = seconds }
     }
     #endif
 }

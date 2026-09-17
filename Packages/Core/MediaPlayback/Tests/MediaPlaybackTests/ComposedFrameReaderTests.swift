@@ -258,6 +258,69 @@ struct ComposedFrameReaderTests {
                 "playing forward restarted the reader \(reader.debugState.generation - 1) times")
     }
 
+    // MARK: - Falling behind
+
+    /// ⚠️ **A READER GIVEN UP FOR FALLING BEHIND STARTS AHEAD OF THE CLOCK, NOT
+    /// ON IT.** Started where the clock stands, its first frame arrives only
+    /// after a decode from the keyframe — by which time the clock has moved that
+    /// far on again, so it is behind again and gives up again. Measured on a
+    /// loaded machine before this: thirty-one restarts and a lag that reached
+    /// 9.1s, with the picture frozen the whole time, which is how a slow machine
+    /// came to look like a dead player.
+    ///
+    /// The clock is simply left alone here while real time passes: the reader
+    /// fills its lookahead and waits, so it ends up a long way behind without
+    /// anything having jumped.
+    @Test func aCatchUpStartsAheadOfTheClock() async throws {
+        let (_, composed) = try await arranged([
+            VideoExportSegment(start: 0, end: 2, transitionOut: .dissolve),
+            VideoExportSegment(start: 2, end: 4)
+        ])
+        let reader = ComposedFrameReader(composed)
+        defer { reader.close() }
+        _ = try #require(try await poll(reader, at: 0, within: 8), "guard: nothing answered the start")
+        // What a start costs is measured, not guessed — the lead is only as
+        // good as that number.
+        #expect(reader.debugStart.cost > 0, "the first start's cost was never noted")
+        reader.debugSetLastStartCost(0.5)
+        let generation = reader.debugState.generation
+
+        try await Task.sleep(for: .seconds(3))
+        _ = reader.frame(at: time(2.6))
+
+        let started = reader.debugStart.at.seconds
+        #expect(reader.debugState.generation > generation, "the reader was not given up at all")
+        #expect(abs(started - 3.1) < 0.01, "a catch-up started at \(started)s, not 0.5s ahead of 2.6s")
+    }
+
+    /// ⚠️ **AND A JUMP LANDS ON THE MOMENT IT ASKS FOR.** A seek, a scrub or a
+    /// wrap is the author naming a moment; handing them a later one would be
+    /// answering a different question. Only the catch-up aims ahead.
+    @Test func aJumpStartsOnTheMomentItAsksFor() async throws {
+        let (_, composed) = try await arranged()
+        let reader = ComposedFrameReader(composed)
+        defer { reader.close() }
+        _ = try #require(try await poll(reader, at: 0, within: 8), "guard: nothing answered the start")
+        reader.debugSetLastStartCost(0.5)
+
+        _ = reader.frame(at: time(1.2))
+
+        #expect(abs(reader.debugStart.at.seconds - 1.2) < 0.01,
+                "a jump started at \(reader.debugStart.at.seconds)s")
+    }
+
+    /// The lead itself: what the last start cost, never under the throttle and
+    /// never over a second.
+    @Test func theLeadIsWhatTheLastStartCost() {
+        func lead(_ cost: CFTimeInterval) -> Double {
+            (ComposedFrameReader.catchUpStart(for: CMTime(value: 600, timescale: 600), lastStartCost: cost)
+                - CMTime(value: 600, timescale: 600)).seconds
+        }
+        #expect(abs(lead(0.4) - 0.4) < 0.001)
+        #expect(abs(lead(0) - ComposedFrameReader.restartThrottle) < 0.001, "a lead of nothing is no lead")
+        #expect(abs(lead(4) - 1) < 0.001, "one slow start threw away four seconds of film")
+    }
+
     // MARK: - Stopping
 
     /// ⚠️ **AT THE END IT STOPS, AND DOES NOT SPIN.** A reader that has run

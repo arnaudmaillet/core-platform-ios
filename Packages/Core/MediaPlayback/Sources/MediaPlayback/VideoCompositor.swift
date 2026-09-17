@@ -3,6 +3,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreMedia
 import CoreVideo
+import Synchronization
 
 /// What one stretch of an arrangement draws.
 ///
@@ -134,6 +135,27 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
     /// every plain frame came back with its green lifted by 17. Unmanaged, the
     /// picture's values pass through and a blend is a blend of what is encoded
     /// — and the output buffers are tagged Rec. 709, which is what they hold.
+    /// ⚠️ **A PROBE, RESOLVED ONCE** — `-composed-probe` also times the render.
+    static let probes = ProcessInfo.processInfo.arguments.contains("-composed-probe")
+    private static let costs = Mutex<(count: Int, seconds: Double, reported: CFTimeInterval)>((0, 0, 0))
+
+    /// Averages the render's cost and prints it once a second.
+    private static func note(_ seconds: Double, size: CGSize) {
+        let line: String? = costs.withLock { tally in
+            tally.count += 1
+            tally.seconds += seconds
+            let now = CACurrentMediaTime()
+            guard now - tally.reported >= 1 else { return nil }
+            defer { tally = (0, 0, now) }
+            guard tally.count > 0, tally.reported > 0 else { return nil }
+            return String(
+                format: "[compose] %d frames, %.1fms each, %.0fx%.0f",
+                tally.count, tally.seconds * 1000 / Double(tally.count), size.width, size.height
+            )
+        }
+        if let line { print(line) }
+    }
+
     static let context = CIContext(options: [
         .cacheIntermediates: false,
         .workingColorSpace: NSNull(),
@@ -188,11 +210,13 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
                               kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
         CVBufferSetAttachment(output, kCVImageBufferYCbCrMatrixKey,
                               kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+        let began = Self.probes ? CACurrentMediaTime() : 0
         Self.context.render(
             picture, to: output,
             bounds: CGRect(origin: .zero, size: instruction.scene.renderSize),
             colorSpace: nil
         )
+        if Self.probes { Self.note(CACurrentMediaTime() - began, size: instruction.scene.renderSize) }
         request.finish(withComposedVideoFrame: output)
     }
 
