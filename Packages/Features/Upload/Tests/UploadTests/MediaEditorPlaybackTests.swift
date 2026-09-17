@@ -70,14 +70,23 @@ struct MediaEditorPlaybackTests {
         /// ⚠️ **`at()` FIRST, AND ONLY A LOAD IT ACCEPTS COUNTS AS BOUND** — the
         /// real controller binds nothing for a load its caller abandons, and the
         /// bound count is this suite's leak assertion.
+        /// Where each accepted load landed, and what it looped.
+        private(set) var landings: [VideoLoadLanding] = []
         func load(
             _ plan: VideoExportPlan, in surface: VideoRenderView,
-            at start: @escaping @MainActor () -> Double?
+            landing: @escaping @MainActor () -> VideoLoadLanding?
         ) async {
-            guard start() != nil else { return }
+            guard let landed = landing() else { return }
+            landings.append(landed)
             plans.append(plan)
             played.append(plan.sourceURL)
             boundSurfaces.insert(ObjectIdentifier(surface))
+        }
+
+        /// Every loop range the screen asked for, in order.
+        private(set) var loops: [ClosedRange<Double>?] = []
+        func setLoopRange(_ range: ClosedRange<Double>?, in surface: VideoRenderView) {
+            loops.append(range)
         }
 
         func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {}

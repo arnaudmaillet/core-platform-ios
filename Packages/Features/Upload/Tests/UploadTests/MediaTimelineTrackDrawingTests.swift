@@ -204,6 +204,29 @@ struct MediaTimelineTrackDrawingTests {
         }
     }
 
+    /// ⚠️ **A PIECE PUT DOWN AT THE END LOSES ITS TRANSITION** — there is no cut
+    /// after the film — and the screen hears the settled timeline.
+    @Test func droppingAPieceOntoTheEndLosesItsTransition() throws {
+        let track = TrackFixture.cutInThree(holding: nil, segments: [
+            MediaSegment(start: 0, end: 3, transitionOut: .dipToBlack),
+            MediaSegment(start: 3, end: 6),
+            MediaSegment(start: 6, end: 9)
+        ])
+        var heard: MediaTimeline?
+        track.onChange = { heard = $0 }
+
+        track.debugLift(atContentX: 10)
+        try #require(track.debugCarrying == 0, "guard: the first piece was not lifted")
+        track.layoutIfNeeded()
+        track.debugCarry(toTrackX: 370)
+        track.debugDrop()
+
+        let pieces = try #require(heard?.segments)
+        #expect(pieces.last?.start == 0, "guard: the faded piece did not reach the end: \(pieces)")
+        #expect(pieces.last?.transitionOut == nil, "a transition survived after the last piece")
+        #expect(track.debugTimeline.segments.last?.transitionOut == nil, "the track kept it")
+    }
+
     /// A rate's stamp stays on its own film, clear of the held piece's cap, and
     /// under the selection's ink.
     @Test func aStampStaysOnItsOwnFilmAndUnderTheFrame() throws {
@@ -474,6 +497,41 @@ struct MediaTimelineTrackDrawingTests {
         for half in carved {
             #expect(abs(half * 2 - (half * 2).rounded()) < 0.001, "a half off the 2x grid: \(carved)")
         }
+    }
+
+    /// ⚠️ **A CAP'S + IS PLACED WITH ITS FRAME, NEVER ANIMATED IN** — a lift
+    /// selects inside a spring and a drop lays the track out inside its fade.
+    @Test func aCapsGlyphIsPlacedWithItsFrame() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 200))
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        let tapped = TrackFixture.cutInThree(holding: nil, poster: TrackFixture.swatch(.blue))
+        tapped.onSeam = { _ in }
+        window.addSubview(tapped)
+        tapped.layoutIfNeeded()
+        UIView.animate(withDuration: 0.5) {
+            tapped.select(1)
+            tapped.layoutIfNeeded()
+        }
+        #expect(tapped.debugCapMarks == ["plus", "plus"])
+        #expect(tapped.debugFrameAnimations.isEmpty, "the frame grew in: \(tapped.debugFrameAnimations)")
+        tapped.removeFromSuperview()
+
+        // ⚠️ **A GLYPH NEVER PLACED BEFORE, PLACED FOR THE FIRST TIME INSIDE THE
+        // DROP'S FADE** — the frame of a piece that stays held is laid out
+        // inside that animation, and a glyph framed there grows from nothing.
+        let carried = TrackFixture.cutInThree(holding: nil, poster: TrackFixture.swatch(.blue))
+        carried.onSeam = { _ in }
+        window.addSubview(carried)
+        carried.layoutIfNeeded()
+        carried.debugLift(atContentX: 90)
+        carried.layoutIfNeeded()
+        try #require(carried.debugCarrying == 0)
+        try #require(carried.debugCapMarks == ["grip", "grip"], "guard: a + was drawn before the drop")
+        carried.debugDrop()
+        #expect(carried.debugCapMarks == ["grip", "plus"], "got \(carried.debugCapMarks)")
+        #expect(carried.debugCapGlyphAnimations.isEmpty, "the + animated in: \(carried.debugCapGlyphAnimations)")
     }
 
     // MARK: - Pixels

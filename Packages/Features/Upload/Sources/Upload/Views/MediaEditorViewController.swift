@@ -275,7 +275,11 @@ final class MediaEditorViewController: UIViewController {
             return
         }
         let edited = edits(for: id)
-        if isTimelineShowing {
+        if transitionFocus != nil {
+            // ⚠️ **NOT WHILE A CUT'S TRANSITION IS BEING CHOSEN.** Undoing every
+            // cut would take away the very cut the row is open on.
+            resetItem.isEnabled = false
+        } else if isTimelineShowing {
             resetItem.isEnabled = MediaTimelining.cuts(
                 edited.timeline, withinSource: trackSeconds
             )
@@ -481,6 +485,47 @@ final class MediaEditorViewController: UIViewController {
     /// The same guard for `-upload-category`, which would otherwise reopen the
     /// band on every return from the finalisation screen.
     private var hasSelectedDebugCategory = false
+
+    #if DEBUG
+    private var hasSeededDebugCuts = false
+
+    /// `-upload-seed-cuts N` cuts the first clip the track opens on into N equal
+    /// pieces, `-upload-seed-reverse` plays them back to front,
+    /// `-upload-seed-transition <raw value>` puts that transition on every cut,
+    /// and `-open-transitions <i>` opens the row on cut `i` — once, through the
+    /// very edit path a person's taps take.
+    ///
+    /// ⚠️ **A SIMULATOR CANNOT SPLIT AT A CHOSEN SECOND BY HAND** — a drag loses
+    /// ten points of slop before the film moves — and a transition is only worth
+    /// checking on cuts that sit where the test says they do.
+    private func seedDebugCuts(id: String, length: Double) {
+        guard !hasSeededDebugCuts,
+              let raw = Self.debugValue(after: "-upload-seed-cuts"),
+              let count = Int(raw), count > 1, length > 0
+        else { return }
+        hasSeededDebugCuts = true
+        let each = length / Double(count)
+        let kind = Self.debugValue(after: "-upload-seed-transition")
+            .flatMap(VideoTransitionKind.init(rawValue:))
+        var pieces = (0..<count).map {
+            MediaSegment(start: Double($0) * each, end: Double($0 + 1) * each)
+        }
+        if ProcessInfo.processInfo.arguments.contains("-upload-seed-reverse") {
+            pieces.reverse()
+        }
+        for index in pieces.indices.dropLast() { pieces[index].transitionOut = kind }
+        let timeline = MediaTimeline(segments: pieces)
+        change(id) { $0.timeline = timeline }
+        timelineTrack.configure(duration: length, timeline: timeline)
+        refreshResetItem()
+        refreshPreview()
+        VideoPlaybackTrace.emit("seeded \(count) cuts, transition=\(kind?.rawValue ?? "none")")
+        if let raw = Self.debugValue(after: "-open-transitions"), let seam = Int(raw) {
+            openTransitions(atSeam: seam)
+        }
+    }
+
+    #endif
 
     /// The value after a flag, `-upload-category 3` style.
     ///
@@ -1180,6 +1225,8 @@ final class MediaEditorViewController: UIViewController {
     /// decoded, and `band.content` is the only thing that says the track is still
     /// the tenant.
     private func refreshTimelineTrack(id: String, duration: Double) {
+        // The row belongs to the clip it was opened on.
+        closeTransitions(animated: false)
         trackSeconds = duration
         timelineTrack.configure(duration: duration, timeline: edits(for: id).timeline)
         timelineTrack.forgetFrames()
@@ -1235,6 +1282,9 @@ final class MediaEditorViewController: UIViewController {
                 )
             }
             timelineTrack.configure(duration: length, timeline: edits(for: id).timeline)
+            #if DEBUG
+            seedDebugCuts(id: id, length: length)
+            #endif
             // A page that has just settled is playing, unless the author stopped
             // it — the glyph says which.
             timelineTrack.showPaused(
@@ -1388,6 +1438,8 @@ final class MediaEditorViewController: UIViewController {
         var timeline: MediaTimeline
         /// Whether the item is the FILE as shot, shown while a handle is held.
         var aiming: Bool
+        /// The stretch of played seconds the item loops, or nil for all of it.
+        var loop: ClosedRange<Double>?
     }
 
     private var previewSubject: PreviewSubject?
@@ -1425,7 +1477,14 @@ final class MediaEditorViewController: UIViewController {
     /// overtaken — by a newer edit, a swipe, a handle taken hold of — abandons
     /// itself when it lands; the newest always wins, and one that fails clears
     /// the pending state so the track does not stop following for good.
-    private func loadPreview(startingAt start: @escaping @MainActor () -> Double) {
+    ///
+    /// ⚠️ **THE LANDING IS ASKED WHEN THE ITEM GOES IN, OF THE TIMELINE THE PLAN
+    /// WAS BUILT FROM.** Where to begin and what to loop are both played seconds
+    /// of that arrangement; asked of anything newer, they would describe film the
+    /// item does not play.
+    private func loadPreview(
+        landing: @escaping @MainActor (_ timeline: MediaTimeline, _ fileSeconds: Double) -> VideoLoadLanding
+    ) {
         guard let id = playingID, let surface = playingSurface else { return }
         previewLoads += 1
         let load = previewLoads
@@ -1441,7 +1500,7 @@ final class MediaEditorViewController: UIViewController {
             let fileSeconds = await realLength(of: file, id: id, declared: declared)
             guard playingID == id, previewLoads == load else { return }
             let timeline = edits(for: id).timeline
-            var landedAt: Double?
+            var landed: VideoLoadLanding?
             await preview.load(
                 VideoExportPlan(
                     sourceURL: file,
@@ -1450,15 +1509,23 @@ final class MediaEditorViewController: UIViewController {
                 in: surface
             ) { [weak self] in
                 guard let self, playingID == id, previewLoads == load else { return nil }
+                var wanted = landing(timeline, fileSeconds)
+                // ⚠️ **WHILE A CUT'S TRANSITION IS BEING CHOSEN, EVERY LOAD LOOPS
+                // IT** — asked HERE, as the item goes in, not when the load was
+                // asked for: a row closed in the meantime loops nothing.
+                if let rehearsal = rehearsal(in: timeline, fileSeconds: fileSeconds) {
+                    wanted = VideoLoadLanding(seconds: rehearsal.range.lowerBound, loop: rehearsal.range)
+                }
                 previewSubject = PreviewSubject(
-                    id: id, file: file, fileSeconds: fileSeconds, timeline: timeline, aiming: false
+                    id: id, file: file, fileSeconds: fileSeconds, timeline: timeline, aiming: false,
+                    loop: wanted.loop
                 )
-                landedAt = start()
-                return landedAt
+                landed = wanted
+                return wanted
             }
             guard previewLoads == load else { return }
             previewPending = false
-            guard let landedAt, playingID == id else { return }
+            guard let landed, playingID == id else { return }
             // ⚠️ **THE LANDING DECIDES WHETHER THE CLIP RUNS.** A release that was
             // owed a new item left the player stopped rather than let it run on
             // the old one for a few frames; the pause is the author's, or the
@@ -1466,25 +1533,27 @@ final class MediaEditorViewController: UIViewController {
             let paused = fingerOnTrack || pausedByAuthor
             preview.setPaused(paused, in: surface)
             timelineTrack.showPaused(paused)
-            if !fingerOnTrack { handover = MediaTimelining.Handover(target: landedAt) }
+            if !fingerOnTrack { handover = MediaTimelining.Handover(target: landed.seconds) }
         }
     }
 
     /// Brings the preview to the edit as it now stands — with a new item only
-    /// when the film it plays would differ.
-    private func refreshPreview() {
-        guard let id = playingID, id == currentItemID else { return }
+    /// when the film it plays would differ. Returns whether a load was asked for.
+    @discardableResult
+    private func refreshPreview() -> Bool {
+        guard let id = playingID, id == currentItemID else { return false }
         let wanted = edits(for: id).timeline
         if let subject = previewSubject, subject.id == id, !subject.aiming, !previewPending,
            MediaTimelining.playsTheSame(subject.timeline, wanted, withinSource: subject.fileSeconds) {
             // Same film, same clock: only the screen's record of it changes.
             previewSubject?.timeline = wanted
-            return
+            return false
         }
-        loadPreview { [weak self] in
-            guard let self, isTimelineShowing else { return 0 }
-            return timelineTrack.playedSecondsUnderNeedle
+        loadPreview { [weak self] _, _ in
+            guard let self, isTimelineShowing else { return VideoLoadLanding(seconds: 0) }
+            return VideoLoadLanding(seconds: timelineTrack.playedSecondsUnderNeedle)
         }
+        return true
     }
 
     /// Whether the release that is happening now is owed a new item before the
@@ -1534,7 +1603,7 @@ final class MediaEditorViewController: UIViewController {
     /// nothing else; `onChange` is the channel that writes to `edits`, and it
     /// fires on release only.
     private func scrubbed(to moment: MediaTimelining.Moment) {
-        guard let surface = playingSurface, let subject = previewSubject,
+        guard transitionFocus == nil, let surface = playingSurface, let subject = previewSubject,
               subject.id == currentItemID
         else { return }
         if timelineTrack.isHoldingAnEdge {
@@ -1886,10 +1955,164 @@ final class MediaEditorViewController: UIViewController {
         tools.speeds.onPick = { [weak self] rate in
             self?.chooseRate(rate)
         }
+        track.onSeam = { [weak self] seam in
+            self?.openTransitions(atSeam: seam)
+        }
+        tools.transitions.onPick = { [weak self] kind in
+            self?.chooseTransition(kind)
+        }
+        tools.transitions.onClose = { [weak self] in
+            self?.closeTransitions(animated: true)
+        }
         return tools
     }()
 
     private var timelineTrack: MediaTimelineTrackView { timelineTools.track }
+
+    // MARK: - Choosing a cut's transition
+
+    /// The cut whose transition is being chosen: the one after piece `seam` of
+    /// clip `id`.
+    ///
+    /// ⚠️ **POSITIONAL, AND SAFE ONLY BECAUSE NOTHING ELSE EDITS WHILE IT IS
+    /// SET.** The track takes no gesture while collapsed, the cut and rate
+    /// actions and the reset arrow are disabled, and every way off the clip
+    /// closes the row first.
+    private struct TransitionFocus: Equatable {
+        let id: String
+        var seam: Int
+    }
+
+    private var transitionFocus: TransitionFocus?
+
+    /// Whether the author had stopped the clip when the row opened. The row
+    /// plays the stretch around the cut whatever it was; closing it puts the
+    /// author's choice back — unless they toggled playback meanwhile (nil).
+    private var pausedBeforeTransitions: Bool?
+
+    /// The stretch to loop and the transition inside it, for the focused cut of
+    /// `timeline` — nil when no row is open on this clip.
+    ///
+    /// ⚠️ **READ LIVE, EVERY TIME.** A load that lands after the row closed must
+    /// loop nothing, and one that lands on the next cut must loop that one.
+    private func rehearsal(
+        in timeline: MediaTimeline, fileSeconds: Double
+    ) -> (range: ClosedRange<Double>, window: ClosedRange<Double>)? {
+        guard let focus = transitionFocus, focus.id == currentItemID, focus.id == playingID else {
+            return nil
+        }
+        return MediaTimelining.rehearsal(
+            atSeam: focus.seam, in: timeline, withinSource: fileSeconds,
+            lead: timelineTrack.rehearsalLead
+        )
+    }
+
+    /// The `+` on a cut was tapped: collapse the film, open the row, and loop
+    /// the few seconds around the cut.
+    ///
+    /// ⚠️ **ASKED FOR IN THOSE WORDS**: *"lorsque l'utilisateur sélectionne le
+    /// plus, la timeline se réduit en hauteur (vers le haut) sous forme de trait
+    /// et l'espace libre en dessous est utilisé pour afficher la scrollview des
+    /// transitions"*.
+    ///
+    /// ⚠️ **NOT BEFORE THE FILE'S REAL LENGTH IS KNOWN.** The stretch is worked
+    /// out against it, and the declared one can be wrong (`realLength`).
+    private func openTransitions(atSeam seam: Int) {
+        guard isTimelineShowing, let id = currentItemID, trackSeconds > 0,
+              fileLengths[id] == trackSeconds, !timelineTrack.isHoldingAnEdge
+        else { return }
+        let timeline = edits(for: id).timeline
+        let pieces = MediaTimelining.resolved(timeline, withinSource: trackSeconds)
+        guard seam >= 0, seam < pieces.count - 1 else { return }
+        let rehearsal = MediaTimelining.rehearsal(
+            atSeam: seam, in: timeline, withinSource: trackSeconds, lead: timelineTrack.rehearsalLead
+        )
+        if var focus = transitionFocus {
+            // Already open: only the cut changes.
+            focus.seam = seam
+            transitionFocus = focus
+            timelineTools.openTransitions(
+                atSeam: seam, chosen: pieces[seam].transitionOut,
+                rehearsal: rehearsal?.range, window: rehearsal?.window, animated: true
+            )
+            landOnTheFocus()
+            return
+        }
+        if timelineTools.isOfferingSpeeds { toggleTheRateChips() }
+        actionBar.setActive(nil)
+        guard timelineTools.openTransitions(
+            atSeam: seam, chosen: pieces[seam].transitionOut,
+            rehearsal: rehearsal?.range, window: rehearsal?.window, animated: true
+        ) else { return }
+        transitionFocus = TransitionFocus(id: id, seam: seam)
+        pausedBeforeTransitions = pausedByAuthor
+        pausedByAuthor = false
+        // A load on its way picks the stretch up as it lands.
+        if !previewPending { landOnTheFocus() }
+        refreshTrackActions()
+        refreshResetItem()
+    }
+
+    /// A transition was chosen for the focused cut — `nil` takes it away.
+    ///
+    /// ⚠️ **STORED, SHOWN ON THE TRACK, AND REPLAYED.** A new kind is new film,
+    /// so the preview gets a new item that lands on the stretch; choosing what
+    /// the cut already carries changes nothing and simply plays it again.
+    private func chooseTransition(_ kind: VideoTransitionKind?) {
+        guard let focus = transitionFocus, focus.id == currentItemID, trackSeconds > 0 else { return }
+        let before = edits(for: focus.id).timeline
+        let after = MediaTimelining.settingTransition(
+            kind, atSeam: focus.seam, in: before, withinSource: trackSeconds
+        )
+        if after != before { change(focus.id) { $0.timeline = after } }
+        // ⚠️ **THE TRACK SHOWS WHAT THE PLAYER PLAYS.** The follower only moves
+        // the film while the item plays the track's own arrangement.
+        timelineTrack.configure(duration: trackSeconds, timeline: after)
+        assert(timelineTrack.arrangement == after, "the collapsed track refused the choice")
+        let rehearsal = MediaTimelining.rehearsal(
+            atSeam: focus.seam, in: after, withinSource: trackSeconds, lead: timelineTrack.rehearsalLead
+        )
+        timelineTools.showTransition(kind, rehearsal: rehearsal?.range, window: rehearsal?.window)
+        pausedByAuthor = false
+        refreshResetItem()
+        if !refreshPreview() { landOnTheFocus() }
+    }
+
+    /// Loops the focused stretch on the item that is playing, from its start.
+    private func landOnTheFocus() {
+        guard let focus = transitionFocus, focus.id == currentItemID,
+              let surface = playingSurface, let subject = previewSubject,
+              subject.id == focus.id, !subject.aiming, !previewPending,
+              let rehearsal = rehearsal(in: subject.timeline, fileSeconds: subject.fileSeconds)
+        else { return }
+        preview.setLoopRange(rehearsal.range, in: surface)
+        previewSubject?.loop = rehearsal.range
+        handover = MediaTimelining.Handover(target: rehearsal.range.lowerBound)
+        preview.setPaused(false, in: surface)
+        timelineTrack.showPaused(false)
+    }
+
+    /// Puts the row away: the film opens again, the loop stops, and the pause
+    /// the author had comes back.
+    ///
+    /// ⚠️ **IT NEVER SEEKS.** The clip plays on from wherever the loop had got
+    /// to, which is the moment the author was just looking at.
+    private func closeTransitions(animated: Bool) {
+        guard transitionFocus != nil || timelineTools.editingSeam != nil else { return }
+        transitionFocus = nil
+        if previewSubject?.loop != nil {
+            previewSubject?.loop = nil
+            if let surface = playingSurface { preview.setLoopRange(nil, in: surface) }
+        }
+        timelineTools.closeTransitions(animated: animated)
+        let paused = pausedBeforeTransitions ?? pausedByAuthor
+        pausedBeforeTransitions = nil
+        pausedByAuthor = paused
+        if let surface = playingSurface { preview.setPaused(paused, in: surface) }
+        timelineTrack.showPaused(paused)
+        refreshTrackActions()
+        refreshResetItem()
+    }
 
     /// Whether the band is holding the timeline.
     private var isTimelineShowing: Bool { band.content === timelineTools }
@@ -1999,8 +2222,12 @@ final class MediaEditorViewController: UIViewController {
     /// What the actions can do from where the needle now stands.
     private func refreshTrackActions() {
         guard isTimelineShowing, let id = currentItemID, trackSeconds > 0 else { return }
+        // ⚠️ **A CUT OR A RATE WHILE THE ROW IS OPEN WOULD MOVE THE CUT IT IS
+        // OPEN ON.** Both wait for it to close.
+        let focused = transitionFocus != nil
+        actionBar.setEnabled(!focused, at: TrackAction.speed.rawValue)
         actionBar.setEnabled(
-            timelineTrack.momentUnderNeedle.map {
+            !focused && timelineTrack.momentUnderNeedle.map {
                 MediaTimelining.canSplit(
                     edits(for: id).timeline, atPiece: $0.piece,
                     atSourceSeconds: $0.sourceSeconds, withinSource: trackSeconds
@@ -2050,6 +2277,9 @@ final class MediaEditorViewController: UIViewController {
         guard let surface = playingSurface else { return }
         let paused = preview.isPaused(in: surface) ?? true
         pausedByAuthor = !paused
+        // ⚠️ **A TOGGLE DURING THE ROW WINS.** Closing it puts back the pause the
+        // author had before it opened — unless they have said something since.
+        if transitionFocus != nil { pausedBeforeTransitions = nil }
         preview.setPaused(!paused, in: surface)
         timelineTrack.showPaused(!paused)
     }
@@ -2593,6 +2823,7 @@ private extension MediaEditorViewController {
         // another item would keep the previous clip's frames.
         page.onReuse = { [weak self] surface in
             guard let self else { return }
+            if playingID == id { closeTransitions(animated: false) }
             preview.stop(surface)
             if playingID == id { playingID = nil }
         }
@@ -2602,12 +2833,14 @@ private extension MediaEditorViewController {
         // open; the funnel re-asks everything after its awaits, since a read can
         // take a moment and the author may have swiped on while it did.
         previewSubject = nil
-        loadPreview { 0 }
+        loadPreview { _, _ in VideoLoadLanding(seconds: 0) }
     }
 
     /// Unbinds whatever is playing and puts the page back to its poster.
     func stopPreview() {
         guard let id = playingID else { return }
+        // Nothing may go on looping a stretch of a clip that is no longer playing.
+        closeTransitions(animated: false)
         playingID = nil
         // Whatever is on its way belongs to a page that is no longer playing.
         previewSubject = nil
@@ -2711,6 +2944,7 @@ extension MediaEditorViewController {
         // would come back on next time still saying "open", over a row nobody
         // asked for.
         if accessory !== timelineTools {
+            closeTransitions(animated: false)
             timelineTools.isOfferingSpeeds = false
             actionBar.setActive(nil)
         }
@@ -2828,6 +3062,10 @@ extension MediaEditorViewController {
     var debugPreviewIsAiming: Bool { previewSubject?.aiming ?? false }
     /// Internal for tests: the arrangement the screen believes the preview plays.
     var debugPreviewTimeline: MediaTimeline? { previewSubject?.timeline }
+    /// Internal for tests: the cut whose transition is being chosen.
+    var debugTransitionSeam: Int? { transitionFocus?.seam }
+    /// Internal for tests: the stretch the screen believes the item loops.
+    var debugPreviewLoop: ClosedRange<Double>? { previewSubject?.loop }
     /// Internal for tests: the path "Next" takes, without a bar to tap.
     func debugTapNext() { goNext() }
     /// Internal for tests: the scissors, through the routine the bar calls.

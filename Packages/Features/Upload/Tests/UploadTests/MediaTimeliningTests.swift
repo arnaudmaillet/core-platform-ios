@@ -1,4 +1,5 @@
 import Foundation
+import MediaPlayback
 import Testing
 @testable import Upload
 
@@ -865,6 +866,49 @@ struct MediaTimeliningTests {
                 from: x, to: x + width
             )
         }
+    }
+
+    private func laid(
+        _ widths: [CGFloat], carrying kinds: [VideoTransitionKind?]
+    ) -> [MediaTimelining.Placement] {
+        laid(widths).enumerated().map { index, placed in
+            var piece = placed.piece
+            piece.transitionOut = kinds.indices.contains(index) ? kinds[index] : nil
+            return MediaTimelining.Placement(index: index, piece: piece, from: placed.from, to: placed.to)
+        }
+    }
+
+    private func caps(of placed: [MediaTimelining.Placement], holding held: Int) -> MediaTimelining.Caps {
+        let span = MediaTimelining.spans(of: placed, gap: 2, holding: held, scale: 3)[held]
+        return MediaTimelining.caps(around: span, grab: 12)
+    }
+
+    /// ⚠️ **A CAP CARRIES A `+` ONLY WHERE IT STANDS ON A CUT, AND READS THE
+    /// PIECE BEFORE THAT CUT** — a transition belongs to its outgoing piece.
+    @Test func capMarksStandOnlyOnInteriorCutsAndReadThePieceBefore() {
+        let placed = laid([180, 180, 180], carrying: [.dipToBlack, .zoom, nil])
+        func marks(_ held: Int) -> [String] {
+            MediaTimelining.capMarks(placed, holding: held, caps: caps(of: placed, holding: held))
+                .map { "\($0.edge) \($0.index) \($0.kind?.rawValue ?? "none")" }
+        }
+        #expect(marks(0) == ["end 0 dipToBlack"])
+        #expect(marks(1) == ["start 0 dipToBlack", "end 1 zoom"])
+        #expect(marks(2) == ["start 1 zoom"])
+        let single = laid([180])
+        #expect(MediaTimelining.capMarks(single, holding: 0, caps: caps(of: single, holding: 0)).isEmpty)
+        #expect(MediaTimelining.capMarks(placed, holding: 3, caps: caps(of: placed, holding: 1)).isEmpty)
+    }
+
+    /// ⚠️ **A FINGER WIDE, FROM THE CAP'S OUTER EDGE INWARDS, AND NO FURTHER
+    /// THAN THE MIDDLE OF THE HELD FILM.**
+    @Test func aCapsPlusReachesAFingerInwardsAndStopsAtTheMiddle() {
+        let wide = laid([180, 180, 180])
+        let marks = MediaTimelining.capMarks(wide, holding: 1, caps: caps(of: wide, holding: 1), reach: 44)
+        #expect(marks.map(\.reach) == [168...212, 328...372], "got \(marks.map(\.reach))")
+
+        let narrow = laid([100, 20, 100])
+        let tight = MediaTimelining.capMarks(narrow, holding: 1, caps: caps(of: narrow, holding: 1), reach: 44)
+        #expect(tight.map(\.reach) == [88...110, 110...132], "got \(tight.map(\.reach))")
     }
 
     /// ⚠️ **THE DAYLIGHT IS CARVED FROM THE FILM AND NEVER FROM THE CLOCK.** Asked

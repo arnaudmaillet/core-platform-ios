@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaPlayback
 import UIKit
 
 /// The clip as a strip of film you push past a fixed needle.
@@ -43,6 +44,14 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         static let grab: CGFloat = 12
         /// The line inside a grab bar that says it is a handle.
         static let grip = CGSize(width: 2, height: 16)
+        /// ⚠️ **THE `+` A CAP CARRIES ON A CUT, AND THE CAP STAYS 12PT.** Bold at
+        /// 7pt the four symbols measure 8.0 (plus), 8.33 (moon), 9.0 (zoom) and
+        /// 9.33 (sun) points wide on the iOS 26.5 simulator — at least 1.33pt of
+        /// white either side, which survives pixel rounding at 1x. At 8pt the
+        /// sun is 10.67; at 9pt, 11.67. Widening the cap instead would move its
+        /// clean 6pt corner, its shadow and every rail measured on 12, and hide
+        /// more of the neighbour's film.
+        static let capGlyph: CGFloat = 7
         /// ⚠️ **THIN, AND THE THINNESS IS THE POINT.** A 2pt rail around a 54pt
         /// strip reads as a border drawn on a thing; 1.5 reads as the edge of the
         /// thing itself, which is what CapCut and Instagram both draw.
@@ -79,6 +88,31 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         /// looking exactly as it did — a cut nobody can aim. The daylight and the
         /// two rounded ends are what say it happened.
         static let seamGap: CGFloat = 2
+        /// How close two `+` marks may stand before the one between is left out
+        /// — a disc and a little air.
+        static let seamSpacing: CGFloat = 26
+        /// The film, collapsed, while a cut's transition is being chosen.
+        static let line: CGFloat = 4
+        /// The track above the transitions row: the ruler, and the line inside
+        /// its two rails' worth of room.
+        static let compactHeight: CGFloat = ruler + gap + bar + line + bar
+        /// The stretch the preview loops, drawn over the line.
+        static let rehearsal: CGFloat = 7
+        /// The transition itself, standing proud of the stretch.
+        static let window: CGFloat = 12
+        /// A cut with nothing on it still shows where it is.
+        static let windowMinimum: CGFloat = 3
+        /// ⚠️ **ROUNDED, AND ASKED FOR**: *"la zone de l'animation (rectangle
+        /// blanc) doit avoir les corners un peu plus arrondis"*. Clamped to half
+        /// the mark's width, so the bare cut's 3pt tick is a pill, not a spike.
+        static let windowCorner: CGFloat = 4
+        /// Room kept between the looped stretch and the track's end, with the
+        /// needle at the stretch's start.
+        static let rehearsalMargin: CGFloat = 16
+        /// How much film either side of a transition the preview loops: at
+        /// least this, at most the longer one.
+        static let shortestLead: Double = 0.5
+        static let longestLead: Double = 2
         /// The play/pause button at the head of the ruler row.
         static let control: CGFloat = 22
         /// How far past an overlay the ruler takes to come back — the crop tools'
@@ -151,6 +185,11 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// track's — the track is taller than its pictures by a ruler.
     nonisolated static var frameHeight: CGFloat { Metrics.strip }
 
+    /// How tall the track DRAWS while the film is collapsed into a line — its
+    /// own height does not change (charter F28); the room below is the
+    /// transitions row's.
+    nonisolated static var compactHeight: CGFloat { Metrics.compactHeight }
+
     /// Fired when the author lets go of a handle.
     var onChange: ((MediaTimeline) -> Void)?
 
@@ -175,6 +214,15 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// is what the toolbar's actions are pointed at.
     var onSelect: ((Int?) -> Void)?
 
+    /// The author tapped the `+` on a cut — the one after piece `n`.
+    ///
+    /// ⚠️ **NO LISTENER, NO MARKS.** A `+` that nobody answers is a control
+    /// that does nothing, so the track draws them only once the screen is
+    /// listening.
+    var onSeam: ((Int) -> Void)? {
+        didSet { setNeedsLayout() }
+    }
+
     private let scroller = ChipScrollView()
     private let content = UIView()
     /// ⚠️ **THE RULER LIVES OUTSIDE THE SCROLLER, AND IT USED TO LIVE INSIDE.**
@@ -194,6 +242,17 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     private let endGrab = UIView()
     private let startGrip = UIView()
     private let endGrip = UIView()
+    /// The `+` — or the transition's symbol — a cap standing on a cut carries in
+    /// place of its grip.
+    private let startGlyph = UIImageView()
+    private let endGlyph = UIImageView()
+    /// The symbol each glyph is drawing, so a layout that changes nothing looks
+    /// nothing up (T8).
+    private var startGlyphName: String?
+    private var endGlyphName: String?
+    #if DEBUG
+    private var capGlyphImageAssignments = 0
+    #endif
     private let needle = UIView()
     private let needleCap = UIView()
     /// ⚠️ **THE FILM'S OWN FOOTPRINT WHILE IT HAS NO PICTURES — NOT A PLATE.**
@@ -260,6 +319,30 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     private let carryTicks = UISelectionFeedbackGenerator()
     /// One stamp per piece that is not playing as shot.
     private var rateStamps: [UILabel] = []
+    /// Every `+` the track would draw, worked out on the last layout.
+    private var seamMarks: [MediaTimelining.SeamMark] = []
+    /// The `+` buttons on screen, keyed by their cut.
+    private var seamButtons: [Int: SeamButton] = [:]
+    private var spareSeamButtons: [SeamButton] = []
+    /// Every cut VoiceOver can reach, as last spoken.
+    private var spokenSeams: [MediaTimelining.SpokenSeam] = []
+    /// Where the finger the tap recogniser — or the press — is following
+    /// LANDED, in content points.
+    private var tapLanding: CGFloat?
+    private var liftLanding: CGFloat?
+
+    /// Whether the film is collapsed into a line, for choosing a transition.
+    private(set) var isCompact = false
+    /// Bumped by every collapse and every return, so an animation that lands
+    /// after a newer one began tidies nothing away.
+    private var compactTurns = 0
+    /// The line: one piece of it per piece of film near the screen.
+    private var lineSegments: [UIView] = []
+    /// The stretch the preview loops, and the transition inside it.
+    private let rehearsalBar = UIView()
+    private let windowMark = UIView()
+    private var rehearsalRange: ClosedRange<Double>?
+    private var rehearsalWindow: ClosedRange<Double>?
 
     /// Clear under the play button, solid across the middle, clear again under
     /// the readout: what a timecode passes through on its way behind either.
@@ -345,6 +428,9 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     private lazy var selectTap: UITapGestureRecognizer = {
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
         tap.cancelsTouchesInView = false
+        // A delegate only for the landing probe (`shouldReceive`); the
+        // `shouldBegin` override lets it begin, as it always did.
+        tap.delegate = self
         return tap
     }()
 
@@ -438,6 +524,13 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             line.layer.cornerRadius = Metrics.grip.width / 2
             line.isUserInteractionEnabled = false
         }
+        // The `+` on a cap is the disc's ink: one meaning, one colour.
+        for glyph in [startGlyph, endGlyph] {
+            glyph.tintColor = .black
+            glyph.contentMode = .center
+            glyph.isUserInteractionEnabled = false
+            glyph.isHidden = true
+        }
 
         // ⚠️ **MONOSPACED DIGITS, OR THE NUMBER JITTERS AS IT COUNTS.** A
         // proportional "1" is narrower than a "0", so a right-aligned readout
@@ -483,12 +576,26 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
 
         content.addSubview(film)
         for plate in innerCorners { content.insertSubview(plate, belowSubview: film) }
+        // ⚠️ **INK, LIKE THE SELECTION** — white on the photograph, never a plate.
+        for mark in [rehearsalBar, windowMark] {
+            mark.backgroundColor = .white
+            mark.isUserInteractionEnabled = false
+            mark.isHidden = true
+            mark.layer.cornerCurve = .continuous
+            content.addSubview(mark)
+        }
+        windowMark.layer.shadowColor = UIColor.black.cgColor
+        windowMark.layer.shadowOpacity = 0.35
+        windowMark.layer.shadowRadius = 2
+        windowMark.layer.shadowOffset = .zero
         content.addSubview(topBar)
         content.addSubview(bottomBar)
         content.addSubview(startGrab)
         content.addSubview(endGrab)
         startGrab.addSubview(startGrip)
         endGrab.addSubview(endGrip)
+        startGrab.addSubview(startGlyph)
+        endGrab.addSubview(endGlyph)
         scroller.addSubview(content)
         // ⚠️ BEHIND THE SCROLLER, NOT INSIDE IT. Inside, it would have to be as
         // wide as the clip is long — 43200px at four minutes, which is charter
@@ -584,7 +691,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // the question. The ruler's timecodes are deliberately not exposed — the
         // value below carries the only number a listener is after, and a scroll
         // position is not something to read out.
-        accessibilityLabel = "Trim, adjusts the end"
+        accessibilityLabel = Self.trimLabel
 
         heightAnchor.constraint(equalToConstant: Self.height).isActive = true
 
@@ -596,6 +703,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private static let trimLabel = "Trim, adjusts the end"
 
     // MARK: - What it is showing
 
@@ -681,10 +790,51 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     }
 
     @objc private func tapped(_ gesture: UITapGestureRecognizer) {
-        takeOrPutDown(atContentX: gesture.location(in: content).x)
+        recognisedTap(reportedAtContentX: gesture.location(in: content).x)
     }
 
-    private func takeOrPutDown(atContentX x: CGFloat) {
+    /// What a recognised tap does, from where it was REPORTED — which is not
+    /// where it landed if the film moved meanwhile.
+    private func recognisedTap(reportedAtContentX reported: CGFloat) {
+        let x = tapLanding ?? reported
+        tapLanding = nil
+        tap(atContentX: x)
+    }
+
+    /// ⚠️ **A TAP IS READ WHERE THE FINGER LANDED.** The film goes on moving under
+    /// a resting finger while the clip plays — `follow(playedSeconds:)` stands
+    /// down for a drag, not for a touch — so a tap that lasts a tenth of a
+    /// second is reported up to thirty points from where it came down, which is
+    /// the far side of a cap's `+`. `UploadNavigationController` reads touches
+    /// the same way.
+    ///
+    /// ⚠️ **AND A PRESS TOO**: it is recognised a third of a second after it
+    /// lands, by which time the film may have carried the neighbour under it.
+    func gestureRecognizer(_ recogniser: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if recogniser === selectTap { tapLanding = touch.location(in: content).x }
+        if recogniser === lift { liftLanding = touch.location(in: content).x }
+        return true
+    }
+
+    private func tap(atContentX x: CGFloat) {
+        // Collapsed, the film is a line to read, not a row of pieces to take.
+        guard !isCompact else { return }
+        takeOrPutDown(atContentX: x)
+    }
+
+    private func takeOrPutDown(atContentX x: CGFloat, answeringMarks: Bool = true) {
+        // ⚠️ **A TAP ON A CAP THAT STANDS ON A CUT IS A TAP ON THAT CUT'S `+`** —
+        // *"quand on appuie sur le + de la pince ça montre les transitions, mais si
+        // on déplace la pince ça prend le comportement de la pince"*. A drag
+        // never gets here: it is the handle pan's, which this recogniser loses
+        // to the moment the finger travels. Asked first, before the rule that
+        // keeps the held piece, and nothing may follow the call: the screen
+        // collapses the track inside it.
+        if answeringMarks,
+           let mark = heldCapMarks().first(where: { $0.reach.contains(x) && edge(at: x) == $0.edge }) {
+            onSeam?(mark.index)
+            return
+        }
         let placed = MediaTimelining.placements(
             timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
         )
@@ -696,7 +846,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // ⚠️ **UNLESS IT LANDS ON ANOTHER PIECE'S FILM, WHICH AT A SEAM IS WHERE
         // THE CAP IS DRAWN.** A cap stands twelve points outside its own piece —
         // at an interior cut those twelve points are the neighbour's first
-        // frames. Swallowing a tap there meant the author could not take the
+        // frames, under an opaque cap that now answers for its cut (above), so
+        // the neighbour's VISIBLE film begins at the cap's outer edge. Swallowing a tap there meant the author could not take the
         // section on the other side of the cut by pointing at it: the tap did
         // nothing, they dragged the handle they could see, and the piece they
         // had held all along moved. Which is exactly "on ne raisonne pas par
@@ -709,6 +860,11 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         if let held = selected, let caps = heldCaps(), caps.claims(x),
            under == nil || under == held {
             return
+        }
+        // ⚠️ **A TAP ON A `+` BELONGS TO THE `+`.** The button answers it; the
+        // piece on either side of the cut is not taken as well.
+        if answeringMarks {
+            guard shownSeam(atContentX: x) == nil else { return }
         }
         select(under)
     }
@@ -1015,7 +1171,9 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     }
 
     private func askForMissingTiles() {
-        guard let framesProvider, duration > 0, !isZooming else { return }
+        // ⚠️ **NOTHING IS DECODED FOR A FILM NOBODY CAN SEE.** Collapsed, the
+        // film is invisible; the squares it lays out wait for the return.
+        guard let framesProvider, duration > 0, !isZooming, !isCompact else { return }
         // ⚠️ **WHAT IS MISSING IS A SECOND OF FILM, NOT A SQUARE OF TRACK.** Two
         // squares can stand for the same moment — a piece may be shown twice
         // over, since a cut leaves both halves the whole source — so this is a
@@ -1170,10 +1328,17 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         rulerHost.frame = CGRect(x: 0, y: 0, width: bounds.width, height: Metrics.ruler)
         layOutTheRuler(width: width)
 
-        film.frame = CGRect(x: 0, y: stripY, width: width, height: Metrics.strip)
+        // ⚠️ **BOUNDS AND CENTRE, NEVER THE FRAME.** The film collapses into the
+        // line by a transform, and a frame assigned under a transform is read
+        // through it — the film would come back somewhere nobody asked for.
+        film.bounds = CGRect(x: 0, y: 0, width: width, height: Metrics.strip)
+        film.center = CGPoint(x: width / 2, y: stripY + Metrics.strip / 2)
         // ⚠️ **BEFORE THE SELECTION, ALWAYS.** The frame's inner corners are
         // plates behind the film and assume the film in front of them is laid.
         refreshTiles()
+        // ⚠️ **ONE ANSWER FOR THE CAPS, PASSED DOWN** — never stored and read
+        // back, or a split's `+` would wait a layout.
+        let capped = heldCapMarks()
 
         let placed = laidPlacements
         let frameTop = stripY - Metrics.bar
@@ -1194,13 +1359,15 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         layOutTheRulerFade()
 
         layOutTheCarry(placed, stripY: stripY)
-        layOutTheSelection(drawnSpans, frameTop: frameTop, frameHeight: frameHeight)
+        layOutTheSelection(drawnSpans, frameTop: frameTop, frameHeight: frameHeight, capped: capped)
         layOutTheRateStamps(drawnSpans, stripY: stripY)
+        layOutTheSeams(reckoning: true)
+        if isCompact { layOutTheLine() }
         layOutTheSkeleton(filmWidth: width, stripY: stripY)
 
         needle.frame = CGRect(
             x: (bounds.width - Metrics.needle) / 2, y: 0,
-            width: Metrics.needle, height: bounds.height
+            width: Metrics.needle, height: needleHeight
         )
         needleCap.frame = CGRect(
             x: (bounds.width - Metrics.needleCap) / 2, y: 0,
@@ -1437,7 +1604,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// segments. It is also what makes per-piece handles possible at all — two
     /// caps can only belong to one piece.
     private func layOutTheSelection(
-        _ drawn: [MediaTimelining.Span], frameTop: CGFloat, frameHeight: CGFloat
+        _ drawn: [MediaTimelining.Span], frameTop: CGFloat, frameHeight: CGFloat,
+        capped: [MediaTimelining.CapMark]
     ) {
         guard let index = selected, let held = drawn.first(where: { $0.index == index }) else {
             for part in [topBar, bottomBar, startGrab, endGrab] { part.isHidden = true }
@@ -1457,10 +1625,10 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         for part in [topBar, bottomBar, startGrab, endGrab] { part.isHidden = false }
         if jumps {
             UIView.performWithoutAnimation {
-                placeTheFrame(around: held, frameTop: frameTop, frameHeight: frameHeight)
+                placeTheFrame(around: held, frameTop: frameTop, frameHeight: frameHeight, capped: capped)
             }
         } else {
-            placeTheFrame(around: held, frameTop: frameTop, frameHeight: frameHeight)
+            placeTheFrame(around: held, frameTop: frameTop, frameHeight: frameHeight, capped: capped)
         }
     }
 
@@ -1468,7 +1636,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     private var laidOutHeld: Int?
 
     private func placeTheFrame(
-        around held: MediaTimelining.Span, frameTop: CGFloat, frameHeight: CGFloat
+        around held: MediaTimelining.Span, frameTop: CGFloat, frameHeight: CGFloat,
+        capped: [MediaTimelining.CapMark]
     ) {
         // ⚠️ **THE CAPS STAND OUTSIDE THE PIECE, NOT ON TOP OF IT.** Laid over the
         // film they eat twelve points of picture at each end — and those are the
@@ -1512,6 +1681,45 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
                 y: (grab.bounds.height - Metrics.grip.height) / 2,
                 width: Metrics.grip.width, height: Metrics.grip.height
             )
+        }
+        // ⚠️ **A CAP ON A CUT CARRIES THE CUT'S `+` IN PLACE OF ITS GRIP** (F7,
+        // F27) — *"mettre le plus dans les pinces de sélection à la place du trait
+        // vertical"*: right after a split the new cut is under the held half's
+        // closing cap, and its `+` has to be there at once.
+        let scale = max(traitCollection.displayScale, 1)
+        for (grab, line, glyph, edge) in [
+            (startGrab, startGrip, startGlyph, MediaTimelining.Edge.start),
+            (endGrab, endGrip, endGlyph, MediaTimelining.Edge.end)
+        ] {
+            let mark = capped.first { $0.edge == edge }
+            line.isHidden = mark != nil
+            glyph.isHidden = mark == nil
+            guard let mark else { continue }
+            // ⚠️ **PLACED, NEVER ANIMATED** — a drop lays the track out inside its
+            // fade, and a glyph set there would grow from nothing.
+            UIView.performWithoutAnimation {
+                let name = MediaTransitionCatalog.markGlyph(for: mark.kind)
+                if name != (edge == .start ? startGlyphName : endGlyphName) {
+                    glyph.image = UIImage(
+                        systemName: name,
+                        withConfiguration: UIImage.SymbolConfiguration(pointSize: Metrics.capGlyph, weight: .bold)
+                    )
+                    if edge == .start { startGlyphName = name } else { endGlyphName = name }
+                    #if DEBUG
+                    capGlyphImageAssignments += 1
+                    #endif
+                }
+                // Centred on the cap, its origin on the pixel grid in CONTENT
+                // points: a cap stands at fractional places under a rate or a
+                // zoom, and a symbol half a pixel off draws soft.
+                let size = glyph.image?.size ?? .zero
+                let x = ((grab.frame.midX - size.width / 2) * scale).rounded() / scale
+                let y = ((grab.frame.midY - size.height / 2) * scale).rounded() / scale
+                glyph.frame = CGRect(
+                    x: x - grab.frame.minX, y: y - grab.frame.minY,
+                    width: size.width, height: size.height
+                )
+            }
         }
 
         // ⚠️ **THE INNER CORNERS ARE THE FILM'S OWN.** Asked for as *"le cadre
@@ -1563,6 +1771,21 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         return MediaTimelining.caps(around: held, grab: Metrics.grab)
     }
 
+    /// The `+` marks the held piece's caps carry.
+    ///
+    /// ⚠️ **ONE SOURCE FOR THE DRAWING, THE TAP AND THE SPOKEN LIST**, like
+    /// `heldCaps()`. None while nobody listens, while a piece is carried, or
+    /// while the film is a line.
+    private func heldCapMarks() -> [MediaTimelining.CapMark] {
+        guard onSeam != nil, reordering == nil, !isCompact, duration > 0,
+              let held = selected, let caps = heldCaps()
+        else { return [] }
+        return MediaTimelining.capMarks(
+            MediaTimelining.placements(timeline, withinSource: duration, pointsPerSecond: pointsPerSecond),
+            holding: held, caps: caps, reach: SeamButton.hitSize
+        )
+    }
+
     private static func spoken(_ pieces: [MediaSegment]) -> String {
         let seconds = Int(pieces.reduce(0) { $0 + $1.playedSeconds }.rounded())
         return seconds == 1 ? "1 second kept" : "\(seconds) seconds kept"
@@ -1574,9 +1797,33 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// cannot step into a state the handles refuse.
     private static let spokenStep: Double = 1
 
-    override func accessibilityIncrement() { adjustEnd(bySourceSeconds: Self.spokenStep) }
+    /// ⚠️ **ACTIVATING THE TRACK TAKES THE PIECE UNDER THE NEEDLE, AND NEVER
+    /// OPENS A CUT.** Left to the default, VoiceOver taps the track's centre —
+    /// the needle — and right after a split that is the held half's `+`. The
+    /// cuts are the custom actions.
+    ///
+    /// ⚠️ **COLLAPSED, IT IS CONSUMED AND DOES NOTHING.** Handed back, the
+    /// default tap lands on the track's centre — where the transitions row
+    /// stands — and would choose a card nobody asked for.
+    override func accessibilityActivate() -> Bool {
+        guard !isCompact else { return true }
+        guard duration > 0 else { return false }
+        takeOrPutDown(
+            atContentX: scroller.contentOffset.x + MediaTimelining.centringInset(forTrackWidth: bounds.width),
+            answeringMarks: false
+        )
+        return true
+    }
 
-    override func accessibilityDecrement() { adjustEnd(bySourceSeconds: -Self.spokenStep) }
+    override func accessibilityIncrement() {
+        guard !isCompact else { return }
+        adjustEnd(bySourceSeconds: Self.spokenStep)
+    }
+
+    override func accessibilityDecrement() {
+        guard !isCompact else { return }
+        adjustEnd(bySourceSeconds: -Self.spokenStep)
+    }
 
     /// ⚠️ **THROUGH `MediaTimelining.moved`, LIKE EVERY OTHER ROUTE.** A second
     /// implementation of the clamping would be a second set of edge cases, and
@@ -1629,7 +1876,13 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         if !rateStamps.isEmpty {
             layOutTheRateStamps(drawnSpans, stripY: stripY)
         }
-        guard !isFollowingPlayback, hasOpened, let moment = momentUnderNeedle else { return }
+        if !seamMarks.isEmpty {
+            layOutTheSeams(reckoning: false)
+        }
+        if isCompact { layOutTheLine() }
+        // ⚠️ **COLLAPSED, THE FILM IS NEVER SCRUBBED.** Only the follower moves
+        // it — the preview is looping a stretch the author did not aim.
+        guard !isFollowingPlayback, !isCompact, hasOpened, let moment = momentUnderNeedle else { return }
         onScrub?(moment)
     }
 
@@ -1779,6 +2032,314 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         }
     }
 
+    /// The `+` on every cut in view.
+    ///
+    /// ⚠️ **WORKED OUT ON A LAYOUT, ONLY PLACED ON A SCROLL — CHARTER T8.** Which
+    /// cuts carry a mark depends on the arrangement, the scale and the held
+    /// piece, and none of them changes while the film merely moves; a scroll
+    /// only decides which of those marks are near enough the screen to exist,
+    /// and a beat that changes nothing allocates nothing.
+    ///
+    /// ⚠️ **NONE WHILE A PIECE IS CARRIED.** The track is put away for the
+    /// length of a carry, and a cut there is about to move anyway.
+    private func layOutTheSeams(reckoning: Bool) {
+        if reckoning {
+            let wanted: [MediaTimelining.SeamMark]
+            if onSeam == nil || reordering != nil || duration <= 0 {
+                wanted = []
+            } else {
+                let caps = heldCaps()
+                wanted = MediaTimelining.seamMarks(
+                    laidPlacements, minimumSpacing: Metrics.seamSpacing,
+                    hiding: caps.map { $0.start.lowerBound...$0.end.upperBound },
+                    disc: SeamButton.discSize, widest: SeamButton.hitSize
+                )
+            }
+            seamMarks = wanted
+            // ⚠️ **EVERY CUT IS SPOKEN, DRAWN OR NOT** — a disc thinned away or
+            // hidden beside a held cap is still a cut a VoiceOver user must
+            // reach. Spoken again only when a cut or what it carries changes,
+            // not on every sample of a trim.
+            let spoken: [MediaTimelining.SpokenSeam] = onSeam == nil || reordering != nil || duration <= 0
+                ? []
+                : laidPlacements.dropLast().map { .init(index: $0.index, kind: $0.piece.transitionOut) }
+            if spoken != spokenSeams {
+                spokenSeams = spoken
+                speakTheSeams()
+            }
+        }
+        let offset = scroller.contentOffset.x
+        let low = offset - MediaTimelining.filmMargin
+        let high = offset + bounds.width + MediaTimelining.filmMargin
+        for (index, button) in seamButtons {
+            let kept = seamMarks.contains { $0.index == index && $0.x >= low && $0.x <= high }
+            guard !kept else { continue }
+            button.removeFromSuperview()
+            seamButtons[index] = nil
+            if spareSeamButtons.count < 4 { spareSeamButtons.append(button) }
+        }
+        let scale = max(traitCollection.displayScale, 1)
+        for mark in seamMarks where mark.x >= low && mark.x <= high {
+            let known = seamButtons[mark.index]
+            guard known == nil || reckoning else { continue }
+            let fresh = known == nil
+            let button = known ?? takeASeamButton()
+            seamButtons[mark.index] = button
+            // ⚠️ **PLACED, NEVER ANIMATED.** A layout can run inside the drop's
+            // fade, and a button from the pool would slide in from wherever it
+            // last stood.
+            UIView.performWithoutAnimation {
+                button.seam = mark.index
+                button.bounds.size = CGSize(width: mark.hitWidth, height: SeamButton.hitSize)
+                button.center = CGPoint(
+                    x: (mark.x * scale).rounded() / scale,
+                    y: ((stripY + Metrics.strip / 2) * scale).rounded() / scale
+                )
+                if fresh || button.showing != mark.kind { button.show(mark.kind) }
+                if fresh {
+                    button.alpha = isCompact ? 0 : 1
+                    button.transform = isCompact ? Self.seamAway : .identity
+                }
+                button.isUserInteractionEnabled = !isCompact
+                button.layoutIfNeeded()
+            }
+        }
+    }
+
+    private func takeASeamButton() -> SeamButton {
+        let button = spareSeamButtons.popLast() ?? {
+            let made = SeamButton()
+            made.addAction(
+                UIAction { [weak self, weak made] _ in
+                    guard let self, let made else { return }
+                    onSeam?(made.seam)
+                },
+                for: .primaryActionTriggered
+            )
+            return made
+        }()
+        content.insertSubview(button, belowSubview: topBar)
+        return button
+    }
+
+    /// Where a `+` goes as the film collapses under it: smaller, and up into
+    /// the line with the film.
+    private static let seamAway = CGAffineTransform(
+        translationX: 0, y: -(Metrics.strip - Metrics.line) / 2
+    ).scaledBy(x: 0.6, y: 0.6)
+
+    /// The `+` a touch at `x` belongs to, if one is on screen there.
+    private func shownSeam(atContentX x: CGFloat) -> Int? {
+        guard !isCompact else { return nil }
+        return seamButtons.first { abs($0.value.center.x - x) <= $0.value.bounds.width / 2 }?.key
+    }
+
+    /// ⚠️ **THE TRACK IS ONE ACCESSIBILITY ELEMENT, SO ITS BUTTONS ARE NOT.** A
+    /// VoiceOver user reaches each cut through the track's own actions — every
+    /// cut, in view or not.
+    private func speakTheSeams() {
+        accessibilityCustomActions = spokenSeams.map { mark in
+            UIAccessibilityCustomAction(
+                name: "Transition after clip \(mark.index + 1): \(mark.kind?.spokenLabel ?? "none")"
+            ) { [weak self] _ in
+                guard let self, let onSeam else { return false }
+                onSeam(mark.index)
+                return true
+            }
+        }
+    }
+
+    // MARK: - Collapsed, for choosing a transition
+
+    /// How tall the needle stands: the whole track, or down to the line.
+    private var needleHeight: CGFloat { isCompact ? Metrics.compactHeight : bounds.height }
+
+    /// The film scaled into the line, its top edge where the film's was.
+    private static var collapse: CGAffineTransform {
+        let scale = Metrics.line / Metrics.strip
+        return CGAffineTransform(translationX: 0, y: -(Metrics.strip - Metrics.line) / 2)
+            .scaledBy(x: 1, y: scale)
+    }
+
+    /// How much film either side of a transition the preview loops.
+    ///
+    /// ⚠️ **AS MUCH AS STAYS ON SCREEN.** The needle is nailed to the centre and
+    /// walks the stretch as it plays, so from its start the whole stretch has
+    /// to fit in the half of the track to the needle's right — at the resting
+    /// scale that is about a second and a quarter either side, *"quelques
+    /// secondes avant jusqu'à quelques secondes après"*. Never less than half a
+    /// second, however far the author has zoomed in; never more than two.
+    var rehearsalLead: Double {
+        guard bounds.width > 0, pointsPerSecond > 0 else { return Metrics.shortestLead }
+        let reach = Double((bounds.width / 2 - Metrics.rehearsalMargin) / pointsPerSecond)
+        let lead = (reach - VideoTransitionKind.standardSeconds) / 2
+        return min(max(lead, Metrics.shortestLead), Metrics.longestLead)
+    }
+
+    /// Collapses the film upwards into a line under the ruler — or opens it
+    /// again — leaving the track its height: the room below the line is the
+    /// transitions row's (charter F28).
+    ///
+    /// ⚠️ **REFUSED WHILE A HANDLE OR A PIECE IS HELD**, and the answer says so.
+    /// A collapse under a finger would take the thing it is moving away.
+    ///
+    /// ⚠️ **STAGED, THEN ANIMATED IN ONE SPRING — AND WITHOUT
+    /// `.beginFromCurrentState`.** The line and the bars are laid out at alpha
+    /// zero first; with that option the fade would read its from-value off a
+    /// presentation layer that has never drawn them, and run from one to one
+    /// (`uiview-animate-from-value-trap`).
+    @discardableResult
+    func setCompact(
+        _ compact: Bool, bringingUnderTheNeedle seconds: Double? = nil, animated: Bool
+    ) -> Bool {
+        guard compact != isCompact else { return true }
+        if compact {
+            guard grip == nil, reordering == nil else { return false }
+            select(nil, notify: true)
+        }
+        stopEasing()
+        compactTurns += 1
+        let turn = compactTurns
+        isCompact = compact
+        scroller.isScrollEnabled = !compact
+        accessibilityTraits = compact ? [] : .adjustable
+        accessibilityLabel = compact ? "Transition timeline" : Self.trimLabel
+        for button in seamButtons.values { button.isUserInteractionEnabled = !compact }
+        if compact {
+            for mark in [rehearsalBar, windowMark] {
+                mark.alpha = 0
+                mark.isHidden = false
+            }
+            setNeedsLayout()
+            layoutIfNeeded()
+        }
+        let target = seconds.map { offset(forPlayedSeconds: $0) }
+        if target != nil {
+            isEasing = true
+            isFollowingPlayback = true
+        }
+        let changes = { [self] in
+            film.transform = compact ? Self.collapse : .identity
+            film.alpha = compact ? 0 : 1
+            for stamp in rateStamps { stamp.alpha = compact ? 0 : 1 }
+            for button in seamButtons.values {
+                button.alpha = compact ? 0 : 1
+                button.transform = compact ? Self.seamAway : .identity
+            }
+            for segment in lineSegments { segment.alpha = compact ? 1 : 0 }
+            rehearsalBar.alpha = compact ? 1 : 0
+            windowMark.alpha = compact ? 1 : 0
+            needle.frame.size.height = needleHeight
+            skeleton.alpha = compact ? 0 : 1
+            if let target { scroller.contentOffset.x = target }
+        }
+        let landed = { [weak self] in
+            guard let self, turn == compactTurns else { return }
+            if target != nil {
+                isEasing = false
+                isFollowingPlayback = false
+            }
+            guard !isCompact else { return }
+            for segment in lineSegments { segment.removeFromSuperview() }
+            lineSegments.removeAll()
+            rehearsalBar.isHidden = true
+            windowMark.isHidden = true
+            rehearsalRange = nil
+            rehearsalWindow = nil
+            // The film asked for nothing while it was a line.
+            refreshTiles()
+        }
+        guard animated, window != nil else {
+            changes()
+            landed()
+            return true
+        }
+        UIView.animate(
+            withDuration: 0.35, delay: 0, usingSpringWithDamping: 1, initialSpringVelocity: 0,
+            options: [.allowUserInteraction], animations: changes
+        ) { _ in landed() }
+        return true
+    }
+
+    /// Lights the stretch the preview loops, and the transition inside it — in
+    /// PLAYED seconds, the axis the line is drawn on.
+    func showRehearsal(
+        _ range: ClosedRange<Double>?, window: ClosedRange<Double>?, animated: Bool
+    ) {
+        rehearsalRange = range
+        rehearsalWindow = window
+        guard isCompact else { return }
+        guard animated, self.window != nil else { return layOutTheLine() }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction]) { [self] in
+            layOutTheLine()
+        }
+    }
+
+    /// The line, the lit stretch and the transition's mark.
+    ///
+    /// ⚠️ **CLIPPED TO THE SCREEN AND ITS MARGIN — CHARTER T6.** A piece of
+    /// line as long as a four-minute piece is 43200px at 3x; a rounded layer
+    /// that wide is what Metal asserts on.
+    private func layOutTheLine() {
+        let offset = scroller.contentOffset.x
+        let low = offset - MediaTimelining.filmMargin
+        let high = offset + bounds.width + MediaTimelining.filmMargin
+        var used = 0
+        for span in drawnSpans where span.to > low && span.from < high {
+            let from = max(span.from, low)
+            let to = min(span.to, high)
+            let segment: UIView
+            if used < lineSegments.count {
+                segment = lineSegments[used]
+            } else {
+                segment = UIView()
+                segment.backgroundColor = UIColor.white.withAlphaComponent(0.35)
+                segment.isUserInteractionEnabled = false
+                segment.layer.cornerCurve = .continuous
+                // ⚠️ **AS VISIBLE AS THE BAR ABOVE IT.** Staged for the collapse,
+                // that is nothing yet; once collapsed, a piece of line scrolled
+                // into view simply shows.
+                segment.alpha = rehearsalBar.alpha
+                content.insertSubview(segment, belowSubview: rehearsalBar)
+                lineSegments.append(segment)
+            }
+            let width = max(to - from, 0)
+            UIView.performWithoutAnimation {
+                segment.frame = CGRect(x: from, y: stripY, width: width, height: Metrics.line)
+                segment.layer.cornerRadius = min(Metrics.line / 2, width / 2)
+                segment.layer.maskedCorners = Self.corners(
+                    leading: from == span.from, trailing: to == span.to
+                )
+            }
+            used += 1
+        }
+        while lineSegments.count > used { lineSegments.removeLast().removeFromSuperview() }
+
+        let middle = stripY + Metrics.line / 2
+        if let range = rehearsalRange {
+            let from = max(MediaTimelining.x(atPlayedSeconds: range.lowerBound, pointsPerSecond: pointsPerSecond), low)
+            let to = min(MediaTimelining.x(atPlayedSeconds: range.upperBound, pointsPerSecond: pointsPerSecond), high)
+            let width = max(to - from, 0)
+            rehearsalBar.frame = CGRect(
+                x: from, y: middle - Metrics.rehearsal / 2, width: width, height: Metrics.rehearsal
+            )
+            rehearsalBar.layer.cornerRadius = min(Metrics.rehearsal / 2, width / 2)
+        }
+        rehearsalBar.isHidden = rehearsalRange == nil
+        if let window = rehearsalWindow {
+            let from = MediaTimelining.x(atPlayedSeconds: window.lowerBound, pointsPerSecond: pointsPerSecond)
+            let to = MediaTimelining.x(atPlayedSeconds: window.upperBound, pointsPerSecond: pointsPerSecond)
+            let width = max(to - from, Metrics.windowMinimum)
+            let centre = min(max((from + to) / 2, low), high)
+            windowMark.frame = CGRect(
+                x: centre - width / 2, y: middle - Metrics.window / 2,
+                width: width, height: Metrics.window
+            )
+            windowMark.layer.cornerRadius = min(Metrics.windowCorner, width / 2)
+        }
+        windowMark.isHidden = rehearsalWindow == nil
+    }
+
     /// The bone under the part of the film that is on screen.
     ///
     /// ⚠️ **THE FILM'S RECTANGLE, NOT THE TRACK'S.** At rest the content carries
@@ -1846,8 +2407,16 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// refuses it. The compiler says so plainly in both directions, which is the
     /// only reason this is cheap to get wrong rather than expensive.
     override func gestureRecognizerShouldBegin(_ recogniser: UIGestureRecognizer) -> Bool {
+        // ⚠️ **COLLAPSED, THE TRACK TAKES NO GESTURE AT ALL.** There is no film
+        // to zoom, no piece to lift and no handle to drag — the line is a
+        // reading of where the loop is.
+        if isCompact, recogniser === pinch || recogniser === lift || recogniser === contentPan {
+            return false
+        }
         guard recogniser !== pinch else { return duration > 0 }
-        guard recogniser !== lift else { return wouldLift(atContentX: lift.location(in: content).x) }
+        guard recogniser !== lift else {
+            return wouldLift(atContentX: liftLanding ?? lift.location(in: content).x)
+        }
         guard recogniser === contentPan else { return true }
         return takesAHandle(at: touchDownX(of: contentPan))
     }
@@ -1884,7 +2453,14 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         let placed = MediaTimelining.placements(
             timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
         )
-        return placed.count > 1 && pieceAimedAt(x, in: placed) != nil
+        // ⚠️ **A PRESS ON A `+` LIFTS NOTHING — A DISC'S OR A CAP'S.** A
+        // recognised long press takes the finger for the whole gesture, and the
+        // `+` would never hear its tap: *"quand on appuie sur le + de la pince ça
+        // montre les transitions"*, however long the press. Within a cap's
+        // target a press is a tap, and a press that travels is the handle's.
+        return placed.count > 1 && shownSeam(atContentX: x) == nil
+            && !heldCapMarks().contains { $0.reach.contains(x) }
+            && pieceAimedAt(x, in: placed) != nil
     }
 
     /// Which piece a gesture at `x` is aimed at.
@@ -1972,9 +2548,15 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // does not scroll. Reading the whole gesture in one space would put the
         // drop wherever the film happened to be scrolled to.
         switch press.state {
-        case .began: lift(atContentX: press.location(in: content).x)
+        case .began:
+            lift(
+                atContentX: liftLanding ?? press.location(in: content).x,
+                underTrackX: press.location(in: self).x
+            )
         case .changed: carry(toTrackX: press.location(in: self).x)
-        case .ended, .cancelled, .failed: drop()
+        case .ended, .cancelled, .failed:
+            liftLanding = nil
+            drop()
         default: break
         }
     }
@@ -1984,7 +2566,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     // test, and `debugPinch` records what re-entering by a copy of the logic
     // costs: it skipped `beginZoom` entirely and the test written to prove that a
     // zoom retires its frames passed on a path that does not.
-    private func lift(atContentX x: CGFloat) {
+    private func lift(atContentX x: CGFloat, underTrackX finger: CGFloat? = nil) {
         let placed = MediaTimelining.placements(
             timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
         )
@@ -1999,7 +2581,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         let list = standing
         shotList.contentOffset.x = MediaTimelining.shotListOffset(
             centring: list.first { $0.index == index },
-            underTrackX: x - scroller.contentOffset.x,
+            underTrackX: finger ?? x - scroller.contentOffset.x,
             listWidth: listWidth(of: list), trackWidth: bounds.width
         )
         // Warm first, so the crossings that follow tick without the engine
@@ -2137,6 +2719,12 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // came up. A new order does not change how long the result runs, so the
         // track has not moved; the moment under the needle, in the new order, is
         // what the player has to be sent to.
+        // ⚠️ **AND A PIECE PUT DOWN AT THE END LOSES ITS TRANSITION** — there is
+        // no cut after the film. Cleared here, once, rather than at every
+        // crossing: a carry that comes back where it started must be the
+        // timeline that was lifted.
+        timeline = MediaTimelining.settled(timeline)
+        setNeedsLayout()
         if let moment = momentUnderNeedle { onScrub?(moment) }
         onScrubbing?(false)
         onChange?(timeline)
@@ -2671,7 +3259,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             .flatMap { $0.layer.animationKeys() ?? [] }
     }
     var debugFrameAnimations: [String] {
-        ([topBar, bottomBar, startGrab, endGrab] + innerCorners)
+        ([topBar, bottomBar, startGrab, endGrab, startGlyph, endGlyph] + innerCorners)
             .flatMap { $0.layer.animationKeys() ?? [] }
     }
     /// Internal for tests: where the ruler's marks are DRAWN, in the track's own
@@ -2691,6 +3279,95 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// predicate the delegate answers with, so the scroll is not taken hostage by
     /// a press that has nothing to lift.
     func debugWouldLift(atContentX x: CGFloat) -> Bool { wouldLift(atContentX: x) }
+    /// Internal for tests: every `+` on screen, in content points, in order.
+    var debugSeamMarks: [(index: Int, centre: CGPoint, hit: CGRect, glyph: String?)] {
+        seamButtons.sorted { $0.key < $1.key }.map { index, button in
+            (index, button.center, button.frame, button.debugGlyph)
+        }
+    }
+    /// Internal for tests: whether any `+` can be seen at all.
+    var debugSeamMarksShowing: Bool { !seamButtons.isEmpty && scroller.alpha > 0 && !scroller.isHidden }
+    /// Internal for tests: taps a `+` exactly as a finger would.
+    func debugTapSeam(_ index: Int) { seamButtons[index]?.sendActions(for: .primaryActionTriggered) }
+    static var debugSeamHitSize: CGFloat { SeamButton.hitSize }
+    /// Internal for tests: where each `+` is DRAWN, transform included.
+    var debugSeamMarkFrames: [CGRect] { seamButtons.sorted { $0.key < $1.key }.map(\.value.frame) }
+    /// Internal for tests: what each cap shows, start then end — "hidden",
+    /// "grip", or the symbol DRAWN in place of the grip.
+    var debugCapMarks: [String] {
+        [(startGrab, startGrip, startGlyph), (endGrab, endGrip, endGlyph)].map { grab, line, glyph in
+            if grab.isHidden { return "hidden" }
+            switch (line.isHidden, glyph.isHidden) {
+            case (false, true): return "grip"
+            case (true, false): return MediaTransitionCatalog.debugSymbol(drawnIn: glyph.image) ?? "unknown"
+            case (false, false): return "both"
+            case (true, true): return "none"
+            }
+        }
+    }
+    /// Internal for tests: each cap's glyph box in content points, and the
+    /// image's own size; nil where the glyph is hidden.
+    var debugCapGlyphs: [(frame: CGRect, image: CGSize)?] {
+        [startGlyph, endGlyph].map { glyph in
+            glyph.isHidden ? nil : (glyph.convert(glyph.bounds, to: content), glyph.image?.size ?? .zero)
+        }
+    }
+    var debugCapGlyphImageAssignments: Int { capGlyphImageAssignments }
+    var debugCapGlyphAnimations: [String] {
+        [startGlyph, endGlyph].flatMap { $0.layer.animationKeys() ?? [] }
+    }
+    var debugGrip: MediaTimelining.Edge? { grip }
+    /// Internal for tests: whether any `+` would answer a finger.
+    var debugSeamTakesTouches: Bool { seamButtons.values.contains { $0.isUserInteractionEnabled } }
+    /// Internal for tests: the collapsed film's line, in content points.
+    var debugLineFrames: [CGRect] { lineSegments.map(\.frame) }
+    /// Internal for tests: the lit stretch and the transition's mark, in
+    /// content points, or nil where nothing is drawn.
+    var debugRehearsalFrame: CGRect? { rehearsalBar.isHidden ? nil : rehearsalBar.frame }
+    var debugWindowFrame: CGRect? { windowMark.isHidden ? nil : windowMark.frame }
+    var debugWindowCorner: CGFloat { windowMark.layer.cornerRadius }
+    var debugNeedleFrame: CGRect { needle.frame }
+    /// Internal for tests: what is animating on the film VIEW itself — the
+    /// collapse — as opposed to the pieces inside it.
+    var debugFilmOwnAnimations: [String] { film.layer.animationKeys() ?? [] }
+    var debugFilmAlpha: CGFloat { film.alpha }
+    /// Internal for tests: what the line and the bars are animating.
+    var debugLineAnimations: [String] {
+        (lineSegments + [rehearsalBar, windowMark]).flatMap { $0.layer.animationKeys() ?? [] }
+    }
+    /// Internal for tests: whether a gesture of each kind would be allowed to
+    /// begin — asked of the very delegate method a finger reaches.
+    var debugGesturesThatWouldBegin: [String] {
+        let asked: [(name: String, recogniser: UIGestureRecognizer)] = [
+            ("pinch", pinch), ("lift", lift), ("handle", contentPan)
+        ]
+        return asked.filter { gestureRecognizerShouldBegin($0.recogniser) }.map(\.name)
+    }
+    /// Internal for tests: what a tap on the scroller would do, through the
+    /// recogniser's own action.
+    func debugTapped(atContentX x: CGFloat) { recognisedTap(reportedAtContentX: x) }
+    /// Internal for tests: a recognised tap that LANDED at one place and was
+    /// reported at another — the film moved under a resting finger.
+    func debugTapped(landedAt landed: CGFloat, reportedAt reported: CGFloat) {
+        tapLanding = landed
+        recognisedTap(reportedAtContentX: reported)
+    }
+    /// Internal for tests: a press that landed at one place and is recognised
+    /// at another, asked of the very routine the recogniser asks.
+    func debugWouldLift(landedAt landed: CGFloat) -> Bool {
+        liftLanding = landed
+        defer { liftLanding = nil }
+        return gestureRecognizerShouldBegin(lift)
+    }
+    /// Internal for tests: the tap that answers a cap's `+` and the handle pan
+    /// share a view, and nothing lets them recognise together — so a drag is
+    /// never also a tap.
+    var debugTapYieldsToTheHandle: Bool {
+        let delegate = self as UIGestureRecognizerDelegate
+        return selectTap.view === contentPan.view && selectTap.delegate === self
+            && !(delegate.gestureRecognizer?(selectTap, shouldRecognizeSimultaneouslyWith: contentPan) ?? false)
+            && !(delegate.gestureRecognizer?(contentPan, shouldRecognizeSimultaneouslyWith: selectTap) ?? false)
+    }
     /// Internal for tests: whether the track is put away — every part of it, not
     /// just one, since any part left showing is part of the mess that was
     /// reported.

@@ -1,4 +1,5 @@
 import Foundation
+import MediaPlayback
 
 /// One piece of the source clip, in the order it will play.
 ///
@@ -24,11 +25,20 @@ struct MediaSegment: Equatable, Sendable {
     var end: Double
     /// 1 is as shot. 2 plays it twice as fast, so it lasts half as long.
     var speed: Double
+    /// The transition at the cut AFTER this piece, if any.
+    ///
+    /// ⚠️ **IT BELONGS TO THE PIECE BEFORE THE CUT.** So it travels with that
+    /// piece when the pieces are re-ordered, the right half keeps it when the
+    /// piece is split (the cut it names is still after that half), and it is
+    /// gone when its piece becomes the last one — there is no cut after the end
+    /// of the film. `nil` is a plain cut.
+    var transitionOut: VideoTransitionKind?
 
-    init(start: Double, end: Double, speed: Double = 1) {
+    init(start: Double, end: Double, speed: Double = 1, transitionOut: VideoTransitionKind? = nil) {
         self.start = start
         self.end = end
         self.speed = speed
+        self.transitionOut = transitionOut
     }
 
     /// How much of the FILE this piece covers.

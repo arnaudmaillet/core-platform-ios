@@ -63,18 +63,27 @@ struct MediaEditorTimelineTests {
         private(set) var starts: [Double] = []
         /// ⚠️ **`at()` IS ASKED, AS THE REAL CONTROLLER ASKS IT**, and a load it
         /// abandons records nothing.
+        /// Where each accepted load landed, and what it looped.
+        private(set) var landings: [VideoLoadLanding] = []
         func load(
             _ plan: VideoExportPlan, in surface: VideoRenderView,
-            at start: @escaping @MainActor () -> Double?
+            landing: @escaping @MainActor () -> VideoLoadLanding?
         ) async {
-            guard let at = start() else { return }
+            guard let landed = landing() else { return }
             plans.append(plan)
-            starts.append(at)
+            starts.append(landed.seconds)
+            landings.append(landed)
         }
 
         /// Every FILE second the screen showed the file as shot at — a held
         /// handle aiming.
         private(set) var shownAsShot: [Double] = []
+        /// Every loop range the screen asked for, in order.
+        private(set) var loops: [ClosedRange<Double>?] = []
+        func setLoopRange(_ range: ClosedRange<Double>?, in surface: VideoRenderView) {
+            loops.append(range)
+        }
+
         func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {
             shownAsShot.append(seconds)
         }

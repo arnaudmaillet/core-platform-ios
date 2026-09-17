@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import MediaPlayback
 
 /// The arithmetic behind the timeline.
 ///
@@ -299,11 +300,16 @@ enum MediaTimelining {
         let floor = shortest(withinSource: duration)
         guard seconds - piece.start >= floor, piece.end - seconds >= floor else { return timeline }
 
+        // ⚠️ **THE RIGHT HALF KEEPS THE TRANSITION** — the cut it names is still
+        // after that half; the new cut in the middle is a plain one.
+        var left = piece
+        left.end = seconds
+        left.transitionOut = nil
+        var right = piece
+        right.start = seconds
         var cut = pieces
-        cut[index] = MediaSegment(start: piece.start, end: seconds, speed: piece.speed)
-        cut.insert(
-            MediaSegment(start: seconds, end: piece.end, speed: piece.speed), at: index + 1
-        )
+        cut[index] = left
+        cut.insert(right, at: index + 1)
         return MediaTimeline(segments: cut)
     }
 
@@ -1036,9 +1042,14 @@ enum MediaTimelining {
             let asked = max(segment.start, 0)
             let start = asked < end ? asked : max(end - floor, 0)
             guard end > start else { continue }
-            kept.append(
-                MediaSegment(start: start, end: end, speed: speed(of: segment))
-            )
+            // ⚠️ **A COPY, NOT A REBUILD** — a piece rebuilt from its three
+            // numbers would silently drop anything else it carries, and every
+            // edit in this file starts from here.
+            var piece = segment
+            piece.start = start
+            piece.end = end
+            piece.speed = speed(of: segment)
+            kept.append(piece)
         }
         // A timeline whose every piece fell away is not an empty timeline — it
         // is a broken one, and the honest answer is the clip itself.
@@ -1101,7 +1112,216 @@ enum MediaTimelining {
         }
         let carried = pieces.remove(at: from)
         pieces.insert(carried, at: to)
+        // ⚠️ **A PURE PERMUTATION — NOTHING IS CLEARED HERE.** A carry applies
+        // this at every crossing, and one that comes back where it started must
+        // be the timeline that was lifted. The last piece's transition is dropped
+        // once, when the piece is put down (`settled`).
         return MediaTimeline(segments: pieces)
+    }
+
+    /// The timeline with no transition after its last piece — there is no cut
+    /// there to draw one on.
+    static func settled(_ timeline: MediaTimeline) -> MediaTimeline {
+        guard let last = timeline.segments.indices.last,
+              timeline.segments[last].transitionOut != nil
+        else { return timeline }
+        var cleared = timeline
+        cleared.segments[last].transitionOut = nil
+        return cleared
+    }
+
+    // MARK: - Transitions
+
+    /// One cut between two pieces, and the transition drawn there.
+    struct Seam: Equatable, Sendable {
+        /// Which cut: the one after piece `index`.
+        let index: Int
+        /// Where the cut is, in PLAYED seconds.
+        let at: Double
+        /// What the author chose there — which may draw nothing if the pieces
+        /// are too short to give it any room (`half` is then zero).
+        let kind: VideoTransitionKind?
+        /// How far the transition reaches on each side, in played seconds.
+        let half: Double
+
+        var opens: Double { at - half }
+        var closes: Double { at + half }
+    }
+
+    /// Every cut of a timeline, in order, with its transition's reach.
+    static func seams(_ timeline: MediaTimeline, withinSource duration: Double) -> [Seam] {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard pieces.count > 1 else { return [] }
+        var at: Double = 0
+        return (0..<(pieces.count - 1)).map { index in
+            at += pieces[index].playedSeconds
+            let kind = pieces[index].transitionOut
+            return Seam(
+                index: index, at: at, kind: kind,
+                half: VideoExporter.transitionHalf(
+                    kind, outgoingPlayedSeconds: pieces[index].playedSeconds,
+                    incomingPlayedSeconds: pieces[index + 1].playedSeconds
+                )
+            )
+        }
+    }
+
+    /// The transition at one cut.
+    static func transition(
+        atSeam seam: Int, in timeline: MediaTimeline, withinSource duration: Double
+    ) -> VideoTransitionKind? {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard seam >= 0, seam < pieces.count - 1 else { return nil }
+        return pieces[seam].transitionOut
+    }
+
+    /// Sets — or with `nil`, removes — the transition at one cut.
+    ///
+    /// ⚠️ **ONLY A REAL CUT.** An untouched clip, a single piece, or an index past
+    /// the last cut comes back unchanged: a transition stored where no cut is
+    /// would be invisible and would publish.
+    static func settingTransition(
+        _ kind: VideoTransitionKind?, atSeam seam: Int, in timeline: MediaTimeline,
+        withinSource duration: Double
+    ) -> MediaTimeline {
+        var pieces = resolved(timeline, withinSource: duration)
+        guard seam >= 0, seam < pieces.count - 1 else { return timeline }
+        pieces[seam].transitionOut = kind
+        return MediaTimeline(segments: pieces)
+    }
+
+    /// What the preview plays while a cut's transition is being chosen: the
+    /// transition's own window, and `lead` seconds either side of it — never
+    /// past the two pieces that meet there, nor outside the result.
+    ///
+    /// ⚠️ **PLAYED SECONDS THROUGHOUT** — the range is looped on the preview
+    /// item, whose clock is the result's.
+    static func rehearsal(
+        atSeam index: Int, in timeline: MediaTimeline, withinSource duration: Double,
+        lead: Double
+    ) -> (range: ClosedRange<Double>, window: ClosedRange<Double>)? {
+        let pieces = resolved(timeline, withinSource: duration)
+        let all = seams(timeline, withinSource: duration)
+        guard all.indices.contains(index), lead.isFinite else { return nil }
+        let seam = all[index]
+        let startsAt = seam.at - pieces[index].playedSeconds
+        let endsAt = seam.at + pieces[index + 1].playedSeconds
+        let total = playedSeconds(of: timeline, withinSource: duration)
+        let lower = max(seam.opens - max(lead, 0), startsAt, 0)
+        let upper = min(seam.closes + max(lead, 0), endsAt, total)
+        guard upper > lower else { return nil }
+        return (lower...upper, seam.opens...seam.closes)
+    }
+
+    // MARK: - Marks on the cuts
+
+    /// The `+` a held piece's cap carries: the cut the cap stands on, what that
+    /// cut carries, and the stretch of track a tap on it answers.
+    struct CapMark: Equatable, Sendable {
+        let edge: Edge
+        /// Which cut: the one after piece `index`.
+        let index: Int
+        let kind: VideoTransitionKind?
+        let reach: ClosedRange<CGFloat>
+    }
+
+    /// The `+` marks a held piece's caps carry — one per cap that stands on a
+    /// cut, start first.
+    ///
+    /// ⚠️ **ASKED FOR**: *"mettre le plus dans les pinces de sélection à la place
+    /// du trait vertical"*. The film's own two ends have no cut and keep their
+    /// grips. A transition belongs to the piece BEFORE its cut (F29), so the
+    /// start cap reads the piece before the held one and the end cap the held one.
+    ///
+    /// ⚠️ **A FINGER WIDE, MEASURED INWARDS.** The cap is the button and the held
+    /// film behind it is its slack: `reach` points from the cap's OUTER edge over
+    /// the held film, never a point past that edge — the neighbour's film shows
+    /// there, and a tap on it takes the neighbour (F8c). The two targets stop at
+    /// the held film's middle, the line where the two handles part, and a tie
+    /// goes to the start, as `edge(at:)`'s does: a tap and a drag at the same
+    /// point name the same cap.
+    static func capMarks(
+        _ placed: [Placement], holding held: Int, caps: Caps, reach: CGFloat = 44
+    ) -> [CapMark] {
+        guard placed.count > 1, placed.indices.contains(held), reach.isFinite, reach > 0 else { return [] }
+        let middle = (caps.start.upperBound + caps.end.lowerBound) / 2
+        var marks: [CapMark] = []
+        if held > 0 {
+            marks.append(CapMark(
+                edge: .start, index: held - 1, kind: placed[held - 1].piece.transitionOut,
+                reach: caps.start.lowerBound...max(
+                    min(caps.start.lowerBound + reach, middle), caps.start.upperBound
+                )
+            ))
+        }
+        if held < placed.count - 1 {
+            marks.append(CapMark(
+                edge: .end, index: held, kind: placed[held].piece.transitionOut,
+                reach: min(max(caps.end.upperBound - reach, middle), caps.end.lowerBound)...caps.end.upperBound
+            ))
+        }
+        return marks
+    }
+
+    /// One cut VoiceOver can reach, and what it carries.
+    struct SpokenSeam: Equatable, Sendable {
+        let index: Int
+        let kind: VideoTransitionKind?
+    }
+
+    /// The `+` on one cut: which cut, where its centre stands on the track, how
+    /// wide a finger may be to hit it, and what the cut carries.
+    struct SeamMark: Equatable, Sendable {
+        /// Which cut: the one after piece `index`.
+        let index: Int
+        let x: CGFloat
+        let hitWidth: CGFloat
+        let kind: VideoTransitionKind?
+    }
+
+    /// The marks the track draws on its cuts.
+    ///
+    /// ⚠️ **ON THE CUT, WHICH IS WHERE ONE PIECE'S TIME ENDS.** The daylight is
+    /// carved either side of it, so the disc stands centred in the gap.
+    ///
+    /// ⚠️ **NONE WHERE THE HELD PIECE'S CAPS ARE.** A cap is a handle, and a disc
+    /// on it would be two controls under one finger — the handle wins there, as
+    /// it wins everywhere else on the track.
+    ///
+    /// ⚠️ **THINNED, AND A CUT THAT CARRIES SOMETHING OUTRANKS ONE THAT DOES
+    /// NOT.** Short pieces at a small scale put cuts a few points apart; discs
+    /// that overlap are a smear nobody can aim at. A transition the author has
+    /// set must stay visible — it is the only sign it exists.
+    ///
+    /// ⚠️ **AND THE TARGETS NEVER OVERLAP.** Each is a finger wide at most and
+    /// no wider than the room to its neighbours, or to the held caps.
+    static func seamMarks(
+        _ placed: [Placement], minimumSpacing: CGFloat = 26,
+        hiding held: ClosedRange<CGFloat>? = nil, disc: CGFloat = 22, widest: CGFloat = 44
+    ) -> [SeamMark] {
+        guard placed.count > 1 else { return [] }
+        var kept: [(index: Int, x: CGFloat, kind: VideoTransitionKind?)] = []
+        for piece in placed.dropLast() {
+            let x = piece.to
+            guard x.isFinite else { continue }
+            if let held, x + disc / 2 > held.lowerBound, x - disc / 2 < held.upperBound { continue }
+            let mark = (index: piece.index, x: x, kind: piece.piece.transitionOut)
+            guard let last = kept.last, x - last.x < minimumSpacing else {
+                kept.append(mark)
+                continue
+            }
+            if last.kind == nil, mark.kind != nil { kept[kept.count - 1] = mark }
+        }
+        return kept.enumerated().map { position, mark in
+            var half = widest / 2
+            if position > 0 { half = min(half, (mark.x - kept[position - 1].x) / 2) }
+            if position + 1 < kept.count { half = min(half, (kept[position + 1].x - mark.x) / 2) }
+            if let held {
+                if held.upperBound <= mark.x { half = min(half, mark.x - held.upperBound) }
+                if held.lowerBound >= mark.x { half = min(half, held.lowerBound - mark.x) }
+            }
+            return SeamMark(index: mark.index, x: mark.x, hitWidth: max(half, 0) * 2, kind: mark.kind)
+        }
     }
 
     /// Where the pieces sit while one of them is in the author's hand: THE SHOT

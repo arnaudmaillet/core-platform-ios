@@ -26,7 +26,9 @@ struct MediaPreviewPlayerTests {
         let player = MediaPreviewPlayer()
         let surface = VideoRenderView()
         surface.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
-        await player.load(VideoExportPlan(sourceURL: try await clip()), in: surface) { 0 }
+        await player.load(VideoExportPlan(sourceURL: try await clip()), in: surface) {
+            VideoLoadLanding(seconds: 0)
+        }
         for _ in 0..<400 {
             if player.debugItemSeconds(in: surface) != nil { break }
             try await Task.sleep(for: .milliseconds(10))
@@ -63,6 +65,31 @@ struct MediaPreviewPlayerTests {
     /// what a STUB was handed; only this can say the one adapter that ships
     /// passes the plan on rather than, say, the file alone — which would look
     /// exactly like a working preview of an uncut clip.
+    /// ⚠️ **THE LOOP IS FORWARDED BOTH WAYS IN** — with a landing, and on its
+    /// own — and taken away again: an adapter that dropped either would leave
+    /// the row looping nothing, and every editor test green.
+    @Test func theLoopReachesThePlayer() async throws {
+        let player = MediaPreviewPlayer()
+        let surface = VideoRenderView()
+        surface.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
+        defer { player.stop(surface) }
+        await player.load(
+            VideoExportPlan(sourceURL: try await clip(seconds: 4), segments: [
+                VideoExportSegment(start: 0, end: 2), VideoExportSegment(start: 2, end: 4)
+            ]),
+            in: surface
+        ) { VideoLoadLanding(seconds: 1, loop: 1...3) }
+        #expect(player.debugItemEnd(in: surface).map { abs($0 - 3) < 0.01 } == true,
+                "the landing's loop was dropped: \(String(describing: player.debugItemEnd(in: surface)))")
+
+        player.setLoopRange(0.5...1.5, in: surface)
+        #expect(player.debugItemEnd(in: surface).map { abs($0 - 1.5) < 0.01 } == true,
+                "the new range was dropped: \(String(describing: player.debugItemEnd(in: surface)))")
+
+        player.setLoopRange(nil, in: surface)
+        #expect(player.debugItemEnd(in: surface) == nil, "the range was never taken away")
+    }
+
     @Test func anArrangementReachesThePlayerAsOneItem() async throws {
         let player = MediaPreviewPlayer()
         let surface = VideoRenderView()
@@ -74,7 +101,7 @@ struct MediaPreviewPlayerTests {
                 VideoExportSegment(start: 0, end: 1)
             ]),
             in: surface
-        ) { 0 }
+        ) { VideoLoadLanding(seconds: 0) }
 
         var length: Double?
         for _ in 0..<400 {

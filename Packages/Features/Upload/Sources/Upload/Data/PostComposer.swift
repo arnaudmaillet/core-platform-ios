@@ -111,7 +111,7 @@ public actor PostComposer: PostComposing {
     /// always succeeds on a file it has just written itself, so that branch is
     /// unreachable through the normal seam — and an unreachable fallback is one
     /// nobody has ever seen run.
-    private let posterFrame: @Sendable (URL) async -> UIImage?
+    private let posterFrame: @Sendable (ExportedVideo) async -> UIImage?
     private let resolveMaxAttempts: Int
     private let resolvePollSeconds: Double
     private let now: @Sendable () -> Date
@@ -132,7 +132,7 @@ public actor PostComposer: PostComposing {
         composedChannel: ComposedPostChannel,
         encoder: MediaEncoder = MediaEncoder(),
         videoExporter: VideoExporter = VideoExporter(),
-        posterFrame: @escaping @Sendable (URL) async -> UIImage? = {
+        posterFrame: @escaping @Sendable (ExportedVideo) async -> UIImage? = {
             await VideoExporter().posterImage(for: $0)
         },
         resolveMaxAttempts: Int = 6,
@@ -318,7 +318,7 @@ public actor PostComposer: PostComposing {
     private func uploadPoster(
         for exported: ExportedVideo, ownerID: AccountID
     ) async -> (image: UIImage, url: URL)? {
-        guard let frame = await posterFrame(exported.fileURL) else {
+        guard let frame = await posterFrame(exported) else {
             logger.warning("no poster frame for the picked video; thumbnail falls back to the clip")
             return nil
         }

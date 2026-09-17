@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaPlayback
 import UIKit
 
 /// The band's trim tenant: the film, with the rate chips standing above it when
@@ -18,6 +19,15 @@ import UIKit
 /// all of that by a number every one of those lines would have to learn. The
 /// track keeps its geometry; this stacks a second control on top of it.
 ///
+/// While a cut's transition is being chosen the film collapses into a line and
+/// the transitions row takes the room it gave up — the band keeps its height:
+///
+/// ```
+///        0:00      0:02      0:04
+///   ──────────▓▓▓▓█▓▓▓▓────────────    ← the track, collapsed
+///   [⊘ None] [☾ Black] [☀ White]  (✕)   ← MediaTransitionRowView, cards
+/// ```
+///
 /// ⚠️ **IT GROWS THE BAND RATHER THAN COVERING ANYTHING.** A floating panel was
 /// the other way, and it would sit exactly where the page indicator is — the band
 /// reserves its own room and the canvas is re-laid out around it, which is what
@@ -27,6 +37,10 @@ import UIKit
 final class MediaTimelineToolsView: UIView {
     let speeds = MediaSpeedRowView()
     let track = MediaTimelineTrackView()
+    let transitions = MediaTransitionRowView()
+
+    /// The cut whose transition is being chosen, if the row is open.
+    private(set) var editingSeam: Int?
 
     private let stack = UIStackView()
 
@@ -46,6 +60,54 @@ final class MediaTimelineToolsView: UIView {
         stack.addArrangedSubview(speeds)
         stack.addArrangedSubview(track)
         stack.pin(to: self)
+
+        // ⚠️ **NOT IN THE STACK.** The row stands in room the track already
+        // owns — the film's, once collapsed — so the band never changes height
+        // for it and the canvas above never moves.
+        transitions.constrain(in: self) { _ in
+            transitions.leadingAnchor.constraint(equalTo: track.leadingAnchor)
+            transitions.trailingAnchor.constraint(equalTo: track.trailingAnchor)
+            transitions.bottomAnchor.constraint(equalTo: track.bottomAnchor)
+            transitions.heightAnchor.constraint(equalToConstant: MediaTransitionRowView.height)
+        }
+    }
+
+    /// Collapses the track and opens the row on cut `seam`, lighting the stretch
+    /// the preview will loop. Returns false when the track refused — a finger is
+    /// holding something on it.
+    @discardableResult
+    func openTransitions(
+        atSeam seam: Int, chosen: VideoTransitionKind?,
+        rehearsal: ClosedRange<Double>?, window: ClosedRange<Double>?, animated: Bool
+    ) -> Bool {
+        track.showRehearsal(rehearsal, window: window, animated: editingSeam != nil && animated)
+        transitions.show(kind: chosen)
+        guard editingSeam == nil else {
+            editingSeam = seam
+            return true
+        }
+        guard track.setCompact(
+            true, bringingUnderTheNeedle: rehearsal?.lowerBound, animated: animated
+        ) else { return false }
+        editingSeam = seam
+        transitions.setOpen(true, animated: animated)
+        return true
+    }
+
+    /// States what the cut now carries, and the stretch that shows it.
+    func showTransition(
+        _ kind: VideoTransitionKind?, rehearsal: ClosedRange<Double>?, window: ClosedRange<Double>?
+    ) {
+        transitions.show(kind: kind)
+        track.showRehearsal(rehearsal, window: window, animated: true)
+    }
+
+    /// Puts the row away and opens the film again.
+    func closeTransitions(animated: Bool) {
+        guard editingSeam != nil else { return }
+        editingSeam = nil
+        transitions.setOpen(false, animated: animated)
+        track.setCompact(false, animated: animated)
     }
 
     @available(*, unavailable)

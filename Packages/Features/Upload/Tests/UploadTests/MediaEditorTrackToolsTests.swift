@@ -59,15 +59,24 @@ struct MediaEditorTrackToolsTests {
         /// asked to begin.
         private(set) var plans: [VideoExportPlan] = []
         private(set) var starts: [Double] = []
+        /// Where each accepted load landed, and what it looped.
+        private(set) var landings: [VideoLoadLanding] = []
         func load(
             _ plan: VideoExportPlan, in surface: VideoRenderView,
-            at start: @escaping @MainActor () -> Double?
+            landing: @escaping @MainActor () -> VideoLoadLanding?
         ) async {
-            guard let at = start() else { return }
+            guard let landed = landing() else { return }
             plans.append(plan)
-            starts.append(at)
+            starts.append(landed.seconds)
+            landings.append(landed)
         }
         private(set) var shownAsShot: [Double] = []
+        /// Every loop range the screen asked for, in order.
+        private(set) var loops: [ClosedRange<Double>?] = []
+        func setLoopRange(_ range: ClosedRange<Double>?, in surface: VideoRenderView) {
+            loops.append(range)
+        }
+
         func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {
             shownAsShot.append(seconds)
         }
@@ -674,6 +683,49 @@ struct MediaEditorTrackToolsTests {
         #expect(screen.preview.pauses.last == false, "the landing left the clip stopped")
     }
 
+    /// ⚠️ **NOTHING LOOPS A STRETCH UNTIL A TRANSITION IS BEING CHOSEN.** Every
+    /// other way in — opening, a carry, a released handle, a rate — plays the
+    /// whole arrangement, and asks the landing exactly once per load.
+    @Test func everyLoadOutsideTheModeLandsWithoutARange() async throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        let tools = try tools(in: screen)
+        try await landed(screen, beyond: 0)
+        let track = try splitInTwo(on: screen)
+
+        var loads = screen.preview.plans.count
+        track.debugLift(atContentX: track.debugPieceFrames[0].lowerBound + 10)
+        try #require(track.debugCarrying == 0, "nothing was lifted")
+        screen.window.layoutIfNeeded()
+        track.debugCarry(toTrackX: track.debugShotFrames[1].midX)
+        track.debugDrop()
+        screen.window.layoutIfNeeded()
+        try await landed(screen, beyond: loads)
+
+        loads = screen.preview.plans.count
+        track.select(1)
+        screen.window.layoutIfNeeded()
+        let centres = try #require(track.debugHandleCentres)
+        track.debugTakeHold(at: centres.end)
+        track.debugDrag(byPoints: -track.debugPointsPerSecond)
+        track.debugRelease()
+        try await landed(screen, beyond: loads)
+
+        loads = screen.preview.plans.count
+        screen.editor.debugActionBar.debugTap(
+            MediaEditorViewController.TrackAction.speed.rawValue
+        )
+        tools.speeds.debugTap(rate: 2)
+        try await landed(screen, beyond: loads)
+
+        let landings = screen.preview.landings
+        #expect(landings.count == screen.preview.plans.count,
+                "\(landings.count) landings for \(screen.preview.plans.count) loads")
+        #expect(landings.count >= 4, "guard: only \(landings.count) loads happened")
+        #expect(landings.allSatisfy { $0.loop == nil }, "a load looped a stretch: \(landings)")
+        #expect(screen.preview.loops.isEmpty, "a range was set: \(screen.preview.loops)")
+    }
+
     /// The stamp is the other half of "you can see what you did": a rate changes
     /// the readout's total, which says SOMETHING happened but not to which piece.
     @Test func aPieceThatIsNotAsShotIsStamped() throws {
@@ -1224,16 +1276,19 @@ struct MediaEditorTrackToolsTests {
     /// protect a finger that had missed a handle — so the author could not take
     /// the section on the other side of the cut, dragged the handle they could
     /// see, and watched the piece they had held all along move instead.
+    /// ⚠️ **FROM ITS FIRST VISIBLE POINT** — past the held cap, which is opaque
+    /// over the neighbour's first frames and answers for the cut it stands on.
     @Test func aTapPastTheCutTakesTheSectionOnTheOtherSideOfIt() throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
         let track = try splitInTwo(on: screen)
         #expect(track.debugSelectedPiece == 0, "guard: the left half is held")
 
-        track.debugTap(atContentX: track.debugPieceFrames[1].lowerBound + 4)
+        track.debugTap(atContentX: track.debugEndGrip.maxX + 4)
 
         #expect(track.debugSelectedPiece == 1,
                 "the tap landed on the second section's film and did not take it")
+        #expect(screen.editor.debugTransitionSeam == nil, "a tap on the film opened the cut")
     }
 
     /// And a tap PAST the film still keeps what is held: that is what the cap
@@ -1242,7 +1297,7 @@ struct MediaEditorTrackToolsTests {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
         let track = try splitInTwo(on: screen)
-        track.debugTap(atContentX: track.debugPieceFrames[1].lowerBound + 4)
+        track.debugTap(atContentX: track.debugEndGrip.maxX + 4)
         #expect(track.debugSelectedPiece == 1, "guard: the last section is held")
 
         track.debugTap(atContentX: track.debugPieceFrames[1].upperBound + 6)
@@ -1250,11 +1305,12 @@ struct MediaEditorTrackToolsTests {
         #expect(track.debugSelectedPiece == 1, "a finger on the closing cap put the piece down")
     }
 
-    /// ⚠️ **A PRESS ON A HELD PIECE'S CAP CARRIES THAT PIECE, NOT ITS NEIGHBOUR.**
-    /// By position alone the cap is inside the next piece — it is drawn on its
-    /// film — so the press lifted the wrong section, and took the selection with
-    /// it. A control belongs to the thing it controls.
-    @Test func apressOnTheHeldPiecesCapCarriesTheHeldPiece() throws {
+    /// ⚠️ **A PRESS ON A HELD PIECE'S CAP NEVER LIFTS ITS NEIGHBOUR** — by
+    /// position alone the cap is inside the next piece, drawn on its film, and a
+    /// press there once lifted the wrong section. A cap standing on a cut now
+    /// carries that cut's `+`, and a press on it is a tap (F27): it lifts
+    /// nothing at all. The neighbour is still lifted from its own film.
+    @Test func aPressOnTheHeldPiecesPlusLiftsNeitherPiece() throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
         let track = try splitInTwo(on: screen)
@@ -1263,9 +1319,10 @@ struct MediaEditorTrackToolsTests {
         // The closing cap of the held piece, which stands on the next one's film.
         track.debugLift(atContentX: track.debugPieceFrames[0].upperBound + 6)
 
-        #expect(track.debugCarrying == 0,
-                "the press lifted \(String(describing: track.debugCarrying)) instead of the piece it was on")
-        track.debugDrop()
+        #expect(track.debugCarrying == nil,
+                "the press on the cap's + lifted \(String(describing: track.debugCarrying))")
+        #expect(track.debugWouldLift(atContentX: track.debugEndGrip.maxX + 10),
+                "guard: the neighbour cannot be lifted from its own film")
     }
 
     /// Where a piece is drawn ON SCREEN — content points less the scroll.

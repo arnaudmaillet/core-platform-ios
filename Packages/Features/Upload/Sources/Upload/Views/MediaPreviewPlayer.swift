@@ -27,13 +27,22 @@ protocol MediaVideoPreviewing: AnyObject {
     /// re-ordered pieces.
     ///
     /// ⚠️ **BINDS IF NOTHING IS BOUND, OTHERWISE SWAPS THE ITEM IN PLACE**, keeping
-    /// the surface's last frame and a pause the author asked for. `start` is read
-    /// after everything asynchronous, just before the item goes in: where to
-    /// begin, or nil to abandon a load the screen has moved past.
+    /// the surface's last frame and a pause the author asked for. `landing` is
+    /// read after everything asynchronous, just before the item goes in: where
+    /// to begin and what to loop, or nil to abandon a load the screen has moved
+    /// past.
     func load(
         _ plan: VideoExportPlan, in surface: VideoRenderView,
-        at start: @escaping @MainActor () -> Double?
+        landing: @escaping @MainActor () -> VideoLoadLanding?
     ) async
+
+    /// Loops a stretch of the arrangement's PLAYED seconds — the few seconds
+    /// around a cut while its transition is chosen — or, with nil, the whole
+    /// item again. Never starts or stops the clip.
+    ///
+    /// ⚠️ **NO DEFAULT IMPLEMENTATION, ON PURPOSE.** A stub that inherited a
+    /// silent one could not say whether the screen ever asked.
+    func setLoopRange(_ range: ClosedRange<Double>?, in surface: VideoRenderView)
 
     /// Shows the file as shot, AT ONCE, in place of the arrangement — for a trim
     /// handle being dragged, which may stand on film the arrangement does not
@@ -121,11 +130,15 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
 
     func load(
         _ plan: VideoExportPlan, in surface: VideoRenderView,
-        at start: @escaping @MainActor () -> Double?
+        landing: @escaping @MainActor () -> VideoLoadLanding?
     ) async {
         // An arrangement is never shared — the controller registers it under no
         // URL. There is one player and one page; sharing is a feed concern.
-        await controller.load(plan, in: surface, at: start)
+        await controller.load(plan, in: surface, landing: landing)
+    }
+
+    func setLoopRange(_ range: ClosedRange<Double>?, in surface: VideoRenderView) {
+        controller.setLoopRange(range, in: surface)
     }
 
     func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {
@@ -191,6 +204,14 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
     /// Internal for tests: how long the item the controller is running lasts.
     func debugItemSeconds(in surface: VideoRenderView) -> Double? {
         controller.playhead(in: surface)?.seconds
+    }
+    /// Internal for tests: where the item the controller is running stops, or
+    /// nil when it plays to its end.
+    func debugItemEnd(in surface: VideoRenderView) -> Double? {
+        guard let end = controller.debugItem(in: surface)?.forwardPlaybackEndTime, end.isValid else {
+            return nil
+        }
+        return end.seconds
     }
     /// Internal for tests: what the controller underneath was actually asked for.
     var debugLastSeekToleranceSeconds: Double? { controller.debugLastSeekToleranceSeconds }
