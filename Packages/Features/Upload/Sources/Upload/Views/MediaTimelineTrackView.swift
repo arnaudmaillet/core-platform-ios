@@ -319,6 +319,23 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     private let carryTicks = UISelectionFeedbackGenerator()
     /// One stamp per piece that is not playing as shot.
     private var rateStamps: [UILabel] = []
+    /// What each stamp last said, so a scroll re-sets nothing.
+    private var rateStampWords: [String] = []
+
+    /// The symbol a filtered piece's stamp carries.
+    static let filterStampGlyph = "camera.filters"
+
+    private static func filterStamp(rate: String?) -> NSAttributedString {
+        let symbol = UIImage(
+            systemName: filterStampGlyph,
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+        )?.withTintColor(.white, renderingMode: .alwaysOriginal)
+        let stamp = NSMutableAttributedString(attachment: NSTextAttachment(image: symbol ?? UIImage()))
+        if let rate {
+            stamp.append(NSAttributedString(string: " " + rate))
+        }
+        return stamp
+    }
     /// Every `+` the track would draw, worked out on the last layout.
     private var seamMarks: [MediaTimelining.SeamMark] = []
     /// The `+` buttons on screen, keyed by their cut.
@@ -2046,8 +2063,15 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// closing cap when that piece is the one before; and inserted under the
     /// selection's ink, which is always the thing on top.
     private func layOutTheRateStamps(_ drawn: [MediaTimelining.Span], stripY: CGFloat) {
-        let stamped = drawn.filter { abs($0.placement.piece.speed - 1) > 0.001 }
-        while rateStamps.count > stamped.count { rateStamps.removeLast().removeFromSuperview() }
+        // ⚠️ **A FILTERED PIECE IS STAMPED TOO** — the filter's symbol before its
+        // rate, if it has one: nothing else on the film says it wears a look.
+        let stamped = drawn.filter {
+            abs($0.placement.piece.speed - 1) > 0.001 || $0.placement.piece.filter != nil
+        }
+        while rateStamps.count > stamped.count {
+            rateStamps.removeLast().removeFromSuperview()
+            rateStampWords.removeLast()
+        }
         while rateStamps.count < stamped.count {
             let stamp = UILabel()
             stamp.font = .monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
@@ -2059,11 +2083,25 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             stamp.layer.shadowOffset = .zero
             content.insertSubview(stamp, belowSubview: topBar)
             rateStamps.append(stamp)
+            rateStampWords.append("")
         }
         let caps = heldCaps()
-        for (stamp, span) in zip(rateStamps, stamped) {
-            stamp.text = MediaTimelining.rateLabel(span.placement.piece.speed)
-            stamp.sizeToFit()
+        for (index, (stamp, span)) in zip(rateStamps, stamped).enumerated() {
+            let piece = span.placement.piece
+            let rate = abs(piece.speed - 1) > 0.001 ? MediaTimelining.rateLabel(piece.speed) : nil
+            // ⚠️ SET ONLY WHEN THE WORDS CHANGE (charter T8): this runs on every
+            // scroll, and an attributed string is an allocation.
+            let words = (piece.filter == nil ? "" : "filter|") + (rate ?? "")
+            if rateStampWords[index] != words {
+                rateStampWords[index] = words
+                if piece.filter != nil {
+                    stamp.attributedText = Self.filterStamp(rate: rate)
+                } else {
+                    stamp.attributedText = nil
+                    stamp.text = rate
+                }
+                stamp.sizeToFit()
+            }
             var from = span.from
             var to = span.to
             if let caps, selected == span.index - 1 {
@@ -3534,7 +3572,24 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         }
     }
     /// Internal for tests: what the pieces that are not as shot are stamped with.
-    var debugRateStamps: [String] { rateStamps.compactMap { $0.isHidden ? nil : $0.text } }
+    var debugRateStamps: [String] {
+        rateStamps.compactMap { stamp in
+            guard !stamp.isHidden else { return nil }
+            // The rate alone — a filter's symbol is read by `debugFilterStamps`.
+            return stamp.attributedText.map {
+                $0.string.replacingOccurrences(of: "\u{FFFC}", with: "").trimmingCharacters(in: .whitespaces)
+            } ?? stamp.text
+        }.filter { !$0.isEmpty }
+    }
+    /// Internal for tests: how many visible stamps DRAW the filter symbol —
+    /// read off the attachment's image, not off the piece.
+    var debugFilterStamps: Int {
+        rateStamps.filter { stamp in
+            guard !stamp.isHidden, let text = stamp.attributedText, text.length > 0 else { return false }
+            let attachment = text.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment
+            return attachment?.image?.description.contains("system: \(Self.filterStampGlyph))") == true
+        }.count
+    }
     /// Internal for tests: where those stamps are, in content points — which is
     /// the half that says whether anyone can read them.
     var debugRateStampFrames: [CGRect] { rateStamps.filter { !$0.isHidden }.map(\.frame) }

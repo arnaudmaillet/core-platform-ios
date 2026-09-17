@@ -27,6 +27,23 @@ struct MediaTimelineCompactTests {
         return track
     }
 
+    /// ⚠️ **A FILTERED PIECE SAYS SO ON THE FILM** — its stamp draws the filter
+    /// symbol, before its rate when it has one; an unfiltered piece at 1×
+    /// carries no stamp at all.
+    @Test func aFilteredPieceWearsAStamp() {
+        let track = track([
+            MediaSegment(start: 0, end: 3, filter: .mono),
+            MediaSegment(start: 3, end: 6, speed: 2, filter: .noir),
+            MediaSegment(start: 6, end: 10)
+        ])
+
+        #expect(track.debugFilterStamps == 2, "\(track.debugFilterStamps) filter stamps")
+        #expect(track.debugRateStamps == ["2×"], "the rates read \(track.debugRateStamps)")
+
+        let plain = self.track([MediaSegment(start: 0, end: 3), MediaSegment(start: 3, end: 10)])
+        #expect(plain.debugFilterStamps == 0 && plain.debugRateStamps.isEmpty)
+    }
+
     /// ⚠️ **A PLACEMENT BEFORE THE TRACK'S FIRST LAYOUT SURVIVES IT.** The
     /// first layout puts the film on the start of the result, once; the track
     /// opening over a running clip is placed on the clip's moment in the same

@@ -90,6 +90,13 @@ protocol MediaEditorHosting: AnyObject {
     var trackSeconds: Double { get }
     /// Re-decides which of the track's actions may be tapped.
     func refreshTrackActions()
+
+    // MARK: A piece's filter
+
+    var segmentFilterIsOpen: Bool { get }
+    var segmentFilterActionEnabled: Bool { get }
+    func toggleSegmentFilters()
+    func segmentFilterRehearsal(in timeline: MediaTimeline, fileSeconds: Double) -> ClosedRange<Double>?
 }
 
 extension MediaEditorViewController: MediaEditorHosting {

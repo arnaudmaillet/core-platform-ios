@@ -2,7 +2,15 @@ import DesignSystem
 import MediaPlayback
 import UIKit
 
-/// The transitions a cut can carry, under the collapsed track.
+/// A row of choices under the collapsed track: the transitions a cut can
+/// carry (`MediaTransitionRowView`), or the filters a piece can wear
+/// (`MediaSegmentFilterRowView`).
+///
+/// ⚠️ **ONE ROW, TWO CLIENTS.** The piece's filter row was asked for
+/// *"exactement comme on a fait avec l'affichage des transitions disponibles"* —
+/// so it IS that row, with pictures on its cards instead of symbols: the fade,
+/// the glass, the rest stops, the reveal and the "no touch until it has landed"
+/// rule are written once.
 ///
 /// ```
 ///   ────────▓▓▓▓█▓▓▓▓──────────              ← the track, collapsed
@@ -32,31 +40,16 @@ import UIKit
 /// ⚠️ **THE FADE IS A MASK ON A HOST THAT DOES NOT SCROLL** — the crop tools'
 /// lesson: a mask framed in a scroll view's bounds travels with its content.
 @MainActor
-final class MediaTransitionRowView: UIView {
-    private enum Metrics {
-        /// A card is as tall as the row, and as wide as the filter row's
-        /// thumbnails — the strips of this flow agree.
-        static let cardWidth: CGFloat = 56
-        static let cardCorner: CGFloat = 10
-        static let cardInset: CGFloat = 4
-        /// ⚠️ **NO BOX OF ITS OWN IS NEEDED FOR THE WORDS TO LINE UP.** The four
-        /// symbols draw at different heights, but their alignment rects — what
-        /// the stack lays out — are one height at one point size (measured: a
-        /// fixed 18pt box changed nothing).
-        static let glyph: CGFloat = 14
-        static let glyphGap: CGFloat = 2
-        static let caption: CGFloat = 11
-        static let rim: CGFloat = 1
-        static let cardFill = UIColor.black.withAlphaComponent(0.55)
-        static let cardRim = UIColor.white.withAlphaComponent(0.2)
-        static let close: CGFloat = 36
-        /// A finger's width around the glass.
-        static let closeReach: CGFloat = 44
-        /// How far a card travels while it dissolves, before the glass.
-        static let fade: CGFloat = 52
-        /// Past the ramp, where the last card comes to rest.
-        static let restPastTheRamp: CGFloat = 8
+final class BandChoiceRowView<Choice: Equatable>: UIView {
+    /// What a card says about its choice.
+    struct Face {
+        /// The symbol on the card — nil for a card that shows a picture.
+        var glyph: String?
+        var label: String
+        var spoken: String
     }
+
+    private typealias Metrics = BandChoiceMetrics
 
     /// ⚠️ **EXACTLY THE ROOM THE LINE FREES.** The track keeps its height while
     /// it collapses; this row lives in what the film gave up, less the band's
@@ -65,9 +58,9 @@ final class MediaTransitionRowView: UIView {
         MediaTimelineTrackView.height - MediaTimelineTrackView.compactHeight - Spacing.sm
     }
 
-    /// A choice was tapped — `nil` is "None". Fires on every tap, the chosen
-    /// one included: tapping it again replays the transition.
-    var onPick: ((VideoTransitionKind?) -> Void)?
+    /// A choice was tapped. Fires on every tap, the chosen one included:
+    /// tapping it again replays it.
+    var onPick: ((Choice) -> Void)?
     /// The close button was tapped.
     var onClose: (() -> Void)?
 
@@ -86,14 +79,17 @@ final class MediaTransitionRowView: UIView {
     }()
     private let scroller = ChipScrollView()
     private let row = UIStackView()
-    private var cards: [TransitionCard] = []
-    private var chosen: VideoTransitionKind?
+    private var cards: [ChoiceCard] = []
+    private var chosen: Choice
 
     private let closeHost = CloseHost()
     private let glass = UIVisualEffectView(effect: nil)
     private let closeButton = UIButton(type: .custom)
 
-    init() {
+    init(
+        choices: [Choice], initial: Choice, closeLabel: String, face: (Choice) -> Face
+    ) {
+        chosen = initial
         super.init(frame: .zero)
         backgroundColor = .clear
         isHidden = true
@@ -116,9 +112,9 @@ final class MediaTransitionRowView: UIView {
         scroller.pin(to: fadeHost)
         fadeHost.pin(to: self)
 
-        for kind in MediaTransitionCatalog.choices {
-            let card = TransitionCard(kind: kind)
-            card.onTap = { [weak self] in self?.pick(kind) }
+        for choice in choices {
+            let card = ChoiceCard(choice: choice, face: face(choice))
+            card.onTap = { [weak self] in self?.pick(choice) }
             cards.append(card)
             row.addArrangedSubview(card)
         }
@@ -135,7 +131,7 @@ final class MediaTransitionRowView: UIView {
             for: .normal
         )
         closeButton.tintColor = .white
-        closeButton.accessibilityLabel = "Close transitions"
+        closeButton.accessibilityLabel = closeLabel
         closeButton.addAction(
             UIAction { [weak self] _ in self?.onClose?() }, for: .primaryActionTriggered
         )
@@ -195,8 +191,8 @@ final class MediaTransitionRowView: UIView {
         CATransaction.commit()
     }
 
-    /// States which choice the cut carries, without announcing it.
-    func show(kind: VideoTransitionKind?) {
+    /// States which choice is held, without announcing it.
+    func show(kind: Choice) {
         guard kind != chosen else { return }
         chosen = kind
         dress()
@@ -256,7 +252,7 @@ final class MediaTransitionRowView: UIView {
     /// carrying Crumble opened on None, Black, White and Zoom, with nothing on
     /// screen saying what the cut carries — the white card was scrolled away.
     func revealChosen(animated: Bool) {
-        guard let card = cards.first(where: { $0.kind == chosen }), bounds.width > 0 else { return }
+        guard let card = cards.first(where: { $0.choice == chosen }), bounds.width > 0 else { return }
         layoutIfNeeded()
         let frame = card.convert(card.bounds, to: scroller)
         let offset = scroller.contentOffset.x
@@ -281,44 +277,78 @@ final class MediaTransitionRowView: UIView {
         return glass
     }
 
-    private func pick(_ kind: VideoTransitionKind?) {
+    /// Puts `picture` on the card of `choice` — the filter row's thumbnails.
+    func setPicture(_ picture: UIImage?, for choice: Choice) {
+        cards.first { $0.choice == choice }?.setPicture(picture)
+    }
+
+    private func pick(_ kind: Choice) {
         show(kind: kind)
         onPick?(kind)
     }
 
     private func dress() {
-        for card in cards { card.setChosen(card.kind == chosen) }
+        for card in cards { card.setChosen(card.choice == chosen) }
     }
 
-    /// One choice: its symbol, and its word under it, on a card.
-    private final class TransitionCard: UIControl {
-        let kind: VideoTransitionKind?
+    /// One choice: its symbol and its word under it, on a card — or, for a
+    /// choice with no symbol, its picture filling the card under its word.
+    private final class ChoiceCard: UIControl {
+        let choice: Choice
+        let face: Face
         var onTap: (() -> Void)?
         private let glyph = UIImageView()
         private let caption = UILabel()
+        /// ⚠️ **INSET BY THE RING, SO THE CARD'S OWN FILL DRAWS IT** — white when
+        /// chosen, dark otherwise, the same fill a symbol card is read by.
+        private let picture = UIImageView()
+        private let shade = CAGradientLayer()
 
-        init(kind: VideoTransitionKind?) {
-            self.kind = kind
+        init(choice: Choice, face: Face) {
+            self.choice = choice
+            self.face = face
             super.init(frame: .zero)
-            glyph.image = UIImage(
-                systemName: MediaTransitionCatalog.glyph(for: kind),
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: Metrics.glyph, weight: .semibold)
-            )
+            if let symbol = face.glyph {
+                glyph.image = UIImage(
+                    systemName: symbol,
+                    withConfiguration: UIImage.SymbolConfiguration(pointSize: Metrics.glyph, weight: .semibold)
+                )
+            } else {
+                picture.contentMode = .scaleAspectFill
+                picture.clipsToBounds = true
+                picture.layer.cornerRadius = Metrics.cardCorner - Metrics.ring
+                picture.layer.cornerCurve = .continuous
+                picture.isUserInteractionEnabled = false
+                shade.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.6).cgColor]
+                shade.locations = [0.35, 1]
+                picture.layer.addSublayer(shade)
+                picture.constrain(in: self) { view in
+                    picture.topAnchor.constraint(equalTo: view.topAnchor, constant: Metrics.ring)
+                    picture.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Metrics.ring)
+                    picture.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Metrics.ring)
+                    picture.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Metrics.ring)
+                }
+            }
             glyph.contentMode = .center
-            caption.text = MediaTransitionCatalog.label(for: kind)
+            caption.text = face.label
             caption.font = .systemFont(ofSize: Metrics.caption, weight: .semibold)
             caption.textAlignment = .center
             caption.numberOfLines = 1
             caption.adjustsFontSizeToFitWidth = true
             caption.minimumScaleFactor = 0.8
-            let stack = UIStackView(arrangedSubviews: [glyph, caption])
+            let stack = UIStackView(arrangedSubviews: face.glyph == nil ? [caption] : [glyph, caption])
             stack.axis = .vertical
             stack.alignment = .center
             stack.spacing = Metrics.glyphGap
             stack.isUserInteractionEnabled = false
+            // A symbol card centres its stack; a picture card sets its word
+            // along the bottom, over the shade.
+            let vertical = face.glyph == nil
+                ? stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Metrics.cardInset)
+                : stack.centerYAnchor.constraint(equalTo: centerYAnchor)
             stack.constrain(in: self) { view in
                 stack.centerXAnchor.constraint(equalTo: view.centerXAnchor)
-                stack.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+                vertical
                 stack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: Metrics.cardInset)
                 stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -Metrics.cardInset)
             }
@@ -328,8 +358,8 @@ final class MediaTransitionRowView: UIView {
             layer.borderColor = Metrics.cardRim.cgColor
             addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
             isAccessibilityElement = true
-            let word = MediaTransitionCatalog.label(for: kind)
-            let spoken = kind?.spokenLabel ?? "No transition"
+            let word = face.label
+            let spoken = face.spoken
             accessibilityLabel = spoken
             // Voice Control is asked by what is written on the card.
             accessibilityUserInputLabels = word == spoken ? [word] : [word, spoken]
@@ -347,14 +377,29 @@ final class MediaTransitionRowView: UIView {
         func setChosen(_ chosen: Bool) {
             backgroundColor = chosen ? .white : Metrics.cardFill
             layer.borderWidth = chosen ? 0 : Metrics.rim
-            let ink: UIColor = chosen ? .black : .white
+            // ⚠️ A PICTURE'S WORD STAYS WHITE, over its shade; only the ring
+            // around the picture says it is chosen.
+            let ink: UIColor = chosen && face.glyph != nil ? .black : .white
             glyph.tintColor = ink
             caption.textColor = ink
             accessibilityTraits = chosen ? [.button, .selected] : [.button]
         }
 
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            shade.frame = picture.bounds
+            CATransaction.commit()
+        }
+
+        func setPicture(_ image: UIImage?) {
+            picture.image = image
+        }
+
         #if DEBUG
-        var debugGlyph: UIView { glyph }
+        var debugPicture: UIImage? { picture.image }
+        var debugGlyph: UIView { face.glyph == nil ? picture : glyph }
         var debugCaption: UIView { caption }
         #endif
     }
@@ -374,18 +419,20 @@ final class MediaTransitionRowView: UIView {
 }
 
 #if DEBUG
-extension MediaTransitionRowView {
+extension BandChoiceRowView {
     /// Internal for tests: each choice's word, in the order shown.
-    var debugLabels: [String] { cards.map { MediaTransitionCatalog.label(for: $0.kind) } }
+    var debugLabels: [String] { cards.map(\.face.label) }
     /// Internal for tests: the word of the card DRAWN as chosen — read off its
     /// fill, not off a flag set beside it.
     var debugChosen: [String] {
-        cards.filter { $0.backgroundColor == .white }.map { MediaTransitionCatalog.label(for: $0.kind) }
+        cards.filter { $0.backgroundColor == .white }.map(\.face.label)
     }
     /// Internal for tests: taps a choice exactly as a finger would.
-    func debugTap(_ kind: VideoTransitionKind?) {
-        cards.first { $0.kind == kind }?.sendActions(for: .touchUpInside)
+    func debugTap(_ kind: Choice) {
+        cards.first { $0.choice == kind }?.sendActions(for: .touchUpInside)
     }
+    /// Internal for tests: the picture each card shows, in order.
+    var debugPictures: [UIImage?] { cards.map(\.debugPicture) }
     func debugTapClose() { closeButton.sendActions(for: .primaryActionTriggered) }
     var debugFadeStops: [Double] { (fade.locations ?? []).map(\.doubleValue) }
     var debugFadeFrame: CGRect { fade.frame }
@@ -408,3 +455,69 @@ extension MediaTransitionRowView {
     var debugScroller: UIScrollView { scroller }
 }
 #endif
+
+/// ⚠️ **AT FILE SCOPE: A GENERIC TYPE CANNOT HOLD STATIC STORED PROPERTIES.**
+private enum BandChoiceMetrics {
+    /// A card is as tall as the row, and as wide as the filter row's
+    /// thumbnails — the strips of this flow agree.
+    static let cardWidth: CGFloat = 56
+    static let cardCorner: CGFloat = 10
+    static let cardInset: CGFloat = 4
+    /// ⚠️ **NO BOX OF ITS OWN IS NEEDED FOR THE WORDS TO LINE UP.** The four
+    /// symbols draw at different heights, but their alignment rects — what
+    /// the stack lays out — are one height at one point size (measured: a
+    /// fixed 18pt box changed nothing).
+    static let glyph: CGFloat = 14
+    static let glyphGap: CGFloat = 2
+    static let caption: CGFloat = 11
+    static let rim: CGFloat = 1
+    /// The chosen ring around a picture card.
+    static let ring: CGFloat = 2
+    static let cardFill = UIColor.black.withAlphaComponent(0.55)
+    static let cardRim = UIColor.white.withAlphaComponent(0.2)
+    static let close: CGFloat = 36
+    /// A finger's width around the glass.
+    static let closeReach: CGFloat = 44
+    /// How far a card travels while it dissolves, before the glass.
+    static let fade: CGFloat = 52
+    /// Past the ramp, where the last card comes to rest.
+    static let restPastTheRamp: CGFloat = 8
+}
+
+
+/// The transitions a cut can carry.
+typealias MediaTransitionRowView = BandChoiceRowView<VideoTransitionKind?>
+
+extension BandChoiceRowView where Choice == VideoTransitionKind? {
+    convenience init() {
+        self.init(
+            choices: MediaTransitionCatalog.choices, initial: nil, closeLabel: "Close transitions"
+        ) { kind in
+            Face(
+                glyph: MediaTransitionCatalog.glyph(for: kind),
+                label: MediaTransitionCatalog.label(for: kind),
+                spoken: kind?.spokenLabel ?? "No transition"
+            )
+        }
+    }
+}
+
+/// The filters one piece of a clip can wear — `nil` first, for none.
+typealias MediaSegmentFilterRowView = BandChoiceRowView<MediaFilter?>
+
+extension BandChoiceRowView where Choice == MediaFilter? {
+    /// Every choice the row offers, in order: nothing first, then the looks.
+    static var filterChoices: [MediaFilter?] {
+        [nil] + MediaFilter.allCases.filter { $0 != .original }.map { $0 }
+    }
+
+    convenience init() {
+        self.init(choices: Self.filterChoices, initial: nil, closeLabel: "Close filters") { filter in
+            Face(
+                glyph: nil,
+                label: filter?.name ?? "None",
+                spoken: filter.map { "\($0.name) filter" } ?? "No filter"
+            )
+        }
+    }
+}

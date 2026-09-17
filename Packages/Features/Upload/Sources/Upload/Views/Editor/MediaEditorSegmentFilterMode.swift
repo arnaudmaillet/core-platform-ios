@@ -14,11 +14,10 @@ import UIKit
 /// (`TrackAction.filter`), inside the timeline's own tenant, so its `tenant` is
 /// nil and the category bar never opens it.
 ///
-/// ⚠️ **A STUB: THE ACTION STAYS DISABLED AND NOTHING OPENS.** The segment-filter
-/// slice (S7) fills it: `actionEnabled` while a piece is held and the file's
-/// real length is known, the focus recorded BEFORE the track collapses
-/// (`setCompact(true)` deselects), the row, the loop over the piece, and every
-/// way off the clip closing it.
+/// ⚠️ **THE SCREEN KEEPS THE STATE; THIS FORWARDS.** The row shares the
+/// transitions row's machinery — the loop, the saved pause, every way off the
+/// clip — which lives in the screen; a second copy here would be two rules for
+/// one surface.
 @MainActor
 final class MediaEditorSegmentFilterMode: MediaEditorMode {
     private weak var host: (any MediaEditorHosting)?
@@ -30,18 +29,18 @@ final class MediaEditorSegmentFilterMode: MediaEditorMode {
     /// Whether the row is open on a piece. While it is, the screen disables
     /// split, speed and the undo arrow — they would move the piece it is open
     /// on.
-    var isOpen: Bool { false }
+    var isOpen: Bool { host?.segmentFilterIsOpen ?? false }
 
     /// Whether the track's filter action may be tapped.
-    var actionEnabled: Bool { false }
+    var actionEnabled: Bool { host?.segmentFilterActionEnabled ?? false }
 
     /// The track's filter action was tapped.
-    func actionTapped() {}
+    func actionTapped() { host?.toggleSegmentFilters() }
 
     /// The stretch of `timeline`'s played seconds the preview loops while the
     /// row is open on this clip, or nil.
     func rehearsal(in timeline: MediaTimeline, fileSeconds: Double) -> ClosedRange<Double>? {
-        nil
+        host?.segmentFilterRehearsal(in: timeline, fileSeconds: fileSeconds)
     }
 
     var tenant: UIView? { nil }
