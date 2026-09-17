@@ -780,7 +780,7 @@ final class MediaEditorViewController: UIViewController {
         super.viewWillDisappear(animated)
         // ⚠️ BEFORE `exitCrop`, WHICH SETTLES THE CANVAS AND WOULD START IT AGAIN.
         stopPreview()
-        exitCrop()
+        exitCrop(resuming: false)
         // ⚠️ **AND EVERY MODE UNWINDS WHAT IT HOLDS, FOR THE REASON CROP DOES** —
         // "Next" pushes from the middle of any of them, and a lock, a sheet or a
         // keyboard left behind would be inherited by the finalisation screen.
@@ -2050,9 +2050,6 @@ final class MediaEditorViewController: UIViewController {
     /// go", AND IT IS NOW FALSE.** Videos publish. Leaving it would have the
     /// screen tell the author their clip is about to be dropped while it quietly
     /// posts it — a notice outliving its reason, which is worse than no notice.
-    private lazy var cropUnavailable = BandNoticeView(
-        "A video can't be cropped yet — it'll be posted as it is."
-    )
 
     /// The clip as a strip of film pushed past a fixed needle, with the rate
     /// chips above it when they have been asked for.
@@ -2631,21 +2628,16 @@ final class MediaEditorViewController: UIViewController {
     }()
 
     private func enterCrop() {
-        guard let id = currentItemID, let item = itemsByID[id] else { return }
-        guard !item.isVideo else {
-            // ⚠️ SAID, NOT SILENTLY DROPPED — AND THE REASON HAS NARROWED.
-            // `post()` no longer discards videos; a clip publishes. What it
-            // cannot carry is an EDIT: `MediaCrop.apply` and `MediaFilter` are
-            // `UIImage`-to-`UIImage`, so the only thing this mode could cut here
-            // is the poster frame, and the cut would never reach the file that
-            // gets uploaded. Still a control that reaches nothing — for a
-            // different reason, written down in
-            // `dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4.
-            setEditingAccessory(cropUnavailable)
-            return
-        }
+        guard let id = currentItemID, itemsByID[id] != nil else { return }
         guard !isCropping else { return }
         isCropping = true
+        // ⚠️ **A CLIP IS CROPPED ON ITS POSTER, AND IT STOPS WHILE IT IS.** The
+        // crop is a rectangle of the picture, the same on every frame, so the
+        // poster is enough to aim it; the playing item is put away because the
+        // surface covers it and its render size is about to change. Leaving the
+        // mode settles the canvas, which plays the clip again — composed with the
+        // crop the compositor now draws, and published with it.
+        stopPreview()
         lockCanvas(by: .crop)
 
         cropSurface.translatesAutoresizingMaskIntoConstraints = false
@@ -2712,7 +2704,10 @@ final class MediaEditorViewController: UIViewController {
         }
     }
 
-    private func exitCrop() {
+    ///
+    /// `resuming` plays the settled page's clip again — with the crop just
+    /// made, since the item is built anew — unless the screen is on its way out.
+    private func exitCrop(resuming: Bool = true) {
         guard isCropping else { return }
         isCropping = false
         croppingID = nil
@@ -2736,6 +2731,9 @@ final class MediaEditorViewController: UIViewController {
         // picture is already held, which it is: the surface has been showing it.
         if let id = croppingID ?? currentItemID { redraw(id) }
         leaveCropGracefully()
+        // ⚠️ **NOT LEFT TO A SETTLE THAT MAY NEVER COME.** Entering stopped the
+        // clip; nothing scrolls on the way out, so nothing else would start it.
+        if resuming { playSettledPage() }
     }
 
     /// The reverse of `settleIntoCrop`: the frame lets go and the picture opens

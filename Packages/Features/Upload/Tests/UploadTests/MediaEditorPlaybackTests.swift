@@ -244,19 +244,11 @@ struct MediaEditorPlaybackTests {
 
     // MARK: - Who stops
 
-    /// ⚠️ **A NOTICE MUST NOT SILENTLY STOP THE MEDIA — AND THIS TEST ASSERTED
-    /// THE OPPOSITE FIRST.** It read `enteringCropStopsTheClip`, on the
-    /// reasonable-sounding ground that crop lifts the picture onto its own
-    /// surface. It does not, for a video: `enterCrop` refuses one and draws a
-    /// line of text in the band instead, leaving the page exactly as it was. So
-    /// the `stopPreview()` written into `enterCrop` for this was unreachable —
-    /// dead code guarding a case that cannot happen — and the clip must carry
-    /// on, or a message about an unavailable tool would look like the tool had
-    /// done something.
-    ///
-    /// When video crop lands (`IOS_VIDEO_CAPTURE_UPLOAD` §5 P4) the refusal goes
-    /// and this becomes a real decision again. It is not one today.
-    @Test func choosingCropOnAVideoDrawsANoticeAndLeavesTheClipRunning() async throws {
+    /// ⚠️ **CROPPING A CLIP STOPS IT, AND LEAVING PLAYS IT CROPPED.** The
+    /// surface covers the canvas and the render size is about to change, so the
+    /// item goes; the settle that ends the mode brings a new one, carrying the
+    /// crop the author just made.
+    @Test func croppingAClipStopsItAndLeavingPlaysItCropped() async throws {
         let screen = open(Self.items(3, videosAt: [1]))
         screen.editor.debugScrollToPage(1)
         try await settle(until: { screen.preview.played.count == 1 })
@@ -265,10 +257,19 @@ struct MediaEditorPlaybackTests {
         screen.editor.debugCategoryBar.select(4) // Crop
         screen.window.layoutIfNeeded()
 
-        #expect(screen.editor.debugBand.content is BandNoticeView,
-                "guard: crop refused the video and said so")
-        #expect(screen.editor.debugIsCropping == false, "nothing was lifted")
-        #expect(screen.preview.boundCount == 1, "so the clip carries on")
+        #expect(screen.editor.debugIsCropping, "crop refused the video")
+        #expect(screen.preview.boundCount == 0, "the clip played on under the crop")
+
+        let cut = MediaCrop(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1))
+        screen.editor.debugCropSurface.onChange?(cut)
+        try #require(screen.editor.debugCrop(for: "video-1") == cut,
+                     "guard: the crop was not stored: \(screen.editor.debugCrop(for: "video-1"))")
+        screen.editor.debugCategoryBar.select(3) // Filters — leaves the crop
+        screen.window.layoutIfNeeded()
+        try await settle(until: { screen.preview.played.count == 2 })
+
+        #expect(screen.preview.plans.last?.finish.crop == cut,
+                "the clip came back without its crop: \(String(describing: screen.preview.plans.last?.finish.crop))")
     }
 
     @Test func leavingTheScreenStopsTheClip() async throws {

@@ -538,16 +538,27 @@ struct MediaEditorCropTests {
 
     // MARK: - A video
 
-    @Test func aVideoSaysWhyItCannotBeCropped() {
+    /// ⚠️ **A VIDEO IS CROPPED NOW — IT WAS TOLD IT COULD NOT BE.** The crop
+    /// travels in the clip's plan, the compositor draws it, and the export
+    /// publishes it; the refusal would be the lie.
+    @Test func aVideoCanBeCropped() {
         let screen = open(Self.items(1, videoAt: 0))
 
         choose(Mode.crop, on: screen)
 
-        let notice = screen.editor.debugBand.content as? BandNoticeView
-        #expect(notice != nil, "got \(String(describing: screen.editor.debugBand.content))")
-        #expect(notice?.debugText?.contains("video") == true, "got \(notice?.debugText ?? "nil")")
-        #expect(!screen.editor.debugIsCropping,
-                "and nothing is borrowed for a mode that is not running")
+        #expect(screen.editor.debugIsCropping, "the video was refused")
+        #expect(screen.editor.debugBand.content is MediaCropToolsView,
+                "got \(String(describing: screen.editor.debugBand.content))")
+    }
+
+    @Test func aVideosCropIsStoredAgainstTheClip() {
+        let screen = open(Self.items(1, videoAt: 0))
+        choose(Mode.crop, on: screen)
+        let cut = MediaCrop(rect: CGRect(x: 0.25, y: 0, width: 0.5, height: 1))
+
+        screen.editor.debugCropSurface.onChange?(cut)
+
+        #expect(screen.editor.debugCrop(for: "item-0") == cut, "got \(screen.editor.debugCrop(for: "item-0"))")
     }
 
     /// ⚠️ **A VIDEO IS OFFERED THE LOOKS NOW — IT WAS TOLD IT COULD NOT BE
@@ -665,23 +676,6 @@ struct MediaEditorCropTests {
 
         #expect(screen.editor.debugCropSurface.isUserInteractionEnabled)
         #expect(screen.editor.debugCropTools.isUserInteractionEnabled)
-    }
-
-    /// ⚠️ **A VIDEO LEFT THE MODE UNREACHABLE FOR EVERY PICTURE AFTER IT.**
-    /// Choosing "Crop" on a video puts a notice in the band and locks nothing, so
-    /// the canvas still pages — and swiping on to a photograph changed nothing at
-    /// all: the band kept the notice, the pill kept saying Crop, and tapping Crop
-    /// again announced nothing because the selection had not changed.
-    @Test func swipingFromAVideoToAPhotographOpensTheToolsAtLast() {
-        let screen = open(Self.items(2, videoAt: 0))
-        choose(Mode.crop, on: screen)
-        #expect(screen.editor.debugBand.content is BandNoticeView, "guard: the notice is up")
-
-        screen.editor.debugScrollToPage(1)
-
-        #expect(screen.editor.debugBand.content is MediaCropToolsView,
-                "got \(String(describing: screen.editor.debugBand.content))")
-        #expect(screen.editor.debugIsCropping)
     }
 
     /// ⚠️ **THE MODE OUTLIVES A PUSH, SO IT HAS TO COME BACK.** Leaving the screen
