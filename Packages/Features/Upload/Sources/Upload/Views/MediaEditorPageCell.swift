@@ -74,6 +74,19 @@ final class MediaEditorPageCell: UICollectionViewCell {
         ])
         isAccessibilityElement = true
         accessibilityTraits = .image
+        picture.accessibilityTraits = .image
+    }
+
+    /// ⚠️ **A CELL THAT IS AN ACCESSIBILITY ELEMENT HIDES EVERYTHING INSIDE
+    /// IT.** VoiceOver would read "Photo" and never reach an overlay; so a page
+    /// carrying overlays becomes a container of the picture and its overlays,
+    /// and a page without any stays the one element it always was.
+    func overlaysDidChange() {
+        let overlays = overlayHost.items
+        isAccessibilityElement = overlays.isEmpty
+        picture.isAccessibilityElement = !overlays.isEmpty
+        picture.accessibilityLabel = accessibilityLabel
+        accessibilityElements = overlays.isEmpty ? nil : [picture] + overlays
     }
 
     @available(*, unavailable)
@@ -89,6 +102,7 @@ final class MediaEditorPageCell: UICollectionViewCell {
         super.prepareForReuse()
         representedID = nil
         picture.image = nil
+        overlayHost.contentSize = nil
         onReuse?(surface)
         onReuse = nil
         surface.isHidden = true
@@ -97,6 +111,7 @@ final class MediaEditorPageCell: UICollectionViewCell {
     func prepare(for item: MediaLibraryItem) {
         representedID = item.id
         accessibilityLabel = item.isVideo ? "Video" : "Photo"
+        picture.accessibilityLabel = accessibilityLabel
     }
 
     /// The surface a video plays in, for the editor to hand to its player.
@@ -126,6 +141,7 @@ final class MediaEditorPageCell: UICollectionViewCell {
     func show(_ image: UIImage?, for id: String) {
         guard representedID == id else { return }
         picture.image = image
+        overlayHost.contentSize = image?.size
     }
 
     /// ⚠️ **`contentMode` IS NOT AN ANIMATABLE PROPERTY.** Assigning it inside a
@@ -154,6 +170,10 @@ final class MediaEditorPageCell: UICollectionViewCell {
     /// would only show less of it for nothing.
     func lay(_ fit: ContentFit, within window: UIEdgeInsets, animated: Bool) {
         setContentMode(fit.mode, animated: animated)
+        // The overlays follow the same choice: a filled picture's chrome covers
+        // part of it, a fitted one is already inset clear of it.
+        overlayHost.fit = fit
+        overlayHost.chromeInsets = fit == .fit ? .zero : window
         // ⚠️ THE VIDEO OBEYS THE SAME CHOICE AS THE PICTURE. Left at the feed's
         // `.resizeAspectFill`, a clip the author asked to see WHOLE would carry
         // on being cropped — and the poster beneath it would not be, so the swap
@@ -174,6 +194,9 @@ final class MediaEditorPageCell: UICollectionViewCell {
 
     /// Internal for tests: where the picture actually sits in its page.
     var debugPictureFrame: CGRect { picture.frame }
+
+    /// Internal for tests: the picture on the page, to read its pixels.
+    var debugPicture: UIImage? { picture.image }
 
     /// Internal for tests: whether a picture has actually landed.
     var debugHasPicture: Bool { picture.image != nil }
