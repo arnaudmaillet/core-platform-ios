@@ -15,6 +15,17 @@ extension VideoTransitionKind {
         case .dipToBlack: "moon.fill"
         case .dipToWhite: "sun.max.fill"
         case .zoom: "arrow.up.left.and.arrow.down.right"
+        case .dissolve: "circle.lefthalf.filled"
+        case .swipe: "arrow.right.square"
+        case .bars: "rectangle.split.3x1"
+        case .copyMachine: "doc.on.doc"
+        case .flash: "bolt.fill"
+        case .mod: "hurricane"
+        case .pageCurl: "book.pages"
+        case .pageCurlShadow: "book.closed.fill"
+        case .ripple: "water.waves"
+        case .accordion: "rectangle.compress.vertical"
+        case .disintegrate: "sparkles"
         }
     }
 
@@ -24,6 +35,17 @@ extension VideoTransitionKind {
         case .dipToBlack: "Black"
         case .dipToWhite: "White"
         case .zoom: "Zoom"
+        case .dissolve: "Dissolve"
+        case .swipe: "Swipe"
+        case .bars: "Bars"
+        case .copyMachine: "Scan"
+        case .flash: "Flash"
+        case .mod: "Swirl"
+        case .pageCurl: "Page"
+        case .pageCurlShadow: "Curl"
+        case .ripple: "Ripple"
+        case .accordion: "Fold"
+        case .disintegrate: "Crumble"
         }
     }
 
@@ -33,6 +55,17 @@ extension VideoTransitionKind {
         case .dipToBlack: "Fade through black"
         case .dipToWhite: "Fade through white"
         case .zoom: "Zoom"
+        case .dissolve: "Cross-dissolve"
+        case .swipe: "Swipe"
+        case .bars: "Bars"
+        case .copyMachine: "Scanner copy"
+        case .flash: "Flash"
+        case .mod: "Swirl"
+        case .pageCurl: "Page turn"
+        case .pageCurlShadow: "Page curl with shadow"
+        case .ripple: "Ripple"
+        case .accordion: "Accordion fold"
+        case .disintegrate: "Crumble"
         }
     }
 }

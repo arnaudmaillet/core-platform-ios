@@ -380,7 +380,8 @@ public final class VideoPlaybackController {
     /// for the file as shot.
     private func bindFresh(
         _ item: AVPlayerItem, in view: VideoRenderView, key: ObjectIdentifier,
-        url: URL?, scope: String?, startingAt start: CMTime?, looping loop: Looping? = nil
+        url: URL?, scope: String?, startingAt start: CMTime?, looping loop: Looping? = nil,
+        composing composed: ComposedVideo? = nil
     ) {
         detach(key: key, view: view)
         let player = idlePlayers.popLast() ?? AVPlayer()
@@ -395,7 +396,7 @@ public final class VideoPlaybackController {
             // the seek finished, between `replaceCurrentItem` and `play`.
             player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
         }
-        renderer(for: player)?.setItem(item)
+        renderer(for: player)?.setItem(item, composing: composed)
         player.isMuted = true
         player.actionAtItemEnd = .none
         bind(player, to: view)
@@ -466,6 +467,7 @@ public final class VideoPlaybackController {
         let asset = asShotAsset(resolved)
         let item: AVPlayerItem
         let built: Bool
+        var composed: ComposedVideo?
         // ⚠️ ANY PIECE AT ALL IS A COMPOSITION HERE, UNLIKE THE EXPORT. One piece
         // at 1x is a `timeRange` to an export session, but a player's clock would
         // then read the FILE's seconds, and the item's seconds are promised to be
@@ -478,21 +480,22 @@ public final class VideoPlaybackController {
         // all is worse than the clip as shot: the author loses the picture, not
         // just the edit.
         if let arranged = try? await VideoExporter.arrangement(
-            of: asset, cut: plan.segments, orientation: .always
+            of: asset, cut: plan.segments, orientation: .always,
+            longestSide: Self.previewLongestSide
         ) {
             item = AVPlayerItem(asset: arranged.asset)
-            item.videoComposition = arranged.videoComposition
+            composed = present(arranged.composed, on: item)
             item.audioMix = arranged.audioMix
             built = true
             if plan.segments.isEmpty {
-                asShotOrientation = (resolved, arranged.videoComposition)
+                asShotOrientation = (resolved, arranged.composed)
             }
         } else {
             VideoPlaybackTrace.emit("load build FAILED \(plan.sourceURL.lastPathComponent)")
             item = AVPlayerItem(asset: asset)
             built = false
             if asShotOrientation?.url == resolved {
-                item.videoComposition = asShotOrientation?.composition
+                composed = present(asShotOrientation?.composed, on: item)
             }
         }
         guard generation[key] == token else { return }
@@ -501,8 +504,9 @@ public final class VideoPlaybackController {
             // once per file — a few header reads the asset has already made.
             asShotOrientation = (
                 resolved,
-                try? await VideoExporter.arrangement(of: asset, cut: [], orientation: .always)
-                    .videoComposition
+                try? await VideoExporter.arrangement(
+                    of: asset, cut: [], orientation: .always, longestSide: Self.previewLongestSide
+                ).composed
             )
             guard generation[key] == token else { return }
         }
@@ -516,9 +520,12 @@ public final class VideoPlaybackController {
         if let range, !range.contains(seconds) { seconds = range.lowerBound }
         let at = CMTime(seconds: seconds, preferredTimescale: 600)
         if let player = activePlayers[key] {
-            swap(item, into: player, at: at, looping: loops)
+            swap(item, into: player, at: at, looping: loops, composing: composed)
         } else {
-            bindFresh(item, in: view, key: key, url: nil, scope: nil, startingAt: at, looping: loops)
+            bindFresh(
+                item, in: view, key: key, url: nil, scope: nil, startingAt: at, looping: loops,
+                composing: composed
+            )
             player(in: view)?.defaultRate = 1
         }
         VideoPlaybackTrace.emit(
@@ -533,7 +540,8 @@ public final class VideoPlaybackController {
 
     /// Replaces the item a bound player is running, keeping everything else.
     private func swap(
-        _ item: AVPlayerItem, into player: AVPlayer, at start: CMTime, looping loop: Looping? = nil
+        _ item: AVPlayerItem, into player: AVPlayer, at start: CMTime, looping loop: Looping? = nil,
+        composing composed: ComposedVideo? = nil
     ) {
         let key = ObjectIdentifier(player)
         let wasPaused = player.timeControlStatus == .paused
@@ -553,7 +561,7 @@ public final class VideoPlaybackController {
         if pausedAnchors[key] != nil { pausedAnchors[key] = start }
         // ⚠️ THE VIDEO OUTPUT IS PER ITEM: without this the renderer keeps
         // reading the item that has just gone, and the picture freezes.
-        renderer(for: player)?.setItem(item)
+        renderer(for: player)?.setItem(item, composing: composed)
         // ⚠️ THE RATE IS IN THE ITEM NOW. A player reused from a clip that was
         // told to run at 2x would otherwise play every arrangement twice over.
         player.defaultRate = 1
@@ -835,6 +843,19 @@ public final class VideoPlaybackController {
     /// answers the other question, and diagnostics should ask this one.
     public func isPlayingForReal(in view: VideoRenderView) -> Bool {
         activePlayers[ObjectIdentifier(view)]?.timeControlStatus == .playing
+    }
+
+    /// How fast the clip in `view` is moving right now: its rate while it
+    /// really plays, and zero while it is paused, stalled or unbound.
+    ///
+    /// ⚠️ **`.playing` ONLY** — see `isPlayingForReal`. A stalled player has
+    /// been asked for a rate it is not delivering, and a caller extrapolating
+    /// from that rate would run ahead of a picture that is not moving.
+    public func advancingRate(in view: VideoRenderView) -> Double {
+        guard let player = watchedPlayer(in: view), player.timeControlStatus == .playing else {
+            return 0
+        }
+        return Double(player.rate)
     }
 
     public func isAdvancing(in view: VideoRenderView) -> Bool {
@@ -1140,12 +1161,16 @@ public final class VideoPlaybackController {
         item.audioTimePitchAlgorithm = .spectral
         // ⚠️ UPRIGHT, FROM THE TURN THE LAST LOAD OF THIS FILE WORKED OUT. It
         // cannot be built here: the swap is synchronous on purpose.
+        var composed: ComposedVideo?
         if let known = asShotOrientation, known.url == file {
-            item.videoComposition = known.composition
+            composed = present(known.composed, on: item)
         } else {
             VideoPlaybackTrace.emit("showAsShot without an orientation for \(file.lastPathComponent)")
         }
-        swap(item, into: player, at: CMTime(seconds: max(seconds, 0), preferredTimescale: 600))
+        swap(
+            item, into: player, at: CMTime(seconds: max(seconds, 0), preferredTimescale: 600),
+            composing: composed
+        )
         return true
     }
 
@@ -1162,7 +1187,31 @@ public final class VideoPlaybackController {
     private var asShot: AVURLAsset?
     /// The video composition that turns the file as shot upright — `nil` when
     /// it is stored upright already — for the last file a load resolved.
-    private var asShotOrientation: (url: URL, composition: AVVideoComposition?)?
+    private var asShotOrientation: (url: URL, composed: ComposedVideo?)?
+
+    /// ⚠️ **THE PREVIEW IS COMPOSED AT MOST THIS LARGE.** The canvas is a phone
+    /// screen; composing a 4K frame to show it at a third of its width would
+    /// spend the compositor's whole budget on pixels nobody sees.
+    static let previewLongestSide: CGFloat = 1280
+
+    /// Puts a composed arrangement where this render path can draw it.
+    ///
+    /// ⚠️ **THE SAMPLE-BUFFER PATH READS IT; ONLY THE LEGACY LAYER PATH HANDS IT
+    /// TO THE ITEM.** An item carrying a video composition fails to play on the
+    /// iOS 27 simulator the moment anything renders it (`ComposedFrameReader`
+    /// has the measurement), so the item itself stays plain and its renderer
+    /// composes the pictures. `AVPlayerLayer` has no such hook: the legacy path
+    /// keeps the old assignment, and with it the old failure.
+    ///
+    /// Returns what the renderer must compose, if anything.
+    private func present(_ composed: ComposedVideo?, on item: AVPlayerItem) -> ComposedVideo? {
+        guard let composed else { return nil }
+        guard VideoRenderFlags.usesSampleBufferLayer else {
+            item.videoComposition = composed.composition
+            return nil
+        }
+        return composed
+    }
 
     /// Where a scrub wants the picture next, waiting for the current seek to
     /// finish.
@@ -1750,6 +1799,13 @@ public final class VideoPlaybackController {
     /// whether anything is moving. A test that read only one of them could not
     /// tell "set the speed" from "start playing at that speed".
     /// The item `view` is running — what a test observes notifications on.
+    /// The composition drawing what `view` shows: the one its renderer reads,
+    /// or on the legacy path the one its item carries.
+    public func debugComposition(in view: VideoRenderView) -> AVVideoComposition? {
+        guard let player = activePlayers[ObjectIdentifier(view)] else { return nil }
+        return renderer(for: player)?.composedVideo?.composition ?? player.currentItem?.videoComposition
+    }
+
     public func debugItem(in view: VideoRenderView) -> AVPlayerItem? {
         watchedPlayer(in: view)?.currentItem
     }

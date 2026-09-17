@@ -118,6 +118,7 @@ struct MediaEditorPlaybackTests {
         /// Playback's subject is binding and pausing, not the playhead — the
         /// track's suite is where scrubbing is asked about.
         func playheadSeconds(in surface: VideoRenderView) -> Double? { nil }
+        func advancingRate(in surface: VideoRenderView) -> Double { 0 }
 
         func seek(
             toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double

@@ -20,7 +20,10 @@ struct MediaTransitionRowTests {
     }
 
     @Test func noneComesFirst() {
-        #expect(row().debugLabels == ["None", "Black", "White", "Zoom"])
+        #expect(row().debugLabels == [
+            "None", "Black", "White", "Zoom", "Dissolve", "Swipe", "Bars", "Scan", "Flash", "Swirl",
+            "Page", "Curl", "Ripple", "Fold", "Crumble"
+        ])
     }
 
     @Test func theChosenChipIsTheWhiteOne() {
@@ -75,15 +78,35 @@ struct MediaTransitionRowTests {
         #expect(last.maxX <= 300 - 8 - 36 - 52 + 0.01, "the last card rests at \(last.maxX), inside the ramp")
     }
 
-    /// On the narrowest phone, all four cards rest whole before the ramp.
-    @Test func allFourCardsRestWholeBeforeTheRamp() throws {
+    /// On the narrowest phone, the first four cards rest whole before the ramp;
+    /// the rest are scrolled to.
+    @Test func theFirstFourCardsRestWholeBeforeTheRamp() throws {
         let row = row(width: 375)
         let scroller = row.debugScroller
         try #require(scroller.contentOffset.x == -scroller.contentInset.left, "guard: the row is not at rest")
 
-        let cards = row.debugCardFrames
+        let cards = Array(row.debugCardFrames.prefix(4))
         try #require(cards.count == 4)
         #expect(cards.allSatisfy { $0.minX >= 8 - 0.01 && $0.maxX <= 375 - 8 - 36 - 52 + 0.01 }, "got \(cards)")
+    }
+
+    /// ⚠️ **A CUT CARRYING A FAR CARD OPENS ON IT.** Fifteen cards do not fit
+    /// on a phone; the white card must be in view, before the ramp.
+    @Test func aRowOpensOnTheChosenCard() throws {
+        let row = row(width: 375)
+        row.setOpen(false, animated: false)
+        row.show(kind: .disintegrate)
+        row.setOpen(true, animated: false)
+
+        let chosen = try #require(row.debugCardFrames.last, "guard: no cards")
+        #expect(chosen.minX >= 8 - 0.01 && chosen.maxX <= 375 - 8 - 36 - 52 + 0.01,
+                "the chosen card rests at \(chosen)")
+        // A near card leaves the row at its start.
+        row.setOpen(false, animated: false)
+        row.show(kind: .dipToBlack)
+        row.setOpen(true, animated: false)
+        let scroller = row.debugScroller
+        #expect(scroller.contentOffset.x == -scroller.contentInset.left, "the row moved for a card in view")
     }
 
     // MARK: - Cards
@@ -95,7 +118,9 @@ struct MediaTransitionRowTests {
         let cards = row.debugCardFrames
         let glyphs = row.debugGlyphFrames
         let captions = row.debugCaptionFrames
-        try #require(cards.count == 4 && glyphs.count == 4 && captions.count == 4)
+        let choices = MediaTransitionCatalog.choices.count
+        try #require(choices == 15, "guard: \(choices) choices")
+        try #require(cards.count == choices && glyphs.count == choices && captions.count == choices)
         for ((card, glyph), caption) in zip(zip(cards, glyphs), captions) {
             #expect(abs(card.width - 56) < 0.01 && abs(card.height - MediaTransitionRowView.height) < 0.01,
                     "a card is \(card.size)")

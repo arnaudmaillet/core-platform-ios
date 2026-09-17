@@ -80,6 +80,7 @@ struct MediaEditorTransitionsTests {
 
         var headSeconds: Double?
         func playheadSeconds(in surface: VideoRenderView) -> Double? { headSeconds }
+        func advancingRate(in surface: VideoRenderView) -> Double { 0 }
         private(set) var seeks: [Double] = []
         func seek(toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double) {
             seeks.append(seconds)

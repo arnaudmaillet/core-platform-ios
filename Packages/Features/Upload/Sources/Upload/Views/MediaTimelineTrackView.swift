@@ -1253,12 +1253,17 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// ⚠️ **NO CONVERSION, AND THAT IS CHARTER T8.** Sixty times a second, a
     /// played second is already where the film goes; turning it into a piece
     /// and back would resolve the timeline, which allocates, on every beat.
-    func follow(playedSeconds seconds: Double) {
+    ///
+    /// `rate` is how many played seconds the clip covers per second of real
+    /// time — zero while it is stopped — which is what an eased move needs to
+    /// land where the clip WILL be rather than where it was.
+    func follow(playedSeconds seconds: Double, advancing rate: Double = 0) {
         guard grip == nil, reordering == nil, !scroller.isDragging, !scroller.isDecelerating,
               bounds.width > 0, !isEasing, seconds.isFinite
         else { return }
         let target = offset(forPlayedSeconds: seconds)
-        guard MediaTimelining.easesFollow(byPoints: target - scroller.contentOffset.x) else {
+        let current = scroller.contentOffset.x
+        guard MediaTimelining.easesFollow(byPoints: target - current) else {
             isFollowingPlayback = true
             scroller.contentOffset.x = target
             isFollowingPlayback = false
@@ -1269,8 +1274,15 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // top of motion that is already smooth — the film would swim. What is
         // brusque is a DISCONTINUITY: letting go of a handle after the player has
         // been seeked elsewhere, or the playhead turning back at the end of the
-        // cut. See `MediaTimelining.stepWithoutEasing` for where the line is.
-        //
+        // cut. See `MediaTimelining.stepWithoutEasing` for where the line is,
+        // and `followEase` for why the ease aims ahead of a running clip.
+        let duration = MediaTimelining.followEaseSeconds
+        let ahead = rate.isFinite && rate > 0
+            ? offset(forPlayedSeconds: seconds + rate * duration) - target : 0
+        let ease = MediaTimelining.followEase(from: current, to: target, lead: ahead)
+        if Self.probesFollow {
+            print(String(format: "[timeline] ease travel=%.1fpt lead=%.1fpt", ease.landing - current, ahead))
+        }
         // ⚠️ **AND THE FLAG IS HELD FOR THE WHOLE ANIMATION, NOT AROUND AN
         // ASSIGNMENT.** An animated content offset calls `scrollViewDidScroll`
         // on every frame of the ease, long after a flag set around the assignment
@@ -1279,16 +1291,56 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // got to. The clip would chase its own animation.
         isEasing = true
         isFollowingPlayback = true
-        UIView.animate(
-            withDuration: 0.22, delay: 0,
-            options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction]
-        ) { [self] in
-            scroller.contentOffset.x = target
-        } completion: { [weak self] _ in
-            self?.isFollowingPlayback = false
-            self?.isEasing = false
+        let animator = UIViewPropertyAnimator(
+            duration: duration,
+            timingParameters: UICubicTimingParameters(
+                controlPoint1: MediaTimelining.FollowEase.firstControlPoint,
+                controlPoint2: ease.controlPoint
+            )
+        )
+        animator.isUserInteractionEnabled = true
+        animator.addAnimations { [scroller] in
+            scroller.contentOffset.x = ease.landing
         }
+        animator.addCompletion { [weak self, weak animator] _ in
+            guard let self, let animator, followAnimator === animator else { return }
+            followAnimator = nil
+            isFollowingPlayback = false
+            isEasing = false
+        }
+        followAnimator = animator
+        animator.startAnimation()
     }
+
+    /// Puts a moment of the RESULT under the needle at once — the track
+    /// appearing over a clip that is already running.
+    ///
+    /// ⚠️ **NOT EASED, BECAUSE THERE IS NOTHING ON SCREEN TO MOVE FROM.** The
+    /// film was wherever the last visit left it; sliding it from there to the
+    /// player is a journey the author never took.
+    /// Returns whether the film was placed.
+    @discardableResult
+    func place(atPlayedSeconds seconds: Double) -> Bool {
+        guard grip == nil, reordering == nil, !scroller.isDragging, !scroller.isDecelerating,
+              bounds.width > 0, seconds.isFinite
+        else { return false }
+        stopEasing()
+        // ⚠️ **LAID OUT FIRST, OR THE OPENING UNDOES IT.** The first layout
+        // with a width puts the film on the start of the result, once; placed
+        // before that pass, the film went back to zero on it and the next beat
+        // eased 300pt across the gap — measured under `-timeline-probe`.
+        layoutIfNeeded()
+        isFollowingPlayback = true
+        scroller.contentOffset.x = offset(forPlayedSeconds: seconds)
+        isFollowingPlayback = false
+        return true
+    }
+
+    /// The ease a follow started, while it runs.
+    private var followAnimator: UIViewPropertyAnimator?
+
+    /// ⚠️ **RESOLVED ONCE** — `MediaEditorViewController.probesFollow` says why.
+    private static let probesFollow = ProcessInfo.processInfo.arguments.contains("-timeline-probe")
 
     /// Whether the film is in the middle of an eased move. A beat that lands
     /// during one is ignored: the ease is already going where the player is, and
@@ -1907,6 +1959,10 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // assigning THAT is what makes the finger pick the film up where it sees
         // it. `uiview-animate-from-value-trap` is the same lesson about `alpha`.
         let visible = scroller.layer.presentation()?.bounds.origin.x
+        if let animator = followAnimator {
+            followAnimator = nil
+            animator.stopAnimation(true)
+        }
         scroller.layer.removeAllAnimations()
         if let visible { scroller.contentOffset.x = visible }
         isEasing = false

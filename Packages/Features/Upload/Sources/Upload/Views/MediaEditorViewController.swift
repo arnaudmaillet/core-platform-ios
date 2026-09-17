@@ -1228,6 +1228,14 @@ final class MediaEditorViewController: UIViewController {
         // The row belongs to the clip it was opened on.
         closeTransitions(animated: false)
         trackSeconds = duration
+        trackNeedsPlacement = true
+        // ⚠️ **A HANDOVER ARMED WHILE THE TRACK WAS SHUT IS NOBODY'S.** The
+        // follower does not run while another mode holds the band, so the one
+        // the editor's first load armed was never settled: it would hold the
+        // film at the load's landing for half a second after the track opened
+        // over a clip that had long since moved on. A load still on its way
+        // arms its own when it lands.
+        if !previewPending { handover = .settled }
         timelineTrack.configure(duration: duration, timeline: edits(for: id).timeline)
         timelineTrack.forgetFrames()
         // ⚠️ **AND THE PROVIDER GOES WITH THEM — FOUND BY
@@ -1413,14 +1421,29 @@ final class MediaEditorViewController: UIViewController {
         let (mayFollow, next) = MediaTimelining.handover(handover, playerSeconds: seconds)
         handover = next
         guard mayFollow else { return }
+        // ⚠️ **THE FIRST BEAT AFTER THE TRACK OPENS PLACES THE FILM; IT DOES NOT
+        // EASE IT.** The clip has been playing on the canvas since the editor
+        // opened, so the track appears seconds behind it — and an ease across
+        // that gap is a slide the author never asked for.
+        if trackNeedsPlacement {
+            if timelineTrack.place(atPlayedSeconds: seconds) {
+                trackNeedsPlacement = false
+                theNeedleMoved(to: seconds)
+            }
+            return
+        }
         // ⚠️ **NO BOUNDARY IS HANDLED HERE ANY MORE.** This routine used to SEEK
         // the file to the next piece's start whenever the playhead reached the
         // end of the one playing — after a re-order a jump across the file on
         // every boundary, reported as a pause between the pieces. The item plays
         // the arrangement itself; the loop back to the start is the player's.
-        timelineTrack.follow(playedSeconds: seconds)
+        timelineTrack.follow(playedSeconds: seconds, advancing: preview.advancingRate(in: surface))
         theNeedleMoved(to: seconds)
     }
+
+    /// Whether the track has opened on a clip and not yet been put where the
+    /// player is.
+    private var trackNeedsPlacement = false
 
     /// What the preview item is running.
     ///

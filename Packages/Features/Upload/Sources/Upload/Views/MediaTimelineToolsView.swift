@@ -83,6 +83,7 @@ final class MediaTimelineToolsView: UIView {
         track.showRehearsal(rehearsal, window: window, animated: editingSeam != nil && animated)
         transitions.show(kind: chosen)
         guard editingSeam == nil else {
+            transitions.revealChosen(animated: animated)
             editingSeam = seam
             return true
         }

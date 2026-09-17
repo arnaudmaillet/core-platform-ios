@@ -98,13 +98,33 @@ struct TransitionCompositionTests {
         #expect(atTheCut.colour.near(.cyan, by: 90), "the zoom is not about the upright picture's middle: \(atTheCut)")
     }
 
+    /// ⚠️ **SAMPLED ACROSS THE WINDOW AND ACROSS THE FRAME.** A swipe or a
+    /// page curl has not reached every point at every moment — one point at one
+    /// time says nothing about them. What every kind must do is change the
+    /// picture SOMEWHERE inside its window.
     @Test func everyKindDrawsSomething() async throws {
-        let plain = try await pixel(arranged(cut(nil)), at: 0.875, x: 0.2)
-        #expect(plain.colour.near(.red), "guard: the plain cut is red there: \(plain.colour)")
+        let times = [0.8, 0.9, 1.0, 1.1, 1.2]
+        let points = [0.1, 0.3, 0.5, 0.7, 0.9]
+        let plain = try await arranged(cut(nil))
+        var reference: [ColourClipWriter.RGB] = []
+        for time in times {
+            for point in points {
+                reference.append(try await pixel(plain, at: time, x: point, y: point).colour)
+            }
+        }
         for kind in VideoTransitionKind.allCases {
-            let drawn = try await pixel(arranged(cut(kind)), at: 0.875, x: 0.2).colour
-            let moved = max(abs(drawn.r - plain.colour.r), abs(drawn.g - plain.colour.g), abs(drawn.b - plain.colour.b))
-            #expect(moved > 40, "\(kind) draws the plain cut: \(drawn)")
+            let drawn = try await arranged(cut(kind))
+            var moved = 0
+            var index = 0
+            for time in times {
+                for point in points {
+                    let colour = try await pixel(drawn, at: time, x: point, y: point).colour
+                    let was = reference[index]
+                    index += 1
+                    moved = max(moved, abs(colour.r - was.r), abs(colour.g - was.g), abs(colour.b - was.b))
+                }
+            }
+            #expect(moved > 40, "\(kind) draws the plain cut everywhere (moved \(moved))")
         }
     }
 
@@ -277,6 +297,36 @@ struct TransitionCompositionTests {
         #expect(top.near(.yellow, by: 40), "the band is not along the top: \(top)")
     }
 
+    /// ⚠️ **A CAPPED PREVIEW IS SMALLER AND STILL THE SAME PICTURE.** The
+    /// canvas composes at most `previewLongestSide`; the turn and the shrink
+    /// must compose in the right order, or the picture lands off the canvas.
+    @Test func aCappedCanvasIsSmallerAndStillUpright() async throws {
+        let file = try await ColourClipWriter.clip(rotated: true)
+        let capped = try await VideoExporter.arrangement(
+            of: AVURLAsset(url: file), cut: cut(.dipToBlack), orientation: .always, longestSide: 80
+        )
+        let composition = try #require(capped.videoComposition)
+        #expect(composition.renderSize == CGSize(width: 60, height: 80), "got \(composition.renderSize)")
+        let top = try await ColourClipWriter.pixel(
+            of: capped.asset, composition: composition, at: 0.5, x: 0.5, y: 0.05
+        )
+        #expect(top.size == CGSize(width: 60, height: 80), "guard: read at \(top.size)")
+        #expect(top.colour.near(.yellow, by: 60), "the band is not along the top: \(top.colour)")
+        let side = try await ColourClipWriter.pixel(
+            of: capped.asset, composition: composition, at: 0.5, x: 0.1, y: 0.6
+        )
+        #expect(side.colour.near(.red), "the picture is off the canvas: \(side.colour)")
+        let square = try await ColourClipWriter.pixel(
+            of: capped.asset, composition: composition, at: 0.5, x: 0.5, y: 0.5
+        )
+        #expect(square.colour.near(.cyan, by: 90), "the middle is not the square: \(square.colour)")
+        // Never scaled up.
+        let small = try await VideoExporter.arrangement(
+            of: AVURLAsset(url: file), cut: cut(.dipToBlack), orientation: .always, longestSide: 4000
+        )
+        #expect(small.videoComposition?.renderSize == CGSize(width: 120, height: 160))
+    }
+
     /// ⚠️ **A TURN THAT CARRIES NO SHIFT OF ITS OWN.** A phone writes the
     /// translation that brings a turned picture back to the origin; not every
     /// file does, and a composition that trusted it would draw the picture off
@@ -392,7 +442,7 @@ struct TransitionPreviewTests {
         ])
         defer { controller.stop(view) }
 
-        let composition = try #require(item.videoComposition, "the preview item draws nothing")
+        let composition = try #require(controller.debugComposition(in: view), "the preview item draws nothing")
         let atTheCut = try await ColourClipWriter.pixel(
             of: item.asset, composition: composition, at: 1.0, x: 0.1
         ).colour
@@ -419,16 +469,21 @@ struct TransitionPreviewTests {
                 orientation: .always
             )
             #expect((arranged.videoComposition != nil) == composed, "guard: the arrangement is not what the case says")
+            // ⚠️ THE ITEM STAYS PLAIN AND THE SOURCE COMPOSES, as the controller
+            // does it — an item carrying the composition fails outright on the
+            // iOS 27 simulator.
             let item = AVPlayerItem(asset: arranged.asset)
-            item.videoComposition = arranged.videoComposition
             let player = AVPlayer(playerItem: item)
             player.isMuted = true
             let source = VideoFrameSource(player: player)
-            source.setItem(item)
+            source.setItem(item, composing: arranged.composed)
             player.play()
             var frames = 0
             var backed = 0
-            for _ in 0..<150 where frames < 10 {
+            // ⚠️ SIX SECONDS, NOT ONE AND A HALF: a composed reader's first frame
+            // waits for a decode from the keyframe, and with other suites
+            // exporting alongside it that took longer than 1.5s.
+            for _ in 0..<600 where frames < 10 {
                 try await Task.sleep(for: .milliseconds(10))
                 guard let frame = source.copyFrame(atHostTime: CACurrentMediaTime()) else { continue }
                 frames += 1
@@ -444,7 +499,7 @@ struct TransitionPreviewTests {
         let (item, controller, view, _) = try await item(loading: [], rotated: true)
         defer { controller.stop(view) }
 
-        let composition = try #require(item.videoComposition, "a turned file plays on its side")
+        let composition = try #require(controller.debugComposition(in: view), "a turned file plays on its side")
         #expect(composition.renderSize == CGSize(width: 120, height: 160), "got \(composition.renderSize)")
     }
 
@@ -452,7 +507,7 @@ struct TransitionPreviewTests {
         let (item, controller, view, _) = try await item(loading: [])
         defer { controller.stop(view) }
 
-        #expect(item.videoComposition == nil, "an upright file went through a compositor")
+        #expect(controller.debugComposition(in: view) == nil, "an upright file went through a compositor")
     }
 
     @Test func aRotatedArrangementWithoutATransitionIsUprightToo() async throws {
@@ -461,7 +516,7 @@ struct TransitionPreviewTests {
         ], rotated: true)
         defer { controller.stop(view) }
 
-        #expect(item.videoComposition?.renderSize == CGSize(width: 120, height: 160),
+        #expect(controller.debugComposition(in: view)?.renderSize == CGSize(width: 120, height: 160),
                 "a cut turned file plays on its side")
     }
 
@@ -474,8 +529,7 @@ struct TransitionPreviewTests {
         defer { controller.stop(view) }
 
         #expect(controller.showAsShot(file, in: view, at: 0.5))
-        let shown = try #require(controller.debugItem(in: view))
-        #expect(shown.videoComposition?.renderSize == CGSize(width: 120, height: 160),
+        #expect(controller.debugComposition(in: view)?.renderSize == CGSize(width: 120, height: 160),
                 "the file as shot is on its side")
     }
 }

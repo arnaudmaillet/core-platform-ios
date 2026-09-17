@@ -1360,6 +1360,54 @@ struct MediaTimeliningTests {
         #expect(MediaTimelining.easesFollow(byPoints: .nan) == false)
     }
 
+    /// ⚠️ **AN EASE BEHIND A RUNNING CLIP LANDS WHERE THE CLIP WILL BE.** Aimed
+    /// at where the clip WAS, a quarter-second ease ended 13–15pt behind it —
+    /// past `stepWithoutEasing` — so the next beat eased again, for as long as
+    /// the clip played: the film moved in jumps (measured under
+    /// `-timeline-probe`, an ease of 15.1pt every quarter second after a wrap).
+    @Test func anEaseBehindARunningClipLandsAhead() {
+        let ease = MediaTimelining.followEase(from: 0, to: 100, lead: 13.2)
+        #expect(ease.landing == 113.2)
+        // The beat after it is a step again.
+        #expect(MediaTimelining.easesFollow(byPoints: (113.2 + 1) - ease.landing) == false)
+    }
+
+    /// ⚠️ **AND IT ARRIVES MOVING AS FAST AS THE CLIP.** The slope a cubic
+    /// timing curve ends on is `(1 − y₂)/(1 − x₂)`; times the distance it
+    /// travels, that is how far the film would go in one more ease's time —
+    /// which must be the lead, or the film stops dead and starts again.
+    @Test func anEaseBehindARunningClipEndsAtItsSpeed() {
+        let ease = MediaTimelining.followEase(from: 0, to: 100, lead: 13.2)
+        let slope = (1 - ease.controlPoint.y) / (1 - ease.controlPoint.x)
+        #expect(abs(slope * (ease.landing - 0) - 13.2) < 0.001, "the curve ends at slope \(slope)")
+    }
+
+    @Test func aStoppedClipIsEasedToRest() {
+        let ease = MediaTimelining.followEase(from: 40, to: 400, lead: 0)
+        #expect(ease.landing == 400)
+        #expect(ease.controlPoint.y == 1, "a stopped clip's ease ends moving")
+    }
+
+    /// A jump BACK behind a running clip — the wrap at the end of a loop — ends
+    /// at rest where the clip will be: the curve cannot end moving forwards
+    /// while it travels backwards without leaving the unit square.
+    @Test func aJumpBackEndsAtRestAhead() {
+        let ease = MediaTimelining.followEase(from: 600, to: 0, lead: 13.2)
+        #expect(ease.landing == 13.2)
+        #expect(ease.controlPoint.y == 1)
+    }
+
+    /// A film just ahead of a running clip travels only the little the clip
+    /// has not yet covered, and would need a slope far past the square;
+    /// capped, the curve stays inside it and never overshoots.
+    @Test func aShortHopNeverOvershoots() {
+        let ease = MediaTimelining.followEase(from: 12.5, to: 0, lead: 13.2)
+        #expect(ease.landing - 12.5 > 0.5, "guard: the hop is not the short forward one")
+        #expect((0...1).contains(ease.controlPoint.y), "the curve leaves the unit square: \(ease.controlPoint)")
+        #expect(MediaTimelining.followEase(from: 0, to: 100, lead: .nan).landing == 100)
+        #expect(MediaTimelining.followEase(from: 0, to: 100, lead: -5).landing == 100)
+    }
+
     // MARK: - Zoom (charter F15)
 
     @Test func aPinchMovesTheScaleAndStaysInsideTheRange() {
