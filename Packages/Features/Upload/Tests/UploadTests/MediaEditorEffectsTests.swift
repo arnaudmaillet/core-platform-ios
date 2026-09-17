@@ -204,11 +204,15 @@ struct MediaEditorEffectsTests {
         let row = try Self.openFilters(on: screen)
         row.debugTap(.mono)
         try await Self.settle(until: { Self.pagePicture(screen, id: "photo-0").map(PixelProbe.isGrey) == true })
+        let tools = try Self.openEffects(on: screen)
+        tools.debugTapDial(.brightness)
+        // ⚠️ **LET EVERY RENDER ALREADY ASKED FOR LAND FIRST.** Opening the
+        // band re-lays the canvas, and a page re-dressed by that would read as
+        // the redraw this test is about.
+        try await Task.sleep(for: .milliseconds(500))
         let mono = try #require(Self.pagePicture(screen, id: "photo-0"))
         #expect(PixelProbe.isGrey(mono), "guard: the page wears mono")
 
-        let tools = try Self.openEffects(on: screen)
-        tools.debugTapDial(.brightness)
         Self.slide(tools, to: 0.8)
         try await Self.settle(until: { Self.pagePicture(screen, id: "photo-0") !== mono })
 
