@@ -8,13 +8,13 @@ import UIKit
 ///
 /// ⚠️ **ONE PATH FOR BOTH KINDS OF PAGE.** A change is written through
 /// `change`, then announced as `.look`: the screen redraws a photograph and
-/// hands a playing clip a live look — no new item, which a slider dragged at
+/// hands a playing clip a live look — no new item, which a ruler dragged at
 /// 60Hz could never afford (`MediaEditorHosting.editsDidChange`).
 ///
-/// ⚠️ **WHILE A FINGER IS ON A SLIDER, THE SCREEN IS TOLD AT MOST 30 TIMES A
+/// ⚠️ **WHILE A FINGER IS ON THE RULER, THE SCREEN IS TOLD AT MOST 30 TIMES A
 /// SECOND.** Every value is stored the moment it arrives; only the redraw is
 /// paced. A photograph's render is latest-wins, but each one that lands behind
-/// the edits starts another — announced at the slider's own rate, those chains
+/// the edits starts another — announced at the ruler's own rate, those chains
 /// would pile up faster than they land. The lift always announces the last
 /// value, so nothing is left behind.
 ///
@@ -35,7 +35,7 @@ final class MediaEditorEffectsMode: MediaEditorMode {
     /// The fastest the screen is told about a change while a finger is down.
     static let liveInterval: CFTimeInterval = 1.0 / 30
 
-    /// Whether a finger is on one of the sliders.
+    /// Whether a finger is on the ruler.
     private(set) var isTracking = false
 
     /// The page the tools were last opened or settled on.
@@ -44,7 +44,7 @@ final class MediaEditorEffectsMode: MediaEditorMode {
     private var lastAnnounced: CFTimeInterval = 0
     /// The announcement a drag is still owed, if one is waiting for its turn.
     private var owed: Task<Void, Never>?
-    /// What the effect cards were last dressed from, so an unchanged request
+    /// What the effect pills were last dressed from, so an unchanged request
     /// renders nothing.
     private var dressedFrom: CardsSource?
     private var dressing: Task<Void, Never>?
@@ -86,8 +86,8 @@ final class MediaEditorEffectsMode: MediaEditorMode {
         tools.browse(animated: false)
     }
 
-    /// ⚠️ **ANOTHER PAGE PUTS THE SLIDER AWAY.** A slider left up would show
-    /// the previous page's value over a picture that does not carry it.
+    /// ⚠️ **ANOTHER PAGE PUTS THE RULER AWAY.** A ruler left up would show the
+    /// previous page's value over a picture that does not carry it.
     func pageDidSettle(on id: String?) {
         guard let host, host.bandContent === tools, let id, id != shownID else { return }
         settleTheDrag()
@@ -169,7 +169,7 @@ final class MediaEditorEffectsMode: MediaEditorMode {
         dressCards(for: id)
     }
 
-    /// Renders the effect cards from the page's own picture, cut and dressed
+    /// Renders the effect pills' pictures from the page's own picture, cut and dressed
     /// as the page is, each wearing its effect.
     ///
     /// ⚠️ **OFF THE MAIN ACTOR, AND LATEST WINS.** Twelve looks are twelve Core
@@ -225,7 +225,7 @@ final class MediaEditorEffectsMode: MediaEditorMode {
 
     /// Internal for tests: the tools, whether or not the band holds them.
     var debugTools: MediaEffectsToolsView { tools }
-    /// Internal for tests: waits for the effect cards to be dressed.
+    /// Internal for tests: waits for the effect pills to be dressed.
     var debugCardsAreDressed: Bool {
         LookEffectKind.allCases.allSatisfy { tools.debugPicture(for: $0) != nil }
     }

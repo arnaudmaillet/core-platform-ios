@@ -72,7 +72,12 @@ struct MediaEditorEffectsTests {
         ) async -> [Double: UIImage] { [:] }
         func playheadSeconds(in surface: VideoRenderView) -> Double? { nil }
         func advancingRate(in surface: VideoRenderView) -> Double { 0 }
-        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) { liveLooks.append(look) }
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool {
+            liveLooks.append(look)
+            return takesLiveLook
+        }
+        /// What this backing answers — false is the legacy layer path's answer.
+        var takesLiveLook = true
         func setMuted(_ muted: Bool, in surface: VideoRenderView) {}
         func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {}
         func seek(toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double) {}
@@ -118,11 +123,10 @@ struct MediaEditorEffectsTests {
         return try #require(screen.editor.debugBand.content as? MediaFilterRowView)
     }
 
-    /// Moves a slider the way a tap on its track does: one move, no drag.
-    static func slide(_ tools: MediaEffectsToolsView, to value: Float) {
-        let slider = tools.debugSlider.debugSlider
-        slider.value = value
-        slider.sendActions(for: .valueChanged)
+    /// Moves the ruler in one step, the way VoiceOver's adjust does: no
+    /// finger, so the value is announced as settled.
+    static func slide(_ tools: MediaEffectsToolsView, to value: Double) {
+        tools.debugRuler.debugSet(value)
     }
 
     /// What the page is showing, read from its picture view.
@@ -155,19 +159,19 @@ struct MediaEditorEffectsTests {
 
     // MARK: - What is stored
 
-    @Test func aSliderStoresAndZeroRemovesTheEntry() throws {
+    @Test func theRulerStoresAndZeroRemovesTheEntry() throws {
         let screen = Self.open(video: false)
         let tools = try Self.openEffects(on: screen)
 
         tools.debugTapDial(.brightness)
-        #expect(tools.debugShowsSlider)
+        #expect(tools.debugShowsRuler)
         Self.slide(tools, to: 0.4)
         let stored = screen.editor.edits(for: "photo-0").adjustments.brightness
         #expect(abs(stored - 0.4) < 0.0001, "stored \(stored)")
-        #expect(tools.debugDialIsMarked(.brightness))
+        #expect(tools.debugReading(.brightness) == "+40%")
         #expect(screen.editor.debugCropResetItem.isEnabled, "the undo arrow has something to undo")
 
-        tools.debugSlider.debugDoubleTapValue()
+        tools.debugRuler.debugTapReadout()
         #expect(!screen.editor.debugHasEdits(for: "photo-0"), "a dial back at rest is no entry at all")
         #expect(!screen.editor.debugCropResetItem.isEnabled)
     }
@@ -190,8 +194,9 @@ struct MediaEditorEffectsTests {
         #expect(after.adjustments.isNeutral)
         #expect(after.effect == nil)
         #expect(after.filter == .mono, "the preset is Filters', and it stays")
-        #expect(!tools.debugShowsSlider, "the slider of an effect that is gone is put away")
-        #expect(tools.debugRingedEffects == [nil])
+        #expect(!tools.debugShowsRuler, "the ruler of an effect that is gone is put away")
+        #expect(tools.debugChosenEffects.isEmpty)
+        #expect(!tools.debugNoneIsEnabled)
     }
 
     // MARK: - What the page and the clip are told
@@ -243,8 +248,33 @@ struct MediaEditorEffectsTests {
         #expect(screen.preview.plans.count == 1, "no new item for a look")
     }
 
+    /// ⚠️ **A BACKING THAT CANNOT TAKE A LOOK LIVE GETS A NEW ITEM.** Under
+    /// `-avplayer-render` the composition belongs to the item and there is no
+    /// board to set (MediaPlayback's `LiveLookOnEitherBackingTests` pins that
+    /// answer); dropping the refusal would leave the clip playing the look the
+    /// author has just changed away from.
+    @Test func aRefusedLiveLookRebuildsTheClip() async throws {
+        let screen = Self.open(video: true)
+        try await Self.settle(until: { screen.preview.plans.count == 1 })
+        screen.preview.takesLiveLook = false
+        let tools = try Self.openEffects(on: screen)
+
+        tools.debugTapDial(.warmth)
+        Self.slide(tools, to: -0.3)
+
+        #expect(screen.preview.liveLooks.count == 1, "guard: the look was offered live first")
+        // A load is a file read and an arrangement: on a loaded machine the
+        // suite's own 3s is not always enough.
+        for _ in 0..<1000 where screen.preview.plans.count < 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(screen.preview.plans.count == 2, "the refused look never reached the clip")
+        #expect(screen.preview.plans.last?.finish.look.adjustments.warmth == -0.3,
+                "the new item does not carry the look: \(String(describing: screen.preview.plans.last?.finish.look))")
+    }
+
     /// ⚠️ **THE SPINNER IS SILENCED BY THIS FLAG** (`beginRender`), so the flag
-    /// must be up exactly while a finger is on a slider — and come down when
+    /// must be up exactly while a finger is on the ruler — and come down when
     /// the band takes the tools away mid-drag, or the spinner would stay
     /// silenced for good.
     ///
@@ -255,24 +285,29 @@ struct MediaEditorEffectsTests {
         let screen = Self.open(video: false)
         let tools = try Self.openEffects(on: screen)
         tools.debugTapDial(.shadows)
-        let slider = tools.debugSlider.debugSlider
+        let ruler = tools.debugRuler
         let mode = screen.editor.effectsMode
         #expect(!mode.isTracking, "guard")
 
-        slider.sendActions(for: .touchDown)
+        ruler.debugBeginDrag()
         #expect(mode.isTracking)
-        slider.value = 0.5
-        slider.sendActions(for: .valueChanged)
+        ruler.debugDrag(by: -150)
         #expect(mode.isTracking, "a move keeps the finger down")
-        slider.sendActions(for: .touchUpOutside)
+        ruler.debugEndDrag()
         #expect(!mode.isTracking)
         let lifted = screen.editor.edits(for: "photo-0").adjustments.shadows
         #expect(abs(lifted - 0.5) < 0.0001, "the lift hands over the last value")
 
-        slider.sendActions(for: .touchDown)
+        ruler.debugBeginDrag()
         #expect(mode.isTracking)
         _ = try Self.openFilters(on: screen)
         #expect(!mode.isTracking, "a band that changes under the finger lets it go")
+
+        // ⚠️ AND THE NEXT FINGER IS HEARD: a ruler left tracking would swallow it.
+        let again = try Self.openEffects(on: screen)
+        again.debugTapDial(.shadows)
+        again.debugRuler.debugBeginDrag()
+        #expect(mode.isTracking, "the ruler still thought the first finger was down")
     }
 }
 

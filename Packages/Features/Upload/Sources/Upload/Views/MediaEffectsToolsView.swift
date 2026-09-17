@@ -6,14 +6,13 @@ import UIKit
 ///
 /// ⚠️ **EVERY SYMBOL HERE IS ASKED OF THE RUNTIME BY A TEST**
 /// (`everyEffectsGlyphExists`). A name that does not resolve draws an empty
-/// card and nothing errors — the category strip shipped one once.
+/// pill and nothing errors — the category strip shipped one once.
 enum MediaEffectsCatalog {
-    static let closeGlyph = "xmark"
     static let noneGlyph = "circle.slash"
     static let noneLabel = "None"
 
-    /// How strongly a newly chosen effect is laid on: fully, so its card and
-    /// the canvas agree, and the slider takes it down from there.
+    /// How strongly a newly chosen effect is laid on: fully, so its pill and
+    /// the canvas agree, and the ruler takes it down from there.
     static let startingIntensity = 1.0
 
     static func name(_ key: LookAdjustments.Key) -> String {
@@ -63,14 +62,14 @@ enum MediaEffectsCatalog {
 
     /// Every symbol the tools draw.
     static var glyphs: [String] {
-        [closeGlyph, noneGlyph] + LookAdjustments.Key.allCases.map(glyph)
+        [noneGlyph] + LookAdjustments.Key.allCases.map(glyph)
     }
 }
 
 /// The small pictures a row of looks is made of.
 ///
 /// ⚠️ **ONE SOURCE, SHRUNK ONCE, THEN MANY LOOKS.** The canvas-sized picture is
-/// ~1.4 MB; running thirteen looks over it for 56pt cards would be thirteen
+/// ~1.4 MB; running thirteen looks over it for tiny pictures would be thirteen
 /// canvas renders. It is shrunk first — whole, so a crop's fractions still
 /// mean the same thing — then cut, then dressed.
 ///
@@ -107,29 +106,28 @@ enum MediaLookThumbnails {
     }
 }
 
-/// The Effects tools in the editing band: the dials, then the effects — and,
-/// while one of them is being turned, its slider.
+/// The Effects tools in the editing band: a row of pills — the dials, then the
+/// effects — and, over it, the ruler of the one being turned.
 ///
 /// ```
-///  browsing:
-///  ┌──┐┌──┐┌──┐ … ┌──┐ │ ┌──┐┌──┐┌──┐┌──┐
-///  │☀•││◐ ││💧│    │▦ │ │ │⊘ ││▣▣││▣▣││▣▣│  →
-///  └──┘└──┘└──┘    └──┘ │ └──┘└──┘└──┘└──┘
-///  Brig Cont Satu  Grain  None Blur Pixl RGB
-///
-///  turning one:
-///  (✕)  Brightness  ━━━━━━━━━●━━━━━━━━━
-///       +23
+///                         +20%
+///   · · ┃ · · · · ┃ · · · ▼ · · ┃ · · · ·           ← while a pill is chosen
+///  (Brightness +20%)(◐ Contrast)(💧 Saturation) │ (⊘ None)(◉ Blur) →
 /// ```
 ///
-/// ⚠️ **A DOT, NOT A NUMBER, ON A TURNED DIAL'S CARD.** Nine numbers in a row
-/// read as a spreadsheet; the dot says "this one is not at rest", and the
-/// number is one tap away.
+/// ⚠️ **THE CROP TOOLS' LAYOUT: A RULER OVER A ROW OF CHIPS, AND THE SAME
+/// HEIGHT.** Choosing a pill brings the ruler in above the row; the row never
+/// leaves, so the next dial is one tap away rather than a close button and a
+/// tap. A tap on the chosen pill puts the ruler away.
+///
+/// ⚠️ **A NUMBER INSTEAD OF THE SYMBOL ON A TURNED PILL.** "Contrast −30%" says
+/// both that the dial is not at rest and where it is, and an untouched pill
+/// keeps the symbol that helps find it.
 ///
 /// ⚠️ **ONE EFFECT AT A TIME.** Choosing an effect replaces the one before —
 /// the compositor's budget on an SE allows one stylised stage per frame
-/// (`FrameLookRenderer`) — and "None" is a card of its own, ringed while no
-/// effect is on.
+/// (`FrameLookRenderer`) — and "None" takes it away, so it is dimmed while
+/// there is nothing to take.
 ///
 /// ⚠️ **THE VIEW DECIDES NOTHING ABOUT THE PICTURE.** It says what was turned
 /// (`onDial`, `onEffect`) and is told what is true (`show(_:)`); the mode writes
@@ -137,20 +135,22 @@ enum MediaLookThumbnails {
 @MainActor
 final class MediaEffectsToolsView: UIView {
     private enum Metrics {
-        static let card: CGFloat = 56
+        static let pill: CGFloat = 30
+        static let icon: CGFloat = 20
+        static var height: CGFloat { MediaValueRulerView.height + Spacing.sm + pill }
     }
 
-    /// As tall as the filter row, so the band does not jump between the two.
-    static var height: CGFloat { MediaFilterRowView.height }
+    /// The ruler, a gap and a row of pills — `MediaCropToolsView`'s sum.
+    static var height: CGFloat { Metrics.height }
 
-    /// The side of an effect card's picture, in points.
-    static var thumbnailSide: CGFloat { Metrics.card }
+    /// The side of an effect pill's picture, in points.
+    static var thumbnailSide: CGFloat { Metrics.icon }
 
     /// What the tools are showing.
     enum Focus: Equatable {
-        /// The row of dials and effects.
+        /// The row alone.
         case browsing
-        /// One dial's slider.
+        /// One dial's ruler.
         case dial(LookAdjustments.Key)
         /// The chosen effect's strength.
         case effect(LookEffectKind)
@@ -160,64 +160,75 @@ final class MediaEffectsToolsView: UIView {
     var onDial: ((LookAdjustments.Key, Double, _ isTracking: Bool) -> Void)?
     /// The effect changed — nil is "None".
     var onEffect: ((LookEffect?, _ isTracking: Bool) -> Void)?
-    /// A finger came down on the slider, or lifted.
+    /// A finger came down on the ruler, or lifted.
     var onTracking: ((Bool) -> Void)?
 
     private(set) var focus: Focus = .browsing
     private var look = FrameLook.neutral
 
+    private let ruler = MediaValueRulerView()
     private let scroller = ChipScrollView()
     private let row = UIStackView()
-    private var dialCards: [LookAdjustments.Key: EffectsCard] = [:]
-    private var effectCards: [LookEffectKind: EffectsCard] = [:]
-    private let noneCard = EffectsCard(glyph: MediaEffectsCatalog.noneGlyph, caption: MediaEffectsCatalog.noneLabel)
-    private let slider = MediaValueSliderRow()
+    private var dialPills: [LookAdjustments.Key: EffectsPill] = [:]
+    private var effectPills: [LookEffectKind: EffectsPill] = [:]
+    private let nonePill = EffectsPill(glyph: MediaEffectsCatalog.noneGlyph, caption: MediaEffectsCatalog.noneLabel)
 
     init() {
         super.init(frame: .zero)
         backgroundColor = .clear
 
+        ruler.alpha = 0
+        ruler.isHidden = true
+        ruler.isUserInteractionEnabled = false
+        ruler.onTracking = { [weak self] tracking in self?.onTracking?(tracking) }
+        ruler.onChange = { [weak self] value, tracking in self?.rulerMoved(to: value, tracking: tracking) }
+
+        // ⚠️ THE BAND HAS NO BACKGROUND, SO NEITHER DOES THIS — and no clipping,
+        // which would cut a pill at the band's edge instead of the screen's.
         scroller.backgroundColor = .clear
         scroller.showsHorizontalScrollIndicator = false
         scroller.clipsToBounds = false
         scroller.contentInset = UIEdgeInsets(top: 0, left: Spacing.lg, bottom: 0, right: Spacing.lg)
         row.axis = .horizontal
-        row.alignment = .top
+        row.alignment = .center
         row.spacing = Spacing.sm
         row.translatesAutoresizingMaskIntoConstraints = false
         scroller.addSubview(row)
-        scroller.pin(to: self)
 
         for key in LookAdjustments.Key.allCases {
-            let card = EffectsCard(glyph: MediaEffectsCatalog.glyph(key), caption: MediaEffectsCatalog.name(key))
-            card.onTap = { [weak self] in self?.focus(on: .dial(key)) }
-            dialCards[key] = card
-            row.addArrangedSubview(card)
+            let pill = EffectsPill(glyph: MediaEffectsCatalog.glyph(key), caption: MediaEffectsCatalog.name(key))
+            pill.onTap = { [weak self] in self?.toggle(.dial(key)) }
+            dialPills[key] = pill
+            row.addArrangedSubview(pill)
         }
         row.addArrangedSubview(Self.divider())
-        noneCard.onTap = { [weak self] in self?.chooseNone() }
-        row.addArrangedSubview(noneCard)
+        nonePill.onTap = { [weak self] in self?.chooseNone() }
+        row.addArrangedSubview(nonePill)
         for kind in LookEffectKind.allCases {
-            let card = EffectsCard(glyph: nil, caption: MediaEffectsCatalog.name(kind))
-            card.onTap = { [weak self] in self?.choose(kind) }
-            effectCards[kind] = card
-            row.addArrangedSubview(card)
+            let pill = EffectsPill(glyph: nil, caption: MediaEffectsCatalog.name(kind))
+            pill.onTap = { [weak self] in self?.choose(kind) }
+            effectPills[kind] = pill
+            row.addArrangedSubview(pill)
         }
 
-        slider.alpha = 0
-        slider.isHidden = true
-        slider.onClose = { [weak self] in self?.browse(animated: true) }
-        slider.onTracking = { [weak self] tracking in self?.onTracking?(tracking) }
-        slider.onChange = { [weak self] value, tracking in self?.sliderMoved(to: value, tracking: tracking) }
-        slider.pin(to: self)
-
+        ruler.constrain(in: self) { view in
+            ruler.topAnchor.constraint(equalTo: view.topAnchor)
+            ruler.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+            ruler.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        }
+        scroller.constrain(in: self) { view in
+            scroller.topAnchor.constraint(equalTo: ruler.bottomAnchor, constant: Spacing.sm)
+            scroller.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+            scroller.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            scroller.heightAnchor.constraint(equalToConstant: Metrics.pill)
+        }
         NSLayoutConstraint.activate([
             row.topAnchor.constraint(equalTo: scroller.contentLayoutGuide.topAnchor),
             row.bottomAnchor.constraint(equalTo: scroller.contentLayoutGuide.bottomAnchor),
             row.leadingAnchor.constraint(equalTo: scroller.contentLayoutGuide.leadingAnchor),
             row.trailingAnchor.constraint(equalTo: scroller.contentLayoutGuide.trailingAnchor),
             row.heightAnchor.constraint(equalTo: scroller.frameLayoutGuide.heightAnchor),
-            heightAnchor.constraint(equalToConstant: Self.height)
+            heightAnchor.constraint(equalToConstant: Metrics.height)
         ])
         show(.neutral)
     }
@@ -225,98 +236,141 @@ final class MediaEffectsToolsView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// States what the page carries, without announcing it: the dots, the
-    /// ringed effect, and the slider's value if one is up.
+    /// States what the page carries, without announcing it: the numbers on the
+    /// pills, the chosen effect, and the ruler's value if one is up.
     func show(_ look: FrameLook) {
         self.look = look
-        for (key, card) in dialCards {
-            let value = look.adjustments[key]
-            card.setMarked(value != 0)
-            card.accessibilityValue = MediaValueSliderRow.spelled(value, twoSided: key.range.lowerBound < 0).spoken
-        }
-        noneCard.setChosen(look.effect == nil)
-        for (kind, card) in effectCards {
-            let chosen = look.effect?.kind == kind
-            card.setChosen(chosen)
-            card.accessibilityValue = chosen
-                ? MediaValueSliderRow.spelled(look.effect?.intensity ?? 0, twoSided: false).spoken
-                : nil
-        }
+        refreshPills()
         switch focus {
         case .browsing: break
-        case .dial(let key): slider.show(look.adjustments[key])
+        case .dial(let key): ruler.show(look.adjustments[key])
         case .effect(let kind):
-            // ⚠️ **AN EFFECT TAKEN AWAY ELSEWHERE TAKES ITS SLIDER WITH IT** —
+            // ⚠️ **AN EFFECT TAKEN AWAY ELSEWHERE TAKES ITS RULER WITH IT** —
             // the undo arrow, or another page.
             if look.effect?.kind == kind {
-                slider.show(look.effect?.intensity ?? 0)
+                ruler.show(look.effect?.intensity ?? 0)
             } else {
                 browse(animated: false)
             }
         }
     }
 
-    /// Hands the effect cards their pictures. "None" keeps its symbol.
+    /// Hands the effect pills their pictures. "None" keeps its symbol.
     func show(pictures: [LookEffectKind: UIImage]) {
-        for (kind, card) in effectCards { card.setPicture(pictures[kind]) }
+        for (kind, pill) in effectPills { pill.setPicture(pictures[kind]) }
     }
 
-    /// Back to the row of cards.
+    /// Puts the ruler away; the row stays.
     func browse(animated: Bool) {
         guard focus != .browsing else { return }
+        ruler.abandonDrag()
         focus = .browsing
-        crossfade(toSlider: false, animated: animated)
+        refreshFocus()
+        fadeRuler(in: false, animated: animated)
     }
 
-    private func focus(on focus: Focus) {
-        self.focus = focus
-        switch focus {
+    private func refreshPills() {
+        for (key, pill) in dialPills {
+            let value = look.adjustments[key]
+            let words = ValueRuler.reading(value, twoSided: key.range.lowerBound < 0)
+            pill.setReading(value != 0 ? words.written : nil)
+            pill.accessibilityValue = words.spoken
+        }
+        nonePill.isEnabled = look.effect != nil
+        for (kind, pill) in effectPills {
+            let chosen = look.effect?.kind == kind
+            let words = ValueRuler.reading(look.effect?.intensity ?? 0, twoSided: false)
+            pill.setChosen(chosen)
+            pill.setReading(chosen ? words.written : nil)
+            pill.accessibilityValue = chosen ? words.spoken : nil
+        }
+    }
+
+    private func refreshFocus() {
+        for (key, pill) in dialPills { pill.setLit(focus == .dial(key)) }
+        for (kind, pill) in effectPills { pill.setLit(focus == .effect(kind)) }
+    }
+
+    /// A tap on the pill that is already up puts its ruler away.
+    private func toggle(_ target: Focus) {
+        guard target != focus else {
+            browse(animated: true)
+            return
+        }
+        focus(on: target)
+    }
+
+    private func focus(on target: Focus) {
+        let wasBrowsing = focus == .browsing
+        focus = target
+        switch target {
         case .browsing:
             return
         case .dial(let key):
-            let name = MediaEffectsCatalog.name(key)
-            slider.configure(
-                title: name, closeLabel: "Close \(name)", range: key.range, value: look.adjustments[key]
+            ruler.configure(
+                name: MediaEffectsCatalog.name(key), range: key.range, rest: 0, value: look.adjustments[key]
             )
         case .effect(let kind):
-            let name = MediaEffectsCatalog.name(kind)
-            slider.configure(
-                title: name, closeLabel: "Close \(name)", range: 0...1,
+            ruler.configure(
+                name: MediaEffectsCatalog.name(kind), range: 0...1,
+                rest: MediaEffectsCatalog.startingIntensity,
                 value: look.effect?.intensity ?? MediaEffectsCatalog.startingIntensity
             )
         }
-        crossfade(toSlider: true, animated: window != nil)
+        refreshFocus()
+        reveal(target)
+        if wasBrowsing { fadeRuler(in: true, animated: window != nil) }
+    }
+
+    /// Scrolls the chosen pill fully into the row.
+    private func reveal(_ target: Focus) {
+        let pill: UIView?
+        switch target {
+        case .browsing: pill = nil
+        case .dial(let key): pill = dialPills[key]
+        case .effect(let kind): pill = effectPills[kind]
+        }
+        guard let pill, scroller.bounds.width > 0 else { return }
+        layoutIfNeeded()
+        let frame = pill.convert(pill.bounds, to: scroller).insetBy(dx: -Spacing.lg, dy: 0)
+        scroller.scrollRectToVisible(frame, animated: window != nil)
     }
 
     private func chooseNone() {
         guard look.effect != nil else { return }
         look.effect = nil
-        show(look)
+        if case .effect = focus { browse(animated: true) }
+        refreshPills()
         onEffect?(nil, false)
     }
 
-    /// ⚠️ **EXCLUSIVE, AND A TAP ON THE CHOSEN ONE ONLY OPENS ITS SLIDER.**
-    /// Re-choosing it would put its strength back to full under a finger that
-    /// only wanted to adjust it.
+    /// ⚠️ **A TAP ON THE CHOSEN ONE ONLY BRINGS UP ITS RULER** — or puts it
+    /// away. Re-choosing it would put its strength back to full under a finger
+    /// that only wanted to adjust it.
     private func choose(_ kind: LookEffectKind) {
-        if look.effect?.kind != kind {
-            look.effect = LookEffect(kind: kind, intensity: MediaEffectsCatalog.startingIntensity)
-            show(look)
-            onEffect?(look.effect, false)
+        guard look.effect?.kind != kind else {
+            toggle(.effect(kind))
+            return
         }
+        look.effect = LookEffect(kind: kind, intensity: MediaEffectsCatalog.startingIntensity)
+        refreshPills()
+        onEffect?(look.effect, false)
         focus(on: .effect(kind))
     }
 
-    private func sliderMoved(to value: Double, tracking: Bool) {
+    private func rulerMoved(to value: Double, tracking: Bool) {
         switch focus {
         case .browsing:
             return
         case .dial(let key):
             look.adjustments[key] = value
-            dialCards[key]?.setMarked(look.adjustments[key] != 0)
+            refreshPills()
             onDial?(key, look.adjustments[key], tracking)
         case .effect(let kind):
+            // A strength dragged to zero is no effect (`LookEffect.normalised`),
+            // and the ruler stays under the finger that did it.
             look.effect = LookEffect(kind: kind, intensity: value)
+            refreshPills()
             onEffect?(look.effect, tracking)
         }
     }
@@ -324,28 +378,21 @@ final class MediaEffectsToolsView: UIView {
     /// ⚠️ **STATED BEFORE THE ANIMATION, NEVER READ FROM IT** — a
     /// `.beginFromCurrentState` fade staged in the same turn animates end to
     /// end and is invisible (memory `uiview-animate-from-value-trap`); this one
-    /// starts from alphas it has just set.
-    private func crossfade(toSlider: Bool, animated: Bool) {
-        slider.isHidden = false
-        scroller.isHidden = false
-        scroller.isUserInteractionEnabled = !toSlider
-        slider.isUserInteractionEnabled = toSlider
-        let changes = { [self] in
-            slider.alpha = toSlider ? 1 : 0
-            scroller.alpha = toSlider ? 0 : 1
-        }
+    /// starts from an alpha it has just set.
+    private func fadeRuler(in showing: Bool, animated: Bool) {
+        ruler.isHidden = false
+        ruler.isUserInteractionEnabled = showing
+        let change = { [ruler] in ruler.alpha = showing ? 1 : 0 }
         let landed = { [weak self] in
             guard let self else { return }
-            let showingSlider = focus != .browsing
-            slider.isHidden = !showingSlider
-            scroller.isHidden = showingSlider
+            ruler.isHidden = focus == .browsing
         }
         guard animated, !UIAccessibility.isReduceMotionEnabled else {
-            changes()
+            change()
             landed()
             return
         }
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut], animations: changes) { _ in
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut], animations: change) { _ in
             landed()
         }
     }
@@ -358,7 +405,7 @@ final class MediaEffectsToolsView: UIView {
         host.addSubview(line)
         NSLayoutConstraint.activate([
             host.widthAnchor.constraint(equalToConstant: 1 + Spacing.sm),
-            host.heightAnchor.constraint(equalToConstant: Metrics.card),
+            host.heightAnchor.constraint(equalToConstant: Metrics.pill),
             line.widthAnchor.constraint(equalToConstant: 1),
             line.centerXAnchor.constraint(equalTo: host.centerXAnchor),
             line.topAnchor.constraint(equalTo: host.topAnchor, constant: Spacing.sm),
@@ -369,152 +416,194 @@ final class MediaEffectsToolsView: UIView {
 
     // MARK: - Tests
 
-    /// Internal for tests: the slider row.
-    var debugSlider: MediaValueSliderRow { slider }
-    /// Internal for tests: whether the slider, not the row, is what shows.
-    var debugShowsSlider: Bool { !slider.isHidden && slider.alpha > 0 && focus != .browsing }
-    /// Internal for tests: a tap on a dial's card.
-    func debugTapDial(_ key: LookAdjustments.Key) { dialCards[key]?.onTap?() }
-    /// Internal for tests: a tap on an effect's card.
-    func debugTapEffect(_ kind: LookEffectKind) { effectCards[kind]?.onTap?() }
-    /// Internal for tests: a tap on "None".
-    func debugTapNone() { noneCard.onTap?() }
-    /// Internal for tests: whether a dial's card wears its dot.
-    func debugDialIsMarked(_ key: LookAdjustments.Key) -> Bool { dialCards[key]?.isMarked ?? false }
-    /// Internal for tests: which cards are ringed — nil is "None".
-    var debugRingedEffects: [LookEffectKind?] {
-        (noneCard.isChosen ? [nil] : []) + LookEffectKind.allCases.filter { effectCards[$0]?.isChosen == true }
+    /// Internal for tests: the ruler.
+    var debugRuler: MediaValueRulerView { ruler }
+    /// Internal for tests: whether the ruler is what a finger would find above
+    /// the row.
+    var debugShowsRuler: Bool {
+        !ruler.isHidden && ruler.alpha > 0 && ruler.isUserInteractionEnabled && focus != .browsing
     }
-    /// Internal for tests: an effect card's picture.
-    func debugPicture(for kind: LookEffectKind) -> UIImage? { effectCards[kind]?.picture }
-    /// Internal for tests: a dial's card, to read what VoiceOver reads.
-    func debugDialCard(_ key: LookAdjustments.Key) -> UIView? { dialCards[key] }
+    /// Internal for tests: whether the row is on screen and takes touches.
+    var debugShowsRow: Bool { !scroller.isHidden && scroller.alpha > 0 && scroller.isUserInteractionEnabled }
+    /// Internal for tests: where the ruler and the row sit, in this view.
+    var debugRulerFrame: CGRect { ruler.frame }
+    var debugRowFrame: CGRect { scroller.frame }
+    /// Internal for tests: a tap on a dial's pill.
+    func debugTapDial(_ key: LookAdjustments.Key) { dialPills[key]?.onTap?() }
+    /// Internal for tests: a tap on an effect's pill.
+    func debugTapEffect(_ kind: LookEffectKind) { effectPills[kind]?.onTap?() }
+    /// Internal for tests: a tap on "None".
+    func debugTapNone() { nonePill.onTap?() }
+    /// Internal for tests: whether "None" can be tapped.
+    var debugNoneIsEnabled: Bool { nonePill.isEnabled }
+    /// Internal for tests: the number a dial's pill shows, nil when it shows
+    /// its symbol.
+    func debugReading(_ key: LookAdjustments.Key) -> String? { dialPills[key]?.reading }
+    func debugReading(_ kind: LookEffectKind) -> String? { effectPills[kind]?.reading }
+    /// Internal for tests: which effects are chosen.
+    var debugChosenEffects: [LookEffectKind] {
+        LookEffectKind.allCases.filter { effectPills[$0]?.isChosen == true }
+    }
+    /// Internal for tests: the pills drawn filled, by caption.
+    var debugFocusedPills: [String] {
+        (Array(dialPills.values) + Array(effectPills.values) + [nonePill])
+            .filter(\.isLit).map(\.caption)
+    }
+    /// Internal for tests: an effect pill's picture.
+    func debugPicture(for kind: LookEffectKind) -> UIImage? { effectPills[kind]?.picture }
+    /// Internal for tests: a dial's pill, to read what VoiceOver reads.
+    func debugDialPill(_ key: LookAdjustments.Key) -> UIView? { dialPills[key] }
+    /// Internal for tests: where a dial pill's parts sit, in the pill — nil for
+    /// a part that is not showing.
+    func debugParts(_ key: LookAdjustments.Key) -> (icon: CGRect?, caption: CGRect, reading: CGRect?)? {
+        dialPills[key]?.parts
+    }
+    /// Internal for tests: a pill's height.
+    func debugPillSize(_ key: LookAdjustments.Key) -> CGSize? { dialPills[key]?.bounds.size }
 }
 
-/// One card: a symbol or a picture, its word underneath, a dot when the dial
-/// it stands for is turned, a ring when it is chosen.
-private final class EffectsCard: UIControl {
+/// One pill: a symbol or a small picture and a word side by side — or, once
+/// the dial it stands for is turned, the word and its number.
+///
+/// ```
+/// ( ☀ Brightness )      ( Brightness +20% )
+/// ```
+private final class EffectsPill: UIControl {
     private enum Metrics {
-        static let side: CGFloat = 56
-        static let corner: CGFloat = 10
-        static let ring: CGFloat = 2
-        static let caption: CGFloat = 16
-        static let dot: CGFloat = 6
-        static let glyph: CGFloat = 20
+        static let height: CGFloat = 30
+        static let padding: CGFloat = 12
+        static let gap: CGFloat = 6
+        static let icon: CGFloat = 20
+        static let glyph: CGFloat = 13
     }
 
     var onTap: (() -> Void)?
-    private let tile = UIView()
-    private let glyphView = UIImageView()
-    private let pictureView = UIImageView()
+    let caption: String
+    private let hasPicture: Bool
+    private let iconView = UIImageView()
     private let captionLabel = UILabel()
-    private let dot = UIView()
-    private(set) var isMarked = false
+    private let readingLabel = UILabel()
+    private let stack = UIStackView()
+    private(set) var isLit = false
     private(set) var isChosen = false
-    var picture: UIImage? { pictureView.image }
+    private(set) var reading: String?
+    var picture: UIImage? { hasPicture ? iconView.image : nil }
 
     init(glyph: String?, caption: String) {
+        self.caption = caption
+        hasPicture = glyph == nil
         super.init(frame: .zero)
-        tile.backgroundColor = .tertiarySystemFill
-        tile.layer.cornerRadius = Metrics.corner
-        tile.layer.cornerCurve = .continuous
-        tile.clipsToBounds = true
-        tile.isUserInteractionEnabled = false
-        tile.layer.borderColor = UIColor.tintColor.cgColor
-        tile.translatesAutoresizingMaskIntoConstraints = false
+        layer.cornerCurve = .continuous
 
-        pictureView.contentMode = .scaleAspectFill
-        pictureView.clipsToBounds = true
-        pictureView.translatesAutoresizingMaskIntoConstraints = false
-        tile.addSubview(pictureView)
         if let glyph {
-            glyphView.image = UIImage(
+            iconView.image = UIImage(
                 systemName: glyph,
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: Metrics.glyph, weight: .regular)
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: Metrics.glyph, weight: .semibold)
             )
-            glyphView.tintColor = .label
-            glyphView.contentMode = .center
-            glyphView.translatesAutoresizingMaskIntoConstraints = false
-            tile.addSubview(glyphView)
-            NSLayoutConstraint.activate([
-                glyphView.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
-                glyphView.centerYAnchor.constraint(equalTo: tile.centerYAnchor)
-            ])
+            iconView.contentMode = .center
+        } else {
+            // A picture waits for its render on a plain disc, so the pill does
+            // not change width when it lands.
+            iconView.backgroundColor = .tertiarySystemFill
+            iconView.contentMode = .scaleAspectFill
+            iconView.layer.cornerRadius = Metrics.icon / 2
+            iconView.clipsToBounds = true
         }
-
-        dot.backgroundColor = .tintColor
-        dot.layer.cornerRadius = Metrics.dot / 2
-        dot.isHidden = true
-        dot.isUserInteractionEnabled = false
-        dot.translatesAutoresizingMaskIntoConstraints = false
-
         captionLabel.text = caption
-        captionLabel.font = .preferredFont(forTextStyle: .caption2)
-        captionLabel.adjustsFontForContentSizeCategory = true
-        captionLabel.adjustsFontSizeToFitWidth = true
-        captionLabel.minimumScaleFactor = 0.7
-        captionLabel.textAlignment = .center
-        captionLabel.textColor = .secondaryLabel
-        captionLabel.isUserInteractionEnabled = false
-        captionLabel.translatesAutoresizingMaskIntoConstraints = false
+        captionLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        readingLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        readingLabel.isHidden = true
 
-        addSubview(tile)
-        addSubview(dot)
-        addSubview(captionLabel)
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = Metrics.gap
+        stack.isUserInteractionEnabled = false
+        for part in [iconView, captionLabel, readingLabel] { stack.addArrangedSubview(part) }
+        stack.constrain(in: self) { view in
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Metrics.padding)
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Metrics.padding)
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        }
         NSLayoutConstraint.activate([
-            tile.topAnchor.constraint(equalTo: topAnchor),
-            tile.leadingAnchor.constraint(equalTo: leadingAnchor),
-            tile.widthAnchor.constraint(equalToConstant: Metrics.side),
-            tile.heightAnchor.constraint(equalToConstant: Metrics.side),
-            pictureView.topAnchor.constraint(equalTo: tile.topAnchor),
-            pictureView.bottomAnchor.constraint(equalTo: tile.bottomAnchor),
-            pictureView.leadingAnchor.constraint(equalTo: tile.leadingAnchor),
-            pictureView.trailingAnchor.constraint(equalTo: tile.trailingAnchor),
-            dot.widthAnchor.constraint(equalToConstant: Metrics.dot),
-            dot.heightAnchor.constraint(equalToConstant: Metrics.dot),
-            dot.topAnchor.constraint(equalTo: tile.topAnchor, constant: Spacing.xs),
-            dot.trailingAnchor.constraint(equalTo: tile.trailingAnchor, constant: -Spacing.xs),
-            captionLabel.topAnchor.constraint(equalTo: tile.bottomAnchor, constant: Spacing.xs),
-            captionLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-            captionLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
-            captionLabel.heightAnchor.constraint(equalToConstant: Metrics.caption),
-            // ⚠️ **THE CARD'S HEIGHT COMES FROM BELOW** — the filter chip's
-            // lesson: without it the control is shorter than its picture and a
-            // finger on the tile's lower half lands on nothing.
-            captionLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
-            widthAnchor.constraint(equalToConstant: Metrics.side)
+            iconView.widthAnchor.constraint(equalToConstant: Metrics.icon),
+            iconView.heightAnchor.constraint(equalToConstant: Metrics.icon),
+            heightAnchor.constraint(equalToConstant: Metrics.height)
         ])
 
         addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
         isAccessibilityElement = true
         accessibilityLabel = caption
-        accessibilityTraits = .button
-        // ⚠️ A `CGColor`, SO IT IS RE-STATED ON EVERY APPEARANCE CHANGE.
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (card: EffectsCard, _) in
-            card.tile.layer.borderColor = UIColor.tintColor.cgColor
-        }
+        paint()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Shaped before anything reads it — `IconSelectorBar`'s rule.
+        layer.cornerRadius = bounds.height / 2
+    }
+
     override var isHighlighted: Bool {
-        didSet { alpha = isHighlighted ? 0.55 : 1 }
+        didSet { paint() }
     }
 
-    func setMarked(_ marked: Bool) {
-        isMarked = marked
-        dot.isHidden = !marked
+    override var isEnabled: Bool {
+        didSet { paint() }
     }
 
+    /// Nil shows the symbol; a number replaces it.
+    func setReading(_ text: String?) {
+        guard text != reading else { return }
+        reading = text
+        readingLabel.text = text
+        readingLabel.isHidden = text == nil
+        iconView.isHidden = text != nil
+    }
+
+    /// Filled while its ruler is up.
+    func setLit(_ lit: Bool) {
+        guard lit != isLit else { return }
+        isLit = lit
+        paint()
+    }
+
+    /// The effect that is on.
     func setChosen(_ chosen: Bool) {
+        guard chosen != isChosen else { return }
         isChosen = chosen
-        tile.layer.borderWidth = chosen ? Metrics.ring : 0
-        captionLabel.textColor = chosen ? .label : .secondaryLabel
-        accessibilityTraits = chosen ? [.button, .selected] : .button
+        paint()
     }
 
     func setPicture(_ image: UIImage?) {
-        pictureView.image = image
+        guard hasPicture else { return }
+        iconView.image = image
+    }
+
+    /// ⚠️ **ONE MATERIAL, NEVER TWO — AND HERE, NONE AT ALL**, the crop chip's
+    /// rule: the band carries no plate, so a focused pill is a fill in the
+    /// label's colour and the rest are a faint wash of it.
+    private func paint() {
+        backgroundColor = isLit ? .label : UIColor.label.withAlphaComponent(0.12)
+        let ink: UIColor = isLit ? .systemBackground : .label
+        iconView.tintColor = ink
+        captionLabel.textColor = ink
+        readingLabel.textColor = ink
+        alpha = !isEnabled ? 0.4 : (isHighlighted ? 0.55 : 1)
+        var traits: UIAccessibilityTraits = .button
+        if isLit || isChosen { traits.insert(.selected) }
+        if !isEnabled { traits.insert(.notEnabled) }
+        accessibilityTraits = traits
+    }
+
+    /// Internal for tests: where the parts sit, in the pill.
+    var parts: (icon: CGRect?, caption: CGRect, reading: CGRect?) {
+        layoutIfNeeded()
+        return (
+            iconView.isHidden ? nil : iconView.convert(iconView.bounds, to: self),
+            captionLabel.convert(captionLabel.bounds, to: self),
+            readingLabel.isHidden ? nil : readingLabel.convert(readingLabel.bounds, to: self)
+        )
     }
 }
