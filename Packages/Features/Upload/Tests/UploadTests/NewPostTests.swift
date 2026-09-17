@@ -412,6 +412,37 @@ struct NewPostTests {
         #expect(tracks.isEmpty == false, "the file handed over carries no video track")
     }
 
+    /// ⚠️ **THE WHOLE EDIT OF A CLIP IS HANDED ON, NOT ONLY ITS PIECES.** A
+    /// look, a crop, the text and a song were shown in the editor and, until
+    /// this, published as if never made.
+    @Test func aClipsWholeEditReachesTheComposer() async throws {
+        let text = FrameOverlay(
+            id: "t", content: .text(TextOverlay(
+                text: "Hi", font: .classic, colour: .white, background: .none, alignment: .centre
+            )),
+            placement: .centred
+        )
+        let song = VideoSoundtrack(
+            fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("song.m4a"),
+            title: "Song", startSeconds: 2, musicVolume: 0.5, originalVolume: 0.25
+        )
+        var edited = MediaEdits(filter: .noir)
+        edited.crop = MediaCrop(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1))
+        edited.overlays = [text]
+        edited.soundtrack = song
+        let screen = open(Self.items(2, videosAt: [1]), edits: ["video-1": edited])
+
+        screen.post.debugTapPost()
+        try await settle(until: { screen.handed.entry != nil })
+
+        let calls = await screen.composer.calls
+        let clip = try #require(calls.first?.videos.first)
+        #expect(clip.finish.look.preset == .noir, "the look was left behind")
+        #expect(clip.finish.crop == edited.crop, "the crop was left behind")
+        #expect(clip.finish.overlays == [text], "the text was left behind")
+        #expect(clip.soundtrack == song, "the song was left behind")
+    }
+
     /// ⚠️ **A CLIP THAT CANNOT BE READ STOPS THE POST — IT DOES NOT SHRINK IT.**
     /// Publishing three of the four things the author assembled, with no word
     /// said, is the exact defect this slice removes; doing it again by way of an

@@ -689,7 +689,7 @@ final class NewPostViewController: UIViewController {
                         if case .video(let seconds) = item.kind { declared = seconds } else { declared = 0 }
                         let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
                         let length = real.isFinite && real > 0 ? real : declared
-                        let timeline = (edits[item.id] ?? .untouched).timeline
+                        let edited = edits[item.id] ?? .untouched
                         // ⚠️ **EVERY PIECE, AND THIS LINE USED TO TAKE ONLY THE
                         // FIRST.** `PickedVideo` carried a single range and the
                         // exporter a single `insertTimeRange`, so a timeline of
@@ -698,10 +698,17 @@ final class NewPostViewController: UIViewController {
                         // perfectly good video. The mapping is shared with the
                         // editor's preview, so what is published is what was
                         // watched.
-                        let kept = MediaTimelining.exportSegments(timeline, withinSource: length)
-                        media.append(
-                            .video(PickedVideo(sourceURL: file, keptPieces: kept))
+                        //
+                        // ⚠️ **AND THE WHOLE EDIT, NOT ONLY THE PIECES** — the
+                        // one mapping the preview uses, overlays included here
+                        // because the editor draws them as views.
+                        let plan = edited.exportPlan(
+                            sourceURL: file, fileSeconds: length, artwork: nil, includingOverlays: true
                         )
+                        media.append(.video(PickedVideo(
+                            sourceURL: file, keptPieces: plan.segments,
+                            finish: plan.finish, soundtrack: plan.soundtrack
+                        )))
                         continue
                     }
                     guard let image = await library.thumbnail(for: item.id, size: Self.publishPixels) else {

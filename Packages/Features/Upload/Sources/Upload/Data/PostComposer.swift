@@ -37,9 +37,32 @@ public struct PickedVideo: Sendable, Equatable {
     /// only empty takes the passthrough.
     public let keptPieces: [VideoExportSegment]
 
-    public init(sourceURL: URL, keptPieces: [VideoExportSegment] = []) {
+    /// What is drawn over the whole clip — its crop, its look and its
+    /// overlays — as the editor showed it.
+    public let finish: FrameFinish
+
+    /// The author's own song under the clip, if any.
+    public let soundtrack: VideoSoundtrack?
+
+    public init(
+        sourceURL: URL, keptPieces: [VideoExportSegment] = [], finish: FrameFinish = .none,
+        soundtrack: VideoSoundtrack? = nil
+    ) {
         self.sourceURL = sourceURL
         self.keptPieces = keptPieces
+        self.finish = finish
+        self.soundtrack = soundtrack
+    }
+
+    /// The export this clip asks for.
+    ///
+    /// ⚠️ **EVERY FIELD, OR THE PUBLISHED FILM IS NOT THE ONE WATCHED.** This
+    /// crossed with the pieces alone: a whole-clip look, a crop, the text and
+    /// the song were all shown in the editor and published as if never made.
+    var plan: VideoExportPlan {
+        VideoExportPlan(
+            sourceURL: sourceURL, segments: keptPieces, finish: finish, soundtrack: soundtrack
+        )
     }
 }
 
@@ -253,9 +276,7 @@ public actor PostComposer: PostComposing {
     ) {
         let exported: ExportedVideo
         do {
-            exported = try await videoExporter.export(
-                VideoExportPlan(sourceURL: picked.sourceURL, segments: picked.keptPieces)
-            )
+            exported = try await videoExporter.export(picked.plan)
         } catch {
             throw ComposeError.media("couldn't prepare the video: \(error)")
         }
