@@ -8,11 +8,10 @@ import UIKit
 /// same page; only the tools in the band differ. The screen sets `kind` before
 /// it opens the mode.
 ///
-/// ⚠️ **STICKERS ARE NOT HERE YET, AND SHOW NOTHING.** The sticker slice (S10)
-/// fills the `.stickers` branch of `open` — its picker, its tools — and reuses
-/// everything else: the layer, the lock, the gestures and the bin. Offering an
-/// "Add sticker" card before there is a picker behind it would be a control
-/// that reaches nothing.
+/// ⚠️ **STICKERS REUSE EVERYTHING BUT THE TOOLS.** Their band offers "Add
+/// sticker", which opens `MediaStickerPickerViewController` as a sheet; the
+/// pick lands at the centre, and the layer, the lock, the gestures and the bin
+/// are text's.
 ///
 /// ⚠️ **THE CANVAS IS HELD STILL WHILE TEXT IS OPEN** (`lockCanvas(by:
 /// .overlays)`): a drag on an overlay must not page the canvas, pop the screen
@@ -55,6 +54,23 @@ final class MediaEditorOverlayMode: MediaEditorMode {
         return tools
     }()
 
+    private lazy var stickerTools: MediaOverlayToolsView = {
+        let tools = MediaOverlayToolsView(addTitle: "Add sticker", addSymbol: "face.smiling")
+        tools.onAction = { [weak self] action in self?.toolsDid(action) }
+        return tools
+    }()
+
+    /// The tools of the category the mode is open as.
+    private var tools: MediaOverlayToolsView { kind == .text ? textTools : stickerTools }
+
+    /// Whether an overlay belongs to the category the mode is open as.
+    private func belongs(_ overlay: FrameOverlay) -> Bool {
+        switch overlay.content {
+        case .text: kind == .text
+        case .emoji, .sticker: kind == .stickers
+        }
+    }
+
     /// Lays the overlays stored for `id` into `cell`'s overlay host — called
     /// every time the canvas configures a page, because a recycled cell
     /// arrives carrying the previous picture's.
@@ -68,24 +84,18 @@ final class MediaEditorOverlayMode: MediaEditorMode {
     }
 
     var tenant: UIView? {
-        guard kind == .text, host?.currentItemID != nil else { return nil }
-        return textTools
+        guard host?.currentItemID != nil else { return nil }
+        return tools
     }
 
     func open(for id: String, item: MediaLibraryItem) {
         guard let host else { return }
-        switch kind {
-        case .stickers:
-            // The sticker slice (S10) opens its tools here.
-            host.showInBand(nil)
-        case .text:
-            host.showInBand(textTools)
-            begin(on: id)
-        }
+        host.showInBand(tools)
+        begin(on: id)
     }
 
     func bandWillChange(to accessory: UIView?) {
-        guard isOpen, accessory !== textTools else { return }
+        guard isOpen, accessory !== textTools, accessory !== stickerTools else { return }
         close()
     }
 
@@ -143,10 +153,7 @@ final class MediaEditorOverlayMode: MediaEditorMode {
 
     private func refreshTools() {
         guard let host, let id = openID ?? host.currentItemID else { return }
-        textTools.show(host.edits(for: id).overlays.filter {
-            if case .text = $0.content { return true }
-            return false
-        })
+        tools.show(host.edits(for: id).overlays.filter(belongs))
     }
 
     // MARK: - What the tools and the layer say
@@ -157,7 +164,9 @@ final class MediaEditorOverlayMode: MediaEditorMode {
         // tools stay in the band while "Next" is away; the lock does not.
         if !isOpen || openID != id { begin(on: id) }
         switch action {
+        case .add where kind == .stickers: pickSticker(on: id)
         case .add: compose(on: id, editing: nil)
+        case .edit(let overlayID) where kind == .stickers: host.pageCell(for: id)?.overlayHost.select(overlayID)
         case .edit(let overlayID): compose(on: id, editing: overlayID)
         case .delete(let overlayID): remove(overlayID, on: id)
         case .bringToFront(let overlayID): bringToFront(overlayID, on: id)
@@ -201,6 +210,34 @@ final class MediaEditorOverlayMode: MediaEditorMode {
         if let cell = host.pageCell(for: id) { dress(cell, for: id) }
         refreshTools()
     }
+
+    // MARK: - Stickers
+
+    /// Opens the sticker sheet; a pick lands at the centre of the picture and
+    /// is held, ready to be moved.
+    private func pickSticker(on id: String) {
+        guard let host else { return }
+        let picker = MediaStickerPickerViewController()
+        picker.onPick = { [weak self] content in self?.place(content, on: id) }
+        if let sheet = picker.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        picker.loadViewIfNeeded()
+        self.picker = picker
+        host.presentSheet(picker)
+    }
+
+    private func place(_ content: FrameOverlay.Content, on id: String) {
+        let layer = host?.pageCell(for: id)?.overlayHost
+        let centre = layer?.newCentre ?? CGPoint(x: 0.5, y: 0.5)
+        let overlay = FrameOverlay(content: content, placement: OverlayPlacement(centre: centre))
+        store(on: id) { $0.append(overlay) }
+        layer?.select(overlay.id)
+    }
+
+    /// The last sheet opened, for tests.
+    private weak var picker: MediaStickerPickerViewController?
 
     // MARK: - Typing
 
@@ -272,6 +309,10 @@ final class MediaEditorOverlayMode: MediaEditorMode {
 
     /// Internal for tests: the text tools, whatever the band holds.
     var debugTextTools: MediaOverlayToolsView { textTools }
+    /// Internal for tests: the sticker tools, whatever the band holds.
+    var debugStickerTools: MediaOverlayToolsView { stickerTools }
+    /// Internal for tests: the sticker sheet last opened.
+    var debugPicker: MediaStickerPickerViewController? { picker }
     /// Internal for tests: the composer, while one is up.
     var debugComposer: MediaTextComposerView? { composer }
 }

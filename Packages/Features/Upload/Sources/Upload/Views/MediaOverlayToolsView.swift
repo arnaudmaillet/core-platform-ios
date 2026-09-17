@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaPlayback
+import StickerKit
 import UIKit
 
 /// What the band holds while Text is open: an "Add text" card, then one card
@@ -79,20 +80,46 @@ final class MediaOverlayToolsView: UIView {
         for view in row.arrangedSubviews.dropFirst() { view.removeFromSuperview() }
         cardIDs = overlays.map(\.id)
         for overlay in overlays {
-            guard case .text(let text) = overlay.content else { continue }
             let id = overlay.id
-            let card = Self.card(caption: text.text) { [weak self] in self?.onAction?(.edit(id: id)) }
-            var title = AttributedString(String(text.text.prefix(4)))
-            title.font = text.font.editorFont(ofSize: 17)
-            title.foregroundColor = text.colour.uiColor
-            var configuration = UIButton.Configuration.plain()
-            configuration.attributedTitle = title
-            card.face.configuration = configuration
-            // A dark card whatever the appearance: the words are shown in their
-            // own ink, which is white more often than not.
-            card.face.backgroundColor = UIColor.black.withAlphaComponent(0.75)
-            card.face.accessibilityLabel = "Text, \(text.text)"
-            card.face.accessibilityHint = "Edits this text"
+            let card: (stack: UIStackView, face: UIButton)
+            switch overlay.content {
+            case .text(let text):
+                card = Self.card(caption: text.text) { [weak self] in self?.onAction?(.edit(id: id)) }
+                var title = AttributedString(String(text.text.prefix(4)))
+                title.font = text.font.editorFont(ofSize: 17)
+                title.foregroundColor = text.colour.uiColor
+                var configuration = UIButton.Configuration.plain()
+                configuration.attributedTitle = title
+                card.face.configuration = configuration
+                // A dark card whatever the appearance: the words are shown in
+                // their own ink, which is white more often than not.
+                card.face.backgroundColor = UIColor.black.withAlphaComponent(0.75)
+                card.face.accessibilityLabel = "Text, \(text.text)"
+                card.face.accessibilityHint = "Edits this text"
+            case .emoji(let emoji):
+                card = Self.card(caption: "Emoji") { [weak self] in self?.onAction?(.edit(id: id)) }
+                var title = AttributedString(emoji)
+                title.font = .systemFont(ofSize: 28)
+                var configuration = UIButton.Configuration.plain()
+                configuration.attributedTitle = title
+                card.face.configuration = configuration
+                card.face.accessibilityLabel = "Emoji, \(emoji)"
+                card.face.accessibilityHint = "Selects it on the picture"
+            case .sticker(let stickerID):
+                let sticker = StickerCatalog.sticker(id: stickerID)
+                card = Self.card(caption: sticker?.label ?? "Sticker") { [weak self] in
+                    self?.onAction?(.edit(id: id))
+                }
+                card.face.imageView?.contentMode = .scaleAspectFit
+                if let sticker {
+                    let face = card.face
+                    StickerCatalog.firstFrame(for: sticker, size: CGSize(width: 88, height: 88)) { image in
+                        face.setImage(image, for: .normal)
+                    }
+                }
+                card.face.accessibilityLabel = "Sticker, \(sticker?.label ?? stickerID)"
+                card.face.accessibilityHint = "Selects it on the picture"
+            }
             card.face.menu = UIMenu(children: [
                 UIAction(title: "Bring to front", image: UIImage(systemName: "square.3.layers.3d.top.filled")) {
                     [weak self] _ in self?.onAction?(.bringToFront(id: id))

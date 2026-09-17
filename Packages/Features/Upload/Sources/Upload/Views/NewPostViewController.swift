@@ -3,6 +3,7 @@
 import AVFoundation
 import MediaPlayback
 import CoreModels
+import StickerKit
 import DesignSystem
 import UIKit
 
@@ -702,12 +703,13 @@ final class NewPostViewController: UIViewController {
                         // ⚠️ **AND THE WHOLE EDIT, NOT ONLY THE PIECES** — the
                         // one mapping the preview uses, overlays included here
                         // because the editor draws them as views.
+                        let art = await Self.stickerArt(for: edited, motion: .loop)
                         let plan = edited.exportPlan(
-                            sourceURL: file, fileSeconds: length, artwork: nil, includingOverlays: true
+                            sourceURL: file, fileSeconds: length, artwork: art, includingOverlays: true
                         )
                         media.append(.video(PickedVideo(
                             sourceURL: file, keptPieces: plan.segments,
-                            finish: plan.finish, soundtrack: plan.soundtrack
+                            finish: plan.finish, soundtrack: plan.soundtrack, artwork: plan.artwork
                         )))
                         continue
                     }
@@ -730,9 +732,11 @@ final class NewPostViewController: UIViewController {
                     // rasterised would lose the author's photograph over a
                     // decoration. `applied(to:artwork:)` carries that rule.
                     //
-                    // ⚠️ NO STICKER ART YET: the publish slice bakes it on the main
-                    // actor before this runs. No screen can add a sticker until then.
-                    let baked = (edits[item.id] ?? .untouched).applied(to: image, artwork: nil)
+                    // ⚠️ STICKERS ARE BAKED FIRST, AS STILLS: a photograph has no
+                    // time, and the render reads the frames off any thread.
+                    let edited = edits[item.id] ?? .untouched
+                    let stills = await Self.stickerArt(for: edited, motion: .still)
+                    let baked = edited.applied(to: image, artwork: stills)
                     media.append(.image(PickedImage(baked)))
                 }
                 let entry = try await composer.publish(media: media, caption: caption, as: nil)
@@ -745,6 +749,21 @@ final class NewPostViewController: UIViewController {
                 present(Self.failureAlert(error), animated: true)
             }
         }
+    }
+
+    /// The baked frames of the stickers an edit lays over its picture — nil
+    /// when it lays none, so nothing is baked for a post without stickers.
+    private static func stickerArt(
+        for edited: MediaEdits, motion: StickerFrameBaker.Motion
+    ) async -> (any OverlayArtwork)? {
+        let ids = edited.overlays.compactMap { overlay -> String? in
+            if case .sticker(let id) = overlay.content { return id }
+            return nil
+        }
+        guard !ids.isEmpty else { return nil }
+        return await StickerFrameBaker.shared.artwork(
+            for: ids, side: StickerFrameBaker.exportSide, motion: motion
+        )
     }
 
     private static func failureAlert(_ error: Error) -> UIAlertController {

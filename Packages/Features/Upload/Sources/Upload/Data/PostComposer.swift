@@ -44,14 +44,26 @@ public struct PickedVideo: Sendable, Equatable {
     /// The author's own song under the clip, if any.
     public let soundtrack: VideoSoundtrack?
 
+    /// The baked frames of the stickers the finish lays over the clip.
+    public let artwork: (any OverlayArtwork)?
+
     public init(
         sourceURL: URL, keptPieces: [VideoExportSegment] = [], finish: FrameFinish = .none,
-        soundtrack: VideoSoundtrack? = nil
+        soundtrack: VideoSoundtrack? = nil, artwork: (any OverlayArtwork)? = nil
     ) {
         self.sourceURL = sourceURL
         self.keptPieces = keptPieces
         self.finish = finish
         self.soundtrack = soundtrack
+        self.artwork = artwork
+    }
+
+    /// ⚠️ **THE ARTWORK IS NOT COMPARED.** It is a cache of pictures baked from
+    /// the sticker identifiers the finish already names; two clips with equal
+    /// finishes show the same stickers.
+    public static func == (lhs: PickedVideo, rhs: PickedVideo) -> Bool {
+        lhs.sourceURL == rhs.sourceURL && lhs.keptPieces == rhs.keptPieces
+            && lhs.finish == rhs.finish && lhs.soundtrack == rhs.soundtrack
     }
 
     /// The export this clip asks for.
@@ -61,7 +73,8 @@ public struct PickedVideo: Sendable, Equatable {
     /// the song were all shown in the editor and published as if never made.
     var plan: VideoExportPlan {
         VideoExportPlan(
-            sourceURL: sourceURL, segments: keptPieces, finish: finish, soundtrack: soundtrack
+            sourceURL: sourceURL, segments: keptPieces, finish: finish, soundtrack: soundtrack,
+            artwork: artwork
         )
     }
 }

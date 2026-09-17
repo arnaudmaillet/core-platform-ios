@@ -1,4 +1,5 @@
 import MediaPlayback
+import StickerKit
 import UIKit
 
 /// One overlay on the canvas: its picture, turned, sized and placed where its
@@ -215,10 +216,23 @@ final class MediaOverlayItemView: UIView, UIGestureRecognizerDelegate {
                              .paragraphStyle: { let p = NSMutableParagraphStyle(); p.alignment = .center; return p }()]
             )
             return CGSize(width: side, height: side)
-        case .sticker:
-            // The sticker slice (S10) hosts the sticker's frames here.
+        case .sticker(let id):
+            // ⚠️ **THE STICKER'S FIRST FRAME, ON EVERY PAGE.** The published
+            // clip animates it (the export bakes every frame); the canvas shows
+            // one picture, which is what the author aims with.
             lettering.attributedText = NSAttributedString(string: "")
             let side = MediaOverlayGeometry.emojiSizeFraction * mediaWidth
+            if let sticker = StickerCatalog.sticker(id: id) {
+                let wanted = overlay.content
+                StickerCatalog.firstFrame(
+                    for: sticker, size: CGSize(width: side * 2, height: side * 2)
+                ) { [weak self] image in
+                    guard let self, overlay.content == wanted else { return }
+                    picture.image = image
+                    picture.isHidden = image == nil
+                    lettering.isHidden = image != nil
+                }
+            }
             return CGSize(width: side, height: side)
         }
     }

@@ -412,6 +412,34 @@ struct NewPostTests {
         #expect(tracks.isEmpty == false, "the file handed over carries no video track")
     }
 
+    /// ⚠️ **A STICKER IS BAKED INTO THE PHOTOGRAPH THAT IS PUBLISHED.** Its
+    /// frames are baked before the render runs; without them the renderer
+    /// skips the sticker and the post goes out bare. The reader averages the
+    /// whole picture — here half red, half blue — so the sticker is laid at
+    /// five times its size, most of the frame, and the average turns towards
+    /// its yellow.
+    @Test func aStickerIsBakedIntoThePublishedPhotograph() async throws {
+        var edited = MediaEdits()
+        edited.overlays = [FrameOverlay(
+            content: .sticker(id: "Idea"), placement: OverlayPlacement(scale: 5)
+        )]
+        let bare = open(Self.items(1))
+        bare.library.answersTwoColours = true
+        bare.post.debugTapPost()
+        let bareImages = try await publishedImages(from: bare.composer)
+        let barePicture = try #require(bareImages.first, "guard: nothing bare was published")
+        let plain = try #require(Self.centrePixel(of: barePicture.image))
+        let screen = open(Self.items(1), edits: ["photo-0": edited])
+        screen.library.answersTwoColours = true
+
+        screen.post.debugTapPost()
+        let images = try await publishedImages(from: screen.composer)
+
+        let picture = try #require(images.first, "nothing reached the composer")
+        let pixel = try #require(Self.centrePixel(of: picture.image))
+        #expect(pixel.g > plain.g + 40, "no sticker was laid: \(pixel) against \(plain)")
+    }
+
     /// ⚠️ **THE WHOLE EDIT OF A CLIP IS HANDED ON, NOT ONLY ITS PIECES.** A
     /// look, a crop, the text and a song were shown in the editor and, until
     /// this, published as if never made.
