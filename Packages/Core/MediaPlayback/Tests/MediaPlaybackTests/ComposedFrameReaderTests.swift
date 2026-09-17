@@ -420,7 +420,12 @@ struct ComposedFrameReaderTests {
         }
         try #require(failed, "guard: the first reader did not fail")
 
-        let got = try await poll(reader, at: 0.5, within: 10)
+        // ⚠️ **THE BUDGET IS THE LEGACY LANE'S.** The retry waits half a second
+        // and then decodes from the keyframe; that costs 0.4 to 1.5s here and
+        // several times as much on the CI runner that composites every frame
+        // through the player. At ten seconds this called that runner a reader
+        // that never tried again.
+        let got = try await poll(reader, at: 0.5, within: 30)
         #expect(got != nil, "the reader never tried again")
         #expect(reader.debugState.generation == 2, "tried \(reader.debugState.generation - 1) times")
     }
