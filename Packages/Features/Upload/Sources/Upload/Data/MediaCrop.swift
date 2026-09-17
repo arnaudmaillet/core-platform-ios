@@ -19,11 +19,16 @@ typealias MediaCrop = FrameCrop
 /// `UIImage` side: turning the photograph upright first, and wrapping the
 /// result.
 ///
-/// ⚠️ **ORDER MATTERS AT PUBLISH: CROP BEFORE FILTER.** Both are baked in
-/// `NewPostViewController.post()`. Cropping first hands the filter fewer pixels,
-/// and for the `CIPhotoEffect` family the result is identical either way — so the
-/// cheaper order is free. Reversing it is not wrong, merely wasteful; doing both
-/// on the preview instead of the publish image would be wrong.
+/// ⚠️ **ORDER MATTERS AT PUBLISH: CROP BEFORE LOOK — AND NO LONGER ONLY FOR
+/// COST.** `MediaEdits.applied` bakes both in one graph, cut first. A preset
+/// alone draws the same either way, but a look now carries a vignette centred
+/// on the picture and effects sized by it: dressed before the cut, the
+/// published photograph would wear the vignette of a picture nobody kept.
+///
+/// ⚠️ **THE CUT'S SIZE IS `FrameCrop.outputSize`, EVEN ON BOTH SIDES** — the
+/// video compositor's render size, so a photo and a video cut the same way draw
+/// the same pixels. A photograph can therefore come back a pixel off what the
+/// fractions say, never wider than the picture.
 enum MediaCropRenderer {
     /// Nil only when the source cannot be read as a `CIImage`, or the kept
     /// rectangle is under a pixel; an untouched crop always returns the source
