@@ -27,15 +27,18 @@ public struct ExportedVideo: Sendable, Equatable {
 
 /// What to make of a picked clip on its way to the upload.
 ///
-/// ⚠️ **A VALUE RATHER THAN MORE PARAMETERS, BECAUSE THIS LIST IS GOING TO
-/// GROW.** Trim needs a time range; crop and filters will need a composition,
-/// which cannot simply be passed in — `AVComposition` is not `Sendable` and a
-/// composition has to be built where its asset lives, so that slot will be a
-/// BUILDER. Adding it to a struct changes no call site; adding it to a
-/// parameter list changes every one.
+/// ⚠️ **A VALUE RATHER THAN MORE PARAMETERS, BECAUSE THIS LIST GROWS.** Trim
+/// needed a time range, then pieces and rates; crop, looks, overlays and a song
+/// followed. Adding a field with a default changes no call site; adding a
+/// parameter changes every one.
 ///
-/// It is not here yet, on purpose: an unused slot is dead code, and this repo
-/// has just removed one for exactly that reason.
+/// ⚠️ **VALUES, NEVER A COMPOSITION.** `AVComposition` is not `Sendable` and has
+/// to be built where its asset lives, so the plan says WHAT to draw and
+/// `VideoExporter.arrangement` builds it, once per caller.
+///
+/// ⚠️ **NOT `Equatable`, AND THAT IS WHAT LETS IT CARRY `artwork`.** Sticker art
+/// is a reference to baked frames; comparing two plans is a question no caller
+/// asks.
 public struct VideoExportPlan: Sendable {
     public let sourceURL: URL
 
@@ -57,12 +60,29 @@ public struct VideoExportPlan: Sendable {
     /// Nil takes the exporter's own preset.
     public let preset: String?
 
+    /// The crop, the look over the whole film and the overlays on top — drawn
+    /// after the pieces are joined and their transitions blended.
+    public let finish: FrameFinish
+
+    /// A song under the film, or nil for the film's own sound alone.
+    public let soundtrack: VideoSoundtrack?
+
+    /// Where sticker pictures come from. Nil draws every overlay but the
+    /// stickers — which is what the editor's preview wants, since it shows
+    /// overlays as views.
+    public let artwork: (any OverlayArtwork)?
+
     public init(
-        sourceURL: URL, segments: [VideoExportSegment] = [], preset: String? = nil
+        sourceURL: URL, segments: [VideoExportSegment] = [], preset: String? = nil,
+        finish: FrameFinish = .none, soundtrack: VideoSoundtrack? = nil,
+        artwork: (any OverlayArtwork)? = nil
     ) {
         self.sourceURL = sourceURL
         self.segments = segments
         self.preset = preset
+        self.finish = finish
+        self.soundtrack = soundtrack
+        self.artwork = artwork
     }
 
     /// One piece, at the rate it was shot — the shape a trim has.
@@ -140,15 +160,23 @@ public struct VideoExportSegment: Sendable, Equatable {
     /// The transition at the cut AFTER this piece. ⚠️ Ignored on the last
     /// piece, which has no cut after it.
     public let transitionOut: VideoTransitionKind?
+    /// The look this piece alone wears, drawn before any transition blends it
+    /// with its neighbour. Nil is none.
+    ///
+    /// ⚠️ **`.original` IS NEVER STORED — THE INITIALISER TURNS IT INTO NIL.**
+    /// Two spellings of "no look" would make two identical pieces unequal, and
+    /// `needsComposition` would build a compositor to draw nothing.
+    public let look: LookPreset?
 
     public init(
         start: Double, end: Double, speed: Double = 1,
-        transitionOut: VideoTransitionKind? = nil
+        transitionOut: VideoTransitionKind? = nil, look: LookPreset? = nil
     ) {
         self.start = start
         self.end = end
         self.speed = speed
         self.transitionOut = transitionOut
+        self.look = look == .original ? nil : look
     }
 
     var sourceSeconds: Double { max(end - start, 0) }
@@ -182,7 +210,17 @@ public struct VideoExporter: Sendable {
     /// therefore proves nothing — and one did, comparing a plan with ITSELF,
     /// since `init(sourceURL:timeRange:)` is sugar over exactly this segment.
     static func needsComposition(for segments: [VideoExportSegment]) -> Bool {
-        segments.count > 1 || segments.contains { !$0.isAsShot }
+        segments.count > 1 || segments.contains { !$0.isAsShot || $0.look != nil }
+    }
+
+    /// Whether a plan needs a composition at all: its pieces do, or something
+    /// is drawn over the finished film, or a song is laid under it.
+    ///
+    /// ⚠️ **A FINISH OR A SONG ON AN UNCUT CLIP STILL NEEDS ONE.** Otherwise the
+    /// clip leaves by `timeRange` or passthrough, and both draw nothing — a
+    /// filtered video would publish as shot, with no error anywhere.
+    static func needsComposition(for plan: VideoExportPlan) -> Bool {
+        needsComposition(for: plan.segments) || !plan.finish.isNone || plan.soundtrack != nil
     }
 
     /// How far a transition reaches on EACH side of its cut, in played seconds.
@@ -358,9 +396,14 @@ public struct VideoExporter: Sendable {
     /// `longestSide` caps the composed picture — the preview's, which a phone
     /// screen shows at a fraction of a 4K frame's pixels. Nil composes at the
     /// source's own size, which is what an export must do.
+    ///
+    /// ⚠️ **THE SONG GOES IN AFTER THE PIECES ARE SCALED** — see
+    /// `applySoundtrack`. An uncut clip has no pieces and takes the early return
+    /// below, so nothing is laid under it yet — nor drawn over it: the
+    /// export-route slice (S2) builds such a clip as one piece.
     static func arrangement(
         of asset: AVURLAsset, cut segments: [VideoExportSegment], orientation: OrientationRule,
-        longestSide: CGFloat? = nil
+        longestSide: CGFloat? = nil, soundtrack: VideoSoundtrack? = nil
     ) async throws -> Arrangement {
         guard let source = try? await asset.loadTracks(withMediaType: .video).first else {
             throw VideoExportError.noVideoTrack
@@ -400,9 +443,16 @@ public struct VideoExporter: Sendable {
         let composition = inserted.composition
         let duration = composition.duration
         let windows = cuts(of: kept, starts: inserted.starts, duration: duration)
+        let dips = soundDips(at: windows)
+        // ⚠️ HERE, AND NOT EARLIER: every composition-level `scaleTimeRange` has
+        // run in `insertPieces`, and a song inserted before one would be sped up
+        // or slowed down with the rated piece it overlaps.
+        let music = try await applySoundtrack(
+            soundtrack, to: composition, original: inserted.audio, dips: dips
+        )
 
         guard !windows.isEmpty || (orientation == .always && turned) else {
-            return Arrangement(asset: composition, videoComposition: nil, audioMix: nil, windows: [])
+            return Arrangement(asset: composition, videoComposition: nil, audioMix: music, windows: [])
         }
         let laneB = try otherSides(
             of: windows, pieces: kept, starts: inserted.starts, from: source,
@@ -414,7 +464,7 @@ public struct VideoExporter: Sendable {
         )
         return Arrangement(
             asset: composition, videoComposition: video,
-            audioMix: inserted.audio.flatMap { soundDips(on: $0, windows: windows) },
+            audioMix: music ?? inserted.audio.flatMap { soundMix(on: $0, dips: dips) },
             windows: windows.map { $0.opens.seconds...$0.closes.seconds },
             videoTracks: composition.tracks(withMediaType: .video)
         )
@@ -652,6 +702,18 @@ public struct VideoExporter: Sendable {
             .concatenating(CGAffineTransform(translationX: centre.x, y: centre.y))
     }
 
+    /// Where the film's own sound dips to silence and back: at a dip to black
+    /// or white, from the window's opening down to the cut and back up to its
+    /// close, on the composition's clock.
+    ///
+    /// ⚠️ **A VALUE, SO THE SONG'S MIX CAN REBUILD THE SAME RAMPS** at the level
+    /// the author left the original sound at, rather than inventing its own.
+    struct SoundDip: Sendable, Equatable {
+        let opens: CMTime
+        let at: CMTime
+        let closes: CMTime
+    }
+
     /// The sound follows a dip down and back up; a zoom leaves it alone.
     ///
     /// ⚠️ **NEVER ACROSS A PIECE THAT IS NOT AS SHOT — A RAMP THERE CAN FREEZE THE
@@ -662,12 +724,16 @@ public struct VideoExporter: Sendable {
     /// goes); ninety exports of the same ramps between pieces at 1x all finished.
     /// A publish that never ends is worse than a dip heard as a plain cut, so a
     /// cut touching a rated piece dips its picture only.
-    private static func soundDips(
-        on track: AVMutableCompositionTrack, windows: [Cut]
+    private static func soundDips(at windows: [Cut]) -> [SoundDip] {
+        windows
+            .filter { ($0.kind == .dipToBlack || $0.kind == .dipToWhite) && $0.asShotBothSides }
+            .map { SoundDip(opens: $0.opens, at: $0.at, closes: $0.closes) }
+    }
+
+    /// The film's own sound, dipping where `dips` say; nil when it never dips.
+    private static func soundMix(
+        on track: AVMutableCompositionTrack, dips: [SoundDip]
     ) -> AVAudioMix? {
-        let dips = windows.filter {
-            ($0.kind == .dipToBlack || $0.kind == .dipToWhite) && $0.asShotBothSides
-        }
         guard !dips.isEmpty else { return nil }
         let parameters = AVMutableAudioMixInputParameters(track: track)
         for dip in dips {
@@ -705,9 +771,12 @@ public struct VideoExporter: Sendable {
         // a second reader, a second set of tracks and a second thing to get
         // wrong for a result that is identical. The composition exists for what
         // a `timeRange` CANNOT say: several pieces, or a rate other than as-shot.
-        let needsComposition = Self.needsComposition(for: plan.segments)
+        let needsComposition = Self.needsComposition(for: plan)
         let arranged = needsComposition
-            ? try await Self.arrangement(of: asset, cut: plan.segments, orientation: .whenComposited)
+            ? try await Self.arrangement(
+                of: asset, cut: plan.segments, orientation: .whenComposited,
+                soundtrack: plan.soundtrack
+            )
             : nil
         let subject: AVAsset = arranged?.asset ?? asset
         // ⚠️ **PASSTHROUGH DRAWS NOTHING, AND SAYS NOTHING.** It ignores a video

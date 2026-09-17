@@ -62,6 +62,27 @@ struct IconSelectorBarTests {
         #expect(bar.selectedIndex == 2, "and it stays chosen")
     }
 
+    /// ⚠️ **THE OTHER HALF OF THE WITNESS ABOVE.** A repeat tap stays off
+    /// `onSelect` and lands on `onReselect` — the only way back into a mode
+    /// whose tools were put away while its icon stayed chosen. Paired with a
+    /// tap that CHANGES the choice, which must not count as a reselect.
+    @Test func aTapOnTheSelectedItemIsAReselect() {
+        let bar = bar()
+        bar.debugTap(2)
+        var selected: [Int] = []
+        var reselected: [Int] = []
+        bar.onSelect = { selected.append($0) }
+        bar.onReselect = { reselected.append($0) }
+
+        bar.debugTap(2)
+        #expect(reselected == [2], "the tap on the chosen icon was a reselect of it")
+        #expect(selected.isEmpty, "and not a selection")
+
+        bar.debugTap(1)
+        #expect(selected == [1])
+        #expect(reselected == [2], "a tap that changes the choice is not a reselect")
+    }
+
     @Test func choosingProgrammaticallyCanStaySilent() {
         let bar = bar()
         var told = 0
@@ -97,10 +118,13 @@ struct IconSelectorBarTests {
     }
 
     /// ⚠️ THE WITNESS FOR THE ONE ABOVE.
+    /// On neither channel: a slide home is not a reselect either — only a tap
+    /// asks for the chosen mode again.
     @Test func aSlideThatComesHomeSaysNothing() {
         let bar = bar()
         var told = 0
         bar.onSelect = { _ in told += 1 }
+        bar.onReselect = { _ in told += 1 }
 
         let start = lensCentre(bar)
         bar.debugBeginDrag(atX: start)

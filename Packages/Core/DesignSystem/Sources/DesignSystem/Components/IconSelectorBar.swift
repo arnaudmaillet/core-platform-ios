@@ -57,6 +57,17 @@ public final class IconSelectorBar: UIView {
     /// what a slide had already decided.
     public var onSelect: ((Int) -> Void)?
 
+    /// The item that is ALREADY selected was tapped.
+    ///
+    /// ⚠️ **A SECOND CHANNEL, NOT A LOOSER `onSelect`.** `onSelect` is silent on
+    /// a repeat tap and must stay so — a host that rebuilds its mode on every
+    /// announcement would rebuild it for a tap that chose nothing. But a mode
+    /// whose tools can be put away (the media editor's Effects is selected at
+    /// launch with an empty band) needs a way back in, and the only gesture
+    /// left is a tap on the icon already chosen. Taps only: a slide that comes
+    /// home is not a request for anything.
+    public var onReselect: ((Int) -> Void)?
+
     public private(set) var selectedIndex: Int = 0
 
     /// The host draws the capsule; this one draws none.
@@ -320,7 +331,10 @@ public final class IconSelectorBar: UIView {
     }
 
     private func tapped(_ index: Int) {
-        guard index != selectedIndex else { return }
+        guard index != selectedIndex else {
+            onReselect?(index)
+            return
+        }
         UIView.animate(withDuration: Metrics.settle, delay: 0, options: [.curveEaseOut]) {
             self.selectedIndex = index
             self.progress = CGFloat(index)

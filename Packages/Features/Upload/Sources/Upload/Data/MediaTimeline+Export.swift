@@ -21,7 +21,8 @@ extension MediaTimelining {
             VideoExportSegment(
                 start: piece.start, end: piece.end, speed: piece.speed,
                 // ⚠️ Nothing after the last piece: there is no cut there.
-                transitionOut: index < pieces.count - 1 ? piece.transitionOut : nil
+                transitionOut: index < pieces.count - 1 ? piece.transitionOut : nil,
+                look: piece.filter
             )
         }
     }

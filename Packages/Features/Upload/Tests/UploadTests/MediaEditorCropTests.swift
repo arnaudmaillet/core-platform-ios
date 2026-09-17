@@ -233,6 +233,30 @@ struct MediaEditorCropTests {
         #expect(screen.editor.debugIsCropping, "guard: and the surface is still up")
     }
 
+    /// ⚠️ **TWO OWNERS, ONE CANVAS — THE SAME DEFECT, ONE LEVEL UP.** The
+    /// overlays hold the canvas the way the crop surface does. Whichever lets go
+    /// first must not unlock it under the other, and the last to let go gives
+    /// back what the FIRST one borrowed.
+    @Test func theCanvasStaysLockedUntilItsLastOwnerLetsGo() {
+        let screen = open(Self.items(2))
+        choose(Mode.crop, on: screen)
+        screen.editor.lockCanvas(by: .overlays)
+        #expect(!screen.editor.debugCanvasScrolls, "guard: locked")
+
+        choose(Mode.filters, on: screen)
+
+        #expect(!screen.editor.debugIsCropping, "guard: the crop surface went")
+        #expect(!screen.editor.debugCanvasScrolls, "leaving crop unlocked a canvas the overlays still hold")
+        #expect(screen.editor.debugSheetIsPinned)
+        #expect(screen.editor.debugSuspendedPans > 0)
+
+        screen.editor.unlockCanvas(by: .overlays)
+
+        #expect(screen.editor.debugCanvasScrolls, "and paging comes back with the last owner")
+        #expect(!screen.editor.debugSheetIsPinned)
+        #expect(screen.editor.debugSuspendedPans == 0)
+    }
+
     @Test func leavingTheScreenUnwindsCropModeWithIt() {
         let screen = open(Self.items(1))
         choose(Mode.crop, on: screen)

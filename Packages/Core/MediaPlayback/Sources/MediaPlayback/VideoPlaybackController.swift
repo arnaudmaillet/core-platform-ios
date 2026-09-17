@@ -481,7 +481,7 @@ public final class VideoPlaybackController {
         // just the edit.
         if let arranged = try? await VideoExporter.arrangement(
             of: asset, cut: plan.segments, orientation: .always,
-            longestSide: Self.previewLongestSide
+            longestSide: Self.previewLongestSide, soundtrack: plan.soundtrack
         ) {
             item = AVPlayerItem(asset: arranged.asset)
             composed = present(arranged.composed, on: item)
@@ -980,6 +980,19 @@ public final class VideoPlaybackController {
         player.defaultRate = Float(rate)
         if player.timeControlStatus != .paused { player.rate = Float(rate) }
         return true
+    }
+
+    /// Changes the look the arrangement playing in `view` is drawn with, without
+    /// a new item: the next composed frame wears it, and a paused frame is
+    /// drawn again.
+    ///
+    /// ⚠️ **A STUB THAT TAKES NOTHING AND RETURNS FALSE.** The live-look slice
+    /// (S2) fills it: each load gets a `VideoLiveLook` the compositor reads
+    /// every frame, and this sets it and asks the frame reader to draw the
+    /// current moment again. Returns whether an arrangement took the look.
+    @discardableResult
+    public func setLiveLook(_ look: FrameLook, in view: VideoRenderView) -> Bool {
+        false
     }
 
     /// Where the clip `view` is drawing has got to, as a fraction of its
@@ -1560,7 +1573,9 @@ public final class VideoPlaybackController {
         return true
     }
 
-    private func watchedPlayer(in view: VideoRenderView) -> AVPlayer? {
+    /// ⚠️ **INTERNAL, NOT PRIVATE**, so the extensions in this module's other
+    /// files — the sound controls — ask the same player every control here asks.
+    func watchedPlayer(in view: VideoRenderView) -> AVPlayer? {
         activePlayers[ObjectIdentifier(view)] ?? view.boundPlayer
     }
 

@@ -106,6 +106,18 @@ protocol MediaVideoPreviewing: AnyObject {
     func frames(
         of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
     ) async -> [Double: UIImage]
+
+    /// Draws the arrangement playing in `surface` with `look` over the whole of
+    /// it, WITHOUT a new item — a slider dragged across a video must not rebuild
+    /// the player sixty times a second. A paused clip shows the change too.
+    func setLiveLook(_ look: FrameLook, in surface: VideoRenderView)
+
+    /// Lets the clip in `surface` be heard, or silences it. Every clip starts
+    /// silent; one carrying a song is the reason to un-mute.
+    func setMuted(_ muted: Bool, in surface: VideoRenderView)
+
+    /// The song's level and the film's own, live, both 0...1.
+    func setMixLevels(music: Double, original: Double, in surface: VideoRenderView)
 }
 
 /// The real one: a `VideoPlaybackController` of this screen's very own.
@@ -204,6 +216,26 @@ final class MediaPreviewPlayer: MediaVideoPreviewing {
         await filmstrip.frames(
             of: file, atSourceSeconds: seconds, height: height, spacing: spacing
         )
+    }
+
+    /// ⚠️ **FORWARDED AS-IS — THE CONTROLLER'S BODY IS STILL A STUB** that
+    /// changes nothing (the live-look slice fills it there, not here).
+    func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) {
+        controller.setLiveLook(look, in: surface)
+    }
+
+    /// ⚠️ **FORWARDED AS-IS — THE CONTROLLER'S BODY IS STILL A STUB.** The
+    /// soundtrack slice fills it, and switches the audio session to `.playback`
+    /// here while a clip is heard (and back to `.ambient` on stop): a player
+    /// un-muted under `.ambient` is silenced by the ring switch.
+    func setMuted(_ muted: Bool, in surface: VideoRenderView) {
+        controller.setMuted(muted, in: surface)
+    }
+
+    /// ⚠️ **FORWARDED AS-IS — THE CONTROLLER'S BODY IS STILL A STUB** (the
+    /// soundtrack slice fills it).
+    func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {
+        controller.setMixLevels(music: music, original: original, in: surface)
     }
 
     #if DEBUG

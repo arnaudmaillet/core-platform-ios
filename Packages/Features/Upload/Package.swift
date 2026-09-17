@@ -19,6 +19,9 @@ let package = Package(
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/MediaPlayback"),
+        // The stickers the editor lays over a picture — the catalogue Chat's
+        // strip plays, moved where two features can share it.
+        .package(path: "../../Core/StickerKit"),
         .package(path: "../../Core/CoreNetworking")
     ],
     targets: [
@@ -31,7 +34,8 @@ let package = Package(
                 "CoreModels",
                 "DesignSystem",
                 "MediaCore",
-                "MediaPlayback"
+                "MediaPlayback",
+                "StickerKit"
             ]
         ),
         .testTarget(

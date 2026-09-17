@@ -10,10 +10,11 @@ import UIKit
 /// control — and features cannot import one another, so the only way to have ONE
 /// of it is here.
 ///
-/// ⚠️ **NO ACTION, ON EITHER SCREEN.** This repository holds no audio seam of any
-/// kind: no track model, no picker, no mock, nothing behind `CoreNetworking`. The
-/// pill is drawn because it is part of the page, and a tap on it does nothing.
-/// Hosts wire nothing to it, and say so where they build it.
+/// ⚠️ **THE ACTION IS THE HOST'S, AND ONE HOST HAS NONE.** A tap calls `onTap`.
+/// The text-post composer sets nothing — there is no sound for a text post to
+/// take — so a tap there still does nothing, which is why the callback is
+/// optional rather than a required init argument. The media editor opens its
+/// song tools from it, and names the chosen song with `setTitle(_:)`.
 ///
 /// ⚠️ **ITS TEXT DOES NOT GROW WITH DYNAMIC TYPE** — pinned at the default size.
 /// In a top bar it shares a run with titles that do not grow either, and a pill
@@ -23,6 +24,15 @@ public final class SoundPillView: UIControl {
     private static let height: CGFloat = 36
     /// The attribution pill's cap, which this pill stands in for.
     private static let maxWidth: CGFloat = 240
+
+    /// Called on a tap. Nil — the default — makes the pill a label that looks
+    /// like a button, which is what the text-post composer wants today.
+    public var onTap: (() -> Void)?
+
+    private let label = UILabel()
+    /// The width floor `neverTruncates` asks for, re-measured when the word
+    /// changes. Nil when the pill may truncate.
+    private var floor: NSLayoutConstraint?
 
     /// The word is the host's, because the two screens do not name the same
     /// thing: a text post takes a sound, a media post takes a song. One control,
@@ -68,7 +78,6 @@ public final class SoundPillView: UIControl {
             plus.centerYAnchor.constraint(equalTo: disc.centerYAnchor)
         ])
 
-        let label = UILabel()
         label.text = title
         // ⚠️ **THE WEIGHT IS APPLIED HERE, NOT THROUGH A `withWeight` HELPER.**
         // Four modules carry one of those and every copy is `private` to the file
@@ -109,24 +118,64 @@ public final class SoundPillView: UIControl {
         height.isActive = true
         widthAnchor.constraint(lessThanOrEqualToConstant: Self.maxWidth).isActive = true
         if neverTruncates {
-            // The floor: the disc, the gap, the word at its own size, and the
-            // two insets. Stated as a `>=` so the cap above still governs a very
-            // long word, and at `.defaultHigh` so it can never conflict with the
-            // bar's own required layout — a required floor beside a required cap
-            // is an unsatisfiable pair the console would report every frame.
-            let content = AvatarImageView.barDiameter + Spacing.sm
-                + ceil(label.intrinsicContentSize.width)
-                + (Self.height - AvatarImageView.barDiameter) / 2 + Spacing.sm
-            let floor = widthAnchor.constraint(greaterThanOrEqualToConstant: min(content, Self.maxWidth))
+            // Stated as a `>=` so the cap above still governs a very long word,
+            // and at `.defaultHigh` so it can never conflict with the bar's own
+            // required layout — a required floor beside a required cap is an
+            // unsatisfiable pair the console would report every frame.
+            let floor = widthAnchor.constraint(greaterThanOrEqualToConstant: floorWidth)
             floor.priority = .defaultHigh
             floor.isActive = true
+            self.floor = floor
         }
 
         isAccessibilityElement = true
         accessibilityLabel = title
         accessibilityTraits = .button
+        addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
     }
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The floor: the disc, the gap, the word at its own size, and the two
+    /// insets — capped, so a very long word is truncated by the cap instead.
+    private var floorWidth: CGFloat {
+        let content = AvatarImageView.barDiameter + Spacing.sm
+            + ceil(label.intrinsicContentSize.width)
+            + (Self.height - AvatarImageView.barDiameter) / 2 + Spacing.sm
+        return min(content, Self.maxWidth)
+    }
+
+    /// The word the pill says — "Add a song", then the song's own name — and
+    /// what VoiceOver says with it.
+    ///
+    /// ⚠️ **THE FLOOR IS MEASURED AGAIN.** It was worked out once from the word
+    /// the pill was built with; a longer word left under the old floor would be
+    /// truncated by exactly the squeeze `neverTruncates` exists to refuse.
+    public func setTitle(_ title: String) {
+        guard label.text != title else { return }
+        label.text = title
+        accessibilityLabel = title
+        floor?.constant = floorWidth
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    /// ⚠️ **VOICEOVER'S DOUBLE TAP GOES WHERE A FINGER'S DOES.** With no action
+    /// the pill declines, and VoiceOver falls back to its simulated tap, which
+    /// reaches nothing either.
+    public override func accessibilityActivate() -> Bool {
+        guard let onTap else { return false }
+        onTap()
+        return true
+    }
 }
+
+#if DEBUG
+extension SoundPillView {
+    /// The word the pill is drawing.
+    public var debugTitle: String? { label.text }
+    /// The width the pill refuses to be squeezed below, or nil when it may be.
+    public var debugFloorWidth: CGFloat? { floor?.constant }
+}
+#endif

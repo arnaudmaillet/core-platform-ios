@@ -119,6 +119,17 @@ struct MediaEditorPlaybackTests {
         /// track's suite is where scrubbing is asked about.
         func playheadSeconds(in surface: VideoRenderView) -> Double? { nil }
         func advancingRate(in surface: VideoRenderView) -> Double { 0 }
+        /// Every live look, mute and pair of levels the screen asked for, in
+        /// order — recorded, because a stub that swallowed them could not say
+        /// whether the screen ever asked.
+        private(set) var liveLooks: [FrameLook] = []
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) { liveLooks.append(look) }
+        private(set) var mutes: [Bool] = []
+        func setMuted(_ muted: Bool, in surface: VideoRenderView) { mutes.append(muted) }
+        private(set) var mixLevels: [(music: Double, original: Double)] = []
+        func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {
+            mixLevels.append((music, original))
+        }
 
         func seek(
             toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double

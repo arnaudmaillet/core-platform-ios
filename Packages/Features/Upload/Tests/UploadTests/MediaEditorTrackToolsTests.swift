@@ -91,6 +91,17 @@ struct MediaEditorTrackToolsTests {
         var headSeconds: Double?
         func playheadSeconds(in surface: VideoRenderView) -> Double? { headSeconds }
         func advancingRate(in surface: VideoRenderView) -> Double { 0 }
+        /// Every live look, mute and pair of levels the screen asked for, in
+        /// order — recorded, because a stub that swallowed them could not say
+        /// whether the screen ever asked.
+        private(set) var liveLooks: [FrameLook] = []
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) { liveLooks.append(look) }
+        private(set) var mutes: [Bool] = []
+        func setMuted(_ muted: Bool, in surface: VideoRenderView) { mutes.append(muted) }
+        private(set) var mixLevels: [(music: Double, original: Double)] = []
+        func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {
+            mixLevels.append((music, original))
+        }
         private(set) var seeks: [Double] = []
         func seek(toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double) {
             seeks.append(seconds)
@@ -236,11 +247,36 @@ struct MediaEditorTrackToolsTests {
     /// ⚠️ **A SYMBOL THAT DOES NOT RESOLVE IS AN EMPTY BUTTON, NOT AN ERROR** —
     /// this repository has shipped one. The runtime is the instrument that cannot
     /// be wrong.
-    @Test func bothActionGlyphsExist() {
+    @Test func everyActionGlyphExists() {
         for action in MediaEditorViewController.TrackAction.allCases {
             #expect(UIImage(systemName: action.symbolName) != nil,
                     "\(action.symbolName) draws a blank capsule that still takes taps")
         }
+    }
+
+    /// ⚠️ **A LOOK FOR THE HELD PIECE, BESIDE THE SCISSORS AND THE SPEEDOMETER —
+    /// AND DEAD UNTIL IT CAN ACT.** Nothing is held when the bar is built, and
+    /// until the piece-filter row exists a held piece does not wake it either.
+    /// The scissors waking at the same moment is the witness that the bar was
+    /// really re-decided.
+    @Test func theFilterActionIsThirdAndStartsDisabled() throws {
+        let filter = MediaEditorViewController.TrackAction.filter
+        let split = MediaEditorViewController.TrackAction.split.rawValue
+        let screen = open(Self.items(1, videosAt: [0]))
+        let bar = screen.editor.debugActionBar
+
+        #expect(bar.debugSymbols == ["scissors", "speedometer", "camera.filters"])
+        #expect(filter.rawValue == 2)
+        #expect(filter.spoken == "Filter this clip")
+        #expect(!bar.isEnabled(at: filter.rawValue), "alive before the timeline even opened")
+
+        choose(Mode.trim, on: screen)
+        let track = try tools(in: screen).track
+        putTheNeedle(at: 5, on: track, in: screen)
+        track.select(0, notify: true)
+
+        #expect(bar.isEnabled(at: split), "witness: the bar was re-decided with a piece held")
+        #expect(!bar.isEnabled(at: filter.rawValue), "the filter woke with no row to open")
     }
 
     // MARK: - The two strips share the bar

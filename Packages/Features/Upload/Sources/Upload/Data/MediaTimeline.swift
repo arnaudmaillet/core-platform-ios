@@ -33,12 +33,29 @@ struct MediaSegment: Equatable, Sendable {
     /// gone when its piece becomes the last one — there is no cut after the end
     /// of the film. `nil` is a plain cut.
     var transitionOut: VideoTransitionKind?
+    /// The look this piece alone wears, under the whole media's.
+    ///
+    /// ⚠️ **IT BELONGS TO THE PIECE, SO IT TRAVELS WITH IT** — re-ordered with
+    /// it, kept by both halves of a split (`split` copies the piece), kept by a
+    /// rate change and a move.
+    ///
+    /// ⚠️ **NIL IS NO FILTER, AND `.original` IS NEVER STORED** — a write of
+    /// `.original` becomes nil, in the initialiser too. Two spellings of "none"
+    /// would break every equality that compares timelines, the same rule
+    /// `transitionOut` follows.
+    var filter: MediaFilter? {
+        didSet { if filter == .original { filter = nil } }
+    }
 
-    init(start: Double, end: Double, speed: Double = 1, transitionOut: VideoTransitionKind? = nil) {
+    init(
+        start: Double, end: Double, speed: Double = 1, transitionOut: VideoTransitionKind? = nil,
+        filter: MediaFilter? = nil
+    ) {
         self.start = start
         self.end = end
         self.speed = speed
         self.transitionOut = transitionOut
+        self.filter = filter == .original ? nil : filter
     }
 
     /// How much of the FILE this piece covers.

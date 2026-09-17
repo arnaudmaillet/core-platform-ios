@@ -715,14 +715,17 @@ final class NewPostViewController: UIViewController {
                     // work on pixels the viewer never approved.
                     //
                     // ⚠️ THE ORDER IS CUT THEN DRESS, and it lives in one place:
-                    // `MediaEdits.applied(to:)`, which four render paths share so
-                    // they cannot drift apart.
+                    // `MediaEdits.applied(to:artwork:)`, which four render paths
+                    // share so they cannot drift apart.
                     //
                     // ⚠️ A FAILED RENDER PUBLISHES THE ORIGINAL RATHER THAN NOTHING.
                     // Dropping the picture because a crop or a filter could not be
                     // rasterised would lose the author's photograph over a
-                    // decoration. `applied(to:)` carries that rule.
-                    let baked = (edits[item.id] ?? .untouched).applied(to: image)
+                    // decoration. `applied(to:artwork:)` carries that rule.
+                    //
+                    // ⚠️ NO STICKER ART YET: the publish slice bakes it on the main
+                    // actor before this runs. No screen can add a sticker until then.
+                    let baked = (edits[item.id] ?? .untouched).applied(to: image, artwork: nil)
                     media.append(.image(PickedImage(baked)))
                 }
                 let entry = try await composer.publish(media: media, caption: caption, as: nil)
