@@ -167,7 +167,16 @@ struct MediaEditorTests {
         // difference, and it is asserted because only a real edge drag on a
         // device would otherwise reveal it.
         let left = try #require(screen.editor.navigationItem.leftBarButtonItems)
-        #expect(left.map(\.title) == ["Save draft"], "the draft alone; the chevron is the system's")
+        // ⚠️ **AN ICON NOW, SO THE ASSERTION IS ON THE SPOKEN NAME.** The words
+        // "Save draft" cost more than sixty points beside a chevron and an undo
+        // arrow, which is more than an SE's bar has to give —
+        // `navbar-leading-selector-collapse` records this family of screens
+        // losing a control to exactly that. A titleless item asserted by `title`
+        // reads as `[nil]`, which is why this asks the accessibility label: an
+        // icon button with no spoken name is a button VoiceOver cannot announce.
+        #expect(left.map(\.accessibilityLabel) == ["Save draft", "Undo every change in this mode"],
+                "the draft and the undo arrow; the chevron is the system's")
+        #expect(left.allSatisfy { $0.image != nil }, "an icon bar item with no icon is a blank capsule")
         #expect(screen.editor.navigationItem.leftItemsSupplementBackButton)
         #expect(
             screen.editor.navigationItem.backButtonDisplayMode == .minimal,

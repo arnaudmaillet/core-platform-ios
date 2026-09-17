@@ -196,7 +196,7 @@ struct NewPostTests {
 
     // MARK: - The bars
 
-    /// The bar is `[‹][Save draft] ——— [Post]` and nothing else: a centred title
+    /// The bar is `[‹][save] ——— [Post]` and nothing else: a centred title
     /// competes with the two words either side of it on a phone.
     @Test func theScreenCarriesNoTitleOfItsOwn() throws {
         let screen = open(Self.items(2))
@@ -206,7 +206,12 @@ struct NewPostTests {
         // makes "Save draft" sit BESIDE the back button rather than in its place,
         // and the back-swipe survives only while it is set.
         let left = try #require(screen.post.navigationItem.leftBarButtonItems)
-        #expect(left.map(\.title) == ["Save draft"], "the draft alone; the chevron is the system's")
+        // An icon rather than the words, for the bar's width budget — see
+        // `MediaEditorTests`. Asked by spoken name, because a titleless item's
+        // `title` is nil and an icon with no spoken name cannot be announced.
+        #expect(left.map(\.accessibilityLabel) == ["Save draft"],
+                "the draft alone; the chevron is the system's")
+        #expect(left.first?.image != nil, "an icon bar item with no icon is a blank capsule")
         #expect(screen.post.navigationItem.leftItemsSupplementBackButton)
         #expect(screen.post.navigationItem.rightBarButtonItems?.map(\.title) == ["Post"])
     }

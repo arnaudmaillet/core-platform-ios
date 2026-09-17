@@ -362,12 +362,12 @@ struct VideoPublishEndToEndTests {
     /// came out the other side.
     ///
     /// The clip is longer here than the rest of the suite's, because
-    /// `MediaTrimming` will not cut below its floor and a four-tenths-of-a-second
+    /// `MediaTimelining` will not cut below its floor and a four-tenths-of-a-second
     /// fixture is already shorter than that. A trim test on it would pass by
     /// refusing to trim.
     @Test func aTrimChosenInTheEditorShortensThePublishedClip() async throws {
         var edited = MediaEdits.untouched
-        edited.trim = MediaTrim(start: 0.5, end: 1.5)
+        edited.timeline = MediaTimeline(segments: [MediaSegment(start: 0.5, end: 1.5)])
         let harness = await open(
             [3], of: 4, clipSeconds: 2.5, edits: ["debug-3": edited]
         )
@@ -396,6 +396,40 @@ struct VideoPublishEndToEndTests {
         let seconds = try await AVURLAsset(url: try #require(clip.url)).load(.duration).seconds
 
         #expect(abs(seconds - 2.5) < 0.2, "expected the whole clip, got \(seconds)")
+    }
+
+    /// ⚠️ **A TRANSITION CHOSEN IN THE EDITOR IS IN THE PUBLISHED FILE.** The
+    /// preview draws it from the same builder; this asks the file that came out
+    /// of the whole chain, at the cut, with a witness cut by the same pieces and
+    /// no transition.
+    @Test func aPublishedClipKeepsItsFade() async throws {
+        func published(_ kind: VideoTransitionKind?) async throws -> URL {
+            var edited = MediaEdits.untouched
+            edited.timeline = MediaTimeline(segments: [
+                MediaSegment(start: 0, end: 1.2, transitionOut: kind),
+                MediaSegment(start: 1.2, end: 2.4)
+            ])
+            let harness = await open([3], of: 4, clipSeconds: 2.5, edits: ["debug-3": edited])
+            harness.screen.debugTapPost()
+            try await settle(until: { harness.handed.entry != nil })
+            let entry = try #require(harness.handed.entry)
+            let clip = try #require(entry.post.attachments.first { $0.mimeType == "video/mp4" })
+            return try #require(clip.url)
+        }
+        func ink(of file: URL, at seconds: Double) async throws -> Int {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
+            let (image, _) = try await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600))
+            let colour = try #require(Self.averageColour(of: UIImage(cgImage: image)))
+            return colour.r + colour.g + colour.b
+        }
+
+        let faded = try await published(.dipToBlack)
+        let plain = try await published(nil)
+
+        #expect(try await ink(of: plain, at: 1.2) > 90, "guard: the witness is dark at the cut anyway")
+        #expect(try await ink(of: faded, at: 1.2) < 30, "the published clip does not dip at the cut")
     }
 
     /// ⚠️ **AND THE ORDER SURVIVES, BECAUSE THE ORDER IS THE CAROUSEL.**

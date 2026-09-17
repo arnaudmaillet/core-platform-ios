@@ -64,10 +64,32 @@ struct MediaEditorPlaybackTests {
         private(set) var stopCount = 0
         private var boundSurfaces: Set<ObjectIdentifier> = []
 
-        func play(_ file: URL, in surface: VideoRenderView) async {
-            played.append(file)
+        /// Every arrangement the screen asked to be played.
+        private(set) var plans: [VideoExportPlan] = []
+
+        /// ⚠️ **`at()` FIRST, AND ONLY A LOAD IT ACCEPTS COUNTS AS BOUND** — the
+        /// real controller binds nothing for a load its caller abandons, and the
+        /// bound count is this suite's leak assertion.
+        /// Where each accepted load landed, and what it looped.
+        private(set) var landings: [VideoLoadLanding] = []
+        func load(
+            _ plan: VideoExportPlan, in surface: VideoRenderView,
+            landing: @escaping @MainActor () -> VideoLoadLanding?
+        ) async {
+            guard let landed = landing() else { return }
+            landings.append(landed)
+            plans.append(plan)
+            played.append(plan.sourceURL)
             boundSurfaces.insert(ObjectIdentifier(surface))
         }
+
+        /// Every loop range the screen asked for, in order.
+        private(set) var loops: [ClosedRange<Double>?] = []
+        func setLoopRange(_ range: ClosedRange<Double>?, in surface: VideoRenderView) {
+            loops.append(range)
+        }
+
+        func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {}
 
         func stop(_ surface: VideoRenderView) {
             stopCount += 1
@@ -81,16 +103,31 @@ struct MediaEditorPlaybackTests {
         private(set) var filmstripRequests: [(file: URL, count: Int)] = []
         var answersFilmstrip = true
 
-        func filmstrip(of file: URL, count: Int, height: CGFloat) async -> [UIImage] {
-            filmstripRequests.append((file, count))
-            guard answersFilmstrip else { return [] }
-            return (0..<count).map { _ in
-                UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+        func frames(
+            of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
+        ) async -> [Double: UIImage] {
+            filmstripRequests.append((file, seconds.count))
+            guard answersFilmstrip else { return [:] }
+            let swatch = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
                     UIColor.green.setFill()
                     context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
                 }
-            }
+            return Dictionary(uniqueKeysWithValues: seconds.map { ($0, swatch) })
         }
+
+        /// Playback's subject is binding and pausing, not the playhead — the
+        /// track's suite is where scrubbing is asked about.
+        func playheadSeconds(in surface: VideoRenderView) -> Double? { nil }
+
+        func seek(
+            toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double
+        ) {}
+
+        /// What the stub player says about being stopped. Tests that care set
+        /// it; nil is "nothing is bound", which is neither playing nor paused.
+        var paused: Bool? = false
+
+        func isPaused(in surface: VideoRenderView) -> Bool? { paused }
 
         func isBound(_ surface: VideoRenderView) -> Bool {
             boundSurfaces.contains(ObjectIdentifier(surface))
