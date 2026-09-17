@@ -359,6 +359,9 @@ public struct VideoExporter: Sendable {
         /// The board the composition reads its whole look from, when it was
         /// built with one.
         var live: VideoLiveLook?
+        /// Where the song and the film's own sound are, when a song is laid —
+        /// what a playing item's levels are changed through.
+        var sound: SoundtrackLayout? = nil
 
         /// What a preview reads its composed pictures from — nil when nothing
         /// is drawn.
@@ -477,7 +480,10 @@ public struct VideoExporter: Sendable {
 
         let looks = kept.map(\.look)
         guard !windows.isEmpty || upright || dressed || looks.contains(where: { $0 != nil }) else {
-            return Arrangement(asset: composition, videoComposition: nil, audioMix: music, windows: [])
+            return Arrangement(
+                asset: composition, videoComposition: nil, audioMix: music?.mix, windows: [],
+                sound: music?.layout
+            )
         }
         let laneB = try otherSides(
             of: windows, pieces: kept, starts: inserted.starts, from: source,
@@ -490,9 +496,10 @@ public struct VideoExporter: Sendable {
         )
         return Arrangement(
             asset: composition, videoComposition: video,
-            audioMix: music ?? inserted.audio.flatMap { soundMix(on: $0, dips: dips) },
+            audioMix: music?.mix ?? inserted.audio.flatMap { soundMix(on: $0, dips: dips) },
             windows: windows.map { $0.opens.seconds...$0.closes.seconds },
-            videoTracks: composition.tracks(withMediaType: .video), live: live
+            videoTracks: composition.tracks(withMediaType: .video), live: live,
+            sound: music?.layout
         )
     }
 

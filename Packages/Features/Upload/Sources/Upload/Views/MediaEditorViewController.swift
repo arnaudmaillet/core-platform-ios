@@ -479,7 +479,10 @@ final class MediaEditorViewController: UIViewController {
     private(set) lazy var overlayMode = MediaEditorOverlayMode(host: self)
     /// The song under a clip — opened from the sound pill, not from the
     /// category bar.
-    private(set) lazy var soundtrackMode = MediaEditorSoundtrackMode(host: self)
+    private(set) lazy var soundtrackMode = MediaEditorSoundtrackMode(host: self, sourcing: soundtracks)
+
+    /// Where "Add a song" finds the author's songs.
+    private let soundtracks: any MediaSoundtrackSourcing
 
     /// Every mode, for the moments each of them has to hear about: the band
     /// changing, a page settling, the screen going.
@@ -633,12 +636,17 @@ final class MediaEditorViewController: UIViewController {
     /// once one is chosen. The same control the text-post composer uses, which
     /// is why it lives in DesignSystem.
     ///
-    /// ⚠️ **WIRED TO A MODE THAT DOES NOTHING YET.** The soundtrack slice fills
-    /// `MediaEditorSoundtrackMode`; until then a tap reaches it and it opens
-    /// nothing — which is what the pill has always done.
+    /// ⚠️ **CROP IS LEFT FIRST, AS CHOOSING ANY OTHER MODE LEAVES IT.** The pill
+    /// stays tappable under the crop surface, and a band handed to the song
+    /// tools with the surface still up would leave the canvas locked behind
+    /// tools that have nothing to do with it.
     private lazy var soundPill: SoundPillView = {
         let pill = SoundPillView(title: MediaEditorSoundtrackMode.addTitle, neverTruncates: true)
-        pill.onTap = { [weak self] in self?.soundtrackMode.toggle() }
+        pill.onTap = { [weak self] in
+            guard let self else { return }
+            if isCropping { exitCrop() }
+            soundtrackMode.toggle()
+        }
         return pill
     }()
 
@@ -668,12 +676,14 @@ final class MediaEditorViewController: UIViewController {
         items: [MediaLibraryItem],
         library: any MediaLibraryReading,
         preview: any MediaVideoPreviewing = MediaPreviewPlayer(),
+        soundtracks: any MediaSoundtrackSourcing = SystemSoundtrackSource(),
         onNext: @escaping ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController
     ) {
         self.items = items
         self.itemsByID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.library = library
         self.preview = preview
+        self.soundtracks = soundtracks
         self.onNext = onNext
         super.init(nibName: nil, bundle: nil)
         // ⚠️ THE TOP BAR BELONGS TO THE SCREEN, NOT TO ITS VIEW. A navigation
@@ -1668,21 +1678,33 @@ final class MediaEditorViewController: UIViewController {
     ///
     /// ⚠️ **THE WHOLE LOOK IS NOT IN THE PREDICATE, ON PURPOSE.** It reaches a
     /// playing item live (`setLiveLook`); the crop and the song cannot, because
-    /// one changes the render size and the other the item's tracks.
+    /// one changes the render size and the other the item's tracks. A song's
+    /// LEVELS are left out for the look's reason — they reach the item live
+    /// (`setMixLevels`) — so only its file and its start count.
+    ///
+    /// ⚠️ **AWAY FROM THE TIMELINE, THE NEW ITEM LANDS WHERE THE OLD ONE WAS.**
+    /// Nothing outside the track changes the film's clock — a new excerpt, a
+    /// crop — so the author keeps the moment they were on rather than the film
+    /// starting over under the control they just let go of.
     @discardableResult
     func refreshPreview() -> Bool {
         guard let id = playingID, id == currentItemID else { return false }
         let edited = edits(for: id)
         let wanted = edited.timeline
         if let subject = previewSubject, subject.id == id, !subject.aiming, !previewPending,
-           subject.crop == edited.crop, subject.soundtrack == edited.soundtrack,
+           subject.crop == edited.crop,
+           VideoSoundtrack.laysTheSameAudio(subject.soundtrack, edited.soundtrack),
            MediaTimelining.playsTheSame(subject.timeline, wanted, withinSource: subject.fileSeconds) {
             // Same film, same clock: only the screen's record of it changes.
             previewSubject?.timeline = wanted
             return false
         }
         loadPreview { [weak self] _, _ in
-            guard let self, isTimelineShowing else { return VideoLoadLanding(seconds: 0) }
+            guard let self else { return VideoLoadLanding(seconds: 0) }
+            guard isTimelineShowing else {
+                let playhead = playingSurface.flatMap { preview.playheadSeconds(in: $0) }
+                return VideoLoadLanding(seconds: playhead ?? 0)
+            }
             return VideoLoadLanding(seconds: timelineTrack.playedSecondsUnderNeedle)
         }
         return true

@@ -60,7 +60,12 @@ public struct UploadFeatureBuilder {
         // with it — session-scoped, nothing on disk, nothing global.
         let draft = PostDraft()
         let picker = MediaPickerViewController(library: library) { chosen in
-            MediaEditorViewController(items: chosen, library: library) { editing, edits in
+            // ⚠️ THE DRAFT'S BAG, so an imported song outlives the editor
+            // until the post is out — see `PostDraft.soundtrackFiles`.
+            MediaEditorViewController(
+                items: chosen, library: library,
+                soundtracks: SystemSoundtrackSource(files: draft.soundtrackFiles)
+            ) { editing, edits in
                 // ⚠️ THE SCREEN DISMISSES ITSELF. This closure cannot reach the
                 // navigation controller — it is built below, after the picker
                 // that owns this one — and a published post is broadcast on

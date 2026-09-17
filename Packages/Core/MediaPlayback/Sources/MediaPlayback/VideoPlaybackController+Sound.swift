@@ -1,27 +1,109 @@
+import AVFoundation
+
 extension VideoPlaybackController {
-    /// Lets the clip in `view` be heard, or silences it again.
+    /// What a player's current arrangement laid for its sound.
     ///
-    /// ⚠️ **EVERY PLAYER IS MUTED TODAY, UNDER AN `.ambient` SESSION** —
-    /// `bindFresh` mutes whatever it binds — so a song laid under an edit could
-    /// never be heard in the preview without this.
+    /// ⚠️ **TIED TO THE ITEM, WEAKLY, NOT ONLY TO THE PLAYER.** The same player
+    /// shows the file as shot while a trim handle is held (`showAsShot`), and
+    /// that item has no song; a mix naming the song's track would be handed to
+    /// an item that does not have it. The binding answers only while the item
+    /// it was made for is the one playing.
+    struct SoundBinding {
+        weak var item: AVPlayerItem?
+        let layout: VideoExporter.SoundtrackLayout
+    }
+
+    /// Lets the clip in `view` be heard, or silences it again. Returns whether
+    /// a player took it.
     ///
-    /// ⚠️ **A STUB THAT CHANGES NOTHING AND RETURNS FALSE.** The soundtrack slice
-    /// (S11) fills it: the choice remembered per surface so a swapped item keeps
-    /// it. Returns whether a player took it.
+    /// ⚠️ **EVERY PLAYER IS MUTED WHEN IT IS BOUND, UNDER AN `.ambient`
+    /// SESSION** — `bindFresh` mutes whatever it binds — so a song laid under an
+    /// edit could never be heard without this. A swapped item keeps the
+    /// player's choice; a fresh bind starts silent again.
+    ///
+    /// ⚠️ **AND THE SESSION IS `.playback` WHILE ANY PLAYER HERE IS HEARD.** An
+    /// `.ambient` session is silenced by the ring switch, so an author with the
+    /// phone on silent would pick a song and hear nothing, with nothing on
+    /// screen to say why. It goes back to `.ambient` — the category this
+    /// controller sets for the whole app — when the last heard player is
+    /// silenced or given back.
     @discardableResult
     public func setMuted(_ muted: Bool, in view: VideoRenderView) -> Bool {
-        false
+        guard let player = watchedPlayer(in: view) else { return false }
+        player.isMuted = muted
+        let key = ObjectIdentifier(player)
+        if muted {
+            audiblePlayers.remove(key)
+        } else {
+            audiblePlayers.insert(key)
+        }
+        settleAudioSession()
+        return true
+    }
+
+    /// Whether the clip in `view` is silenced; nil when nothing is bound.
+    public func isMuted(in view: VideoRenderView) -> Bool? {
+        watchedPlayer(in: view)?.isMuted
+    }
+
+    /// Whether the item playing in `view` carries a song.
+    public func carriesSoundtrack(in view: VideoRenderView) -> Bool {
+        guard let player = watchedPlayer(in: view) else { return false }
+        return binding(for: player) != nil
     }
 
     /// Sets the song's level and the film's own, live, on the arrangement
-    /// playing in `view` — both 0...1.
+    /// playing in `view` — both 0...1. Returns whether an arrangement took them:
+    /// false when nothing is bound, or the item carries no song.
     ///
-    /// ⚠️ **A STUB THAT CHANGES NOTHING AND RETURNS FALSE.** The soundtrack slice
-    /// (S11) fills it: the item's `audioMix` replaced with constant levels on the
-    /// track IDs its arrangement was built with. Returns whether an arrangement
-    /// took the levels.
+    /// ⚠️ **THE ITEM'S `audioMix` IS REPLACED, NOT EDITED.** An item copies the
+    /// mix it is given, so the only way to change a level is a new mix — built
+    /// from the same layout the arrangement was, so the film's dips come back at
+    /// the new level, and with constant levels only.
     @discardableResult
     public func setMixLevels(music: Double, original: Double, in view: VideoRenderView) -> Bool {
-        false
+        guard let player = watchedPlayer(in: view), let item = player.currentItem,
+              let layout = binding(for: player)
+        else { return false }
+        item.audioMix = layout.mix(music: music, original: original)
+        return true
+    }
+
+    /// Records what `player`'s new item laid for its sound — nil when it laid
+    /// no song. Called by `load` once the item is in.
+    func adoptSound(_ layout: VideoExporter.SoundtrackLayout?, on player: AVPlayer) {
+        let key = ObjectIdentifier(player)
+        guard let layout, let item = player.currentItem else {
+            soundBindings.removeValue(forKey: key)
+            return
+        }
+        soundBindings[key] = SoundBinding(item: item, layout: layout)
+    }
+
+    /// Forgets everything about `player`'s sound, and silences it. Called by
+    /// `retire`: a pooled player is lent to the next clip muted, and a player
+    /// given back is no longer a reason for the session to play through the
+    /// ring switch.
+    func forgetSound(of player: AVPlayer) {
+        let key = ObjectIdentifier(player)
+        soundBindings.removeValue(forKey: key)
+        player.isMuted = true
+        if audiblePlayers.remove(key) != nil {
+            settleAudioSession()
+        }
+    }
+
+    private func binding(for player: AVPlayer) -> VideoExporter.SoundtrackLayout? {
+        guard let bound = soundBindings[ObjectIdentifier(player)], let item = bound.item,
+              item === player.currentItem
+        else { return nil }
+        return bound.layout
+    }
+
+    private func settleAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        let wanted: AVAudioSession.Category = audiblePlayers.isEmpty ? .ambient : .playback
+        guard session.category != wanted else { return }
+        try? session.setCategory(wanted, mode: .moviePlayback)
     }
 }

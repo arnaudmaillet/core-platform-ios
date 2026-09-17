@@ -179,6 +179,11 @@ public final class VideoPlaybackController {
     /// joining or leaving its surface set is bookkeeping that draws nothing.
     /// Empty when the flag is off.
     private var renderers: [ObjectIdentifier: VideoFrameRenderer] = [:]
+    /// What each player's arrangement laid for its sound, and which players
+    /// are being heard — kept for `VideoPlaybackController+Sound.swift`, keyed by
+    /// PLAYER and emptied by `retire` like every other per-player table here.
+    var soundBindings: [ObjectIdentifier: SoundBinding] = [:]
+    var audiblePlayers: Set<ObjectIdentifier> = []
 
     /// How many players may be bound to surfaces at once.
     ///
@@ -487,6 +492,7 @@ public final class VideoPlaybackController {
         let item: AVPlayerItem
         let built: Bool
         var composed: ComposedVideo?
+        var sound: VideoExporter.SoundtrackLayout?
         // ⚠️ ANY PIECE AT ALL IS A COMPOSITION HERE, UNLIKE THE EXPORT. One piece
         // at 1x is a `timeRange` to an export session, but a player's clock would
         // then read the FILE's seconds, and the item's seconds are promised to be
@@ -513,6 +519,7 @@ public final class VideoPlaybackController {
             item = AVPlayerItem(asset: arranged.asset)
             composed = present(arranged.composed, on: item)
             item.audioMix = arranged.audioMix
+            sound = arranged.sound
             built = true
         } else {
             VideoPlaybackTrace.emit("load build FAILED \(plan.sourceURL.lastPathComponent)")
@@ -541,6 +548,8 @@ public final class VideoPlaybackController {
             )
             player(in: view)?.defaultRate = 1
         }
+        // ⚠️ AFTER THE ITEM IS IN: the binding names the item it describes.
+        if let player = player(in: view) { adoptSound(sound, on: player) }
         VideoPlaybackTrace.emit(
             "loaded \(plan.sourceURL.lastPathComponent) pieces=\(plan.segments.count) at=\(seconds)"
                 + (range.map { " loop=\($0.lowerBound)...\($0.upperBound)" } ?? "")
@@ -1701,6 +1710,8 @@ public final class VideoPlaybackController {
         seeking.remove(ObjectIdentifier(player))
         // And a pooled player runs no arrangement, and loops no range.
         looping.removeValue(forKey: ObjectIdentifier(player))
+        // Nor carries a song, nor is heard.
+        forgetSound(of: player)
         player.replaceCurrentItem(with: nil)
         // The renderer stays in the map, keyed to this player, and is reused
         // when the player is loaned out again. Invalidating only drops its
