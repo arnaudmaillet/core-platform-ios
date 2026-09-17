@@ -99,8 +99,25 @@ final class MediaEditorViewController: UIViewController {
         let symbol: String
     }
 
-    /// What the strip at the foot of the screen offers.
-    static let categories: [Category] = [
+    /// What the strip at the foot of the screen offers, for the medium in front
+    /// of the author.
+    ///
+    /// ⚠️ **A PHOTOGRAPH IS NOT OFFERED THE TIMELINE.** It used to be, and
+    /// choosing it put a line of text in the band saying a photo has nothing to
+    /// trim — a control that reaches nothing, which is the line
+    /// `dev/BACKEND_GAPS.md` §22 draws. Asked for in those words: *"lorsqu'on
+    /// édite une photo, il faudrait retirer de la toolbar l'option de timeline
+    /// car elle ne sert à rien"*. Trim is LAST precisely so that dropping it
+    /// leaves every other index where it was.
+    static func categories(for kind: MediaLibraryItem.Kind) -> [Category] {
+        switch kind {
+        case .photo: Array(everyCategory.dropLast())
+        case .video: everyCategory
+        }
+    }
+
+    /// Every category there is — the video's list, and the longest one.
+    static let everyCategory: [Category] = [
         Category(title: "Effects", symbol: "wand.and.stars"),
         Category(title: "Text", symbol: "textformat"),
         Category(title: "Stickers", symbol: "face.smiling"),
@@ -153,10 +170,33 @@ final class MediaEditorViewController: UIViewController {
     /// slide. `IconSelectorBar` is the same gesture with the contract this screen
     /// actually has.
     private let categoryBar = IconSelectorBar(
-        items: MediaEditorViewController.categories.map {
+        items: MediaEditorViewController.everyCategory.map {
             IconSelectorBar.Item(symbolName: $0.symbol, accessibilityLabel: $0.title)
         }
     )
+
+    /// The list the strip is wearing — the medium's, re-decided on every settle.
+    private var categories: [Category] = MediaEditorViewController.everyCategory
+
+    /// Dresses the strip for the page in front of the author.
+    ///
+    /// ⚠️ **AND A SELECTION THE NEW LIST NO LONGER HAS IS LET GO.** Swiping from
+    /// a clip whose timeline is open onto a photograph takes Trim off the strip;
+    /// `IconSelectorBar` answers that by going neutral and saying so, and the
+    /// band closes with it rather than keeping a track nobody can reach.
+    private func dressCategoryStrip(for id: String?) {
+        let kind = id.flatMap { itemsByID[$0]?.kind } ?? .photo
+        let wanted = Self.categories(for: kind)
+        guard wanted.count != categories.count else { return }
+        let standing = selectedCategory
+        categories = wanted
+        categoryBar.setItems(wanted.map {
+            IconSelectorBar.Item(symbolName: $0.symbol, accessibilityLabel: $0.title)
+        })
+        if let standing, let index = wanted.firstIndex(where: { $0.title == standing }) {
+            categoryBar.select(index, notify: false)
+        }
+    }
 
     /// What the leading end of the toolbar offers while the timeline is open.
     ///
@@ -522,9 +562,21 @@ final class MediaEditorViewController: UIViewController {
     /// launch over an empty band — opens again. A mode with nothing to show
     /// (`tenant == nil`) is left alone, so the band is not re-stated for
     /// nothing.
+    /// ⚠️ **A SECOND TAP PUTS THE TOOLS AWAY.** Asked for in those words: the
+    /// strip has a neutral state, it is what the screen opens on, and tapping
+    /// the icon that is already chosen returns to it. The tools that were open
+    /// are closed by `showAccessory(for: nil)`, which also unwinds crop.
+    ///
+    /// The one exception is a mode whose tools are not up yet — choosing a
+    /// category and then swiping to a page that mode cannot serve leaves the
+    /// band on a notice — where a repeat tap re-opens rather than closes.
     private func categoryReselected() {
-        guard let mode = selectedMode, let tenant = mode.tenant, band.content !== tenant else { return }
-        showAccessory(for: selectedCategory)
+        if let mode = selectedMode, let tenant = mode.tenant, band.content !== tenant {
+            showAccessory(for: selectedCategory)
+            return
+        }
+        categoryBar.selectNothing(notify: false)
+        showAccessory(for: nil)
     }
 
     /// Which glyph the bar is currently wearing, so the item is only re-stated
@@ -799,6 +851,7 @@ final class MediaEditorViewController: UIViewController {
         // The first page has never settled — nothing scrolled — so this is the
         // only moment it can start. Stepping back from the finalisation screen
         // lands here too, which is what restarts a clip the author left running.
+        dressCategoryStrip(for: currentItemID)
         playSettledPage()
         #if DEBUG
         logCanvas("didAppear")
@@ -824,7 +877,7 @@ final class MediaEditorViewController: UIViewController {
         // runs again on every pop back from the finalisation screen.
         if !hasSelectedDebugCategory,
            let raw = Self.debugValue(after: "-upload-category"),
-           let index = Int(raw), Self.categories.indices.contains(index) {
+           let index = Int(raw), categories.indices.contains(index) {
             hasSelectedDebugCategory = true
             categoryBar.select(index)
             // ⚠️ `select(_:)` ANNOUNCES ONLY ON A CHANGE — picking the index the
@@ -1144,6 +1197,13 @@ final class MediaEditorViewController: UIViewController {
         // it, and Effects is chosen at launch over an empty band: without this
         // the first mode could never be opened on first entry.
         categoryBar.onReselect = { [weak self] _ in self?.categoryReselected() }
+        // The strip can lose the item it was on when the medium changes; the
+        // band closes with it.
+        categoryBar.onSelectNothing = { [weak self] in self?.showAccessory(for: nil) }
+        // ⚠️ **THE SCREEN OPENS ON NOTHING.** It used to open with Effects
+        // chosen over an EMPTY band, so the one filled icon was a promise the
+        // band did not keep and the first tap on it was a reselect.
+        categoryBar.selectNothing(notify: false)
         touchProbe.attach(to: categoryBar)
         // ⚠️ **THE PILL KEEPS ITS WORD AND THE STRIP GIVES.** The two together
         // over-subscribe the band — a pill beside a four-segment strip does not
@@ -1345,8 +1405,8 @@ final class MediaEditorViewController: UIViewController {
     /// ⚠️ AND THE TITLE IS DERIVED, NOT A HARD-CODED POSITION. This strip has
     /// already been reordered once; `categories[3]` would break in silence.
     private var selectedCategory: String? {
-        let index = categoryBar.selectedIndex
-        return Self.categories.indices.contains(index) ? Self.categories[index].title : nil
+        guard let index = categoryBar.selection, categories.indices.contains(index) else { return nil }
+        return categories[index].title
     }
 
     /// ⚠️ **LEAVING CROP IS AN ACT, NOT AN ABSENCE.** Choosing another mode has
@@ -1370,8 +1430,14 @@ final class MediaEditorViewController: UIViewController {
         case "Filters":
             open(filtersMode)
         case "Trim":
+            // ⚠️ **A PHOTOGRAPH CANNOT REACH THIS AT ALL ANY MORE** — the strip
+            // does not offer Trim for one (`categories(for:)`), so the notice
+            // that used to stand here has no way of being seen. What is left is
+            // the guard itself: a settle onto a photograph re-runs this while
+            // the strip is being re-dressed, and it closes the band rather than
+            // keeping a track for a picture with no film.
             guard let id = currentItemID, case .video(let seconds)? = itemsByID[id]?.kind else {
-                setEditingAccessory(trimUnavailable)
+                setEditingAccessory(nil)
                 return
             }
             setEditingAccessory(timelineTools)
@@ -1957,10 +2023,7 @@ final class MediaEditorViewController: UIViewController {
     /// video must lose the strip, and a video settled onto after a photograph
     /// must lose the notice.
     private func refreshTimelineTrackIfShowing() {
-        guard isTimelineShowing
-                || band.content === trimUnavailable
-                || band.content === trimTooShort
-        else { return }
+        guard isTimelineShowing || band.content === trimTooShort else { return }
         showAccessory(for: "Trim")
     }
 
@@ -2664,17 +2727,6 @@ final class MediaEditorViewController: UIViewController {
         timelineTrack.showPaused(!paused)
     }
 
-    /// ⚠️ **THE MIRROR IMAGE OF THE SONG MODE'S NOTICE, AND THESE ARE THE LAST
-    /// OF THEM.** Trim refuses a photograph, and so does the soundtrack mode
-    /// (`MediaEditorSoundtrackMode.photoNotice`); Crop and Filters refused a
-    /// video until the compositor drew both into the export, and they refuse
-    /// nothing now. Same rule throughout — a mode that cannot serve the medium in
-    /// front of the author says so rather than offering a control that reaches
-    /// nothing.
-    private lazy var trimUnavailable = BandNoticeView(
-        "A photo has nothing to trim."
-    )
-
     /// ⚠️ **HANDLES THAT CANNOT MOVE ARE WORSE THAN NO HANDLES.**
     /// `MediaTimelining` will not leave less than `shortestSourceSeconds` behind, so on
     /// a clip already at or below that floor every drag resolves back to where
@@ -3141,6 +3193,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     private func pageSettled() {
         updateFitItem(animated: true)
         let settled = currentItemID
+        dressCategoryStrip(for: settled)
         for mode in modes { mode.pageDidSettle(on: settled) }
         refreshTimelineTrackIfShowing()
         reopenCropIfWaiting()
@@ -3271,7 +3324,10 @@ extension MediaEditorViewController {
     var debugPageDots: UIView { pageDots }
 
     /// Internal for tests: the categories the strip spells.
-    var debugCategoryTitles: [String] { Self.categories.map(\.title) }
+    var debugCategoryTitles: [String] { categories.map(\.title) }
+    /// Internal for tests: which category is open, nil while the strip is
+    /// neutral.
+    var debugSelectedCategory: String? { selectedCategory }
     /// Internal for tests: whether the picture runs under the bars.
     var debugCanvasIgnoresInsets: Bool { canvas.contentInsetAdjustmentBehavior == .never }
     /// Internal for tests: the strip itself, to read what it is wearing.

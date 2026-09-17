@@ -194,7 +194,9 @@ struct MediaEditorTests {
         #expect(hosted.count == 2, "the pill and the strip, and nothing else")
         #expect(hosted.first is SoundPillView, "the song leads: \(hosted)")
         #expect(hosted.last is IconSelectorBar, "and the categories follow it")
-        #expect(screen.editor.debugCategoryTitles == MediaEditorViewController.categories.map(\.title))
+        // A photograph is offered every category but the timeline.
+        #expect(screen.editor.debugCategoryTitles
+                == MediaEditorViewController.categories(for: .photo).map(\.title))
         #expect(screen.editor.debugCategoryBar.suppressesBackdrop, "no bubble inside a bubble")
         #expect(screen.navigation.isToolbarHidden == false, "raised by the screen itself")
     }
@@ -400,6 +402,44 @@ struct MediaEditorTests {
     ///
     /// Reported from a device: sliding the pill onto a category moved the pill and
     /// left the band showing the previous one until the viewer also tapped it.
+    /// ⚠️ **THE SCREEN OPENS ON NOTHING.** It used to open with Effects chosen
+    /// over an EMPTY band — one filled icon promising tools that were not
+    /// there, and a first tap on it that counted as a reselect. Asked for as
+    /// *"il faudrait que le sélecteur puisse avoir un state neutre, ce qui sera
+    /// le state par défaut lorsque la fenêtre apparaîtra"*.
+    @Test func theStripOpensWithNothingChosen() async throws {
+        let screen = open(Self.items(2))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        #expect(screen.editor.debugCategoryBar.selection == nil,
+                "the strip opened on \(String(describing: screen.editor.debugCategoryBar.selection))")
+        #expect(screen.editor.debugSelectedCategory == nil)
+        #expect(!screen.editor.debugCategoryBar.debugLensIsShowing, "a pill stands over nothing")
+        #expect(screen.editor.debugBand.debugIsShowing == false)
+    }
+
+    /// ⚠️ **AND A SECOND TAP PUTS THE TOOLS AWAY AGAIN** — *"si on réappuie
+    /// dessus, cela met le state du sélecteur à vide"*. The same gesture used to
+    /// re-open the tools it had just opened.
+    @Test func tappingTheChosenCategoryAgainClosesItsTools() async throws {
+        let screen = open(Self.items(2))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        let filters = try #require(screen.editor.debugCategoryTitles.firstIndex(of: "Filters"))
+        screen.editor.debugCategoryBar.debugTap(filters)
+        #expect(screen.editor.debugBand.debugIsShowing, "guard: the tools are up")
+
+        screen.editor.debugCategoryBar.debugTap(filters)
+
+        #expect(screen.editor.debugCategoryBar.selection == nil,
+                "the strip kept \(String(describing: screen.editor.debugCategoryBar.selection))")
+        #expect(screen.editor.debugBand.debugIsShowing == false, "the tools stayed up")
+        #expect(!screen.editor.debugCategoryBar.debugLensIsShowing)
+
+        // And a third tap opens them again, rather than doing nothing at all.
+        screen.editor.debugCategoryBar.debugTap(filters)
+        #expect(screen.editor.debugBand.debugIsShowing)
+    }
+
     @Test func choosingACategoryOpensWhatItOffers() async throws {
         let screen = open(Self.items(2))
         try await settle(until: { !Self.pages(in: screen.window).isEmpty })

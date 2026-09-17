@@ -35,6 +35,91 @@ struct IconSelectorBarTests {
         bar.debugLensCentreX - bar.debugStripOffset
     }
 
+    // MARK: - Nothing chosen
+
+    /// ⚠️ **A STATE THE BAR COULD NOT HOLD.** `selectedIndex` is an `Int`, so
+    /// "none" had nowhere to live and a host whose tools can all be put away had
+    /// to keep pretending one of them was open. Neutral hides the pill, fills no
+    /// symbol, and marks nothing selected for VoiceOver.
+    @Test func neutralChoosesNothingAndDrawsNoPill() {
+        let bar = bar()
+        var nothing = 0
+        bar.onSelectNothing = { nothing += 1 }
+        bar.debugTap(2)
+        #expect(bar.selection == 2, "guard")
+        #expect(bar.debugChosenIndices == [2], "guard: the chosen item is marked")
+        #expect(bar.debugLensIsShowing, "guard: the pill is there while something is chosen")
+
+        bar.selectNothing()
+
+        #expect(bar.selection == nil)
+        #expect(bar.isNeutral)
+        #expect(!bar.debugLensIsShowing, "the pill stayed over an item nobody chose")
+        #expect(bar.debugChosenIndices.isEmpty, "an item is still marked chosen: \(bar.debugChosenIndices)")
+        #expect(nothing == 1, "the bar went neutral without saying so")
+    }
+
+    /// ⚠️ **AND IT SAYS SO ON A CHANNEL OF ITS OWN.** An index of -1 travelling
+    /// down a path typed `Int` is a value every caller has to remember to
+    /// refuse, and the ones that forget clamp it back to the first item.
+    @Test func goingNeutralNeverTravelsThroughOnSelect() {
+        let bar = bar()
+        var selected: [Int] = []
+        bar.onSelect = { selected.append($0) }
+        bar.debugTap(1)
+
+        bar.selectNothing()
+
+        #expect(selected == [1], "got \(selected)")
+    }
+
+    /// Coming back from neutral is a change, even onto the item the bar was on
+    /// before — the host has closed its tools and needs telling to open them.
+    @Test func choosingAgainAfterNeutralIsAChange() {
+        let bar = bar()
+        var told: [Int] = []
+        bar.debugTap(2)
+        bar.selectNothing(notify: false)
+        bar.onSelect = { told.append($0) }
+
+        bar.debugTap(2)
+
+        #expect(told == [2], "the bar thought it was already on 2: \(told)")
+        #expect(bar.selection == 2)
+        #expect(bar.debugLensIsShowing)
+    }
+
+    /// ⚠️ **A SELECTION THE NEW LIST NO LONGER HAS IS LET GO, NOT CLAMPED.**
+    /// Clamping moved a viewer sitting on the last item onto its neighbour in
+    /// silence, so the host kept showing the tools of an item the strip no
+    /// longer offered.
+    @Test func losingTheChosenItemGoesNeutralRatherThanSliding() {
+        let bar = bar()
+        var nothing = 0
+        bar.onSelectNothing = { nothing += 1 }
+        bar.debugTap(3)
+        #expect(bar.selection == 3, "guard")
+
+        bar.setItems(Array(Self.four.dropLast()))
+
+        #expect(bar.selection == nil, "the bar slid to \(String(describing: bar.selection))")
+        #expect(nothing == 1, "it happened in silence")
+        #expect(!bar.debugLensIsShowing)
+    }
+
+    /// And a list that still holds the chosen item leaves it alone.
+    @Test func aShorterListThatKeepsTheChoiceKeepsIt() {
+        let bar = bar()
+        var nothing = 0
+        bar.onSelectNothing = { nothing += 1 }
+        bar.debugTap(1)
+
+        bar.setItems(Array(Self.four.dropLast()))
+
+        #expect(bar.selection == 1)
+        #expect(nothing == 0)
+    }
+
     // MARK: - Tapping
 
     @Test func aTapChoosesAndSaysSo() {

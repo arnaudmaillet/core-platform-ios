@@ -68,7 +68,33 @@ public final class IconSelectorBar: UIView {
     /// home is not a request for anything.
     public var onReselect: ((Int) -> Void)?
 
+    /// The bar went neutral — nothing is chosen any more.
+    ///
+    /// ⚠️ **A CHANNEL OF ITS OWN, NOT A SENTINEL THROUGH `onSelect`.** An index
+    /// of -1 travelling down a path typed `Int` is a value every caller has to
+    /// remember to refuse, and the ones that forget clamp it back to the first
+    /// item — which is how `rebuildSegments` used to lose a selection.
+    public var onSelectNothing: (() -> Void)?
+
     public private(set) var selectedIndex: Int = 0
+
+    /// Whether NOTHING is chosen.
+    ///
+    /// ⚠️ **A STATE THE BAR COULD NOT HOLD, AND A HOST NEEDED.** `selectedIndex`
+    /// is an `Int` with no room for "none" — -1 is refused by `select(_:)` and
+    /// clamped away by `rebuildSegments` — so a screen whose tools can all be
+    /// put away had to keep pretending one of them was open. The media editor
+    /// opens on nothing, and a second tap on the chosen icon puts its tools away
+    /// again. `IconActionBar` has held the same shape since it was written
+    /// (`activeIndex: Int?`), which is where the lens-hiding below comes from.
+    ///
+    /// `selectedIndex` keeps its last value while neutral, so a host that asks
+    /// "which one was it" still gets an answer; `selection` is the one to read
+    /// for "which one is it NOW".
+    public private(set) var isNeutral = false
+
+    /// The chosen item, or nil while the bar is neutral.
+    public var selection: Int? { isNeutral ? nil : selectedIndex }
 
     /// The host draws the capsule; this one draws none.
     ///
@@ -300,7 +326,17 @@ public final class IconSelectorBar: UIView {
             button.widthAnchor.constraint(equalToConstant: Metrics.segmentSide).isActive = true
             return button
         }
-        selectedIndex = min(max(0, selectedIndex), max(0, items.count - 1))
+        // ⚠️ **A SELECTION THE NEW LIST NO LONGER HAS IS LET GO, NOT CLAMPED.**
+        // Clamping moved a viewer sitting on the last item onto its neighbour
+        // silently, so the host kept showing the tools of an item the strip no
+        // longer offered. Going neutral says what happened, once.
+        if !items.indices.contains(selectedIndex) {
+            selectedIndex = max(0, min(selectedIndex, items.count - 1))
+            if !isNeutral {
+                isNeutral = true
+                onSelectNothing?()
+            }
+        }
         progress = CGFloat(selectedIndex)
         applySelectionAppearance()
         invalidateIntrinsicContentSize()
@@ -321,7 +357,8 @@ public final class IconSelectorBar: UIView {
     /// has touched anything — telling it about its own decision is noise.
     public func select(_ index: Int, notify: Bool = true) {
         guard items.indices.contains(index) else { return }
-        let changed = index != selectedIndex
+        let changed = index != selectedIndex || isNeutral
+        isNeutral = false
         selectedIndex = index
         progress = CGFloat(index)
         applySelectionAppearance()
@@ -330,12 +367,28 @@ public final class IconSelectorBar: UIView {
         if changed, notify { onSelect?(index) }
     }
 
+    /// Puts every choice down: nothing filled, no pill, and the host's tools
+    /// closed. What the media editor's screen opens on, and where a second tap
+    /// on the chosen icon returns it.
+    public func selectNothing(notify: Bool = true) {
+        guard !isNeutral else { return }
+        isNeutral = true
+        applySelectionAppearance()
+        if notify { onSelectNothing?() }
+    }
+
     private func tapped(_ index: Int) {
-        guard index != selectedIndex else {
+        guard index != selection else {
             onReselect?(index)
             return
         }
+        let wasNeutral = isNeutral
+        isNeutral = false
         UIView.animate(withDuration: Metrics.settle, delay: 0, options: [.curveEaseOut]) {
+            // Coming back from neutral the pill has nowhere to travel FROM, so
+            // it appears where it is going rather than sliding in from the item
+            // it happened to be on last time.
+            if wasNeutral { self.progress = CGFloat(index) }
             self.selectedIndex = index
             self.progress = CGFloat(index)
             self.applyProgress()
@@ -346,9 +399,10 @@ public final class IconSelectorBar: UIView {
     }
 
     private func applySelectionAppearance() {
+        lens.isHidden = isNeutral
         for (index, button) in buttons.enumerated() {
             let item = items[index]
-            let isSelected = index == selectedIndex
+            let isSelected = index == selection
             // Selection = the filled variant where the symbol has one, which is
             // the rule `GlassSegmentRow` already follows.
             let name = isSelected ? item.symbolName + ".fill" : item.symbolName
@@ -629,9 +683,21 @@ extension IconSelectorBar: UIGestureRecognizerDelegate {
 extension IconSelectorBar {
     public var debugItemCount: Int { items.count }
     public var debugLensFrame: CGRect { lens.frame }
+    /// Whether the pill is drawn at all — it is not, while the bar is neutral.
+    public var debugLensIsShowing: Bool { !lens.isHidden }
     public var debugStripOffset: CGFloat { scroller.contentOffset.x }
     public var debugStripAcceptsScrolling: Bool { scroller.isScrollEnabled }
     public var debugEdgeScrollIsArmed: Bool { edgeLink != nil }
+    /// Which items are marked chosen — the trait VoiceOver reads, set by
+    /// `applySelectionAppearance` and nowhere else. Empty while neutral.
+    ///
+    /// ⚠️ **NOT `debugIsSelectedFilled` BELOW**, which only answers whether the
+    /// selected button has an image at all — true of every button, filled or
+    /// not, and it let a neutral bar look chosen.
+    public var debugChosenIndices: [Int] {
+        buttons.indices.filter { buttons[$0].accessibilityTraits.contains(.selected) }
+    }
+
     public var debugIsSelectedFilled: Bool {
         guard buttons.indices.contains(selectedIndex) else { return false }
         return buttons[selectedIndex].configuration?.image != nil

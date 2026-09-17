@@ -265,23 +265,23 @@ struct MediaEditorTimelineTests {
                 "got \(String(describing: screen.editor.debugBand.content))")
     }
 
-    /// ⚠️ **THE MIRROR OF THE OTHER TWO NOTICES, AND THE WITNESS FOR THE LINE
-    /// ABOVE.** Crop and Filters refuse a video; Trim refuses a photograph. A
-    /// mode that cannot serve the medium in front of the author says so rather
-    /// than offering a control that reaches nothing — which is the defect this
-    /// whole run of work has been removing.
-    @Test func choosingTrimOnAPhotographSaysWhyThereIsNothingToDo() throws {
+    /// ⚠️ **A PHOTOGRAPH IS NOT OFFERED THE TIMELINE AT ALL.** It used to be,
+    /// and choosing it put a line of text in the band saying a photo has
+    /// nothing to trim — a control that reaches nothing, one step later. Asked
+    /// for as *"lorsqu'on édite une photo, il faudrait retirer de la toolbar
+    /// l'option de timeline car elle ne sert à rien"*.
+    @Test func aPhotographIsNotOfferedTheTimeline() throws {
         let screen = open(Self.items(2, videosAt: [1]))
 
-        choose(Mode.trim, on: screen)
-
-        // ⚠️ **THE TEXT, NOT JUST THE TYPE.** `BandNoticeView` is also what Crop
-        // and Filters install when they refuse a video; asserting only "a notice
-        // is up" would pass if Trim silently fell through to another mode's
-        // message. The word has to be about trimming.
-        let notice = try #require(screen.editor.debugBand.content as? BandNoticeView)
-        #expect(notice.debugText?.lowercased().contains("trim") == true,
-                "got \(notice.debugText ?? "nil")")
+        #expect(!screen.editor.debugCategoryTitles.contains("Trim"),
+                "got \(screen.editor.debugCategoryTitles)")
+        #expect(screen.editor.debugCategoryTitles
+                == MediaEditorViewController.categories(for: .photo).map(\.title))
+        // And the clip on the next page still is.
+        screen.editor.debugScrollToPage(1)
+        screen.window.layoutIfNeeded()
+        #expect(screen.editor.debugCategoryTitles.contains("Trim"),
+                "a clip lost it too: \(screen.editor.debugCategoryTitles)")
     }
 
     // MARK: - What it shows
@@ -458,21 +458,32 @@ struct MediaEditorTimelineTests {
         #expect(screen.handed.edits?["video-long"] == nil, "and the one behind is untouched")
     }
 
-    /// The mirror: settling from a video onto a photograph must swap the strip
-    /// for the notice, or the photograph collects a `trim` it never earned —
-    /// which also moves its `MediaEdits.signature`, and therefore its thumbnail
-    /// cache key.
-    @Test func settlingOntoAPhotographSwapsTheTrackForTheNotice() async throws {
+    /// The mirror: settling from a video onto a photograph must take the
+    /// timeline OFF the strip and close the band with it, or the photograph
+    /// collects a `trim` it never earned — which also moves its
+    /// `MediaEdits.signature`, and therefore its thumbnail cache key.
+    ///
+    /// ⚠️ **IT USED TO SWAP THE TRACK FOR A NOTICE SAYING A PHOTO HAS NOTHING
+    /// TO TRIM.** The category is simply not offered for a photograph now, so
+    /// there is nothing left to apologise for.
+    @Test func settlingOntoAPhotographTakesTheTimelineOffTheStrip() async throws {
         let screen = open(Self.items(2, videosAt: [0]))
         choose(Mode.trim, on: screen)
         try await ready(screen)
         #expect(screen.editor.debugBand.content is MediaTimelineToolsView, "guard: the strip is up")
+        #expect(screen.editor.debugCategoryTitles.contains("Trim"), "guard: a clip is offered it")
 
         screen.editor.debugScrollToPage(1)
-        try await settle(until: { screen.editor.debugBand.content is BandNoticeView })
+        try await settle(until: { screen.editor.debugBand.content == nil })
 
-        #expect(screen.editor.debugBand.content is BandNoticeView,
+        #expect(!screen.editor.debugCategoryTitles.contains("Trim"),
+                "a photograph is still offered the timeline: \(screen.editor.debugCategoryTitles)")
+        #expect(screen.editor.debugSelectedCategory == nil,
+                "the strip kept a category it no longer offers: \(String(describing: screen.editor.debugSelectedCategory))")
+        #expect(screen.editor.debugBand.content == nil,
                 "got \(String(describing: screen.editor.debugBand.content))")
+        #expect(screen.handed.edits?["photo-1"]?.timeline.segments.isEmpty != false,
+                "the photograph collected a cut")
     }
 
     // MARK: - A clip too short to cut
