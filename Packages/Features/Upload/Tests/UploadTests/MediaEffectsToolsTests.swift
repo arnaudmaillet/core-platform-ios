@@ -94,6 +94,34 @@ struct MediaEffectsToolsTests {
         #expect(tools.debugReading(.brightness) == "+20%")
     }
 
+    /// ⚠️ **A PILL ALREADY IN VIEW DOES NOT MOVE THE ROW.** Revealing it with
+    /// `scrollRectToVisible` and a margin slides the row whenever the pill sits
+    /// closer to an edge than that margin — under the finger that had just
+    /// aimed at it, and measured on an SE as the whole row stepping sideways.
+    @Test func choosingAPillInViewLeavesTheRowWhereItIs() throws {
+        let (tools, window) = tools()
+        _ = window
+        tools.layoutIfNeeded()
+        let pill = try #require(tools.debugPillFrame(.brightness))
+        // Scrolled so the pill is whole and eight points inside the trailing
+        // edge — visible, and nearer the edge than the margin a reveal adds.
+        tools.debugRowOffset = pill.maxX + 8 - tools.debugRowWindow
+        let before = tools.debugRowOffset
+
+        tools.debugTapDial(.brightness)
+        tools.layoutIfNeeded()
+
+        // ⚠️ THE DECISION, NOT THE OFFSET: the scroll is animated, so the
+        // offset it would land on is not there to read in the same turn.
+        #expect(tools.debugRevealed == nil, "the row was scrolled to \(String(describing: tools.debugRevealed))")
+        #expect(tools.debugRowOffset == before)
+
+        // And a pill off the end is still brought in.
+        tools.debugRowOffset = 0
+        tools.debugTapDial(.grain)
+        #expect(tools.debugRevealed != nil, "the last dial was left off the row")
+    }
+
     // MARK: - Effects
 
     /// One effect at a time: choosing one lets the one before go, and "None"

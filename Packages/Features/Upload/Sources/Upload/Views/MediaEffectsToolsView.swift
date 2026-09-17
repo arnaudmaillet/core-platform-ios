@@ -172,6 +172,9 @@ final class MediaEffectsToolsView: UIView {
     private var dialPills: [LookAdjustments.Key: EffectsPill] = [:]
     private var effectPills: [LookEffectKind: EffectsPill] = [:]
     private let nonePill = EffectsPill(glyph: MediaEffectsCatalog.noneGlyph, caption: MediaEffectsCatalog.noneLabel)
+    /// What the last reveal decided to scroll to, nil when it left the row
+    /// alone — the decision, which an animated scroll hides from a test.
+    private var revealed: CGRect?
 
     init() {
         super.init(frame: .zero)
@@ -323,6 +326,12 @@ final class MediaEffectsToolsView: UIView {
     }
 
     /// Scrolls the chosen pill fully into the row.
+    ///
+    /// ⚠️ **AND LEAVES THE ROW ALONE WHEN IT IS ALREADY THERE.**
+    /// `scrollRectToVisible` on a rect that is already visible still moves the
+    /// row, because the rect is inset by a margin the row does not owe it:
+    /// measured, a tap on the first pill slid everything 16pt sideways under
+    /// the finger that had just aimed at it.
     private func reveal(_ target: Focus) {
         let pill: UIView?
         switch target {
@@ -332,8 +341,18 @@ final class MediaEffectsToolsView: UIView {
         }
         guard let pill, scroller.bounds.width > 0 else { return }
         layoutIfNeeded()
-        let frame = pill.convert(pill.bounds, to: scroller).insetBy(dx: -Spacing.lg, dy: 0)
-        scroller.scrollRectToVisible(frame, animated: window != nil)
+        let frame = pill.convert(pill.bounds, to: scroller)
+        let showing = CGRect(
+            x: scroller.contentOffset.x + scroller.contentInset.left, y: 0,
+            width: scroller.bounds.width - scroller.contentInset.left - scroller.contentInset.right,
+            height: scroller.bounds.height
+        )
+        guard frame.minX < showing.minX || frame.maxX > showing.maxX else {
+            revealed = nil
+            return
+        }
+        revealed = frame
+        scroller.scrollRectToVisible(frame.insetBy(dx: -Spacing.lg, dy: 0), animated: window != nil)
     }
 
     private func chooseNone() {
@@ -460,6 +479,22 @@ final class MediaEffectsToolsView: UIView {
     }
     /// Internal for tests: a pill's height.
     func debugPillSize(_ key: LookAdjustments.Key) -> CGSize? { dialPills[key]?.bounds.size }
+    /// Internal for tests: what the last reveal scrolled to, nil when it left
+    /// the row where it was.
+    var debugRevealed: CGRect? { revealed }
+    /// Internal for tests: how far the row is scrolled, and where a pill sits
+    /// in it.
+    var debugRowOffset: CGFloat {
+        get { scroller.contentOffset.x }
+        set { scroller.contentOffset.x = newValue }
+    }
+    func debugPillFrame(_ key: LookAdjustments.Key) -> CGRect? {
+        dialPills[key].map { $0.convert($0.bounds, to: scroller) }
+    }
+    /// Internal for tests: the width the row shows, inside its insets.
+    var debugRowWindow: CGFloat {
+        scroller.bounds.width - scroller.contentInset.left - scroller.contentInset.right
+    }
 }
 
 /// One pill: a symbol or a small picture and a word side by side — or, once
