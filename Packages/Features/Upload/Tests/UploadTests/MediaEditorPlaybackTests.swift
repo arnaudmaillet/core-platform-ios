@@ -304,7 +304,7 @@ struct MediaEditorPlaybackTests {
         try #require(screen.preview.landings.last?.seconds == 0, "guard: a fresh page starts at the top")
 
         screen.preview.playhead = 3.25
-        screen.editor.debugCategoryBar.select(4) // Crop
+        screen.editor.debugChoose("Crop")
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.played.count == 2 })
         try #require(screen.preview.played.count == 2, "the box never loaded its film")
@@ -313,7 +313,7 @@ struct MediaEditorPlaybackTests {
                 "the box started the film over: \(String(describing: screen.preview.landings.last))")
 
         screen.preview.playhead = 5.5
-        screen.editor.debugCategoryBar.select(3) // Filters — leaves the crop
+        screen.editor.debugChoose("Filters") // leaves the crop
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.played.count == 3 })
         try #require(screen.preview.played.count == 3, "the canvas never took the film back")
@@ -349,7 +349,7 @@ struct MediaEditorPlaybackTests {
         try await settle(until: { screen.preview.played.count == 1 })
         #expect(screen.preview.boundCount == 1, "guard: it was playing")
 
-        screen.editor.debugCategoryBar.select(4) // Crop
+        screen.editor.debugChoose("Crop")
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.played.count == 2 })
 
@@ -367,7 +367,7 @@ struct MediaEditorPlaybackTests {
         screen.editor.debugCropSurface.onChange?(cut)
         try #require(screen.editor.debugCrop(for: "video-1") == cut,
                      "guard: the crop was not stored: \(screen.editor.debugCrop(for: "video-1"))")
-        screen.editor.debugCategoryBar.select(3) // Filters — leaves the crop
+        screen.editor.debugChoose("Filters") // leaves the crop
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.plans.last?.finish.crop == cut })
 
@@ -379,7 +379,7 @@ struct MediaEditorPlaybackTests {
         // Until the author has cut something, "with the crop" and "without it"
         // are the same plan — which is exactly how a test can pass while the
         // box aims at already-cut film.
-        screen.editor.debugCategoryBar.select(4)
+        screen.editor.debugChoose("Crop")
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.plans.last?.finish.crop == .untouched })
 

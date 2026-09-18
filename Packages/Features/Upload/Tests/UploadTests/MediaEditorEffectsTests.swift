@@ -15,8 +15,8 @@ import UIKit
 @MainActor
 struct MediaEditorEffectsTests {
     private enum Category {
-        static let effects = 0
-        static let filters = 3
+        static let effects = "Effects"
+        static let filters = "Filters"
     }
 
     struct Screen {
@@ -125,13 +125,13 @@ struct MediaEditorEffectsTests {
     /// Opens Effects the way a first entry does: a tap on the icon that is
     /// already chosen.
     static func openEffects(on screen: Screen) throws -> MediaEffectsToolsView {
-        screen.editor.debugCategoryBar.debugTap(Category.effects)
+        screen.editor.debugTapCategory(Category.effects)
         screen.window.layoutIfNeeded()
         return try #require(screen.editor.debugBand.content as? MediaEffectsToolsView)
     }
 
     static func openFilters(on screen: Screen) throws -> MediaFilterRowView {
-        screen.editor.debugCategoryBar.select(Category.filters)
+        screen.editor.debugChoose(Category.filters)
         screen.window.layoutIfNeeded()
         return try #require(screen.editor.debugBand.content as? MediaFilterRowView)
     }

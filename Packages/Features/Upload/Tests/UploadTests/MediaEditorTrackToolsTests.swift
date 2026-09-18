@@ -18,8 +18,8 @@ import UIKit
 @MainActor
 struct MediaEditorTrackToolsTests {
     private enum Mode {
-        static let trim = 5
-        static let filters = 3
+        static let trim = "Trim"
+        static let filters = "Filters"
     }
 
     private struct Screen {
@@ -153,8 +153,8 @@ struct MediaEditorTrackToolsTests {
         )
     }
 
-    private func choose(_ mode: Int, on screen: Screen) {
-        screen.editor.debugCategoryBar.select(mode)
+    private func choose(_ mode: String, on screen: Screen) {
+        screen.editor.debugChoose(mode)
         screen.window.layoutIfNeeded()
     }
 
@@ -233,11 +233,12 @@ struct MediaEditorTrackToolsTests {
 
     /// A photograph gets the notice, not the track — and so it must not get the
     /// actions either: there is nothing for them to cut.
+    /// A photograph's strip does not offer the timeline at all, so there is
+    /// no choice that could bring the actions in.
     @Test func aPhotographNeverSeesTheActions() {
         let screen = open(Self.items(1))
 
-        choose(Mode.trim, on: screen)
-
+        #expect(!screen.editor.debugCategoryTitles.contains(Mode.trim))
         #expect(hostedToolbarViews(screen).first is SoundPillView)
     }
 

@@ -19,8 +19,8 @@ import UIKit
 @MainActor
 struct MediaEditorTransitionsTests {
     private enum Mode {
-        static let trim = 5
-        static let filters = 3
+        static let trim = "Trim"
+        static let filters = "Filters"
     }
 
     private struct Screen {
@@ -127,8 +127,8 @@ struct MediaEditorTransitionsTests {
         return Screen(editor: editor, window: window, navigation: navigation, preview: preview)
     }
 
-    private func choose(_ mode: Int, on screen: Screen) {
-        screen.editor.debugCategoryBar.select(mode)
+    private func choose(_ mode: String, on screen: Screen) {
+        screen.editor.debugChoose(mode)
         screen.window.layoutIfNeeded()
     }
 

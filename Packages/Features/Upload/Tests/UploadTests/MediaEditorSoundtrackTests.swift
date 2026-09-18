@@ -17,8 +17,8 @@ import UIKit
 @Suite(.serialized)
 struct MediaEditorSoundtrackTests {
     private enum Mode {
-        static let filters = 3
-        static let crop = 4
+        static let filters = "Filters"
+        static let crop = "Crop"
     }
 
     private struct Screen {
@@ -240,7 +240,7 @@ struct MediaEditorSoundtrackTests {
     /// leave the author with a surface nothing can close.
     @Test func thePillLeavesCropFirst() throws {
         let screen = open(Self.items([false]))
-        screen.editor.debugCategoryBar.select(Mode.crop)
+        screen.editor.debugChoose(Mode.crop)
         screen.window.layoutIfNeeded()
         try #require(screen.editor.debugIsCropping, "guard: crop did not open")
 
@@ -254,7 +254,7 @@ struct MediaEditorSoundtrackTests {
     @Test func choosingACategoryPutsTheToolsAway() async throws {
         let screen = try await openTools()
 
-        screen.editor.debugCategoryBar.select(Mode.filters)
+        screen.editor.debugChoose(Mode.filters)
         screen.window.layoutIfNeeded()
 
         #expect(screen.editor.debugBand.content !== screen.editor.soundtrackMode.debugTools)
