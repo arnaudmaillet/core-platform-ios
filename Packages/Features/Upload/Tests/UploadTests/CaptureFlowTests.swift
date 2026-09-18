@@ -569,22 +569,27 @@ struct CaptureFlowTests {
         #expect(picker.navigationItem.leftBarButtonItems?.isEmpty ?? true, "no Cancel over the back chevron")
     }
 
-    /// The shortcut shows the newest picture only where access is ALREADY
-    /// granted, and never asks.
-    @Test func theLibraryShortcutNeverAsksForAccess() async throws {
+    /// ⚠️ The shortcut is always offered — with the newest picture where
+    /// access is already granted, a neutral face otherwise — and the camera
+    /// never asks for access: the picker it opens does.
+    @Test func theLibraryShortcutIsAlwaysOfferedAndNeverAsks() async throws {
         let granted = Recents()
         let shown = try await open(recents: granted)
-        try await settle { shown.camera.debugLibraryIsShowing }
+        try await settle { shown.camera.hasLibraryThumbnail }
         #expect(shown.camera.debugLibraryIsShowing)
+        #expect(shown.camera.hasLibraryThumbnail, "the newest picture, where access allows")
         shown.camera.debugTapLibrary()
         #expect(shown.handed.pickers == 1)
 
         let unasked = Recents()
         unasked.granted = .undetermined
-        let hidden = try await open(recents: unasked)
+        let neutral = try await open(recents: unasked)
         try await Task.sleep(for: .milliseconds(300))
-        #expect(!hidden.camera.debugLibraryIsShowing)
-        #expect(unasked.asked == 0, "the camera must not put the Photos prompt up")
+        #expect(neutral.camera.debugLibraryIsShowing, "offered all the same")
+        #expect(!neutral.camera.hasLibraryThumbnail, "with its neutral face")
+        #expect(unasked.asked == 0, "the camera never puts the Photos prompt up")
+        neutral.camera.debugTapLibrary()
+        #expect(neutral.handed.pickers == 1, "the picker it opens asks")
         #expect(granted.asked == 0)
     }
 

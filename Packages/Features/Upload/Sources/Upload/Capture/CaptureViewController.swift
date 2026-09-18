@@ -369,7 +369,15 @@ final class CaptureViewController: UIViewController {
         libraryButton.layer.cornerCurve = .continuous
         libraryButton.layer.borderColor = UIColor.white.cgColor
         libraryButton.layer.borderWidth = 2
-        libraryButton.imageView?.contentMode = .scaleAspectFill
+        // A neutral face until the newest picture can be shown — see
+        // `loadLibraryShortcut`.
+        libraryButton.setImage(
+            UIImage(systemName: "photo.on.rectangle", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)),
+            for: .normal
+        )
+        libraryButton.tintColor = .white
+        libraryButton.imageView?.contentMode = .center
+        libraryButton.backgroundColor = UIColor.white.withAlphaComponent(0.15)
         libraryButton.accessibilityLabel = "Choose from library"
         libraryButton.isHidden = true
         libraryButton.addAction(UIAction { [weak self] _ in self?.openLibrary() }, for: .primaryActionTriggered)
@@ -1064,7 +1072,7 @@ final class CaptureViewController: UIViewController {
     private func refreshTakeControls(animated: Bool) {
         let recordingOrCounting = isRecording || countdownTask != nil
         let hasClips = !take.isEmpty
-        setShown(libraryButton, !hasClips && !recordingOrCounting && libraryButton.image(for: .normal) != nil, animated: animated, pops: true)
+        setShown(libraryButton, !hasClips && !recordingOrCounting && makeLibraryPicker != nil, animated: animated, pops: true)
         // Undo and Next arrive one after the other, as a band's row does.
         setShown(undoButton, hasClips && !recordingOrCounting, animated: animated, pops: true)
         setShown(nextButton, hasClips && !recordingOrCounting, animated: animated, pops: true, delay: BandPop.staggerStep)
@@ -1202,10 +1210,13 @@ final class CaptureViewController: UIViewController {
 
     /// The newest picture in the library, as the shortcut's face.
     ///
-    /// ⚠️ **ONLY IF ACCESS IS ALREADY GRANTED.** Reading `access` asks nothing;
-    /// `requestAccess()` would put the Photos prompt in front of a person who
-    /// opened the CAMERA. With no access the shortcut is simply not offered —
-    /// the "+" menu's "Upload Media" asks, where asking is expected.
+    /// ⚠️ **THE SHORTCUT IS ALWAYS OFFERED; ONLY ITS FACE WAITS FOR ACCESS.**
+    /// It used to appear only once Photos access was granted and a thumbnail
+    /// had loaded, so a person who had never been asked had no way from the
+    /// camera to their library at all. It now stands with a neutral glyph, and
+    /// the picker it opens asks for access itself — where asking is expected.
+    /// The camera still never asks: reading `access` asks nothing, and the
+    /// thumbnail is only fetched where access is already granted.
     private func loadLibraryShortcut() {
         guard let recents, makeLibraryPicker != nil else { return }
         guard recents.access == .granted || recents.access == .limited else { return }
@@ -1215,10 +1226,14 @@ final class CaptureViewController: UIViewController {
                   let picture = await recents.thumbnail(for: newest.id, size: CGSize(width: 88, height: 88))
             else { return }
             guard let self else { return }
+            libraryButton.imageView?.contentMode = .scaleAspectFill
+            libraryButton.backgroundColor = nil
             libraryButton.setImage(picture, for: .normal)
-            refreshTakeControls(animated: true)
+            hasLibraryThumbnail = true
         }
     }
+
+    private(set) var hasLibraryThumbnail = false
 
     private func openLibrary() {
         guard let picker = makeLibraryPicker?() else { return }
