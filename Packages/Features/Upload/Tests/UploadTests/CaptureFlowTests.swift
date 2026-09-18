@@ -818,6 +818,24 @@ struct CaptureFlowTests {
         #expect(!screen.folder.files.contains { $0.pathExtension == "jpg" }, "its file went too")
     }
 
+    /// ⚠️ Under Reduce Motion the focus ring and the toast fade without
+    /// scaling; with motion they spring from a scale.
+    @Test func reduceMotionFadesTheFocusRingAndTheToastWithoutScaling() async throws {
+        let still = try await open()
+        still.camera.debugTapPreview(at: CGPoint(x: 100, y: 200))
+        #expect(still.camera.debugFocusRingStart == .identity)
+        try await record(still, seconds: 0.6)
+        still.camera.debugSelector.debugTap(CaptureOption.ratio.rawValue)
+        #expect(still.camera.debugToastStart == .identity)
+
+        let moving = try await open(motion: true)
+        moving.camera.debugTapPreview(at: CGPoint(x: 100, y: 200))
+        #expect(moving.camera.debugFocusRingStart != .identity)
+        try await record(moving, seconds: 0.6)
+        moving.camera.debugSelector.debugTap(CaptureOption.ratio.rawValue)
+        #expect(moving.camera.debugToastStart != .identity)
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {

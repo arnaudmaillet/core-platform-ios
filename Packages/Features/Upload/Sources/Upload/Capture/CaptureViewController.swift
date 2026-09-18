@@ -1173,18 +1173,24 @@ final class CaptureViewController: UIViewController {
     }
 
     @objc private func previewTapped(_ tap: UITapGestureRecognizer) {
+        previewTapped(at: tap.location(in: previewContainer))
+    }
+
+    private func previewTapped(at point: CGPoint) {
         // A tap on the preview closes an open band first — the finger was
         // reaching for the picture, not for focus.
         if openOption != nil {
             closeOption()
             return
         }
-        let point = tap.location(in: previewContainer)
         let bounds = previewContainer.bounds
         guard bounds.width > 0 else { return }
         source.focus(at: CGPoint(x: point.x / bounds.width, y: point.y / bounds.height))
         focusRing.center = point
-        focusRing.transform = CGAffineTransform(scaleX: 1.4, y: 1.4)
+        // ⚠️ REDUCE MOTION FADES; IT DOES NOT SCALE. Staged at identity, the
+        // spring below has nothing to move.
+        focusRing.transform = reducesMotion() ? .identity : CGAffineTransform(scaleX: 1.4, y: 1.4)
+        debugFocusRingStart = focusRing.transform
         focusRing.alpha = 1
         UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0) {
             self.focusRing.transform = .identity
@@ -1273,7 +1279,9 @@ final class CaptureViewController: UIViewController {
         toastLabel.text = text
         debugLastToast = text
         debugToasts.append(text)
-        toast.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+        // ⚠️ REDUCE MOTION FADES; IT DOES NOT SCALE.
+        toast.transform = reducesMotion() ? .identity : CGAffineTransform(scaleX: 0.9, y: 0.9)
+        debugToastStart = toast.transform
         UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
             self.toast.alpha = 1
             self.toast.transform = .identity
@@ -1337,6 +1345,10 @@ final class CaptureViewController: UIViewController {
     private(set) var debugPopIns = 0
     private(set) var debugLastToast: String?
     private(set) var debugToasts: [String] = []
+    /// What the focus ring and the toast were staged at before they spring in.
+    private(set) var debugFocusRingStart: CGAffineTransform?
+    private(set) var debugToastStart: CGAffineTransform?
+    func debugTapPreview(at point: CGPoint) { previewTapped(at: point) }
     var debugShapeIsDimmed: Bool { (ratioButton?.alpha ?? 1) < 0.5 }
     private(set) var debugLastHandOff: ([MediaLibraryItem], [String: MediaEdits])?
     var debugSelector: IconSelectorBar { selector }
