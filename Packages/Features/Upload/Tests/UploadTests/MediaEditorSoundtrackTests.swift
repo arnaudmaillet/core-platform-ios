@@ -376,21 +376,28 @@ struct MediaEditorSoundtrackTests {
         #expect(screen.preview.plans.count == loads, "a new level rebuilt the item")
     }
 
-    /// The undo arrow puts the excerpt back at the song's start and both levels
-    /// at full — and keeps the song.
-    @Test func resetRestoresTheExcerptAndTheLevels() async throws {
+    /// The two changes come off one at a time, and the song stays: it was a
+    /// change of its own, one step further back.
+    @Test func steppingBackRestoresTheExcerptAndTheLevels() async throws {
         let (screen, song) = try await withSong()
         screen.window.layoutIfNeeded()
-        #expect(!screen.editor.soundtrackMode.canReset, "nothing to undo yet")
+        // ⚠️ **THE SONG IS ITSELF A STEP, SO THE ARROW IS ALREADY LIVE.** What
+        // this guards is that it arrived wearing nothing else: a whole excerpt
+        // and both levels full.
+        let arrived = try #require(screen.editor.edits(for: "video-0").soundtrack)
+        #expect(arrived.startSeconds == 0 && arrived.musicVolume == 1 && arrived.originalVolume == 1)
 
         screen.editor.soundtrackMode.debugTools.debugDragLevels(music: 0.2, original: 0)
         screen.editor.soundtrackMode.debugTools.debugLetGoOfLevels()
         screen.editor.soundtrackMode.debugTools.debugExcerpt.debugDrag(toSeconds: 3)
         screen.editor.soundtrackMode.debugTools.debugExcerpt.debugRelease()
-        #expect(screen.editor.soundtrackMode.canReset)
-        #expect(screen.editor.debugCropResetItem.isEnabled, "the undo arrow is dead over a changed song")
+        #expect(screen.editor.debugUndoItem.isEnabled, "the back arrow is dead over a changed song")
 
-        screen.editor.debugTapReset()
+        // ⚠️ **TWO CHANGES, TWO STEPS.** The levels and the excerpt are separate
+        // settled changes, so walking back to the song as it arrived takes one
+        // step for each — which is what the arrows promise.
+        screen.editor.debugTapUndo()
+        screen.editor.debugTapUndo()
 
         let stored = try #require(screen.editor.edits(for: "video-0").soundtrack)
         #expect(stored.fileURL == song)

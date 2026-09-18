@@ -76,8 +76,16 @@ struct MediaEdits: Equatable, Sendable {
     /// overlays as views over the page so they can move under a finger; baking
     /// them into the page too would show every overlay twice, and the copy in
     /// the pixels would not move.
-    func finish(includingOverlays: Bool) -> FrameFinish {
-        FrameFinish(crop: crop, look: look, overlays: includingOverlays ? overlays : [])
+    /// ⚠️ **`includingCrop: false` IS FOR THE CROP SURFACE ITSELF.** While the
+    /// author is aiming the box, the clip behind it must be the WHOLE film — a
+    /// compositor that has already cut it would leave them cropping a crop, and
+    /// every box they drew would bite twice.
+    func finish(includingOverlays: Bool, includingCrop: Bool = true) -> FrameFinish {
+        FrameFinish(
+            crop: includingCrop ? crop : .untouched,
+            look: look,
+            overlays: includingOverlays ? overlays : []
+        )
     }
 
     /// What a cache key needs so a re-edit actually redraws.

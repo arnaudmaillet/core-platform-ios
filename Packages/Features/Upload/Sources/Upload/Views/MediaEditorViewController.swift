@@ -99,8 +99,25 @@ final class MediaEditorViewController: UIViewController {
         let symbol: String
     }
 
-    /// What the strip at the foot of the screen offers.
-    static let categories: [Category] = [
+    /// What the strip at the foot of the screen offers, for the medium in front
+    /// of the author.
+    ///
+    /// ⚠️ **A PHOTOGRAPH IS NOT OFFERED THE TIMELINE.** It used to be, and
+    /// choosing it put a line of text in the band saying a photo has nothing to
+    /// trim — a control that reaches nothing, which is the line
+    /// `dev/BACKEND_GAPS.md` §22 draws. Asked for in those words: *"lorsqu'on
+    /// édite une photo, il faudrait retirer de la toolbar l'option de timeline
+    /// car elle ne sert à rien"*. Trim is LAST precisely so that dropping it
+    /// leaves every other index where it was.
+    static func categories(for kind: MediaLibraryItem.Kind) -> [Category] {
+        switch kind {
+        case .photo: Array(everyCategory.dropLast())
+        case .video: everyCategory
+        }
+    }
+
+    /// Every category there is — the video's list, and the longest one.
+    static let everyCategory: [Category] = [
         Category(title: "Effects", symbol: "wand.and.stars"),
         Category(title: "Text", symbol: "textformat"),
         Category(title: "Stickers", symbol: "face.smiling"),
@@ -153,10 +170,33 @@ final class MediaEditorViewController: UIViewController {
     /// slide. `IconSelectorBar` is the same gesture with the contract this screen
     /// actually has.
     private let categoryBar = IconSelectorBar(
-        items: MediaEditorViewController.categories.map {
+        items: MediaEditorViewController.everyCategory.map {
             IconSelectorBar.Item(symbolName: $0.symbol, accessibilityLabel: $0.title)
         }
     )
+
+    /// The list the strip is wearing — the medium's, re-decided on every settle.
+    private var categories: [Category] = MediaEditorViewController.everyCategory
+
+    /// Dresses the strip for the page in front of the author.
+    ///
+    /// ⚠️ **AND A SELECTION THE NEW LIST NO LONGER HAS IS LET GO.** Swiping from
+    /// a clip whose timeline is open onto a photograph takes Trim off the strip;
+    /// `IconSelectorBar` answers that by going neutral and saying so, and the
+    /// band closes with it rather than keeping a track nobody can reach.
+    private func dressCategoryStrip(for id: String?) {
+        let kind = id.flatMap { itemsByID[$0]?.kind } ?? .photo
+        let wanted = Self.categories(for: kind)
+        guard wanted.count != categories.count else { return }
+        let standing = selectedCategory
+        categories = wanted
+        categoryBar.setItems(wanted.map {
+            IconSelectorBar.Item(symbolName: $0.symbol, accessibilityLabel: $0.title)
+        })
+        if let standing, let index = wanted.firstIndex(where: { $0.title == standing }) {
+            categoryBar.select(index, notify: false)
+        }
+    }
 
     /// What the leading end of the toolbar offers while the timeline is open.
     ///
@@ -227,87 +267,130 @@ final class MediaEditorViewController: UIViewController {
         primaryAction: UIAction { [weak self] _ in self?.goNext() }
     )
 
-    /// Undoes every cut and every degree on the picture in front of the author.
+    /// What the trailing side says while a text overlay is being typed.
     ///
-    /// ⚠️ **ON THE LEADING SIDE, AFTER "Save draft".** It began as a third button
-    /// in the band beside the quarter turn and the row of shapes — which put "undo
-    /// everything" a few points from "hold the box to 4:5", two acts of very
-    /// different weight in one row — and then briefly took the fill/fit glyph's
-    /// slot on the trailing side. It sits with the other things that act on the
-    /// whole screen rather than on the picture: `[‹][Save draft][undo] ⋯ [Next]`,
-    /// leaving the trailing side to the one action that moves the flow forward.
-    /// ⚠️ **`arrow.trianglehead.counterclockwise.rotate` DOES NOT EXIST, AND A
-    /// SYMBOL THAT DOES NOT EXIST IS AN EMPTY BUTTON, NOT AN ERROR.**
-    /// `UIImage(systemName:)` answers nil and the bar draws a blank capsule that
-    /// still takes taps — shipped, it reads as a rendering bug on someone's phone.
-    /// This SDK's catalogue holds `arrow.trianglehead.counterclockwise` (this one,
-    /// the undo arrow) and `arrow.trianglehead.counterclockwise.rotate.90`, which
-    /// means "turn by ninety degrees" and is the QUARTER-TURN button's job, not
-    /// undo's. `everyGlyphInTheCropToolsExists` is what stops the next one being
-    /// invisible.
-    private lazy var resetItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "arrow.counterclockwise"),
-            primaryAction: UIAction { [weak self] _ in self?.resetTheCurrentMode() }
+    /// ⚠️ **"Next" BECOMES "Done"; A SECOND BUTTON UNDER IT IS THE BUG.** The
+    /// composer used to carry its own white "Done" capsule a few points below
+    /// this item — *"le bouton 'Done' ne doit pas etre sous 'Next', c'est
+    /// 'Next' qui devient 'Done'"* — two controls at the same corner of the
+    /// screen, one putting the keyboard away and one leaving for the
+    /// finalisation page. There is one now, and it means the nearer thing:
+    /// finish what is being typed. "Next" comes back the moment the session
+    /// ends, because leaving the screen mid-sentence is not what "Done" is for.
+    private lazy var doneTypingItem = UIBarButtonItem(
+        title: "Done",
+        primaryAction: UIAction { [weak self] _ in self?.overlayMode.finishComposing() }
+    )
+
+    /// States the trailing side for what the screen is doing right now.
+    private func showTheTrailingItem(animated: Bool = false) {
+        navigationItem.setRightBarButtonItems(
+            [isTypingText ? doneTypingItem : nextItem], animated: animated
         )
-        item.accessibilityLabel = "Undo every change in this mode"
+    }
+
+    /// ⚠️ **THE HEADER WALKS THE AUTHOR'S OWN HISTORY NOW, AND THE ONE-MODE
+    /// UNDO IS GONE.** It used to carry a single arrow whose meaning was the
+    /// mode: Crop reset the rectangle, the timeline reset the cut, every other
+    /// mode reset what it owned. Two arrows in its place — asked for as
+    /// *"supprimer réinitialiser et mettre à la place des icônes de précédent et
+    /// suivant, pour naviguer dans l'historique des modifications"* — so a step
+    /// back is a step back whatever the author was doing when they made it, and
+    /// a step they regret taking back can be taken again.
+    ///
+    /// ⚠️ **AND THE SYMBOLS ARE ASKED OF THE RUNTIME.** `UIImage(systemName:)`
+    /// answers nil for a name this SDK does not have, and the bar draws a blank
+    /// capsule that still takes taps — shipped, it reads as a rendering bug on
+    /// someone's phone.
+    private lazy var undoItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.uturn.backward"),
+            primaryAction: UIAction { [weak self] _ in self?.stepBack() }
+        )
+        item.accessibilityLabel = "Undo"
         return item
     }()
 
-    /// ⚠️ **ONE ARROW, WHOSE MEANING IS THE MODE THE AUTHOR IS IN.** Crop resets
-    /// the rectangle and the angle; the timeline resets the cut; every other
-    /// mode resets what it owns (`MediaEditorMode.reset`). Two bar items would
-    /// put two undo arrows a few points apart, each undoing a different thing,
-    /// and nothing on screen to say which is which.
-    private func resetTheCurrentMode() {
-        if isTimelineShowing {
-            resetTimeline()
-        } else if isCropping {
-            resetCrop()
-        } else {
-            showingMode?.reset()
-        }
-    }
+    private lazy var redoItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.uturn.forward"),
+            primaryAction: UIAction { [weak self] _ in self?.stepForward() }
+        )
+        item.accessibilityLabel = "Redo"
+        return item
+    }()
 
     private func resetTimeline() {
         guard let id = currentItemID else { return }
         change(id) { $0.timeline = .whole }
         timelineTrack.configure(duration: trackSeconds, timeline: .whole)
         timelineTrack.select(nil, notify: false)
-        refreshResetItem()
+        refreshHistoryItems()
         refreshTrackActions()
         refreshPreview()
     }
 
-    /// The arrow is dead when there is nothing to undo — a control that reaches
-    /// nothing has to say so.
-    /// ⚠️ **ENABLED ONLY WHERE THE TAP CAN ACT, AND IT WAS ENABLED EVERYWHERE.**
-    /// `resetCrop` begins `guard let id = croppingID`, and `croppingID` is set in
-    /// `enterCrop` and cleared in `exitCrop` — so outside the crop surface the
-    /// arrow drew ENABLED over a photograph carrying a crop and did nothing at
-    /// all when tapped. That is the shape this screen has removed three times
-    /// now: a control that reaches nothing. It used to be hidden by living only
-    /// in the crop bar; standing in the bar permanently, it has to say so itself.
-    func refreshResetItem() {
-        guard let id = currentItemID else {
-            resetItem.isEnabled = false
+    /// Lights the two arrows from what the page's history actually holds.
+    ///
+    /// ⚠️ **NOT WHILE A CUT'S TRANSITION — OR A PIECE'S FILTER — IS BEING
+    /// CHOSEN.** Stepping back there could take away the very cut, or the very
+    /// piece, the row is open on, and the row would be left pointing at
+    /// nothing.
+    func refreshHistoryItems() {
+        guard let id = currentItemID, transitionFocus == nil, !segmentFilterMode.isOpen else {
+            undoItem.isEnabled = false
+            redoItem.isEnabled = false
             return
         }
-        let edited = edits(for: id)
-        if transitionFocus != nil || segmentFilterMode.isOpen {
-            // ⚠️ **NOT WHILE A CUT'S TRANSITION — OR A PIECE'S FILTER — IS BEING
-            // CHOSEN.** Undoing every cut would take away the very cut, or the
-            // very piece, the row is open on.
-            resetItem.isEnabled = false
-        } else if isTimelineShowing {
-            resetItem.isEnabled = MediaTimelining.cuts(
-                edited.timeline, withinSource: trackSeconds
-            )
-        } else if croppingID != nil {
-            resetItem.isEnabled = !edited.crop.isUntouched
-        } else {
-            resetItem.isEnabled = showingMode?.canReset ?? false
-        }
+        undoItem.isEnabled = history.canUndo(id)
+        redoItem.isEnabled = history.canRedo(id)
+    }
+
+    /// One step back through this page's own changes.
+    ///
+    /// ⚠️ **THE WHOLE EDIT, NOT THE MODE'S PART OF IT.** The arrow that stood
+    /// here used to undo "what this mode owns", so a step back meant something
+    /// different depending on which tools happened to be open. A step is a
+    /// change the author made; going back to it puts the page exactly where it
+    /// was, whichever band they were in at the time.
+    private func stepBack() {
+        guard let id = currentItemID, let restored = history.undo(id, from: edits(for: id)) else { return }
+        restore(restored, on: id)
+    }
+
+    private func stepForward() {
+        guard let id = currentItemID, let restored = history.redo(id, from: edits(for: id)) else { return }
+        restore(restored, on: id)
+    }
+
+    /// Puts a state back on the page and tells everything that draws it.
+    ///
+    /// ⚠️ **THE SCREEN REDRAWS, THE CLIP IS REBUILT, AND EVERY MODE RE-READS.**
+    /// A restored state can differ from the one on screen in any field at all —
+    /// a look, a cut, an overlay, a song — so this cannot announce one kind of
+    /// change; `.film` is the widest one the screen has, and `editsWereRestored`
+    /// is how a mode that is showing its own controls learns to state them
+    /// again.
+    private func restore(_ restored: MediaEdits, on id: String) {
+        // ⚠️ **A RESTORED LOOK GOES LIVE; ANYTHING ELSE REBUILDS THE ITEM.**
+        // Rebuilding for a look would work and would be wrong twice over: the
+        // clip stutters where it does not have to, and the live path
+        // (`setLiveLook`) stops being exercised by the arrows at all. What
+        // decides is whether ANY field other than the look moved — written as a
+        // comparison rather than a list, so a field added to `MediaEdits`
+        // tomorrow lands on the safe side by itself.
+        let showing = edits(for: id)
+        var asIfOnlyTheLookMoved = showing
+        asIfOnlyTheLookMoved.filter = restored.filter
+        asIfOnlyTheLookMoved.adjustments = restored.adjustments
+        asIfOnlyTheLookMoved.effect = restored.effect
+        edits[id] = restored.isUntouched ? nil : restored
+        editsDidChange(id, asIfOnlyTheLookMoved == restored ? .look : .film)
+        refreshTimelineTrackIfShowing()
+        for mode in modes { mode.editsWereRestored(for: id) }
+        if isCropping { showCropPicture(for: id) }
+        showTheFitGlyph()
+        refreshHistoryItems()
     }
 
     private func resetCrop() {
@@ -452,11 +535,44 @@ final class MediaEditorViewController: UIViewController {
     /// ⚠️ AN ENTRY THAT SAYS NOTHING IS WORSE THAN NO ENTRY: it makes "was this
     /// picture edited?" answerable two ways. Undoing every change removes the
     /// entry rather than storing a neutral one.
-    func change(_ id: String, _ mutate: (inout MediaEdits) -> Void) {
-        var value = edits[id] ?? .untouched
+    /// ⚠️ **`settling: false` IS A CHANGE STILL UNDER A FINGER.** A ruler
+    /// dragged across the screen writes sixty values a second; each one is a
+    /// change, and none of them is a STEP. The mode that owns the finger is the
+    /// only thing that knows, so it says — everything else settles by default.
+    func change(_ id: String, settling: Bool = true, _ mutate: (inout MediaEdits) -> Void) {
+        let before = edits[id] ?? .untouched
+        var value = before
         mutate(&value)
         edits[id] = value.isUntouched ? nil : value
+        guard settling else {
+            // ⚠️ **THE STATE THE FINGER LANDED ON, KEPT UNTIL IT LIFTS.** Only
+            // the FIRST sample of a drag holds it; every later one would file
+            // the value the sample before it wrote, and the step the author
+            // gets back would be one frame of their own gesture.
+            if pendingBefore?.id != id { pendingBefore = (id, before) }
+            return
+        }
+        // ⚠️ **AND A LIFT THAT WRITES THE VALUE ALREADY ON THE PAGE IS STILL
+        // THE END OF A STEP.** A ruler's last sample and its settle carry the
+        // same number, so recording from `before` here would compare the value
+        // to itself, find no change, and file nothing — a drag across the whole
+        // screen, and a back arrow that never lit.
+        let opening = pendingBefore?.id == id ? (pendingBefore?.state ?? before) : before
+        pendingBefore = nil
+        history.record(opening, changingTo: value, for: id)
+        refreshHistoryItems()
     }
+
+    /// What the two arrows in the header walk — see `MediaEditHistory`.
+    private var history = MediaEditHistory<MediaEdits>()
+
+    /// Where the drag under the finger began, filed by the first sample.
+    ///
+    /// ⚠️ **ONE SLOT, BECAUSE THERE IS ONE FINGER.** A second page cannot be
+    /// dragged while this one is, and a page that changes under a held finger
+    /// is not a thing this screen can do — so an id that does not match is a
+    /// drag that ended without a lift, and the slot is simply taken over.
+    private var pendingBefore: (id: String, state: MediaEdits)?
 
     // MARK: - Modes
 
@@ -475,6 +591,32 @@ final class MediaEditorViewController: UIViewController {
     private(set) lazy var segmentFilterMode = MediaEditorSegmentFilterMode(host: self)
     /// Text and Stickers: one mode, told which of the two it is before it opens.
     private(set) lazy var overlayMode = MediaEditorOverlayMode(host: self)
+
+    /// Whether a text overlay is being typed over this screen right now — set
+    /// by `MediaEditorHosting.textEditingDidChange(_:)`, which the overlay mode
+    /// calls once at each end of a typing session.
+    ///
+    /// ⚠️ **THE SEAM ONLY: NOTHING HERE TOUCHES A BAR ITEM.** "Next" is meant
+    /// to read "Done" while this is true, and the composer's own Done button is
+    /// meant to go with it. Both are changes to `navigationItem`, which one
+    /// worker owns at a time; this property is what that change reads. Not
+    /// `private(set)`: the conformance lives in
+    /// `MediaEditorViewController+Host.swift`, and `private` is per FILE.
+    var isTypingText = false {
+        didSet {
+            showTheTrailingItem(animated: true)
+            #if DEBUG
+            textEditingChanges.append(isTypingText)
+            #endif
+        }
+    }
+
+    #if DEBUG
+    /// Internal for tests: every value `isTypingText` has been HANDED, in
+    /// order, deduped nowhere — so a mode that announced one session twice is
+    /// visible here as `[true, false, false]`.
+    private(set) var textEditingChanges: [Bool] = []
+    #endif
     /// The song under a clip — opened from the sound pill, not from the
     /// category bar.
     private(set) lazy var soundtrackMode = MediaEditorSoundtrackMode(host: self, sourcing: soundtracks)
@@ -522,14 +664,24 @@ final class MediaEditorViewController: UIViewController {
     /// launch over an empty band — opens again. A mode with nothing to show
     /// (`tenant == nil`) is left alone, so the band is not re-stated for
     /// nothing.
+    /// ⚠️ **A SECOND TAP PUTS THE TOOLS AWAY.** Asked for in those words: the
+    /// strip has a neutral state, it is what the screen opens on, and tapping
+    /// the icon that is already chosen returns to it. The tools that were open
+    /// are closed by `showAccessory(for: nil)`, which also unwinds crop.
+    ///
+    /// The one exception is a mode whose tools are not up yet — choosing a
+    /// category and then swiping to a page that mode cannot serve leaves the
+    /// band on a notice — where a repeat tap re-opens rather than closes.
     private func categoryReselected() {
-        guard let mode = selectedMode, let tenant = mode.tenant, band.content !== tenant else { return }
-        showAccessory(for: selectedCategory)
+        if let mode = selectedMode, let tenant = mode.tenant, band.content !== tenant {
+            showAccessory(for: selectedCategory)
+            return
+        }
+        categoryBar.selectNothing(notify: false)
+        showAccessory(for: nil)
     }
 
     /// Which glyph the bar is currently wearing, so the item is only re-stated
-    /// when it actually changes — see `updateFitItem(animated:)`.
-    private var shownFit: ContentFit = .fill
 
     /// Which of several media is showing. Hides itself for a single one.
     private let pageDots = MediaPageDotsView()
@@ -606,7 +758,7 @@ final class MediaEditorViewController: UIViewController {
         let timeline = MediaTimeline(segments: pieces)
         change(id) { $0.timeline = timeline }
         timelineTrack.configure(duration: length, timeline: timeline)
-        refreshResetItem()
+        refreshHistoryItems()
         refreshPreview()
         VideoPlaybackTrace.emit("seeded \(count) cuts, transition=\(kind?.rawValue ?? "none")")
         if let raw = Self.debugValue(after: "-open-transitions"), let seam = Int(raw) {
@@ -736,6 +888,18 @@ final class MediaEditorViewController: UIViewController {
         configureCanvas()
         configureCategoryStrip()
         showItems()
+        // ⚠️ **THE ARROWS ARE ASKED WHAT THEY CAN DO BEFORE THEY ARE FIRST
+        // DRAWN.** `UIBarButtonItem.isEnabled` is TRUE at birth, so a screen
+        // that only ever re-decides them on a change opens with two live arrows
+        // over a photograph nobody has touched — `stepBack` finds no step,
+        // returns, and the author taps a control that does nothing. Seen on the
+        // simulator before it was seen here.
+        //
+        // ⚠️ **AND AFTER THE CANVAS, NOT IN `configureBars`.** The answer is
+        // `history.canUndo(currentItemID)`, and `currentItemID` reads the
+        // canvas's own offset: asked from the bars, which are stated first, it
+        // traps on a canvas that does not exist yet.
+        refreshHistoryItems()
     }
 
     /// The stack's toolbar carries the category strip, and a toolbar's
@@ -799,6 +963,7 @@ final class MediaEditorViewController: UIViewController {
         // The first page has never settled — nothing scrolled — so this is the
         // only moment it can start. Stepping back from the finalisation screen
         // lands here too, which is what restarts a clip the author left running.
+        dressCategoryStrip(for: currentItemID)
         playSettledPage()
         #if DEBUG
         logCanvas("didAppear")
@@ -824,7 +989,7 @@ final class MediaEditorViewController: UIViewController {
         // runs again on every pop back from the finalisation screen.
         if !hasSelectedDebugCategory,
            let raw = Self.debugValue(after: "-upload-category"),
-           let index = Int(raw), Self.categories.indices.contains(index) {
+           let index = Int(raw), categories.indices.contains(index) {
             hasSelectedDebugCategory = true
             categoryBar.select(index)
             // ⚠️ `select(_:)` ANNOUNCES ONLY ON A CHANGE — picking the index the
@@ -1103,18 +1268,20 @@ final class MediaEditorViewController: UIViewController {
         // ⚠️ AND THE OLD NOTE'S FEAR DOES NOT MATERIALISE: it warned that an
         // inherited button wears the previous screen's title, but no Upload
         // screen HAS a title, so it draws as a bare chevron. Verified on device.
-        // `[‹][save][undo] ⋯ [fit][next]` — the reset arrow stands with the other
+        // `[‹][save][◀][▶] ⋯ [next]` — the two arrows stand with the other
         // things that act on the whole screen rather than on the picture.
-        navigationItem.leftBarButtonItems = [saveDraftItem, resetItem]
+        navigationItem.leftBarButtonItems = [saveDraftItem, undoItem, redoItem]
         navigationItem.leftItemsSupplementBackButton = true
         // The chevron the NEXT screen wears, kept wordless if a title ever lands
         // here.
         navigationItem.backButtonDisplayMode = .minimal
-        // ⚠️ RIGHT ITEMS ARE LAID OUT FROM THE TRAILING EDGE INWARDS, so the
-        // FIRST one written is the RIGHTMOST. `[next, fit]` is what draws
-        // `[fit][next]` on screen — the order this screen promises.
-        navigationItem.rightBarButtonItems = [nextItem, makeFitItem(for: .fill)]
+        // ⚠️ **ONE ITEM ON THE TRAILING SIDE, AND WHICH ONE IS THE SCREEN'S
+        // STATE.** The fill/fit glyph used to stand beside it and has gone to
+        // the crop tools; what shares the slot now is "Done", for the length of
+        // a typing session — see `showTheTrailingItem`.
+        showTheTrailingItem()
         nextItem.style = .done
+        doneTypingItem.style = .done
     }
 
     private func configureCategoryStrip() {
@@ -1144,6 +1311,13 @@ final class MediaEditorViewController: UIViewController {
         // it, and Effects is chosen at launch over an empty band: without this
         // the first mode could never be opened on first entry.
         categoryBar.onReselect = { [weak self] _ in self?.categoryReselected() }
+        // The strip can lose the item it was on when the medium changes; the
+        // band closes with it.
+        categoryBar.onSelectNothing = { [weak self] in self?.showAccessory(for: nil) }
+        // ⚠️ **THE SCREEN OPENS ON NOTHING.** It used to open with Effects
+        // chosen over an EMPTY band, so the one filled icon was a promise the
+        // band did not keep and the first tap on it was a reselect.
+        categoryBar.selectNothing(notify: false)
         touchProbe.attach(to: categoryBar)
         // ⚠️ **THE PILL KEEPS ITS WORD AND THE STRIP GIVES.** The two together
         // over-subscribe the band — a pill beside a four-segment strip does not
@@ -1223,30 +1397,36 @@ final class MediaEditorViewController: UIViewController {
     /// off rather than being applied to a control the rule was not written for.
     private func shareTheBarBetweenTheTwoStrips() {
         measureTheBar()
-        guard isTimelineShowing, let toolbar = navigationController?.toolbar,
-              toolbar.bounds.width > 0
-        else {
+        guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else {
             actionBarWidth.isActive = false
             categoryBarWidth.isActive = false
             return
         }
         // ⚠️ **WHAT THE BAR CHARGES AROUND THE TWO GROUPS, NOT A SPACING** —
         // see `ToolbarGeometry`. Charged as one 8pt gap inside 8pt margins, the
-        // split fitted only while the action bar held two items; with the
-        // filter action as a third, the two halves overran an iPhone SE's bar.
+        // two strips overran an iPhone SE's bar and iOS swept the selector into
+        // a `•••`.
         let available = barGeometry.available(in: toolbar.bounds.width)
+        let leading: UIView = isTimelineShowing ? actionBar : soundPill
         let held = EditorSelectorLayout.widths(
-            leadingWants: actionBar.intrinsicContentSize.width,
-            trailingWants: categoryBar.intrinsicContentSize.width,
-            available: available
+            leadingWants: Self.wantedWidth(of: leading),
+            available: available,
+            trailingFloor: categoryBar.intrinsicContentSize.height
         )
+        // ⚠️ **THE ACTIONS ARE HELD, THE PILL IS ONLY CAPPED.** The strip states
+        // an intrinsic width and is pinned to it; the pill has none — it is laid
+        // out by its label and its disc — so a width constraint would be the
+        // screen deciding what the component already knows. What the screen owes
+        // it is a ceiling, and the ceiling is inert until a song title is long
+        // enough to leave the selector less than a bubble.
+        actionBarWidth.isActive = isTimelineShowing
         actionBarWidth.constant = held.leading
+        soundPillCap.constant = available - held.trailing + (isTimelineShowing ? 0 : 0)
         categoryBarWidth.constant = held.trailing
-        actionBarWidth.isActive = true
         categoryBarWidth.isActive = true
         // A bar item's view keeps its autoresizing mask, so the size UIKit
         // reads at the hand-over is the frame's.
-        actionBar.frame.size.width = held.leading
+        leading.frame.size.width = held.leading
         categoryBar.frame.size.width = held.trailing
     }
 
@@ -1296,6 +1476,26 @@ final class MediaEditorViewController: UIViewController {
     private lazy var actionBarWidth: NSLayoutConstraint =
         actionBar.widthAnchor.constraint(equalToConstant: IconActionBar.height)
 
+    /// The pill's ceiling — see `shareTheBarBetweenTheTwoStrips`. Always on,
+    /// and inert until a title is long enough to crowd the selector out.
+    private lazy var soundPillCap: NSLayoutConstraint = {
+        let cap = soundPill.widthAnchor.constraint(lessThanOrEqualToConstant: 10_000)
+        cap.isActive = true
+        return cap
+    }()
+
+    /// The width a strip would take on its own.
+    ///
+    /// ⚠️ **NOT `intrinsicContentSize` ALONE.** `IconActionBar` states one;
+    /// `SoundPillView` answers `noIntrinsicMetric` (-1) because its size comes
+    /// from its own subviews' constraints, and -1 read as a width gave the
+    /// selector the whole bar and the pill nothing.
+    private static func wantedWidth(of view: UIView) -> CGFloat {
+        let stated = view.intrinsicContentSize.width
+        guard stated == UIView.noIntrinsicMetric else { return stated }
+        return view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+    }
+
     private lazy var categoryBarWidth: NSLayoutConstraint =
         categoryBar.widthAnchor.constraint(equalToConstant: IconSelectorBar.height)
 
@@ -1319,8 +1519,8 @@ final class MediaEditorViewController: UIViewController {
     /// ⚠️ AND THE TITLE IS DERIVED, NOT A HARD-CODED POSITION. This strip has
     /// already been reordered once; `categories[3]` would break in silence.
     private var selectedCategory: String? {
-        let index = categoryBar.selectedIndex
-        return Self.categories.indices.contains(index) ? Self.categories[index].title : nil
+        guard let index = categoryBar.selection, categories.indices.contains(index) else { return nil }
+        return categories[index].title
     }
 
     /// ⚠️ **LEAVING CROP IS AN ACT, NOT AN ABSENCE.** Choosing another mode has
@@ -1344,8 +1544,14 @@ final class MediaEditorViewController: UIViewController {
         case "Filters":
             open(filtersMode)
         case "Trim":
+            // ⚠️ **A PHOTOGRAPH CANNOT REACH THIS AT ALL ANY MORE** — the strip
+            // does not offer Trim for one (`categories(for:)`), so the notice
+            // that used to stand here has no way of being seen. What is left is
+            // the guard itself: a settle onto a photograph re-runs this while
+            // the strip is being re-dressed, and it closes the band rather than
+            // keeping a track for a picture with no film.
             guard let id = currentItemID, case .video(let seconds)? = itemsByID[id]?.kind else {
-                setEditingAccessory(trimUnavailable)
+                setEditingAccessory(nil)
                 return
             }
             setEditingAccessory(timelineTools)
@@ -1627,6 +1833,46 @@ final class MediaEditorViewController: UIViewController {
         let soundtrack: VideoSoundtrack?
     }
 
+    /// Whether something is standing over the editor — a picker, a sheet.
+    ///
+    /// ⚠️ **READ, NOT STORED.** A flag would have to be lowered by whoever
+    /// raised it, and a path that forgot would leave the clip stopped for good;
+    /// `presentedViewController` is the truth and cannot go stale. It is a THIRD
+    /// term beside the finger and the author's own pause, and it is never
+    /// written into `pausedByAuthor` — a cover is not a decision the author
+    /// made, and treating it as one would leave the clip stopped after the
+    /// sheet had gone.
+    var isCovered: Bool { presentedViewController != nil }
+
+    /// Stops the clip while a sheet stands over it.
+    func pauseUnderACover() {
+        guard let surface = playingSurface else { return }
+        preview.setPaused(true, in: surface)
+        timelineTrack.showPaused(true)
+    }
+
+    /// Lets it run again once the sheet has gone — at whatever the AUTHOR last
+    /// asked for, which may well be "stopped".
+    ///
+    /// ⚠️ **THE NEWS ARRIVES BEFORE UIKIT HAS FINISHED, SO IT IS ASKED AGAIN.**
+    /// A picker says it is going from its own `viewDidDisappear`, which runs
+    /// while the dismissal is still in flight: `presentedViewController` is
+    /// still answering, the guard below refuses, and the clip would stay
+    /// stopped for good. Measured in the test that found it. A couple of turns
+    /// of the runloop is all it takes, and the guard is what stops a resume
+    /// landing under a SECOND sheet opened straight after the first.
+    func resumeAfterACover(retries: Int = 0) {
+        guard !isCovered else {
+            guard retries > 0 else { return }
+            DispatchQueue.main.async { [weak self] in self?.resumeAfterACover(retries: retries - 1) }
+            return
+        }
+        guard let surface = playingSurface else { return }
+        let paused = fingerOnTrack || pausedByAuthor
+        preview.setPaused(paused, in: surface)
+        timelineTrack.showPaused(paused)
+    }
+
     private var previewSubject: PreviewSubject?
     /// Bumped for every load asked for: only the newest may land.
     private var previewLoads = 0
@@ -1691,7 +1937,8 @@ final class MediaEditorViewController: UIViewController {
             // canvas draws as views: overlays, and so the art for their stickers.
             await preview.load(
                 edited.exportPlan(
-                    sourceURL: file, fileSeconds: fileSeconds, artwork: nil, includingOverlays: false
+                    sourceURL: file, fileSeconds: fileSeconds, artwork: nil, includingOverlays: false,
+                    includingCrop: !isCropping
                 ),
                 in: surface
             ) { [weak self] in
@@ -1718,7 +1965,7 @@ final class MediaEditorViewController: UIViewController {
             // owed a new item left the player stopped rather than let it run on
             // the old one for a few frames; the pause is the author's, or the
             // finger's if one has come down since.
-            let paused = fingerOnTrack || pausedByAuthor
+            let paused = fingerOnTrack || pausedByAuthor || isCovered
             preview.setPaused(paused, in: surface)
             timelineTrack.showPaused(paused)
             if !fingerOnTrack { handover = MediaTimelining.Handover(target: landed.seconds) }
@@ -1806,13 +2053,15 @@ final class MediaEditorViewController: UIViewController {
     private var lastScrubbedSeconds: Double?
 
     /// The surface the settled page is playing in, if it is playing at all.
-    var playingSurface: VideoRenderView? {
-        guard let id = playingID, let index = items.firstIndex(where: { $0.id == id }),
-              let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
-                as? MediaEditorPageCell
-        else { return nil }
-        return page.videoSurface
-    }
+    /// ⚠️ **REMEMBERED, NOT RE-DERIVED.** It used to be looked up through the
+    /// canvas's cell for the playing page, which answers nil whenever the cell
+    /// is not reachable — while a sheet covers the screen, for one, so the
+    /// clip could not be told anything until the cell came back. It is also the
+    /// only way the CROP surface can hold the clip: the film plays there while
+    /// its box is aimed, and that surface belongs to no cell.
+    var playingSurface: VideoRenderView? { boundSurface }
+
+    private var boundSurface: VideoRenderView?
 
     /// The film moved under the needle, or a handle moved: put that moment on
     /// the canvas.
@@ -1931,10 +2180,7 @@ final class MediaEditorViewController: UIViewController {
     /// video must lose the strip, and a video settled onto after a photograph
     /// must lose the notice.
     private func refreshTimelineTrackIfShowing() {
-        guard isTimelineShowing
-                || band.content === trimUnavailable
-                || band.content === trimTooShort
-        else { return }
+        guard isTimelineShowing || band.content === trimTooShort else { return }
         showAccessory(for: "Trim")
     }
 
@@ -2016,68 +2262,33 @@ final class MediaEditorViewController: UIViewController {
         change(id) { $0.fit = next }
         let page = canvas.cellForItem(at: IndexPath(item: currentIndex, section: 0))
         (page as? MediaEditorPageCell)?.lay(next, within: fitWindow, animated: true)
-        updateFitItem(animated: true)
+        showTheFitGlyph()
     }
 
-    private func makeFitItem(for fit: ContentFit) -> UIBarButtonItem {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: fit.symbolName),
-            primaryAction: UIAction { [weak self] _ in self?.toggleFit() }
-        )
-        item.accessibilityLabel = fit.actionName
-        return item
-    }
-
-    /// Keeps the glyph offering the move the viewer can actually make on the
-    /// picture in front of them — including after a swipe, when the next
-    /// picture may have been left in the other state.
+    /// Keeps the crop tools' glyph offering the move the author can actually
+    /// make on the picture in front of them — including after a swipe, when
+    /// the next picture may have been left in the other state.
     ///
-    /// ⚠️ **A NEW ITEM, NOT A NEW IMAGE.** Assigning `.image` on the item that
-    /// is already in the bar swaps the glyph in a single frame. UIKit animates
-    /// the capsule only when the ITEM ITSELF is replaced and the change is
-    /// stated through `setRightBarButtonItems(_:animated:)` — identity is what
-    /// it diffs on.
-    ///
-    /// ⚠️ **AND ONLY WHEN IT ACTUALLY CHANGES.** Re-stating the bar on every
-    /// settle would animate the item while swiping between two pictures that
-    /// share a fit state, which reads as a flicker for no reason.
-    private func updateFitItem(animated: Bool) {
-        // ⚠️ **NOT WHILE THE CROP SURFACE HOLDS THAT SLOT.** Undo stands where the
-        // fill/fit glyph does, and a settle arriving mid-crop would quietly put the
-        // glyph back over it. The canvas is locked while cropping so no settle
-        // should arrive — this is the guard that makes "should" unnecessary.
-        guard !isCropping else { return }
+    /// ⚠️ **IT LIVES IN THE CROP TOOLS NOW, NOT IN THE HEADER**, so there is no
+    /// bar item to replace and none of the identity dance that went with it: a
+    /// `UIBarButtonItem`'s glyph only animates when the ITEM is swapped, which
+    /// is why this used to rebuild one and guard against rebuilding it too
+    /// often. A button's image is just an image.
+    private func showTheFitGlyph() {
         let fit = currentFit
-        guard fit != shownFit else { return }
-        shownFit = fit
-        navigationItem.setRightBarButtonItems([nextItem, makeFitItem(for: fit)], animated: animated)
+        cropTools.showFit(symbol: fit.symbolName, label: fit.actionName)
     }
 
-    /// Puts undo in the bar while the crop surface is up, and the fill/fit glyph
-    /// back when it goes.
+    /// The header while the crop surface is up.
     ///
-    /// ⚠️ **THE FILL/FIT GLYPH LEAVES FOR THE DURATION, AND THAT IS DELIBERATE.**
-    /// Filling or fitting is a decision about how a picture is laid in the frame it
-    /// will be shown in; while the author is deciding what that picture even IS,
-    /// the control has nothing meaningful to act on. It comes back with the mode.
-    ///
-    /// ⚠️ **`shownFit` IS RE-SEEDED ON THE WAY BACK, NOT TRUSTED.** It records
-    /// which glyph the bar is WEARING, and while the mode was up the bar was
-    /// wearing neither — so restoring through `updateFitItem`'s "only when it
-    /// changes" rule would leave the slot empty whenever the fit had not moved.
+    /// ⚠️ **IT NO LONGER SWAPS THE FILL/FIT GLYPH IN AND OUT.** That control
+    /// used to stand in the header and leave for the duration of the mode,
+    /// because while the author is deciding what the picture even IS there is
+    /// nothing for it to act on. It now lives in the crop tools themselves,
+    /// where it is only reachable at exactly the moment it means something.
     private func showCropBarItems(_ isCropping: Bool, animated: Bool) {
-        if isCropping {
-            navigationItem.setLeftBarButtonItems([saveDraftItem, resetItem], animated: animated)
-            navigationItem.setRightBarButtonItems([nextItem], animated: animated)
-        } else {
-            navigationItem.setLeftBarButtonItems(
-                [saveDraftItem, resetItem], animated: animated
-            )
-            shownFit = currentFit
-            navigationItem.setRightBarButtonItems(
-                [nextItem, makeFitItem(for: shownFit)], animated: animated
-            )
-        }
+        navigationItem.setLeftBarButtonItems([saveDraftItem, undoItem, redoItem], animated: animated)
+        showTheTrailingItem(animated: animated)
     }
 
     private func goNext() {
@@ -2092,7 +2303,19 @@ final class MediaEditorViewController: UIViewController {
     /// band should not rebuild the controls inside it.
     private lazy var cropTools: MediaCropToolsView = {
         let tools = MediaCropToolsView()
-        tools.onTurn = { [weak self] angle in self?.cropSurface.setAngle(angle) }
+        // ⚠️ **THE DIAL TURNS THE PICTURE PER FRAME AND FILES ONE STEP.** The
+        // surface states its crop on every sample, deliberately — the picture
+        // has to turn under the finger — so the moment the dial says the finger
+        // is down is the moment the history must be told to hold.
+        tools.onTurn = { [weak self] angle in
+            self?.isTurningTheDial = true
+            self?.cropSurface.setAngle(angle)
+        }
+        tools.onTurnSettled = { [weak self] angle in
+            guard let self else { return }
+            isTurningTheDial = false
+            cropSurface.setAngle(angle)
+        }
         tools.onRatio = { [weak self] ratio in
             guard let self, let id = currentItemID else { return }
             cropRatios[id] = ratio
@@ -2100,6 +2323,7 @@ final class MediaEditorViewController: UIViewController {
         }
         tools.onQuarterTurn = { [weak self] in self?.cropSurface.turnQuarter() }
         tools.onFlip = { [weak self] in self?.cropSurface.flipAcross() }
+        tools.onFit = { [weak self] in self?.toggleFit() }
         return tools
     }()
 
@@ -2132,7 +2356,7 @@ final class MediaEditorViewController: UIViewController {
         track.onChange = { [weak self] timeline in
             guard let self, let id = currentItemID else { return }
             change(id) { $0.timeline = timeline }
-            refreshResetItem()
+            refreshHistoryItems()
             refreshTrackActions()
             // ⚠️ **THE PREVIEW PLAYS THE EDIT.** A handle release, a carry, a
             // spoken adjustment: the arrangement changed, or a handle had the
@@ -2259,7 +2483,7 @@ final class MediaEditorViewController: UIViewController {
         // A load on its way picks the stretch up as it lands.
         if !previewPending { landOnTheFocus() }
         refreshTrackActions()
-        refreshResetItem()
+        refreshHistoryItems()
     }
 
     /// A transition was chosen for the focused cut — `nil` takes it away.
@@ -2283,7 +2507,7 @@ final class MediaEditorViewController: UIViewController {
         )
         timelineTools.showTransition(kind, rehearsal: rehearsal?.range, window: rehearsal?.window)
         pausedByAuthor = false
-        refreshResetItem()
+        refreshHistoryItems()
         if !refreshPreview() { landOnTheFocus() }
     }
 
@@ -2324,7 +2548,7 @@ final class MediaEditorViewController: UIViewController {
         if let surface = playingSurface { preview.setPaused(paused, in: surface) }
         timelineTrack.showPaused(paused)
         refreshTrackActions()
-        refreshResetItem()
+        refreshHistoryItems()
     }
 
     // MARK: - Choosing a piece's filter
@@ -2385,7 +2609,7 @@ final class MediaEditorViewController: UIViewController {
         dressSegmentFilterCards(id: id, piece: pieces[piece])
         if !previewPending { landOnTheFocus() }
         refreshTrackActions()
-        refreshResetItem()
+        refreshHistoryItems()
     }
 
     /// A look was chosen for the focused piece — `nil` takes it away.
@@ -2399,7 +2623,7 @@ final class MediaEditorViewController: UIViewController {
         timelineTrack.configure(duration: trackSeconds, timeline: after)
         timelineTools.showSegmentFilter(filter)
         pausedByAuthor = false
-        refreshResetItem()
+        refreshHistoryItems()
         if !refreshPreview() { landOnTheFocus() }
     }
 
@@ -2420,7 +2644,7 @@ final class MediaEditorViewController: UIViewController {
         if let surface = playingSurface { preview.setPaused(paused, in: surface) }
         timelineTrack.showPaused(paused)
         refreshTrackActions()
-        refreshResetItem()
+        refreshHistoryItems()
     }
 
     /// Bumped for every set of card pictures asked for: only the newest lands.
@@ -2502,7 +2726,7 @@ final class MediaEditorViewController: UIViewController {
         // just made to ONE piece, and the half the needle has just left is the
         // one they were watching. `split` keeps that half at the index it had.
         timelineTrack.select(moment.piece, notify: false)
-        refreshResetItem()
+        refreshHistoryItems()
         refreshTrackActions()
     }
 
@@ -2557,7 +2781,7 @@ final class MediaEditorViewController: UIViewController {
         timelineTrack.configure(duration: trackSeconds, timeline: after)
         if let watching { timelineTrack.bringUnderTheNeedle(watching) }
         timelineTools.speeds.show(rate: rate)
-        refreshResetItem()
+        refreshHistoryItems()
         refreshTrackActions()
         // ⚠️ **THE RATE IS BUILT INTO THE ITEM, SO A NEW RATE IS A NEW ITEM** —
         // landing on the needle, which `bringUnderTheNeedle` has just put back on
@@ -2638,17 +2862,6 @@ final class MediaEditorViewController: UIViewController {
         timelineTrack.showPaused(!paused)
     }
 
-    /// ⚠️ **THE MIRROR IMAGE OF THE SONG MODE'S NOTICE, AND THESE ARE THE LAST
-    /// OF THEM.** Trim refuses a photograph, and so does the soundtrack mode
-    /// (`MediaEditorSoundtrackMode.photoNotice`); Crop and Filters refused a
-    /// video until the compositor drew both into the export, and they refuse
-    /// nothing now. Same rule throughout — a mode that cannot serve the medium in
-    /// front of the author says so rather than offering a control that reaches
-    /// nothing.
-    private lazy var trimUnavailable = BandNoticeView(
-        "A photo has nothing to trim."
-    )
-
     /// ⚠️ **HANDLES THAT CANNOT MOVE ARE WORSE THAN NO HANDLES.**
     /// `MediaTimelining` will not leave less than `shortestSourceSeconds` behind, so on
     /// a clip already at or below that floor every drag resolves back to where
@@ -2701,13 +2914,10 @@ final class MediaEditorViewController: UIViewController {
         guard let id = currentItemID, itemsByID[id] != nil else { return }
         guard !isCropping else { return }
         isCropping = true
-        // ⚠️ **A CLIP IS CROPPED ON ITS POSTER, AND IT STOPS WHILE IT IS.** The
-        // crop is a rectangle of the picture, the same on every frame, so the
-        // poster is enough to aim it; the playing item is put away because the
-        // surface covers it and its render size is about to change. Leaving the
-        // mode settles the canvas, which plays the clip again — composed with the
-        // crop the compositor now draws, and published with it.
-        stopPreview()
+        // ⚠️ **THE CLIP KEEPS PLAYING, ON THE CROP SURFACE.** It used to stop
+        // and the author aimed at a poster frame — still, and often the least
+        // representative frame there is. The binding moves to the surface at
+        // the end of this routine, once the box and the still are in place.
         lockCanvas(by: .crop)
 
         cropSurface.translatesAutoresizingMaskIntoConstraints = false
@@ -2736,6 +2946,7 @@ final class MediaEditorViewController: UIViewController {
         setEditingAccessory(cropTools)
         showCropPicture(for: id)
         settleIntoCrop()
+        playInsideTheCropBox(for: id)
     }
 
     /// The picture shrinking into the frame it is about to be cut in.
@@ -2801,8 +3012,14 @@ final class MediaEditorViewController: UIViewController {
         // picture is already held, which it is: the surface has been showing it.
         if let id = croppingID ?? currentItemID { redraw(id) }
         leaveCropGracefully()
-        // ⚠️ **NOT LEFT TO A SETTLE THAT MAY NEVER COME.** Entering stopped the
-        // clip; nothing scrolls on the way out, so nothing else would start it.
+        // ⚠️ **THE BOX'S FILM IS UNCUT, SO IT CANNOT SIMPLY CARRY ON.** The clip
+        // was bound to the crop surface and playing the WHOLE film; the canvas
+        // must now play the cut one. Unbinding first is what makes the reload
+        // happen at all — `playSettledPage` returns early for a page that is
+        // already the playing one.
+        stopPreview()
+        // ⚠️ **NOT LEFT TO A SETTLE THAT MAY NEVER COME.** Nothing scrolls on
+        // the way out, so nothing else would start it.
         if resuming { playSettledPage() }
     }
 
@@ -2844,7 +3061,7 @@ final class MediaEditorViewController: UIViewController {
         let ratio = cropRatios[id] ?? .free
         let size = canvasSize
         cropTools.adopt(angle: MediaCropGeometry.split(chosen.crop.angle).fine, ratio: ratio)
-        resetItem.isEnabled = !chosen.crop.isUntouched
+        refreshHistoryItems()
         // ⚠️ THE SAME SHORTCUT AS `redraw`: the picture the canvas is showing is
         // the picture the surface wants, so opening the mode need not wait for the
         // library to answer a question it has already answered.
@@ -2880,12 +3097,15 @@ final class MediaEditorViewController: UIViewController {
         cropTools.isUserInteractionEnabled = true
     }
 
+    /// Whether the straighten dial is under a finger — see its wiring.
+    private var isTurningTheDial = false
+
     private func cropChanged(_ crop: MediaCrop) {
         guard let id = croppingID else { return }
-        change(id) { $0.crop = crop }
+        change(id, settling: !isTurningTheDial) { $0.crop = crop }
         // ⚠️ ONLY THE UNDO BUTTON, NEVER THE DIAL — see `setCanReset`. Re-stating
         // the dial's angle from here would fight the finger that is turning it.
-        resetItem.isEnabled = !crop.isUntouched
+        refreshHistoryItems()
     }
 
     // MARK: - The strip wins its own touches
@@ -3018,7 +3238,9 @@ private extension MediaEditorViewController {
     /// moving pixels nobody is looking at, behind a still the author IS looking
     /// at.
     func playSettledPage() {
-        guard !isCropping else { return stopPreview() }
+        // The crop surface holds the clip while its box is being aimed — see
+        // `playInsideTheCropBox`.
+        guard !isCropping else { return }
         guard let id = currentItemID, itemsByID[id]?.isVideo == true else {
             return stopPreview()
         }
@@ -3033,6 +3255,7 @@ private extension MediaEditorViewController {
 
         playingID = id
         page.beginShowingVideo()
+        boundSurface = page.videoSurface
         // ⚠️ THE CELL TELLS US WHEN IT IS TAKEN AWAY. A canvas recycles pages
         // without asking, and a surface handed to a player and then re-used for
         // another item would keep the previous clip's frames.
@@ -3061,13 +3284,35 @@ private extension MediaEditorViewController {
         previewSubject = nil
         previewLoads += 1
         previewPending = false
+        // ⚠️ **WHATEVER IT WAS BOUND TO, WHICH IS NOT ALWAYS A PAGE.** The crop
+        // surface holds the clip while a box is being aimed at it, and it
+        // belongs to no cell.
+        if let surface = boundSurface { preview.stop(surface) }
+        boundSurface = nil
+        cropSurface.showsVideo(false)
         guard let index = items.firstIndex(where: { $0.id == id }),
               let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
                 as? MediaEditorPageCell
         else { return }
         page.onReuse = nil
-        preview.stop(page.videoSurface)
         page.stopShowingVideo()
+    }
+
+    /// Plays the clip ON the crop surface, uncut, while its box is being aimed.
+    ///
+    /// ⚠️ **UNCUT, AND THAT IS THE WHOLE POINT.** The plan the canvas plays
+    /// carries the crop, so the compositor hands back film that is already cut;
+    /// aiming a box at that would crop a crop, and every rectangle the author
+    /// drew would bite twice. `includingCrop: false` is why this is a load of
+    /// its own rather than the canvas's.
+    private func playInsideTheCropBox(for id: String) {
+        guard itemsByID[id]?.isVideo == true else { return }
+        stopPreview()
+        playingID = id
+        boundSurface = cropSurface.videoSurface
+        cropSurface.showsVideo(true)
+        previewSubject = nil
+        loadPreview { _, _ in VideoLoadLanding(seconds: 0) }
     }
 }
 
@@ -3113,8 +3358,15 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     /// `scrollToItem`. Every mode hears it (a filter row re-dressed for the new
     /// picture, an overlay layer rebuilt for it) before the page starts playing.
     private func pageSettled() {
-        updateFitItem(animated: true)
+        showTheFitGlyph()
         let settled = currentItemID
+        // ⚠️ **THE ARROWS BELONG TO THE PAGE IN FRONT, SO A SWIPE RE-DECIDES
+        // THEM.** They are lit from `history.canUndo(currentItemID)`, and
+        // nothing else here reads the history — so without this line the author
+        // swipes to an untouched photograph and finds a live back arrow
+        // offering them the PREVIOUS page's last change.
+        refreshHistoryItems()
+        dressCategoryStrip(for: settled)
         for mode in modes { mode.pageDidSettle(on: settled) }
         refreshTimelineTrackIfShowing()
         reopenCropIfWaiting()
@@ -3183,7 +3435,7 @@ extension MediaEditorViewController {
         follower.isPaused = accessory !== timelineTools
         // The undo arrow's meaning changes with the band, so its enabled state
         // has to be re-decided here too.
-        refreshResetItem()
+        refreshHistoryItems()
         // ⚠️ THE BAND JUST MOVED THE INDICATOR, AND THE INDICATOR IS THE FOOT OF A
         // FITTED PICTURE'S WINDOW. Laying out first is what makes `fitWindow` true
         // rather than one band-height out of date.
@@ -3226,9 +3478,9 @@ extension MediaEditorViewController {
     /// Internal for tests: how many pages the canvas holds.
     var debugPageCount: Int { dataSource.snapshot().numberOfItems }
     /// Internal for tests: what the fill/fit button currently offers.
-    var debugFitActionName: String? {
-        navigationItem.rightBarButtonItems?.last?.accessibilityLabel
-    }
+    /// Internal for tests: what the fill/fit glyph offers — it stands in the
+    /// crop tools now, not in the header.
+    var debugFitActionName: String? { cropTools.debugFitLabel }
     /// Internal for tests: the fit chosen for an item, defaulting as the screen does.
     func debugFit(for id: String) -> ContentFit { edits(for: id).fit }
     /// Internal for tests: the path the fill/fit button takes, without a bar to tap.
@@ -3245,18 +3497,27 @@ extension MediaEditorViewController {
     var debugPageDots: UIView { pageDots }
 
     /// Internal for tests: the categories the strip spells.
-    var debugCategoryTitles: [String] { Self.categories.map(\.title) }
+    var debugCategoryTitles: [String] { categories.map(\.title) }
+    /// Internal for tests: which category is open, nil while the strip is
+    /// neutral.
+    var debugSelectedCategory: String? { selectedCategory }
     /// Internal for tests: whether the picture runs under the bars.
     var debugCanvasIgnoresInsets: Bool { canvas.contentInsetAdjustmentBehavior == .never }
     /// Internal for tests: the strip itself, to read what it is wearing.
     var debugCategoryBar: IconSelectorBar { categoryBar }
     /// Internal for tests: the momentary bar the timeline mode puts opposite it.
     var debugActionBar: IconActionBar { actionBar }
+    /// Internal for tests: the pill that holds the leading slot the rest of the
+    /// time.
+    var debugSoundPill: UIView { soundPill }
     /// Internal for tests: the width each strip is being held to, or nil where
     /// the rule is not being applied.
     var debugStripWidths: (leading: CGFloat, trailing: CGFloat)? {
-        guard actionBarWidth.isActive, categoryBarWidth.isActive else { return nil }
-        return (actionBarWidth.constant, categoryBarWidth.constant)
+        guard categoryBarWidth.isActive else { return nil }
+        let leading = isTimelineShowing
+            ? actionBarWidth.constant
+            : Self.wantedWidth(of: soundPill)
+        return (leading, categoryBarWidth.constant)
     }
 
     /// Internal for tests: the end of a scrub, through the very routine the
@@ -3291,10 +3552,24 @@ extension MediaEditorViewController {
     var debugPreviewLoop: ClosedRange<Double>? { previewSubject?.loop }
     /// Internal for tests: the path "Next" takes, without a bar to tap.
     func debugTapNext() { goNext() }
+    /// Internal for tests: the trailing item, through ITS OWN action.
+    ///
+    /// ⚠️ **DISPATCHED, NOT COPIED.** Calling `goNext()` or `finishComposing()`
+    /// from here would test this line and not the bar — and WHICH routine the
+    /// trailing item is carrying is the whole subject. `performWithSender`
+    /// runs the `UIAction` the item was built with, which is what a finger on
+    /// it runs.
+    func debugTapTheTrailingItem() {
+        navigationItem.rightBarButtonItems?.first?.primaryAction?.performWithSender(nil, target: nil)
+    }
     /// Internal for tests: the scissors, through the routine the bar calls.
     func debugSplitAtTheNeedle() { splitAtTheNeedle() }
     /// Internal for tests: the undo arrow, through the routine it actually calls.
-    func debugTapReset() { resetTheCurrentMode() }
+    func debugTapUndo() { stepBack() }
+    func debugTapRedo() { stepForward() }
+    /// Internal for tests: the two arrows, to read what they offer.
+    var debugUndoItem: UIBarButtonItem { undoItem }
+    var debugRedoItem: UIBarButtonItem { redoItem }
     /// Internal for tests: whether the screen is holding the current page's
     /// picture — which is the poster the track borrows.
     var debugHasSourcePicture: Bool { lastSource != nil }
@@ -3350,20 +3625,20 @@ extension MediaEditorViewController {
         return (page as? MediaEditorPageCell)?.debugPictureSize ?? .zero
     }
 
-    /// Internal for tests: the path the bar's undo takes, without a bar to tap.
+    /// Internal for tests: the path the crop's own reset takes, without a
+    /// control to tap. It is the crop tools' now — the header walks the
+    /// author's history instead.
     func debugTapResetCrop() { resetCrop() }
-    /// Internal for tests: whether undo is offered, and where it lives now.
-    var debugCanResetCrop: Bool { resetItem.isEnabled }
     /// Internal for tests: whether a display link is still scheduled.
     var debugFollowerIsScheduled: Bool { followerProxy.link != nil }
-    /// Internal for tests: whether the bar is offering undo, and on which side.
-    var debugBarOffersCropReset: Bool {
-        navigationItem.leftBarButtonItems?.contains(where: { $0 === resetItem }) ?? false
+    /// Internal for tests: whether the bar is offering the two arrows, and on
+    /// which side.
+    var debugBarOffersTheArrows: Bool {
+        let items = navigationItem.leftBarButtonItems ?? []
+        return items.contains { $0 === undoItem } && items.contains { $0 === redoItem }
     }
     /// Internal for tests: the order the leading side spells, after the chevron.
     var debugLeadingBarItems: [UIBarButtonItem] { navigationItem.leftBarButtonItems ?? [] }
-    /// Internal for tests: the item undo actually is, to read its glyph.
-    var debugCropResetItem: UIBarButtonItem { resetItem }
 
     /// Internal for tests: whether the canvas is the thing being looked at.
     var debugCanvasIsShowing: Bool { !canvas.isHidden }

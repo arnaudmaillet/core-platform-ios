@@ -21,26 +21,22 @@ struct MediaEffectsToolsTests {
     @Test func everyEffectsGlyphExists() {
         let missing = MediaEffectsCatalog.glyphs.filter { UIImage(systemName: $0) == nil }
         #expect(missing.isEmpty, "no such symbols: \(missing)")
-        #expect(MediaEffectsCatalog.glyphs.count == 10, "none and the nine dials")
+        #expect(MediaEffectsCatalog.glyphs.count == 11, "the two icons and the nine dials")
     }
 
     // MARK: - The layout
 
     /// ⚠️ **THE REQUEST, AS WORDS:** "don't hide the row of options; show a
-    /// graduated ruler above it, laid out like crop." So the ruler comes in
-    /// above the row, the row stays and still takes a tap, and the band is the
-    /// crop tools' height.
-    @Test func theRulerComesInAboveTheRowAndTheRowStays() {
+    /// graduated ruler above it, laid out like crop." So the ruler stands above
+    /// the row, the row stays and still takes a tap, and the band is the crop
+    /// tools' height.
+    @Test func theRulerStandsAboveTheRowAndTheRowStays() {
         let (tools, window) = tools()
         _ = window
-        #expect(!tools.debugShowsRuler, "guard: no ruler before a pill is chosen")
-        #expect(tools.debugShowsRow)
-
-        tools.debugTapDial(.contrast)
         tools.layoutIfNeeded()
 
         #expect(tools.debugShowsRuler)
-        #expect(tools.debugShowsRow, "the row was put away for the ruler")
+        #expect(tools.debugShowsRow)
         let ruler = tools.debugRulerFrame, row = tools.debugRowFrame
         #expect(ruler.height > 0 && row.height > 0)
         #expect(ruler.maxY <= row.minY, "the ruler is not above the row: \(ruler) vs \(row)")
@@ -53,20 +49,48 @@ struct MediaEffectsToolsTests {
         #expect(tools.debugRuler.accessibilityLabel == "Saturation")
     }
 
-    /// A tap on the pill whose ruler is up puts the ruler away — the only
-    /// way to, now that there is no close button.
-    @Test func aSecondTapPutsTheRulerAway() {
+    /// ⚠️ **THE ROW HAS NO EMPTY STATE.** It opens on the first dial with its
+    /// ruler up — *"un élément doit toujours être sélectionné donc il faut
+    /// sélectionner par défaut le premier (brightness)"* — and a tap on the pill
+    /// that is already lit leaves it lit, because putting the ruler away would
+    /// be an empty state by another name.
+    @Test func theRowOpensOnTheFirstDialAndNeverEmpties() {
         let (tools, window) = tools()
         _ = window
-        tools.debugTapDial(.warmth)
-        #expect(tools.debugShowsRuler, "guard")
 
-        tools.debugTapDial(.warmth)
+        #expect(tools.focus == .dial(.brightness))
+        #expect(tools.debugFocusedPills == ["Brightness"])
+        #expect(tools.debugShowsRuler)
+        #expect(tools.debugRuler.accessibilityLabel == "Brightness")
 
-        #expect(!tools.debugShowsRuler)
-        #expect(tools.focus == .browsing)
-        #expect(tools.debugFocusedPills.isEmpty)
-        #expect(tools.debugShowsRow)
+        tools.debugTapDial(.brightness)
+
+        #expect(tools.focus == .dial(.brightness), "a second tap emptied the row")
+        #expect(tools.debugFocusedPills == ["Brightness"])
+        #expect(tools.debugShowsRuler)
+    }
+
+    /// ⚠️ **THE TWO ICONS STAND OVER THE ROW, AND PILLS DISSOLVE BEHIND THEM** —
+    /// the crop tools' arrangement, for the reason recorded there: a mask on the
+    /// SCROLLER travels with its content, so it lives on a host that does not
+    /// scroll, and the row rests past the ramp rather than half inside it.
+    @Test func theIconsStandOverTheRowAndPillsDissolveBehindThem() {
+        let (tools, window) = tools()
+        _ = window
+        tools.layoutIfNeeded()
+
+        #expect(tools.debugMaskIsOnTheHost, "the mask is on the scroller and will travel with it")
+        #expect(tools.debugFadeFrame.minX == 0, "the mask is not framed in the host's own bounds")
+        #expect(tools.debugFadeFrame.width == tools.bounds.width)
+        let stops = tools.debugFadeStops
+        #expect(stops.count == 4, "the ramp is not four stops: \(stops)")
+        let icons = tools.debugIconsFrame
+        #expect(icons.minX > 0 && icons.maxX < tools.bounds.width, "the icons are not over the row's start")
+        #expect(abs(stops[1] * Double(tools.bounds.width) - Double(icons.maxX)) < 1,
+                "the fade does not begin where the icons end: \(stops)")
+        #expect(stops[2] > stops[1], "the ramp has no width")
+        #expect(tools.debugRowInset > icons.maxX,
+                "a pill would come to rest inside the fade: \(tools.debugRowInset) against \(icons.maxX)")
     }
 
     /// `[icon label]` side by side at rest; `[label number]` once turned, the
@@ -105,7 +129,7 @@ struct MediaEffectsToolsTests {
         let pill = try #require(tools.debugPillFrame(.brightness))
         // Scrolled so the pill is whole and eight points inside the trailing
         // edge — visible, and nearer the edge than the margin a reveal adds.
-        tools.debugRowOffset = pill.maxX + 8 - tools.debugRowWindow
+        tools.debugRowOffset = pill.maxX + 8 + tools.debugRowTrailingInset - tools.bounds.width
         let before = tools.debugRowOffset
 
         tools.debugTapDial(.brightness)
@@ -124,33 +148,56 @@ struct MediaEffectsToolsTests {
 
     // MARK: - Effects
 
-    /// One effect at a time: choosing one lets the one before go, and "None"
-    /// can be tapped exactly while something is on.
-    @Test func effectsAreExclusive() {
+    /// One effect at a time, and the ⊘ icon — not a card in the row — is what
+    /// takes a look off.
+    @Test func effectsAreExclusiveAndTheIconClearsThem() {
+        let (tools, window) = tools()
+        _ = window
+        var told: [LookEffect?] = []
+        var cleared = 0
+        tools.onEffect = { effect, _ in told.append(effect) }
+        tools.onClear = { cleared += 1 }
+        #expect(tools.debugChosenEffects.isEmpty)
+        #expect(!tools.debugCanClear, "guard: nothing to take off at rest")
+
+        tools.debugTapEffect(.blur)
+        tools.debugRuler.debugSet(0.5)
+        #expect(tools.debugChosenEffects == [.blur])
+        #expect(tools.debugReading(.blur) == "50%")
+
+        tools.debugTapEffect(.vhs)
+        #expect(tools.debugChosenEffects.isEmpty, "the new effect arrived already laid on")
+        #expect(tools.debugReading(.blur) == nil, "the blur pill kept its number")
+        #expect(tools.debugFocusedPills == ["VHS"], "the ruler did not follow the choice")
+
+        var look = FrameLook.neutral
+        look.effect = LookEffect(kind: .vhs, intensity: 0.4)
+        tools.show(look)
+        #expect(tools.debugCanClear, "the ⊘ icon is dead while an effect is on")
+        tools.debugTapClear()
+        #expect(cleared == 1, "the ⊘ icon says nothing")
+
+        #expect(told == [LookEffect(kind: .blur, intensity: 0.5), nil], "got \(told)")
+    }
+
+    /// ⚠️ **NO EFFECT OPENS AT FULL.** Choosing one used to lay it on at 100%
+    /// and leave the author turning DOWN a picture they had not asked for —
+    /// *"ne jamais afficher par défaut un filtre à 100%"*. The tap hands over
+    /// the ruler at nothing, and announces nothing, because nothing changed.
+    @Test func anEffectOpensAtNothing() {
         let (tools, window) = tools()
         _ = window
         var told: [LookEffect?] = []
         tools.onEffect = { effect, _ in told.append(effect) }
-        #expect(tools.debugChosenEffects.isEmpty)
-        #expect(!tools.debugNoneIsEnabled, "guard: nothing to take away at rest")
 
-        tools.debugTapEffect(.blur)
-        #expect(tools.debugChosenEffects == [.blur])
-        #expect(tools.debugNoneIsEnabled)
-        #expect(tools.debugReading(.blur) == "100%")
-        tools.debugTapEffect(.vhs)
-        #expect(tools.debugChosenEffects == [.vhs], "the blur pill let go")
-        #expect(tools.debugReading(.blur) == nil, "the blur pill kept its number")
-        tools.debugTapNone()
-        #expect(tools.debugChosenEffects.isEmpty)
-        #expect(!tools.debugShowsRuler, "the ruler of an effect that is gone stayed up")
-        #expect(!tools.debugNoneIsEnabled)
+        tools.debugTapEffect(.bloom)
 
-        #expect(told == [
-            LookEffect(kind: .blur, intensity: 1),
-            LookEffect(kind: .vhs, intensity: 1),
-            nil
-        ])
+        #expect(tools.debugRuler.value == 0, "the ruler opened at \(tools.debugRuler.value)")
+        #expect(tools.debugReading(.bloom) == "0%", "the lit pill does not say where it stands")
+        #expect(tools.debugFocusedPills == ["Bloom"])
+        #expect(told.isEmpty, "a look nobody asked for was announced: \(told)")
+        #expect(MediaEffectsCatalog.startingIntensity == 0)
+        #expect(MediaEffectsCatalog.previewIntensity == 1, "the pills' pictures would show nothing either")
     }
 
     /// A tap on an effect brings up its strength; moving it announces the
@@ -163,31 +210,30 @@ struct MediaEffectsToolsTests {
 
         tools.debugTapEffect(.bloom)
         #expect(tools.debugShowsRuler)
-        #expect(tools.debugRuler.value == 1)
+        #expect(tools.debugRuler.value == 0)
         tools.debugRuler.debugSet(0.25)
         #expect(tools.debugReading(.bloom) == "25%")
         tools.debugRuler.debugSet(0)
 
-        #expect(told == [LookEffect(kind: .bloom, intensity: 1), LookEffect(kind: .bloom, intensity: 0.25), nil])
+        #expect(told == [LookEffect(kind: .bloom, intensity: 0.25), nil])
         #expect(tools.debugShowsRuler, "a strength dragged to zero keeps its ruler under the finger")
     }
 
-    /// ⚠️ **A TAP ON THE CHOSEN EFFECT IS NOT A RE-CHOICE** — it would put the
-    /// strength back to full under a finger that only wanted the ruler.
-    @Test func aChosenEffectsPillOnlyTogglesItsRuler() {
+    /// ⚠️ **A TAP ON THE CHOSEN EFFECT IS NOT A RE-CHOICE** — it would put its
+    /// strength back to nothing under a finger that only wanted the ruler.
+    @Test func aChosenEffectsPillKeepsItsStrength() {
         let (tools, window) = tools()
         _ = window
         var told: [LookEffect?] = []
         tools.onEffect = { effect, _ in told.append(effect) }
         tools.debugTapEffect(.comic)
         tools.debugRuler.debugSet(0.4)
-        tools.debugTapEffect(.comic)
-        #expect(!tools.debugShowsRuler)
+
         tools.debugTapEffect(.comic)
 
         #expect(tools.debugShowsRuler)
-        #expect(tools.debugRuler.value == 0.4)
-        #expect(told.count == 2, "a tap re-announced the effect: \(told)")
+        #expect(tools.debugRuler.value == 0.4, "the strength was reset to \(tools.debugRuler.value)")
+        #expect(told.count == 1, "a tap re-announced the effect: \(told)")
     }
 
     // MARK: - The dials

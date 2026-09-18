@@ -26,6 +26,24 @@ struct MediaEditorEffectsTests {
         let preview: StubPreview
     }
 
+    /// What the stub library answers with for every page: ONE flat saturated
+    /// red. Flat is not laziness — it is what a clip's poster routinely is, and
+    /// it is why a video's cards are drawn from `MediaLookReference` instead;
+    /// `MediaLookReferenceTests` reads this same colour to tell the two sources
+    /// apart in one pixel.
+    static let pagePictureColour = UIColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1)
+
+    /// A rectangle of one colour, at scale 1 — a page's picture, as the stub
+    /// library vends it.
+    static func flat(_ colour: UIColor, size: CGSize = CGSize(width: 40, height: 30)) -> UIImage {
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            colour.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
     private final class StubLibrary: MediaLibraryReading {
         var access: MediaLibraryAccess { .granted }
         func requestAccess() async -> MediaLibraryAccess { .granted }
@@ -36,12 +54,7 @@ struct MediaEditorEffectsTests {
         /// A saturated red: the mono look turns it grey, which is what the
         /// preset-stage assertions read.
         func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage? {
-            let format = UIGraphicsImageRendererFormat.preferred()
-            format.scale = 1
-            return UIGraphicsImageRenderer(size: CGSize(width: 40, height: 30), format: format).image { context in
-                UIColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1).setFill()
-                context.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
-            }
+            MediaEditorEffectsTests.flat(MediaEditorEffectsTests.pagePictureColour)
         }
 
         func videoFile(for item: MediaLibraryItem.ID) async -> URL? {
@@ -169,11 +182,42 @@ struct MediaEditorEffectsTests {
         let stored = screen.editor.edits(for: "photo-0").adjustments.brightness
         #expect(abs(stored - 0.4) < 0.0001, "stored \(stored)")
         #expect(tools.debugReading(.brightness) == "+40%")
-        #expect(screen.editor.debugCropResetItem.isEnabled, "the undo arrow has something to undo")
+        #expect(screen.editor.debugUndoItem.isEnabled, "the back arrow has a step to take")
 
         tools.debugRuler.debugTapReadout()
         #expect(!screen.editor.debugHasEdits(for: "photo-0"), "a dial back at rest is no entry at all")
-        #expect(!screen.editor.debugCropResetItem.isEnabled)
+        // ⚠️ **AN EMPTY PAGE IS NOT AN EMPTY HISTORY.** Putting the dial back at
+        // rest is itself a change the author made, and one they may want back —
+        // so the arrow stays live and the +40% is one step away.
+        #expect(screen.editor.debugUndoItem.isEnabled, "the way back to +40% is a step of its own")
+        screen.editor.debugTapUndo()
+        let again = screen.editor.edits(for: "photo-0").adjustments.brightness
+        #expect(abs(again - 0.4) < 0.0001, "stepping back from rest gave \(again)")
+    }
+
+    /// ⚠️ **SIXTY SAMPLES, ONE STEP.** A finger crossing the ruler writes a
+    /// value per frame; filed as they come, one flick would bury every earlier
+    /// change under thirty steps of itself and the back arrow would look broken.
+    /// The lift is what files it, and what it files is where the finger LANDED —
+    /// not the sample before the last one.
+    @Test func aRulerDragIsOneStepHoweverManySamplesItTakes() throws {
+        let screen = Self.open(video: false)
+        let tools = try Self.openEffects(on: screen)
+        tools.debugTapDial(.brightness)
+
+        tools.debugRuler.debugBeginDrag()
+        for _ in 0..<10 { tools.debugRuler.debugDrag(by: -9) }
+        tools.debugRuler.debugEndDrag()
+        let dragged = screen.editor.edits(for: "photo-0").adjustments.brightness
+        #expect(dragged > 0.05, "guard: the drag moved the dial, got \(dragged)")
+
+        screen.editor.debugTapUndo()
+
+        #expect(screen.editor.edits(for: "photo-0").adjustments.brightness == 0,
+                "one step took the whole drag")
+        #expect(!screen.editor.debugUndoItem.isEnabled, "and there was only ever one")
+        #expect(tools.debugReading(.brightness) == nil,
+                "the pill went on showing a value the page no longer wears")
     }
 
     @Test func undoResetsOnlyEffects() async throws {
@@ -184,19 +228,78 @@ struct MediaEditorEffectsTests {
         tools.debugTapDial(.contrast)
         Self.slide(tools, to: -0.5)
         tools.debugTapEffect(.pixellate)
+        // An effect arrives at nothing; the author raising its ruler is what
+        // lays it on.
+        Self.slide(tools, to: 0.7)
 
         let before = screen.editor.edits(for: "photo-0")
         #expect(before.effect?.kind == .pixellate && before.adjustments.contrast != 0, "guard")
-        #expect(screen.editor.debugCropResetItem.isEnabled)
-        screen.editor.debugTapReset()
+        #expect(screen.editor.debugUndoItem.isEnabled)
+        // ⚠️ **A STEP BACK IS ONE CHANGE, NOT A MODE'S WORTH.** The header used
+        // to carry an arrow that reset everything the open mode owned; it walks
+        // the author's own history now, so this takes off the effect and leaves
+        // the dial where they left it.
+        screen.editor.debugTapUndo()
 
         let after = screen.editor.edits(for: "photo-0")
-        #expect(after.adjustments.isNeutral)
+        #expect(after.effect == nil, "the last change is still on the page")
+        #expect(abs(after.adjustments.contrast + 0.5) < 0.0001,
+                "a step back took the dial too: \(after.adjustments)")
+        #expect(after.filter == .mono, "the preset is Filters', and it stays")
+        #expect(tools.debugChosenEffects.isEmpty, "the tools did not re-read the page")
+        #expect(tools.debugCanClear, "a dial is still on, so the ⊘ icon has work")
+        #expect(tools.debugShowsRuler, "the row was left empty")
+    }
+
+    /// ⚠️ **THE ⊘ ICON TAKES OFF WHAT THIS TAB OWNS, AND NOT THE PRESET.** The
+    /// look Filters chose belongs to Filters; the dials and the effect are the
+    /// only things Effects put on and the only things it takes off.
+    @Test func theClearIconTakesEveryLookOffButLeavesThePreset() throws {
+        let screen = Self.open(video: false)
+        let row = try Self.openFilters(on: screen)
+        row.debugTap(.mono)
+        let tools = try Self.openEffects(on: screen)
+        tools.debugTapDial(.contrast)
+        Self.slide(tools, to: -0.5)
+        tools.debugTapEffect(.pixellate)
+        Self.slide(tools, to: 0.7)
+        #expect(tools.debugCanClear, "guard: nothing to take off")
+
+        tools.debugTapClear()
+
+        let after = screen.editor.edits(for: "photo-0")
+        #expect(after.adjustments.isNeutral, "a dial survived: \(after.adjustments)")
         #expect(after.effect == nil)
         #expect(after.filter == .mono, "the preset is Filters', and it stays")
-        #expect(!tools.debugShowsRuler, "the ruler of an effect that is gone is put away")
-        #expect(tools.debugChosenEffects.isEmpty)
-        #expect(!tools.debugNoneIsEnabled)
+        #expect(!tools.debugCanClear, "the icon still offers to take something off")
+    }
+
+    /// ⚠️ **THE ↺ ICON GOES BACK TO WHAT THE TAB OPENED ON, NOT TO NOTHING.**
+    /// Asked for in those words: *"une icône arrow.counterclockwise qui
+    /// permettra de remettre les filtres au state où ils étaient à l'ouverture
+    /// de l'onglet des effets"*. So a look the author arrived with survives it,
+    /// and only what they did since is undone.
+    @Test func theRevertIconPutsBackTheLookTheTabOpenedOn() throws {
+        let screen = Self.open(video: false)
+        let first = try Self.openEffects(on: screen)
+        first.debugTapDial(.contrast)
+        Self.slide(first, to: -0.5)
+        // Leaving and coming back is what makes a new opening.
+        _ = try Self.openFilters(on: screen)
+        let tools = try Self.openEffects(on: screen)
+        #expect(!tools.debugCanRevert, "guard: nothing has changed since it opened")
+
+        tools.debugTapDial(.brightness)
+        Self.slide(tools, to: 0.4)
+        #expect(tools.debugCanRevert, "the icon is dead after a change")
+
+        tools.debugTapRevert()
+
+        let after = screen.editor.edits(for: "photo-0")
+        #expect(after.adjustments.brightness == 0, "what was done since is still on the page")
+        #expect(abs(after.adjustments.contrast + 0.5) < 0.0001,
+                "the look the tab opened on was thrown away too: \(after.adjustments)")
+        #expect(!tools.debugCanRevert)
     }
 
     // MARK: - What the page and the clip are told
@@ -237,12 +340,15 @@ struct MediaEditorEffectsTests {
         let tools = try Self.openEffects(on: screen)
         tools.debugTapDial(.warmth)
         Self.slide(tools, to: -0.3)
+        // ⚠️ AN EFFECT ARRIVES AT NOTHING, so choosing one announces nothing:
+        // the second look is the author raising its ruler.
         tools.debugTapEffect(.vhs)
+        Self.slide(tools, to: 0.6)
 
         let looks = screen.preview.liveLooks
         #expect(looks.count == 2, "got \(looks)")
         #expect(abs((looks.first?.adjustments.warmth ?? 0) + 0.3) < 0.0001)
-        #expect(looks.last?.effect == LookEffect(kind: .vhs, intensity: 1))
+        #expect(looks.last?.effect == LookEffect(kind: .vhs, intensity: 0.6))
         #expect(looks.last?.adjustments.warmth == looks.first?.adjustments.warmth, "the dial rides along")
         try await Task.sleep(for: .milliseconds(100))
         #expect(screen.preview.plans.count == 1, "no new item for a look")
@@ -330,14 +436,19 @@ struct MediaEditorVideoFiltersTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(screen.preview.plans.count == 1, "no new item for a look")
 
-        #expect(screen.editor.debugCropResetItem.isEnabled, "Original is one tap away")
-        screen.editor.debugTapReset()
+        #expect(screen.editor.debugUndoItem.isEnabled, "Original is one step back")
+        screen.editor.debugTapUndo()
         #expect(screen.preview.liveLooks.last?.preset == .original)
         #expect(row.debugSelected == .original)
     }
 
-    /// The chips are dressed from the clip's own poster, cut as the page is,
-    /// and wear the page's dials and effect under their own preset.
+    /// The chips wear the page's dials and effect under their own preset.
+    ///
+    /// ⚠️ **WHAT THEY ARE DRAWN FROM IS NO LONGER THE CLIP'S POSTER** — a
+    /// video's chips are the reference photograph's (`MediaLookReference`), so
+    /// the colour this test used to read here ("Original keeps the poster's
+    /// red") would now be a failure. `MediaLookReferenceTests` owns that
+    /// question; what is left here is the LOOK.
     @Test func thumbnailsWearTheCurrentLook() async throws {
         let screen = Harness.open(video: true)
         try await Harness.settle(until: { screen.editor.heldPicture?.id == "video-0" })
@@ -345,6 +456,11 @@ struct MediaEditorVideoFiltersTests {
         tools.debugTapDial(.saturation)
         Harness.slide(tools, to: 0.6)
         tools.debugTapEffect(.comic)
+        // ⚠️ **AN EFFECT ARRIVES AT NOTHING** (`MediaEffectsCatalog.startingIntensity`),
+        // and an effect at zero is spelled `nil`: the tap alone leaves the page
+        // wearing no effect at all, so a chip could not carry one either. The
+        // author raising its ruler is what lays it on.
+        Harness.slide(tools, to: 0.5)
 
         let row = try Harness.openFilters(on: screen)
         let original = try #require(row.debugPicture(for: .original))
@@ -353,7 +469,8 @@ struct MediaEditorVideoFiltersTests {
         #expect(abs(row.dressedIn.adjustments.saturation - 0.6) < 0.0001, "got \(row.dressedIn)")
         #expect(row.dressedIn.effect?.kind == .comic)
         #expect(PixelProbe.isGrey(mono), "the mono chip wears mono")
-        #expect(!PixelProbe.isGrey(original), "and Original keeps the poster's red")
+        #expect(PixelProbe.distance(original, mono) > 0.1,
+                "and Original is not wearing it too — the preset is what tells the chips apart")
     }
 }
 
@@ -382,6 +499,55 @@ enum PixelProbe {
     static func isGrey(_ image: UIImage) -> Bool {
         let pixel = centre(image)
         return abs(pixel.r - pixel.g) < 0.04 && abs(pixel.g - pixel.b) < 0.04
+    }
+
+    /// The picture read as an 8×8 grid — coarse enough that two renders of the
+    /// same photograph at different sizes agree, fine enough that a photograph
+    /// and a flat colour never do.
+    ///
+    /// ⚠️ **ONE PIXEL CANNOT SAY WHICH PICTURE THIS IS.** `centre` answers
+    /// questions about a look (is it grey? is it brighter?) over a flat page
+    /// picture, where every pixel is the same. A photograph's centre pixel is
+    /// one leaf, and a comparison resting on it turns on the resampler.
+    static func grid(_ image: UIImage, side: Int = 8) -> [(r: Double, g: Double, b: Double)] {
+        var bytes = [UInt8](repeating: 0, count: side * side * 4)
+        let space = CGColorSpaceCreateDeviceRGB()
+        bytes.withUnsafeMutableBytes { raw in
+            guard let context = CGContext(
+                data: raw.baseAddress, width: side, height: side, bitsPerComponent: 8,
+                bytesPerRow: side * 4, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return }
+            context.interpolationQuality = .high
+            UIGraphicsPushContext(context)
+            context.translateBy(x: 0, y: CGFloat(side))
+            context.scaleBy(x: 1, y: -1)
+            image.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
+            UIGraphicsPopContext()
+        }
+        return (0..<(side * side)).map {
+            (Double(bytes[$0 * 4]) / 255, Double(bytes[$0 * 4 + 1]) / 255, Double(bytes[$0 * 4 + 2]) / 255)
+        }
+    }
+
+    /// How far apart two pictures look overall: the largest gap between the two
+    /// grids, cell by cell and channel by channel. Zero for the same pixels.
+    static func distance(_ one: UIImage, _ other: UIImage) -> Double {
+        let left = grid(one), right = grid(other)
+        guard left.count == right.count else { return 1 }
+        return zip(left, right).reduce(0.0) { worst, pair in
+            max(worst, max(abs(pair.0.r - pair.1.r), abs(pair.0.g - pair.1.g), abs(pair.0.b - pair.1.b)))
+        }
+    }
+
+    /// How much the picture varies across itself — 0 for one flat colour.
+    static func spread(_ image: UIImage) -> Double {
+        let cells = grid(image)
+        guard !cells.isEmpty else { return 0 }
+        let channels = [cells.map(\.r), cells.map(\.g), cells.map(\.b)]
+        return channels.reduce(0.0) { worst, values in
+            max(worst, (values.max() ?? 0) - (values.min() ?? 0))
+        }
     }
 
     static func luma(_ image: UIImage) -> Double {

@@ -2,96 +2,61 @@ import Testing
 import UIKit
 @testable import Upload
 
-/// **HOW TWO SELECTORS SHARE THE TOOLBAR.**
+/// **HOW THE TWO BOTTOM STRIPS DIVIDE THE TOOLBAR.**
 ///
-/// The rule as given: each may take at most 70% of what there is, and if the two
-/// together will not fit, each takes 50%.
+/// The rule as given: the leading strip takes its intrinsic width, whatever it
+/// holds, and the trailing one takes what is left.
 struct EditorSelectorLayoutTests {
     private let bar: CGFloat = 390
+    private let bubble: CGFloat = 38
 
-    @Test func oneSelectorTakesWhatItWantsUpToTheCeiling() {
-        #expect(EditorSelectorLayout.width(wants: 120, available: bar) == 120)
-        #expect(EditorSelectorLayout.width(wants: 380, available: bar) == bar * 0.7)
+    @Test func theLeadingStripKeepsItsWidthAndTheRestIsTheOthers() {
+        let widths = EditorSelectorLayout.widths(leadingWants: 112, available: bar, trailingFloor: bubble)
+
+        #expect(widths.leading == 112, "the actions were squeezed")
+        #expect(widths.trailing == bar - 112, "the selector did not take the rest")
+        #expect(widths.leading + widths.trailing == bar, "the bar is not fully spoken for")
     }
 
-    /// ⚠️ **THE CEILING HOLDS EVEN ALONE, AND THAT IS THE POINT.** A lone strip
-    /// filling the bar edge to edge leaves no room for the gap before whatever
-    /// arrives next — so the moment a second selector appears, every item in the
-    /// first one moves. Holding the ceiling means opening a mode does not
-    /// rearrange what was already on screen.
-    @Test func aLoneSelectorStillLeavesRoomForTheOneThatMayArrive() {
-        let alone = EditorSelectorLayout.width(wants: 999, available: bar)
+    /// ⚠️ **NO CEILING ANY MORE, IN EITHER DIRECTION.** A narrow leading strip
+    /// used to be held to seven tenths and so did the trailing one, which left
+    /// the middle of the bar to nobody; and when the two would not fit they
+    /// halved, which gave three glyphs 159pt of a 375pt bar while the strip that
+    /// scrolls went short by the same amount.
+    @Test func aNarrowLeadingStripHandsOverEverythingElse() {
+        let pill = EditorSelectorLayout.widths(leadingWants: 60, available: bar, trailingFloor: bubble)
 
-        #expect(alone < bar, "a lone strip filled the whole bar")
-        #expect(alone == bar * EditorSelectorLayout.ceiling)
+        #expect(pill.trailing == bar - 60)
+        #expect(pill.trailing > bar * 0.7, "the trailing strip is still capped")
     }
 
-    @Test func twoThatFitAreLeftAlone() {
-        let widths = EditorSelectorLayout.widths(
-            leadingWants: 100, trailingWants: 180, available: bar
-        )
+    /// ⚠️ **THE ONE THING THE RULE WILL NOT DO.** A leading strip wider than the
+    /// bar would leave the selector nothing at all, and UIKit answers a demand
+    /// it cannot meet by sweeping the group into a `•••`
+    /// (`navbar-leading-selector-collapse`). One bubble is kept back.
+    @Test func theTrailingStripNeverFallsBelowOneBubble() {
+        let widths = EditorSelectorLayout.widths(leadingWants: 9999, available: bar, trailingFloor: bubble)
 
-        #expect(widths.leading == 100)
-        #expect(widths.trailing == 180)
-    }
-
-    /// ⚠️ **NEITHER MAY CROWD THE OTHER OUT.** Two strips that each want most of
-    /// the bar cannot both have it, and letting the first one served win would
-    /// make the layout depend on which mode was opened first.
-    @Test func twoThatDoNotFitSplitTheBarEvenly() {
-        let widths = EditorSelectorLayout.widths(
-            leadingWants: 260, trailingWants: 260, available: bar
-        )
-
-        #expect(widths.leading == bar * 0.5)
-        #expect(widths.trailing == bar * 0.5)
-    }
-
-    /// And evenly means EVENLY — a greedy strip does not keep more of the bar
-    /// just because it asked for more.
-    @Test func theEvenSplitIgnoresWhoWantedMore() {
-        let lopsided = EditorSelectorLayout.widths(
-            leadingWants: 340, trailingWants: 200, available: bar
-        )
-
-        #expect(lopsided.leading == lopsided.trailing,
-                "\(lopsided.leading) against \(lopsided.trailing)")
-    }
-
-    /// ⚠️ **THE CEILING IS APPLIED BEFORE THE FIT IS JUDGED, AND THIS IS THE ONE
-    /// CASE THAT CAN TELL.** A greedy strip beside a narrow one: held to 70%
-    /// first, 273 + 100 fits in 390 and each keeps what it may have. Judged on
-    /// what they ASKED for, 9999 + 100 overflows and both would be cut to half —
-    /// the narrow one losing nothing it wanted and the greedy one losing 78
-    /// points for no reason.
-    ///
-    /// My first draft of this test paired 273 with 40, which fits either way and
-    /// proved nothing; the expectation was simply wrong and the implementation
-    /// was right.
-    @Test func theCeilingIsAppliedBeforeTheFitIsJudged() {
-        let widths = EditorSelectorLayout.widths(
-            leadingWants: 9999, trailingWants: 100, available: bar
-        )
-
-        #expect(widths.leading == bar * EditorSelectorLayout.ceiling)
-        #expect(widths.trailing == 100, "the narrow one was cut to fit something that fits")
-    }
-
-    /// And when they genuinely do not fit, they halve.
-    @Test func aGreedyPairHalvesTheBar() {
-        let widths = EditorSelectorLayout.widths(
-            leadingWants: 9999, trailingWants: 200, available: bar
-        )
-
-        #expect(widths.leading == bar * 0.5)
-        #expect(widths.trailing == bar * 0.5)
+        #expect(widths.trailing == bubble)
+        #expect(widths.leading == bar - bubble, "the leading strip did not give up the bubble")
     }
 
     @Test func anUnlaidBarAsksForNothing() {
-        #expect(EditorSelectorLayout.width(wants: 100, available: 0) == 0)
+        #expect(EditorSelectorLayout.widths(leadingWants: 100, available: 0, trailingFloor: bubble) == (0, 0))
         #expect(EditorSelectorLayout.widths(
-            leadingWants: 100, trailingWants: 100, available: 0
+            leadingWants: 100, available: .nan, trailingFloor: bubble
         ) == (0, 0))
+    }
+
+    /// A strip that states no intrinsic width at all is not allowed to take the
+    /// bar with it.
+    @Test func anUnstatedWidthTakesNothing() {
+        let widths = EditorSelectorLayout.widths(
+            leadingWants: .nan, available: bar, trailingFloor: bubble
+        )
+
+        #expect(widths.leading == 0)
+        #expect(widths.trailing == bar)
     }
 }
 
@@ -105,18 +70,18 @@ struct ToolbarGeometryTests {
         #expect(geometry.available(in: 375) == strips)
     }
 
-    /// ⚠️ **THE DEFECT:** three actions and six modes on a 375pt bar. Two
-    /// halves of what the bar has left must fit with their platters, the gap
-    /// and both margins — and they did not while the bar was charged 8pt
-    /// margins and one 8pt gap.
-    @Test func twoHalvesFitAnSEsBar() {
+    /// ⚠️ **THE DEFECT:** three actions and six modes on a 375pt bar. What the
+    /// two strips are held to must fit with their platters, the gap and both
+    /// margins — and it did not while the bar was charged 8pt margins and one
+    /// 8pt gap.
+    @Test func bothStripsFitAnSEsBar() {
         let geometry = ToolbarGeometry.fallback
         let available = geometry.available(in: 375)
-        let held = EditorSelectorLayout.widths(leadingWants: 112, trailingWants: 226, available: available)
+        let held = EditorSelectorLayout.widths(leadingWants: 112, available: available, trailingFloor: 38)
         let used = 2 * geometry.margin + (held.leading + geometry.platter) + geometry.gap
             + (held.trailing + geometry.platter)
         #expect(used <= 375, "the bar is overrun by \(used - 375)pt")
-        #expect(held.leading == held.trailing, "they do not fit together, so each takes half")
+        #expect(held.leading == 112, "the actions were squeezed on a bar that had room")
     }
 
     /// Read off two hosted platters, in the bar's own coordinates.

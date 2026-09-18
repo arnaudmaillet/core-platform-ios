@@ -132,22 +132,19 @@ final class MediaEditorSoundtrackMode: MediaEditorMode {
     /// cannot go while one is up, and the song's files belong to the draft.
     func screenWillDisappear() {}
 
-    /// The excerpt from the song's start, both levels full.
-    var canReset: Bool {
-        guard let song = currentSong else { return false }
-        return song.startSeconds != 0 || song.musicVolume != 1 || song.originalVolume != 1
-    }
-
-    func reset() {
-        guard let host, let id = host.currentItemID, host.edits(for: id).soundtrack != nil else { return }
-        host.change(id) {
-            $0.soundtrack?.startSeconds = 0
-            $0.soundtrack?.musicVolume = 1
-            $0.soundtrack?.originalVolume = 1
-        }
-        preview(music: 1, original: 1)
-        host.editsDidChange(id, .film)
+    /// A step put a whole edit back: the song, the excerpt and the two levels
+    /// may all differ from what the tools are showing.
+    ///
+    /// ⚠️ **THE LIVE MIX IS STATED AGAIN, NOT ONLY THE CONTROLS.** The levels
+    /// reach the player on their own path (`setMixLevels`, so a drag is heard
+    /// without rebuilding the item); an item rebuilt from restored edits does
+    /// carry them, but nothing would have told the CURRENT item — the author
+    /// would see the sliders jump back and go on hearing the mix they undid.
+    func editsWereRestored(for id: String) {
+        guard let host, host.currentItemID == id else { return }
         dress(for: id)
+        let song = host.edits(for: id).soundtrack
+        preview(music: song?.musicVolume ?? 1, original: song?.originalVolume ?? 1)
     }
 
     // MARK: - Picking
@@ -169,6 +166,11 @@ final class MediaEditorSoundtrackMode: MediaEditorMode {
             await land(picked, on: id)
             isPicking = false
             tools.setBusy(false)
+            // ⚠️ **THE SHEET HAS GONE AND UIKIT SAID NOTHING** — a page sheet
+            // leaves the editor on screen, so it gets no appearance callback
+            // either way. The pick resolving IS the signal, on a cancel as much
+            // as on a choice.
+            host.sheetDidClose()
         }
     }
 

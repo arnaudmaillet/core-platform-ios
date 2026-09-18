@@ -26,6 +26,14 @@ final class MediaStickerPickerViewController: UIViewController {
     /// A choice was made.
     var onPick: ((FrameOverlay.Content) -> Void)?
 
+    /// The sheet has gone — by a pick, by the grabber, by a swipe.
+    ///
+    /// ⚠️ **THE EDITOR UNDERNEATH IS TOLD NOTHING BY UIKIT.** A page sheet does
+    /// not remove the presenting view from the hierarchy, so the screen it
+    /// covers keeps decoding and composing a clip nobody can see until somebody
+    /// says the cover has gone. `viewDidDisappear` is that somebody.
+    var onGone: (() -> Void)?
+
     private(set) var shelf: Shelf = .stickers
     private var query = ""
 
@@ -45,6 +53,12 @@ final class MediaStickerPickerViewController: UIViewController {
     private static let names: [String: String] = Dictionary(
         EmojiCatalog.all.map { ($0.glyph, $0.name) }, uniquingKeysWith: { first, _ in first }
     )
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard isBeingDismissed || presentingViewController == nil else { return }
+        onGone?()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()

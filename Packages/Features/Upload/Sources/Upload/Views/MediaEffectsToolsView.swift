@@ -8,12 +8,24 @@ import UIKit
 /// (`everyEffectsGlyphExists`). A name that does not resolve draws an empty
 /// pill and nothing errors — the category strip shipped one once.
 enum MediaEffectsCatalog {
-    static let noneGlyph = "circle.slash"
-    static let noneLabel = "None"
 
-    /// How strongly a newly chosen effect is laid on: fully, so its pill and
-    /// the canvas agree, and the ruler takes it down from there.
-    static let startingIntensity = 1.0
+    /// ⚠️ **AN EFFECT OPENS AT NOTHING, AND ITS PILL SHOWS IT AT FULL.** Two
+    /// numbers, because they answer different questions. Choosing an effect used
+    /// to lay it on at full strength and leave the author turning it DOWN from a
+    /// picture they had not asked for — *"ne jamais afficher par défaut un filtre
+    /// à 100%"*. So a tap applies `startingIntensity`, which is none of it, and
+    /// the ruler opens at zero for the author to raise. The PILL still has to
+    /// show what the effect does, and an effect at zero looks like every other
+    /// effect at zero, so its little picture is dressed at `previewIntensity`.
+    static let startingIntensity = 0.0
+    /// What an effect's own pill picture is dressed at — see above.
+    static let previewIntensity = 1.0
+
+    /// The two fixed icons that stand over the leading end of the row.
+    static let clearGlyph = "circle.slash"
+    static let clearLabel = "Take every look off"
+    static let revertGlyph = "arrow.counterclockwise"
+    static let revertLabel = "Back to how it was"
 
     static func name(_ key: LookAdjustments.Key) -> String {
         switch key {
@@ -62,7 +74,7 @@ enum MediaEffectsCatalog {
 
     /// Every symbol the tools draw.
     static var glyphs: [String] {
-        [noneGlyph] + LookAdjustments.Key.allCases.map(glyph)
+        [clearGlyph, revertGlyph] + LookAdjustments.Key.allCases.map(glyph)
     }
 }
 
@@ -106,37 +118,53 @@ enum MediaLookThumbnails {
     }
 }
 
-/// The Effects tools in the editing band: a row of pills — the dials, then the
-/// effects — and, over it, the ruler of the one being turned.
+/// The Effects tools in the editing band: a ruler over a row of pills — the
+/// dials, then the effects — with two fixed icons standing over its leading end.
 ///
 /// ```
 ///                         +20%
-///   · · ┃ · · · · ┃ · · · ▼ · · ┃ · · · ·           ← while a pill is chosen
-///  (Brightness +20%)(◐ Contrast)(💧 Saturation) │ (⊘ None)(◉ Blur) →
+///   · · ┃ · · · · ┃ · · · ▼ · · ┃ · · · ·
+///  (⊘)(↺)  (Brightness +20%)(◐ Contrast)(💧 Saturation) │ (◉ Blur) →
 /// ```
 ///
-/// ⚠️ **THE CROP TOOLS' LAYOUT: A RULER OVER A ROW OF CHIPS, AND THE SAME
-/// HEIGHT.** Choosing a pill brings the ruler in above the row; the row never
-/// leaves, so the next dial is one tap away rather than a close button and a
-/// tap. A tap on the chosen pill puts the ruler away.
+/// ⚠️ **THE CROP TOOLS' LAYOUT, DOWN TO THE DISSOLVE.** A ruler over a row of
+/// chips at the same height, and — as Crop does behind its rotate and mirror
+/// buttons — the pills fade out as they pass behind the two icons rather than
+/// sliding under them: the mask is on a host that does NOT scroll, because a
+/// scroll view's `bounds.origin` IS its content offset.
+///
+/// ⚠️ **THERE IS NO EMPTY STATE: SOMETHING IS ALWAYS CHOSEN.** The row opens on
+/// the first dial with its ruler up — *"un élément doit toujours être
+/// sélectionné donc il faut sélectionner par défaut le premier"* — and a tap on
+/// the pill that is already lit leaves it lit. The ruler is never put away, so
+/// the band never changes shape under the author's finger.
+///
+/// ⚠️ **THE TWO ICONS ARE NOT PILLS, AND THAT IS THE POINT.** "None" used to be
+/// a card in the row, which put an ACTION among a list of CHOICES and made it
+/// scroll away just when it was wanted. Taking every look off, and going back to
+/// the look the tab opened on, stand still at the leading end where a thumb
+/// rests.
 ///
 /// ⚠️ **A NUMBER INSTEAD OF THE SYMBOL ON A TURNED PILL.** "Contrast −30%" says
 /// both that the dial is not at rest and where it is, and an untouched pill
 /// keeps the symbol that helps find it.
 ///
-/// ⚠️ **ONE EFFECT AT A TIME.** Choosing an effect replaces the one before —
-/// the compositor's budget on an SE allows one stylised stage per frame
-/// (`FrameLookRenderer`) — and "None" takes it away, so it is dimmed while
-/// there is nothing to take.
+/// ⚠️ **ONE EFFECT AT A TIME** — the compositor's budget on an SE allows one
+/// stylised stage per frame (`FrameLookRenderer`).
 ///
 /// ⚠️ **THE VIEW DECIDES NOTHING ABOUT THE PICTURE.** It says what was turned
-/// (`onDial`, `onEffect`) and is told what is true (`show(_:)`); the mode writes
-/// the edit and the screen redraws.
+/// (`onDial`, `onEffect`, `onClear`, `onRevert`) and is told what is true
+/// (`show(_:)`); the mode writes the edit and the screen redraws.
 @MainActor
 final class MediaEffectsToolsView: UIView {
     private enum Metrics {
         static let pill: CGFloat = 30
         static let icon: CGFloat = 20
+        static let button: CGFloat = 30
+        /// How far a pill travels behind the icons before it is gone — the crop
+        /// tools' number, measured there: at 28 the ramp was over before the eye
+        /// registered it.
+        static let fade: CGFloat = 52
         static var height: CGFloat { MediaValueRulerView.height + Spacing.sm + pill }
     }
 
@@ -146,15 +174,18 @@ final class MediaEffectsToolsView: UIView {
     /// The side of an effect pill's picture, in points.
     static var thumbnailSide: CGFloat { Metrics.icon }
 
-    /// What the tools are showing.
+    /// Which pill the ruler belongs to. There is no third case: the row is
+    /// never in an empty state.
     enum Focus: Equatable {
-        /// The row alone.
-        case browsing
         /// One dial's ruler.
         case dial(LookAdjustments.Key)
-        /// The chosen effect's strength.
+        /// An effect's strength.
         case effect(LookEffectKind)
     }
+
+    /// The dial the row opens on, and the one it settles back to when a new
+    /// page arrives.
+    static let firstDial = LookAdjustments.Key.allCases[0]
 
     /// A dial moved; `isTracking` is true while a finger is still on it.
     var onDial: ((LookAdjustments.Key, Double, _ isTracking: Bool) -> Void)?
@@ -162,16 +193,37 @@ final class MediaEffectsToolsView: UIView {
     var onEffect: ((LookEffect?, _ isTracking: Bool) -> Void)?
     /// A finger came down on the ruler, or lifted.
     var onTracking: ((Bool) -> Void)?
+    /// The ⊘ icon: take every look off this page.
+    var onClear: (() -> Void)?
+    /// The ↺ icon: back to the look the tab was opened on.
+    var onRevert: (() -> Void)?
 
-    private(set) var focus: Focus = .browsing
+    private(set) var focus: Focus = .dial(MediaEffectsToolsView.firstDial)
     private var look = FrameLook.neutral
 
     private let ruler = MediaValueRulerView()
     private let scroller = ChipScrollView()
     private let row = UIStackView()
+    /// ⚠️ **THE MASK GOES ON THIS, NOT ON THE SCROLLER** — `MediaCropToolsView`
+    /// records why: a scroll view's `bounds.origin` is its content offset, so a
+    /// mask framed in its bounds travels with the content and slides off the
+    /// viewport on the first drag.
+    private let scrollerHost = UIView()
+    private let fadeOut = CAGradientLayer()
     private var dialPills: [LookAdjustments.Key: EffectsPill] = [:]
     private var effectPills: [LookEffectKind: EffectsPill] = [:]
-    private let nonePill = EffectsPill(glyph: MediaEffectsCatalog.noneGlyph, caption: MediaEffectsCatalog.noneLabel)
+    private lazy var clearButton = Self.button(
+        symbol: MediaEffectsCatalog.clearGlyph, label: MediaEffectsCatalog.clearLabel
+    ) { [weak self] in self?.onClear?() }
+    private lazy var revertButton = Self.button(
+        symbol: MediaEffectsCatalog.revertGlyph, label: MediaEffectsCatalog.revertLabel
+    ) { [weak self] in self?.onRevert?() }
+    private lazy var icons: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [clearButton, revertButton])
+        stack.axis = .horizontal
+        stack.spacing = Spacing.xs
+        return stack
+    }()
     /// What the last reveal decided to scroll to, nil when it left the row
     /// alone — the decision, which an animated scroll hides from a test.
     private var revealed: CGRect?
@@ -180,9 +232,6 @@ final class MediaEffectsToolsView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
 
-        ruler.alpha = 0
-        ruler.isHidden = true
-        ruler.isUserInteractionEnabled = false
         ruler.onTracking = { [weak self] tracking in self?.onTracking?(tracking) }
         ruler.onChange = { [weak self] value, tracking in self?.rulerMoved(to: value, tracking: tracking) }
 
@@ -191,7 +240,20 @@ final class MediaEffectsToolsView: UIView {
         scroller.backgroundColor = .clear
         scroller.showsHorizontalScrollIndicator = false
         scroller.clipsToBounds = false
+        // The leading inset is not a constant: `layoutSubviews` sets it past
+        // the icons and their ramp, so the first pill rests where it is whole.
         scroller.contentInset = UIEdgeInsets(top: 0, left: Spacing.lg, bottom: 0, right: Spacing.lg)
+        // ⚠️ **NO CLIPPING AT ALL — THE MASK IS THE ONLY THING THAT TAKES A PILL
+        // AWAY.** A hard clip and a gradient fight for the same pixels and the
+        // clip wins, which is the sharp edge this replaced in the crop tools.
+        scrollerHost.clipsToBounds = false
+        fadeOut.colors = [
+            UIColor.clear.cgColor, UIColor.clear.cgColor,
+            UIColor.black.cgColor, UIColor.black.cgColor
+        ]
+        fadeOut.startPoint = CGPoint(x: 0, y: 0.5)
+        fadeOut.endPoint = CGPoint(x: 1, y: 0.5)
+        scrollerHost.layer.mask = fadeOut
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = Spacing.sm
@@ -200,13 +262,11 @@ final class MediaEffectsToolsView: UIView {
 
         for key in LookAdjustments.Key.allCases {
             let pill = EffectsPill(glyph: MediaEffectsCatalog.glyph(key), caption: MediaEffectsCatalog.name(key))
-            pill.onTap = { [weak self] in self?.toggle(.dial(key)) }
+            pill.onTap = { [weak self] in self?.focus(on: .dial(key)) }
             dialPills[key] = pill
             row.addArrangedSubview(pill)
         }
         row.addArrangedSubview(Self.divider())
-        nonePill.onTap = { [weak self] in self?.chooseNone() }
-        row.addArrangedSubview(nonePill)
         for kind in LookEffectKind.allCases {
             let pill = EffectsPill(glyph: nil, caption: MediaEffectsCatalog.name(kind))
             pill.onTap = { [weak self] in self?.choose(kind) }
@@ -219,11 +279,21 @@ final class MediaEffectsToolsView: UIView {
             ruler.leadingAnchor.constraint(equalTo: view.leadingAnchor)
             ruler.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         }
-        scroller.constrain(in: self) { view in
-            scroller.topAnchor.constraint(equalTo: ruler.bottomAnchor, constant: Spacing.sm)
-            scroller.leadingAnchor.constraint(equalTo: view.leadingAnchor)
-            scroller.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-            scroller.heightAnchor.constraint(equalToConstant: Metrics.pill)
+        // ⚠️ **THE HOST IS ADDED FIRST, AND THAT IS WHAT PUTS THE ICONS ON TOP.**
+        // `constrain(in:)` begins with `addSubview`, so the order of these two
+        // blocks IS the z order — the crop tools' note, and the same reason: the
+        // row has to run UNDER the icons for there to be anything to dissolve.
+        scroller.pin(to: scrollerHost)
+        scrollerHost.constrain(in: self) { view in
+            scrollerHost.topAnchor.constraint(equalTo: ruler.bottomAnchor, constant: Spacing.sm)
+            scrollerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+            scrollerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            scrollerHost.heightAnchor.constraint(equalToConstant: Metrics.pill)
+        }
+        icons.constrain(in: self) { view in
+            icons.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg)
+            icons.topAnchor.constraint(equalTo: scrollerHost.topAnchor)
+            icons.heightAnchor.constraint(equalToConstant: Metrics.pill)
         }
         NSLayoutConstraint.activate([
             row.topAnchor.constraint(equalTo: scroller.contentLayoutGuide.topAnchor),
@@ -233,43 +303,90 @@ final class MediaEffectsToolsView: UIView {
             row.heightAnchor.constraint(equalTo: scroller.frameLayoutGuide.heightAnchor),
             heightAnchor.constraint(equalToConstant: Metrics.height)
         ])
+        openOnTheFirstDial()
         show(.neutral)
+    }
+
+    /// ⚠️ **THE INSET AND THE RAMP ARE ONE STATEMENT.** Without the inset the
+    /// first pill would come to rest inside the fade and sit permanently half
+    /// dissolved; with it, a pill is solid where it stops and dissolves only on
+    /// its way out. The frame is set with actions off because a layer that is
+    /// not a view's backing layer animates its own `frame` over a quarter
+    /// second, which would drag the ramp behind a rotation.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let width = scrollerHost.bounds.width
+        guard width > 0 else { return }
+        let behind = icons.frame.maxX
+        let solid = behind + Metrics.fade
+        if abs(scroller.contentInset.left - (solid + Spacing.sm)) > 0.5 {
+            scroller.contentInset.left = solid + Spacing.sm
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fadeOut.frame = scrollerHost.bounds
+        fadeOut.locations = [
+            0,
+            NSNumber(value: Double(behind / width)),
+            NSNumber(value: Double(solid / width)),
+            1
+        ]
+        CATransaction.commit()
+    }
+
+    /// One of the two icons: the crop tools' button, to the point.
+    private static func button(
+        symbol: String, label: String, action: @escaping @MainActor () -> Void
+    ) -> UIButton {
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: symbol)
+        configuration.baseForegroundColor = .label
+        configuration.contentInsets = .zero
+        let button = UIButton(configuration: configuration, primaryAction: UIAction { _ in action() })
+        button.accessibilityLabel = label
+        button.widthAnchor.constraint(equalToConstant: Metrics.button).isActive = true
+        return button
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// States what the page carries, without announcing it: the numbers on the
-    /// pills, the chosen effect, and the ruler's value if one is up.
+    /// pills, the chosen effect, and where the ruler stands.
     func show(_ look: FrameLook) {
         self.look = look
         refreshPills()
         switch focus {
-        case .browsing: break
-        case .dial(let key): ruler.show(look.adjustments[key])
+        case .dial(let key):
+            ruler.show(look.adjustments[key])
         case .effect(let kind):
-            // ⚠️ **AN EFFECT TAKEN AWAY ELSEWHERE TAKES ITS RULER WITH IT** —
-            // the undo arrow, or another page.
-            if look.effect?.kind == kind {
-                ruler.show(look.effect?.intensity ?? 0)
-            } else {
-                browse(animated: false)
-            }
+            // ⚠️ **AN EFFECT TAKEN OFF ELSEWHERE LEAVES ITS RULER AT NOTHING,
+            // NOT SOMEWHERE ELSE.** The undo arrow, the ⊘ icon or another page
+            // can empty it while its pill is the one lit; zero is where it sits
+            // then, which is also where a fresh choice starts.
+            ruler.show(look.effect?.kind == kind ? (look.effect?.intensity ?? 0) : 0)
         }
     }
 
-    /// Hands the effect pills their pictures. "None" keeps its symbol.
+    /// Hands the effect pills their pictures.
     func show(pictures: [LookEffectKind: UIImage]) {
         for (kind, pill) in effectPills { pill.setPicture(pictures[kind]) }
     }
 
-    /// Puts the ruler away; the row stays.
-    func browse(animated: Bool) {
-        guard focus != .browsing else { return }
+    /// Whether the ↺ icon has anything to go back to.
+    func setCanRevert(_ can: Bool) {
+        revertButton.isEnabled = can
+    }
+
+    /// Back to the dial the row opens on — what a new page, or the band being
+    /// handed to someone else, settles the row to.
+    ///
+    /// ⚠️ **NOT "NOTHING CHOSEN".** There is no such state: the ruler belongs to
+    /// a pill at all times, so arriving at another picture puts it back on the
+    /// first dial rather than leaving the band half empty.
+    func openOnTheFirstDial() {
         ruler.abandonDrag()
-        focus = .browsing
-        refreshFocus()
-        fadeRuler(in: false, animated: animated)
+        focus(on: .dial(Self.firstDial))
     }
 
     private func refreshPills() {
@@ -279,13 +396,18 @@ final class MediaEffectsToolsView: UIView {
             pill.setReading(value != 0 ? words.written : nil)
             pill.accessibilityValue = words.spoken
         }
-        nonePill.isEnabled = look.effect != nil
+        clearButton.isEnabled = !look.adjustments.isNeutral || look.effect != nil
         for (kind, pill) in effectPills {
             let chosen = look.effect?.kind == kind
             let words = ValueRuler.reading(look.effect?.intensity ?? 0, twoSided: false)
             pill.setChosen(chosen)
-            pill.setReading(chosen ? words.written : nil)
-            pill.accessibilityValue = chosen ? words.spoken : nil
+            // ⚠️ **THE LIT PILL SHOWS ITS NUMBER EVEN AT NOTHING.** An effect
+            // opens at 0%, so it carries no effect at all yet; without this the
+            // pill the ruler belongs to would be the one pill not saying where
+            // it stands.
+            let lit = focus == .effect(kind)
+            pill.setReading(chosen || lit ? words.written : nil)
+            pill.accessibilityValue = chosen || lit ? words.spoken : nil
         }
     }
 
@@ -294,21 +416,12 @@ final class MediaEffectsToolsView: UIView {
         for (kind, pill) in effectPills { pill.setLit(focus == .effect(kind)) }
     }
 
-    /// A tap on the pill that is already up puts its ruler away.
-    private func toggle(_ target: Focus) {
-        guard target != focus else {
-            browse(animated: true)
-            return
-        }
-        focus(on: target)
-    }
-
+    /// ⚠️ **A TAP ON THE PILL THAT IS ALREADY LIT CHANGES NOTHING**, because
+    /// there is nowhere to go: the row has no empty state, and putting the ruler
+    /// away would be one.
     private func focus(on target: Focus) {
-        let wasBrowsing = focus == .browsing
         focus = target
         switch target {
-        case .browsing:
-            return
         case .dial(let key):
             ruler.configure(
                 name: MediaEffectsCatalog.name(key), range: key.range, rest: 0, value: look.adjustments[key]
@@ -317,12 +430,14 @@ final class MediaEffectsToolsView: UIView {
             ruler.configure(
                 name: MediaEffectsCatalog.name(kind), range: 0...1,
                 rest: MediaEffectsCatalog.startingIntensity,
-                value: look.effect?.intensity ?? MediaEffectsCatalog.startingIntensity
+                value: look.effect?.kind == kind
+                    ? (look.effect?.intensity ?? 0)
+                    : MediaEffectsCatalog.startingIntensity
             )
         }
         refreshFocus()
+        refreshPills()
         reveal(target)
-        if wasBrowsing { fadeRuler(in: true, animated: window != nil) }
     }
 
     /// Scrolls the chosen pill fully into the row.
@@ -335,7 +450,6 @@ final class MediaEffectsToolsView: UIView {
     private func reveal(_ target: Focus) {
         let pill: UIView?
         switch target {
-        case .browsing: pill = nil
         case .dial(let key): pill = dialPills[key]
         case .effect(let kind): pill = effectPills[kind]
         }
@@ -355,32 +469,24 @@ final class MediaEffectsToolsView: UIView {
         scroller.scrollRectToVisible(frame.insetBy(dx: -Spacing.lg, dy: 0), animated: window != nil)
     }
 
-    private func chooseNone() {
-        guard look.effect != nil else { return }
-        look.effect = nil
-        if case .effect = focus { browse(animated: true) }
-        refreshPills()
-        onEffect?(nil, false)
-    }
-
-    /// ⚠️ **A TAP ON THE CHOSEN ONE ONLY BRINGS UP ITS RULER** — or puts it
-    /// away. Re-choosing it would put its strength back to full under a finger
-    /// that only wanted to adjust it.
+    /// ⚠️ **CHOOSING AN EFFECT LAYS NOTHING ON — IT HANDS OVER THE RULER.** The
+    /// strength starts at nothing (`startingIntensity`) and the author raises
+    /// it; an effect that arrived at full left them turning DOWN a picture they
+    /// had not asked for. Announced all the same, because zero IS the new value
+    /// when another effect was on.
     private func choose(_ kind: LookEffectKind) {
         guard look.effect?.kind != kind else {
-            toggle(.effect(kind))
+            focus(on: .effect(kind))
             return
         }
+        let had = look.effect
         look.effect = LookEffect(kind: kind, intensity: MediaEffectsCatalog.startingIntensity)
-        refreshPills()
-        onEffect?(look.effect, false)
         focus(on: .effect(kind))
+        if had != look.effect { onEffect?(look.effect, false) }
     }
 
     private func rulerMoved(to value: Double, tracking: Bool) {
         switch focus {
-        case .browsing:
-            return
         case .dial(let key):
             look.adjustments[key] = value
             refreshPills()
@@ -391,28 +497,6 @@ final class MediaEffectsToolsView: UIView {
             look.effect = LookEffect(kind: kind, intensity: value)
             refreshPills()
             onEffect?(look.effect, tracking)
-        }
-    }
-
-    /// ⚠️ **STATED BEFORE THE ANIMATION, NEVER READ FROM IT** — a
-    /// `.beginFromCurrentState` fade staged in the same turn animates end to
-    /// end and is invisible (memory `uiview-animate-from-value-trap`); this one
-    /// starts from an alpha it has just set.
-    private func fadeRuler(in showing: Bool, animated: Bool) {
-        ruler.isHidden = false
-        ruler.isUserInteractionEnabled = showing
-        let change = { [ruler] in ruler.alpha = showing ? 1 : 0 }
-        let landed = { [weak self] in
-            guard let self else { return }
-            ruler.isHidden = focus == .browsing
-        }
-        guard animated, !UIAccessibility.isReduceMotionEnabled else {
-            change()
-            landed()
-            return
-        }
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut], animations: change) { _ in
-            landed()
         }
     }
 
@@ -438,23 +522,37 @@ final class MediaEffectsToolsView: UIView {
     /// Internal for tests: the ruler.
     var debugRuler: MediaValueRulerView { ruler }
     /// Internal for tests: whether the ruler is what a finger would find above
-    /// the row.
+    /// the row. It is always up — the row has no empty state — so a false here
+    /// is a defect, not a mode.
     var debugShowsRuler: Bool {
-        !ruler.isHidden && ruler.alpha > 0 && ruler.isUserInteractionEnabled && focus != .browsing
+        !ruler.isHidden && ruler.alpha > 0 && ruler.isUserInteractionEnabled
     }
     /// Internal for tests: whether the row is on screen and takes touches.
     var debugShowsRow: Bool { !scroller.isHidden && scroller.alpha > 0 && scroller.isUserInteractionEnabled }
     /// Internal for tests: where the ruler and the row sit, in this view.
     var debugRulerFrame: CGRect { ruler.frame }
-    var debugRowFrame: CGRect { scroller.frame }
+    var debugRowFrame: CGRect { scrollerHost.frame }
     /// Internal for tests: a tap on a dial's pill.
     func debugTapDial(_ key: LookAdjustments.Key) { dialPills[key]?.onTap?() }
     /// Internal for tests: a tap on an effect's pill.
     func debugTapEffect(_ kind: LookEffectKind) { effectPills[kind]?.onTap?() }
-    /// Internal for tests: a tap on "None".
-    func debugTapNone() { nonePill.onTap?() }
-    /// Internal for tests: whether "None" can be tapped.
-    var debugNoneIsEnabled: Bool { nonePill.isEnabled }
+    /// Internal for tests: a tap on the ⊘ icon, and on the ↺ one.
+    func debugTapClear() { clearButton.sendActions(for: .primaryActionTriggered) }
+    func debugTapRevert() { revertButton.sendActions(for: .primaryActionTriggered) }
+    /// Internal for tests: whether each icon has anything to do.
+    var debugCanClear: Bool { clearButton.isEnabled }
+    var debugCanRevert: Bool { revertButton.isEnabled }
+    /// Internal for tests: the two icons, to read where they stand over the row.
+    var debugIconsFrame: CGRect { icons.frame }
+    /// Internal for tests: the mask that dissolves a pill passing behind them —
+    /// on the HOST, and framed in the host's own bounds.
+    var debugMaskIsOnTheHost: Bool { scrollerHost.layer.mask === fadeOut }
+    var debugFadeFrame: CGRect { fadeOut.frame }
+    var debugFadeStops: [Double] { (fadeOut.locations ?? []).map(\.doubleValue) }
+    /// Internal for tests: where the row comes to rest — past the ramp — and
+    /// what it keeps at the other end.
+    var debugRowInset: CGFloat { scroller.contentInset.left }
+    var debugRowTrailingInset: CGFloat { scroller.contentInset.right }
     /// Internal for tests: the number a dial's pill shows, nil when it shows
     /// its symbol.
     func debugReading(_ key: LookAdjustments.Key) -> String? { dialPills[key]?.reading }
@@ -465,7 +563,7 @@ final class MediaEffectsToolsView: UIView {
     }
     /// Internal for tests: the pills drawn filled, by caption.
     var debugFocusedPills: [String] {
-        (Array(dialPills.values) + Array(effectPills.values) + [nonePill])
+        (Array(dialPills.values) + Array(effectPills.values))
             .filter(\.isLit).map(\.caption)
     }
     /// Internal for tests: an effect pill's picture.

@@ -88,26 +88,72 @@ enum MediaTextPalette {
 }
 
 /// The row of text styles over the keyboard: typeface, ink, what is behind the
-/// words, and how the lines line up.
+/// words, and how the lines line up — one glass capsule running the width of
+/// the keyboard, with the controls scrolling inside it.
 ///
 /// ```
-/// [≡][A̲] | Classic Rounded Serif … | ● ● ● ● ● ● ● ● ◐
+/// ┌───────────────────────────────────────────┐
+/// │ [≡][A̲] | Classic Rounded … | ● ● ● ● ● ◐  │
+/// └───────────────────────────────────────────┘
+///   q  w  e  r  t  y  u  i  o  p
 /// ```
+///
+/// ⚠️ **AN `inputAccessoryView` IS THE WINDOW'S WIDTH, SO "FULL-WIDTH CAPSULE"
+/// IS A CAPSULE INSIDE INSETS.** UIKit sizes and places this view itself, edge
+/// to edge, and a capsule drawn edge to edge has its curves cut off by the
+/// screen: it reads as a bar with two bites out of it. The view therefore stays
+/// the full width and carries nothing of its own — no colour, no material — and
+/// the one glass host is inset `Metrics.ends` from each end and
+/// `Metrics.clearance` from top and bottom. The bar's height is the capsule
+/// plus that clearance twice, which is why `height` is arithmetic and not a
+/// number.
+///
+/// ⚠️ **ONE MATERIAL, AND IT IS THE HOUSE'S.** `GlassCapsule.wrap` is copied,
+/// not re-invented: its note records that the corner shape MUST be
+/// `cornerConfiguration` and never `clipsToBounds` plus a layer radius, or the
+/// shape is not part of what UIKit interpolates and the capsule flashes as a
+/// hard square. The 0.35 black plate this bar used to wear is gone with it —
+/// a colour under glass reads as two surfaces.
 ///
 /// ⚠️ **IT STORES NOTHING.** It says what was chosen through `onChange` and
 /// shows what it is told through `show(_:)`; the composer owns the style, and
 /// the overlay mode owns what is stored.
 @MainActor
 final class MediaTextStyleBar: UIView {
-    static let height: CGFloat = 52
+    private enum Metrics {
+        /// The tallest control in the row — the two cycle buttons and the font
+        /// chips all stand 44pt, a finger's own target.
+        static let control: CGFloat = 44
+        /// The glass itself: the controls with 4pt of material above and below,
+        /// which is the 52pt this bar has always been.
+        static let capsule: CGFloat = 52
+        /// Between the capsule and the ends of the window.
+        static let ends: CGFloat = Spacing.md
+        /// Above and below the capsule, so the glass floats clear of the
+        /// keyboard's top edge instead of being welded to it.
+        static let clearance: CGFloat = Spacing.sm
+        /// How far the first and last control stand from the capsule's ends.
+        ///
+        /// ⚠️ **MEASURED OFF THE CURVE, NOT PICKED.** A capsule 52pt tall has a
+        /// 26pt radius; a 44pt control centred in it spans 4pt to 48pt, and at
+        /// 4pt from the top the capsule's own edge is already
+        /// `26 − √(26² − 22²) = 12.14pt` in from the bounding box. A control
+        /// flush against that box would have its corner eaten by the glass.
+        /// 14pt clears it with under two points to spare.
+        static let inner: CGFloat = 14
+    }
+
+    /// The capsule plus its clearance, twice — 68pt at the current metrics.
+    static var height: CGFloat { Metrics.capsule + 2 * Metrics.clearance }
 
     /// Called with the whole style after any control changed it.
     var onChange: ((TextOverlay) -> Void)?
 
     private(set) var style = TextOverlay.fresh
 
-    private let scroller = ChipScrollView()
+    private let scroller: ChipScrollView
     private let row = UIStackView()
+    private let glass: UIVisualEffectView
     private let backgroundButton = UIButton(type: .system)
     private let alignmentButton = UIButton(type: .system)
     private var fontButtons: [OverlayFont: UIButton] = [:]
@@ -115,30 +161,64 @@ final class MediaTextStyleBar: UIView {
     private let well = UIColorWell()
 
     override init(frame: CGRect) {
-        super.init(frame: CGRect(x: 0, y: 0, width: frame.width, height: Self.height))
-        autoresizingMask = .flexibleWidth
-        backgroundColor = UIColor.black.withAlphaComponent(0.35)
-
+        // ⚠️ **BUILT FROM LOCALS, BECAUSE `wrap` TAKES THE SCROLLER.** A
+        // designated initialiser may not touch `self` until every stored
+        // property is set and `super.init` has run, so the scroller is made
+        // here, handed to `wrap`, and both are stored in the same breath.
+        let scroller = ChipScrollView()
         scroller.showsHorizontalScrollIndicator = false
         scroller.backgroundColor = .clear
+        self.scroller = scroller
+        // ⚠️ **THE SCROLLER IS CLIPPED AND THE CAPSULE IS WHAT CLIPS IT.**
+        // `cornerConfiguration` gives the host its shape, so clipping there
+        // follows the curve rather than squaring it off — which is what a
+        // layer-masked radius would have done. Without it a chip scrolled to
+        // the end would slide out past the glass and hang in mid-air.
+        let glass = GlassCapsule.wrap(scroller)
+        glass.clipsToBounds = true
+        self.glass = glass
+        super.init(frame: CGRect(x: 0, y: 0, width: frame.width, height: Self.height))
+        autoresizingMask = .flexibleWidth
+        backgroundColor = .clear
+
         row.axis = .horizontal
         row.spacing = Spacing.sm
         row.alignment = .center
         row.translatesAutoresizingMaskIntoConstraints = false
         scroller.addSubview(row)
-        scroller.pin(to: self)
+        addSubview(glass)
         NSLayoutConstraint.activate([
+            // ⚠️ **PINNED TO THE SAFE AREA, NOT THE EDGES.** In landscape on a
+            // notched phone the accessory view still spans the window, and a
+            // capsule inset from the raw edge would sit under the sensor
+            // housing on one side and float on the other.
+            glass.leadingAnchor.constraint(
+                equalTo: safeAreaLayoutGuide.leadingAnchor, constant: Metrics.ends
+            ),
+            glass.trailingAnchor.constraint(
+                equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -Metrics.ends
+            ),
+            glass.topAnchor.constraint(equalTo: topAnchor, constant: Metrics.clearance),
+            glass.heightAnchor.constraint(equalToConstant: Metrics.capsule),
+            // ⚠️ `wrap` PINS leading, trailing AND centerY — NEVER A HEIGHT,
+            // which `MediaAccessNoticeView` also has to make up. A scroll view
+            // with no height is a scroll view that shows nothing.
+            scroller.heightAnchor.constraint(equalTo: glass.contentView.heightAnchor),
             row.topAnchor.constraint(equalTo: scroller.contentLayoutGuide.topAnchor),
             row.bottomAnchor.constraint(equalTo: scroller.contentLayoutGuide.bottomAnchor),
-            row.leadingAnchor.constraint(equalTo: scroller.contentLayoutGuide.leadingAnchor, constant: Spacing.md),
-            row.trailingAnchor.constraint(equalTo: scroller.contentLayoutGuide.trailingAnchor, constant: -Spacing.md),
+            row.leadingAnchor.constraint(
+                equalTo: scroller.contentLayoutGuide.leadingAnchor, constant: Metrics.inner
+            ),
+            row.trailingAnchor.constraint(
+                equalTo: scroller.contentLayoutGuide.trailingAnchor, constant: -Metrics.inner
+            ),
             row.heightAnchor.constraint(equalTo: scroller.frameLayoutGuide.heightAnchor)
         ])
 
         for button in [backgroundButton, alignmentButton] {
             button.tintColor = .white
-            button.widthAnchor.constraint(equalToConstant: 44).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            button.widthAnchor.constraint(equalToConstant: Metrics.control).isActive = true
+            button.heightAnchor.constraint(equalToConstant: Metrics.control).isActive = true
             row.addArrangedSubview(button)
         }
         backgroundButton.addAction(UIAction { [weak self] _ in self?.cycleBackground() }, for: .touchUpInside)
@@ -155,7 +235,7 @@ final class MediaTextStyleBar: UIView {
             button.tintColor = .white
             button.layer.cornerRadius = 15
             button.layer.cornerCurve = .continuous
-            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.control).isActive = true
             button.addAction(UIAction { [weak self] _ in self?.choose(font) }, for: .touchUpInside)
             fontButtons[font] = button
             row.addArrangedSubview(button)
@@ -279,4 +359,31 @@ final class MediaTextStyleBar: UIView {
     var debugBackgroundButton: UIButton { backgroundButton }
     var debugAlignmentButton: UIButton { alignmentButton }
     func debugFontButton(_ font: OverlayFont) -> UIButton? { fontButtons[font] }
+    /// Internal for tests: every material in the bar's subtree. There must be
+    /// exactly one.
+    var debugMaterials: [UIVisualEffectView] { Self.materials(in: self) }
+    /// Internal for tests: where the capsule is DRAWN, in the bar's points.
+    var debugCapsuleFrame: CGRect { glass.convert(glass.bounds, to: self) }
+    /// Internal for tests: the radius the capsule's corners actually RESOLVE
+    /// to, asked of UIKit through the `cornerConfiguration` it was given —
+    /// which is the shape as drawn, not a number somebody stored.
+    func debugCapsuleRadius(_ corner: UIRectCorner) -> CGFloat {
+        glass.effectiveRadius(corner: corner)
+    }
+    /// Internal for tests: the layer radius the capsule is NOT cut with. See
+    /// `GlassCapsule` — a layer-masked radius is not part of what UIKit
+    /// interpolates, and the capsule flashes square.
+    var debugCapsuleLayerRadius: CGFloat { glass.layer.cornerRadius }
+    /// Internal for tests: the scroller, and where its first control sits
+    /// inside the capsule.
+    var debugScroller: UIScrollView { scroller }
+    var debugFirstControlFrame: CGRect? {
+        row.arrangedSubviews.first.map { $0.convert($0.bounds, to: glass) }
+    }
+
+    private static func materials(in view: UIView) -> [UIVisualEffectView] {
+        view.subviews.flatMap { subview -> [UIVisualEffectView] in
+            (subview as? UIVisualEffectView).map { [$0] } ?? materials(in: subview)
+        }
+    }
 }

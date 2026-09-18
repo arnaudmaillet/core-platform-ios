@@ -27,6 +27,11 @@ struct MediaCropSurfaceTests {
         abs(a - b) <= slack
     }
 
+    private func near(_ a: CGRect, _ b: CGRect, _ slack: CGFloat = 0.002) -> Bool {
+        near(a.minX, b.minX, slack) && near(a.minY, b.minY, slack)
+            && near(a.width, b.width, slack) && near(a.height, b.height, slack)
+    }
+
     // MARK: - Where it starts
 
     @Test func aFreshSurfaceFramesTheWholePicture() {
@@ -207,6 +212,134 @@ struct MediaCropSurfaceTests {
         #expect(near(view.debugBox.height, box.height),
                 "only the side that was dragged moved: \(view.debugBox) vs \(box)")
         #expect(view.debugBox.width < box.width)
+    }
+
+    // MARK: - A shape is always the same shape
+
+    /// ⚠️ **THE REPORTED DEFECT, AS ARITHMETIC.** Choosing a shape used to settle
+    /// the placement it found with `covering`, which only ever enlarges — so every
+    /// tap kept whatever zoom the last shape had needed and the box crept inwards
+    /// for as long as the author played with the chips. The literal rectangle is
+    /// asserted, not merely "the same twice": the same twice was ALREADY true of
+    /// the broken code, since a scale that has ratcheted stays ratcheted.
+    ///
+    /// The worked example: a 400x300 picture on a 358x468 surface, a square box of
+    /// 358 points. Covering it takes 358/300, so the picture spans 477.3 points and
+    /// the square keeps 358/477.3 = 0.75 of its width and all of its height.
+    @Test func choosingTheSameShapeTwiceKeepsTheSameRectangle() {
+        let view = surface()
+        view.debugPinch(by: 2.2, about: CGPoint(x: view.debugBox.midX, y: view.debugBox.midY))
+        #expect(view.crop.rect.width < 0.6, "guard: the pinch must really have zoomed in — \(view.crop.rect)")
+
+        view.choose(.square)
+        let once = view.crop
+        view.choose(.square)
+
+        #expect(near(view.crop.rect, once.rect), "twice: \(view.crop.rect) vs \(once.rect)")
+        #expect(near(once.rect, CGRect(x: 0.125, y: 0, width: 0.75, height: 1)),
+                "and it is the largest square the picture can give: \(once.rect)")
+    }
+
+    /// ⚠️ **A THEN B THEN A, WHICH IS WHAT THE AUTHOR ACTUALLY DID.** Under the
+    /// old arithmetic the 4:5 box in the middle raised the scale from 1.193 to
+    /// 1.492 and the square came back holding (0.2, 0.1, 0.6, 0.8) — 48% of the
+    /// photograph — instead of the 75% one tap gives.
+    ///
+    /// ⚠️ **AND IT IS DONE OVER A MIRRORED PICTURE, WHICH IS THE ONLY LINE THAT
+    /// CROSSES THE WIRE.** `filling` is handed the reflection to carry, and a
+    /// version that simply passed `false` would be caught in this file and nowhere
+    /// else in the surface's suite — the author's flip would survive every other
+    /// control and quietly die on a tap of a shape.
+    @Test func aShapeChosenAgainAfterAnotherLandsExactlyWhereItDidAlone() {
+        let view = surface()
+        view.flipAcross()
+        view.choose(.square)
+        let alone = view.crop
+
+        view.choose(.portrait)
+        let between = view.crop
+        view.choose(.square)
+
+        #expect(between.rect.width < alone.rect.width,
+                "guard: 4:5 must really be a different rectangle — \(between.rect)")
+        #expect(near(view.crop.rect, alone.rect), "\(view.crop.rect) vs \(alone.rect)")
+        #expect(near(view.debugBox.width / view.debugBox.height, 1, 0.01),
+                "and the box is square again: \(view.debugBox)")
+        #expect(view.crop.isMirrored, "the reflection survived the shapes: \(view.crop)")
+    }
+
+    /// The report in its own words — *"ça crop de plus en plus"*. Five shapes in a
+    /// row may not leave the author holding less of their photograph than one tap
+    /// on the last of them.
+    ///
+    /// ⚠️ **THE ORDER IS CHOSEN SO THE LAST SHAPE IS NOT THE GREEDIEST, AND THE
+    /// FIRST DRAFT OF THIS TEST WAS GREEN AGAINST THE BROKEN CODE FOR EXACTLY
+    /// THAT REASON.** A ratcheting scale only shows when the run has already
+    /// asked for MORE scale than the shape being measured needs: 9:16 wants 1.56
+    /// of this picture and 1:1 wants 1.193, so a run that ends on 9:16 hides the
+    /// defect perfectly. Ending on 1:1 leaves the broken code holding 44% where
+    /// one tap holds 75%.
+    @Test func aRunThroughFiveShapesNeverCutsDeeperThanTheLastOneAlone() {
+        let alone = surface()
+        alone.choose(.square)
+        let target = alone.crop.rect
+
+        let view = surface()
+        for ratio in [CropRatio.portrait, .classic, .tall, .wide, .square] {
+            view.choose(ratio)
+        }
+        let kept = view.crop.rect
+
+        #expect(kept.width * kept.height >= target.width * target.height - 0.001,
+                "five taps kept \(kept.width * kept.height), one tap keeps \(target.width * target.height)")
+        #expect(near(kept, target), "and the very same rectangle: \(kept) vs \(target)")
+    }
+
+    /// ⚠️ **IDEMPOTENT *FOR THAT ANGLE*, WHICH IS THE ONLY THING IT CAN MEAN.**
+    /// The straighten angle changes the bounding box `MediaCrop.rect` is measured
+    /// against and changes how much picture a shape can be given, so a shape chosen
+    /// over a turned picture cannot land where it lands over an upright one. What
+    /// must hold is that at a FIXED angle the same tap is the same rectangle — and
+    /// that the box is still inside the photograph, which at 12° is a tilted
+    /// rectangle with empty corners around it.
+    @Test func choosingShapesOverAStraightenedPictureIsIdempotentToo() {
+        let view = surface()
+        view.setAngle(12)
+        view.choose(.square)
+        let alone = view.crop
+
+        view.choose(.tall)
+        view.choose(.wide)
+        view.choose(.square)
+
+        #expect(view.crop.angle == 12, "guard: the straightening survived: \(view.crop.angle)")
+        #expect(near(view.crop.rect, alone.rect), "\(view.crop.rect) vs \(alone.rect)")
+        #expect(view.crop.rect.minX >= -0.002 && view.crop.rect.minY >= -0.002
+                    && view.crop.rect.maxX <= 1.002 && view.crop.rect.maxY <= 1.002,
+                "and nothing outside the picture was kept: \(view.crop.rect)")
+        #expect(alone.rect.width < 0.75,
+                "guard: 12° really does cost the square some width — \(alone.rect)")
+    }
+
+    /// ⚠️ **"FREE" IS THE AUTHOR'S OWN RECTANGLE AND MUST NOT BE RE-DERIVED FROM
+    /// ANYTHING.** Every other chip now throws the placement away and computes
+    /// from the picture; this one has no shape to compute from, and falling back
+    /// to the box's current proportions would silently recentre what the author
+    /// framed.
+    @Test func theFreeShapeLeavesTheAuthorsOwnRectangleAlone() {
+        let view = surface()
+        let box = view.debugBox
+        view.debugBeginDrag(at: CGPoint(x: box.minX, y: box.midY))
+        view.debugDrag(by: CGPoint(x: 90, y: 0))
+        view.debugEndDrag()
+        let theirs = view.crop
+
+        #expect(theirs.rect.minX > 0.05, "guard: the drag must really have kept the right side — \(theirs.rect)")
+
+        view.choose(.free)
+
+        #expect(view.ratio == .free)
+        #expect(view.crop == theirs, "not a fraction moved: \(view.crop.rect) vs \(theirs.rect)")
     }
 
     // MARK: - Turning

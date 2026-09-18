@@ -315,6 +315,48 @@ struct MediaCropGeometryTests {
         }
     }
 
+    /// ⚠️ **THE DECISION BEHIND AN IDEMPOTENT CHIP, WRITTEN AS ARITHMETIC.**
+    /// "From the original" means the largest rectangle of the chosen shape that
+    /// fits the PICTURE at the angle it now stands — a tilted rectangle inscribed
+    /// in the photograph, not the largest that fits its turned bounding box,
+    /// whose corners are empty. `holds` walks the four corners by hand; the hair
+    /// below the scale is what makes "largest" an edge rather than an adjective.
+    @Test func fillingABoxTakesTheLargestRectangleOfItsShapeCentredOnThePicture() {
+        for angle in [CGFloat(0), 12, -30, 90] {
+            let box = MediaCropGeometry.box(ratio: 1, in: Self.surface)
+            let placed = MediaCropGeometry.filling(
+                box, source: Self.source, angle: angle, isMirrored: false
+            )
+            let crop = MediaCropGeometry.crop(box: box, placement: placed, source: Self.source)
+            let ahair = CropPlacement(
+                centre: placed.centre, scale: placed.scale * 0.998, angle: angle
+            )
+
+            #expect(holds(box, placed, source: Self.source),
+                    "angle \(angle): a corner of the box left the picture")
+            #expect(!holds(box, ahair, source: Self.source),
+                    "angle \(angle): a hair less must NOT fit, or it is not the largest")
+            #expect(near(crop.rect.midX, 0.5, 0.001) && near(crop.rect.midY, 0.5, 0.001),
+                    "angle \(angle): centred on the picture — \(crop.rect)")
+            #expect(near(placed.angle, angle, 0.0001), "angle \(angle): the turn is carried, not reset")
+        }
+    }
+
+    /// The witness for the line above: the reflection is carried too, and it is
+    /// the one field of a placement that no arithmetic here reads.
+    @Test func fillingCarriesTheReflectionItWasGiven() {
+        let box = MediaCropGeometry.box(ratio: 1, in: Self.surface)
+        let mirrored = MediaCropGeometry.filling(
+            box, source: Self.source, angle: 0, isMirrored: true
+        )
+        let plain = MediaCropGeometry.filling(
+            box, source: Self.source, angle: 0, isMirrored: false
+        )
+
+        #expect(mirrored.isMirrored && !plain.isMirrored)
+        #expect(near(mirrored.scale, plain.scale, 0.0001), "and it changes nothing else")
+    }
+
     @Test func aRatioBoxIsAsLargeAsItCanBe() {
         let wide = MediaCropGeometry.box(ratio: 16.0 / 9.0, in: Self.surface)
         let tall = MediaCropGeometry.box(ratio: 9.0 / 16.0, in: Self.surface)

@@ -286,11 +286,12 @@ struct MediaEditorTrackToolsTests {
 
     // MARK: - The two strips share the bar
 
-    /// ⚠️ **THE RULE EXISTED AND NOTHING APPLIED IT.** `EditorSelectorLayout` was
-    /// written for the day a second strip arrived and said so in its own comment.
-    /// This is that day: without it, two intrinsic widths and a flexible space
-    /// let Auto Layout squeeze whichever one it prefers.
-    @Test func theTwoStripsAreHeldToTheirShareOfTheBar() throws {
+    /// ⚠️ **THE ACTIONS KEEP THEIR WIDTH AND THE SELECTOR TAKES THE REST.** The
+    /// percentages that used to divide the bar gave three glyphs half of it
+    /// while the strip that scrolls went short; asked for as *"la toolbar de
+    /// gauche prend toujours sa taille intrinsèque, et celle de droite prend ce
+    /// qui reste"*.
+    @Test func theActionsKeepTheirWidthAndTheSelectorTakesTheRest() throws {
         let screen = open(Self.items(1, videosAt: [0]))
 
         choose(Mode.trim, on: screen)
@@ -300,20 +301,30 @@ struct MediaEditorTrackToolsTests {
         let held = try #require(screen.editor.debugStripWidths, "the rule is not being applied")
         let geometry = screen.editor.barGeometry
         let available = geometry.available(in: bar.bounds.width)
-        #expect(held.leading > 0 && held.trailing > 0)
-        #expect(held.leading <= available * EditorSelectorLayout.ceiling
-                && held.trailing <= available * EditorSelectorLayout.ceiling,
-                "one strip took more than its ceiling: \(held) of \(available)")
-        // ⚠️ **WHAT THE BAR IS CHARGED, NOT ITS BARE WIDTH** — the two halves
-        // of a bare 375 overran an SE's bar by the margins, platters and gap.
+        let wants = screen.editor.debugActionBar.intrinsicContentSize.width
+        #expect(held.leading == wants, "the actions were squeezed to \(held.leading) of \(wants)")
+        #expect(abs(held.leading + held.trailing - available) < 0.5,
+                "the bar is not fully spoken for: \(held) of \(available)")
+        // ⚠️ **WHAT THE BAR IS CHARGED, NOT ITS BARE WIDTH** — two halves of a
+        // bare 375 overran an SE's bar by the margins, platters and gap.
         let used = 2 * geometry.margin + held.leading + held.trailing + 2 * geometry.platter + geometry.gap
         #expect(used <= bar.bounds.width + 0.5, "together they overrun the bar: \(held), \(geometry)")
-        let expected = EditorSelectorLayout.widths(
-            leadingWants: screen.editor.debugActionBar.intrinsicContentSize.width,
-            trailingWants: screen.editor.debugCategoryBar.intrinsicContentSize.width,
-            available: available
-        )
-        #expect(held == expected, "not the rule's answer")
+    }
+
+    /// The same rule with the song pill in the leading slot: it keeps the width
+    /// it wants — which it states through its subviews, not as an intrinsic
+    /// size — and the selector takes what is left of the bar.
+    @Test func theSongPillKeepsItsWidthTheSameWay() throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        screen.window.layoutIfNeeded()
+
+        let bar = try #require(screen.navigation.toolbar.bounds.width > 0 ? screen.navigation.toolbar : nil)
+        let held = try #require(screen.editor.debugStripWidths, "the rule is not applied without the timeline")
+        let available = screen.editor.barGeometry.available(in: bar.bounds.width)
+        #expect(held.leading > 0, "the pill was measured at \(held.leading)")
+        #expect(abs(held.leading + held.trailing - available) < 0.5, "\(held) of \(available)")
+        #expect(held.trailing > screen.editor.debugCategoryBar.intrinsicContentSize.height,
+                "the selector was left less than a bubble")
     }
 
     /// ⚠️ **HELD BEFORE THE HAND-OVER.** UIKit decides whether a bar item fits
@@ -333,16 +344,6 @@ struct MediaEditorTrackToolsTests {
         let held = try #require(screen.editor.debugStripWidths)
         #expect(handedOver.leading == held.leading, "the actions went over at \(handedOver.leading)")
         #expect(handedOver.trailing == held.trailing, "the selector went over at \(handedOver.trailing)")
-    }
-
-    @Test func thePillsArrangementIsLeftAloneWhenItIsTheOneInTheSlot() {
-        let screen = open(Self.items(1, videosAt: [0]))
-
-        choose(Mode.filters, on: screen)
-        screen.window.layoutIfNeeded()
-
-        #expect(screen.editor.debugStripWidths == nil,
-                "the rule is for two strips; the pill has its own floor")
     }
 
     // MARK: - Splitting
@@ -818,15 +819,15 @@ struct MediaEditorTrackToolsTests {
         choose(Mode.trim, on: screen)
         let tools = try tools(in: screen)
         putTheNeedle(at: 5, on: tools.track, in: screen)
-        #expect(screen.editor.debugCropResetItem.isEnabled == false, "guard: nothing to undo")
+        #expect(screen.editor.debugUndoItem.isEnabled == false, "guard: nothing to step back to")
 
         screen.editor.debugActionBar.debugTap(
             MediaEditorViewController.TrackAction.speed.rawValue
         )
         tools.speeds.debugTap(rate: 2)
-        #expect(screen.editor.debugCropResetItem.isEnabled, "a rate is something to undo")
+        #expect(screen.editor.debugUndoItem.isEnabled, "a rate is something to step back from")
 
-        screen.editor.debugTapReset()
+        screen.editor.debugTapUndo()
         #expect(MediaTimelining.rate(at: 5, in: tools.track.debugTimeline, withinSource: 10) == 1)
     }
 

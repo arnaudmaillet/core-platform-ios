@@ -54,28 +54,32 @@ final class MediaEditorFiltersMode: MediaEditorMode {
 
     func screenWillDisappear() {}
 
-    var canReset: Bool {
-        guard let host, let id = host.currentItemID else { return false }
-        return host.edits(for: id).filter != .original
-    }
-
-    func reset() {
-        guard let id = host?.currentItemID, canReset else { return }
-        row.setSelected(.original)
-        apply(.original, to: id)
+    /// A step put a whole edit back: the ring may be on another chip, and the
+    /// chips themselves wear the page's dials.
+    func editsWereRestored(for id: String) {
+        guard let host, host.bandContent === row, host.currentItemID == id else { return }
+        refresh()
     }
 
     /// Feeds the row the picture it is choosing a look for, and restores the
     /// look this item already carries.
     ///
+    /// ⚠️ **A VIDEO'S CHIPS ARE THE REFERENCE PHOTOGRAPH'S** — `MediaLookReference`
+    /// has the why, and the crop it is NOT cut by. Nothing is fetched for a clip
+    /// then: the picture is already in hand and it is the same one for every
+    /// clip. A clip whose reference is missing falls back below, to its poster.
+    ///
     /// ⚠️ **ONE PICTURE, NOT NINE — AND THE PAGE'S OWN WHEN IT IS IN HAND.** The
     /// row filters locally from a single source. The canvas-sized picture the
-    /// screen holds (a video's poster, on a clip) is shrunk and used at once;
-    /// only a page the screen holds nothing for goes to the library, whose seam
-    /// caches nothing.
+    /// screen holds is shrunk and used at once; only a page the screen holds
+    /// nothing for goes to the library, whose seam caches nothing.
     private func refresh() {
         guard let current = host, let id = current.currentItemID else { return }
         row.setSelected(current.edits(for: id).filter)
+        if MediaLookReference.standsIn(for: current.item(id)), let reference = MediaLookReference.picture {
+            dress(from: reference, for: id, cutByTheAuthorsCrop: false)
+            return
+        }
         if let held = current.heldPicture, held.id == id {
             dress(from: held.image, for: id)
             return
@@ -98,11 +102,20 @@ final class MediaEditorFiltersMode: MediaEditorMode {
     /// uncut picture instead is the invisible version of this bug: nine chips
     /// previewing looks on a photograph that no longer matches the canvas above
     /// them.
-    private func dress(from source: UIImage, for id: String) {
+    ///
+    /// ⚠️ **AND THE REFERENCE PHOTOGRAPH IS NOT CUT AT ALL**
+    /// (`cutByTheAuthorsCrop: false`). The author's crop frames THEIR film; the
+    /// reference is not their film, so a cut taken from it would throw away
+    /// part of the spectrum the chips are read against and promise a framing
+    /// these pixels know nothing about. The dials and the effect still ride
+    /// along, because those ARE what the page will wear.
+    private func dress(from source: UIImage, for id: String, cutByTheAuthorsCrop: Bool = true) {
         guard let host else { return }
         let edits = host.edits(for: id)
         let pixels = MediaFilterRowView.thumbnailSide * max(1, row.traitCollection.displayScale)
-        let base = MediaLookThumbnails.base(source, crop: edits.crop, pixels: pixels)
+        let base = MediaLookThumbnails.base(
+            source, crop: cutByTheAuthorsCrop ? edits.crop : .untouched, pixels: pixels
+        )
         row.show(base, wearing: edits.look)
     }
 

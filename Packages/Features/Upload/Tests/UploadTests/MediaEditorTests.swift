@@ -142,6 +142,117 @@ struct MediaEditorTests {
         #expect(page.accessibilityLabel == "Video")
     }
 
+    // MARK: - The history
+
+    private enum Band {
+        static let filters = 3
+        static let crop = 4
+    }
+
+    private func choose(_ band: Int, on screen: Screen) {
+        screen.editor.debugCategoryBar.select(band)
+        screen.window.layoutIfNeeded()
+    }
+
+    /// ⚠️ **A BAR ITEM IS BORN ENABLED.** Seen on the simulator before it was
+    /// seen here: the screen opened with two bright arrows over a photograph
+    /// nobody had touched, and tapping either did nothing at all — `stepBack`
+    /// finds no step and returns. Nothing else re-decides them until something
+    /// changes, so the bar has to ask on the way up.
+    @Test func theArrowsAreDeadOnAScreenNobodyHasTouchedYet() {
+        let screen = open(Self.items(2))
+
+        #expect(!screen.editor.debugUndoItem.isEnabled)
+        #expect(!screen.editor.debugRedoItem.isEnabled)
+    }
+
+    /// ⚠️ **A STEP IS THE AUTHOR'S, NOT THE BAND'S.** The arrow that stood here
+    /// undid "what the open mode owns", so the same tap meant different things
+    /// depending on which tools happened to be showing — and a change made in a
+    /// band the author had since left could not be reached at all. Two changes
+    /// in two bands, taken back in the order they were made.
+    @Test func aStepBackCrossesTheBandItWasTakenIn() async throws {
+        let screen = open(Self.items(1))
+        choose(Band.filters, on: screen)
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        row.debugTap(.mono)
+        choose(Band.crop, on: screen)
+        try await settle(until: { screen.editor.debugCropSurface.debugHasPicture })
+        screen.editor.debugCropSurface.setAngle(6)
+
+        screen.editor.debugTapUndo()
+
+        #expect(screen.editor.debugCrop(for: "item-0").angle == 0, "the last change came off")
+        #expect(screen.editor.edits(for: "item-0").filter == .mono, "and only the last one")
+
+        screen.editor.debugTapUndo()
+
+        #expect(screen.editor.edits(for: "item-0").filter == .original)
+        #expect(!screen.editor.debugHasEdits(for: "item-0"), "back to a page nobody had touched")
+        #expect(!screen.editor.debugUndoItem.isEnabled)
+        #expect(screen.editor.debugRedoItem.isEnabled, "both steps are ahead now")
+    }
+
+    @Test func aStepTakenBackCanBeTakenAgain() async throws {
+        let screen = open(Self.items(1))
+        choose(Band.filters, on: screen)
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        row.debugTap(.mono)
+        screen.editor.debugTapUndo()
+        #expect(screen.editor.edits(for: "item-0").filter == .original, "guard")
+        // ⚠️ **READ THE RING AFTER THE STEP BACK, NOT ONLY AFTER THE STEP
+        // FORWARD.** Asserting it only at the end proves nothing: the row is
+        // ALREADY on the look the redo restores, so a row that is never
+        // re-stated at all reads as correct. Measured — deleting the mode's
+        // `editsWereRestored` left this test green until this line existed.
+        #expect(row.debugSelected == .original,
+                "the ring stayed on a look the page no longer wears")
+
+        screen.editor.debugTapRedo()
+
+        #expect(screen.editor.edits(for: "item-0").filter == .mono)
+        #expect(row.debugSelected == .mono, "the row went on showing the look that was undone")
+        #expect(!screen.editor.debugRedoItem.isEnabled)
+    }
+
+    /// ⚠️ **A NEW CHANGE ENDS THE WAY FORWARD.** What was undone and then built
+    /// on top of is not a page that ever existed, and offering to walk into it
+    /// would hand the author a look they never chose.
+    @Test func aNewChangeAfterAStepBackClosesTheWayForward() async throws {
+        let screen = open(Self.items(1))
+        choose(Band.filters, on: screen)
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        row.debugTap(.mono)
+        screen.editor.debugTapUndo()
+        #expect(screen.editor.debugRedoItem.isEnabled, "guard")
+
+        row.debugTap(.noir)
+
+        #expect(!screen.editor.debugRedoItem.isEnabled)
+        screen.editor.debugTapUndo()
+        #expect(screen.editor.edits(for: "item-0").filter == .original,
+                "the way back is the real one: got \(screen.editor.edits(for: "item-0").filter)")
+    }
+
+    /// ⚠️ **THE ARROWS ACT ON THE PICTURE IN FRONT OF THE AUTHOR.** One list for
+    /// the whole screen would have a step taken on page two undo something on
+    /// page one — a change they cannot see happening, on a photograph they would
+    /// have to swipe back to find.
+    @Test func theArrowsActOnThePageInFront() async throws {
+        let screen = open(Self.items(2))
+        choose(Band.filters, on: screen)
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        row.debugTap(.mono)
+        #expect(screen.editor.debugUndoItem.isEnabled, "guard: page one has a step")
+
+        screen.editor.debugScrollToPage(1)
+
+        #expect(!screen.editor.debugUndoItem.isEnabled, "page two has a history of its own, and it is empty")
+        screen.editor.debugScrollToPage(0)
+        #expect(screen.editor.debugUndoItem.isEnabled, "and page one's came back with it")
+        #expect(screen.editor.edits(for: "item-0").filter == .mono, "nothing was undone by the swipe")
+    }
+
     // MARK: - The bars
 
     /// Bar items are laid out from the trailing edge inwards, so "Next" is
@@ -149,17 +260,14 @@ struct MediaEditorTests {
     @Test func theTopBarKeepsItsPromisedOrder() throws {
         let screen = open(Self.items(2))
 
-        // ⚠️ THE FIRST RIGHT ITEM IS THE RIGHTMOST — bar items on that side lay
-        // out from the trailing edge inwards. `[Next, fit]` is what draws
-        // `[fit][Next]`, which is the order the screen promises.
+        // ⚠️ **THE TRAILING SIDE IS JUST "Next" NOW.** The fill/fit glyph used to
+        // stand beside it; it has gone to the crop tools, where it is reachable
+        // at the moment it means something.
         let right = try #require(screen.editor.navigationItem.rightBarButtonItems)
-        #expect(right.count == 2, "the fill/fit glyph, then Next at the edge")
+        #expect(right.count == 1, "got \(right.map { $0.title ?? $0.accessibilityLabel ?? "?" })")
         #expect(right.first?.title == "Next", "Next takes the edge")
-        #expect(right.last?.title == nil, "and the fit control is a glyph, not a word")
-        #expect(
-            right.last?.accessibilityLabel == "Fit the picture",
-            "named for what it will DO: the canvas fills, so the button offers fit"
-        )
+        #expect(screen.editor.debugFitActionName == "Fit the picture",
+                "named for what it will DO: the canvas fills, so the glyph offers fit")
         // ⚠️ **THE CHEVRON IS UIKit'S NOW, AND THAT IS WHAT KEEPS THE
         // BACK-SWIPE.** A custom leading item stands IN PLACE of the back button
         // and UIKit disables the interactive pop along with it — silently, so no
@@ -174,8 +282,8 @@ struct MediaEditorTests {
         // losing a control to exactly that. A titleless item asserted by `title`
         // reads as `[nil]`, which is why this asks the accessibility label: an
         // icon button with no spoken name is a button VoiceOver cannot announce.
-        #expect(left.map(\.accessibilityLabel) == ["Save draft", "Undo every change in this mode"],
-                "the draft and the undo arrow; the chevron is the system's")
+        #expect(left.map(\.accessibilityLabel) == ["Save draft", "Undo", "Redo"],
+                "the draft and the two history arrows; the chevron is the system's")
         #expect(left.allSatisfy { $0.image != nil }, "an icon bar item with no icon is a blank capsule")
         #expect(screen.editor.navigationItem.leftItemsSupplementBackButton)
         #expect(
@@ -194,7 +302,9 @@ struct MediaEditorTests {
         #expect(hosted.count == 2, "the pill and the strip, and nothing else")
         #expect(hosted.first is SoundPillView, "the song leads: \(hosted)")
         #expect(hosted.last is IconSelectorBar, "and the categories follow it")
-        #expect(screen.editor.debugCategoryTitles == MediaEditorViewController.categories.map(\.title))
+        // A photograph is offered every category but the timeline.
+        #expect(screen.editor.debugCategoryTitles
+                == MediaEditorViewController.categories(for: .photo).map(\.title))
         #expect(screen.editor.debugCategoryBar.suppressesBackdrop, "no bubble inside a bubble")
         #expect(screen.navigation.isToolbarHidden == false, "raised by the screen itself")
     }
@@ -311,20 +421,26 @@ struct MediaEditorTests {
         #expect(page.debugContentMode == .scaleAspectFill)
     }
 
-    @Test func theFitButtonLaysTheCurrentPictureWhole() async throws {
+    /// ⚠️ **THE FILL/FIT GLYPH LEFT THE HEADER FOR THE CROP TOOLS**, beside the
+    /// quarter turn and the mirror — asked for in those words. All three say
+    /// how the picture sits in its frame, and none of them has anything to act
+    /// on while the author is somewhere else.
+    @Test func theFitGlyphLaysTheCurrentPictureWholeAndLivesWithTheCropTools() async throws {
         let screen = open(Self.items(2))
         try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        #expect(screen.editor.navigationItem.rightBarButtonItems?.count == 1,
+                "the header still carries the fill/fit glyph")
 
-        screen.editor.debugTapFit()
+        screen.editor.debugCropTools.debugTapFit()
         screen.window.layoutIfNeeded()
 
         #expect(screen.editor.debugFit(for: "item-0") == .fit)
         let page = try #require(Self.pages(in: screen.window).first { $0.representedID == "item-0" })
         #expect(page.debugContentMode == .scaleAspectFit, "shown whole, with the ground around it")
-        #expect(
-            screen.editor.navigationItem.rightBarButtonItems?.last?.accessibilityLabel == "Fill the screen",
-            "and the glyph now offers the way back"
-        )
+        #expect(screen.editor.debugCropTools.debugFitLabel == "Fill the screen",
+                "and the glyph now offers the way back")
+        #expect(screen.editor.debugCropTools.debugGlyphs.allSatisfy { $0 != nil },
+                "a symbol that does not resolve draws an empty button")
     }
 
     /// ⚠️ THE REGRESSION THIS PINS. A screen-wide flag would make choosing for
@@ -400,6 +516,44 @@ struct MediaEditorTests {
     ///
     /// Reported from a device: sliding the pill onto a category moved the pill and
     /// left the band showing the previous one until the viewer also tapped it.
+    /// ⚠️ **THE SCREEN OPENS ON NOTHING.** It used to open with Effects chosen
+    /// over an EMPTY band — one filled icon promising tools that were not
+    /// there, and a first tap on it that counted as a reselect. Asked for as
+    /// *"il faudrait que le sélecteur puisse avoir un state neutre, ce qui sera
+    /// le state par défaut lorsque la fenêtre apparaîtra"*.
+    @Test func theStripOpensWithNothingChosen() async throws {
+        let screen = open(Self.items(2))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        #expect(screen.editor.debugCategoryBar.selection == nil,
+                "the strip opened on \(String(describing: screen.editor.debugCategoryBar.selection))")
+        #expect(screen.editor.debugSelectedCategory == nil)
+        #expect(!screen.editor.debugCategoryBar.debugLensIsShowing, "a pill stands over nothing")
+        #expect(screen.editor.debugBand.debugIsShowing == false)
+    }
+
+    /// ⚠️ **AND A SECOND TAP PUTS THE TOOLS AWAY AGAIN** — *"si on réappuie
+    /// dessus, cela met le state du sélecteur à vide"*. The same gesture used to
+    /// re-open the tools it had just opened.
+    @Test func tappingTheChosenCategoryAgainClosesItsTools() async throws {
+        let screen = open(Self.items(2))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        let filters = try #require(screen.editor.debugCategoryTitles.firstIndex(of: "Filters"))
+        screen.editor.debugCategoryBar.debugTap(filters)
+        #expect(screen.editor.debugBand.debugIsShowing, "guard: the tools are up")
+
+        screen.editor.debugCategoryBar.debugTap(filters)
+
+        #expect(screen.editor.debugCategoryBar.selection == nil,
+                "the strip kept \(String(describing: screen.editor.debugCategoryBar.selection))")
+        #expect(screen.editor.debugBand.debugIsShowing == false, "the tools stayed up")
+        #expect(!screen.editor.debugCategoryBar.debugLensIsShowing)
+
+        // And a third tap opens them again, rather than doing nothing at all.
+        screen.editor.debugCategoryBar.debugTap(filters)
+        #expect(screen.editor.debugBand.debugIsShowing)
+    }
+
     @Test func choosingACategoryOpensWhatItOffers() async throws {
         let screen = open(Self.items(2))
         try await settle(until: { !Self.pages(in: screen.window).isEmpty })

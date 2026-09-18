@@ -455,15 +455,15 @@ struct MediaEditorTransitionsTests {
 
     // MARK: - Guards
 
-    @Test func theResetArrowWaitsForTheRowToClose() async throws {
+    @Test func theArrowsWaitForTheRowToClose() async throws {
         let (screen, tools) = try await cutClip()
-        #expect(screen.editor.debugCropResetItem.isEnabled, "guard: a cut clip cannot be reset")
+        #expect(screen.editor.debugUndoItem.isEnabled, "guard: a cut clip cannot be reset")
 
         tools.track.debugTapSeam(0)
-        #expect(!screen.editor.debugCropResetItem.isEnabled, "the arrow could undo the cut the row is on")
+        #expect(!screen.editor.debugUndoItem.isEnabled, "the arrow could undo the cut the row is on")
 
         tools.transitions.debugTapClose()
-        #expect(screen.editor.debugCropResetItem.isEnabled)
+        #expect(screen.editor.debugUndoItem.isEnabled)
     }
 
     /// ⚠️ **NOT BEFORE THE FILE'S REAL LENGTH IS KNOWN** — the stretch is

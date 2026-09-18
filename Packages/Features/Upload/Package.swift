@@ -36,7 +36,17 @@ let package = Package(
                 "MediaCore",
                 "MediaPlayback",
                 "StickerKit"
-            ]
+            ],
+            // The photograph a VIDEO's look cards are drawn from, read back
+            // through `Bundle.module` by `MediaLookReference`.
+            //
+            // .copy, not .process: StickerKit's shape, and for its second
+            // reason as well as its first — the folder keeps its structure in
+            // the bundle, so the licence note beside the picture travels with
+            // it rather than being left behind in a commit message. There is
+            // nothing for an asset-catalogue rule to do to one JPEG that the
+            // cards do not already do themselves.
+            resources: [.copy("Resources/LookReference")]
         ),
         .testTarget(
             name: "UploadTests",

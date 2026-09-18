@@ -127,4 +127,122 @@ enum MediaOverlayGeometry {
         next.rotation = (placement.rotation + radians).truncatingRemainder(dividingBy: 2 * .pi)
         return next
     }
+
+    // MARK: - Snapping
+
+    /// How near the middle of the picture an overlay's centre has to come
+    /// before it is taken to be ON it — in SCREEN POINTS on the page.
+    ///
+    /// ⚠️ **POINTS, NOT FRACTIONS, AND THE DIFFERENCE IS NOT COSMETIC.** The
+    /// same 0.02 of the picture is 6pt of travel on a 300pt-wide fitted page and
+    /// 24pt on the 1200pt-wide filled one this file's own tests use — the snap
+    /// would grab four times as hard on one lay as on the other, for the same
+    /// finger. A window stated in points is the same window under every finger,
+    /// and the conversion is the one this type already owns.
+    ///
+    /// 8pt is under a fifth of the 44pt target a finger is given
+    /// (`MediaOverlayItemView.minimumTarget`): near enough that an overlay the
+    /// author *meant* to centre falls in, far enough that one they meant to
+    /// leave 20pt off-centre stays where they left it.
+    static let centreReach: CGFloat = 8
+
+    /// How near a right angle a turn has to come before it is taken to BE one,
+    /// in degrees either side.
+    ///
+    /// ⚠️ **5°, WHICH IS `StraightenDial.detent`'s NUMBER FOR THE SAME REASON.**
+    /// A 5° window each side of four right angles claims 40 of the 360 degrees
+    /// — a ninth of the dial — so eight ninths of a turn is still free. A
+    /// window wide enough to catch a sloppy hand (15° is often suggested) makes
+    /// a deliberate 10° tilt impossible to hold, and a tilt is a thing authors
+    /// do on purpose.
+    static let squareReach: Double = 5
+
+    /// Which marks a placement lit by falling into a snap.
+    ///
+    /// ⚠️ **NAMED FOR WHAT IS TRUE OF THE OVERLAY, NOT FOR THE LINE DRAWN.**
+    /// `centredAcross` means the centre sits on the picture's vertical middle —
+    /// which is drawn as a VERTICAL guide. Naming the member after the line
+    /// would have every reader ask which of the two axes "horizontal guide"
+    /// refers to.
+    struct OverlaySnapMarks: OptionSet, Hashable, Sendable {
+        let rawValue: Int
+
+        init(rawValue: Int) { self.rawValue = rawValue }
+
+        /// Centred left-to-right: `centre.x == 0.5`.
+        static let centredAcross = OverlaySnapMarks(rawValue: 1 << 0)
+        /// Centred top-to-bottom: `centre.y == 0.5`.
+        static let centredDown = OverlaySnapMarks(rawValue: 1 << 1)
+        /// Turned to a right angle — 0, 90, 180, 270 or a full 360.
+        static let square = OverlaySnapMarks(rawValue: 1 << 2)
+    }
+
+    /// A placement after the snaps, and what they lit.
+    struct SnappedPlacement: Equatable {
+        var placement: OverlayPlacement
+        var marks: OverlaySnapMarks
+    }
+
+    /// The right angle `radians` is taken to be, or nil when it is between two.
+    ///
+    /// ⚠️ **THE FULL TURN IS ITS OWN DETENT, AND IT IS NOT FOLDED BACK TO
+    /// ZERO.** `rotated` keeps a rotation within one turn either way, so a hand
+    /// that has gone all the way round reads 6.28 and not 0. Answering `2π`
+    /// here draws identically to answering 0 — `CGAffineTransform` does not care
+    /// — and it keeps the answer a pure function of the input, which folding
+    /// would not: the author who turned a full circle did turn a full circle.
+    static func squared(_ radians: Double) -> Double? {
+        let quarter = Double.pi / 2
+        let nearest = (radians / quarter).rounded() * quarter
+        let window = squareReach * .pi / 180
+        // ⚠️ `<=`: the window is INCLUSIVE, so exactly 5° off snaps and 5°
+        // plus a hair does not. The tests are written either side of that edge.
+        return abs(radians - nearest) <= window ? nearest : nil
+    }
+
+    /// `placement` with every snap applied, and the marks they lit.
+    ///
+    /// ⚠️ **HAND IT THE RAW PLACEMENT, NEVER ITS OWN LAST ANSWER.** Feeding the
+    /// snapped value back in is the numb-control failure `StraightenDial.advanced`
+    /// records from the other side: at a snapped 0° a further 3° of turn is 3°,
+    /// which snaps to 0° again, and the overlay can never be turned out of the
+    /// detent at all. The caller advances an unsnapped placement of its own and
+    /// asks this only for what to DRAW — which is why this takes a placement and
+    /// not a delta.
+    ///
+    /// ⚠️ **THE CLAMP COMES AFTER THE SNAP, AND A CLAMPED AXIS LIGHTS NOTHING.**
+    /// On a filled picture whose middle the chrome covers, pulling the centre to
+    /// 0.5 would put it where nobody can grab it; `visible` wins, and the mark
+    /// is only lit for an axis that actually ended on the middle.
+    static func snapped(
+        _ placement: OverlayPlacement, in mediaRect: CGRect, visible: CGRect
+    ) -> SnappedPlacement {
+        var next = placement
+        if mediaRect.width > 0, abs(placement.centre.x - 0.5) * mediaRect.width <= centreReach {
+            next.centre.x = 0.5
+        }
+        if mediaRect.height > 0, abs(placement.centre.y - 0.5) * mediaRect.height <= centreReach {
+            next.centre.y = 0.5
+        }
+        next.centre = clamped(next.centre, into: visible)
+        var marks: OverlaySnapMarks = []
+        if next.centre.x == 0.5 { marks.insert(.centredAcross) }
+        if next.centre.y == 0.5 { marks.insert(.centredDown) }
+        if let turn = squared(placement.rotation) {
+            next.rotation = turn
+            marks.insert(.square)
+        }
+        return SnappedPlacement(placement: next, marks: marks)
+    }
+
+    /// Whether the engine owes a tick: a mark is lit now that was not lit a
+    /// sample ago.
+    ///
+    /// ⚠️ **ON THE WAY IN ONLY, WHICH IS WHY THIS IS A SUBTRACTION AND NOT A
+    /// `!=`.** Leaving a snap is not an event the hand needs told about —
+    /// `MediaOverlayTrashView` arms with a tap and disarms in silence for the
+    /// same reason — and a `!=` would click twice for every detent crossed.
+    static func ticks(from previous: OverlaySnapMarks, to next: OverlaySnapMarks) -> Bool {
+        !next.subtracting(previous).isEmpty
+    }
 }

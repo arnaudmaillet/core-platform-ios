@@ -37,10 +37,24 @@ protocol MediaEditorMode: AnyObject {
     /// away every sheet.
     func screenWillDisappear()
 
-    /// Whether the undo arrow has anything to undo in this mode, on the current
-    /// page.
-    var canReset: Bool { get }
+    /// A step back or forward put a whole edit back on `id`: whatever this mode
+    /// is showing about that page is now out of date.
+    ///
+    /// ⚠️ **ANY FIELD MAY HAVE MOVED.** A restored state is not "this mode's
+    /// part changed" — it is the page as it was, so a mode states everything it
+    /// draws again rather than diffing.
+    func editsWereRestored(for id: String)
 
-    /// The undo arrow was tapped while this mode's tools were up.
-    func reset()
+    // ⚠️ **NO `canReset`, AND NO `reset()`.** Every mode used to answer "what
+    // would the header's arrow take off you?", because one arrow acted on
+    // whichever mode was open. The arrows walk the author's own history now and
+    // ask no mode anything — what is left of "reset" is a control a mode owns
+    // outright (the ⊘ icon in the Effects row, the crop's own reset), so it is
+    // that mode's own business and not a seam.
+}
+
+extension MediaEditorMode {
+    /// Most modes draw nothing of their own about a page, so a restored state
+    /// changes nothing they show.
+    func editsWereRestored(for id: String) {}
 }

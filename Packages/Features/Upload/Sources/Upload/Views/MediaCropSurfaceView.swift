@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaPlayback
 import UIKit
 
 /// The shape a crop is held to.
@@ -99,6 +100,14 @@ final class MediaCropSurfaceView: UIView {
     private var isMirrored = false
 
     private let picture = UIImageView()
+    /// ⚠️ **A CLIP IS AIMED AT WHILE IT PLAYS.** The box used to be drawn over a
+    /// poster frame — still, and often the least representative frame of the
+    /// film — which is fine for a rectangle that is the same on every frame and
+    /// wrong for the author, who is framing a MOVING picture. Asked for as
+    /// *"problème lors de l'édition du recadrage d'une vidéo, la vidéo ne se
+    /// joue pas dans la fenêtre"*. The surface is laid by exactly the same
+    /// placement as the still beneath it, so the two cannot drift apart.
+    private let video = VideoRenderView()
     private let dimming = UIView()
     private let hole = CAShapeLayer()
     private let outline = CropFrameView()
@@ -122,6 +131,16 @@ final class MediaCropSurfaceView: UIView {
 
         picture.contentMode = .scaleToFill
         addSubview(picture)
+        // ⚠️ **`.resize`, TO MATCH `scaleToFill` EXACTLY.** The placement below
+        // sizes this view to the picture's own pixels and then turns and scales
+        // it; a gravity that preserved the aspect ratio would letterbox INSIDE
+        // that frame and the film would sit a few points off the still.
+        video.videoGravity = .resize
+        // Until the first composed frame lands there is nothing to show, and
+        // the still underneath is what the author should see.
+        video.paintsOpaqueGround = false
+        video.isHidden = true
+        addSubview(video)
 
         // ⚠️ **THE SCRIM IS THE GROUND, NOT BLACK.** It covers the picture outside
         // the box AND the bare margins beside it. A black scrim over a white ground
@@ -275,12 +294,37 @@ final class MediaCropSurfaceView: UIView {
     }
 
     /// Holds the box to a shape.
+    ///
+    /// ⚠️ **THE SHAPE IS MEASURED FROM THE WHOLE PICTURE EVERY TIME, NEVER FROM
+    /// THE RECTANGLE THE LAST SHAPE LEFT — REPORTED, AND THE REPORT WAS RIGHT.**
+    /// This used to settle the existing placement with `covering`, which only
+    /// ever enlarges: 1:1 then 4:5 kept the taller shape's scale, and coming back
+    /// to 1:1 framed 48% of the photograph where the first tap had framed 75%.
+    /// Playing with the chips zoomed in further and further and nothing gave the
+    /// room back. `filling` derives the scale and the centre from the picture
+    /// alone, so the same tap is always the same rectangle — the largest one of
+    /// that shape the picture can give, centred on the picture rather than on
+    /// whatever the author had framed.
+    ///
+    /// ⚠️ **AND THAT COSTS THE AUTHOR'S OWN ZOOM, DELIBERATELY — IT IS THE ONE
+    /// THING THAT CANNOT BE BOTH KEPT AND IDEMPOTENT.** A turn keeps it
+    /// (`MediaCropGeometry.zoom`) because a turn adjusts the framing the author
+    /// is holding; a chip is an absolute statement about shape, and the accrued
+    /// zoom IS the defect. Carrying the centre instead of recentring fails for
+    /// the same reason one step later: each shape clamps the slide to its own
+    /// room, and `min(min(x, roomB), roomA)` is not `min(x, roomA)` for a picture
+    /// the author has panned.
+    ///
+    /// "Free" returns before any of it, which is what keeps it meaning the
+    /// author's own rectangle rather than a shape in disguise.
     func choose(_ newRatio: CropRatio) {
         ratio = newRatio
         guard surface.width > 0 else { return }
         guard let value = newRatio.value(for: turnedSource) else { return }
         box = MediaCropGeometry.box(ratio: value, in: surface)
-        placement = MediaCropGeometry.covering(placement, source: source, box: box)
+        placement = MediaCropGeometry.filling(
+            box, source: source, angle: placement.angle, isMirrored: placement.isMirrored
+        )
         UIView.animate(withDuration: Metrics.settle, delay: 0, options: [.curveEaseOut]) {
             self.apply()
         }
@@ -314,6 +358,22 @@ final class MediaCropSurfaceView: UIView {
         apply()
     }
 
+    /// The surface the clip plays on while its box is being aimed, and whether
+    /// it is showing at all.
+    var videoSurface: VideoRenderView { video }
+
+    func showsVideo(_ showing: Bool) {
+        video.isHidden = !showing
+    }
+
+    /// Internal for tests: whether the film is showing over the still, and
+    /// whether it is laid exactly where the still is.
+    var debugShowsVideo: Bool { !video.isHidden }
+    var debugVideoMatchesThePicture: Bool {
+        video.bounds == picture.bounds && video.center == picture.center
+            && video.transform == picture.transform
+    }
+
     private func apply() {
         picture.bounds = CGRect(origin: .zero, size: source)
         picture.center = placement.centre
@@ -328,6 +388,10 @@ final class MediaCropSurfaceView: UIView {
         picture.transform = CGAffineTransform(
             rotationAngle: MediaCropGeometry.radians(placement.angle)
         ).scaledBy(x: placement.isMirrored ? -placement.scale : placement.scale, y: placement.scale)
+        // The film is laid exactly as the still is — one statement, two views.
+        video.bounds = picture.bounds
+        video.center = picture.center
+        video.transform = picture.transform
 
         outline.frame = box
         hole.frame = bounds
