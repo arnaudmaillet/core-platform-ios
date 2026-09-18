@@ -107,6 +107,7 @@ final class AVCaptureSource: CaptureSource {
 
     private func adopt(_ snapshot: AVCaptureEngine.Snapshot) {
         defer { onStateChange?() }
+        hasReported = true
         position = snapshot.position
         displayScale = snapshot.displayScale
         lenses = snapshot.lensFactors.map(CaptureLens.init(factor:))
@@ -154,9 +155,24 @@ final class AVCaptureSource: CaptureSource {
         adopt(await engine.flip())
     }
 
+    /// Whether a snapshot has told this side the camera's numbers yet.
+    private var hasReported = false
+
+    /// ⚠️ **THE ENGINE CONVERTS, ON ITS QUEUE, WITH THE CAMERA IT IS ON.** This
+    /// used to multiply by `displayScale` here, which is the camera of the
+    /// last snapshot: before the first one it was 1 — and device factor 1 is
+    /// the ULTRA-WIDE on a triple-camera phone — and during a flip it was the
+    /// other camera's. The engine answers with the zoom it applied, which is
+    /// what the chips then show.
     func setZoom(_ factor: CGFloat, smoothly: Bool) {
-        zoom = min(max(factor, zoomRange.lowerBound), zoomRange.upperBound)
-        engine.setZoom(zoom * displayScale, smoothly: smoothly)
+        if hasReported { zoom = min(max(factor, zoomRange.lowerBound), zoomRange.upperBound) }
+        engine.setZoom(display: factor, smoothly: smoothly) { [weak self] applied in
+            Task { @MainActor in
+                guard let self else { return }
+                self.zoom = applied
+                self.onStateChange?()
+            }
+        }
     }
 
     func focus(at point: CGPoint) {
@@ -482,16 +498,23 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         }
     }
 
-    func setZoom(_ factor: CGFloat, smoothly: Bool) {
+    /// Zooms the camera in use to the DISPLAY factor `display`, converted with
+    /// that camera's own scale here on the queue, and reports the display
+    /// factor it applied.
+    func setZoom(display: CGFloat, smoothly: Bool, applied: @escaping @Sendable (CGFloat) -> Void) {
         queue.async { [self] in
             guard let device = videoInput?.device, (try? device.lockForConfiguration()) != nil else { return }
-            let clamped = min(max(factor, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
+            let scale = Self.displayScale(of: device)
+            // The same ceiling `snapshot()` offers the author.
+            let highest = min(device.maxAvailableVideoZoomFactor, scale * 15)
+            let clamped = min(max(display * scale, device.minAvailableVideoZoomFactor), highest)
             if smoothly {
                 device.ramp(toVideoZoomFactor: clamped, withRate: 8)
             } else {
                 device.videoZoomFactor = clamped
             }
             device.unlockForConfiguration()
+            applied(clamped / scale)
         }
     }
 
