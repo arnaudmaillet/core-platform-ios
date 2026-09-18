@@ -491,10 +491,45 @@ struct CaptureFlowTests {
         screen.camera.debugTimerRow.debugPick(.three)
         screen.camera.debugTapShutter()
         try await Task.sleep(for: .milliseconds(700))
-        #expect(screen.handed.editors == 0, "nothing is taken during the countdown")
+        // ⚠️ THE CALL TO THE CAMERA, NOT THE EDITOR: a photograph taken at once
+        // could still be on its way to the editor after 700ms on a loaded
+        // machine, and the check would pass for the wrong reason.
+        #expect(screen.source.photoFlashes.isEmpty, "nothing is taken during the countdown")
         screen.camera.debugTapShutter()
         try await Task.sleep(for: .seconds(3))
-        #expect(screen.handed.editors == 0, "a cancelled countdown takes nothing")
+        #expect(screen.source.photoFlashes.isEmpty, "a cancelled countdown takes nothing")
+    }
+
+    /// The countdown ends in the photograph it counted down to. A countdown
+    /// can only run LONG on a loaded machine, so "not before 2.5s" is safe.
+    @Test func theTimerTakesThePhotoWhenItsCountdownEnds() async throws {
+        let screen = try await open()
+        screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        screen.camera.debugTimerRow.debugPick(.three)
+        screen.camera.debugTapShutter()
+        try await Task.sleep(for: .milliseconds(2500))
+        #expect(screen.source.photoFlashes.isEmpty, "not before the countdown ends")
+        try await settle(for: 10) { screen.handed.editors == 1 }
+        #expect(screen.source.photoFlashes.count == 1)
+        #expect(screen.handed.editors == 1)
+    }
+
+    /// A hold with a timer set records hands-free once the countdown ends —
+    /// the finger that started it has long gone.
+    @Test func aHoldWithATimerRecordsHandsFreeAfterTheCountdown() async throws {
+        let screen = try await open()
+        screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        screen.camera.debugTimerRow.debugPick(.three)
+        screen.camera.debugBeginHold()
+        screen.camera.debugEndHold()
+        #expect(!screen.camera.isRecording, "counting down, not recording")
+        #expect(screen.camera.shutterLogic.phase == .locked, "and the release did not stop it")
+        try await settle(for: 10) { screen.camera.isRecording }
+        try #require(screen.camera.isRecording)
+        try await Task.sleep(for: .milliseconds(500))
+        screen.camera.debugTapShutter()
+        try await settle { screen.camera.take.clips.count == 1 }
+        #expect(screen.camera.take.clips.count == 1)
     }
 
     // MARK: - Zoom, flip, library
@@ -561,9 +596,9 @@ struct CaptureFlowTests {
         #expect(screen.source.starts == 0, "the session is never started")
         screen.camera.debugTapShutter()
         screen.camera.debugBeginHold()
-        try await Task.sleep(for: .milliseconds(300))
         #expect(!screen.camera.isRecording)
-        #expect(screen.handed.editors == 0)
+        #expect(screen.source.photoFlashes.isEmpty, "no photograph was asked for")
+        #expect(screen.source.limits.isEmpty, "no recording was asked for")
     }
 
     /// No camera at all is not a refusal: the notice says so, offers no
