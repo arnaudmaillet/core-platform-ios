@@ -168,6 +168,10 @@ final class NewPostViewController: UIViewController {
     /// is rebuilt on every "Next".
     private let draft: PostDraft
 
+    #if DEBUG
+    private var hasRunTheDebugScript = false
+    #endif
+
     private var postTitle = ""
     private var caption = ""
     private var settings = Settings()
@@ -365,7 +369,32 @@ final class NewPostViewController: UIViewController {
         isOnScreen = true
         bringTheStripIn()
         playCover()
+        #if DEBUG
+        runTheDebugScript()
+        #endif
     }
+
+    #if DEBUG
+    /// ⚠️ **A PUBLISH HAD NO SCRIPTED WAY IN, AND THE PHOTOS PATH NEEDS ONE.**
+    /// Keeping a copy runs a change block on Photos' own queue, and a block
+    /// that inherited this screen's isolation compiles and traps the moment
+    /// Photos calls it (`photos-handler-isolation-trap`) — no test host can
+    /// answer the permission prompt that path needs, so only a running app can
+    /// show it does not. `-upload-save-to-photos` switches the copy on and
+    /// `-upload-publish` presses Post, after a beat; both once per screen.
+    private func runTheDebugScript() {
+        guard !hasRunTheDebugScript else { return }
+        hasRunTheDebugScript = true
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-upload-save-to-photos"), !settings.savesToPhotos {
+            setToggle(true, for: .saveToPhotos)
+            reconfigure([.saveToPhotos])
+        }
+        if arguments.contains("-upload-publish") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.post() }
+        }
+    }
+    #endif
 
     /// The strip's entrance: its tiles, held invisible since they were built,
     /// ripple in as the screen slides in — see `NewPostMediaCell.popTilesIn`.
