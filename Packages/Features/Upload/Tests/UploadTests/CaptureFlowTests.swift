@@ -561,6 +561,12 @@ struct CaptureFlowTests {
         camera.debugTapShutter()
         try await settle { navigation.topViewController is MediaEditorViewController }
         let editor = try #require(navigation.topViewController as? MediaEditorViewController)
+        // ⚠️ THE EDITOR READS THE CAPTURES. Handed the device library instead it
+        // draws nothing — and this test stayed GREEN through that break, because
+        // the finalisation screen, which publishes, still read the captures.
+        #expect(editor.library === camera.captures, "the editor asks the library that holds the photograph")
+        let page = await editor.library.thumbnail(for: try #require(editor.items.first).id, size: CGSize(width: 90, height: 160))
+        #expect(page != nil, "and gets it")
         editor.debugTapNext()
         try await settle { navigation.topViewController is NewPostViewController }
         let finalisation = try #require(navigation.topViewController as? NewPostViewController)
