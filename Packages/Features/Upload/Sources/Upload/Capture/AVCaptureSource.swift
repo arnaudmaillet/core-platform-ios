@@ -205,7 +205,10 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
 
     private func configure() {
         session.beginConfiguration()
-        defer { session.commitConfiguration() }
+        defer {
+            session.commitConfiguration()
+            adoptPhotoDimensions()
+        }
         // 1080p, 16:9 — video and photographs share the frame the preview shows,
         // so the ratio's crop is the same rectangle on both.
         session.sessionPreset = .high
@@ -252,15 +255,27 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         videoInput = input
         currentPosition = position
         rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
-        if let dimensions = device.activeFormat.supportedMaxPhotoDimensions.last {
-            photoOutput.maxPhotoDimensions = dimensions
-        }
         // Start on the wide lens, which is display factor 1.
         if (try? device.lockForConfiguration()) != nil {
             device.videoZoomFactor = Self.displayScale(of: device)
             if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
             device.unlockForConfiguration()
         }
+    }
+
+    /// The largest photograph the active format offers.
+    ///
+    /// ⚠️ **AFTER THE COMMIT, AND ONLY ONCE THE OUTPUT IS CONNECTED.** The
+    /// preset picks the device's format at `commitConfiguration()`, and
+    /// `maxPhotoDimensions` raises an exception for any size the ACTIVE format
+    /// does not list — so read inside the configuration block it could name a
+    /// size from the format being replaced, on a camera just switched to.
+    private func adoptPhotoDimensions() {
+        guard photoOutput.connection(with: .video) != nil,
+              let largest = videoInput?.device.activeFormat.supportedMaxPhotoDimensions
+                  .max(by: { $0.width * $0.height < $1.width * $1.height })
+        else { return }
+        photoOutput.maxPhotoDimensions = largest
     }
 
     /// ⚠️ THE ROTATION IS THE COORDINATOR'S, READ AT EACH CAPTURE — so a photo
@@ -321,6 +336,7 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
                 installCamera(position)
                 applyConnections()
                 session.commitConfiguration()
+                adoptPhotoDimensions()
                 continuation.resume(returning: snapshot())
             }
         }

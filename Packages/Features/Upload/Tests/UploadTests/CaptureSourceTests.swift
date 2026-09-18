@@ -11,8 +11,14 @@ import UIKit
 /// ⚠️ **PIXELS AND DURATIONS, NOT "A FILE EXISTS".** `PlaceholderVideoFetcher`
 /// wrote black clips for its whole life because no test ever read a pixel out
 /// of one; these read the colour of a photograph and the length of a clip.
+///
+/// ⚠️ **SERIALIZED, AND TIME-LIMITED.** Each test runs a camera drawing thirty
+/// frames a second and writes real clips in real time; run side by side on one
+/// main actor they starved each other, and a 0.8s hold measured 1.9s. One at a
+/// time, the clock the tests read is the clock the clips were recorded on. The
+/// limit is for a stop that never comes: broken, a recording never resolves.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite(.serialized, .timeLimit(.minutes(3)))
 struct CaptureSourceTests {
     /// Runs the simulated camera until it has produced a frame.
     private func running() async throws -> (SimulatedCaptureSource, CaptureFolder) {
@@ -60,17 +66,21 @@ struct CaptureSourceTests {
         defer { source.stop() }
 
         let url = folder.newFile("clip", pathExtension: "mov")
-        // ⚠️ THE WALL CLOCK BETWEEN START AND STOP, NOT THE SLEEP ASKED FOR.
-        // Suites run in parallel on one main actor, and a 0.8s sleep came back
-        // after 1.9s (measured); the clip was honest about that, the test was not.
+        // ⚠️ WHAT THE SOURCE HAD RECORDED WHEN THE STOP WAS ASKED FOR, AND THE
+        // WALL CLOCK AS A CEILING — NOT THE SLEEP ASKED FOR. On a machine under
+        // load a 0.8s sleep came back after 1.9s, and the first frame can be
+        // late too (measured: held 2.48s, recorded 2.19s at a load average of
+        // 487). The clip was honest both times; the test was not.
         let startedAt = CACurrentMediaTime()
         let promise = source.startRecording(to: url, torch: false, limit: 60)
         try await Task.sleep(for: .milliseconds(800))
+        let atStop = source.recordedDuration
         source.stopRecording()
         let held = CACurrentMediaTime() - startedAt
         let clip = try await promise.value
-        #expect(held >= 0.8)
-        #expect(abs(clip.duration - held) < 0.25, "held \(held)s, recorded \(clip.duration)s")
+        #expect(atStop > 0.3, "it was recording: \(atStop)s")
+        #expect(abs(clip.duration - atStop) < 0.25, "recorded \(atStop)s at the stop, the clip says \(clip.duration)s")
+        #expect(clip.duration <= held + 0.1, "never longer than it was held: \(held)s")
         let measured = await CapturedMediaLibrary.duration(of: clip.url)
         #expect(abs(measured - clip.duration) < 0.1, "the file agrees: \(measured)")
 
@@ -83,8 +93,7 @@ struct CaptureSourceTests {
     /// A stop that arrives before the first frame still ends the recording —
     /// the ordering `startRecording` promises. Time-limited: broken, it never
     /// resolves at all.
-    @Test(.timeLimit(.minutes(1)))
-    func aStopRightAfterTheStartEndsTheRecording() async throws {
+    @Test func aStopRightAfterTheStartEndsTheRecording() async throws {
         let (source, folder) = try await running()
         defer { source.stop() }
         let promise = source.startRecording(to: folder.newFile("clip", pathExtension: "mov"), torch: false, limit: 60)

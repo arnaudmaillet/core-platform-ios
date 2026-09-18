@@ -9,8 +9,11 @@ import UIKit
 /// The camera screen driven through its own code paths on the SIMULATED
 /// source — photograph, hold, lock, undo, Next — up to the editor it hands
 /// over to, and, through the builder, to a published post.
+///
+/// ⚠️ **SERIALIZED, AND TIME-LIMITED** — `CaptureSourceTests`' reasons: every
+/// test runs a live camera, a Metal renderer and a window on the main actor.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite(.serialized, .timeLimit(.minutes(3)))
 struct CaptureFlowTests {
     /// The simulated camera, with the calls the screen makes written down.
     @MainActor
@@ -143,19 +146,21 @@ struct CaptureFlowTests {
     }
 
     /// Holds the shutter for `seconds` and waits for the clip to land.
-    /// Returns how long the finger was ACTUALLY down — see
+    /// Returns how long the finger was ACTUALLY down, and what the source had
+    /// recorded when it lifted — see
     /// `CaptureSourceTests.aClipLastsAsLongAsTheRecordingAndStopsAtItsLimit`.
     @discardableResult
-    private func record(_ screen: Screen, seconds: Double) async throws -> TimeInterval {
+    private func record(_ screen: Screen, seconds: Double) async throws -> (held: TimeInterval, atRelease: TimeInterval) {
         let before = screen.camera.take.clips.count
         let startedAt = CACurrentMediaTime()
         screen.camera.debugBeginHold()
         try await Task.sleep(for: .seconds(seconds))
+        let atRelease = screen.source.recordedDuration
         screen.camera.debugEndHold()
         let held = CACurrentMediaTime() - startedAt
         try await settle { screen.camera.take.clips.count == before + 1 && !screen.camera.isRecording }
         try #require(screen.camera.take.clips.count == before + 1, "the clip never landed")
-        return held
+        return (held, atRelease)
     }
 
     // MARK: - Photograph
@@ -220,10 +225,11 @@ struct CaptureFlowTests {
     /// Next offered — and a tap now records instead of photographing.
     @Test func aHoldRecordsAClipAndOffersUndoAndNext() async throws {
         let screen = try await open()
-        let held = try await record(screen, seconds: 0.8)
+        let (held, atRelease) = try await record(screen, seconds: 0.8)
 
         let clip = try #require(screen.camera.take.clips.first)
-        #expect(abs(clip.duration - held) < 0.25, "held \(held)s, recorded \(clip.duration)s")
+        #expect(abs(clip.duration - atRelease) < 0.25, "\(atRelease)s recorded at the release, the clip says \(clip.duration)s")
+        #expect(clip.duration <= held + 0.1, "never longer than the hold: \(held)s")
         #expect(FileManager.default.fileExists(atPath: clip.url.path))
         #expect(screen.camera.shutter.debugSegmentCount == 1)
         #expect(screen.camera.debugUndoIsShowing)
