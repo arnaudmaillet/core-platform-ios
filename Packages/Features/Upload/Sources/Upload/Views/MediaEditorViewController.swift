@@ -2693,22 +2693,40 @@ final class MediaEditorViewController: UIViewController {
     /// Bumped for every set of card pictures asked for: only the newest lands.
     private var pictureRequests = 0
 
-    /// Dresses every card with the piece's own frame in that card's look — then
-    /// the whole media's look over it, which is the order the compositor draws.
+    /// Dresses every card in that card's look — then the whole media's look over
+    /// it, which is the order the compositor draws.
     ///
-    /// ⚠️ **ONE FRAME, NINE LOOKS, OFF THE MAIN THREAD** — the filter row's rule.
+    /// ⚠️ **ONE PICTURE, NINE LOOKS, OFF THE MAIN THREAD** — the filter row's rule.
+    ///
+    /// ⚠️ **AND THE PICTURE IS THE REFERENCE PHOTOGRAPH, NOT THE PIECE'S OWN
+    /// FRAME** — reported from a screenshot of nine identical BLACK cards. F31
+    /// said "that piece's own frame" and it was written before F38; the two
+    /// disagreed and F38 is the one that survives, for the reason it gives: a
+    /// clip's frame is routinely black, blurred or one flat colour, and nine
+    /// looks drawn on it say nothing about any of them. The piece is still what
+    /// is REHEARSED — the loop under the row is the piece itself (F32), which is
+    /// where the author sees the look on their own film.
+    ///
+    /// ⚠️ **THE FALLBACK IS STILL THE PIECE'S FRAME**, for the case the bundle
+    /// has no such resource: a row of blank cards would be a worse answer than
+    /// a row of dark ones.
     private func dressSegmentFilterCards(id: String, piece: MediaSegment) {
         pictureRequests += 1
         let request = pictureRequests
         let whole = edits(for: id).look
         let row = timelineTools.segmentFilters
         let middle = (piece.start + piece.end) / 2
+        let reference = MediaLookReference.standsIn(for: item(id)) ? MediaLookReference.picture : nil
         Task { [weak self] in
-            guard let self, let file = await library.videoFile(for: id) else { return }
-            let frames = await preview.frames(
-                of: file, atSourceSeconds: [middle], height: MediaTransitionRowView.height * 2, spacing: 0
-            )
-            guard let frame = frames.values.first, pictureRequests == request else { return }
+            guard let self else { return }
+            var source = reference
+            if source == nil {
+                guard let file = await library.videoFile(for: id) else { return }
+                source = await preview.frames(
+                    of: file, atSourceSeconds: [middle], height: MediaTransitionRowView.height * 2, spacing: 0
+                ).values.first
+            }
+            guard let frame = source, pictureRequests == request else { return }
             let choices = MediaSegmentFilterRowView.filterChoices
             let pictures = await Task.detached(priority: .userInitiated) {
                 choices.map { choice -> UIImage? in
