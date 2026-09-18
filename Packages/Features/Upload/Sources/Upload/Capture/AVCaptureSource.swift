@@ -148,8 +148,7 @@ final class AVCaptureSource: CaptureSource {
     }
 
     func flip() async {
-        let snapshot = await engine.switchTo(position.flipped)
-        adopt(snapshot)
+        adopt(await engine.flip())
     }
 
     func setZoom(_ factor: CGFloat, smoothly: Bool) {
@@ -446,11 +445,19 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         )
     }
 
-    func switchTo(_ position: CapturePosition) async -> Snapshot {
+    /// Turns to the other camera — the other one from the camera in use when
+    /// this runs, on the queue.
+    ///
+    /// ⚠️ **NOT A TARGET WORKED OUT ON THE MAIN ACTOR.** The first version was
+    /// handed `position.flipped`, read from a `position` that updates only once
+    /// a flip has finished: two quick flips both asked for the front camera,
+    /// and the second one did nothing while its animation said otherwise.
+    /// Resolved here, each queued flip turns the camera the one before it left.
+    func flip() async -> Snapshot {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 session.beginConfiguration()
-                installCamera(position)
+                installCamera(currentPosition.flipped)
                 applyConnections()
                 session.commitConfiguration()
                 adoptPhotoDimensions()
