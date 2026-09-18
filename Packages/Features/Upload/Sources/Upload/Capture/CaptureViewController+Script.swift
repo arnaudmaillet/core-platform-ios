@@ -15,7 +15,8 @@ import UIKit
 /// `lock` (slide onto the padlock), `lift`, `undo`, `next`, `flip`,
 /// `option:<timer|ratio|filters|grid>`, `ratio:<tall|classic|square>`,
 /// `filter:<name>`, `flash:<off|auto|on>`, `timer:<0|3|10>`, `lens:<index>`,
-/// `library`, `frames` (logs the live view's frame time).
+/// `library`, `frames` (logs the live view's frame time), `editor-category:<index>`
+/// (once a capture has opened the editor, chooses one of its categories).
 ///
 /// `-camera-log-frames` logs the live view's mean render time every two
 /// seconds, which is how the frame time in `CaptureLiveView` was measured.
@@ -84,6 +85,12 @@ extension CaptureViewController {
         case "frames":
             let stats = debugLiveView.debugFrameStats
             NSLog("%@", String(format: "[camera-frames] mean %.2f ms drawn %d dropped %d", stats.meanMilliseconds, stats.drawn, stats.dropped))
+        case "editor-category":
+            // The editor a capture opened, one of its categories chosen — so
+            // its toolbar can be set beside the camera's.
+            if let editor = navigationController?.topViewController as? MediaEditorViewController, let index = Int(value) {
+                editor.debugCategoryBar.debugTap(index)
+            }
         default:
             print("[camera-script] unknown step \(step)")
         }
