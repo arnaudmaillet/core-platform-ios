@@ -203,7 +203,10 @@ final class MediaEditorViewController: UIViewController {
         // at the hand-over to decide whether the item fits at all. Swiping onto
         // a video adds one 38pt segment, and the bar went on honouring a fit it
         // decided for five. Re-entrancy is held by `refreshToolbarItems`.
-        refreshToolbarItems(animated: false)
+        //
+        // ⚠️ **ANIMATED, AND AS NEW CONTENT.** Asked for: the icon arriving and
+        // leaving with the bar's own transition rather than blinking in.
+        refreshToolbarItems(animated: true, contentChanged: true)
     }
 
     /// What the leading end of the toolbar offers while the timeline is open.
@@ -1413,7 +1416,7 @@ final class MediaEditorViewController: UIViewController {
     /// reaching for. Charter F18, asked for in exactly those words: with the mode
     /// on, the bottom-left pill is replaced by a second bar carrying split and
     /// speed.
-    private func refreshToolbarItems(animated: Bool) {
+    private func refreshToolbarItems(animated: Bool, contentChanged: Bool = false) {
         // ⚠️ **NOTHING IS HANDED OVER BEFORE THE BAR CAN HOLD IT.** UIKit
         // decides whether an item fits ONCE, from the size its view has at the
         // hand-over, and never reconsiders. The first call comes from
@@ -1459,12 +1462,20 @@ final class MediaEditorViewController: UIViewController {
         // transition for it, and a transition started while another is still
         // running is the moment the bar holds two sets of items at once.
         let held = toolbarItems ?? []
-        let unchanged = held.count == 4
+        // ⚠️ **UNLESS WHAT A VIEW SHOWS HAS CHANGED.** The same strip holding
+        // one category more is, to UIKit, the same item with new content — and
+        // that is precisely the case `identifier` exists for: a fresh item under
+        // the old identifier is matched to the old one, and UIKit animates the
+        // difference itself. Skipped, the timeline's icon appeared and vanished
+        // in a single frame as the author swiped between a clip and a photo.
+        let unchanged = !contentChanged
+            && held.count == 4
             && held[0].customView === leading
             && held[2].customView === categoryBar
         if !unchanged {
             #if DEBUG
             debugRealHandovers += 1
+            debugLastHandoverWasAnimated = animated
             #endif
             setToolbarItems(
                 [
@@ -1630,6 +1641,9 @@ final class MediaEditorViewController: UIViewController {
     /// Internal for tests: how many times the bar was ACTUALLY handed a new
     /// set of items — as opposed to asked to, which is `debugHandoverWidths`.
     private(set) var debugRealHandovers = 0
+    /// Internal for tests: whether the last real hand-over asked UIKit to
+    /// animate it.
+    private(set) var debugLastHandoverWasAnimated = false
     /// Internal for tests: the items the bar is holding, by identity.
     var debugToolbarItems: [UIBarButtonItem] { toolbarItems ?? [] }
     /// Internal for tests: the toolbar's width at each hand-over, in order.

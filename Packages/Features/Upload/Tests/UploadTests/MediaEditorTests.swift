@@ -458,11 +458,22 @@ struct MediaEditorTests {
         screen.window.layoutIfNeeded()
         let before = screen.editor.debugHandoverWidths.count
 
+        let handed = screen.editor.debugRealHandovers
+
         screen.editor.debugScrollToPage(1)
         screen.window.layoutIfNeeded()
 
         #expect(screen.editor.debugHandoverWidths.count > before,
                 "the strip gained a category and the bar was never told")
+        // ⚠️ **A REAL HAND-OVER, AND AN ANIMATED ONE.** Asked for: the timeline's
+        // icon arriving and leaving with the bar's own transition. With the
+        // same views in the same places a hand-over is skipped, so without the
+        // content flag nothing reached UIKit at all and the icon blinked in;
+        // with it, a fresh item under the old identifier is matched to the old
+        // one and UIKit animates the difference — measured on the device as the
+        // icons blurring out and back in over about 150ms.
+        #expect(screen.editor.debugRealHandovers > handed, "the bar was never actually handed anything")
+        #expect(screen.editor.debugLastHandoverWasAnimated, "and it was handed over without its transition")
         let share = try #require(screen.editor.debugBarShare)
         #expect(abs(share.leading + share.trailing - share.available) < 0.5,
                 "and the share did not follow: \(share)")
