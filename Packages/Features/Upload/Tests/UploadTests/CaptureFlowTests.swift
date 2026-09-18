@@ -556,12 +556,26 @@ struct CaptureFlowTests {
     @Test func aRefusedCameraShowsTheNoticeAndShootsNothing() async throws {
         let screen = try await open(answer: .denied)
         #expect(screen.camera.debugNoticeIsShowing)
+        #expect(screen.camera.debugNotice?.debugOffersSettings == true, "the way to Settings")
         #expect(screen.source.starts == 0, "the session is never started")
         screen.camera.debugTapShutter()
         screen.camera.debugBeginHold()
         try await Task.sleep(for: .milliseconds(300))
         #expect(!screen.camera.isRecording)
         #expect(screen.handed.editors == 0)
+    }
+
+    /// No camera at all is not a refusal: the notice says so, offers no
+    /// Settings, and the session is never started.
+    @Test func aDeviceWithNoCameraSaysSoAndOffersNoSettings() async throws {
+        let screen = try await open(answer: .unavailable)
+        let notice = try #require(screen.camera.debugNotice)
+        #expect(notice.kind == .unavailable)
+        #expect(notice.debugTitle == "No camera available")
+        #expect(!notice.debugOffersSettings)
+        #expect(screen.source.starts == 0)
+        screen.camera.debugTapShutter()
+        #expect(screen.source.photoFlashes.isEmpty)
     }
 
     // MARK: - End to end, through the builder

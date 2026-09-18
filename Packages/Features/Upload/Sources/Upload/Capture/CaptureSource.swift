@@ -19,6 +19,9 @@ enum CaptureAuthorization: Equatable, Sendable {
     case authorized(microphone: Bool)
     /// Refused, or refusable only from Settings.
     case denied
+    /// There is no camera to ask for — a device with none, or none usable.
+    /// Nothing in Settings changes that, so nothing offers to.
+    case unavailable
 }
 
 /// One of the zoom stops a camera offers — "0.5", "1", "2", "3" — in the
@@ -230,19 +233,26 @@ protocol CaptureSource: AnyObject {
     func setDeliversFrames(_ on: Bool)
 }
 
-/// The real camera where one exists, the simulated one everywhere else.
+/// The real camera, unless this is a simulator or a DEBUG build with no camera
+/// to find.
 ///
-/// ⚠️ **ASKED OF THE DEVICE, NOT OF THE BUILD.** `#if targetEnvironment` would
-/// be right today and wrong on the first Mac that runs this app with a camera
-/// attached, or a device whose cameras are all in use by a restriction. A
-/// discovery that finds nothing is the one question that is always right.
+/// ⚠️ **THE SIMULATED CAMERA NEVER SHIPS.** The first version fell back to it
+/// in every build, so a RELEASE build on a device whose discovery found no
+/// camera — an iPad without one, cameras restricted by a profile — would have
+/// offered a drawn landscape captioned "SIMULATED CAMERA" and published its
+/// frames as the author's. The simulated source exists only for a simulator
+/// or a DEBUG build; anywhere else the real source answers `.unavailable`,
+/// and the screen says the camera is unavailable.
+///
+/// ⚠️ **INSIDE THOSE BUILDS, ASKED OF THE DEVICE.** A simulator exposes zero
+/// capture devices, which is what picks the simulated one there;
+/// `-camera-simulated` forces it in a DEBUG build on a phone.
 @MainActor
 func makeCaptureSource() -> any CaptureSource {
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-camera-simulated") {
+    #if DEBUG || targetEnvironment(simulator)
+    if ProcessInfo.processInfo.arguments.contains("-camera-simulated") || !AVCaptureSource.hasAnyCamera {
         return SimulatedCaptureSource()
     }
     #endif
-    if AVCaptureSource.hasAnyCamera { return AVCaptureSource() }
-    return SimulatedCaptureSource()
+    return AVCaptureSource()
 }

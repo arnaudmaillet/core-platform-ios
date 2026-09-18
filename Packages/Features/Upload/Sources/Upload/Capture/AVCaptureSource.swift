@@ -46,6 +46,8 @@ final class AVCaptureSource: CaptureSource {
     }
 
     func authorize() async -> CaptureAuthorization {
+        // No camera is not a refusal: nothing in Settings would change it.
+        guard Self.hasAnyCamera else { return .unavailable }
         var video = AVCaptureDevice.authorizationStatus(for: .video)
         if video == .notDetermined {
             video = await AVCaptureDevice.requestAccess(for: .video) ? .authorized : .denied

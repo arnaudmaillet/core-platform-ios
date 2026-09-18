@@ -1,3 +1,6 @@
+// ⚠️ A SIMULATOR AND DEBUG BUILDS ONLY — see `makeCaptureSource()`: the drawn
+// camera must never reach a release build on a phone.
+#if DEBUG || targetEnvironment(simulator)
 import AVFoundation
 import CoreGraphics
 import CoreVideo
@@ -576,3 +579,4 @@ enum SimulatedCameraScene {
         context.restoreGState()
     }
 }
+#endif

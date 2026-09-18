@@ -202,39 +202,55 @@ final class CaptureGridView: UIView {
     }
 }
 
-/// What stands in the preview when the camera is refused: why, and the one
-/// place it can be changed.
+/// What stands in the preview when there is no camera to show: refused —
+/// with the one place that can change it — or not there at all.
 @MainActor
 final class CaptureAccessNoticeView: UIView {
-    var onOpenSettings: (() -> Void)?
+    enum Kind: Equatable {
+        /// Camera access is off; Settings can turn it back on.
+        case denied
+        /// There is no camera. Nothing to open, so no button to open it.
+        case unavailable
+    }
 
-    init() {
+    var onOpenSettings: (() -> Void)?
+    let kind: Kind
+    private let title = UILabel()
+    private let body = UILabel()
+    private var button: UIButton?
+
+    init(_ kind: Kind) {
+        self.kind = kind
         super.init(frame: .zero)
-        let icon = UIImageView(image: UIImage(systemName: "camera.fill"))
+        let icon = UIImageView(image: UIImage(systemName: kind == .denied ? "camera.fill" : "video.slash.fill"))
         icon.tintColor = .secondaryLabel
         icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)
-        let title = UILabel()
-        title.text = "Camera access is off"
+        title.text = kind == .denied ? "Camera access is off" : "No camera available"
         title.font = .preferredFont(forTextStyle: .headline)
         title.textColor = .label
         title.adjustsFontForContentSizeCategory = true
-        let body = UILabel()
-        body.text = "Allow the camera in Settings to take photos and record videos for your posts."
+        body.text = kind == .denied
+            ? "Allow the camera in Settings to take photos and record videos for your posts."
+            : "This device has no camera to take photos or record videos with. You can still post from your library."
         body.font = .preferredFont(forTextStyle: .subheadline)
         body.textColor = .secondaryLabel
         body.numberOfLines = 0
         body.textAlignment = .center
         body.adjustsFontForContentSizeCategory = true
-        var configuration = UIButton.Configuration.prominentGlass()
-        configuration.title = "Open Settings"
-        let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
-            self?.onOpenSettings?()
-        })
-        let stack = UIStackView(arrangedSubviews: [icon, title, body, button])
+        let stack = UIStackView(arrangedSubviews: [icon, title, body])
         stack.axis = .vertical
         stack.alignment = .center
         stack.spacing = Spacing.md
-        stack.setCustomSpacing(Spacing.xl, after: body)
+        if kind == .denied {
+            var configuration = UIButton.Configuration.prominentGlass()
+            configuration.title = "Open Settings"
+            let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
+                self?.onOpenSettings?()
+            })
+            stack.setCustomSpacing(Spacing.xl, after: body)
+            stack.addArrangedSubview(button)
+            self.button = button
+        }
         stack.constrain(in: self) { view in
             stack.centerYAnchor.constraint(equalTo: view.centerYAnchor)
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.xl)
@@ -243,4 +259,8 @@ final class CaptureAccessNoticeView: UIView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Internal for tests.
+    var debugTitle: String? { title.text }
+    var debugOffersSettings: Bool { button != nil }
 }

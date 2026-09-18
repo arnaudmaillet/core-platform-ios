@@ -214,9 +214,12 @@ final class CaptureViewController: UIViewController {
             guard let self else { return }
             let answer = await source.authorize()
             authorization = answer
-            if case .denied = answer {
-                showNotice()
-            } else {
+            switch answer {
+            case .denied:
+                showNotice(.denied)
+            case .unavailable:
+                showNotice(.unavailable)
+            case .authorized:
                 notice?.removeFromSuperview()
                 notice = nil
                 // A real session reports its lenses once it is running.
@@ -1127,9 +1130,9 @@ final class CaptureViewController: UIViewController {
 
     // MARK: - Notices
 
-    private func showNotice() {
+    private func showNotice(_ kind: CaptureAccessNoticeView.Kind) {
         guard notice == nil else { return }
-        let notice = CaptureAccessNoticeView()
+        let notice = CaptureAccessNoticeView(kind)
         notice.onOpenSettings = {
             guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
             UIApplication.shared.open(url)
@@ -1225,6 +1228,7 @@ final class CaptureViewController: UIViewController {
     var debugWindow: CGRect { gridView.frame }
     var debugPreviewBounds: CGRect { previewContainer.bounds }
     var debugNoticeIsShowing: Bool { notice != nil }
+    var debugNotice: CaptureAccessNoticeView? { notice }
     func debugTapUndo() { undoTapped() }
     func debugTapNext() { nextTapped() }
     func debugTapShutter() { shutterTapped() }
