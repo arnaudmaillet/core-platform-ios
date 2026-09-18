@@ -888,6 +888,18 @@ final class MediaEditorViewController: UIViewController {
         configureCanvas()
         configureCategoryStrip()
         showItems()
+        // ⚠️ **THE ARROWS ARE ASKED WHAT THEY CAN DO BEFORE THEY ARE FIRST
+        // DRAWN.** `UIBarButtonItem.isEnabled` is TRUE at birth, so a screen
+        // that only ever re-decides them on a change opens with two live arrows
+        // over a photograph nobody has touched — `stepBack` finds no step,
+        // returns, and the author taps a control that does nothing. Seen on the
+        // simulator before it was seen here.
+        //
+        // ⚠️ **AND AFTER THE CANVAS, NOT IN `configureBars`.** The answer is
+        // `history.canUndo(currentItemID)`, and `currentItemID` reads the
+        // canvas's own offset: asked from the bars, which are stated first, it
+        // traps on a canvas that does not exist yet.
+        refreshHistoryItems()
     }
 
     /// The stack's toolbar carries the category strip, and a toolbar's
@@ -1256,7 +1268,7 @@ final class MediaEditorViewController: UIViewController {
         // ⚠️ AND THE OLD NOTE'S FEAR DOES NOT MATERIALISE: it warned that an
         // inherited button wears the previous screen's title, but no Upload
         // screen HAS a title, so it draws as a bare chevron. Verified on device.
-        // `[‹][save][undo] ⋯ [fit][next]` — the reset arrow stands with the other
+        // `[‹][save][◀][▶] ⋯ [next]` — the two arrows stand with the other
         // things that act on the whole screen rather than on the picture.
         navigationItem.leftBarButtonItems = [saveDraftItem, undoItem, redoItem]
         navigationItem.leftItemsSupplementBackButton = true

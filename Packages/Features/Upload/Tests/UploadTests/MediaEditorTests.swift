@@ -154,6 +154,18 @@ struct MediaEditorTests {
         screen.window.layoutIfNeeded()
     }
 
+    /// ⚠️ **A BAR ITEM IS BORN ENABLED.** Seen on the simulator before it was
+    /// seen here: the screen opened with two bright arrows over a photograph
+    /// nobody had touched, and tapping either did nothing at all — `stepBack`
+    /// finds no step and returns. Nothing else re-decides them until something
+    /// changes, so the bar has to ask on the way up.
+    @Test func theArrowsAreDeadOnAScreenNobodyHasTouchedYet() {
+        let screen = open(Self.items(2))
+
+        #expect(!screen.editor.debugUndoItem.isEnabled)
+        #expect(!screen.editor.debugRedoItem.isEnabled)
+    }
+
     /// ⚠️ **A STEP IS THE AUTHOR'S, NOT THE BAND'S.** The arrow that stood here
     /// undid "what the open mode owns", so the same tap meant different things
     /// depending on which tools happened to be showing — and a change made in a
