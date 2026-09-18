@@ -1,3 +1,4 @@
+import DesignSystem
 import Testing
 import UIKit
 @testable import Upload
@@ -46,6 +47,30 @@ struct BandPopTests {
         #expect(BandPop.collapsedScale > 0.6, "a card this small reads as a different, smaller control")
         #expect(BandPop.collapsedTransform.a == BandPop.collapsedScale)
         #expect(BandPop.collapsedTransform.d == BandPop.collapsedScale, "scaled on one axis only")
+    }
+
+    // MARK: - The press, which states these numbers in DesignSystem
+
+    /// ⚠️ **DESIGNSYSTEM CANNOT IMPORT THIS FILE, SO IT STATES THE NUMBERS AND
+    /// THIS HOLDS THEM EQUAL.** A press springs back on the band's own clock:
+    /// `PressFeedback.Metrics.releaseResponse` is `BandPop.duration`, and the
+    /// two drifting apart would make a tapped card and an arriving one move to
+    /// different beats in the same row.
+    @MainActor
+    @Test func aPressSpringsBackOnTheBandsClock() {
+        #expect(PressFeedback.Metrics.releaseResponse == BandPop.duration)
+    }
+
+    /// ⚠️ **AND IT PASSES REST BY WHAT A BAND ELEMENT LANDS WITH.** An element
+    /// arriving from `collapsedScale` at `dampingRatio` overshoots by
+    /// `(1 − collapsedScale) × e^(−πζ/√(1−ζ²))` of its size; the press's
+    /// `landingOvershoot` is that number, computed here from BandPop's own.
+    @MainActor
+    @Test func aPressOvershootsByWhatABandElementLandsWith() {
+        let zeta = BandPop.dampingRatio
+        let landing = (1 - BandPop.collapsedScale) * exp(-.pi * zeta / (1 - zeta * zeta).squareRoot())
+        #expect(abs(PressFeedback.Metrics.landingOvershoot - landing) < 0.0005,
+                "BandPop lands \(landing) past rest; a press is told \(PressFeedback.Metrics.landingOvershoot)")
     }
 }
 

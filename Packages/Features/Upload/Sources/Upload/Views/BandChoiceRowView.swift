@@ -135,6 +135,13 @@ final class BandChoiceRowView<Choice: Equatable>: UIView {
         closeButton.addAction(
             UIAction { [weak self] _ in self?.onClose?() }, for: .primaryActionTriggered
         )
+        // ⚠️ **IT TICKS, AND IT DOES NOT SCALE: THE GLASS ALREADY MOVES.** The
+        // close button sits in the band's one interactive `UIGlassEffect`,
+        // which answers a touch with a scale and a shimmer of its own — the
+        // platform's press for a glass control, the same answer the bar items
+        // give. A second scale on the glyph inside would shrink it while the
+        // glass around it swelled.
+        PressFeedback.attach(to: closeButton, scales: false)
         glass.contentView.addSubview(closeButton)
         closeHost.target = closeButton
         closeHost.addSubview(glass)
@@ -356,6 +363,7 @@ final class BandChoiceRowView<Choice: Equatable>: UIView {
             layer.cornerRadius = Metrics.cardCorner
             layer.cornerCurve = .continuous
             layer.borderColor = Metrics.cardRim.cgColor
+            PressFeedback.attach(to: self)
             addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
             isAccessibilityElement = true
             let word = face.label
@@ -451,6 +459,9 @@ extension BandChoiceRowView {
     }
     var debugCaptionFrames: [CGRect] { cards.map { $0.debugCaption.convert($0.debugCaption.bounds, to: self) } }
     var debugCards: [UIView] { cards }
+    /// Internal for tests: every control a finger can press — the cards, then
+    /// the close button.
+    var debugPressables: [UIControl] { cards + [closeButton] }
     var debugTakesTouches: Bool { isUserInteractionEnabled && !isHidden }
     var debugScroller: UIScrollView { scroller }
 }

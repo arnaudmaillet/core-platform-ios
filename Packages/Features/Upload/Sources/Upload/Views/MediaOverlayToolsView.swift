@@ -148,6 +148,10 @@ final class MediaOverlayToolsView: UIView {
         face.layer.cornerRadius = Metrics.corner
         face.layer.cornerCurve = .continuous
         face.clipsToBounds = true
+        // ⚠️ **THE FACE GIVES, NOT THE CARD.** The caption under it is a label,
+        // not part of the button, and a word that shrank with a picture it is
+        // not attached to would read as the whole column being pressed.
+        PressFeedback.attach(to: face)
         face.addAction(UIAction { _ in tap() }, for: .touchUpInside)
         NSLayoutConstraint.activate([
             face.widthAnchor.constraint(equalToConstant: Metrics.card),

@@ -173,6 +173,11 @@ final class MediaFilterRowView: UIView {
     func debugChips() -> [UIView] {
         row.arrangedSubviews
     }
+
+    /// Internal for tests: every control a finger can press, in the order read.
+    var debugPressables: [UIControl] {
+        MediaFilter.allCases.compactMap { buttons[$0]?.debugButton }
+    }
 }
 
 /// The row's scroller, which hands a drag to the scroll rather than to the
@@ -195,6 +200,42 @@ final class MediaFilterRowView: UIView {
 /// states the same reasoning: two copies of an arbitration rule drift, and the
 /// drift is invisible until a drag goes missing on one of them.
 final class ChipScrollView: UIScrollView {
+    /// ⚠️ **TOUCHES REACH THE CHIPS AT ONCE — `delaysContentTouches` IS OFF —
+    /// AND THE SCROLL STILL WINS EVERY DRAG, BECAUSE OF THE OVERRIDE BELOW.**
+    /// Every chip here gives under the finger (`PressFeedback`), and left on,
+    /// the scroller hides that. Measured with real XCUITest touches on the
+    /// filter row (iOS 27 simulator), the finger's landing read by a
+    /// recogniser, which the scroller does not hold back:
+    ///
+    /// ```
+    ///                     four taps (32-98ms long)       two 0.6s holds
+    ///   delays ON         touch-down arrives AFTER the   pressed 145-148ms
+    ///                     lift, with the touch-up        after landing
+    ///   delays OFF        pressed 1-4ms after landing*   pressed 3ms after
+    /// ```
+    ///
+    /// (*50ms on the first tap after launch, main thread still busy.) With it
+    /// on, not one tap was ever seen pressed: the chip heard its
+    /// touch-down and its touch-up together, once the finger had gone. Off,
+    /// when the finger drags instead, the pan begins, `touchesShouldCancel`
+    /// answers true for the chip, and the chip receives `.touchCancel` — a
+    /// silent release, measured too: pressed, then released without a tick
+    /// 100ms later as the row scrolled. The two settings are one decision:
+    /// `PagedTabBar`, the map's filter bars and the sticker strip make it the
+    /// same way.
+    ///
+    /// ⚠️ **SHARED WITH THE TIMELINE'S SCROLLER AND SHOT LIST, WHICH HOLD NO
+    /// CONTROLS.** Their film and their shots are plain views driven by
+    /// recognisers on the track itself, and a recogniser is handed its touches
+    /// at once whatever this says; nothing there changes.
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delaysContentTouches = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
     override func touchesShouldCancel(in view: UIView) -> Bool { true }
 
     /// ⚠️ **THE ROW IS ASKED BEFORE ANYTHING OUTSIDE IT.** A drag that begins in
@@ -276,6 +317,10 @@ private final class FilterChip: UIView {
         caption.translatesAutoresizingMaskIntoConstraints = false
 
         button.accessibilityLabel = filter.name
+        // ⚠️ **THE BUTTON IS CLEAR, SO THE CARD IS WHAT GIVES.** The button is a
+        // transparent layer over the picture and its caption; pressing it must
+        // move what the author is looking at.
+        PressFeedback.attach(to: button, moving: self)
         button.addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
 
         addSubview(picture)
@@ -318,6 +363,9 @@ private final class FilterChip: UIView {
         picture.layer.borderWidth = chosen ? ring : 0
         caption.textColor = chosen ? .label : .secondaryLabel
     }
+
+    /// Internal for tests: the clear button a finger actually presses.
+    var debugButton: UIControl { button }
 
     /// Internal for tests: what the ring is drawn in, and how wide it is.
     var ringColour: UIColor? { picture.layer.borderColor.map(UIColor.init(cgColor:)) }

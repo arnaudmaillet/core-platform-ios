@@ -127,6 +127,18 @@ final class StraightenDialView: UIView {
     private let click = UISelectionFeedbackGenerator()
     private var lastDetent = 0
 
+    /// The strip growing while a finger is on the dial — asked for as *"scale
+    /// in légèrement la scrollview de crans tant que l'utilisateur interagit"*.
+    ///
+    /// ⚠️ **THE STRIP GROWS, NOT THE DIAL.** The readout above it is the number
+    /// being changed, and a number that swelled with every touch would read as
+    /// a change of its own. What is picked up is the ruler.
+    ///
+    /// ⚠️ **ON THE FINGER, NOT ON THE PAN.** The pan only begins once the finger
+    /// has travelled; the strip grows the moment it lands, and stays grown until
+    /// it lifts — however far past the dial's own edges the drag has gone.
+    private lazy var hold = PressFeedback.attach(toView: self, style: .hold, moving: ruler)
+
     init() {
         super.init(frame: .zero)
         backgroundColor = .clear
@@ -162,6 +174,8 @@ final class StraightenDialView: UIView {
 
         let drag = UIPanGestureRecognizer(target: self, action: #selector(dragged))
         addGestureRecognizer(drag)
+        // Installed now, not on the first drag that asks for its scale.
+        _ = hold
 
         // A tap on the readout is the way back to level — the same gesture Photos
         // gives the word RESET, without spending a second control on it.
@@ -198,7 +212,7 @@ final class StraightenDialView: UIView {
             // THE LAST ONE. Leaving it cumulative would apply the whole drag on
             // every frame and the dial would run away.
             pan.setTranslation(.zero, in: self)
-            turn(by: travel)
+            turn(byFingerTravel: travel)
         case .ended, .cancelled, .failed:
             settle()
         default:
@@ -214,6 +228,16 @@ final class StraightenDialView: UIView {
 
     private func turn(by travel: CGFloat) {
         turnTo(StraightenDial.advanced(angle, by: travel))
+    }
+
+    /// ⚠️ **DIVIDED BY THE STRIP'S HELD SCALE, OR THE TICKS OUTRUN THE FINGER.**
+    /// The pan measures travel in the dial's own points, and the strip is drawn
+    /// six percent larger while held: a degree is `pointsPerDegree × 1.06` on
+    /// screen, so the travel that moves one must be too. Undivided, a 120pt drag
+    /// would carry the tick the finger landed on seven points past it (0.06 of
+    /// 120) — the one thing `StraightenDial.advanced`'s sign exists to prevent.
+    private func turn(byFingerTravel travel: CGFloat) {
+        turn(by: travel / hold.scale)
     }
 
     private func turnTo(_ newAngle: CGFloat) {
@@ -345,6 +369,13 @@ final class StraightenDialView: UIView {
 extension StraightenDialView {
     /// Internal for tests: the path a real drag takes, without a finger.
     func debugDrag(by travel: CGFloat) { turn(by: travel) }
+    /// Internal for tests: a sample of a real drag, as the pan reports it —
+    /// in the dial's points, before the held scale is taken out.
+    func debugFingerTravel(_ travel: CGFloat) { turn(byFingerTravel: travel) }
+    /// Internal for tests: the feedback that grows the strip.
+    var debugHold: PressFeedback { hold }
+    /// Internal for tests: the strip of ticks.
+    var debugStrip: UIView { ruler }
     /// Internal for tests: the lift at the end of that drag.
     func debugEndDrag() { settle() }
     /// Internal for tests: the readout's own words.

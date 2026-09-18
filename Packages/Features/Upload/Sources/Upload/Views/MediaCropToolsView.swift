@@ -255,6 +255,7 @@ final class MediaCropToolsView: UIView {
         let button = UIButton(configuration: configuration, primaryAction: UIAction { _ in action() })
         button.accessibilityLabel = label
         button.widthAnchor.constraint(equalToConstant: Metrics.button).isActive = true
+        PressFeedback.attach(to: button)
         return button
     }
 
@@ -276,6 +277,7 @@ final class MediaCropToolsView: UIView {
             }
             heightAnchor.constraint(equalToConstant: height).isActive = true
             layer.cornerCurve = .continuous
+            PressFeedback.attach(to: self)
             addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
             isAccessibilityElement = true
             accessibilityTraits = .button
@@ -346,6 +348,13 @@ extension MediaCropToolsView {
             inks.append(("an unchosen shape", chip.debugInk, .systemBackground))
         }
         return inks
+    }
+
+    /// Internal for tests: every control a finger can press, in the order read
+    /// — the turn, the mirror and the fill/fit glyph, then the shapes.
+    var debugPressables: [UIControl] {
+        turns.arrangedSubviews.compactMap { $0 as? UIControl }
+            + CropRatio.allCases.compactMap { chips[$0] }
     }
 
     /// Internal for tests: the paths the two buttons take.

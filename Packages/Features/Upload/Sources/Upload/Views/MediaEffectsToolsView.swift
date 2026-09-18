@@ -345,6 +345,7 @@ final class MediaEffectsToolsView: UIView {
         let button = UIButton(configuration: configuration, primaryAction: UIAction { _ in action() })
         button.accessibilityLabel = label
         button.widthAnchor.constraint(equalToConstant: Metrics.button).isActive = true
+        PressFeedback.attach(to: button)
         return button
     }
 
@@ -532,6 +533,12 @@ final class MediaEffectsToolsView: UIView {
     /// Internal for tests: where the ruler and the row sit, in this view.
     var debugRulerFrame: CGRect { ruler.frame }
     var debugRowFrame: CGRect { scrollerHost.frame }
+    /// Internal for tests: every control a finger can press, in the order read
+    /// — the two icons, then the pills.
+    var debugPressables: [UIControl] {
+        icons.arrangedSubviews.compactMap { $0 as? UIControl }
+            + row.arrangedSubviews.compactMap { $0 as? UIControl }
+    }
     /// Internal for tests: a tap on a dial's pill.
     func debugTapDial(_ key: LookAdjustments.Key) { dialPills[key]?.onTap?() }
     /// Internal for tests: a tap on an effect's pill.
@@ -663,6 +670,7 @@ private final class EffectsPill: UIControl {
             heightAnchor.constraint(equalToConstant: Metrics.height)
         ])
 
+        PressFeedback.attach(to: self)
         addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .touchUpInside)
         isAccessibilityElement = true
         accessibilityLabel = caption

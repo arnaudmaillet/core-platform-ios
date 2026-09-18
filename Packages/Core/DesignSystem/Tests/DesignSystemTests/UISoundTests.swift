@@ -20,6 +20,20 @@ struct UISoundTests {
         #expect(player.duration < 0.2, "a punctuation sound this long smears a staggered row: \(player.duration)s")
     }
 
+    /// ⚠️ **THE TAP PLAYS ON EVERY TAP, SO IT MUST BE OVER BEFORE THE NEXT ONE
+    /// CAN BEGIN.** A finger tapping as fast as it can lands about every 80ms;
+    /// the file was trimmed to its audible 12ms, and anything that grew past a
+    /// quarter of that gap would start to smear a quick run of taps together.
+    @Test func theTapIsInTheBundleAndOverLongBeforeTheNextTap() throws {
+        let url = try #require(
+            Bundle.module.url(forResource: "tap", withExtension: "caf", subdirectory: "Sounds"),
+            "DesignSystem's bundle has no Sounds/tap.caf — check Package.swift's resources"
+        )
+        let player = try AVAudioPlayer(contentsOf: url)
+        #expect(player.duration > 0.005, "got \(player.duration)s")
+        #expect(player.duration < 0.02, "a tap this long smears a run of taps: \(player.duration)s")
+    }
+
     /// ⚠️ **ONE PLAYER PER SOUND WOULD CUT EACH POP OFF WITH THE NEXT.**
     /// `AVAudioPlayer.play()` on a running player restarts it, and these are
     /// asked to overlap: 70ms of sound against a 40ms stagger.

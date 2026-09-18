@@ -272,6 +272,13 @@ final class MediaTextStyleBar: UIView {
         }, for: .valueChanged)
         row.addArrangedSubview(well)
 
+        // ⚠️ **EVERY CONTROL IN THE ROW, AND ONLY THE CONTROLS.** The two
+        // dividers are lines, not buttons. The keyboard under this bar ticks for
+        // its own keys; this is the bar's own tick, on its own buttons.
+        for control in row.arrangedSubviews.compactMap({ $0 as? UIControl }) {
+            PressFeedback.attach(to: control)
+        }
+
         show(style)
     }
 
@@ -364,6 +371,8 @@ final class MediaTextStyleBar: UIView {
         }
     }
 
+    /// Internal for tests: every control a finger can press, in the order read.
+    var debugPressables: [UIControl] { row.arrangedSubviews.compactMap { $0 as? UIControl } }
     /// Internal for tests: the controls, to read what they say.
     var debugBackgroundButton: UIButton { backgroundButton }
     var debugAlignmentButton: UIButton { alignmentButton }

@@ -302,11 +302,50 @@ final class NewPostViewController: UIViewController {
         applyRows()
     }
 
+    /// ⚠️ **THE STRIP'S ENTRANCE STARTS HERE, AS THE PUSH BEGINS — NOT WHEN
+    /// THE SCREEN HAS LANDED.** Asked for as *"déclencher avant, peut-être dès
+    /// le tap sur Next"*. Measured on the iOS 27 simulator, pushes from the
+    /// editor's "Next", in milliseconds after `viewWillAppear` — two untouched,
+    /// then the list's layout forced here, root view alone and root then list:
+    ///
+    /// ```
+    ///                          untouched     forced here
+    ///                        run 1  run 2   root  root+list
+    ///   viewIsAppearing        +17    +32     +6     +9
+    ///   strip cell dequeued    +47    +86    +17    +34
+    ///   list's first layout   +249   +420   +133   +255
+    ///   viewDidAppear         +825  +1010   +692   +811
+    /// ```
+    ///
+    /// The ripple used to start at `viewDidAppear`; it now starts at the end of
+    /// the list's first layout — the last column, +255 against +811. The
+    /// coordinator says the slide is 0.35s, but `viewDidAppear` waits for the
+    /// whole transition to settle: a ripple started there began most of a
+    /// second after the tap, on a screen that had stopped moving. Started here
+    /// it begins about 0.55s sooner, while the push is still under way.
+    ///
+    /// ⚠️ **`viewIsAppearing`, NOT `viewWillAppear` — MEASURED, TOO.** At
+    /// `viewWillAppear` the view is not in a window yet: forcing the list's
+    /// layout there built eight rows outside any window, and the list laid
+    /// itself out again as seven once it was in one — the work done twice, the
+    /// first time wrong. At `viewIsAppearing` the view is in the window at its
+    /// final size (402 wide on this simulator, the width the strip was dequeued
+    /// at in every run), and the one forced layout below is the very pass the
+    /// transition runs a few milliseconds later: the strip comes out at 402 and
+    /// is not laid out again at any other width.
+    override func viewIsAppearing(_ animated: Bool) {
+        super.viewIsAppearing(animated)
+        bringTheStripIn()
+    }
+
     /// ⚠️ **`viewDidAppear`, NOT `viewDidLoad` — THE TILE HAS TO EXIST FIRST.**
     /// The surface is laid over a tile inside the strip's cell, and at load time
     /// the collection view has dequeued nothing: `cellForItem` answers nil and
     /// the cover would silently never start. This is also the moment a pop back
     /// from anywhere lands on, which is what restarts the clip.
+    ///
+    /// The entrance is asked for again here only as a net: it has already run
+    /// from `viewIsAppearing`, and runs once.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         isOnScreen = true
@@ -315,7 +354,7 @@ final class NewPostViewController: UIViewController {
     }
 
     /// The strip's entrance: its tiles, held invisible since they were built,
-    /// ripple in once the screen has landed — see `NewPostMediaCell.popTilesIn`.
+    /// ripple in as the screen slides in — see `NewPostMediaCell.popTilesIn`.
     ///
     /// ⚠️ **ONCE PER SCREEN, AND A REBUILD DOES NOT REPLAY IT.** Changing the
     /// cover reorders the strip, and the reorder rebuilds every tile — but the
@@ -326,12 +365,16 @@ final class NewPostViewController: UIViewController {
     /// "Next" again is a new screen (`UploadFeatureBuilder` builds one per
     /// push), so that entrance does ripple, as it should.
     ///
-    /// ⚠️ **LAID OUT BEFORE THE FLAG IS SET, NOT AFTER.** `viewDidAppear` can
-    /// run before the list has built its first cell (`playCover` carries the
-    /// same note); a strip built with the flag already up would never be held,
-    /// and the first entrance would quietly never happen.
+    /// ⚠️ **LAID OUT BEFORE THE FLAG IS SET, NOT AFTER** — and at
+    /// `viewIsAppearing` the list has not even been given its frame yet
+    /// (measured: 0×0, no rows). The root view's layout gives the list its
+    /// size; only the list's own layout then dequeues the strip — measured,
+    /// the first alone left it at zero rows. A strip built with the flag
+    /// already up would never be held, and the entrance would quietly never
+    /// happen.
     private func bringTheStripIn() {
         guard !stripHasArrived else { return }
+        view.layoutIfNeeded()
         list.layoutIfNeeded()
         stripHasArrived = true
         strip?.popTilesIn()
@@ -407,7 +450,8 @@ final class NewPostViewController: UIViewController {
             cell.reducesMotion = reducesMotion
             cell.show(
                 publishOrder, coverID: coverID, edits: edits,
-                // Held only until the screen lands — see `bringTheStripIn`.
+                // Held only until the screen starts to appear — see
+                // `bringTheStripIn`.
                 holdsForArrival: !stripHasArrived
             ) { [weak self] id, size in
                 await self?.library.thumbnail(for: id, size: size)
@@ -1204,6 +1248,9 @@ extension NewPostViewController {
     var debugCoverID: String? { coverID }
     /// Internal for tests: what would actually be published, in order.
     var debugPublishOrder: [String] { publishOrder.map(\.id) }
+    /// Internal for tests: whether the screen has landed — `viewDidAppear` has
+    /// run — as opposed to being on its way in.
+    var debugHasLanded: Bool { isOnScreen }
     /// Internal for tests: the footer a section is wearing, if any.
     func debugFooterText(forSection index: Int) -> String? {
         Section(rawValue: index).flatMap(footerText(for:))
