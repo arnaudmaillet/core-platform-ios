@@ -136,14 +136,15 @@ public enum VideoTransitionKind: String, CaseIterable, Sendable {
     /// The outgoing picture breaks up into flakes.
     case disintegrate
 
-    /// How long every transition runs, in PLAYED seconds, centred on its cut.
-    /// ⚠️ **NOT STORED PER CUT** — a length no screen can change would be a
-    /// field nothing sets; it becomes one when a duration control exists.
+    /// How long a transition runs, in PLAYED seconds, centred on its cut, when
+    /// the author has not said otherwise — what every cut ran for before a
+    /// duration could be chosen (`VideoExportSegment.transitionSeconds`).
     public static let standardSeconds: Double = 0.5
 
     /// Whether the transition shows both pieces at once — and so needs the
-    /// other side of its cut on a second lane. The dips and the zoom draw each
-    /// piece on its own side of the cut.
+    /// outgoing piece's side of the window on a second lane
+    /// (`VideoExporter.borrowedSides`). The dips and the zoom draw each piece on
+    /// its own side of the cut.
     public var needsBothPictures: Bool {
         switch self {
         case .dipToBlack, .dipToWhite, .zoom: false
@@ -162,6 +163,13 @@ public struct VideoExportSegment: Sendable, Equatable {
     /// The transition at the cut AFTER this piece. ⚠️ Ignored on the last
     /// piece, which has no cut after it.
     public let transitionOut: VideoTransitionKind?
+    /// How long that transition runs, in PLAYED seconds, before
+    /// `VideoExporter.transitionHalf` clamps it to what the two pieces can give.
+    ///
+    /// ⚠️ **THE STANDARD WHENEVER THERE IS NO TRANSITION — THE INITIALISER SEES
+    /// TO IT.** A length on a plain cut is a second spelling of "nothing", and
+    /// two identical plain pieces would compare unequal.
+    public let transitionSeconds: Double
     /// The look this piece alone wears, drawn before any transition blends it
     /// with its neighbour. Nil is none.
     ///
@@ -172,12 +180,15 @@ public struct VideoExportSegment: Sendable, Equatable {
 
     public init(
         start: Double, end: Double, speed: Double = 1,
-        transitionOut: VideoTransitionKind? = nil, look: LookPreset? = nil
+        transitionOut: VideoTransitionKind? = nil,
+        transitionSeconds: Double = VideoTransitionKind.standardSeconds, look: LookPreset? = nil
     ) {
         self.start = start
         self.end = end
         self.speed = speed
         self.transitionOut = transitionOut
+        self.transitionSeconds = transitionOut == nil || !transitionSeconds.isFinite
+            ? VideoTransitionKind.standardSeconds : transitionSeconds
         self.look = look == .original ? nil : look
     }
 
@@ -231,18 +242,24 @@ public struct VideoExporter: Sendable {
     /// THE BUILDER.** Written twice, the lit window and the drawn fade would
     /// disagree the first time either changed.
     ///
-    /// ⚠️ **NEVER MORE THAN HALF OF EITHER NEIGHBOUR.** A piece with a
-    /// transition at both ends gives each at most half of itself, so the two can
-    /// touch and never cross — crossing instructions fail the export. Floored to
+    /// ⚠️ **HALF OF WHAT THE AUTHOR ASKED FOR, AND NEVER MORE THAN HALF OF
+    /// EITHER NEIGHBOUR.** A transition of `seconds` borrows `seconds / 2` from
+    /// the end of the piece before its cut and as much from the start of the
+    /// piece after it (`borrowedSides` draws both from there). A piece with a
+    /// transition at both ends lends each at most half of itself, so the two can
+    /// touch and never cross — crossing instructions fail the export, and two
+    /// windows reading the same film would show it twice. So a cut can carry at
+    /// most as long a transition as its SHORTER neighbour plays for. Floored to
     /// the composition's 1/600 grid, and nothing at all below a frame at 30fps,
     /// where a transition would be a flicker nobody chose.
     public static func transitionHalf(
-        _ kind: VideoTransitionKind?, outgoingPlayedSeconds outgoing: Double,
-        incomingPlayedSeconds incoming: Double
+        _ kind: VideoTransitionKind?, seconds: Double = VideoTransitionKind.standardSeconds,
+        outgoingPlayedSeconds outgoing: Double, incomingPlayedSeconds incoming: Double
     ) -> Double {
-        guard kind != nil, outgoing.isFinite, incoming.isFinite, outgoing > 0, incoming > 0
+        guard kind != nil, seconds.isFinite, seconds > 0, outgoing.isFinite, incoming.isFinite,
+              outgoing > 0, incoming > 0
         else { return 0 }
-        let half = min(VideoTransitionKind.standardSeconds / 2, outgoing / 2, incoming / 2)
+        let half = min(seconds / 2, outgoing / 2, incoming / 2)
         let floored = (half * 600).rounded(.down) / 600
         return floored < 1.0 / 30 ? 0 : floored
     }
@@ -389,11 +406,12 @@ public struct VideoExporter: Sendable {
     /// seconds; a set that ends one tick short renders in an image generator and
     /// FAILS THE EXPORT (-11841), and a gap renders black with no error at all.
     ///
-    /// ⚠️ **A TRANSITION DRAWS INSIDE ITS OWN TWO PIECES.** The dips and the zoom
-    /// play on the single lane: the outgoing piece fades or zooms up to the cut,
-    /// the incoming one from it. A two-picture kind reads the other side of the
-    /// cut from a second lane (`otherSides`) instead of overlapping the pieces,
-    /// so the played length is exactly what the track shows either way.
+    /// ⚠️ **A TRANSITION DRAWS INSIDE ITS OWN TWO PIECES, FROM THEIR OWN FILM.**
+    /// The dips and the zoom play on the single lane: the outgoing piece fades
+    /// or zooms up to the cut, the incoming one from it. A two-picture kind
+    /// shows both pieces across its whole window (`borrowedSides`) instead of
+    /// overlapping them, so the played length is exactly what the track shows
+    /// either way.
     ///
     /// ⚠️ **EVERYTHING IS DRAWN BY `VideoCompositor`.** A custom compositor
     /// takes over the whole composition, so the dips and the zoom are its too —
@@ -485,9 +503,8 @@ public struct VideoExporter: Sendable {
                 sound: music?.layout
             )
         }
-        let laneB = try otherSides(
-            of: windows, pieces: kept, starts: inserted.starts, from: source,
-            sourceRange: sourceRange, frame: canvas.frame, in: composition
+        let laneB = try borrowedSides(
+            of: windows, pieces: kept, from: source, arrangement: inserted.video, in: composition
         )
         let video = try composed(
             laneA: inserted.video.trackID, laneB: laneB, drawing: drawing,
@@ -551,7 +568,8 @@ public struct VideoExporter: Sendable {
             let outgoing = at - opens
             let incoming = closes - at
             let half = transitionHalf(
-                kind, outgoingPlayedSeconds: outgoing.seconds, incomingPlayedSeconds: incoming.seconds
+                kind, seconds: pieces[index].transitionSeconds,
+                outgoingPlayedSeconds: outgoing.seconds, incomingPlayedSeconds: incoming.seconds
             )
             // ⚠️ NO RE-CLAMP ON THE TICKS: `transitionHalf` already floors to
             // the 1/600 grid, and flooring again here once made a window a tick
@@ -626,28 +644,44 @@ public struct VideoExporter: Sendable {
         }
     }
 
-    /// Lays the other side of every two-picture cut on a second video lane.
+    /// Lays both pieces of every two-picture cut across its whole window: the
+    /// OUTGOING piece's side on a second lane, the INCOMING piece's side in place
+    /// of the window on the arrangement's own lane.
     ///
-    /// ⚠️ **THE FILM EITHER SIDE OF A CUT, NOT AN OVERLAP.** Cross-fading by
-    /// overlapping the pieces would shorten the result and break every played
-    /// second the track draws. Instead, before the cut this lane plays the film
-    /// that LEADS INTO the incoming piece, and after it the film that FOLLOWS
-    /// the outgoing one — so each picture runs on without a jump when the lanes
-    /// swap at the cut, and the result is exactly as long as the track says.
+    /// ⚠️ **BORROWED FROM THE TWO PIECES, NEVER FROM THE FILE AROUND THEM.** This
+    /// used to read the other side of a cut from the film just past the pieces —
+    /// what LED INTO the incoming piece and what FOLLOWED the outgoing one, the
+    /// "handles" a desktop editor reads. On a split, which is how every cut in
+    /// this editor is made, the film leading into the right half IS the end of
+    /// the left half: both lanes carried the same pictures, and a dissolve, a
+    /// swipe, bars, a swirl or a fold drew a picture over itself. Measured on a
+    /// split: every frame of those five windows identical to the plain cut's,
+    /// 0 on every channel — reported as *"la plupart des transitions entre
+    /// segments ne fonctionnent pas"*. And after a trim or a re-order the handles
+    /// showed film the author had cut AWAY. Now each side is the author's own:
+    /// the outgoing piece's last `half`, the incoming piece's first `half`.
     ///
-    /// ⚠️ **AND WHERE THE FILE HAS NO SUCH FILM, ONE FRAME HELD.** A piece that
-    /// starts at the file's first frame has nothing before it; one that ends on
-    /// its last has nothing after. That side of the transition holds the edge
-    /// frame instead of reading past the file, which would fail the build.
+    /// ⚠️ **EASED, BECAUSE A FIXED LENGTH LEAVES NO OTHER WAY.** The window is
+    /// `2·half` long and each side has `half` of film, so each must play slower
+    /// than its rate somewhere. The outgoing side leaves at its rate and slows to
+    /// a stop as it fades out; the incoming side starts from a stop and reaches
+    /// its rate as it takes over (`Easing`). At the window's two edges — where
+    /// one picture is all there is — both the frame and the pace meet the pieces
+    /// either side, so nothing jumps and nothing is seen to slow. The two sides
+    /// are always two different moments: on a split, `half` apart where the
+    /// window opens and closes, `half / 2` at the cut.
     ///
-    /// ⚠️ **SCALED ON THIS TRACK ONLY, AND AFTER THE ARRANGEMENT IS BUILT.**
-    /// The lane has no sound, so a track-level scale cannot drift anything, and
-    /// the composition-level scales that set the pieces' rates have all been
-    /// applied already — one issued now would stretch these inserts too.
-    private static func otherSides(
-        of windows: [Cut], pieces: [VideoExportSegment], starts: [CMTime],
-        from source: AVAssetTrack, sourceRange: CMTimeRange, frame: CMTime,
-        in composition: AVMutableComposition
+    /// ⚠️ **THE ARRANGEMENT'S LANE CARRIES THE INCOMING SIDE,** so a window
+    /// decodes two lanes, as it did before: the window is taken out of it and the
+    /// eased film put back, exactly as long, so nothing after it moves.
+    ///
+    /// ⚠️ **SCALED ON THE VIDEO TRACKS ONLY, AND AFTER THE ARRANGEMENT IS
+    /// BUILT.** Neither lane carries sound, so a track-level scale drifts
+    /// nothing, and the composition-level scales that set the pieces' rates have
+    /// all been applied already — one issued now would stretch these inserts too.
+    private static func borrowedSides(
+        of windows: [Cut], pieces: [VideoExportSegment], from source: AVAssetTrack,
+        arrangement: AVMutableCompositionTrack, in composition: AVMutableComposition
     ) throws -> CMPersistentTrackID? {
         let crossings = windows.filter(\.kind.needsBothPictures)
         guard !crossings.isEmpty else { return nil }
@@ -656,19 +690,19 @@ public struct VideoExporter: Sendable {
         ) else {
             throw VideoExportError.exportFailed
         }
-        let fileStart = sourceRange.isValid ? sourceRange.start : .zero
-        let fileEnd = sourceRange.isValid ? sourceRange.end : .positiveInfinity
         func time(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 600) }
-        func place(_ film: CMTimeRange, at target: CMTimeRange) throws {
-            if lane.timeRange.end < target.start {
-                lane.insertEmptyTimeRange(CMTimeRange(start: lane.timeRange.end, end: target.start))
-            }
-            try lane.insertTimeRange(film, of: source, at: target.start)
-            if film.duration != target.duration {
-                lane.scaleTimeRange(
-                    CMTimeRange(start: target.start, duration: film.duration),
-                    toDuration: target.duration
-                )
+        func lay(_ steps: [Step], on track: AVMutableCompositionTrack) throws {
+            for step in steps {
+                if track.timeRange.end < step.screen.start {
+                    track.insertEmptyTimeRange(CMTimeRange(start: track.timeRange.end, end: step.screen.start))
+                }
+                try track.insertTimeRange(step.film, of: source, at: step.screen.start)
+                if step.film.duration != step.screen.duration {
+                    track.scaleTimeRange(
+                        CMTimeRange(start: step.screen.start, duration: step.film.duration),
+                        toDuration: step.screen.duration
+                    )
+                }
             }
         }
         do {
@@ -676,23 +710,101 @@ public struct VideoExporter: Sendable {
                 let outgoing = pieces[cut.outgoing]
                 let incoming = pieces[cut.outgoing + 1]
                 let half = cut.half.seconds
-                // Before the cut: what leads into the incoming piece.
-                let leadIn = time(incoming.start) - time(half * incoming.speed)
-                let before = leadIn >= fileStart
-                    ? CMTimeRange(start: leadIn, end: time(incoming.start))
-                    : CMTimeRange(start: time(incoming.start), duration: frame)
-                try place(before, at: CMTimeRange(start: cut.opens, end: cut.at))
-                // After the cut: what follows the outgoing piece.
-                let runOn = time(outgoing.end) + time(half * outgoing.speed)
-                let after = runOn <= fileEnd
-                    ? CMTimeRange(start: time(outgoing.end), end: runOn)
-                    : CMTimeRange(start: time(outgoing.end) - frame, duration: frame)
-                try place(after, at: CMTimeRange(start: cut.at, end: cut.closes))
+                let window = CMTimeRange(start: cut.opens, end: cut.closes)
+                // ⚠️ SOURCE seconds: `half` is played time, a piece at 2x plays
+                // twice as much film in it.
+                let leaves = time(outgoing.end)
+                let leaving = CMTimeRange(start: leaves - time(half * outgoing.speed), end: leaves)
+                let arrives = time(incoming.start)
+                let arriving = CMTimeRange(start: arrives, end: arrives + time(half * incoming.speed))
+                let outSteps = steps(film: leaving, over: window, easing: .out)
+                let inSteps = steps(film: arriving, over: window, easing: .in)
+                guard !outSteps.isEmpty, !inSteps.isEmpty else { throw VideoExportError.exportFailed }
+                try lay(outSteps, on: lane)
+                arrangement.removeTimeRange(window)
+                try lay(inSteps, on: arrangement)
             }
         } catch {
             throw VideoExportError.exportFailed
         }
         return lane.trackID
+    }
+
+    /// How a borrowed side's film is laid across its window — `film(at:)` is
+    /// how much of it has played `u` of the way through, both from 0 to 1.
+    enum Easing: Sendable {
+        /// The outgoing side: at its piece's rate where the window opens, slowing
+        /// to a stop where it closes and is no longer seen. `2u − u²`.
+        case out
+        /// The incoming side: standing still where the window opens and it is
+        /// not seen yet, at its piece's rate where it closes. `u²`.
+        case `in`
+
+        func film(at u: Double) -> Double {
+            let u = min(max(u, 0), 1)
+            switch self {
+            case .out: return 2 * u - u * u
+            case .in: return u * u
+            }
+        }
+    }
+
+    /// One straight piece of an eased side: `film` of the source, played over
+    /// `screen` of the composition.
+    struct Step: Equatable, Sendable {
+        let film: CMTimeRange
+        let screen: CMTimeRange
+    }
+
+    /// `film` eased across `window` as straight pieces — a composition track
+    /// scales a range by one factor, so a curve is a few of them end to end.
+    ///
+    /// ⚠️ **ONE PIECE PER TWO FRAMES AT 30FPS, AND NEVER MORE THAN TWELVE.** A
+    /// half-second window is seven pieces, whose pace changes by a seventh of the
+    /// rate every two frames; a two-frame window is one, played at half pace.
+    ///
+    /// ⚠️ **ON THE 1/600 GRID, AND A PIECE WITH NO FILM IS FOLDED INTO THE
+    /// NEXT.** An eased-in side's first piece is a sliver of film; rounded to
+    /// nothing, it cannot be inserted, so its screen time goes to the piece
+    /// after it. The pieces tile `window` exactly and cover `film` exactly — the
+    /// window is taken out of the arrangement and must go back just as long.
+    static func steps(film: CMTimeRange, over window: CMTimeRange, easing: Easing) -> [Step] {
+        let screen = window.duration.convertScale(600, method: .roundTowardZero).value
+        let length = film.duration.convertScale(600, method: .roundTowardZero).value
+        guard screen > 0, length > 0 else { return [] }
+        let start = window.start.convertScale(600, method: .roundTowardZero)
+        let filmStart = film.start.convertScale(600, method: .roundTowardZero)
+        let count = max(1, min(12, Int(Double(screen) / 600 * 15)))
+        var made: [Step] = []
+        var screenFrom = start
+        var filmFrom = filmStart
+        for index in 1...count {
+            let u = Double(index) / Double(count)
+            let last = index == count
+            let screenTo = last
+                ? start + CMTime(value: screen, timescale: 600)
+                : start + CMTime(value: CMTimeValue((Double(screen) * u).rounded()), timescale: 600)
+            let filmTo = last
+                ? filmStart + CMTime(value: length, timescale: 600)
+                : filmStart + CMTime(
+                    value: CMTimeValue((Double(length) * easing.film(at: u)).rounded()), timescale: 600
+                )
+            guard filmTo > filmFrom, screenTo > screenFrom else { continue }
+            made.append(Step(
+                film: CMTimeRange(start: filmFrom, end: filmTo),
+                screen: CMTimeRange(start: screenFrom, end: screenTo)
+            ))
+            screenFrom = screenTo
+            filmFrom = filmTo
+        }
+        // The film ran out before the window did: the last piece takes the rest.
+        if let final = made.last, screenFrom < start + CMTime(value: screen, timescale: 600) {
+            made[made.count - 1] = Step(
+                film: final.film,
+                screen: CMTimeRange(start: final.screen.start, end: start + CMTime(value: screen, timescale: 600))
+            )
+        }
+        return made
     }
 
     /// Where a piece starts on the composition's clock, and the look it wears.
@@ -716,9 +828,9 @@ public struct VideoExporter: Sendable {
     /// ⚠️ **ONE INSTRUCTION PER STRETCH, SPLIT AT EVERY PIECE BOUNDARY AND AT
     /// EVERY WINDOW'S EDGES.** A stretch carries one look per lane, so one that
     /// ran across two pieces would dress the second in the first's look. A
-    /// window is split at its cut by the same rule — the cut IS a boundary —
-    /// which is also where the lanes swap roles, and where AVFoundation is sure
-    /// to hand over the frames of the pieces either side.
+    /// window is split at its cut by the same rule — the cut IS a boundary, and
+    /// a dip or a zoom changes piece there. (A two-picture window draws the same
+    /// two sides on both halves.)
     private static func composed(
         laneA: CMPersistentTrackID, laneB: CMPersistentTrackID?, drawing: Drawing,
         pieces: [Piece], windows: [Cut], duration: CMTime
@@ -745,10 +857,15 @@ public struct VideoExporter: Sendable {
                 scene.transition = .init(
                     kind: cut.kind, opens: cut.opens.seconds, cut: cut.at.seconds, closes: cut.closes.seconds
                 )
-                scene.looks.a = beforeCut ? outgoing : incoming
                 if cut.kind.needsBothPictures {
+                    // ⚠️ THE WHOLE WINDOW, ON BOTH SIDES OF THE CUT: lane A
+                    // carries the incoming side and lane B the outgoing one
+                    // (`borrowedSides`), and neither swaps at the cut.
                     other = laneB
-                    scene.looks.b = beforeCut ? incoming : outgoing
+                    scene.looks.a = incoming
+                    scene.looks.b = outgoing
+                } else {
+                    scene.looks.a = beforeCut ? outgoing : incoming
                 }
             } else {
                 scene.looks.a = look(pieces.lastIndex { $0.start <= start } ?? 0)

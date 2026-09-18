@@ -35,10 +35,10 @@ struct VideoCompositionScene: Sendable, Equatable {
 
     /// Which piece's look each lane wears.
     ///
-    /// ⚠️ **THE LANES SWAP PIECES AT THE CUT, SO THEIR LOOKS SWAP TOO.** Before
-    /// the cut lane A plays the outgoing piece and lane B the incoming one's
-    /// lead-in; after it A plays the incoming piece and B the outgoing one's
-    /// run-on. A look follows its piece's film, whichever lane carries it.
+    /// ⚠️ **A LOOK FOLLOWS ITS PIECE'S FILM, WHICHEVER LANE CARRIES IT.** Inside
+    /// a two-picture window lane A carries the incoming piece's side and lane B
+    /// the outgoing one's, for the whole window; a dip or a zoom has lane A
+    /// alone, the outgoing piece before the cut and the incoming one after it.
     struct Looks: Sendable, Equatable {
         var a: LookPreset?
         var b: LookPreset?
@@ -63,11 +63,11 @@ struct VideoCompositionScene: Sendable, Equatable {
 
 /// A stretch of the composition and what to draw over it.
 ///
-/// ⚠️ **LANE A IS THE ARRANGEMENT; LANE B IS ONLY EVER THE OTHER SIDE OF A
-/// CUT.** Before a cut, A plays the outgoing piece and B the incoming one's
-/// lead-in; after it, A plays the incoming piece and B the outgoing one's
-/// run-on. Which is which follows from the time, so the instruction only names
-/// the tracks.
+/// ⚠️ **LANE A IS THE ARRANGEMENT; LANE B IS ONLY EVER THE OUTGOING SIDE OF A
+/// TWO-PICTURE WINDOW.** Inside such a window the arrangement's own lane plays
+/// the incoming piece's side, eased in, and B the outgoing piece's, eased out
+/// (`VideoExporter.borrowedSides`) — from the window's opening to its close,
+/// with no swap at the cut.
 final class VideoCompositorInstruction: NSObject, AVVideoCompositionInstructionProtocol,
     @unchecked Sendable {
     // ⚠️ `@unchecked` BECAUSE EVERY STORED PROPERTY IS A `let` OF A SENDABLE
@@ -302,9 +302,10 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
             let centre = CGPoint(x: canvas.midX, y: canvas.midY)
             drawn = (a ?? background).transformed(by: VideoExporter.zoom(about: centre, by: scale))
         default:
-            let other = upright(laneB, wearing: scene.looks.b) ?? a ?? background
-            let from = beforeCut ? (a ?? background) : other
-            let to = beforeCut ? other : (a ?? background)
+            // The outgoing piece's side is on lane B and the incoming piece's on
+            // lane A, for the whole window.
+            let to = a ?? background
+            let from = upright(laneB, wearing: scene.looks.b) ?? to
             drawn = cross(
                 transition.kind, from: from, to: to,
                 progress: transition.progress(at: seconds), canvas: canvas
@@ -450,14 +451,24 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
             filter.scale = 50
             output = filter.outputImage
         case .accordion:
+            // ⚠️ **FOLDED DOWN TO NOTHING, OVER THE INCOMING PICTURE — NOT INTO
+            // IT.** Core Image's fold only folds between pictures of DIFFERENT
+            // HEIGHTS; handed two frames of one clip it is a plain cross-fade.
+            // Measured: every pixel of red "folding" into blue came back as
+            // (128,0,128) half way, exactly what the dissolve drew — the Fold
+            // card published a second Dissolve. Folded into a one-pixel strip of
+            // nothing, the outgoing picture collapses in pleats towards the
+            // bottom edge and the incoming one is uncovered above it.
             let filter = CIFilter.accordionFoldTransition()
             filter.inputImage = from
-            filter.targetImage = to
+            filter.targetImage = CIImage(color: .clear).cropped(
+                to: CGRect(x: canvas.minX, y: canvas.minY, width: canvas.width, height: 1)
+            )
             filter.bottomHeight = 0
             filter.numberOfFolds = 5
-            filter.foldShadowAmount = 0.2
+            filter.foldShadowAmount = 0.5
             filter.time = time
-            output = filter.outputImage
+            output = filter.outputImage.map { $0.composited(over: to) }
         case .disintegrate:
             let filter = CIFilter.disintegrateWithMaskTransition()
             filter.inputImage = from
