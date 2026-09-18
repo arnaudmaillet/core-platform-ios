@@ -819,15 +819,15 @@ struct MediaEditorTrackToolsTests {
         choose(Mode.trim, on: screen)
         let tools = try tools(in: screen)
         putTheNeedle(at: 5, on: tools.track, in: screen)
-        #expect(screen.editor.debugCropResetItem.isEnabled == false, "guard: nothing to undo")
+        #expect(screen.editor.debugUndoItem.isEnabled == false, "guard: nothing to step back to")
 
         screen.editor.debugActionBar.debugTap(
             MediaEditorViewController.TrackAction.speed.rawValue
         )
         tools.speeds.debugTap(rate: 2)
-        #expect(screen.editor.debugCropResetItem.isEnabled, "a rate is something to undo")
+        #expect(screen.editor.debugUndoItem.isEnabled, "a rate is something to step back from")
 
-        screen.editor.debugTapReset()
+        screen.editor.debugTapUndo()
         #expect(MediaTimelining.rate(at: 5, in: tools.track.debugTimeline, withinSource: 10) == 1)
     }
 

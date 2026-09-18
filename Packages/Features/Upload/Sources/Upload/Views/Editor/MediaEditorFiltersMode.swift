@@ -54,15 +54,11 @@ final class MediaEditorFiltersMode: MediaEditorMode {
 
     func screenWillDisappear() {}
 
-    var canReset: Bool {
-        guard let host, let id = host.currentItemID else { return false }
-        return host.edits(for: id).filter != .original
-    }
-
-    func reset() {
-        guard let id = host?.currentItemID, canReset else { return }
-        row.setSelected(.original)
-        apply(.original, to: id)
+    /// A step put a whole edit back: the ring may be on another chip, and the
+    /// chips themselves wear the page's dials.
+    func editsWereRestored(for id: String) {
+        guard let host, host.bandContent === row, host.currentItemID == id else { return }
+        refresh()
     }
 
     /// Feeds the row the picture it is choosing a look for, and restores the

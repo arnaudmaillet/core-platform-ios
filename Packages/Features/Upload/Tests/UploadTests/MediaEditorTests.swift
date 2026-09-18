@@ -142,6 +142,105 @@ struct MediaEditorTests {
         #expect(page.accessibilityLabel == "Video")
     }
 
+    // MARK: - The history
+
+    private enum Band {
+        static let filters = 3
+        static let crop = 4
+    }
+
+    private func choose(_ band: Int, on screen: Screen) {
+        screen.editor.debugCategoryBar.select(band)
+        screen.window.layoutIfNeeded()
+    }
+
+    /// ⚠️ **A STEP IS THE AUTHOR'S, NOT THE BAND'S.** The arrow that stood here
+    /// undid "what the open mode owns", so the same tap meant different things
+    /// depending on which tools happened to be showing — and a change made in a
+    /// band the author had since left could not be reached at all. Two changes
+    /// in two bands, taken back in the order they were made.
+    @Test func aStepBackCrossesTheBandItWasTakenIn() async throws {
+        let screen = open(Self.items(1))
+        choose(Band.filters, on: screen)
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        row.debugTap(.mono)
+        choose(Band.crop, on: screen)
+        try await settle(until: { screen.editor.debugCropSurface.debugHasPicture })
+        screen.editor.debugCropSurface.setAngle(6)
+
+        screen.editor.debugTapUndo()
+
+        #expect(screen.editor.debugCrop(for: "item-0").angle == 0, "the last change came off")
+        #expect(screen.editor.edits(for: "item-0").filter == .mono, "and only the last one")
+
+        screen.editor.debugTapUndo()
+
+        #expect(screen.editor.edits(for: "item-0").filter == .original)
+        #expect(!screen.editor.debugHasEdits(for: "item-0"), "back to a page nobody had touched")
+        #expect(!screen.editor.debugUndoItem.isEnabled)
+        #expect(screen.editor.debugRedoItem.isEnabled, "both steps are ahead now")
+    }
+
+    @Test func aStepTakenBackCanBeTakenAgain() async throws {
+        let screen = open(Self.items(1))
+        choose(Band.filters, on: screen)
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        row.debugTap(.mono)
+        screen.editor.debugTapUndo()
+        #expect(screen.editor.edits(for: "item-0").filter == .original, "guard")
+        // ⚠️ **READ THE RING AFTER THE STEP BACK, NOT ONLY AFTER THE STEP
+        // FORWARD.** Asserting it only at the end proves nothing: the row is
+        // ALREADY on the look the redo restores, so a row that is never
+        // re-stated at all reads as correct. Measured — deleting the mode's
+        // `editsWereRestored` left this test green until this line existed.
+        #expect(row.debugSelected == .original,
+                "the ring stayed on a look the page no longer wears")
+
+        screen.editor.debugTapRedo()
+
+        #expect(screen.editor.edits(for: "item-0").filter == .mono)
+        #expect(row.debugSelected == .mono, "the row went on showing the look that was undone")
+        #expect(!screen.editor.debugRedoItem.isEnabled)
+    }
+
+    /// ⚠️ **A NEW CHANGE ENDS THE WAY FORWARD.** What was undone and then built
+    /// on top of is not a page that ever existed, and offering to walk into it
+    /// would hand the author a look they never chose.
+    @Test func aNewChangeAfterAStepBackClosesTheWayForward() async throws {
+        let screen = open(Self.items(1))
+        choose(Band.filters, on: screen)
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        row.debugTap(.mono)
+        screen.editor.debugTapUndo()
+        #expect(screen.editor.debugRedoItem.isEnabled, "guard")
+
+        row.debugTap(.noir)
+
+        #expect(!screen.editor.debugRedoItem.isEnabled)
+        screen.editor.debugTapUndo()
+        #expect(screen.editor.edits(for: "item-0").filter == .original,
+                "the way back is the real one: got \(screen.editor.edits(for: "item-0").filter)")
+    }
+
+    /// ⚠️ **THE ARROWS ACT ON THE PICTURE IN FRONT OF THE AUTHOR.** One list for
+    /// the whole screen would have a step taken on page two undo something on
+    /// page one — a change they cannot see happening, on a photograph they would
+    /// have to swipe back to find.
+    @Test func theArrowsActOnThePageInFront() async throws {
+        let screen = open(Self.items(2))
+        choose(Band.filters, on: screen)
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        row.debugTap(.mono)
+        #expect(screen.editor.debugUndoItem.isEnabled, "guard: page one has a step")
+
+        screen.editor.debugScrollToPage(1)
+
+        #expect(!screen.editor.debugUndoItem.isEnabled, "page two has a history of its own, and it is empty")
+        screen.editor.debugScrollToPage(0)
+        #expect(screen.editor.debugUndoItem.isEnabled, "and page one's came back with it")
+        #expect(screen.editor.edits(for: "item-0").filter == .mono, "nothing was undone by the swipe")
+    }
+
     // MARK: - The bars
 
     /// Bar items are laid out from the trailing edge inwards, so "Next" is
@@ -171,8 +270,8 @@ struct MediaEditorTests {
         // losing a control to exactly that. A titleless item asserted by `title`
         // reads as `[nil]`, which is why this asks the accessibility label: an
         // icon button with no spoken name is a button VoiceOver cannot announce.
-        #expect(left.map(\.accessibilityLabel) == ["Save draft", "Undo every change in this mode"],
-                "the draft and the undo arrow; the chevron is the system's")
+        #expect(left.map(\.accessibilityLabel) == ["Save draft", "Undo", "Redo"],
+                "the draft and the two history arrows; the chevron is the system's")
         #expect(left.allSatisfy { $0.image != nil }, "an icon bar item with no icon is a blank capsule")
         #expect(screen.editor.navigationItem.leftItemsSupplementBackButton)
         #expect(

@@ -182,11 +182,42 @@ struct MediaEditorEffectsTests {
         let stored = screen.editor.edits(for: "photo-0").adjustments.brightness
         #expect(abs(stored - 0.4) < 0.0001, "stored \(stored)")
         #expect(tools.debugReading(.brightness) == "+40%")
-        #expect(screen.editor.debugCropResetItem.isEnabled, "the undo arrow has something to undo")
+        #expect(screen.editor.debugUndoItem.isEnabled, "the back arrow has a step to take")
 
         tools.debugRuler.debugTapReadout()
         #expect(!screen.editor.debugHasEdits(for: "photo-0"), "a dial back at rest is no entry at all")
-        #expect(!screen.editor.debugCropResetItem.isEnabled)
+        // ⚠️ **AN EMPTY PAGE IS NOT AN EMPTY HISTORY.** Putting the dial back at
+        // rest is itself a change the author made, and one they may want back —
+        // so the arrow stays live and the +40% is one step away.
+        #expect(screen.editor.debugUndoItem.isEnabled, "the way back to +40% is a step of its own")
+        screen.editor.debugTapUndo()
+        let again = screen.editor.edits(for: "photo-0").adjustments.brightness
+        #expect(abs(again - 0.4) < 0.0001, "stepping back from rest gave \(again)")
+    }
+
+    /// ⚠️ **SIXTY SAMPLES, ONE STEP.** A finger crossing the ruler writes a
+    /// value per frame; filed as they come, one flick would bury every earlier
+    /// change under thirty steps of itself and the back arrow would look broken.
+    /// The lift is what files it, and what it files is where the finger LANDED —
+    /// not the sample before the last one.
+    @Test func aRulerDragIsOneStepHoweverManySamplesItTakes() throws {
+        let screen = Self.open(video: false)
+        let tools = try Self.openEffects(on: screen)
+        tools.debugTapDial(.brightness)
+
+        tools.debugRuler.debugBeginDrag()
+        for _ in 0..<10 { tools.debugRuler.debugDrag(by: -9) }
+        tools.debugRuler.debugEndDrag()
+        let dragged = screen.editor.edits(for: "photo-0").adjustments.brightness
+        #expect(dragged > 0.05, "guard: the drag moved the dial, got \(dragged)")
+
+        screen.editor.debugTapUndo()
+
+        #expect(screen.editor.edits(for: "photo-0").adjustments.brightness == 0,
+                "one step took the whole drag")
+        #expect(!screen.editor.debugUndoItem.isEnabled, "and there was only ever one")
+        #expect(tools.debugReading(.brightness) == nil,
+                "the pill went on showing a value the page no longer wears")
     }
 
     @Test func undoResetsOnlyEffects() async throws {
@@ -203,15 +234,20 @@ struct MediaEditorEffectsTests {
 
         let before = screen.editor.edits(for: "photo-0")
         #expect(before.effect?.kind == .pixellate && before.adjustments.contrast != 0, "guard")
-        #expect(screen.editor.debugCropResetItem.isEnabled)
-        screen.editor.debugTapReset()
+        #expect(screen.editor.debugUndoItem.isEnabled)
+        // ⚠️ **A STEP BACK IS ONE CHANGE, NOT A MODE'S WORTH.** The header used
+        // to carry an arrow that reset everything the open mode owned; it walks
+        // the author's own history now, so this takes off the effect and leaves
+        // the dial where they left it.
+        screen.editor.debugTapUndo()
 
         let after = screen.editor.edits(for: "photo-0")
-        #expect(after.adjustments.isNeutral)
-        #expect(after.effect == nil)
+        #expect(after.effect == nil, "the last change is still on the page")
+        #expect(abs(after.adjustments.contrast + 0.5) < 0.0001,
+                "a step back took the dial too: \(after.adjustments)")
         #expect(after.filter == .mono, "the preset is Filters', and it stays")
-        #expect(tools.debugChosenEffects.isEmpty)
-        #expect(!tools.debugCanClear, "the ⊘ icon still offers to take something off")
+        #expect(tools.debugChosenEffects.isEmpty, "the tools did not re-read the page")
+        #expect(tools.debugCanClear, "a dial is still on, so the ⊘ icon has work")
         #expect(tools.debugShowsRuler, "the row was left empty")
     }
 
@@ -400,8 +436,8 @@ struct MediaEditorVideoFiltersTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(screen.preview.plans.count == 1, "no new item for a look")
 
-        #expect(screen.editor.debugCropResetItem.isEnabled, "Original is one tap away")
-        screen.editor.debugTapReset()
+        #expect(screen.editor.debugUndoItem.isEnabled, "Original is one step back")
+        screen.editor.debugTapUndo()
         #expect(screen.preview.liveLooks.last?.preset == .original)
         #expect(row.debugSelected == .original)
     }

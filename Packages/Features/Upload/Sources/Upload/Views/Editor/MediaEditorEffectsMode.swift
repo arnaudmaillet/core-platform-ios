@@ -123,17 +123,27 @@ final class MediaEditorEffectsMode: MediaEditorMode {
         present(id)
     }
 
+    /// A step back or forward may have moved the dials or the effect under the
+    /// tools; they state what the page wears now.
+    func editsWereRestored(for id: String) {
+        guard let host, host.bandContent === tools, id == shownID else { return }
+        settleTheDrag()
+        present(id)
+    }
+
     func screenWillDisappear() {
         settleTheDrag()
     }
 
-    var canReset: Bool {
+    /// Whether the ⊘ icon has anything to take off. Its own, not a seam: the
+    /// header's arrows ask no mode what it owns.
+    private var canReset: Bool {
         guard let host, let id = host.currentItemID else { return false }
         let edits = host.edits(for: id)
         return !edits.adjustments.isNeutral || edits.effect != nil
     }
 
-    func reset() {
+    private func reset() {
         guard let host, let id = host.currentItemID, canReset else { return }
         settleTheDrag()
         host.change(id) {
@@ -168,7 +178,11 @@ final class MediaEditorEffectsMode: MediaEditorMode {
     /// beat — see the type's note.
     private func write(tracking: Bool, _ mutate: (inout MediaEdits) -> Void) {
         guard let host, let id = shownID ?? host.currentItemID else { return }
-        host.change(id, mutate)
+        // ⚠️ **A DRAG IS ONE STEP IN THE HISTORY, NOT SIXTY.** Only the mode
+        // that owns the finger knows whether one is down, so it says; the lift
+        // settles, and the state the drag started from is the one the back
+        // arrow hands back.
+        host.change(id, settling: !tracking, mutate)
         // Cheap, and the ↺ icon is wrong the moment it is not asked: it lights
         // as soon as the page differs from what the tab opened on.
         tools.setCanRevert(canRevert(id, wearing: host.edits(for: id).look))

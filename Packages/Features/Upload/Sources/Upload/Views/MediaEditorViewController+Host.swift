@@ -53,7 +53,10 @@ protocol MediaEditorHosting: AnyObject {
 
     /// What is decided about `id`; `.untouched` when nothing is.
     func edits(for id: String) -> MediaEdits
-    func change(_ id: String, _ mutate: (inout MediaEdits) -> Void)
+    /// ⚠️ **`settling: false` IS A CHANGE STILL UNDER A FINGER**, and only the
+    /// mode holding that finger knows. It decides whether the change is a STEP
+    /// in the author's history; everything else settles.
+    func change(_ id: String, settling: Bool, _ mutate: (inout MediaEdits) -> Void)
     /// Brings the canvas and the preview up to date after `change`.
     func editsDidChange(_ id: String, _ kind: MediaEditKind)
 
@@ -63,8 +66,9 @@ protocol MediaEditorHosting: AnyObject {
     /// hears it through `bandWillChange(to:)` first.
     func showInBand(_ accessory: UIView?)
     var bandContent: UIView? { get }
-    /// Re-decides the undo arrow — a mode's `canReset` changed.
-    func refreshResetItem()
+    /// Re-decides the two arrows — something a mode did may have added a step
+    /// to this page's history, or taken the page out of reach of one.
+    func refreshHistoryItems()
     /// Re-decides the sound pill's word — `MediaEditorSoundtrackMode.pillTitle`.
     func refreshSoundPill()
     func presentSheet(_ controller: UIViewController)
@@ -103,6 +107,13 @@ protocol MediaEditorHosting: AnyObject {
     func segmentFilterRehearsal(in timeline: MediaTimeline, fileSeconds: Double) -> ClosedRange<Double>?
 }
 
+extension MediaEditorHosting {
+    /// The ordinary case: a change nobody's finger is still on.
+    func change(_ id: String, _ mutate: (inout MediaEdits) -> Void) {
+        change(id, settling: true, mutate)
+    }
+}
+
 extension MediaEditorViewController: MediaEditorHosting {
     func item(_ id: String) -> MediaLibraryItem? { itemsByID[id] }
 
@@ -135,7 +146,7 @@ extension MediaEditorViewController: MediaEditorHosting {
         case .overlays:
             break
         }
-        refreshResetItem()
+        refreshHistoryItems()
     }
 
     func showInBand(_ accessory: UIView?) { setEditingAccessory(accessory) }

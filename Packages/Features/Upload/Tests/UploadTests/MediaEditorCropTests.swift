@@ -271,18 +271,20 @@ struct MediaEditorCropTests {
         #expect(screen.editor.debugSuspendedPans == 0)
     }
 
-    /// ⚠️ **`[‹][Save draft][undo] ⋯ [Next]`.** Undo acts on the whole screen, so
-    /// it stands with the other things that do, after the draft. The trailing side
-    /// keeps the one action that moves the flow forward.
-    @Test func undoStandsAfterSaveDraftWhileCropping() async throws {
+    /// ⚠️ **`[‹][Save draft][◀][▶] ⋯ [Next]`.** The two arrows act on the whole
+    /// screen, so they stand with the other things that do, after the draft, and
+    /// in the order they read: back, then forward. The trailing side keeps the
+    /// one action that moves the flow forward.
+    @Test func theArrowsStandAfterSaveDraftWhileCropping() async throws {
         let screen = open(Self.items(1))
 
         choose(Mode.crop, on: screen)
 
         let leading = screen.editor.debugLeadingBarItems
-        #expect(leading.count == 2, "got \(leading.count) leading items")
-        #expect(leading.last === screen.editor.debugCropResetItem,
-                "undo comes after the draft, not before it")
+        #expect(leading.count == 3, "got \(leading.count) leading items")
+        #expect(leading.dropFirst().first === screen.editor.debugUndoItem,
+                "back comes after the draft, not before it")
+        #expect(leading.last === screen.editor.debugRedoItem, "and forward after back")
         #expect(screen.editor.navigationItem.leftItemsSupplementBackButton,
                 "and the chevron still leads them — a custom leading item replaces it silently")
     }
@@ -308,37 +310,65 @@ struct MediaEditorCropTests {
 
         #expect(screen.editor.debugFit(for: "item-0") == .fit)
         #expect(screen.editor.debugFitActionName == "Fill the screen", "the glyph did not turn round")
-        #expect(screen.editor.debugLeadingBarItems.count == 2,
-                "the leading side is the draft and the undo arrow")
+        #expect(screen.editor.debugLeadingBarItems.count == 3,
+                "the leading side is the draft and the two arrows")
     }
 
-    /// ⚠️ **THE ARROW STANDS IN THE BAR PERMANENTLY NOW, SO IT HAS TO SAY WHEN IT
-    /// CANNOT ACT.** `resetCrop` begins `guard let id = croppingID`, and that is
-    /// set only between `enterCrop` and `exitCrop` — so outside the surface the
-    /// arrow drew ENABLED over a photograph carrying a crop and did nothing when
-    /// tapped. It used to be hidden by living only in the crop bar.
-    @Test func theUndoArrowIsDeadOnceTheCropSurfaceIsGone() async throws {
+    /// ⚠️ **A STEP BELONGS TO THE PAGE, NOT TO THE BAND IT WAS TAKEN IN.** The
+    /// arrow that stood here undid "what the open mode owns", and it had to go
+    /// dead the moment the crop surface left — it reached `croppingID`, which
+    /// exists only between `enterCrop` and `exitCrop`, so over a cropped
+    /// photograph in another band it drew ENABLED and did nothing when tapped.
+    /// The history has no such reach: the straightening below is undone from
+    /// the filter band, without the surface ever coming back.
+    @Test func aStepBackReachesACropMadeInAnotherBand() async throws {
         let screen = open(Self.items(1))
         choose(Mode.crop, on: screen)
         try await settle(until: { screen.editor.debugCropSurface.debugHasPicture })
         screen.editor.debugCropSurface.setAngle(8)
-        #expect(screen.editor.debugCanResetCrop, "guard: there is something to undo while cropping")
+        #expect(screen.editor.debugCrop(for: "item-0").angle == 8, "guard: the turn is stored")
 
         choose(Mode.filters, on: screen)
+        #expect(screen.editor.debugUndoItem.isEnabled, "the step went with the surface")
+        screen.editor.debugTapUndo()
 
-        #expect(screen.editor.debugCanResetCrop == false,
-                "the arrow offers to undo a crop it can no longer reach")
+        #expect(screen.editor.debugCrop(for: "item-0").angle == 0,
+                "got \(screen.editor.debugCrop(for: "item-0").angle)")
+        #expect(!screen.editor.debugHasEdits(for: "item-0"))
     }
 
-    @Test func undoIsOfferedOnlyWhenThereIsSomethingToUndo() async throws {
+    @Test func aStepBackIsOfferedOnlyWhenThereIsOneToTake() async throws {
         let screen = open(Self.items(1))
         choose(Mode.crop, on: screen)
         try await settle(until: { screen.editor.debugCropSurface.debugHasPicture })
-        #expect(!screen.editor.debugCanResetCrop, "guard: nothing has been done yet")
+        #expect(!screen.editor.debugUndoItem.isEnabled, "guard: nothing has been done yet")
 
         screen.editor.debugCropSurface.setAngle(8)
 
-        #expect(screen.editor.debugCanResetCrop)
+        #expect(screen.editor.debugUndoItem.isEnabled)
+        #expect(!screen.editor.debugRedoItem.isEnabled, "nothing has been taken back yet")
+    }
+
+    /// ⚠️ **SIXTY SAMPLES, ONE STEP.** The dial turns the picture on every
+    /// sample — it has to, the photograph moves under the finger — and each one
+    /// reaches `cropChanged`. Filed as they come, a single flick of the dial
+    /// would bury the author's previous change under thirty identical steps and
+    /// the back arrow would look broken.
+    @Test func turningTheDialIsOneStepHoweverLongTheDragIs() async throws {
+        let screen = open(Self.items(1))
+        choose(Mode.crop, on: screen)
+        try await settle(until: { screen.editor.debugCropSurface.debugHasPicture })
+        screen.editor.debugCropSurface.flipAcross()
+
+        let dial = screen.editor.debugCropTools.debugDial
+        for _ in 0..<12 { dial.debugDrag(by: -6) }
+        dial.debugEndDrag()
+
+        #expect(screen.editor.debugCrop(for: "item-0").angle != 0, "guard: the dial turned it")
+        screen.editor.debugTapUndo()
+        #expect(screen.editor.debugCrop(for: "item-0").angle == 0, "one step took the whole drag")
+        #expect(screen.editor.debugCrop(for: "item-0").isMirrored,
+                "and it stopped at the change before it")
     }
 
     @Test func theFlipButtonMirrorsThePicture() async throws {
@@ -363,9 +393,10 @@ struct MediaEditorCropTests {
         let screen = open(Self.items(1))
         choose(Mode.crop, on: screen)
 
-        #expect(screen.editor.debugBarOffersCropReset, "guard: undo is in the bar to be checked")
-        #expect(screen.editor.debugCropResetItem.image != nil,
-                "undo has no glyph — the name is not in this SDK")
+        #expect(screen.editor.debugBarOffersTheArrows, "guard: the arrows are in the bar to be checked")
+        #expect(screen.editor.debugUndoItem.image != nil,
+                "back has no glyph — the name is not in this SDK")
+        #expect(screen.editor.debugRedoItem.image != nil, "and forward has none either")
         for glyph in screen.editor.debugCropTools.debugGlyphs {
             #expect(glyph != nil, "a button in the band has no glyph")
         }

@@ -53,7 +53,4 @@ final class MediaEditorSegmentFilterMode: MediaEditorMode {
 
     func screenWillDisappear() {}
 
-    var canReset: Bool { false }
-
-    func reset() {}
 }
