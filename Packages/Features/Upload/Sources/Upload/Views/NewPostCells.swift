@@ -1,4 +1,6 @@
 import DesignSystem
+// `VideoRenderView` — the surface the cover's clip plays in, over its own tile.
+import MediaPlayback
 import UIKit
 
 /// The chosen media, laid along the top of the new-post screen in the order they
@@ -34,6 +36,29 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// What the strip currently stands for, so a re-configure of the same
     /// selection in the same order does not rebuild and re-fetch it.
     private var shown: [String] = []
+    /// The tiles by item id, so the cover can be found again without walking
+    /// the row — the order is `publishOrder`'s, which changes under us.
+    private var tiles: [String: UIImageView] = [:]
+
+    /// ⚠️ **ONE SURFACE, BUILT ONCE AND MOVED — NOT ONE PER TILE.** The strip
+    /// holds up to twenty tiles and the screen plays exactly one of them (see
+    /// `NewPostViewController.playCover`), so a surface per tile would be
+    /// nineteen `VideoRenderView`s that never receive a frame. Built here rather
+    /// than made on demand because it is handed to a player: a surface minted
+    /// inside `videoSurface(over:)` would be a new object on every cover change,
+    /// and the screen's "am I already playing this?" guard compares identity.
+    private let surface = VideoRenderView()
+
+    /// Told when a bound surface is taken out from under its player — a rebuild
+    /// of the strip, or the cell being recycled.
+    ///
+    /// ⚠️ **THE CELL CANNOT STOP A PLAYER AND MUST NOT TRY.** It owns the
+    /// rectangle, not the playback seam; what it can do is say that the
+    /// rectangle is gone. `MediaEditorPageCell.onReuse` carries the same
+    /// division for the canvas, for the same reason: a surface detached while a
+    /// player still holds it goes on decoding for nobody, which is the shape of
+    /// `profile-gallery-player-leak`.
+    var onSurfaceLost: ((VideoRenderView) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -103,6 +128,12 @@ final class NewPostMediaCell: UICollectionViewListCell {
         let wanted = items.map { "\($0.id)=\((edits[$0.id] ?? .untouched).signature)" }
         guard wanted != shown else { return }
         shown = wanted
+        // ⚠️ **THE SURFACE IS TAKEN OUT BEFORE ITS TILE IS**, and whoever put a
+        // player in it is told. The loop below frees every tile, and a surface
+        // left inside one would be deallocated with it while a player was still
+        // pushing frames at it.
+        surrenderSurface()
+        tiles.removeAll()
         for view in row.arrangedSubviews { view.removeFromSuperview() }
 
         let size = CGSize(width: Metrics.width * 2, height: Metrics.height * 2)
@@ -149,6 +180,7 @@ final class NewPostMediaCell: UICollectionViewListCell {
 
             row.addArrangedSubview(picture)
             let id = item.id
+            tiles[id] = picture
             let chosen = edits[id] ?? .untouched
             Task { [weak picture] in
                 let image = await thumbnail(id, size)
@@ -157,7 +189,99 @@ final class NewPostMediaCell: UICollectionViewListCell {
         }
     }
 
+    /// Lays the video surface over the tile standing for `id` and hands it back,
+    /// or nil when no tile stands for it.
+    ///
+    /// ⚠️ **BELOW THE BADGES, ABOVE THE PICTURE.** The "Cover" capsule and the
+    /// `video.fill` mark are subviews of the tile, added in `show`, so an
+    /// `addSubview` here would put moving film on top of both — the cover badge
+    /// would vanish the moment the cover started playing, on the one tile that
+    /// needs it most. Index 0 is above the tile's own image (which is drawn by
+    /// the view, not by a subview) and below everything `show` added.
+    ///
+    /// ⚠️ **NO POSTER, AND NO OPAQUE GROUND.** `MediaEditorPageCell` hands its
+    /// surface `setPoster(picture.image)` because the page's picture is behind
+    /// a canvas that paints its own ground; here the tile IS the poster and it
+    /// is directly underneath, so a copy of it would be the same pixels decoded
+    /// twice. What makes the still show through until the first frame lands is
+    /// `paintsOpaqueGround = false` — left at its default the surface is a black
+    /// rectangle over the thumbnail for as long as the load takes.
+    ///
+    /// The gravity tracks the tile's own `contentMode`, which is the fit the
+    /// author chose in the editor: a clip they asked to see WHOLE must not start
+    /// filling its frame the moment it begins to move.
+    func videoSurface(over id: String) -> VideoRenderView? {
+        guard let tile = tiles[id] else { return nil }
+        surface.videoGravity = tile.contentMode == .scaleAspectFit ? .resizeAspect : .resizeAspectFill
+        guard surface.superview !== tile else { return surface }
+        surrenderSurface()
+        surface.paintsOpaqueGround = false
+        surface.isUserInteractionEnabled = false
+        surface.isHidden = false
+        // ⚠️ **`insertSubview(at:)` AND THE CONSTRAINTS BY HAND, NOT `pin(to:)`.**
+        // DesignSystem's `pin` calls `addSubview` itself, which appends — the
+        // badges would end up underneath, which is the whole thing the index
+        // above exists to avoid.
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        tile.insertSubview(surface, at: 0)
+        NSLayoutConstraint.activate([
+            surface.leadingAnchor.constraint(equalTo: tile.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: tile.trailingAnchor),
+            surface.topAnchor.constraint(equalTo: tile.topAnchor),
+            surface.bottomAnchor.constraint(equalTo: tile.bottomAnchor)
+        ])
+        surface.fadeInOnFirstFrame(over: 0.2)
+        return surface
+    }
+
+    /// Takes the surface back off whatever tile it was over. Idempotent, and
+    /// silent — the caller is the one who stopped the player.
+    func hideVideoSurface() {
+        guard surface.superview != nil else { return }
+        detachSurface()
+    }
+
+    /// Detaches a bound surface and says so, for the paths where the tile is
+    /// about to go away under it.
+    private func surrenderSurface() {
+        guard surface.superview != nil else { return }
+        detachSurface()
+        onSurfaceLost?(surface)
+    }
+
+    private func detachSurface() {
+        surface.isHidden = true
+        surface.removeFromSuperview()
+    }
+
+    /// ⚠️ **A LIST CELL IS RECYCLED WITHOUT ASKING.** There is one media row on
+    /// this screen and it is the first, so this rarely fires — but "rarely" is
+    /// how a surface handed to a player ends up inside somebody else's cell.
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        surrenderSurface()
+        onSurfaceLost = nil
+        shown = []
+        tiles.removeAll()
+    }
+
     #if DEBUG
+    /// Internal for tests: which tile the video surface is laid over, by item
+    /// id — nil when nothing is laid over anything.
+    ///
+    /// ⚠️ **ASKED BY THE ID THE TILE STANDS FOR, NOT BY ITS INDEX.** The strip
+    /// is drawn in `publishOrder`, so the cover is index 0 by construction and
+    /// an index assertion would pass over a strip that always played its first
+    /// tile whatever the cover was.
+    var debugSurfaceTileID: String? {
+        guard let host = surface.superview else { return nil }
+        return tiles.first { $0.value === host }?.key
+    }
+
+    /// Internal for tests: the surface itself, only while it is installed — so
+    /// a test can say the seam was handed THIS one.
+    var debugVideoSurface: VideoRenderView? { surface.superview == nil ? nil : surface }
+
     /// Internal for tests: how each thumbnail lays its picture, in strip order.
     ///
     /// ⚠️ **ASKED OF THE STRIP, NOT HUNTED FOR IN THE WINDOW.** A recursive

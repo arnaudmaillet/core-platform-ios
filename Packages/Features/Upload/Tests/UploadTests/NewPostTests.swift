@@ -23,7 +23,82 @@ struct NewPostTests {
         let window: UIWindow
         let library: StubLibrary
         let composer: RecordingComposer
+        let preview: StubPreview
         let handed: Handed
+    }
+
+    /// Records what the screen ASKED the playback seam for, which is the whole
+    /// subject of the cover tests.
+    ///
+    /// ⚠️ **A STUB IS NOT A CONVENIENCE HERE, IT IS THE ONLY WAY TO ASK.** The
+    /// default is a real `MediaPreviewPlayer`, and this suite's `StubLibrary`
+    /// synthesises genuine H.264 — so without this every one of the twenty-odd
+    /// tests below would bind an `AVPlayer` to an offscreen surface and decode
+    /// a real composition for nothing. What is assertable is narrower and
+    /// entirely answerable: which arrangement was handed over, into which
+    /// surface, whether it was silenced, and whether it was given back.
+    /// `MediaEditorPlaybackTests.StubPreview` is the same shape.
+    private final class StubPreview: MediaVideoPreviewing {
+        /// Every arrangement the screen asked to be played, and the surface it
+        /// asked for it in — paired, because "the cover's tile hosts it" is
+        /// half the claim and "this is the plan it was given" is the other.
+        private(set) var plans: [(plan: VideoExportPlan, surface: VideoRenderView)] = []
+        /// Where each accepted load landed. A landing naming no range is the
+        /// whole arrangement, looping.
+        private(set) var landings: [VideoLoadLanding] = []
+        private(set) var stopped: [VideoRenderView] = []
+        private(set) var mutes: [(muted: Bool, surface: VideoRenderView)] = []
+        private(set) var loops: [ClosedRange<Double>?] = []
+        private var boundSurfaces: Set<ObjectIdentifier> = []
+
+        /// ⚠️ **ONLY A LOAD THE LANDING ACCEPTS COUNTS AS BOUND** — the real
+        /// controller binds nothing for a load its caller abandons, and the
+        /// bound count is this suite's leak assertion.
+        func load(
+            _ plan: VideoExportPlan, in surface: VideoRenderView,
+            landing: @escaping @MainActor () -> VideoLoadLanding?
+        ) async {
+            guard let landed = landing() else { return }
+            landings.append(landed)
+            plans.append((plan, surface))
+            boundSurfaces.insert(ObjectIdentifier(surface))
+        }
+
+        func setLoopRange(_ range: ClosedRange<Double>?, in surface: VideoRenderView) {
+            loops.append(range)
+        }
+
+        func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {}
+
+        func stop(_ surface: VideoRenderView) {
+            stopped.append(surface)
+            boundSurfaces.remove(ObjectIdentifier(surface))
+        }
+
+        func setPaused(_ paused: Bool, in surface: VideoRenderView) {}
+        func isPaused(in surface: VideoRenderView) -> Bool? { false }
+        func advancingRate(in surface: VideoRenderView) -> Double { 0 }
+        func isBound(_ surface: VideoRenderView) -> Bool {
+            boundSurfaces.contains(ObjectIdentifier(surface))
+        }
+        func playheadSeconds(in surface: VideoRenderView) -> Double? { nil }
+        func seek(
+            toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double
+        ) {}
+        func frames(
+            of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
+        ) async -> [Double: UIImage] { [:] }
+        @discardableResult
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool { true }
+        func setMuted(_ muted: Bool, in surface: VideoRenderView) {
+            mutes.append((muted, surface))
+        }
+        func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {}
+
+        /// ⚠️ **THE COUNT OF BOUND SURFACES IS THE LEAK ASSERTION.** A screen
+        /// that started every clip in the strip would still satisfy "the cover
+        /// plays"; only this can say that the other nineteen did not.
+        var boundCount: Int { boundSurfaces.count }
     }
 
     /// ⚠️ `@MainActor` IS STATED, NOT INHERITED — a nested type does not take the
@@ -88,12 +163,23 @@ struct NewPostTests {
         /// measuring this stub rather than the screen. Tiny and short on
         /// purpose, and `PlaceholderVideoFetcher` caches by URL on disk, so the
         /// whole suite pays for one encode per id.
+        /// The file each id was actually vended.
+        ///
+        /// ⚠️ **RECORDED, BECAUSE IT CANNOT BE PREDICTED.**
+        /// `PlaceholderVideoFetcher` names its cache file from a hash of the
+        /// mock URL and `Hasher` is seeded per process, so a test that built the
+        /// expected path itself would be asserting on a different name every
+        /// run. This is how "the plan carries the COVER's file" is said.
+        private(set) var vended: [String: URL] = [:]
+
         func videoFile(for item: MediaLibraryItem.ID) async -> URL? {
             videoRequests.append(item)
             guard !answersNoVideoFile else { return nil }
             guard let source = URL(string: "mock://video/\(item)?w=64&h=64") else { return nil }
-            return try? await PlaceholderVideoFetcher(durationSeconds: 0.4, framesPerSecond: 10)
+            let file = try? await PlaceholderVideoFetcher(durationSeconds: 0.4, framesPerSecond: 10)
                 .playableURL(for: source)
+            if let file { vended[item] = file }
+            return file
         }
     }
 
@@ -166,9 +252,10 @@ struct NewPostTests {
     ) -> Screen {
         let library = StubLibrary()
         let composer = RecordingComposer()
+        let preview = StubPreview()
         let handed = Handed()
         let post = NewPostViewController(
-            items: items, edits: edits, library: library, composer: composer
+            items: items, edits: edits, library: library, composer: composer, preview: preview
         ) { handed.entry = $0 }
         let navigation = UINavigationController(rootViewController: post)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -177,8 +264,37 @@ struct NewPostTests {
         window.layoutIfNeeded()
         return Screen(
             post: post, navigation: navigation, window: window,
-            library: library, composer: composer, handed: handed
+            library: library, composer: composer, preview: preview, handed: handed
         )
+    }
+
+    /// ⚠️ **APPEARANCE IS DRIVEN BY HAND, BECAUSE A HOSTED WINDOW DOES NOT SEND
+    /// IT.** Setting `rootViewController` and laying out gives the screen a view
+    /// and a rectangle and nothing else — `viewDidAppear` never fires, which is
+    /// where the cover starts. `MediaEditorPlaybackTests` drives its editor the
+    /// same way.
+    private func appear(_ screen: Screen) {
+        screen.post.beginAppearanceTransition(true, animated: false)
+        screen.post.endAppearanceTransition()
+        screen.window.layoutIfNeeded()
+    }
+
+    private func disappear(_ screen: Screen) {
+        screen.post.beginAppearanceTransition(false, animated: false)
+        screen.post.endAppearanceTransition()
+    }
+
+    /// A breath, for a claim that something did NOT happen.
+    ///
+    /// ⚠️ **`settle(until:)` IS THE WRONG INSTRUMENT FOR A NEGATIVE.** Its bound
+    /// is thirty seconds — sized for a CI machine finishing a real publish — and
+    /// a condition that must never hold pays all of it, once per negative test.
+    /// What "nothing happened" needs is long enough for the work to have
+    /// STARTED, and the first thing a cover load does is ask the library for a
+    /// file, which is one suspension away.
+    private func breathe() async throws {
+        for _ in 0..<20 { await Task.yield() }
+        try await Task.sleep(for: .milliseconds(100))
     }
 
     /// ⚠️ **RAISED FROM 300 BECAUSE VIDEO ARRIVED.** Three seconds was ample
@@ -587,6 +703,134 @@ struct NewPostTests {
             strip.debugContentModes == [.scaleAspectFill, .scaleAspectFit, .scaleAspectFill],
             "only the one the author chose to show whole is fitted: \(strip.debugContentModes)"
         )
+    }
+
+    // MARK: - The cover, moving
+
+    /// **ONE PLAYER, ON THE COVER, AND ONLY WHEN THE COVER IS A CLIP.**
+    ///
+    /// Three clips are chosen here on purpose: "the cover plays" is satisfied
+    /// just as well by a strip that starts every tile, and the count is the only
+    /// thing that can tell those apart.
+    @Test func theCoverClipPlaysMutedOnItsOwnTileAndNothingElseDoes() async throws {
+        let screen = open(Self.items(3, videosAt: [0, 1, 2]))
+        appear(screen)
+        // Silencing is the LAST thing a cover load does, so waiting on it means
+        // the whole sequence has run — and the breath after it is what gives a
+        // strip that started the other two time to be caught doing it.
+        try await settle(until: { screen.preview.mutes.count == 1 })
+        try await breathe()
+        screen.window.layoutIfNeeded()
+
+        let strip = try #require(Self.strips(in: screen.window).first)
+        #expect(screen.preview.plans.count == 1, "one clip moves, whatever was chosen")
+        #expect(screen.preview.boundCount == 1, "exactly one surface holds a player")
+        #expect(screen.library.videoRequests == ["video-0"],
+                "the other two clips were never even read: \(screen.library.videoRequests)")
+        let started = try #require(screen.preview.plans.first)
+        // What was ASKED FOR: the cover's own file, in the cover's own tile.
+        #expect(started.plan.sourceURL == screen.library.vended["video-0"])
+        #expect(strip.debugSurfaceTileID == "video-0",
+                "the surface sits on the cover's tile: \(strip.debugSurfaceTileID ?? "nothing")")
+        #expect(started.surface === strip.debugVideoSurface,
+                "the seam was handed the surface the tile is hosting")
+        // ⚠️ SILENCED EXPLICITLY, AND AFTER THE ITEM IS IN. `MediaPreviewPlayer`
+        // un-mutes a clip carrying a song at the end of its own load, which is
+        // right on the editor's canvas and wrong on a settings form.
+        let silenced = try #require(screen.preview.mutes.last)
+        #expect(silenced.muted, "a thumbnail that makes noise beside a caption field is a defect")
+        #expect(silenced.surface === strip.debugVideoSurface)
+        // A landing naming no range is the whole arrangement, looping.
+        #expect(screen.preview.landings == [VideoLoadLanding(seconds: 0)])
+    }
+
+    /// The witness. Without it, a seam that played nothing at all — a library
+    /// answering nil, a surface never found — would satisfy every "stops"
+    /// assertion below and read as careful bookkeeping.
+    @Test func aPhotographCoverAsksForNothing() async throws {
+        let screen = open(Self.items(3, videosAt: [1, 2]))
+        appear(screen)
+        try await breathe()
+        screen.window.layoutIfNeeded()
+
+        let strip = try #require(Self.strips(in: screen.window).first)
+        #expect(screen.preview.plans.isEmpty, "the cover is a photograph; nothing moves")
+        #expect(screen.library.videoRequests.isEmpty,
+                "not even read: \(screen.library.videoRequests)")
+        #expect(screen.preview.boundCount == 0)
+        #expect(strip.debugSurfaceTileID == nil, "no tile wears a video surface")
+    }
+
+    /// ⚠️ **A PUSH IS A DISAPPEARANCE TOO**, which is why the stop lives in
+    /// `viewWillDisappear` rather than behind an `isMovingFromParent` guard.
+    @Test func leavingTheScreenStopsTheCover() async throws {
+        let screen = open(Self.items(2, videosAt: [0]))
+        appear(screen)
+        try await settle(until: { screen.preview.plans.count == 1 })
+        screen.window.layoutIfNeeded()
+        let strip = try #require(Self.strips(in: screen.window).first)
+        let surface = try #require(strip.debugVideoSurface)
+
+        disappear(screen)
+
+        #expect(screen.preview.stopped.count == 1, "the player was given back")
+        #expect(screen.preview.stopped.last === surface)
+        #expect(screen.preview.boundCount == 0)
+        #expect(strip.debugSurfaceTileID == nil, "the tile is a still again")
+    }
+
+    /// Publishing builds an export over the very file the strip is playing.
+    @Test func postingStopsTheCover() async throws {
+        let screen = open(Self.items(2, videosAt: [0]))
+        appear(screen)
+        try await settle(until: { screen.preview.plans.count == 1 })
+        screen.window.layoutIfNeeded()
+        let strip = try #require(Self.strips(in: screen.window).first)
+
+        screen.post.debugTapPost()
+
+        #expect(screen.preview.boundCount == 0, "nothing is still decoding beside the export")
+        #expect(screen.preview.stopped.count == 1)
+        #expect(strip.debugSurfaceTileID == nil)
+    }
+
+    /// The cover row is a real control, and the player follows it.
+    @Test func changingTheCoverMovesThePlayerToTheNewClip() async throws {
+        let screen = open(Self.items(3, videosAt: [0, 2]))
+        appear(screen)
+        try await settle(until: { screen.preview.plans.count == 1 })
+        screen.window.layoutIfNeeded()
+
+        screen.post.debugSetCover("video-2")
+        try await settle(until: { screen.preview.plans.count == 2 })
+        screen.window.layoutIfNeeded()
+
+        let strip = try #require(Self.strips(in: screen.window).first)
+        #expect(screen.preview.plans.count == 2, "the first clip stopped and the new one started")
+        #expect(screen.preview.boundCount == 1, "not two players, one moved")
+        #expect(screen.preview.plans.last?.plan.sourceURL == screen.library.vended["video-2"])
+        #expect(strip.debugSurfaceTileID == "video-2",
+                "on the new cover's tile: \(strip.debugSurfaceTileID ?? "nothing")")
+        #expect(screen.preview.plans.last?.surface === strip.debugVideoSurface)
+    }
+
+    /// ⚠️ **THE RE-ENTRANCY PIN.** `viewDidAppear` runs again on every return to
+    /// this screen, and the strip is redrawn by any reconfigure — so "start the
+    /// cover" is asked far more often than the cover changes. Asking twice for
+    /// the same clip in the same rectangle must mint nothing: a second item over
+    /// a bound player restarts the picture the author is watching.
+    @Test func askingTwiceForTheSameCoverBindsNothingFurther() async throws {
+        let screen = open(Self.items(2, videosAt: [0]))
+        appear(screen)
+        try await settle(until: { screen.preview.plans.count == 1 })
+        screen.window.layoutIfNeeded()
+
+        appear(screen)
+        try await breathe()
+
+        #expect(screen.preview.plans.count == 1, "the second appearance found it already playing")
+        #expect(screen.preview.stopped.isEmpty, "and stopped nothing to find that out")
+        #expect(screen.preview.boundCount == 1)
     }
 
     /// The strip cell, dug out of the hosted window — the same recursive shape
