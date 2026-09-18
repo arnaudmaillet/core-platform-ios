@@ -54,8 +54,12 @@ enum EditorSelectorLayout {
         guard available > 0, available.isFinite else { return (0, 0) }
         func clean(_ value: CGFloat) -> CGFloat { value.isFinite ? max(value, 0) : 0 }
         let floor = min(clean(leadingFloor), available)
+        // ⚠️ THE FLOOR IS KEPT HERE, AND ONLY HERE: the trailing strip gives
+        // way before the selector could go under one bubble, so what it leaves
+        // is never less than one. (A second `max(floor, …)` on the selector's
+        // line was found redundant by breaking it: nothing went red.)
         let trailing = min(clean(trailingWants), available - floor)
-        let leading = max(floor, min(clean(leadingWants), available - trailing))
+        let leading = min(clean(leadingWants), available - trailing)
         return (leading, trailing)
     }
 }
