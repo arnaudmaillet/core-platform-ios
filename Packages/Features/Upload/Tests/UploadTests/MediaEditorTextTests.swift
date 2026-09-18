@@ -217,12 +217,12 @@ struct MediaEditorTextTests {
     @Test func whileTypingTheTrailingSideSaysDoneAndTheComposerCarriesNone() async throws {
         let screen = open(Self.items(1))
         _ = try await page("item-0", on: screen)
-        #expect(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) == ["Next"], "guard")
+        #expect(screen.editor.debugTrailingBarItems.first?.title == "Next", "guard")
 
         choose(Mode.text, on: screen)
 
-        #expect(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) == ["Done"],
-                "got \(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) ?? [])")
+        #expect(screen.editor.debugTrailingBarItems.first?.title == "Done",
+                "got \(screen.editor.debugTrailingBarItems.map { $0.title ?? "?" })")
         let composer = try #require(screen.editor.overlayMode.debugComposer)
         #expect(Self.buttonTitles(in: composer) == [],
                 "the composer put a button of its own back under the bar's")
@@ -241,7 +241,7 @@ struct MediaEditorTextTests {
 
         #expect(screen.editor.overlayMode.debugComposer == nil, "the session is over")
         #expect(screen.editor.edits(for: "item-0").overlays.count == 1, "and the words were kept")
-        #expect(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) == ["Next"],
+        #expect(screen.editor.debugTrailingBarItems.first?.title == "Next",
                 "the way forward came back")
         #expect(screen.navigation.topViewController === screen.editor,
                 "Done left the screen — it is not Next wearing another word")

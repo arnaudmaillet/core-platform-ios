@@ -283,9 +283,19 @@ final class MediaEditorViewController: UIViewController {
     )
 
     /// States the trailing side for what the screen is doing right now.
+    ///
+    /// ⚠️ **THE TWO ARROWS STAND HERE, NOT WITH THE DRAFT** — asked for as
+    /// *"[back][save]-----[precedent, suivant][next]"*. They left the leading
+    /// side because that side is where LEAVING lives (the chevron, the draft)
+    /// and the arrows are not a way out; they belong with the action that moves
+    /// the work forward.
+    ///
+    /// ⚠️ **AND THE ORDER READS BACKWARDS HERE.** Trailing items are laid out
+    /// from the edge INWARDS, so the first one written is the RIGHTMOST: this
+    /// array draws `[◀][▶][Next]`.
     private func showTheTrailingItem(animated: Bool = false) {
         navigationItem.setRightBarButtonItems(
-            [isTypingText ? doneTypingItem : nextItem], animated: animated
+            [isTypingText ? doneTypingItem : nextItem, redoItem, undoItem], animated: animated
         )
     }
 
@@ -1268,9 +1278,9 @@ final class MediaEditorViewController: UIViewController {
         // ⚠️ AND THE OLD NOTE'S FEAR DOES NOT MATERIALISE: it warned that an
         // inherited button wears the previous screen's title, but no Upload
         // screen HAS a title, so it draws as a bare chevron. Verified on device.
-        // `[‹][save][◀][▶] ⋯ [next]` — the two arrows stand with the other
-        // things that act on the whole screen rather than on the picture.
-        navigationItem.leftBarButtonItems = [saveDraftItem, undoItem, redoItem]
+        // `[‹][save] ⋯ [◀][▶][next]` — the leading side is the ways OUT of this
+        // screen, and nothing else.
+        navigationItem.leftBarButtonItems = [saveDraftItem]
         navigationItem.leftItemsSupplementBackButton = true
         // The chevron the NEXT screen wears, kept wordless if a title ever lands
         // here.
@@ -2287,7 +2297,7 @@ final class MediaEditorViewController: UIViewController {
     /// nothing for it to act on. It now lives in the crop tools themselves,
     /// where it is only reachable at exactly the moment it means something.
     private func showCropBarItems(_ isCropping: Bool, animated: Bool) {
-        navigationItem.setLeftBarButtonItems([saveDraftItem, undoItem, redoItem], animated: animated)
+        navigationItem.setLeftBarButtonItems([saveDraftItem], animated: animated)
         showTheTrailingItem(animated: animated)
     }
 
@@ -3634,9 +3644,11 @@ extension MediaEditorViewController {
     /// Internal for tests: whether the bar is offering the two arrows, and on
     /// which side.
     var debugBarOffersTheArrows: Bool {
-        let items = navigationItem.leftBarButtonItems ?? []
+        let items = navigationItem.rightBarButtonItems ?? []
         return items.contains { $0 === undoItem } && items.contains { $0 === redoItem }
     }
+    /// Internal for tests: the order the trailing side spells, edge inwards.
+    var debugTrailingBarItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
     /// Internal for tests: the order the leading side spells, after the chevron.
     var debugLeadingBarItems: [UIBarButtonItem] { navigationItem.leftBarButtonItems ?? [] }
 

@@ -260,12 +260,17 @@ struct MediaEditorTests {
     @Test func theTopBarKeepsItsPromisedOrder() throws {
         let screen = open(Self.items(2))
 
-        // ⚠️ **THE TRAILING SIDE IS JUST "Next" NOW.** The fill/fit glyph used to
-        // stand beside it; it has gone to the crop tools, where it is reachable
-        // at the moment it means something.
+        // ⚠️ **THE TRAILING SIDE CARRIES THE TWO ARROWS NOW, AND IT READS
+        // BACKWARDS.** Items are laid out from the edge INWARDS, so the array
+        // `[Next, Redo, Undo]` is what DRAWS `[◀][▶][Next]` — the order the
+        // author asked for. Asserted as the array, with the reading spelled
+        // out, because a test that asserted the drawn order would have to
+        // reverse it silently and the next reader would fix the "bug".
         let right = try #require(screen.editor.navigationItem.rightBarButtonItems)
-        #expect(right.count == 1, "got \(right.map { $0.title ?? $0.accessibilityLabel ?? "?" })")
+        #expect(right.map { $0.title ?? $0.accessibilityLabel ?? "?" } == ["Next", "Redo", "Undo"],
+                "got \(right.map { $0.title ?? $0.accessibilityLabel ?? "?" })")
         #expect(right.first?.title == "Next", "Next takes the edge")
+        #expect(right.dropFirst().allSatisfy { $0.image != nil }, "an icon item with no icon is a blank capsule")
         #expect(screen.editor.debugFitActionName == "Fit the picture",
                 "named for what it will DO: the canvas fills, so the glyph offers fit")
         // ⚠️ **THE CHEVRON IS UIKit'S NOW, AND THAT IS WHAT KEEPS THE
@@ -282,8 +287,8 @@ struct MediaEditorTests {
         // losing a control to exactly that. A titleless item asserted by `title`
         // reads as `[nil]`, which is why this asks the accessibility label: an
         // icon button with no spoken name is a button VoiceOver cannot announce.
-        #expect(left.map(\.accessibilityLabel) == ["Save draft", "Undo", "Redo"],
-                "the draft and the two history arrows; the chevron is the system's")
+        #expect(left.map(\.accessibilityLabel) == ["Save draft"],
+                "the leading side is the ways out: the chevron is the system's, then the draft")
         #expect(left.allSatisfy { $0.image != nil }, "an icon bar item with no icon is a blank capsule")
         #expect(screen.editor.navigationItem.leftItemsSupplementBackButton)
         #expect(
@@ -428,8 +433,8 @@ struct MediaEditorTests {
     @Test func theFitGlyphLaysTheCurrentPictureWholeAndLivesWithTheCropTools() async throws {
         let screen = open(Self.items(2))
         try await settle(until: { !Self.pages(in: screen.window).isEmpty })
-        #expect(screen.editor.navigationItem.rightBarButtonItems?.count == 1,
-                "the header still carries the fill/fit glyph")
+        #expect(screen.editor.navigationItem.rightBarButtonItems?.count == 3,
+                "Next and the two arrows — and no fill/fit glyph among them")
 
         screen.editor.debugCropTools.debugTapFit()
         screen.window.layoutIfNeeded()
