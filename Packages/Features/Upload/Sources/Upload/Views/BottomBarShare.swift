@@ -57,4 +57,31 @@ enum BottomBarShare {
             trailingPlatter: trailingPlatter
         )
     }
+
+    /// The bar's geometry when its two strips stand at its two ENDS with a
+    /// flexible space between them — the camera's `[selector] ---- [close]`.
+    ///
+    /// ⚠️ **THE GAP IS READ ONLY WHILE THE FLEXIBLE SPACE HOLDS NOTHING.** While
+    /// the leading strip has room to spare, the flexible space takes it, and
+    /// the distance between the two platters is that slack plus the bar's own
+    /// gap. Read as the gap, the slack would come off every later share for
+    /// good (`barGeometry` never reverts). So unless `flush` says the last
+    /// share left no slack, the trailing platter is read as if it stood `gap`
+    /// after the leading one: the margin and the platter are measured, the
+    /// gap is kept.
+    static func measure(
+        leading: UIView, trailing: UIView, flush: Bool, keepingGap gap: CGFloat
+    ) -> ToolbarGeometry? {
+        guard let window = leading.window, trailing.window === window,
+              let leadingPlatter = platter(of: leading),
+              let trailingPlatter = platter(of: trailing)
+        else { return nil }
+        let slack = flush ? 0 : trailingPlatter.minX - (leadingPlatter.maxX + gap)
+        return ToolbarGeometry.measured(
+            leading: leading.convert(leading.bounds, to: nil),
+            leadingPlatter: leadingPlatter,
+            trailing: trailing.convert(trailing.bounds, to: nil).offsetBy(dx: -slack, dy: 0),
+            trailingPlatter: trailingPlatter.offsetBy(dx: -slack, dy: 0)
+        )
+    }
 }

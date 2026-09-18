@@ -35,6 +35,29 @@ enum EditorSelectorLayout {
         let leading = min(max(leadingWants.isFinite ? leadingWants : 0, 0), available - floor)
         return (leading, available - leading)
     }
+
+    /// The widths for a bar whose LEADING strip is a selector that takes at
+    /// most what it wants, a trailing strip at its own width, and a flexible
+    /// space between them — the camera's `[selector] ---- [close]`.
+    ///
+    /// ⚠️ **ASKED FOR IN THOSE WORDS**: the selector should take "en largeur
+    /// maximale la largeur restante disponible, sinon sa largeur intrinsèque".
+    /// So it is held at min(what it wants, what the trailing strip leaves), is
+    /// never narrower than one bubble (`leadingFloor`) — scrolling what it
+    /// cannot show — and whatever is left over goes to the flexible space. The
+    /// trailing strip keeps its own width unless even one bubble would not fit
+    /// beside it. `widths(leadingWants:available:trailingFloor:)`, the editor's
+    /// rule, is untouched: its trailing selector still takes the rest.
+    static func leadingCapped(
+        leadingWants: CGFloat, trailingWants: CGFloat, available: CGFloat, leadingFloor: CGFloat
+    ) -> (leading: CGFloat, trailing: CGFloat) {
+        guard available > 0, available.isFinite else { return (0, 0) }
+        func clean(_ value: CGFloat) -> CGFloat { value.isFinite ? max(value, 0) : 0 }
+        let floor = min(clean(leadingFloor), available)
+        let trailing = min(clean(trailingWants), available - floor)
+        let leading = max(floor, min(clean(leadingWants), available - trailing))
+        return (leading, trailing)
+    }
 }
 
 /// What the bottom bar charges around its items, which is what decides how
