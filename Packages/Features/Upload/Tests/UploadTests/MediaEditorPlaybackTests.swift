@@ -262,6 +262,34 @@ struct MediaEditorPlaybackTests {
 
     // MARK: - Who stops
 
+    /// ⚠️ **A TAP ON THE PICTURE ANSWERS IN THE MIDDLE OF IT.** Asked for: a
+    /// play and a pause glyph, according to the state, flashing briefly each
+    /// time the video is tapped. It names the state the tap LEFT — a clip that
+    /// has just stopped shows a pause — because it is gone in half a second and
+    /// cannot stand for the next tap the way a permanent button can.
+    @Test func tappingTheClipFlashesTheStateItLeaves() async throws {
+        let screen = open(Self.items(3, videosAt: [1]))
+        screen.editor.debugScrollToPage(1)
+        try await settle(until: { screen.preview.played.count == 1 })
+        try #require(screen.preview.played.count == 1, "guard: the clip is bound")
+
+        screen.editor.debugTapTheMedia()
+        screen.editor.debugTapTheMedia()
+
+        #expect(screen.editor.debugPlaybackFlashes == [true, false],
+                "the flashes named \(screen.editor.debugPlaybackFlashes) for a pause then a play")
+    }
+
+    /// And a photograph, which has nothing to play, answers nothing.
+    @Test func tappingAPhotographFlashesNothing() throws {
+        let screen = open(Self.items(3, videosAt: [1]))
+
+        screen.editor.debugTapTheMedia()
+
+        #expect(screen.editor.debugPlaybackFlashes.isEmpty,
+                "a still photograph flashed a playback glyph")
+    }
+
     /// ⚠️ **THE BOX CARRIES THE FILM ON, AND SO DOES THE CANVAS WHEN IT TAKES IT
     /// BACK.** Asked for as "la vidéo devrait être la continuité / le même
     /// player": opening crop started the clip again from its first frame, which

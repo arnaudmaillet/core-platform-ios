@@ -3114,7 +3114,23 @@ final class MediaEditorViewController: UIViewController {
     /// doing the work.
     @objc private func mediaTapped() {
         togglePreviewPlayback()
+        flashThePlaybackState()
     }
+
+    /// ⚠️ **ONLY FOR THE TAP ON THE PICTURE.** The timeline's own glyph changes
+    /// itself under the finger that pressed it; a second answer in the middle
+    /// of the picture would pull the eye away from where the finger is. The
+    /// picture is the control nobody can see, so it is the one that needs one.
+    private func flashThePlaybackState() {
+        guard let surface = playingSurface, surface.window != nil,
+              let paused = preview.isPaused(in: surface)
+        else { return }
+        if playbackFlash.superview == nil { view.addSubview(playbackFlash) }
+        let middle = surface.convert(CGPoint(x: surface.bounds.midX, y: surface.bounds.midY), to: view)
+        playbackFlash.flash(paused: paused, at: middle)
+    }
+
+    private lazy var playbackFlash = MediaPlaybackFlashView()
 
     private lazy var mediaTap: UITapGestureRecognizer = {
         let tap = UITapGestureRecognizer(target: self, action: #selector(mediaTapped))
@@ -3936,6 +3952,11 @@ extension MediaEditorViewController {
     var debugTransitionSeam: Int? { transitionFocus?.seam }
     /// Internal for tests: the stretch the screen believes the item loops.
     var debugPreviewLoop: ClosedRange<Double>? { previewSubject?.loop }
+    /// Internal for tests: a tap on the picture, through the routine the
+    /// recogniser calls.
+    func debugTapTheMedia() { mediaTapped() }
+    /// Internal for tests: the play/pause glyph, and every state it flashed.
+    var debugPlaybackFlashes: [Bool] { playbackFlash.debugFlashes }
     /// Internal for tests: the path "Next" takes, without a bar to tap.
     func debugTapNext() { goNext() }
     /// Internal for tests: the trailing item, through ITS OWN action.
