@@ -241,7 +241,6 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
     private var videoInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
     private var isConfigured = false
-    private var rotation: AVCaptureDevice.RotationCoordinator?
     private var photoDelegates: [Int64: PhotoDelegate] = [:]
     /// What records a clip — the movie output, or a test's double.
     private let recorder: any CaptureMovieRecording
@@ -386,10 +385,9 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         session.addInput(input)
         videoInput = input
         currentPosition = device.position == .front ? .front : .back
-        // ⚠️ LAYER-LESS, AND THEREFORE FOR THE CAPTURE ANGLE ONLY: its preview
-        // angle is 0 by contract. The preview's own coordinator is built on the
-        // main actor with the layer — `AVCaptureSource.followPreviewRotation`.
-        rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+        // ⚠️ NO COORDINATOR OF ITS OWN: every output takes the preview's angle
+        // (`applyConnections`), from the main actor's coordinator, which knows
+        // the layer — `AVCaptureSource.followPreviewRotation`.
         // Start on the wide lens, which is display factor 1.
         if (try? device.lockForConfiguration()) != nil {
             device.videoZoomFactor = Self.displayScale(of: device)
@@ -415,21 +413,26 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         photoOutput.maxPhotoDimensions = largest
     }
 
-    /// ⚠️ THE ROTATION IS THE COORDINATOR'S, READ AT EACH CAPTURE — so a photo
-    /// taken with the phone turned is level. Mirroring follows what the author
-    /// SAW: a front-camera capture keeps the reflection the preview showed, the
-    /// social cameras' convention.
+    /// Mirroring follows what the author SAW: a front-camera capture keeps the
+    /// reflection the preview showed, the social cameras' convention.
     ///
-    /// ⚠️ **TWO ANGLES, AND THE DATA OUTPUT TAKES THE PREVIEW'S.** Its frames
-    /// ARE a preview — the drawn look and the filter cards. Given the capture
-    /// angle, which follows gravity rather than the interface, they turned a
-    /// quarter and were cropped by the aspect fill whenever the phone was held
-    /// sideways over a portrait screen.
+    /// ⚠️ **THE DATA OUTPUT TAKES THE PREVIEW'S ANGLE — AND SO, NOW, DO THE
+    /// FILES.** Its frames ARE a preview — the drawn look and the filter cards.
+    /// Given the capture angle, which follows gravity rather than the
+    /// interface, they turned a quarter and were cropped by the aspect fill
+    /// whenever the phone was held sideways over a portrait screen.
     private func applyConnections() {
-        let captureAngle = rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
         let mirrored = currentPosition == .front
+        // ⚠️ **ONE ANGLE FOR EVERYTHING: THE ONE THE AUTHOR SEES.** Files used
+        // to take the gravity-level CAPTURE angle while the preview and the
+        // ratio's window took the interface's. Under Portrait Orientation Lock
+        // with the phone held sideways, the window framed a portrait 9:16 of a
+        // picture that was written LANDSCAPE, and the 9:16 crop computed from
+        // the file kept a sliver 0.32 of its width wide. A capture now has the
+        // orientation of the frame the author framed it in; where the
+        // interface does rotate, the two angles agree anyway.
         let outputs: [(AVCaptureOutput, CGFloat)] = [
-            (photoOutput, captureAngle), (movieOutput, captureAngle), (dataOutput, previewAngle)
+            (photoOutput, previewAngle), (movieOutput, previewAngle), (dataOutput, previewAngle)
         ]
         for (output, angle) in outputs {
             guard let connection = output.connection(with: .video) else { continue }
