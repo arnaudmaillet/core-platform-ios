@@ -485,12 +485,28 @@ final class CaptureViewController: UIViewController {
         selector.setItems(CaptureOption.allCases.map {
             IconSelectorBar.Item(symbolName: Self.symbol(for: $0, settings: settings), accessibilityLabel: $0.title)
         })
+        applyShapeLock()
     }
 
+    /// ⚠️ **ONE SHAPE AND ONE LOOK FOR THE WHOLE VIDEO — THE SHAPE LOCKED,
+    /// THE LOOK SAID.** A take is stitched into one video and handed to the
+    /// editor as ONE item with one set of edits, so the shape and the look in
+    /// force at Next apply to every clip, including clips shot under another.
+    /// The author decided: once the take has a clip the shape is locked — its
+    /// icon dimmed, a tap explaining how to free it — while the look stays
+    /// free and says, the first time it changes mid-take, that it applies to
+    /// the whole video. Keeping a shape and a look per clip would mean handing
+    /// the editor each clip as its own piece, which is a larger change.
     private func optionChosen(_ index: Int) {
         guard let option = CaptureOption(rawValue: index) else { return }
         take.disarm()
         refreshTakeControls(animated: true)
+        if option == .ratio, !take.isEmpty {
+            selector.selectNothing(notify: false)
+            showBand(nil)
+            say("Undo your clips to change the shape")
+            return
+        }
         if option == .grid {
             settings.showsGrid.toggle()
             applyGrid(animated: true)
@@ -611,7 +627,14 @@ final class CaptureViewController: UIViewController {
         }
     }
 
+    /// Whether this take has already been told its look is the whole video's.
+    private var hasSaidTheLookIsWhole = false
+
     private func setFilter(_ filter: MediaFilter) {
+        if !take.isEmpty, !hasSaidTheLookIsWhole, filter != settings.filter {
+            hasSaidTheLookIsWhole = true
+            say("The look applies to the whole video")
+        }
         settings.filter = filter
         liveView.setLook(FrameLook(preset: filter))
         applyFrameDelivery()
@@ -1051,6 +1074,33 @@ final class CaptureViewController: UIViewController {
         // ⚠️ A SHEET WITH CLIPS IN IT DOES NOT SWIPE AWAY: the drag would throw
         // the take out with no question asked. Cancel asks.
         navigationController?.isModalInPresentation = hasClips || isRecording
+        if !hasClips { hasSaidTheLookIsWhole = false }
+        applyShapeLock()
+    }
+
+    /// Dims the shape's icon while the take has a clip — see `optionChosen`.
+    ///
+    /// ⚠️ **FOUND BY ITS LABEL, BECAUSE THE BAR HAS NO PER-ITEM STATE.**
+    /// `IconSelectorBar` offers no "dimmed" for one item, and DesignSystem is
+    /// not this change's to edit; its buttons carry their item's
+    /// accessibility label, which is how this one is found. Re-applied after
+    /// every re-dress, since `setItems` builds new buttons.
+    private func applyShapeLock() {
+        guard let button = ratioButton else { return }
+        let locked = !take.isEmpty
+        button.alpha = locked ? 0.35 : 1
+        button.accessibilityValue = locked ? "Locked. Undo your clips to change the shape." : nil
+    }
+
+    private var ratioButton: UIButton? {
+        func find(in view: UIView) -> UIButton? {
+            if let button = view as? UIButton, button.accessibilityLabel == CaptureOption.ratio.title { return button }
+            for subview in view.subviews {
+                if let found = find(in: subview) { return found }
+            }
+            return nil
+        }
+        return find(in: selector)
     }
 
     /// Everything but the shutter, the ring and the zoom steps back while a
@@ -1184,6 +1234,7 @@ final class CaptureViewController: UIViewController {
     private func say(_ text: String) {
         toastLabel.text = text
         debugLastToast = text
+        debugToasts.append(text)
         toast.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
         UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
             self.toast.alpha = 1
@@ -1247,6 +1298,8 @@ final class CaptureViewController: UIViewController {
 
     private(set) var debugPopIns = 0
     private(set) var debugLastToast: String?
+    private(set) var debugToasts: [String] = []
+    var debugShapeIsDimmed: Bool { (ratioButton?.alpha ?? 1) < 0.5 }
     private(set) var debugLastHandOff: ([MediaLibraryItem], [String: MediaEdits])?
     var debugSelector: IconSelectorBar { selector }
     var debugBand: MediaEditorBandView { band }

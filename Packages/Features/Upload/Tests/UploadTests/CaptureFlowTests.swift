@@ -662,6 +662,43 @@ struct CaptureFlowTests {
         try await settle { screen.source.feed.latestFrame != nil }
     }
 
+    /// ⚠️ Once the take has a clip the shape is locked — dimmed, and a tap
+    /// says how to free it — because every clip becomes one video in one
+    /// shape. Undoing back to an empty take frees it.
+    @Test func theShapeIsLockedOnceTheTakeHasAClip() async throws {
+        let screen = try await open()
+        #expect(!screen.camera.debugShapeIsDimmed)
+        try await record(screen, seconds: 0.6)
+        #expect(screen.camera.debugShapeIsDimmed)
+        screen.camera.debugSelector.debugTap(CaptureOption.ratio.rawValue)
+        #expect(screen.camera.openOption == nil, "its row does not open")
+        #expect(screen.camera.debugLastToast == "Undo your clips to change the shape")
+        #expect(screen.camera.debugSelector.selection == nil)
+
+        screen.camera.debugTapUndo()
+        screen.camera.debugTapUndo()
+        #expect(screen.camera.take.isEmpty)
+        #expect(!screen.camera.debugShapeIsDimmed)
+        screen.camera.debugSelector.debugTap(CaptureOption.ratio.rawValue)
+        #expect(screen.camera.openOption == .ratio)
+    }
+
+    /// The look stays free mid-take, and says once that it is the whole
+    /// video's.
+    @Test func aLookChangedMidTakeSaysOnceThatItIsTheWholeVideos() async throws {
+        let screen = try await open()
+        screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
+        screen.camera.debugFilterRow.debugTap(.chrome)
+        #expect(!screen.camera.debugToasts.contains("The look applies to the whole video"), "nothing to say on an empty take")
+        screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
+        try await record(screen, seconds: 0.6)
+        screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
+        screen.camera.debugFilterRow.debugTap(.noir)
+        screen.camera.debugFilterRow.debugTap(.mono)
+        #expect(screen.camera.settings.filter == .mono)
+        #expect(screen.camera.debugToasts.filter { $0 == "The look applies to the whole video" }.count == 1)
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {
