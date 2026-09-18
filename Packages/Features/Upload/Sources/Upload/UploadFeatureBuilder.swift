@@ -122,16 +122,23 @@ public struct UploadFeatureBuilder {
                 return picker
             }
         ) { items, initialEdits in
-            MediaEditorViewController(
+            let editor = MediaEditorViewController(
                 items: items, library: captures,
                 soundtracks: SystemSoundtrackSource(files: draft.soundtrackFiles),
                 initialEdits: initialEdits
             ) { editing, edits in
-                NewPostViewController(
+                let finalisation = NewPostViewController(
                     items: editing, edits: edits,
                     library: captures, composer: composer, draft: draft
                 ) { _ in }
+                // ⚠️ THE SCREENS THAT READ A CAPTURE HOLD ITS FILE — "Post"
+                // keeps reading after the author steps back to the camera.
+                // See `CapturedMediaLibrary.hold(_:by:)`.
+                captures.hold(editing, by: finalisation)
+                return finalisation
             }
+            captures.hold(items, by: editor)
+            return editor
         }
         let navigation = UploadNavigationController(rootViewController: camera)
         navigation.modalPresentationStyle = .pageSheet

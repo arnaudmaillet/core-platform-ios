@@ -195,6 +195,7 @@ final class CaptureViewController: UIViewController {
         // has its selector in its own layout and wants the foot clear.
         navigationController?.setToolbarHidden(true, animated: animated)
         startCamera()
+        sweepReleased()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -1096,7 +1097,8 @@ final class CaptureViewController: UIViewController {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         case .deleted(let clip):
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            folder.discard(clip.url)
+            // A one-clip take was handed over as this very clip.
+            release(clip.url)
             dropStitch()
         }
         refreshTakeControls(animated: true)
@@ -1145,6 +1147,30 @@ final class CaptureViewController: UIViewController {
         }
     }
 
+    /// Files the camera is done with that a screen it handed them to still
+    /// reads — deleted once nobody does (`sweepReleased`).
+    private var awaitingRelease: Set<URL> = []
+
+    /// Deletes a file the camera no longer needs — later, if a screen it was
+    /// handed to still reads it. See `CapturedMediaLibrary.hold(_:by:)`.
+    private func release(_ url: URL) {
+        sweepReleased()
+        if captures.isHeld(url) {
+            awaitingRelease.insert(url)
+        } else {
+            folder.discard(url)
+        }
+    }
+
+    /// Deletes the files that were waiting for their readers to go. Whatever is
+    /// still held when the sheet closes goes with the folder.
+    private func sweepReleased() {
+        for url in awaitingRelease where !captures.isHeld(url) {
+            folder.discard(url)
+            awaitingRelease.remove(url)
+        }
+    }
+
     /// Forgets the joined take — and deletes its file.
     ///
     /// ⚠️ **THE FILE GOES WITH THE CACHE.** The first version only let go of
@@ -1155,9 +1181,10 @@ final class CaptureViewController: UIViewController {
     /// the take's.
     private func dropStitch() {
         if let stitched, !stitched.clips.contains(stitched.url) {
-            folder.discard(stitched.url)
+            release(stitched.url)
         }
         stitched = nil
+        sweepReleased()
     }
 
     /// Lays out what the take allows: the library shortcut while it is empty,

@@ -103,6 +103,9 @@ struct CaptureFlowTests {
 
     @MainActor
     final class Handed {
+        /// The screen the last capture was handed to, kept alive as a
+        /// publishing finalisation screen keeps itself.
+        var holder: UIViewController?
         var items: [MediaLibraryItem] = []
         var edits: [String: MediaEdits] = [:]
         var editors = 0
@@ -131,8 +134,9 @@ struct CaptureFlowTests {
         source.plain = plainPreview
         let handed = Handed()
         let folder = CaptureFolder()
+        let captures = CapturedMediaLibrary()
         let camera = CaptureViewController(
-            source: source, folder: folder, captures: CapturedMediaLibrary(), recents: recents,
+            source: source, folder: folder, captures: captures, recents: recents,
             takeLimit: takeLimit, reducesMotion: { !motion },
             makeLibraryPicker: {
                 handed.pickers += 1
@@ -142,7 +146,11 @@ struct CaptureFlowTests {
             handed.items = items
             handed.edits = edits
             handed.editors += 1
-            return UIViewController()
+            // What the builder does: the screen a capture goes to holds its file.
+            let screen = UIViewController()
+            captures.hold(items, by: screen)
+            handed.holder = screen
+            return screen
         }
         let navigation = UploadNavigationController(rootViewController: camera)
         let window = UIWindow(frame: CGRect(origin: .zero, size: size))
@@ -705,9 +713,17 @@ struct CaptureFlowTests {
     }
 
     /// Pops back to the camera once the push has landed, and waits for frames.
-    private func comeBack(to screen: Screen) async throws {
+    /// The screen the capture went to is let go — as a popped editor is —
+    /// unless the test keeps it, as a publishing finalisation screen keeps
+    /// itself.
+    private func comeBack(to screen: Screen, keepingTheScreen: Bool = false) async throws {
         try await settle { screen.navigation.viewControllers.count == 2 && screen.navigation.transitionCoordinator == nil }
         screen.navigation.popViewController(animated: false)
+        if !keepingTheScreen {
+            weak var gone = screen.handed.holder
+            screen.handed.holder = nil
+            try await settle { gone == nil }
+        }
         try #require(screen.navigation.topViewController === screen.camera)
         screen.source.feed.forgetLatest()
         try await settle { screen.source.feed.latestFrame != nil }
@@ -916,6 +932,30 @@ struct CaptureFlowTests {
         #expect(FileManager.default.fileExists(atPath: kept.path), "the live folder stayed")
     }
 
+    /// ⚠️ A file handed to a screen that still reads it — "Post" publishing
+    /// after the author stepped back — is not deleted by the camera; it goes
+    /// once that screen has gone.
+    @Test func aHandedTakeOutlivesTheCameraWhileItsScreenReadsIt() async throws {
+        let screen = try await open()
+        try await record(screen, seconds: 0.6)
+        try await record(screen, seconds: 0.6)
+        screen.camera.debugTapNext()
+        try await settle(for: 10) { screen.handed.editors == 1 }
+        let handedFile = await screen.camera.captures.videoFile(for: try #require(screen.handed.items.first).id)
+        let joined = try #require(handedFile)
+        try await comeBack(to: screen, keepingTheScreen: true)
+
+        try await record(screen, seconds: 0.6)
+        #expect(FileManager.default.fileExists(atPath: joined.path), "still read by the screen it went to")
+
+        weak var gone = screen.handed.holder
+        screen.handed.holder = nil
+        try await settle { gone == nil }
+        try #require(gone == nil)
+        try await record(screen, seconds: 0.6)
+        #expect(!FileManager.default.fileExists(atPath: joined.path), "and deleted once nobody reads it")
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {
@@ -973,5 +1013,27 @@ struct CaptureFlowTests {
         }
         #expect(published.count == 1)
         if case .image = published.first {} else { Issue.record("published \(published)") }
+    }
+
+    /// ⚠️ The builder has both screens a capture goes to — the editor and the
+    /// finalisation screen — hold its file.
+    @Test func theEditorAndTheFinalisationScreenHoldTheCapturesFile() async throws {
+        let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
+        let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
+        let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = navigation
+        window.isHidden = false
+        try await settle { camera.authorization != nil }
+        try await settle { camera.debugLiveView.debugFrameStats.drawn > 0 }
+        camera.debugTapShutter()
+        try await settle { navigation.topViewController is MediaEditorViewController }
+        let editor = try #require(navigation.topViewController as? MediaEditorViewController)
+        let item = try #require(editor.items.first)
+        let url = try #require(camera.captures.url(for: item.id))
+        #expect(camera.captures.holderCount(of: url) == 1, "the editor holds it")
+        editor.debugTapNext()
+        try await settle { navigation.topViewController is NewPostViewController }
+        #expect(camera.captures.holderCount(of: url) == 2, "and so does the finalisation screen")
     }
 }
