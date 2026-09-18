@@ -96,6 +96,19 @@ final class SimulatedCaptureSource: CaptureSource {
 
 /// The simulated camera's moving parts, on a queue of their own.
 ///
+/// ⚠️ **THE FRAMES ARE DRAWN ON A THREAD WITH AN 8MB STACK, NOT ON THE QUEUE'S
+/// WORKER — MEASURED, TWICE.** The first version ticked from a
+/// `DispatchSourceTimer`, so every frame — Core Graphics, Core Text for the
+/// caption, the writer's append, the hand-off to the preview — ran on a
+/// dispatch worker with 512KB of stack. The app died on that thread with
+/// `EXC_BAD_ACCESS` at the stack guard: first inside Core Image's render
+/// (moved off since, see `CaptureLiveView`), then, two minutes into a soak
+/// with a look on and the whole Upload suite running beside it, only 29 frames
+/// deep in the hand-off itself. A `Thread` states its stack; the tick runs on
+/// it through `queue.sync`, which keeps every write to the queue's state
+/// serialised with the recording's start and stop. The photograph is drawn on
+/// a thread of the same kind.
+///
 /// ⚠️ **NOT MAIN-ACTOR ISOLATED, AND THAT IS STRUCTURAL.** Every closure handed
 /// to the timer and to `AVAssetWriter` is formed in here, in a nonisolated
 /// context. Formed inside a `@MainActor` type instead, the same closure
@@ -144,8 +157,8 @@ final class SimulatedCaptureEngine: @unchecked Sendable {
     private let queue = DispatchQueue(label: "capture.simulated", qos: .userInitiated)
     private let state = Mutex(State())
     private let elapsed = Mutex<TimeInterval>(0)
+    private let running = Atomic(false)
     /// Touched on `queue` only.
-    private var timer: DispatchSourceTimer?
     private var pool: CVPixelBufferPool?
     private var recording: Recording?
     private let startedAt = CACurrentMediaTime()
@@ -155,30 +168,57 @@ final class SimulatedCaptureEngine: @unchecked Sendable {
         self.size = frameSize
     }
 
+    /// Room for Core Graphics, Core Text and the writer — see the type's note.
+    static let stackSize = 8 << 20
+
     func start() {
-        queue.async { [self] in
-            guard timer == nil else { return }
-            let source = DispatchSource.makeTimerSource(queue: queue)
-            source.schedule(
-                deadline: .now(), repeating: .nanoseconds(Int(1_000_000_000 / Self.framesPerSecond)),
-                leeway: .milliseconds(2)
-            )
-            source.setEventHandler { [weak self] in self?.tick() }
-            source.resume()
-            timer = source
+        guard running.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing).exchanged
+        else { return }
+        let interval = 1.0 / Double(SimulatedCaptureEngine.framesPerSecond)
+        let thread = Thread { [weak self] in
+            var next = CACurrentMediaTime()
+            while SimulatedCaptureEngine.step(self) {
+                next += interval
+                let wait = next - CACurrentMediaTime()
+                if wait > 0 {
+                    Thread.sleep(forTimeInterval: wait)
+                } else {
+                    // Late: the next frame is due now, not in a burst.
+                    next = CACurrentMediaTime()
+                }
+            }
         }
+        thread.name = "capture.simulated-frames"
+        thread.stackSize = Self.stackSize
+        thread.qualityOfService = .userInitiated
+        thread.start()
+    }
+
+    /// One frame, if the engine is still there and running.
+    ///
+    /// ⚠️ **THE STRONG REFERENCE LIVES FOR THE CALL AND NO LONGER.** The loop
+    /// holds the engine weakly, so an engine dropped without `stop()` — a test
+    /// that simply lets its screen go — ends its thread on the next frame
+    /// instead of drawing thirty frames a second for nobody, forever.
+    private static func step(_ engine: SimulatedCaptureEngine?) -> Bool {
+        guard let engine, engine.running.load(ordering: .acquiring) else { return false }
+        engine.queue.sync { engine.tick() }
+        return true
     }
 
     func stop() {
+        running.store(false, ordering: .releasing)
         queue.async { [self] in
-            timer?.cancel()
-            timer = nil
             if let recording { finish(recording) }
         }
     }
 
-    deinit {
-        timer?.cancel()
+    /// Runs `body` on a fresh thread with the frame thread's stack.
+    private static func onLargeStack(_ body: @escaping @Sendable () -> Void) {
+        let thread = Thread(block: body)
+        thread.stackSize = stackSize
+        thread.qualityOfService = .userInitiated
+        thread.start()
     }
 
     func setPosition(_ position: CapturePosition) {
@@ -251,7 +291,7 @@ final class SimulatedCaptureEngine: @unchecked Sendable {
 
     func photograph(to url: URL, flash: Bool) async throws -> CapturedPhoto {
         try await withCheckedThrowingContinuation { continuation in
-            queue.async { [self] in
+            Self.onLargeStack { [self] in
                 let current = state.withLock { $0 }
                 let photo = Self.photoSize
                 guard let context = CGContext(
