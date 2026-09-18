@@ -54,7 +54,7 @@ final class CaptureViewController: UIViewController {
     private let reducesMotion: () -> Bool
 
     private(set) var settings = CaptureSettings()
-    private(set) var take = CaptureTake()
+    private(set) var take: CaptureTake
     private(set) var shutterLogic = CaptureShutterLogic()
     private(set) var authorization: CaptureAuthorization?
     private(set) var isRecording = false
@@ -143,10 +143,12 @@ final class CaptureViewController: UIViewController {
         folder: CaptureFolder,
         captures: CapturedMediaLibrary,
         recents: (any MediaLibraryReading)?,
+        takeLimit: TimeInterval = CaptureTake.maximum,
         reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled },
         makeLibraryPicker: (() -> UIViewController)?,
         makeEditor: @escaping MakeEditor
     ) {
+        self.take = CaptureTake(limit: takeLimit)
         self.source = source
         self.folder = folder
         self.captures = captures
@@ -675,7 +677,7 @@ final class CaptureViewController: UIViewController {
         case .stopRecording:
             source.stopRecording()
         case .none where take.isFull:
-            say("3-minute limit reached")
+            say(take.limitReachedMessage)
         default:
             break
         }
@@ -687,7 +689,7 @@ final class CaptureViewController: UIViewController {
         take.disarm()
         let action = shutterLogic.beginHold(takeIsFull: take.isFull)
         guard case .startRecording = action else {
-            if take.isFull { say("3-minute limit reached") }
+            if take.isFull { say(take.limitReachedMessage) }
             return
         }
         holdBaseZoom = source.zoom
@@ -823,14 +825,27 @@ final class CaptureViewController: UIViewController {
 
     /// What the capture arrives in the editor wearing: the look and the ratio
     /// chosen here, as the editor's own edits.
+    ///
+    /// ⚠️ **A SHAPE THAT CUTS ALSO ARRIVES SHOWN WHOLE (`fit`).** The editor
+    /// lays a picture FILLING its full-screen canvas by default, and a square
+    /// filled into a phone-shaped canvas is cut a second time, on screen: the
+    /// author would open the editor on a picture framed nothing like the one
+    /// they shot. Shown whole, the square is the square. `fit` is a screen's
+    /// concern and reaches no pixel (`MediaEdits.fit`), so this changes what the
+    /// author SEES, never what is published; they can still fill it there.
     func handOffEdits(uprightSize: CGSize) -> MediaEdits {
         var edits = MediaEdits()
         edits.filter = settings.filter
         edits.crop = settings.ratio.crop(forUpright: uprightSize)
+        if !edits.crop.isUntouched { edits.fit = .fit }
         return edits
     }
 
+    /// ⚠️ **AN EDIT THAT SAYS NOTHING IS NOT HANDED OVER** — `MediaEdits`'
+    /// rule that absent means untouched, kept at the source rather than left
+    /// for the editor to filter.
     private func openEditor(_ items: [MediaLibraryItem], edits: [String: MediaEdits]) {
+        let edits = edits.filter { !$0.value.isUntouched }
         let editor = makeEditor(items, edits)
         debugLastHandOff = (items, edits)
         navigationController?.pushViewController(editor, animated: true)
@@ -842,7 +857,7 @@ final class CaptureViewController: UIViewController {
         guard !isRecording else { return }
         guard !take.isFull else {
             shutterLogic.recordingEnded()
-            say("3-minute limit reached")
+            say(take.limitReachedMessage)
             return
         }
         let url = folder.newFile("clip", pathExtension: "mov")
@@ -881,20 +896,23 @@ final class CaptureViewController: UIViewController {
         setChromeHidden(false)
         refreshTakeControls(animated: true)
         if clip == nil { say("The clip could not be recorded") }
-        if take.isFull { say("3-minute limit reached") }
+        if take.isFull { say(take.limitReachedMessage) }
     }
 
     private func ringTick() {
         guard isRecording else { return }
-        let start = take.total / CaptureTake.limit
+        let start = take.total / take.limit
         let now = min(take.remaining, source.recordedDuration)
-        shutter.setLive(from: start, to: start + now / CaptureTake.limit)
-        timeLabel.text = Self.clock(take.total + now)
+        shutter.setLive(from: start, to: start + now / take.limit)
+        timeLabel.text = Self.clock(take.total + now, of: take.limit)
     }
 
-    static func clock(_ seconds: TimeInterval) -> String {
-        let whole = Int(seconds.rounded(.down))
-        return String(format: "%d:%02d / 3:00", whole / 60, whole % 60)
+    static func clock(_ seconds: TimeInterval, of limit: TimeInterval) -> String {
+        func spelled(_ value: TimeInterval) -> String {
+            let whole = Int(value.rounded(.down))
+            return String(format: "%d:%02d", whole / 60, whole % 60)
+        }
+        return "\(spelled(seconds)) / \(spelled(limit))"
     }
 
     // MARK: - Undo, Next
@@ -970,7 +988,7 @@ final class CaptureViewController: UIViewController {
         undoButton.configuration = undo
         undoButton.accessibilityLabel = take.isArmedToUndo ? "Delete last clip — tap again to confirm" : "Delete last clip"
         shutter.setSegments(take.segments, armedLast: take.isArmedToUndo)
-        timeLabel.text = Self.clock(take.total)
+        timeLabel.text = Self.clock(take.total, of: take.limit)
         setShown(timePill, hasClips || isRecording, animated: animated)
         // ⚠️ A SHEET WITH CLIPS IN IT DOES NOT SWIPE AWAY: the drag would throw
         // the take out with no question asked. Cancel asks.
@@ -1187,6 +1205,8 @@ final class CaptureViewController: UIViewController {
     func debugMoveHold(_ translation: CGPoint) { holdMoved(translation) }
     func debugEndHold() { holdEnded() }
     func debugTapLibrary() { openLibrary() }
+    func debugTapCancel() { cancelTapped() }
+    var debugTimeText: String? { timeLabel.text }
     func debugFlip() { flip() }
 }
 

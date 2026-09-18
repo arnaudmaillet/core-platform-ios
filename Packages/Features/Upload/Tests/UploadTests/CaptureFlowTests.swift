@@ -96,7 +96,8 @@ struct CaptureFlowTests {
 
     private func open(
         answer: CaptureAuthorization = .authorized(microphone: false),
-        recents: Recents? = nil
+        recents: Recents? = nil,
+        takeLimit: TimeInterval = CaptureTake.maximum
     ) async throws -> Screen {
         let source = SpySource()
         source.answer = answer
@@ -104,7 +105,7 @@ struct CaptureFlowTests {
         let folder = CaptureFolder()
         let camera = CaptureViewController(
             source: source, folder: folder, captures: CapturedMediaLibrary(), recents: recents,
-            reducesMotion: { true },
+            takeLimit: takeLimit, reducesMotion: { true },
             makeLibraryPicker: {
                 handed.pickers += 1
                 return UIViewController()
@@ -172,8 +173,7 @@ struct CaptureFlowTests {
         let thumbnail = await screen.camera.captures.thumbnail(for: item.id, size: CGSize(width: 90, height: 160))
         let picture = try #require(thumbnail)
         #expect(abs(picture.size.width / picture.size.height - 9.0 / 16.0) < 0.02, "the photograph's own shape")
-        #expect(screen.handed.edits.isEmpty || screen.handed.edits[item.id]?.isUntouched == true,
-                "9:16 and no look: nothing to hand over")
+        #expect(screen.handed.edits.isEmpty, "9:16 and no look: nothing to hand over")
     }
 
     /// The look and the ratio chosen while shooting arrive as the editor's
@@ -194,6 +194,7 @@ struct CaptureFlowTests {
         #expect(abs(edits.crop.rect.height - 0.5625) < 1e-6, "a square of 1080×1920: \(edits.crop.rect)")
         #expect(abs(edits.crop.rect.width - 1) < 1e-6)
         #expect(abs(edits.crop.rect.midY - 0.5) < 1e-6)
+        #expect(edits.fit == .fit, "the square arrives shown whole, not cut again by the canvas")
         let url = try #require(screen.camera.captures.url(for: item.id))
         #expect(CapturedMediaLibrary.uprightImageSize(at: url) == SimulatedCaptureEngine.photoSize, "the file keeps the whole frame")
     }
@@ -222,7 +223,7 @@ struct CaptureFlowTests {
         #expect(screen.camera.shutter.debugSegmentCount == 1)
         #expect(screen.camera.debugUndoIsShowing)
         #expect(screen.camera.debugNextIsShowing)
-        #expect(screen.source.limits == [CaptureTake.limit], "the whole budget for the first clip")
+        #expect(screen.source.limits == [CaptureTake.maximum], "the whole budget for the first clip")
 
         screen.camera.debugTapShutter()
         #expect(screen.camera.isRecording, "with clips in the take, a tap records")
@@ -242,7 +243,44 @@ struct CaptureFlowTests {
         try await record(screen, seconds: 0.6)
         let first = try #require(screen.camera.take.clips.first)
         #expect(screen.source.limits.count == 2)
-        #expect(abs(screen.source.limits[1] - (CaptureTake.limit - first.duration)) < 1e-9)
+        #expect(abs(screen.source.limits[1] - (CaptureTake.maximum - first.duration)) < 1e-9)
+    }
+
+    /// A take that runs out of budget stops by itself — the source's own hard
+    /// stop, not a finger — says so, and refuses another clip.
+    @Test func theBudgetStopsTheRecordingByItselfAndSaysSo() async throws {
+        let screen = try await open(takeLimit: 1.2)
+        screen.camera.debugBeginHold()
+        try await settle { !screen.camera.isRecording }
+        #expect(!screen.camera.isRecording, "stopped with the finger still down")
+        let clip = try #require(screen.camera.take.clips.first)
+        #expect(clip.duration <= 1.25 && clip.duration >= 1.0, "\(clip.duration)")
+        #expect(screen.camera.take.isFull)
+        #expect(screen.camera.debugLastToast == "1-second limit reached")
+        screen.camera.debugEndHold()
+
+        screen.camera.debugBeginHold()
+        #expect(!screen.camera.isRecording, "a full take records nothing more")
+        screen.camera.debugEndHold()
+        screen.camera.debugTapShutter()
+        #expect(!screen.camera.isRecording)
+        #expect(screen.camera.take.clips.count == 1)
+    }
+
+    /// The three minutes are spelled on the clock.
+    @Test func theClockSpellsTheTakeAgainstItsBudget() {
+        #expect(CaptureViewController.clock(65.9, of: CaptureTake.maximum) == "1:05 / 3:00")
+        #expect(CaptureTake().limitReachedMessage == "3-minute limit reached")
+    }
+
+    /// Cancel with clips in the take asks before throwing them away.
+    @Test func cancelWithClipsAsksFirst() async throws {
+        let screen = try await open()
+        try await record(screen, seconds: 0.6)
+        screen.camera.debugTapCancel()
+        let alert = try #require(screen.camera.presentedViewController as? UIAlertController)
+        #expect(alert.actions.contains { $0.style == .destructive })
+        #expect(screen.navigation.isModalInPresentation, "and the sheet does not swipe away")
     }
 
     /// Sliding onto the padlock locks: the lifted finger no longer stops the
@@ -404,6 +442,18 @@ struct CaptureFlowTests {
         try await Task.sleep(for: .milliseconds(200))
         #expect(screen.source.position == .front, "refused while recording")
         screen.camera.debugEndHold()
+    }
+
+    /// The shortcut opens the ordinary picker ON the camera's stack, with the
+    /// chevron back to the camera instead of a Cancel that would close it.
+    @Test func theLibraryShortcutPushesThePickerWithAWayBack() throws {
+        let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
+        let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
+        let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
+        camera.debugTapLibrary()
+        let picker = try #require(navigation.viewControllers.last as? MediaPickerViewController)
+        #expect(navigation.viewControllers.count == 2)
+        #expect(picker.navigationItem.leftBarButtonItems?.isEmpty ?? true, "no Cancel over the back chevron")
     }
 
     /// The shortcut shows the newest picture only where access is ALREADY

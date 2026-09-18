@@ -19,7 +19,15 @@ struct CaptureClip: Equatable, Sendable {
 struct CaptureTake: Equatable, Sendable {
     /// The longest video a take can become. Asked for in those words: three
     /// minutes, all clips together.
-    static let limit: TimeInterval = 180
+    static let maximum: TimeInterval = 180
+
+    /// This take's budget — `maximum`, unless a test asks for a budget it can
+    /// run out of in a second rather than in three minutes.
+    let limit: TimeInterval
+
+    init(limit: TimeInterval = CaptureTake.maximum) {
+        self.limit = limit
+    }
 
     /// ⚠️ **A HOLD SHORTER THAN THIS IS A SLIP, NOT A CLIP.** A long press
     /// recognises after a fraction of a second, and a finger lifted right after
@@ -41,9 +49,16 @@ struct CaptureTake: Equatable, Sendable {
 
     var total: TimeInterval { clips.reduce(0) { $0 + $1.duration } }
 
-    var remaining: TimeInterval { max(0, Self.limit - total) }
+    var remaining: TimeInterval { max(0, limit - total) }
 
     var isFull: Bool { remaining <= Self.fullTolerance }
+
+    /// What the screen says when the budget runs out: "3-minute limit reached".
+    var limitReachedMessage: String {
+        limit >= 60
+            ? "\(Int((limit / 60).rounded()))-minute limit reached"
+            : "\(Int(limit.rounded()))-second limit reached"
+    }
 
     /// Keeps a finished clip. Returns false — and keeps nothing — for a clip
     /// under `shortest`; the caller deletes its file.
@@ -104,7 +119,7 @@ struct CaptureTake: Equatable, Sendable {
     var segments: [ClosedRange<Double>] {
         var start = 0.0
         return clips.map { clip in
-            let end = min(1, start + clip.duration / Self.limit)
+            let end = min(1, start + clip.duration / limit)
             defer { start = end }
             return start...end
         }
