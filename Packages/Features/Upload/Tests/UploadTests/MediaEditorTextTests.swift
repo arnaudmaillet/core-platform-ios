@@ -384,6 +384,32 @@ struct MediaEditorTextTests {
                 "the first control starts at \(first.minX) and the glass eats \(bite)")
     }
 
+    /// ⚠️ **THE CONTROLS SPEAK THE CAPSULE'S LANGUAGE, NOT A SECOND ONE.** The
+    /// chips carried `layer.cornerRadius = 15` on a 44pt-tall button: a rounded
+    /// rectangle a few points inside a capsule, which is what the author saw and
+    /// asked to have matched. Asserted the way the capsule itself is — the
+    /// radius UIKit RESOLVES, with the layer's own radius held at zero, because
+    /// a layer-masked corner is not part of what UIKit interpolates.
+    @Test func theStyleBarsControlsAreTheSamePillAsTheBarAroundThem() throws {
+        let bar = styleBar()
+
+        let shaped = bar.debugShapedControls
+        #expect(shaped.count >= OverlayFont.allCases.count, "got \(shaped.count) shaped controls")
+        for control in shaped {
+            let height = control.view.bounds.height
+            try #require(height > 0, "a control with no height cannot be read")
+            #expect(abs(control.radius - height / 2) < 0.001,
+                    "\(type(of: control.view)) resolves \(control.radius) for a \(height)pt height")
+            // ⚠️ **AND IT IS THE CONFIGURATION THAT SAYS SO.** UIKit mirrors a
+            // resolved `cornerConfiguration` into `layer.cornerRadius`, so the
+            // radius above cannot tell a capsule asked for from a number
+            // written by hand — and a hand-written radius is the one that
+            // flashes square mid-animation (`GlassCapsule`).
+            #expect(control.asksForAShape,
+                    "\(type(of: control.view)) carries a layer radius, not a corner configuration")
+        }
+    }
+
     /// ⚠️ **THE ROW STILL WINS FIRST REFUSAL, A LEVEL DEEPER IN THE TREE.**
     /// `ChipScrollView`'s whole reason for existing is that a drag beginning in
     /// it must be offered to it before any ancestor's pan — the sheet's

@@ -233,8 +233,14 @@ final class MediaTextStyleBar: UIView {
             configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
             let button = UIButton(configuration: configuration)
             button.tintColor = .white
-            button.layer.cornerRadius = 15
-            button.layer.cornerCurve = .continuous
+            // ⚠️ **A PILL INSIDE A PILL, AND `cornerConfiguration` IS HOW.** A
+            // 15pt radius on a 44pt-tall chip is a rounded rectangle sitting
+            // inside a capsule — two different corner languages a few points
+            // apart, which is what the author saw. `.capsule()` asks UIKit for
+            // the shape rather than stating a number, so a chip that grows with
+            // Dynamic Type stays a pill instead of turning back into a
+            // rectangle; `InlineFilterTrayView` records the rest of the reason.
+            button.cornerConfiguration = .capsule()
             button.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.control).isActive = true
             button.addAction(UIAction { [weak self] _ in self?.choose(font) }, for: .touchUpInside)
             fontButtons[font] = button
@@ -245,7 +251,10 @@ final class MediaTextStyleBar: UIView {
         for (index, swatch) in MediaTextPalette.swatches.enumerated() {
             let button = UIButton(type: .custom)
             button.backgroundColor = swatch.colour.uiColor
-            button.layer.cornerRadius = 13
+            // The same language as the chips beside them: a 26pt square asked
+            // for a capsule is the circle these have always drawn, and it stays
+            // one if the size ever moves.
+            button.cornerConfiguration = .capsule()
             button.layer.borderColor = UIColor.white.cgColor
             button.widthAnchor.constraint(equalToConstant: 26).isActive = true
             button.heightAnchor.constraint(equalToConstant: 26).isActive = true
@@ -374,6 +383,14 @@ final class MediaTextStyleBar: UIView {
     /// `GlassCapsule` — a layer-masked radius is not part of what UIKit
     /// interpolates, and the capsule flashes square.
     var debugCapsuleLayerRadius: CGFloat { glass.layer.cornerRadius }
+    /// Internal for tests: every control that carries a shape of its own, and
+    /// the radius each one RESOLVES to — the chips and the swatches, asked of
+    /// UIKit rather than read back off a number somebody stored.
+    var debugShapedControls: [(view: UIView, radius: CGFloat, asksForAShape: Bool)] {
+        (Array(fontButtons.values) + swatchButtons).map {
+            ($0, $0.effectiveRadius(corner: .topLeft), $0.cornerConfiguration != nil)
+        }
+    }
     /// Internal for tests: the scroller, and where its first control sits
     /// inside the capsule.
     var debugScroller: UIScrollView { scroller }
