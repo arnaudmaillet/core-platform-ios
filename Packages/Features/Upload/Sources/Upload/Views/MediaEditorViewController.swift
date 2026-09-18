@@ -1323,9 +1323,29 @@ final class MediaEditorViewController: UIViewController {
         }
     }
 
+    /// Lays the screen out after the band changed height, moving a fitted
+    /// picture with it.
+    ///
+    /// ⚠️ **THE PAGES ARE LAID BY THE LAYOUT PASS ITSELF, SO THAT PASS IS WHAT
+    /// MUST ANIMATE.** Every call site used to lay the screen out and THEN ask
+    /// for an animated lay — by which time `viewDidLayoutSubviews` had already
+    /// laid every page unanimated, and the animated call found nothing left to
+    /// move. The picture jumped each time a row of rates, a row of lengths or
+    /// a new tenant resized the band, while every one of those lines said it
+    /// animated.
+    private func followTheBand(animated: Bool) {
+        laysPagesAnimated = animated && view.window != nil
+        defer { laysPagesAnimated = false }
+        view.layoutIfNeeded()
+    }
+
+    /// Whether the layout pass in progress moves the pages rather than
+    /// placing them — see `followTheBand`.
+    private var laysPagesAnimated = false
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        layPagesInTheirWindow(animated: false)
+        layPagesInTheirWindow(animated: laysPagesAnimated)
         // The toolbar's width is only knowable once something has laid it out,
         // and it changes with rotation and with the sheet's own size.
         let held = shareTheBarBetweenTheTwoStrips()
@@ -2688,6 +2708,15 @@ final class MediaEditorViewController: UIViewController {
         tools.transitions.onClose = { [weak self] in
             self?.closeTransitions(animated: true)
         }
+        tools.onTransitionDuration = { [weak self] seconds in
+            self?.chooseTransitionDuration(seconds)
+        }
+        // ⚠️ THE LENGTHS RAISE AND LOWER THE BAND, AND THE BAND IS THE FOOT OF
+        // A FITTED PICTURE'S WINDOW — the rate chips' two lines, for their
+        // reason (`toggleTheRateChips`).
+        tools.onHeightChange = { [weak self] in
+            self?.followTheBand(animated: true)
+        }
         tools.segmentFilters.onPick = { [weak self] filter in
             self?.chooseSegmentFilter(filter)
         }
@@ -2764,6 +2793,8 @@ final class MediaEditorViewController: UIViewController {
             transitionFocus = focus
             timelineTools.openTransitions(
                 atSeam: seam, chosen: pieces[seam].transitionOut,
+                seconds: MediaTimelining.transitionSeconds(atSeam: seam, in: timeline, withinSource: trackSeconds),
+                longest: MediaTimelining.longestTransition(atSeam: seam, in: timeline, withinSource: trackSeconds),
                 rehearsal: rehearsal?.range, window: rehearsal?.window, animated: true
             )
             landOnTheFocus()
@@ -2773,6 +2804,8 @@ final class MediaEditorViewController: UIViewController {
         actionBar.setActive(nil)
         guard timelineTools.openTransitions(
             atSeam: seam, chosen: pieces[seam].transitionOut,
+            seconds: MediaTimelining.transitionSeconds(atSeam: seam, in: timeline, withinSource: trackSeconds),
+            longest: MediaTimelining.longestTransition(atSeam: seam, in: timeline, withinSource: trackSeconds),
             rehearsal: rehearsal?.range, window: rehearsal?.window, animated: true
         ) else { return }
         transitionFocus = TransitionFocus(id: id, seam: seam)
@@ -2800,13 +2833,45 @@ final class MediaEditorViewController: UIViewController {
         // the film while the item plays the track's own arrangement.
         timelineTrack.configure(duration: trackSeconds, timeline: after)
         assert(timelineTrack.arrangement == after, "the collapsed track refused the choice")
-        let rehearsal = MediaTimelining.rehearsal(
-            atSeam: focus.seam, in: after, withinSource: trackSeconds, lead: timelineTrack.rehearsalLead
-        )
-        timelineTools.showTransition(kind, rehearsal: rehearsal?.range, window: rehearsal?.window)
+        showTheFocusedTransition(in: after)
         pausedByAuthor = false
         refreshHistoryItems()
         if !refreshPreview() { landOnTheFocus() }
+    }
+
+    /// A length was chosen for the focused cut's transition.
+    ///
+    /// ⚠️ **CLAMPED TO WHAT THE TWO PIECES CAN GIVE, AND STORED THROUGH
+    /// `change`** — a length is an edit of the film like the kind it belongs
+    /// to, so it is a step the arrows can take back, and a new item the preview
+    /// lands on the stretch (charter F29b).
+    private func chooseTransitionDuration(_ seconds: Double) {
+        guard let focus = transitionFocus, focus.id == currentItemID, trackSeconds > 0 else { return }
+        let before = edits(for: focus.id).timeline
+        let after = MediaTimelining.settingTransitionDuration(
+            seconds, atSeam: focus.seam, in: before, withinSource: trackSeconds
+        )
+        if after != before { change(focus.id) { $0.timeline = after } }
+        timelineTrack.configure(duration: trackSeconds, timeline: after)
+        showTheFocusedTransition(in: after)
+        pausedByAuthor = false
+        refreshHistoryItems()
+        if !refreshPreview() { landOnTheFocus() }
+    }
+
+    /// States what the focused cut carries in `timeline` — its kind, its
+    /// length and the longest it could have — and the stretch that shows it.
+    private func showTheFocusedTransition(in timeline: MediaTimeline) {
+        guard let focus = transitionFocus else { return }
+        let rehearsal = MediaTimelining.rehearsal(
+            atSeam: focus.seam, in: timeline, withinSource: trackSeconds, lead: timelineTrack.rehearsalLead
+        )
+        timelineTools.showTransition(
+            MediaTimelining.transition(atSeam: focus.seam, in: timeline, withinSource: trackSeconds),
+            seconds: MediaTimelining.transitionSeconds(atSeam: focus.seam, in: timeline, withinSource: trackSeconds),
+            longest: MediaTimelining.longestTransition(atSeam: focus.seam, in: timeline, withinSource: trackSeconds),
+            rehearsal: rehearsal?.range, window: rehearsal?.window
+        )
     }
 
     /// Loops the focused stretch on the item that is playing, from its start.
@@ -3052,10 +3117,9 @@ final class MediaEditorViewController: UIViewController {
         actionBar.setActive(opening ? TrackAction.speed.rawValue : nil)
         if opening { timelineTools.speeds.show(rate: rateOfTheTargetPiece) }
         // ⚠️ THE BAND JUST CHANGED HEIGHT, AND THE BAND IS THE FOOT OF A FITTED
-        // PICTURE'S WINDOW — the same two lines `setEditingAccessory` ends with,
-        // and for the same reason.
-        view.layoutIfNeeded()
-        layPagesInTheirWindow(animated: true)
+        // PICTURE'S WINDOW — what `setEditingAccessory` ends with, and for the
+        // same reason.
+        followTheBand(animated: true)
     }
 
     /// The piece a rate is set on: the one the author is holding, and ONLY that.
@@ -3802,8 +3866,7 @@ extension MediaEditorViewController {
         // ⚠️ THE BAND JUST MOVED THE INDICATOR, AND THE INDICATOR IS THE FOOT OF A
         // FITTED PICTURE'S WINDOW. Laying out first is what makes `fitWindow` true
         // rather than one band-height out of date.
-        view.layoutIfNeeded()
-        layPagesInTheirWindow(animated: true)
+        followTheBand(animated: animated)
         if let departing { popTheTenantOut(departing) }
         if animated, let accessory { popTheTenantIn(accessory) }
     }
@@ -4081,6 +4144,15 @@ extension MediaEditorViewController {
     /// Internal for tests: where the picture sits on screen, in the editor's own
     /// coordinates — the only thing that can say whether a fitted picture is
     /// centred between the chrome or hanging behind it.
+    /// Internal for tests: whether the picture of `id` is travelling to a new
+    /// place rather than standing in it — a curve is on its layer.
+    func debugPictureIsMoving(for id: String) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == id }),
+              let page = canvas.cellForItem(at: IndexPath(item: index, section: 0)) as? MediaEditorPageCell
+        else { return false }
+        return page.debugPictureIsMoving
+    }
+
     func debugPictureFrame(for id: String) -> CGRect {
         guard let index = items.firstIndex(where: { $0.id == id }),
               let page = canvas.cellForItem(at: IndexPath(item: index, section: 0)) as? MediaEditorPageCell
