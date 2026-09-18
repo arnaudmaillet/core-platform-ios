@@ -157,6 +157,11 @@ struct TransitionVisibilityTests {
 
     /// The colour clip's own background — neither its cyan square nor its
     /// yellow band, which every second shares.
+    /// How much greener than its other two channels a colour is.
+    static func greenness(_ colour: RGB) -> Int {
+        colour.g - max(colour.r, colour.b)
+    }
+
     static func background(_ frame: Frame) -> [Point] {
         frame.points.filter { point in
             point.y > 0.16 && !(0.2 < point.x && point.x < 0.8 && 0.2 < point.y && point.y < 0.8)
@@ -346,8 +351,11 @@ struct TransitionVisibilityTests {
                 VideoExportSegment(start: 2.0, end: 2.5)
             ], file: file, route: route, from: 0.25, to: 0.75)
             try #require(drawn.count >= 14, "guard: \(kind) drew \(drawn.count) frames")
-            let greenest = drawn.flatMap { Self.background($0) }
-                .max { $0.colour.g - max($0.colour.r, $0.colour.b) < $1.colour.g - max($1.colour.r, $1.colour.b) }
+            // ⚠️ ONE STEP AT A TIME: written as one comparator, Xcode 26's type
+            // checker gives up on this line ("unable to type-check this
+            // expression in reasonable time") where Xcode 27's does not.
+            let points: [Point] = drawn.flatMap { Self.background($0) }
+            let greenest = points.max { Self.greenness($0.colour) < Self.greenness($1.colour) }
             let colour = try #require(greenest).colour
             #expect(colour.g < max(colour.r, colour.b) + 40,
                     "\(route) \(kind) shows cut-away green film: \(colour)")
