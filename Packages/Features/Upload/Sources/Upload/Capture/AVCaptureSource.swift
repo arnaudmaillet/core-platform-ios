@@ -235,6 +235,8 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
     /// coordinator — see `setPreviewAngle`. 90 until it reports: a phone held
     /// upright, which is how a sheet is opened.
     private var previewAngle: CGFloat = 90
+    /// Watches the current camera for a changed scene after a tap-to-focus.
+    private var subjectAreaObserver: (any NSObjectProtocol)?
     private let wantsAudio = Mutex(false)
 
     var includesAudio: Bool {
@@ -326,8 +328,10 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         if (try? device.lockForConfiguration()) != nil {
             device.videoZoomFactor = Self.displayScale(of: device)
             if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+            if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
             device.unlockForConfiguration()
         }
+        watchSubjectArea(of: device)
     }
 
     /// The largest photograph the active format offers.
@@ -455,6 +459,39 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
                   connection.isVideoRotationAngleSupported(angle) else { return }
             connection.videoRotationAngle = angle
         }
+    }
+
+    /// ⚠️ **A TAP LOCKS FOCUS AND EXPOSURE ON ONE POINT — UNTIL THE SCENE
+    /// CHANGES.** `focus(at:)` switches subject-area monitoring on, and the
+    /// first version never listened to it: one tap and the camera held that
+    /// focus and that exposure for the rest of the session, whatever it was
+    /// pointed at next. When the device reports the subject area changed, the
+    /// camera goes back to continuous focus and exposure on the centre, as
+    /// Apple's AVCam does. On `queue`.
+    private func watchSubjectArea(of device: AVCaptureDevice) {
+        if let subjectAreaObserver { NotificationCenter.default.removeObserver(subjectAreaObserver) }
+        subjectAreaObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.subjectAreaDidChangeNotification, object: device, queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            queue.async { self.resumeContinuousFocus() }
+        }
+    }
+
+    /// On `queue`.
+    private func resumeContinuousFocus() {
+        guard let device = videoInput?.device, (try? device.lockForConfiguration()) != nil else { return }
+        let centre = CGPoint(x: 0.5, y: 0.5)
+        if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = centre }
+        if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+        if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = centre }
+        if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+        device.isSubjectAreaChangeMonitoringEnabled = false
+        device.unlockForConfiguration()
+    }
+
+    deinit {
+        if let subjectAreaObserver { NotificationCenter.default.removeObserver(subjectAreaObserver) }
     }
 
     /// Switches the data output on or off to match `feed.wantsFrames`.
