@@ -288,7 +288,7 @@ final class CaptureViewController: UIViewController {
 
         if let plain = source.plainPreview { plain.pin(to: previewContainer) }
         liveView.pin(to: previewContainer)
-        source.feed.setConsumer(liveView.makeSink())
+        // The feed's consumer is decided by `applyFrameDelivery`.
 
         for bar in [letterboxTop, letterboxBottom] {
             bar.backgroundColor = UIColor.black.withAlphaComponent(0.9)
@@ -667,10 +667,17 @@ final class CaptureViewController: UIViewController {
     /// and a source that has a plain preview, the Metal view is hidden and the
     /// source stops delivering frames — unless the filter row is open, whose
     /// cards are drawn from the live frame.
+    ///
+    /// ⚠️ **A HIDDEN LIVE VIEW DRAWS NOTHING.** With the filter row open and no
+    /// look chosen, frames flow for the cards, which read `latestFrame` twice a
+    /// second — and every one of them was ALSO rendered, at full drawable size,
+    /// into the hidden Metal layer. The feed keeps the latest frame whether or
+    /// not it has a consumer; the renderer is only its consumer while it shows.
     private func applyFrameDelivery() {
         let hasPlain = source.plainPreview != nil
         let needsLook = settings.filter != .original
         liveView.isHidden = hasPlain && !needsLook
+        source.feed.setConsumer(liveView.isHidden ? nil : liveView.makeSink())
         source.setDeliversFrames(!hasPlain || needsLook || openOption == .filters)
     }
 

@@ -466,9 +466,18 @@ struct CaptureFlowTests {
         screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
         #expect(screen.source.deliversFrames.last == true, "the cards need the live frame")
         #expect(screen.camera.debugLiveView.isHidden, "but the picture itself is still plain")
+        let drawnWhileHidden = screen.camera.debugLiveView.debugFrameStats.drawn
+        screen.source.feed.forgetLatest()
+        try await settle { screen.source.feed.latestFrame != nil }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(screen.source.feed.latestFrame != nil, "the cards still get their frame")
+        #expect(screen.camera.debugLiveView.debugFrameStats.drawn == drawnWhileHidden, "and the hidden view draws none of it")
 
         screen.camera.debugFilterRow.debugTap(.fade)
         #expect(!screen.camera.debugLiveView.isHidden, "a look is drawn")
+        let before = screen.camera.debugLiveView.debugFrameStats.drawn
+        try await settle { screen.camera.debugLiveView.debugFrameStats.drawn > before + 2 }
+        #expect(screen.camera.debugLiveView.debugFrameStats.drawn > before + 2, "and drawn it is")
 
         screen.camera.debugFilterRow.debugTap(.original)
         screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
