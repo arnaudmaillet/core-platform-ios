@@ -882,10 +882,21 @@ final class MediaEditorViewController: UIViewController {
         library: any MediaLibraryReading,
         preview: any MediaVideoPreviewing = MediaPreviewPlayer(),
         soundtracks: any MediaSoundtrackSourcing = SystemSoundtrackSource(),
+        initialEdits: [String: MediaEdits] = [:],
         onNext: @escaping ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController
     ) {
         self.items = items
         self.itemsByID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // ⚠️ **WHAT THE MEDIA ARRIVE WEARING, NOT A STEP.** The camera hands its
+        // captures over with the look and the shape the author chose while
+        // shooting; those are where the editing STARTS, so they are not in the
+        // history — a step back from the first change the author makes here
+        // lands on them, never behind them. Only edits that say something are
+        // kept, for `edits`'s own reason: an entry that says nothing is worse
+        // than none.
+        self.edits = initialEdits.filter { id, edit in
+            !edit.isUntouched && items.contains { $0.id == id }
+        }
         self.library = library
         self.preview = preview
         self.soundtracks = soundtracks

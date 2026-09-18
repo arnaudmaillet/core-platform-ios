@@ -142,6 +142,31 @@ struct MediaEditorTests {
         #expect(page.accessibilityLabel == "Video")
     }
 
+    // MARK: - What the media arrive wearing
+
+    /// ⚠️ **THE CAMERA'S CHOICES ARE WHERE EDITING STARTS, NOT A STEP.** A
+    /// capture arrives with the look and shape the author chose while shooting;
+    /// they are on the page from the first frame, and the back arrow has nothing
+    /// to take away until the author changes something here.
+    @Test func mediaCanArriveAlreadyWearingTheirEdits() {
+        let library = StubLibrary()
+        let handed = Handed()
+        var chosen = MediaEdits.untouched
+        chosen.filter = .mono
+        let editor = MediaEditorViewController(
+            items: Self.items(2), library: library,
+            initialEdits: ["item-0": chosen, "item-1": .untouched, "nobody": chosen]
+        ) { _, _ in handed.destination }
+        // The arrows are asked what they can do when the screen loads — a bar
+        // item is born enabled (`theArrowsAreDeadOnAScreenNobodyHasTouchedYet`).
+        editor.loadViewIfNeeded()
+
+        #expect(editor.edits(for: "item-0").filter == .mono, "the look it arrived with is not on the page")
+        #expect(!editor.debugHasEdits(for: "item-1"), "an untouched edit was stored as an entry")
+        #expect(!editor.debugHasEdits(for: "nobody"), "an edit for an item not on screen was kept")
+        #expect(!editor.debugUndoItem.isEnabled, "arriving is not a step to take back")
+    }
+
     // MARK: - The history
 
     private enum Band {
