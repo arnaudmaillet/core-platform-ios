@@ -23,10 +23,18 @@ import UIKit
 /// the transitions row takes the room it gave up — the band keeps its height:
 ///
 /// ```
+///     0.25s  (0.5s)  1s  1.5s  2s       ← only while the cut carries a kind
 ///        0:00      0:02      0:04
 ///   ──────────▓▓▓▓█▓▓▓▓────────────    ← the track, collapsed
 ///   [⊘ None] [☾ Black] [☀ White]  (✕)   ← MediaTransitionRowView, cards
 /// ```
+///
+/// ⚠️ **THE LENGTHS STAND WHERE THE RATES DO, AND ONLY OVER A KIND.** Opening
+/// the row on a plain cut changes no height (charter F28); choosing a kind
+/// raises the lengths over the track exactly as the speedometer raises the
+/// rates, and "None" lowers them. The rates are never up while a cut is open,
+/// so the two never stand together. `onHeightChange` tells the screen, which
+/// fits its pages to the band as it does for the rates.
 ///
 /// ⚠️ **IT GROWS THE BAND RATHER THAN COVERING ANYTHING.** A floating panel was
 /// the other way, and it would sit exactly where the page indicator is — the band
@@ -36,10 +44,20 @@ import UIKit
 @MainActor
 final class MediaTimelineToolsView: UIView {
     let speeds = MediaSpeedRowView()
+    /// How long the open cut's transition runs — over the track, while the cut
+    /// carries a kind.
+    let durations = MediaTransitionDurationRowView()
     let track = MediaTimelineTrackView()
     let transitions = MediaTransitionRowView()
     /// The looks one piece can wear — the same row, under the same line.
     let segmentFilters = MediaSegmentFilterRowView()
+
+    /// A length was chosen for the open cut's transition, in played seconds.
+    /// Fires on every tap, the length already showing included.
+    var onTransitionDuration: ((Double) -> Void)?
+    /// The tools changed height — the lengths rose over the track or went
+    /// away. The screen lays its pages in their window again.
+    var onHeightChange: (() -> Void)?
 
     /// The cut whose transition is being chosen, if the row is open.
     private(set) var editingSeam: Int?
@@ -61,9 +79,12 @@ final class MediaTimelineToolsView: UIView {
         // switched by hand — and `isHidden` is animatable, which a rebuilt
         // hierarchy is not.
         speeds.isHidden = true
+        durations.isHidden = true
         stack.addArrangedSubview(speeds)
+        stack.addArrangedSubview(durations)
         stack.addArrangedSubview(track)
         stack.pin(to: self)
+        durations.onPick = { [weak self] seconds in self?.onTransitionDuration?(seconds) }
 
         // ⚠️ **NOT IN THE STACK.** The row stands in room the track already
         // owns — the film's, once collapsed — so the band never changes height
@@ -119,17 +140,24 @@ final class MediaTimelineToolsView: UIView {
     /// Collapses the track and opens the row on cut `seam`, lighting the stretch
     /// the preview will loop. Returns false when the track refused — a finger is
     /// holding something on it.
+    ///
+    /// `seconds` is how long the cut's transition runs and `longest` the most
+    /// its two pieces can give (`MediaTimelining.transitionSeconds` and
+    /// `.longestTransition`); left out, the lengths show the standard and
+    /// refuse nothing.
     @discardableResult
     func openTransitions(
-        atSeam seam: Int, chosen: VideoTransitionKind?,
+        atSeam seam: Int, chosen: VideoTransitionKind?, seconds: Double? = nil, longest: Double? = nil,
         rehearsal: ClosedRange<Double>?, window: ClosedRange<Double>?, animated: Bool
     ) -> Bool {
         guard editingPiece == nil else { return false }
         track.showRehearsal(rehearsal, window: window, animated: editingSeam != nil && animated)
         transitions.show(kind: chosen)
+        showLength(seconds: seconds, longest: longest)
         guard editingSeam == nil else {
             transitions.revealChosen(animated: animated)
             editingSeam = seam
+            offerDurations(chosen != nil, animated: animated)
             return true
         }
         guard track.setCompact(
@@ -137,15 +165,20 @@ final class MediaTimelineToolsView: UIView {
         ) else { return false }
         editingSeam = seam
         transitions.setOpen(true, animated: animated)
+        offerDurations(chosen != nil, animated: animated)
         return true
     }
 
-    /// States what the cut now carries, and the stretch that shows it.
+    /// States what the cut now carries — its kind, and how long it runs — and
+    /// the stretch that shows it.
     func showTransition(
-        _ kind: VideoTransitionKind?, rehearsal: ClosedRange<Double>?, window: ClosedRange<Double>?
+        _ kind: VideoTransitionKind?, seconds: Double? = nil, longest: Double? = nil,
+        rehearsal: ClosedRange<Double>?, window: ClosedRange<Double>?
     ) {
         transitions.show(kind: kind)
+        showLength(seconds: seconds, longest: longest)
         track.showRehearsal(rehearsal, window: window, animated: true)
+        if editingSeam != nil { offerDurations(kind != nil, animated: true) }
     }
 
     /// Puts the row away and opens the film again.
@@ -154,6 +187,34 @@ final class MediaTimelineToolsView: UIView {
         editingSeam = nil
         transitions.setOpen(false, animated: animated)
         track.setCompact(false, animated: animated)
+        offerDurations(false, animated: animated)
+    }
+
+    /// Whether the lengths are standing over the track.
+    var isOfferingDurations: Bool { !durations.isHidden }
+
+    private func showLength(seconds: Double?, longest: Double?) {
+        durations.show(
+            seconds: seconds ?? VideoTransitionKind.standardSeconds,
+            longest: longest ?? MediaTimelining.transitionLengths.last ?? VideoTransitionKind.standardSeconds
+        )
+    }
+
+    /// Raises the lengths over the track, or takes them away — and says so,
+    /// since the band's height is the screen's to follow.
+    ///
+    /// ⚠️ **THE FADE IS ON THE WAY IN ONLY, AND THE FROM-VALUE IS SET FIRST** —
+    /// the rate chips' reason (`isOfferingSpeeds`).
+    private func offerDurations(_ offered: Bool, animated: Bool) {
+        guard offered != isOfferingDurations else { return }
+        durations.isHidden = !offered
+        if offered, animated, window != nil {
+            durations.alpha = 0
+            UIView.animate(withDuration: 0.2) { self.durations.alpha = 1 }
+        } else {
+            durations.alpha = 1
+        }
+        onHeightChange?()
     }
 
     @available(*, unavailable)
