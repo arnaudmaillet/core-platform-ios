@@ -33,11 +33,12 @@ final class AVCaptureSource: CaptureSource {
     private let previewView = CapturePreviewLayerView()
 
     /// Whether any camera exists — see `makeCaptureSource()`.
-    static var hasAnyCamera: Bool {
-        !AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external], mediaType: .video, position: .unspecified
-        ).devices.isEmpty
-    }
+    /// ⚠️ **WHETHER THE ENGINE CAN INSTALL A CAMERA — THE SAME QUESTION ITS
+    /// `installable(preferring:)` ANSWERS.** It asked a looser one (any
+    /// wide-angle or external camera), so a device whose only camera the
+    /// engine could not install got a session with no video input — and a
+    /// shutter tap then raised in `capturePhoto`.
+    static var hasAnyCamera: Bool { AVCaptureEngine.installable(preferring: .back) != nil }
 
     init() {
         engine = AVCaptureEngine(feed: feed)
@@ -106,6 +107,7 @@ final class AVCaptureSource: CaptureSource {
 
     private func adopt(_ snapshot: AVCaptureEngine.Snapshot) {
         defer { onStateChange?() }
+        hasReported = true
         position = snapshot.position
         displayScale = snapshot.displayScale
         lenses = snapshot.lensFactors.map(CaptureLens.init(factor:))
@@ -153,9 +155,24 @@ final class AVCaptureSource: CaptureSource {
         adopt(await engine.flip())
     }
 
+    /// Whether a snapshot has told this side the camera's numbers yet.
+    private var hasReported = false
+
+    /// ⚠️ **THE ENGINE CONVERTS, ON ITS QUEUE, WITH THE CAMERA IT IS ON.** This
+    /// used to multiply by `displayScale` here, which is the camera of the
+    /// last snapshot: before the first one it was 1 — and device factor 1 is
+    /// the ULTRA-WIDE on a triple-camera phone — and during a flip it was the
+    /// other camera's. The engine answers with the zoom it applied, which is
+    /// what the chips then show.
     func setZoom(_ factor: CGFloat, smoothly: Bool) {
-        zoom = min(max(factor, zoomRange.lowerBound), zoomRange.upperBound)
-        engine.setZoom(zoom * displayScale, smoothly: smoothly)
+        if hasReported { zoom = min(max(factor, zoomRange.lowerBound), zoomRange.upperBound) }
+        engine.setZoom(display: factor, smoothly: smoothly) { [weak self] applied in
+            Task { @MainActor in
+                guard let self else { return }
+                self.zoom = applied
+                self.onStateChange?()
+            }
+        }
     }
 
     func focus(at point: CGPoint) {
@@ -224,7 +241,6 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
     private var videoInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
     private var isConfigured = false
-    private var rotation: AVCaptureDevice.RotationCoordinator?
     private var photoDelegates: [Int64: PhotoDelegate] = [:]
     /// What records a clip — the movie output, or a test's double.
     private let recorder: any CaptureMovieRecording
@@ -320,7 +336,11 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         // playing. Mixed, it plays on (and is heard in a clip, as it is in the
         // room). `UISound` still never touches the audio session itself.
         session.configuresApplicationAudioSessionToMixWithOthers = true
-        installCamera(.back)
+        // ⚠️ THE BACK CAMERA IF THERE IS ONE — NOT ONLY IF. A Mac or a Vision
+        // Pro running this iPad app, or a device whose one camera faces the
+        // author, has no back camera, and the first version then ran a session
+        // with no video input at all.
+        if let device = Self.installable(preferring: .back) { install(device) }
         // ⚠️ AND NO MICROPHONE UNTIL A CLIP RECORDS — see `attachMicrophone`.
         if session.canAddOutput(photoOutput) {
             session.addOutput(photoOutput)
@@ -336,6 +356,12 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         applyConnections()
     }
 
+    /// The camera to install for `position`: that one, else the other one,
+    /// else whatever the system calls its default video device.
+    static func installable(preferring position: CapturePosition) -> AVCaptureDevice? {
+        device(for: position) ?? device(for: position.flipped) ?? AVCaptureDevice.default(for: .video)
+    }
+
     private static func device(for position: CapturePosition) -> AVCaptureDevice? {
         let types: [AVCaptureDevice.DeviceType] = position == .back
             ? [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
@@ -347,9 +373,10 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         return discovery.devices.first
     }
 
-    private func installCamera(_ position: CapturePosition) {
-        guard let device = Self.device(for: position),
-              let input = try? AVCaptureDeviceInput(device: device) else { return }
+    /// Installs `device` in place of the camera in use. A device facing the
+    /// author is the front camera; anything else is treated as the back one.
+    private func install(_ device: AVCaptureDevice) {
+        guard let input = try? AVCaptureDeviceInput(device: device) else { return }
         if let videoInput { session.removeInput(videoInput) }
         guard session.canAddInput(input) else {
             if let videoInput { session.addInput(videoInput) }
@@ -357,11 +384,10 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         }
         session.addInput(input)
         videoInput = input
-        currentPosition = position
-        // ⚠️ LAYER-LESS, AND THEREFORE FOR THE CAPTURE ANGLE ONLY: its preview
-        // angle is 0 by contract. The preview's own coordinator is built on the
-        // main actor with the layer — `AVCaptureSource.followPreviewRotation`.
-        rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+        currentPosition = device.position == .front ? .front : .back
+        // ⚠️ NO COORDINATOR OF ITS OWN: every output takes the preview's angle
+        // (`applyConnections`), from the main actor's coordinator, which knows
+        // the layer — `AVCaptureSource.followPreviewRotation`.
         // Start on the wide lens, which is display factor 1.
         if (try? device.lockForConfiguration()) != nil {
             device.videoZoomFactor = Self.displayScale(of: device)
@@ -387,21 +413,26 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         photoOutput.maxPhotoDimensions = largest
     }
 
-    /// ⚠️ THE ROTATION IS THE COORDINATOR'S, READ AT EACH CAPTURE — so a photo
-    /// taken with the phone turned is level. Mirroring follows what the author
-    /// SAW: a front-camera capture keeps the reflection the preview showed, the
-    /// social cameras' convention.
+    /// Mirroring follows what the author SAW: a front-camera capture keeps the
+    /// reflection the preview showed, the social cameras' convention.
     ///
-    /// ⚠️ **TWO ANGLES, AND THE DATA OUTPUT TAKES THE PREVIEW'S.** Its frames
-    /// ARE a preview — the drawn look and the filter cards. Given the capture
-    /// angle, which follows gravity rather than the interface, they turned a
-    /// quarter and were cropped by the aspect fill whenever the phone was held
-    /// sideways over a portrait screen.
+    /// ⚠️ **THE DATA OUTPUT TAKES THE PREVIEW'S ANGLE — AND SO, NOW, DO THE
+    /// FILES.** Its frames ARE a preview — the drawn look and the filter cards.
+    /// Given the capture angle, which follows gravity rather than the
+    /// interface, they turned a quarter and were cropped by the aspect fill
+    /// whenever the phone was held sideways over a portrait screen.
     private func applyConnections() {
-        let captureAngle = rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
         let mirrored = currentPosition == .front
+        // ⚠️ **ONE ANGLE FOR EVERYTHING: THE ONE THE AUTHOR SEES.** Files used
+        // to take the gravity-level CAPTURE angle while the preview and the
+        // ratio's window took the interface's. Under Portrait Orientation Lock
+        // with the phone held sideways, the window framed a portrait 9:16 of a
+        // picture that was written LANDSCAPE, and the 9:16 crop computed from
+        // the file kept a sliver 0.32 of its width wide. A capture now has the
+        // orientation of the frame the author framed it in; where the
+        // interface does rotate, the two angles agree anyway.
         let outputs: [(AVCaptureOutput, CGFloat)] = [
-            (photoOutput, captureAngle), (movieOutput, captureAngle), (dataOutput, previewAngle)
+            (photoOutput, previewAngle), (movieOutput, previewAngle), (dataOutput, previewAngle)
         ]
         for (output, angle) in outputs {
             guard let connection = output.connection(with: .video) else { continue }
@@ -459,7 +490,9 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 session.beginConfiguration()
-                installCamera(currentPosition.flipped)
+                // Only a camera that really faces the other way: with one camera
+                // there is nothing to flip to, and the one in use stays.
+                if let other = Self.device(for: currentPosition.flipped) { install(other) }
                 applyConnections()
                 session.commitConfiguration()
                 adoptPhotoDimensions()
@@ -468,16 +501,23 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         }
     }
 
-    func setZoom(_ factor: CGFloat, smoothly: Bool) {
+    /// Zooms the camera in use to the DISPLAY factor `display`, converted with
+    /// that camera's own scale here on the queue, and reports the display
+    /// factor it applied.
+    func setZoom(display: CGFloat, smoothly: Bool, applied: @escaping @Sendable (CGFloat) -> Void) {
         queue.async { [self] in
             guard let device = videoInput?.device, (try? device.lockForConfiguration()) != nil else { return }
-            let clamped = min(max(factor, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
+            let scale = Self.displayScale(of: device)
+            // The same ceiling `snapshot()` offers the author.
+            let highest = min(device.maxAvailableVideoZoomFactor, scale * 15)
+            let clamped = min(max(display * scale, device.minAvailableVideoZoomFactor), highest)
             if smoothly {
                 device.ramp(toVideoZoomFactor: clamped, withRate: 8)
             } else {
                 device.videoZoomFactor = clamped
             }
             device.unlockForConfiguration()
+            applied(clamped / scale)
         }
     }
 
@@ -557,6 +597,13 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
                 applyConnections()
+                // ⚠️ `capturePhoto` RAISES — an Objective-C exception, not an
+                // error — without an active, enabled video connection. No camera
+                // installed is a failed photograph, never a crash.
+                guard let connection = photoOutput.connection(with: .video), connection.isActive, connection.isEnabled else {
+                    continuation.resume(throwing: CaptureSourceError.photoFailed)
+                    return
+                }
                 let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
                 settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
                 let wanted: AVCaptureDevice.FlashMode = switch flash {
@@ -589,6 +636,13 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
                 promise.fulfil(.failure(CaptureSourceError.recordingFailed))
                 return
             }
+            // ⚠️ AND `startRecording` RAISES WITHOUT A VIDEO CONNECTION, as
+            // `capturePhoto` does. Asked of the recorder, so the engine stays
+            // testable with no camera attached.
+            guard recorder.canRecord else {
+                promise.fulfil(.failure(CaptureSourceError.recordingFailed))
+                return
+            }
             attachMicrophone()
             applyConnections()
             setTorch(torch)
@@ -597,11 +651,18 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
             // recording ends at exactly `limit`, reported as a successful
             // finish (`AVErrorMaximumDurationReached` with
             // `AVErrorRecordingSuccessfullyFinishedKey`).
-            recorder.start(to: url, limit: limit) { [self] result in
+            // ⚠️ **WEAK: THE RECORDER KEEPS ITS LAST COMPLETION.** The movie
+            // output's recorder holds the last clip's delegate, the delegate
+            // holds this closure — and with `self` captured strongly that was a
+            // cycle through the engine's own `recorder`: every camera that
+            // recorded a clip leaked its engine, its session and its frame feed,
+            // and through the feed's consumer the Metal renderer.
+            recorder.start(to: url, limit: limit) { [weak self] result in
                 // Cleared on the queue BEFORE the promise resolves, so the
                 // next clip's `record` — which can only follow the promise —
                 // never finds this one still standing.
-                queue.async { [self] in
+                self?.queue.async { [weak self] in
+                    guard let self else { return }
                     setTorch(false)
                     recordingRequested = false
                     detachMicrophone()
@@ -710,6 +771,9 @@ private final class PhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unc
 protocol CaptureMovieRecording: AnyObject {
     /// True once the first sample has been written, as the movie output says.
     var isRecording: Bool { get }
+    /// Whether a recording can start at all — the output has an active,
+    /// enabled video connection.
+    var canRecord: Bool { get }
     var recordedSeconds: TimeInterval { get }
     /// Starts one clip, ending by itself after `limit` seconds. `finished` is
     /// called exactly once, on any queue.
@@ -730,6 +794,10 @@ private final class MovieFileRecorder: CaptureMovieRecording {
     }
 
     var isRecording: Bool { output.isRecording }
+    var canRecord: Bool {
+        guard let connection = output.connection(with: .video) else { return false }
+        return connection.isActive && connection.isEnabled
+    }
     var recordedSeconds: TimeInterval { output.recordedDuration.seconds }
 
     func start(to url: URL, limit: TimeInterval, finished: @escaping @Sendable (Result<CaptureClip, any Error>) -> Void) {

@@ -48,7 +48,7 @@ struct CaptureFlowTests {
         var zoom: CGFloat { inner.zoom }
         func setZoom(_ factor: CGFloat, smoothly: Bool) { inner.setZoom(factor, smoothly: smoothly) }
         func focus(at point: CGPoint) {}
-        var hasFlash: Bool { true }
+        var hasFlash: Bool { inner.hasFlash }
         func capturePhoto(flash: CaptureFlashMode, into folder: CaptureFolder) async throws -> CapturedPhoto {
             photoFlashes.append(flash)
             return try await inner.capturePhoto(flash: flash, into: folder)
@@ -80,29 +80,29 @@ struct CaptureFlowTests {
         func setDeliversFrames(_ on: Bool) { deliversFrames.append(on) }
     }
 
-    /// A library that is ALREADY granted, counting whether anybody asked.
-    final class Recents: MediaLibraryReading {
-        var granted: MediaLibraryAccess = .granted
+    /// The shortcut's face, counting how often it is asked for.
+    @MainActor
+    final class Face {
+        var picture: UIImage?
         private(set) var asked = 0
-        var access: MediaLibraryAccess { granted }
-        func requestAccess() async -> MediaLibraryAccess {
+        func provide() async -> UIImage? {
             asked += 1
-            return granted
+            return picture
         }
-        func presentLimitedPicker(from host: UIViewController) {}
-        func albums() async -> [MediaLibraryAlbum] { [MediaLibraryAlbum(id: "recents", title: "Recents", count: 1)] }
-        func items(in album: MediaLibraryAlbum.ID) async -> [MediaLibraryItem] { [MediaLibraryItem(id: "newest", kind: .photo)] }
-        func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage? {
+
+        static var green: UIImage {
             UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
                 UIColor.green.setFill()
                 context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
             }
         }
-        func videoFile(for item: MediaLibraryItem.ID) async -> URL? { nil }
     }
 
     @MainActor
     final class Handed {
+        /// The screen the last capture was handed to, kept alive as a
+        /// publishing finalisation screen keeps itself.
+        var holder: UIViewController?
         var items: [MediaLibraryItem] = []
         var edits: [String: MediaEdits] = [:]
         var editors = 0
@@ -118,21 +118,46 @@ struct CaptureFlowTests {
         let folder: CaptureFolder
     }
 
+    /// The screens earlier tests opened, closed before the next one opens.
+    ///
+    /// ⚠️ **A SHOWN WINDOW OUTLIVES ITS TEST.** Nothing hid them, so every
+    /// test's camera went on drawing thirty frames a second into its renderer
+    /// for the rest of the run — fifty cameras at once by the end of the
+    /// suite, on one simulator. The suite is serialized, so when a test opens
+    /// its screen the one before it is finished: its camera is stopped and its
+    /// window hidden here.
+    private static var opened: [Screen] = []
+
+    private static func closeOpened() {
+        for screen in opened {
+            screen.source.stop()
+            screen.window.isHidden = true
+        }
+        opened = []
+    }
+
     private func open(
         answer: CaptureAuthorization = .authorized(microphone: false),
-        recents: Recents? = nil,
+        face: Face? = nil,
         takeLimit: TimeInterval = CaptureTake.maximum,
         plainPreview: UIView? = nil,
         motion: Bool = false,
         size: CGSize = CGSize(width: 402, height: 874)
     ) async throws -> Screen {
+        Self.closeOpened()
         let source = SpySource()
         source.answer = answer
         source.plain = plainPreview
         let handed = Handed()
         let folder = CaptureFolder()
+        let captures = CapturedMediaLibrary()
+        var libraryFace: (@MainActor () async -> UIImage?)?
+        if let face {
+            libraryFace = { await face.provide() }
+        }
         let camera = CaptureViewController(
-            source: source, folder: folder, captures: CapturedMediaLibrary(), recents: recents,
+            source: source, folder: folder, captures: captures,
+            libraryFace: libraryFace,
             takeLimit: takeLimit, reducesMotion: { !motion },
             makeLibraryPicker: {
                 handed.pickers += 1
@@ -142,7 +167,11 @@ struct CaptureFlowTests {
             handed.items = items
             handed.edits = edits
             handed.editors += 1
-            return UIViewController()
+            // What the builder does: the screen a capture goes to holds its file.
+            let screen = UIViewController()
+            captures.hold(items, by: screen)
+            handed.holder = screen
+            return screen
         }
         let navigation = UploadNavigationController(rootViewController: camera)
         let window = UIWindow(frame: CGRect(origin: .zero, size: size))
@@ -154,7 +183,9 @@ struct CaptureFlowTests {
         if case .authorized = answer {
             try await settle { source.feed.latestFrame != nil }
         }
-        return Screen(camera: camera, navigation: navigation, window: window, source: source, handed: handed, folder: folder)
+        let screen = Screen(camera: camera, navigation: navigation, window: window, source: source, handed: handed, folder: folder)
+        Self.opened.append(screen)
+        return screen
     }
 
     private func settle(for seconds: Double = 5, until condition: () -> Bool) async throws {
@@ -232,8 +263,7 @@ struct CaptureFlowTests {
     /// The flash chosen is the flash fired.
     @Test func theFlashChosenIsTheFlashFired() async throws {
         let screen = try await open()
-        screen.camera.debugSelector.debugTap(CaptureOption.flash.rawValue)
-        screen.camera.debugFlashRow.debugPick(.on)
+        screen.camera.debugPickFlash(.on)
         screen.camera.debugTapShutter()
         try await settle { screen.handed.editors == 1 }
         #expect(screen.source.photoFlashes == [.on])
@@ -407,9 +437,9 @@ struct CaptureFlowTests {
     @Test func anIconOpensItsBandAndASecondTapClosesIt() async throws {
         let screen = try await open()
         let selector = screen.camera.debugSelector
-        selector.debugTap(CaptureOption.flash.rawValue)
-        #expect(screen.camera.openOption == .flash)
-        #expect(screen.camera.debugBand.content === screen.camera.debugFlashRow)
+        selector.debugTap(CaptureOption.ratio.rawValue)
+        #expect(screen.camera.openOption == .ratio)
+        #expect(screen.camera.debugBand.content === screen.camera.debugRatioRow)
 
         selector.debugTap(CaptureOption.timer.rawValue)
         #expect(screen.camera.openOption == .timer)
@@ -579,28 +609,38 @@ struct CaptureFlowTests {
         #expect(picker.navigationItem.leftBarButtonItems?.isEmpty ?? true, "no Cancel over the back chevron")
     }
 
-    /// ⚠️ The shortcut is always offered — with the newest picture where
-    /// access is already granted, a neutral face otherwise — and the camera
-    /// never asks for access: the picker it opens does.
-    @Test func theLibraryShortcutIsAlwaysOfferedAndNeverAsks() async throws {
-        let granted = Recents()
-        let shown = try await open(recents: granted)
+    /// ⚠️ The shortcut is always offered — with the newest picture as its face
+    /// where there is one, a neutral glyph otherwise — and its face is asked
+    /// for once, as one picture.
+    @Test func theLibraryShortcutIsAlwaysOfferedWithOnePictureAsItsFace() async throws {
+        let face = Face()
+        face.picture = Face.green
+        let shown = try await open(face: face)
         try await settle { shown.camera.hasLibraryThumbnail }
         #expect(shown.camera.debugLibraryIsShowing)
-        #expect(shown.camera.hasLibraryThumbnail, "the newest picture, where access allows")
+        #expect(shown.camera.hasLibraryThumbnail, "the newest picture")
+        #expect(face.asked == 1, "asked for once")
         shown.camera.debugTapLibrary()
         #expect(shown.handed.pickers == 1)
 
-        let unasked = Recents()
-        unasked.granted = .undetermined
-        let neutral = try await open(recents: unasked)
+        let faceless = Face()
+        let neutral = try await open(face: faceless)
         try await Task.sleep(for: .milliseconds(300))
         #expect(neutral.camera.debugLibraryIsShowing, "offered all the same")
         #expect(!neutral.camera.hasLibraryThumbnail, "with its neutral face")
-        #expect(unasked.asked == 0, "the camera never puts the Photos prompt up")
         neutral.camera.debugTapLibrary()
-        #expect(neutral.handed.pickers == 1, "the picker it opens asks")
-        #expect(granted.asked == 0)
+        #expect(neutral.handed.pickers == 1, "the picker it opens asks for access")
+    }
+
+    /// ⚠️ The face is ONE asset, the newest photo or video — never a walk of
+    /// the whole library.
+    @Test func theShortcutsFaceIsOneAssetNewestFirst() throws {
+        let options = CaptureLibraryFace.newestFetchOptions
+        #expect(options.fetchLimit == 1)
+        let order = try #require(options.sortDescriptors?.first)
+        #expect(order.key == "creationDate")
+        #expect(!order.ascending, "newest first")
+        #expect(options.predicate != nil, "photos and videos only")
     }
 
     /// A refused camera says so, with the way to Settings, and shoots nothing.
@@ -705,9 +745,17 @@ struct CaptureFlowTests {
     }
 
     /// Pops back to the camera once the push has landed, and waits for frames.
-    private func comeBack(to screen: Screen) async throws {
+    /// The screen the capture went to is let go — as a popped editor is —
+    /// unless the test keeps it, as a publishing finalisation screen keeps
+    /// itself.
+    private func comeBack(to screen: Screen, keepingTheScreen: Bool = false) async throws {
         try await settle { screen.navigation.viewControllers.count == 2 && screen.navigation.transitionCoordinator == nil }
         screen.navigation.popViewController(animated: false)
+        if !keepingTheScreen {
+            weak var gone = screen.handed.holder
+            screen.handed.holder = nil
+            try await settle { gone == nil }
+        }
         try #require(screen.navigation.topViewController === screen.camera)
         screen.source.feed.forgetLatest()
         try await settle { screen.source.feed.latestFrame != nil }
@@ -758,31 +806,31 @@ struct CaptureFlowTests {
     @Test func withMotionAnOptionReopenedMidDepartureKeepsItsRow() async throws {
         let screen = try await open(motion: true)
         let selector = screen.camera.debugSelector
-        let row = screen.camera.debugFlashRow
-        selector.debugTap(CaptureOption.flash.rawValue)
+        let row = screen.camera.debugTimerRow
+        selector.debugTap(CaptureOption.timer.rawValue)
         try await Task.sleep(for: .milliseconds(50))
-        selector.debugTap(CaptureOption.flash.rawValue)
+        selector.debugTap(CaptureOption.timer.rawValue)
         #expect(screen.camera.openOption == nil)
-        selector.debugTap(CaptureOption.flash.rawValue)
+        selector.debugTap(CaptureOption.timer.rawValue)
         try await Task.sleep(for: .seconds(BandPop.departure + BandPop.settled(after: 3) + 0.2))
-        #expect(screen.camera.openOption == .flash)
+        #expect(screen.camera.openOption == .timer)
         #expect(screen.camera.debugBand.content === row)
         #expect(row.superview === screen.camera.debugBand, "the row is still in the band")
         #expect(row.alpha == 1)
     }
 
-    /// With motion on, flash → timer → flash in quick succession ends on the
-    /// flash row, in the band.
+    /// With motion on, timer → ratio → timer in quick succession ends on the
+    /// timer row, in the band.
     @Test func withMotionQuickSwitchesEndOnTheLastRow() async throws {
         let screen = try await open(motion: true)
         let selector = screen.camera.debugSelector
-        selector.debugTap(CaptureOption.flash.rawValue)
         selector.debugTap(CaptureOption.timer.rawValue)
-        selector.debugTap(CaptureOption.flash.rawValue)
+        selector.debugTap(CaptureOption.ratio.rawValue)
+        selector.debugTap(CaptureOption.timer.rawValue)
         try await Task.sleep(for: .seconds(BandPop.departure + BandPop.settled(after: 3) + 0.2))
-        #expect(screen.camera.debugBand.content === screen.camera.debugFlashRow)
-        #expect(screen.camera.debugFlashRow.superview === screen.camera.debugBand)
-        #expect(screen.camera.debugTimerRow.superview == nil, "the timer's row has left")
+        #expect(screen.camera.debugBand.content === screen.camera.debugTimerRow)
+        #expect(screen.camera.debugTimerRow.superview === screen.camera.debugBand)
+        #expect(screen.camera.debugRatioRow.superview == nil, "the shape's row has left")
     }
 
     /// With motion on, a row's pills arrive one after another and all land
@@ -806,7 +854,9 @@ struct CaptureFlowTests {
     /// ⚠️ The library shortcut is not offered, and refuses, while a
     /// photograph is being written.
     @Test func theLibraryShortcutWaitsForAPhotographInFlight() async throws {
-        let screen = try await open(recents: Recents())
+        let face = Face()
+        face.picture = Face.green
+        let screen = try await open(face: face)
         try await settle { screen.camera.debugLibraryIsShowing }
         screen.camera.debugTapShutter()
         #expect(!screen.camera.debugLibraryIsShowing, "put away while the photograph is written")
@@ -873,13 +923,11 @@ struct CaptureFlowTests {
     /// spoken as shapes rather than as times of day.
     @Test func theOptionsSpeakTheirState() async throws {
         let screen = try await open()
-        #expect(screen.camera.debugSelectorLabels == ["Flash, off", "Timer, off", "Aspect ratio", "Filters", "Grid, off"])
+        #expect(screen.camera.debugSelectorLabels == ["Timer, off", "Aspect ratio", "Filters", "Grid, off"])
         screen.camera.debugSelector.debugTap(CaptureOption.grid.rawValue)
-        screen.camera.debugSelector.debugTap(CaptureOption.flash.rawValue)
-        screen.camera.debugFlashRow.debugPick(.on)
         screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
         screen.camera.debugTimerRow.debugPick(.ten)
-        #expect(screen.camera.debugSelectorLabels == ["Flash, on", "Timer, 10 seconds", "Aspect ratio", "Filters", "Grid, on"])
+        #expect(screen.camera.debugSelectorLabels == ["Timer, 10 seconds", "Aspect ratio", "Filters", "Grid, on"])
         #expect(screen.camera.debugRatioRow.debugSpoken == ["Nine by sixteen", "Three by four", "Square"])
         #expect(screen.camera.debugTimerRow.debugSpoken == ["Off", "3 seconds", "10 seconds"])
     }
@@ -916,6 +964,164 @@ struct CaptureFlowTests {
         #expect(FileManager.default.fileExists(atPath: kept.path), "the live folder stayed")
     }
 
+    /// ⚠️ A file handed to a screen that still reads it — "Post" publishing
+    /// after the author stepped back — is not deleted by the camera; it goes
+    /// once that screen has gone.
+    @Test func aHandedTakeOutlivesTheCameraWhileItsScreenReadsIt() async throws {
+        let screen = try await open()
+        try await record(screen, seconds: 0.6)
+        try await record(screen, seconds: 0.6)
+        screen.camera.debugTapNext()
+        try await settle(for: 10) { screen.handed.editors == 1 }
+        let handedFile = await screen.camera.captures.videoFile(for: try #require(screen.handed.items.first).id)
+        let joined = try #require(handedFile)
+        try await comeBack(to: screen, keepingTheScreen: true)
+
+        try await record(screen, seconds: 0.6)
+        #expect(FileManager.default.fileExists(atPath: joined.path), "still read by the screen it went to")
+
+        weak var gone = screen.handed.holder
+        screen.handed.holder = nil
+        try await settle { gone == nil }
+        try #require(gone == nil)
+        try await record(screen, seconds: 0.6)
+        #expect(!FileManager.default.fileExists(atPath: joined.path), "and deleted once nobody reads it")
+    }
+
+    /// ⚠️ A photograph that lands while the sheet is being closed is not
+    /// pushed into the closing sheet — it is dropped with its file.
+    @Test func aPhotographLandingDuringCancelIsDropped() async throws {
+        let screen = try await open()
+        screen.camera.debugTapShutter()
+        screen.camera.debugTapCancel()
+        try await settle(for: 10) { !screen.camera.isBusy }
+        try #require(!screen.camera.isBusy)
+        #expect(screen.handed.editors == 0)
+        #expect(!screen.folder.files.contains { $0.pathExtension == "jpg" }, "its file went too")
+    }
+
+    /// ⚠️ Back from another screen with the Filters band still open, the
+    /// cards go on following the live frame.
+    ///
+    /// ⚠️ **THE CAMERA REALLY LEAVES FIRST.** A push and a pop in the same turn
+    /// never took the camera off screen: it never disappeared, its timer was
+    /// never stopped, and the test passed with the restart deleted.
+    @Test func theFilterCardsStayLiveAfterComingBack() async throws {
+        let screen = try await open()
+        screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
+        try await settle { screen.camera.debugCardRefreshes > 0 }
+        screen.navigation.pushViewController(UIViewController(), animated: false)
+        try await settle { screen.camera.viewIfLoaded?.window == nil }
+        try #require(screen.camera.viewIfLoaded?.window == nil, "the camera is off screen")
+        let away = screen.camera.debugCardRefreshes
+        try await Task.sleep(for: .seconds(1.1))
+        #expect(screen.camera.debugCardRefreshes == away, "the cards rest while the camera is away")
+        screen.navigation.popViewController(animated: false)
+        try await settle { screen.camera.viewIfLoaded?.window != nil }
+        try #require(screen.navigation.topViewController === screen.camera)
+        #expect(screen.camera.openOption == .filters, "the band is still open")
+        let before = screen.camera.debugCardRefreshes
+        try await Task.sleep(for: .seconds(1.6))
+        #expect(screen.camera.debugCardRefreshes >= before + 2, "the cards are redrawn from the live frame")
+    }
+
+    /// ⚠️ The toolbar is the editor's two-strip bar: the flash and the flip
+    /// leading at their own width, the options trailing with the rest — never
+    /// less than one bubble — each a fresh item under a stable identifier at
+    /// every hand-over, both away (the toolbar staying up) while a clip records.
+    @Test func theToolbarIsTheEditorsTwoStripBar() async throws {
+        let screen = try await open()
+        let camera = screen.camera
+        try await settle { camera.toolbarItems?.count == 4 }
+        #expect(!screen.navigation.isToolbarHidden)
+        let items = try #require(camera.toolbarItems)
+        #expect(items.count == 4)
+        #expect(items[0].customView === camera.debugLeadingBar)
+        #expect(items[0].identifier == CaptureViewController.leadingItemID)
+        #expect(items[2].customView === camera.debugSelector)
+        #expect(items[2].identifier == CaptureViewController.optionsItemID)
+        #expect(camera.debugLeadingBar.suppressesBackdrop && camera.debugSelector.suppressesBackdrop, "the toolbar supplies the glass")
+        #expect(camera.navigationItem.rightBarButtonItems?.isEmpty ?? true, "the header keeps Cancel alone")
+
+        screen.window.layoutIfNeeded()
+        let share = try #require(camera.debugBarShare)
+        #expect(abs(share.leading - share.leadingWants) < 0.5, "the leading strip at its own width: \(share)")
+        #expect(abs(share.leading + share.trailing - share.available) < 0.5, "the options take the rest")
+        #expect(share.trailing >= share.floor - 0.5, "never less than one bubble")
+
+        screen.camera.debugBeginHold()
+        #expect(camera.toolbarItems?.isEmpty == true, "away while recording")
+        #expect(!screen.navigation.isToolbarHidden, "the toolbar itself stays, and the shutter with it")
+        screen.camera.debugEndHold()
+        try await settle { camera.take.clips.count == 1 && !camera.isRecording }
+        let back = try #require(camera.toolbarItems)
+        #expect(back.count == 4)
+        #expect(back[0] !== items[0] && back[2] !== items[2], "fresh items, never the old ones re-handed")
+        #expect(back[0].identifier == items[0].identifier && back[2].identifier == items[2].identifier)
+    }
+
+    /// ⚠️ On an SE's narrow bar the two strips never overrun it: at every
+    /// step of a recorded sequence — open, record, flash, flip, an option —
+    /// each strip's frame is the width it is held to and both are on screen
+    /// (a strip swept into a `•••` is not). The editor's own assertion.
+    @Test func theSEsNarrowBarNeverCollapses() async throws {
+        let screen = try await open(size: CGSize(width: 375, height: 667))
+        let camera = screen.camera
+        func held(_ step: String) {
+            screen.window.layoutIfNeeded()
+            let widths = camera.debugHeldWidths
+            #expect(abs(camera.debugLeadingBar.frame.width - widths.leading) < 0.5, "\(step): leading \(camera.debugLeadingBar.frame.width) vs \(widths.leading)")
+            #expect(abs(camera.debugSelector.frame.width - widths.trailing) < 0.5, "\(step): options \(camera.debugSelector.frame.width) vs \(widths.trailing)")
+            #expect(camera.debugLeadingBar.window != nil && camera.debugSelector.window != nil, "\(step): both strips on screen")
+        }
+        try await settle { camera.toolbarItems?.count == 4 }
+        held("opened")
+        try await record(screen, seconds: 0.6)
+        try await settle { camera.toolbarItems?.count == 4 }
+        held("after a clip")
+        camera.debugLeadingBar.debugTap(CaptureViewController.LeadingAction.flash.rawValue)
+        held("flash")
+        camera.debugLeadingBar.debugTap(CaptureViewController.LeadingAction.flip.rawValue)
+        try await settle { screen.source.position == .front }
+        held("front camera")
+        camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        held("timer open")
+        camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        held("timer closed")
+    }
+
+    /// ⚠️ The flash and the flip act from the leading strip: the flash cycles
+    /// Auto → On → Off with its icon and its spoken name following, and goes
+    /// dim on a camera with no flash.
+    @Test func theFlashAndTheFlipActFromTheLeadingStrip() async throws {
+        let screen = try await open()
+        let bar = screen.camera.debugLeadingBar
+        let flash = CaptureViewController.LeadingAction.flash.rawValue
+        let flip = CaptureViewController.LeadingAction.flip.rawValue
+        for mode in CaptureFlashMode.allCases {
+            #expect(UIImage(systemName: mode.symbolName) != nil, "\(mode.symbolName) exists at runtime")
+        }
+        #expect(bar.debugSymbols[flash] == "bolt.slash")
+        bar.debugTap(flash)
+        #expect(screen.camera.settings.flash == .auto)
+        #expect(bar.debugSymbols[flash] == "bolt.badge.automatic")
+        bar.debugTap(flash)
+        #expect(screen.camera.settings.flash == .on)
+        #expect(bar.debugSymbols[flash] == "bolt.fill")
+        bar.debugTap(flash)
+        #expect(screen.camera.settings.flash == .off)
+
+        bar.debugTap(flip)
+        try await settle { screen.source.position == .front }
+        #expect(screen.source.position == .front, "the flip turns the camera")
+        try await settle { !bar.isEnabled(at: flash) }
+        #expect(!bar.isEnabled(at: flash), "no flash on the front camera")
+        bar.debugTap(flip)
+        try await settle { screen.source.position == .back }
+        try await settle { bar.isEnabled(at: flash) }
+        #expect(bar.isEnabled(at: flash))
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {
@@ -948,9 +1154,12 @@ struct CaptureFlowTests {
         let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
         #expect(camera.navigationItem.leftBarButtonItems?.first?.title == "Cancel")
 
+        Self.closeOpened()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         window.rootViewController = navigation
         window.isHidden = false
+        // Hidden, the camera disappears and stops — see `opened`.
+        defer { window.isHidden = true }
         try await settle { camera.authorization != nil }
         try await settle { camera.debugLiveView.debugFrameStats.drawn > 0 }
         camera.debugTapShutter()
@@ -973,5 +1182,165 @@ struct CaptureFlowTests {
         }
         #expect(published.count == 1)
         if case .image = published.first {} else { Issue.record("published \(published)") }
+    }
+
+    /// ⚠️ The builder has both screens a capture goes to — the editor and the
+    /// finalisation screen — hold its file.
+    @Test func theEditorAndTheFinalisationScreenHoldTheCapturesFile() async throws {
+        let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
+        let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
+        let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
+        Self.closeOpened()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = navigation
+        window.isHidden = false
+        // Hidden, the camera disappears and stops — see `opened`.
+        defer { window.isHidden = true }
+        try await settle { camera.authorization != nil }
+        try await settle { camera.debugLiveView.debugFrameStats.drawn > 0 }
+        camera.debugTapShutter()
+        try await settle { navigation.topViewController is MediaEditorViewController }
+        let editor = try #require(navigation.topViewController as? MediaEditorViewController)
+        let item = try #require(editor.items.first)
+        let url = try #require(camera.captures.url(for: item.id))
+        #expect(camera.captures.holderCount(of: url) == 1, "the editor holds it")
+        editor.debugTapNext()
+        try await settle { navigation.topViewController is NewPostViewController }
+        #expect(camera.captures.holderCount(of: url) == 2, "and so does the finalisation screen")
+    }
+
+    /// ⚠️ The camera zone's foot is rounded like the top of its container:
+    /// the radius UIKit answers for the zone's concentric top corners — in the
+    /// app, the sheet's — is the one its foot wears. (A test host cannot
+    /// present a sheet, so the container here is given a radius of its own.)
+    @Test func theCameraZonesFootIsRoundedLikeItsContainersTop() async throws {
+        let screen = try await open()
+        screen.navigation.view.cornerConfiguration = .uniformCorners(radius: .fixed(44))
+        try await settle {
+            screen.window.setNeedsLayout()
+            screen.window.layoutIfNeeded()
+            screen.camera.view.setNeedsLayout()
+            screen.camera.view.layoutIfNeeded()
+            return screen.camera.sheetRadius > CaptureViewController.cornerFloor
+        }
+        let corners = screen.camera.debugPreviewCorners
+        #expect(abs(corners.top - 44) < 0.5, "the container's radius, read through the concentric top: \(corners)")
+        #expect(abs(corners.bottom - corners.top) < 0.5, "and the foot wears it: \(corners)")
+    }
+
+    /// ⚠️ What a flip turns — the picture itself — wears the zone's corners,
+    /// all four, and clips to them: turned in 3D away from the sheet's edge,
+    /// square corners were what the author saw.
+    @Test func whatAFlipTurnsWearsTheZonesCorners() async throws {
+        let screen = try await open()
+        screen.navigation.view.cornerConfiguration = .uniformCorners(radius: .fixed(44))
+        try await settle {
+            screen.window.setNeedsLayout()
+            screen.window.layoutIfNeeded()
+            screen.camera.view.setNeedsLayout()
+            screen.camera.view.layoutIfNeeded()
+            return screen.camera.sheetRadius > CaptureViewController.cornerFloor
+        }
+        let picture = try #require(screen.camera.debugFlippingView)
+        #expect(picture.clipsToBounds)
+        #expect(screen.camera.debugLiveView.isDescendant(of: picture), "the picture is inside what turns")
+        for corner: UIRectCorner in [.topLeft, .topRight, .bottomLeft, .bottomRight] {
+            #expect(abs(picture.effectiveRadius(corner: corner) - screen.camera.sheetRadius) < 0.5, "corner \(corner.rawValue)")
+        }
+    }
+
+    /// ⚠️ At every angle of the turn, all four corners of the turning
+    /// pictures stay inside the zone — none is cut square by its edge — on
+    /// the 18 Pro's zone and the SE's.
+    @Test func theTurnNeverOutgrowsTheZone() {
+        for size in [CGSize(width: 402, height: 700), CGSize(width: 375, height: 560)] {
+            for degrees in stride(from: -90.0, through: 90.0, by: 5.0) {
+                let turn = CaptureViewController.turn(degrees * .pi / 180, width: size.width)
+                for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                    let px = x * size.width / 2, py = y * size.height / 2
+                    // A point through the matrix, row-vector convention, then divided by w.
+                    let w = px * turn.m14 + py * turn.m24 + turn.m44
+                    let sx = (px * turn.m11 + py * turn.m21 + turn.m41) / w
+                    let sy = (px * turn.m12 + py * turn.m22 + turn.m42) / w
+                    #expect(abs(sx) <= size.width / 2 + 0.01 && abs(sy) <= size.height / 2 + 0.01,
+                            "\(size) at \(degrees)°: corner (\(x), \(y)) lands at (\(sx), \(sy))")
+                }
+            }
+        }
+    }
+
+    // MARK: - Next in the header, undo beside the shutter
+
+    /// ⚠️ Next is the header's trailing item — `[Cancel] ---- [Next]`,
+    /// prominent, as the picker's and the editor's — from the first clip on.
+    /// Undo sits to the RIGHT of the shutter, and the library shortcut stays
+    /// at its LEFT, beside the take: the row reads, and VoiceOver reads it,
+    /// library, shutter, undo.
+    @Test func nextIsInTheHeaderAndUndoIsRightOfTheShutter() async throws {
+        let screen = try await open()
+        #expect(screen.camera.navigationItem.leftBarButtonItems?.count == 1, "Cancel alone on the leading side")
+        #expect(!screen.camera.debugNextIsShowing, "no Next before a clip")
+        try await record(screen, seconds: 0.6)
+
+        let next = try #require(screen.camera.debugNextItem)
+        #expect(screen.camera.navigationItem.rightBarButtonItems?.count == 1, "Next alone on the trailing side")
+        #expect(next.title == "Next")
+        #expect(next.style == .done, "prominent")
+        #expect(next.isEnabled)
+        #expect(screen.camera.debugUndoIsShowing)
+        #expect(screen.camera.debugLibraryIsShowing, "the library stays beside a take")
+
+        screen.camera.view.layoutIfNeeded()
+        let shutter = screen.camera.shutter.frame
+        let undo = screen.camera.debugUndoFrame
+        let library = screen.camera.debugLibraryFrame
+        #expect(undo.minX > shutter.maxX, "undo right of the shutter: \(undo) vs \(shutter)")
+        #expect(library.maxX < shutter.minX, "the library left of it: \(library)")
+        #expect(abs(undo.midY - shutter.midY) < 0.5 && abs(library.midY - shutter.midY) < 0.5, "one row")
+        #expect(undo.maxX <= screen.camera.view.bounds.maxX, "on screen")
+
+        // The library opens from beside a take, and the take waits under it.
+        let clips = screen.camera.take.clips
+        screen.camera.debugTapLibrary()
+        #expect(screen.handed.pickers == 1)
+        #expect(screen.camera.take.clips == clips)
+    }
+
+    /// ⚠️ Next is disabled while the take is joined, and gone — with undo and
+    /// the library — while a clip records or a countdown runs. Each time it
+    /// comes back it is a FRESH item under the same identifier; while it
+    /// stays it is the same one.
+    @Test func nextIsDisabledWhileJoiningAndGoneWhileRecordingOrCounting() async throws {
+        let screen = try await open()
+        try await record(screen, seconds: 0.6)
+        let first = try #require(screen.camera.debugNextItem)
+
+        screen.camera.debugBeginHold()
+        try await settle { screen.camera.isRecording }
+        #expect(!screen.camera.debugNextIsShowing, "gone while a clip records")
+        #expect(!screen.camera.debugUndoIsShowing)
+        #expect(!screen.camera.debugLibraryIsShowing)
+        try await Task.sleep(for: .milliseconds(500))
+        screen.camera.debugEndHold()
+        try await settle { screen.camera.take.clips.count == 2 && !screen.camera.isRecording }
+
+        let second = try #require(screen.camera.debugNextItem)
+        #expect(second !== first, "a fresh item each time it arrives")
+        #expect(second.identifier == CaptureViewController.nextItemID && first.identifier == second.identifier)
+
+        screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        screen.camera.debugTimerRow.debugPick(.three)
+        screen.camera.debugTapShutter()
+        #expect(!screen.camera.isRecording, "counting down")
+        #expect(!screen.camera.debugNextIsShowing, "gone while a countdown runs")
+        screen.camera.debugTapShutter()
+        try await settle { screen.camera.debugNextIsShowing }
+
+        let third = try #require(screen.camera.debugNextItem)
+        screen.camera.debugTapNext()
+        #expect(screen.camera.debugNextItem === third, "the same item while it stays")
+        #expect(!third.isEnabled, "disabled while the take is joined")
+        try await settle(for: 10) { screen.handed.editors == 1 }
+        #expect(screen.handed.editors == 1)
     }
 }

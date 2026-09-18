@@ -6,19 +6,19 @@ import UIKit
 /// media editor the moment a capture is done.
 ///
 /// ```
-/// │ Cancel                          ⟲ │  ← the stack's bar
+/// │ Cancel                       Next │  ← the stack's bar; Next once there is a clip
 /// │ ┌──────────────────────────────┐  │
 /// │ │                              │  │
 /// │ │     the preview, 9:16,       │  │  ← the ratio's window; grid, countdown
 /// │ │     the chosen look          │  │
 /// │ │      [0.5] [1×] [2] [3]      │  │  ← lens chips (or the band, when open)
-/// │ │  ▣       (  ◉  )      Next ›  │  │  ← library / undo · shutter · next
+/// │ │  ▣       (  ◉  )       ⌫     │  │  ← library · shutter · undo
 /// │ └──────────────────────────────┘  │
-/// │      ⚡  ⏱  ▭  ◐  ⊞                │  ← the options, an IconSelectorBar
+/// │ [ ⚡ ⟲ ] [ ⏱  ▭  ◐  ⊞        ]    │  ← the toolbar: flash and flip, then the options
 /// ```
 ///
 /// ⚠️ **THE OPTIONS ARE ICONS IN A SELECTOR, AND AN ICON OPENS A BAND — THE
-/// EDITOR'S PATTERN, NOT ITS CODE.** Choosing flash, timer, ratio or filters
+/// EDITOR'S PATTERN, NOT ITS CODE.** Choosing timer, ratio or filters
 /// opens that option's controls above the shutter; a second tap on the chosen
 /// icon closes them again (the editor's neutral state). The grid is a toggle
 /// and opens nothing. The band is `MediaEditorBandView`, its tenants arrive
@@ -46,9 +46,9 @@ final class CaptureViewController: UIViewController {
     private let folder: CaptureFolder
     /// The captures, as the editor and the finalisation screen will read them.
     let captures: CapturedMediaLibrary
-    /// The device library, asked for its newest picture only if access is
-    /// ALREADY granted — see `loadLibraryShortcut`.
-    private let recents: (any MediaLibraryReading)?
+    /// The library shortcut's face: the newest picture in the library, or nil
+    /// — see `CaptureLibraryFace`.
+    private let libraryFace: (@MainActor () async -> UIImage?)?
     private let makeEditor: MakeEditor
     private let makeLibraryPicker: (() -> UIViewController)?
     private let reducesMotion: () -> Bool
@@ -70,6 +70,9 @@ final class CaptureViewController: UIViewController {
 
     private let previewContainer = UIView()
     private let liveView = CaptureLiveView()
+    /// The pictures' host: what a flip turns, rounded like the zone on all
+    /// four corners — see `flip()` and `matchTheSheetsCorners`.
+    private let flipHost = UIView()
     private let letterboxTop = UIView()
     private let letterboxBottom = UIView()
     private let gridView = CaptureGridView()
@@ -94,19 +97,9 @@ final class CaptureViewController: UIViewController {
         button.addAction(UIAction { [weak self] _ in self?.undoTapped() }, for: .primaryActionTriggered)
         return button
     }()
-    private lazy var nextButton: UIButton = {
-        var configuration = UIButton.Configuration.prominentGlass()
-        configuration.title = "Next"
-        configuration.image = UIImage(systemName: "chevron.right")
-        configuration.imagePlacement = .trailing
-        configuration.imagePadding = Spacing.xs
-        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 12, weight: .bold)
-        configuration.baseBackgroundColor = .white
-        configuration.baseForegroundColor = .black
-        let button = UIButton(configuration: configuration)
-        button.addAction(UIAction { [weak self] _ in self?.nextTapped() }, for: .primaryActionTriggered)
-        return button
-    }()
+    /// The header's "Next", while the take has a clip — see `refreshNextItem`.
+    private var nextItem: UIBarButtonItem?
+    static let nextItemID = "upload.camera.next"
 
     private let selector = IconSelectorBar(items: CaptureOption.allCases.map {
         IconSelectorBar.Item(
@@ -115,9 +108,6 @@ final class CaptureViewController: UIViewController {
         )
     })
 
-    private lazy var flashRow = CaptureChoiceRowView(
-        choices: CaptureFlashMode.allCases, chosen: settings.flash, label: \.label, symbol: \.symbolName
-    )
     private lazy var timerRow = CaptureChoiceRowView(
         choices: CaptureTimer.allCases, chosen: settings.timer, label: \.label, spoken: \.spoken
     )
@@ -129,14 +119,60 @@ final class CaptureViewController: UIViewController {
     private lazy var cancelItem = UIBarButtonItem(
         title: "Cancel", primaryAction: UIAction { [weak self] _ in self?.cancelTapped() }
     )
-    private lazy var flipItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "arrow.triangle.2.circlepath.camera"),
-            primaryAction: UIAction { [weak self] _ in self?.flip() }
-        )
-        item.accessibilityLabel = "Switch camera"
-        return item
+    /// The toolbar's LEADING strip: the flash and the flip.
+    ///
+    /// ⚠️ **ASKED FOR IN THOSE WORDS**: both icons in the bottom toolbar, on the
+    /// left, "toujours en largeur sa taille intrinsèque (prioritaire)", the
+    /// options' selector taking the rest — "le même système qu'on a fait sur
+    /// l'écran d'édition des médias". So it is the editor's leading strip:
+    /// an `IconActionBar`, momentary, drawn without a backdrop inside the
+    /// toolbar's glass.
+    ///
+    /// ⚠️ **THE FLASH CYCLES ON A TAP — AUTO → ON → OFF — AND DOES NOT OPEN A
+    /// MENU.** `IconActionBar` is a row of momentary buttons with no menu to
+    /// carry, and giving it one is a DesignSystem change. The icon names the
+    /// mode it is in, so the author sees each step as they take it; VoiceOver
+    /// says it ("Flash, auto"). Dimmed where the camera has no flash — the
+    /// front one — rather than taken away, so the strip keeps its width and
+    /// the bar is not handed over again for it.
+    private(set) lazy var leadingBar: IconActionBar = {
+        let bar = IconActionBar(items: leadingItems())
+        bar.suppressesBackdrop = true
+        bar.onTap = { [weak self] index in
+            switch LeadingAction(rawValue: index) {
+            case .flash: self?.cycleFlash()
+            case .flip: self?.flip()
+            case nil: break
+            }
+        }
+        return bar
     }()
+
+    /// The leading strip's items. The raw value is the bar's index.
+    enum LeadingAction: Int, CaseIterable {
+        case flash
+        case flip
+    }
+
+    private func leadingItems() -> [IconActionBar.Item] {
+        let flash = source.hasFlash
+            ? "Flash, \(settings.flash.label.lowercased())"
+            : "Flash, unavailable"
+        return [
+            IconActionBar.Item(symbolName: settings.flash.symbolName, accessibilityLabel: flash),
+            IconActionBar.Item(symbolName: "arrow.triangle.2.circlepath.camera", accessibilityLabel: "Switch camera")
+        ]
+    }
+
+    private func refreshLeadingBar() {
+        leadingBar.setItems(leadingItems())
+        leadingBar.setEnabled(source.hasFlash, at: LeadingAction.flash.rawValue)
+    }
+
+    private func cycleFlash() {
+        UISelectionFeedbackGenerator().selectionChanged()
+        setFlash(settings.flash.next)
+    }
 
     private let ringLink = CaptureLinkProxy()
     private var cardsTimer: Timer?
@@ -145,7 +181,7 @@ final class CaptureViewController: UIViewController {
         source: any CaptureSource,
         folder: CaptureFolder,
         captures: CapturedMediaLibrary,
-        recents: (any MediaLibraryReading)?,
+        libraryFace: (@MainActor () async -> UIImage?)?,
         takeLimit: TimeInterval = CaptureTake.maximum,
         reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled },
         makeLibraryPicker: (() -> UIViewController)?,
@@ -155,7 +191,7 @@ final class CaptureViewController: UIViewController {
         self.source = source
         self.folder = folder
         self.captures = captures
-        self.recents = recents
+        self.libraryFace = libraryFace
         self.reducesMotion = reducesMotion
         self.makeLibraryPicker = makeLibraryPicker
         self.makeEditor = makeEditor
@@ -190,11 +226,50 @@ final class CaptureViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        isClosing = false
         UISound.prepare()
-        // The editor raises the stack's toolbar for its own strip; the camera
-        // has its selector in its own layout and wants the foot clear.
-        navigationController?.setToolbarHidden(true, animated: animated)
+        // The options live in the stack's toolbar, as the editor's categories
+        // do — see `handOverSelector`.
+        navigationController?.setToolbarHidden(false, animated: animated)
+        configureToolbarAppearance()
         startCamera()
+        sweepReleased()
+        // ⚠️ THE CARDS' TIMER STOPS WHEN THE CAMERA IS LEFT (`viewDidDisappear`)
+        // and the Filters band can still be open when the author comes back
+        // from the editor or the picker: without this the nine cards froze on
+        // the frame from before they left.
+        if openOption == .filters { startCardsTimer() }
+    }
+
+    /// The toolbar's appearance as the camera found it, put back on the way out.
+    private var restoreToolbar: (() -> Void)?
+
+    /// ⚠️ **TRANSPARENT, AS THE EDITOR'S IS** — the preview runs under the bar
+    /// and a bar background would cut it — and put back on the way out: the
+    /// library's picker, pushed from here, draws its album strip on the same
+    /// toolbar with the appearance it expects.
+    private func configureToolbarAppearance() {
+        guard let toolbar = navigationController?.toolbar, restoreToolbar == nil else { return }
+        let standard = toolbar.standardAppearance
+        let compact = toolbar.compactAppearance
+        let scrollEdge = toolbar.scrollEdgeAppearance
+        restoreToolbar = { [weak toolbar] in
+            toolbar?.standardAppearance = standard
+            toolbar?.compactAppearance = compact
+            toolbar?.scrollEdgeAppearance = scrollEdge
+        }
+        let clear = UIToolbarAppearance()
+        clear.configureWithTransparentBackground()
+        toolbar.standardAppearance = clear
+        toolbar.compactAppearance = clear
+        toolbar.scrollEdgeAppearance = clear
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        restoreToolbar?()
+        restoreToolbar = nil
+        if navigationController?.isBeingDismissed == true || isBeingDismissed { isClosing = true }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -210,6 +285,11 @@ final class CaptureViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutWindow()
+        let held = shareTheBar()
+        guard !isHandingOver else { return }
+        let moved = zip([handedWidths?.leading, handedWidths?.trailing], [held?.leading, held?.trailing])
+            .contains { abs(($0 ?? -1) - ($1 ?? -2)) > 0.5 }
+        if owesAHandover || moved { handOverSelector(animated: false) }
     }
 
     private func startCamera() {
@@ -237,7 +317,7 @@ final class CaptureViewController: UIViewController {
 
     private func configureBars() {
         navigationItem.leftBarButtonItems = [cancelItem]
-        navigationItem.rightBarButtonItems = [flipItem]
+        // The flip and the flash live in the toolbar's leading strip.
         navigationItem.backButtonDisplayMode = .minimal
         // ⚠️ TRANSPARENT, AND STATED ON THIS SCREEN'S ITEM — a bar appearance
         // set on the stack's bar would follow the author into the editor.
@@ -248,9 +328,30 @@ final class CaptureViewController: UIViewController {
         navigationItem.compactAppearance = clear
     }
 
+    /// The sheet is on its way out: Cancel or Discard, or a swipe that
+    /// dismisses it. Cleared if the camera comes back.
+    private var isClosing = false
+
+    /// Whether a finished capture may still be handed over: the camera is what
+    /// the author sees, and the sheet is not leaving.
+    ///
+    /// ⚠️ **"ON TOP" IS NOT ENOUGH.** During a dismissal the camera is still the
+    /// top screen: a photograph, or a join of the take, that landed during
+    /// Cancel's slide-down was registered, and an editor built and pushed
+    /// inside the sheet on its way out. It is now dropped, file and all.
+    private var canHandOff: Bool {
+        !isClosing && view.window != nil && navigationController?.isBeingDismissed != true
+            && navigationController?.topViewController === self
+    }
+
+    private func close() {
+        isClosing = true
+        dismiss(animated: true)
+    }
+
     private func cancelTapped() {
         guard !take.isEmpty else {
-            dismiss(animated: true)
+            close()
             return
         }
         // ⚠️ CLIPS ARE WORK. A cancel that silently threw away a minute of
@@ -261,7 +362,7 @@ final class CaptureViewController: UIViewController {
             message: "What you recorded will be lost.", preferredStyle: .actionSheet
         )
         alert.addAction(UIAlertAction(title: "Discard", style: .destructive) { [weak self] _ in
-            self?.dismiss(animated: true)
+            self?.close()
         })
         alert.addAction(UIAlertAction(title: "Keep Recording", style: .cancel))
         alert.popoverPresentationController?.barButtonItem = cancelItem
@@ -273,10 +374,8 @@ final class CaptureViewController: UIViewController {
     private func configurePreview() {
         previewContainer.backgroundColor = .black
         previewContainer.clipsToBounds = true
-        previewContainer.layer.cornerRadius = 24
-        previewContainer.layer.cornerCurve = .continuous
-        // Only the foot is rounded: the sheet already rounds the top.
-        previewContainer.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        // Its corners are the sheet's — see `matchTheSheetsCorners`.
+        previewContainer.cornerConfiguration = .corners(radius: .containerConcentric(minimum: Self.cornerFloor))
         previewContainer.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(previewContainer)
         // ⚠️ **ALWAYS THE FRAME'S OWN 9:16, NARROWED AND CENTRED WHEN THE
@@ -298,8 +397,11 @@ final class CaptureViewController: UIViewController {
             wide
         ])
 
-        if let plain = source.plainPreview { plain.pin(to: previewContainer) }
-        liveView.pin(to: previewContainer)
+        // The pictures sit in a host of their own — what a flip turns.
+        flipHost.backgroundColor = .black
+        flipHost.pin(to: previewContainer)
+        if let plain = source.plainPreview { plain.pin(to: flipHost) }
+        liveView.pin(to: flipHost)
         // The feed's consumer is decided by `applyFrameDelivery`.
 
         for bar in [letterboxTop, letterboxBottom] {
@@ -347,7 +449,49 @@ final class CaptureViewController: UIViewController {
 
     /// Where the ratio's window stands in the preview, and the letterbox
     /// around it.
+    /// The camera zone's foot, rounded like the top of the sheet.
+    ///
+    /// ⚠️ **ASKED FOR: THE FOOT OF THE CAMERA ZONE ROUNDED LIKE THE TOP OF THE
+    /// SHEET.** The radius is not hard-coded, and not read from anything
+    /// private: the zone's top corners are CONCENTRIC with their container —
+    /// the sheet, whose top edge they sit on — so UIKit answers the sheet's
+    /// radius as their effective radius (`effectiveRadius(corner:)`, iOS 26),
+    /// and the foot is given that same number. Where there is no sheet to be
+    /// concentric with (a test's window), the floor stands in.
+    private func matchTheSheetsCorners() {
+        let top = previewContainer.effectiveRadius(corner: .topLeft)
+        let radius = max(Self.cornerFloor, top)
+        guard abs(radius - sheetRadius) > 0.25 else { return }
+        sheetRadius = radius
+        previewContainer.cornerConfiguration = .corners(
+            topLeftRadius: .containerConcentric(minimum: Self.cornerFloor),
+            topRightRadius: .containerConcentric(minimum: Self.cornerFloor),
+            bottomLeftRadius: .fixed(radius),
+            bottomRightRadius: .fixed(radius)
+        )
+        // ⚠️ **WHAT A FLIP TURNS WEARS THE SAME CORNERS, ALL FOUR.** A flip
+        // turns the pictures' host in 3D (`flip()`), away from the sheet's
+        // edge and inside the zone: with square corners of its own, square
+        // corners were what the author saw turning. At rest they coincide
+        // with the zone's and cannot be seen.
+        flipHost.cornerConfiguration = .uniformCorners(radius: .fixed(radius))
+        flipHost.clipsToBounds = true
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-camera-log-frames") {
+            NSLog("[camera-corners] sheet radius %.2f", radius)
+        }
+        #endif
+    }
+
+    /// The sheet's corner radius as last read — see `matchTheSheetsCorners`.
+    private(set) var sheetRadius: CGFloat = 0
+
+    /// The least the camera zone's corners are rounded, where no sheet says
+    /// otherwise.
+    static let cornerFloor: CGFloat = 24
+
     private func layoutWindow() {
+        matchTheSheetsCorners()
         let bounds = previewContainer.bounds
         guard bounds.width > 0 else { return }
         let window = settings.ratio.window(in: bounds)
@@ -395,22 +539,20 @@ final class CaptureViewController: UIViewController {
         libraryButton.addAction(UIAction { [weak self] _ in self?.openLibrary() }, for: .primaryActionTriggered)
         libraryButton.constrain(in: view) { _ in
             libraryButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
-            libraryButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: -112)
+            libraryButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: -Self.besideTheShutter)
             libraryButton.widthAnchor.constraint(equalToConstant: 44)
             libraryButton.heightAnchor.constraint(equalToConstant: 44)
         }
 
+        // ⚠️ **UNDO TO THE RIGHT OF THE SHUTTER, THE LIBRARY TO ITS LEFT —
+        // ASKED FOR** ("déplacer le bouton pour supprimer la prise… à droite du
+        // bouton de capture"), so the shortcut can stay beside a take. The row
+        // reads — and VoiceOver reads it — library, shutter, undo.
         undoButton.constrain(in: view) { _ in
             undoButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
-            undoButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: -112)
+            undoButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: Self.besideTheShutter)
             undoButton.widthAnchor.constraint(equalToConstant: 48)
             undoButton.heightAnchor.constraint(equalToConstant: 48)
-        }
-
-        nextButton.constrain(in: view) { _ in
-            nextButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
-            nextButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: 116)
-            nextButton.heightAnchor.constraint(equalToConstant: 44)
         }
 
         lensChips.onPick = { [weak self] lens in self?.pickLens(lens) }
@@ -451,10 +593,15 @@ final class CaptureViewController: UIViewController {
         loadLibraryShortcut()
     }
 
+    /// How far the library shortcut and undo sit from the shutter's centre, on
+    /// either side.
+    static let besideTheShutter: CGFloat = 112
+
     /// ⚠️ **GLASS IS MATERIALISED ONCE A WINDOW EXISTS** — the `IconSelectorBar`
     /// rule about contacting the render server before there is one.
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
+        handOverSelector(animated: false)
         if timePill.effect == nil { timePill.effect = UIGlassEffect() }
         if toast.effect == nil { toast.effect = UIGlassEffect() }
     }
@@ -464,18 +611,24 @@ final class CaptureViewController: UIViewController {
     private func configureSelector() {
         // ⚠️ THE SHUTTER STANDS INSIDE THE PICTURE, NEVER ACROSS ITS EDGE. On
         // the first run the preview's rounded foot cut through the ring. It
-        // rests just above the selector where the phone is tall enough, and is
-        // lifted into the preview where it is not (an SE's preview reaches the
-        // foot of the sheet, and the selector then lies over the picture).
-        let resting = shutter.bottomAnchor.constraint(equalTo: selector.topAnchor, constant: -Spacing.md)
+        // rests just above the stack's toolbar — the safe area's foot, which
+        // the visible toolbar raises — and is lifted into the preview where
+        // the phone is too short for both (an SE).
+        let resting = shutter.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.md)
         resting.priority = .defaultHigh
-        selector.constrain(in: view) { view in
-            selector.centerXAnchor.constraint(equalTo: view.centerXAnchor)
-            selector.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.sm)
-            shutter.bottomAnchor.constraint(lessThanOrEqualTo: selector.topAnchor, constant: -Spacing.md)
-            shutter.bottomAnchor.constraint(lessThanOrEqualTo: previewContainer.bottomAnchor, constant: -Spacing.lg)
+        NSLayoutConstraint.activate([
+            shutter.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.md),
+            shutter.bottomAnchor.constraint(lessThanOrEqualTo: previewContainer.bottomAnchor, constant: -Spacing.lg),
             resting
-        }
+        ])
+        // ⚠️ **A REAL BAR ITEM IN THE STACK'S TOOLBAR, TRAILING — THE EDITOR'S
+        // STRIP, NOT A LOOKALIKE.** It stood in the camera's own layout,
+        // centred, with its own glass capsule, and it read as a different
+        // control: the pill sat in a capsule of another height, with unequal
+        // margins at the top and the sides. The toolbar supplies the glass, so
+        // the bar draws none of its own — the rule `IconSelectorBar` states for
+        // any bar that lives in one.
+        selector.suppressesBackdrop = true
         selector.onSelect = { [weak self] index in self?.optionChosen(index) }
         // ⚠️ A SECOND TAP ON THE CHOSEN ICON PUTS ITS CONTROLS AWAY — the
         // editor's neutral state, asked for in the same words.
@@ -483,7 +636,6 @@ final class CaptureViewController: UIViewController {
         selector.onSelectNothing = { [weak self] in self?.showBand(nil) }
         selector.selectNothing(notify: false)
 
-        flashRow.onPick = { [weak self] in self?.setFlash($0) }
         timerRow.onPick = { [weak self] in self?.setTimer($0) }
         ratioRow.onPick = { [weak self] in self?.setRatio($0) }
         filterRow.onPick = { [weak self] in self?.setFilter($0) }
@@ -491,7 +643,6 @@ final class CaptureViewController: UIViewController {
 
     static func symbol(for option: CaptureOption, settings: CaptureSettings) -> String {
         switch option {
-        case .flash: settings.flash.symbolName
         case .timer: settings.timer.symbolName
         case .ratio: "aspectratio"
         case .filters: "camera.filters"
@@ -510,7 +661,6 @@ final class CaptureViewController: UIViewController {
     /// (`IconSelectorBar.setDimmed`).
     static func spokenName(for option: CaptureOption, settings: CaptureSettings) -> String {
         switch option {
-        case .flash: "\(option.title), \(settings.flash.label.lowercased())"
         case .timer: "\(option.title), \(settings.timer.spoken.lowercased())"
         case .grid: "\(option.title), \(settings.showsGrid ? "on" : "off")"
         case .ratio, .filters: option.title
@@ -567,7 +717,6 @@ final class CaptureViewController: UIViewController {
 
     private func tenant(for option: CaptureOption) -> UIView? {
         switch option {
-        case .flash: flashRow
         case .timer: timerRow
         case .ratio: ratioRow
         case .filters: filterRow
@@ -658,7 +807,7 @@ final class CaptureViewController: UIViewController {
 
     private func setFlash(_ mode: CaptureFlashMode) {
         settings.flash = mode
-        refreshSelectorIcons()
+        refreshLeadingBar()
     }
 
     private func setTimer(_ timer: CaptureTimer) {
@@ -735,6 +884,7 @@ final class CaptureViewController: UIViewController {
                 CaptureLiveView.snapshot(of: frame, side: side)
             }.value
             guard let self, openOption == .filters, let picture else { return }
+            debugCardRefreshes += 1
             filterRow.show(picture)
             filterRow.setSelected(settings.filter)
         }
@@ -972,7 +1122,7 @@ final class CaptureViewController: UIViewController {
     /// has gone somewhere else; the editor would land on top of it. The
     /// photograph is dropped, file and all.
     private func photographed(_ photo: CapturedPhoto) {
-        guard navigationController?.topViewController === self else {
+        guard canHandOff else {
             folder.discard(photo.url)
             return
         }
@@ -1096,7 +1246,8 @@ final class CaptureViewController: UIViewController {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         case .deleted(let clip):
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            folder.discard(clip.url)
+            // A one-clip take was handed over as this very clip.
+            release(clip.url)
             dropStitch()
         }
         refreshTakeControls(animated: true)
@@ -1106,18 +1257,16 @@ final class CaptureViewController: UIViewController {
         guard !take.isEmpty, !isRecording, !isBusy else { return }
         take.disarm()
         isBusy = true
+        // A bar item carries no spinner: the shutter says the take is being
+        // joined, with the look it wears while a photograph is written.
+        shutter.setLook(.busy, animated: true)
         refreshTakeControls(animated: true)
-        var busy = nextButton.configuration
-        busy?.showsActivityIndicator = true
-        nextButton.configuration = busy
         let clips = take.clips.map(\.url)
         Task { [weak self] in
             guard let self else { return }
             defer {
                 isBusy = false
-                var idle = nextButton.configuration
-                idle?.showsActivityIndicator = false
-                nextButton.configuration = idle
+                shutter.setLook(.idle, animated: true)
                 refreshTakeControls(animated: true)
             }
             do {
@@ -1135,13 +1284,36 @@ final class CaptureViewController: UIViewController {
                 let size = await CapturedMediaLibrary.uprightVideoSize(at: url) ?? .zero
                 // A take that changed while it was being joined is not the
                 // take on screen; nothing is handed over for it.
-                guard take.clips.map(\.url) == clips,
-                      navigationController?.topViewController === self else { return }
+                guard take.clips.map(\.url) == clips, canHandOff else { return }
                 let item = captures.register(url, kind: .video(duration: duration))
                 openEditor([item], edits: [item.id: handOffEdits(uprightSize: size)])
             } catch {
                 say("The video could not be put together")
             }
+        }
+    }
+
+    /// Files the camera is done with that a screen it handed them to still
+    /// reads — deleted once nobody does (`sweepReleased`).
+    private var awaitingRelease: Set<URL> = []
+
+    /// Deletes a file the camera no longer needs — later, if a screen it was
+    /// handed to still reads it. See `CapturedMediaLibrary.hold(_:by:)`.
+    private func release(_ url: URL) {
+        sweepReleased()
+        if captures.isHeld(url) {
+            awaitingRelease.insert(url)
+        } else {
+            folder.discard(url)
+        }
+    }
+
+    /// Deletes the files that were waiting for their readers to go. Whatever is
+    /// still held when the sheet closes goes with the folder.
+    private func sweepReleased() {
+        for url in awaitingRelease where !captures.isHeld(url) {
+            folder.discard(url)
+            awaitingRelease.remove(url)
         }
     }
 
@@ -1155,21 +1327,28 @@ final class CaptureViewController: UIViewController {
     /// the take's.
     private func dropStitch() {
         if let stitched, !stitched.clips.contains(stitched.url) {
-            folder.discard(stitched.url)
+            release(stitched.url)
         }
         stitched = nil
+        sweepReleased()
     }
 
-    /// Lays out what the take allows: the library shortcut while it is empty,
-    /// undo and Next once it holds a clip, the ring's segments, the clock.
+    /// Lays out what the take allows: the library shortcut, undo and Next once
+    /// it holds a clip, the ring's segments, the clock.
+    ///
+    /// ⚠️ **THE LIBRARY SHORTCUT STAYS BESIDE A TAKE.** It used to give way to
+    /// undo, which had its place; undo has moved to the other side of the
+    /// shutter, and the library is as much a way on from a take as from an
+    /// empty camera: the picker is pushed over the camera, the take waits
+    /// under it, and back comes back to it whole.
     private func refreshTakeControls(animated: Bool) {
         let recordingOrCounting = isRecording || countdownTask != nil
         let hasClips = !take.isEmpty
-        setShown(libraryButton, !hasClips && !recordingOrCounting && !isBusy && makeLibraryPicker != nil, animated: animated, pops: true)
-        // Undo and Next arrive one after the other, as a band's row does.
+        // It pops when it arrives on an empty camera, not when it comes back
+        // after each clip.
+        setShown(libraryButton, !recordingOrCounting && !isBusy && makeLibraryPicker != nil, animated: animated, pops: !hasClips)
         setShown(undoButton, hasClips && !recordingOrCounting, animated: animated, pops: true)
-        setShown(nextButton, hasClips && !recordingOrCounting, animated: animated, pops: true, delay: BandPop.staggerStep)
-        nextButton.isEnabled = !isBusy
+        refreshNextItem(shown: hasClips && !recordingOrCounting, animated: animated)
         undoButton.isEnabled = !isBusy
         var undo = UIButton.Configuration.glass()
         if take.isArmedToUndo {
@@ -1191,6 +1370,33 @@ final class CaptureViewController: UIViewController {
         applyShapeLock()
     }
 
+    /// Puts "Next" in the header — or takes it out — and enables it.
+    ///
+    /// ⚠️ **IN THE HEADER, AS THE PICKER'S AND THE EDITOR'S ARE — ASKED FOR**
+    /// ("le bouton 'Next' sera affiché dans la toolbar du haut à droite"): a
+    /// prominent (`.done`) item at the trailing edge, `[Cancel] ---- [Next]`.
+    /// It arrives with the first clip, is disabled while the take is joined
+    /// or a photograph written, and goes while a clip records or a countdown
+    /// runs, with the rest of the chrome.
+    ///
+    /// ⚠️ **A FRESH ITEM EACH TIME IT ARRIVES, UNDER ONE IDENTIFIER**
+    /// (`bar-item-wrapper-drift`): an item handed back to a bar is never one
+    /// the bar already had. It is not rebuilt while it stays: only enabled or
+    /// not.
+    private func refreshNextItem(shown: Bool, animated: Bool) {
+        if shown, nextItem == nil {
+            let item = UIBarButtonItem(title: "Next", primaryAction: UIAction { [weak self] _ in self?.nextTapped() })
+            item.style = .done
+            item.identifier = Self.nextItemID
+            nextItem = item
+            navigationItem.setRightBarButtonItems([item], animated: animated)
+        } else if !shown, nextItem != nil {
+            nextItem = nil
+            navigationItem.setRightBarButtonItems(nil, animated: animated)
+        }
+        nextItem?.isEnabled = !isBusy
+    }
+
     /// Dims the shape's icon while the take has a clip — see `optionChosen`.
     /// It rests rather than disabling: a tap on it explains how to free it.
     private func applyShapeLock() {
@@ -1202,12 +1408,109 @@ final class CaptureViewController: UIViewController {
     /// Everything but the shutter, the ring and the zoom steps back while a
     /// clip records or a countdown runs.
     private func setChromeHidden(_ hidden: Bool) {
+        isChromeHidden = hidden
         cancelItem.isHidden = hidden
-        flipItem.isHidden = hidden
-        setShown(selector, !hidden, animated: true)
+        handOverSelector(animated: true)
         if hidden { showBand(nil); selector.selectNothing(notify: false) }
         refreshTakeControls(animated: true)
     }
+
+    private var isChromeHidden = false
+
+    /// A hand-over the toolbar could not take yet, owed to the first layout
+    /// pass once the screen is in a window.
+    private var owesAHandover = false
+
+    /// Puts the two strips in the stack's toolbar — the flash and the flip
+    /// leading, the options trailing — or takes them out while a clip records
+    /// or a countdown runs.
+    ///
+    /// ⚠️ **THE EDITOR'S BAR, SHARED RATHER THAN COPIED.** The leading strip is
+    /// held at its own width and the selector takes the rest, floored at one
+    /// bubble (`EditorSelectorLayout`), in the room the bar leaves once its
+    /// margins, platters and group gap are charged (`ToolbarGeometry`, measured
+    /// from the two platters through `BottomBarShare`).
+    ///
+    /// ⚠️ **FRESH ITEMS ON EVERY HAND-OVER, UNDER STABLE IDENTIFIERS**
+    /// (`bar-item-wrapper-drift`): UIKit keeps the wrapper it builds around a
+    /// REUSED item's view, and that wrapper does not follow the view's width —
+    /// the editor lost its strip to a `•••` that way.
+    ///
+    /// ⚠️ **NEVER BEFORE THE SCREEN IS IN A WINDOW, AND THE WIDTHS BEFORE THE
+    /// ITEMS.** UIKit decides once, at the hand-over, whether an item fits; a
+    /// toolbar that has never been in a window answers the SCREEN's width. An
+    /// early call is owed to `viewDidLayoutSubviews`, which also hands over
+    /// again when the share has moved since the last hand-over.
+    ///
+    /// ⚠️ **THE TOOLBAR STAYS UP WHILE ITS ITEMS ARE AWAY.** Hiding the toolbar
+    /// for a recording would lower the safe area the shutter rests on, and the
+    /// shutter would drop under the author's thumb mid-clip.
+    private func handOverSelector(animated: Bool) {
+        guard view.window != nil, (navigationController?.toolbar.bounds.width ?? 0) > 0 else {
+            owesAHandover = true
+            return
+        }
+        guard !isHandingOver else { return }
+        isHandingOver = true
+        defer { isHandingOver = false }
+        owesAHandover = false
+        _ = shareTheBar()
+        let offered = !isChromeHidden && notice == nil
+        setToolbarItems(offered ? [
+            Self.barItem(leadingBar, as: Self.leadingItemID),
+            .fixedSpace(Spacing.sm),
+            Self.barItem(selector, as: Self.optionsItemID),
+            .flexibleSpace()
+        ] : [], animated: animated)
+        handedWidths = shareTheBar()
+    }
+
+    private static func barItem(_ view: UIView, as identifier: String) -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: view)
+        item.identifier = identifier
+        return item
+    }
+
+    /// `setToolbarItems` lays the bar out, and this is called from that layout.
+    private var isHandingOver = false
+
+    /// The two widths the bar was last handed; a share that has moved since
+    /// is handed over again.
+    private var handedWidths: (leading: CGFloat, trailing: CGFloat)?
+
+    private(set) var barGeometry = ToolbarGeometry.fallback
+
+    private lazy var leadingWidth: NSLayoutConstraint =
+        leadingBar.widthAnchor.constraint(equalToConstant: IconActionBar.height)
+    private lazy var selectorWidth: NSLayoutConstraint =
+        selector.widthAnchor.constraint(equalToConstant: IconSelectorBar.height)
+
+    /// Holds the two strips to their share of the bar — the editor's
+    /// `shareTheBarBetweenTheTwoStrips`, for this bar's two strips.
+    @discardableResult
+    private func shareTheBar() -> (leading: CGFloat, trailing: CGFloat)? {
+        if let measured = BottomBarShare.measure(leading: leadingBar, trailing: selector) { barGeometry = measured }
+        guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else {
+            leadingWidth.isActive = false
+            selectorWidth.isActive = false
+            return nil
+        }
+        let held = EditorSelectorLayout.widths(
+            leadingWants: BottomBarShare.wantedWidth(of: leadingBar),
+            available: barGeometry.available(in: toolbar.bounds.width),
+            trailingFloor: selector.intrinsicContentSize.height
+        )
+        leadingWidth.constant = held.leading
+        selectorWidth.constant = held.trailing
+        leadingWidth.isActive = true
+        selectorWidth.isActive = true
+        leadingBar.frame.size.width = held.leading
+        selector.frame.size.width = held.trailing
+        return held
+    }
+
+    static let leadingItemID = "upload.camera.toolbar.leading"
+    static let optionsItemID = "upload.camera.toolbar.options"
 
     private func showLock(_ shown: Bool) {
         lockView.setLocked(false)
@@ -1218,6 +1521,8 @@ final class CaptureViewController: UIViewController {
     // MARK: - Zoom, focus, flip
 
     private func refreshLenses() {
+        // The camera changed, or reported: its flash comes and goes with it.
+        refreshLeadingBar()
         lensChips.setLenses(source.lenses, zoom: source.zoom)
         setShown(lensChips, openOption == nil && source.lenses.count > 1, animated: false)
     }
@@ -1268,6 +1573,64 @@ final class CaptureViewController: UIViewController {
         }
     }
 
+    /// The flip's turn: a quarter away and a quarter back, about the vertical
+    /// axis, in keyframes so every step is `turn(_:width:)` — never something
+    /// Core Animation interpolated between two of them.
+    private func turnThePictures() {
+        let width = flipHost.bounds.width
+        guard width > 0, !isTurning else { return }
+        isTurning = true
+        let steps = 8
+        func half(_ duration: TimeInterval, angle: @escaping (Double) -> CGFloat, then: @escaping () -> Void) {
+            UIView.animateKeyframes(withDuration: duration, delay: 0, options: [.allowUserInteraction, .calculationModeLinear]) {
+                for step in 1...steps {
+                    let progress = Double(step) / Double(steps)
+                    UIView.addKeyframe(withRelativeStartTime: progress - 1 / Double(steps), relativeDuration: 1 / Double(steps)) {
+                        self.flipHost.transform3D = Self.turn(angle(progress), width: width)
+                    }
+                }
+            } completion: { _ in then() }
+        }
+        // Away, easing in; back, easing out, from the other side.
+        half(0.2, angle: { .pi / 2 * $0 * $0 }) {
+            self.flipHost.transform3D = Self.turn(-.pi / 2, width: width)
+            half(0.22, angle: { -.pi / 2 * (1 - $0) * (1 - $0) }) {
+                self.flipHost.transform3D = CATransform3DIdentity
+                self.isTurning = false
+            }
+        }
+    }
+
+    private var isTurning = false
+
+    /// How far the eye is from the turning pictures, in points: the turn's
+    /// perspective.
+    static let turnDistance: CGFloat = 900
+
+    /// How much of the zone's height the turning pictures' nearer edge may
+    /// take at most.
+    static let turnMargin: CGFloat = 0.96
+
+    /// The pictures turned by `angle` about their vertical axis, seen with
+    /// perspective — and shrunk just enough to stay inside the zone.
+    ///
+    /// ⚠️ **SHRUNK, OR THE NEAR CORNERS ARE CUT SQUARE — MEASURED.** A turn in
+    /// perspective makes the nearer edge TALLER than the zone (by a quarter
+    /// at 60° here), and the zone clips it: the recording showed the far
+    /// corners rounded and the near ones cut flat by the zone's top and
+    /// bottom. The scale is the one that holds the near edge at
+    /// `turnMargin` of the zone's height, whatever the angle.
+    static func turn(_ angle: CGFloat, width: CGFloat) -> CATransform3D {
+        var transform = CATransform3DIdentity
+        transform.m34 = -1 / turnDistance
+        // The near edge comes forward by half the width times sin(angle),
+        // which enlarges it by 1 / (1 − scale · lift).
+        let lift = width / 2 * abs(sin(angle)) / turnDistance
+        let scale = turnMargin / (1 + turnMargin * lift)
+        transform = CATransform3DRotate(transform, angle, 0, 1, 0)
+        return CATransform3DScale(transform, scale, scale, 1)
+    }
+
     @objc private func doubleTapped(_ tap: UITapGestureRecognizer) {
         flip()
     }
@@ -1275,13 +1638,17 @@ final class CaptureViewController: UIViewController {
     /// ⚠️ **A FLIP WHILE RECORDING IS REFUSED**, not queued: the movie output
     /// cannot change inputs under a running file, and a clip is where a flip
     /// belongs anyway — between two of them.
+    ///
+    /// ⚠️ **TURNED BY HAND, NOT WITH `UIView.transition(.transitionFlipFromLeft)`
+    /// — MEASURED.** That transition was given a view with rounded, clipping
+    /// corners, and a recording of it still showed a card with SQUARE corners
+    /// turning: the transition draws the view without its corner mask. The
+    /// pictures' host is turned instead — a quarter away, then a quarter back
+    /// in with the other camera — and its own mask turns with it.
     private func flip() {
         guard !isRecording, !isBusy else { return }
         UISelectionFeedbackGenerator().selectionChanged()
-        let snapshot = liveView.isHidden ? source.plainPreview : liveView
-        if !reducesMotion(), let snapshot {
-            UIView.transition(with: snapshot, duration: 0.4, options: [.transitionFlipFromLeft, .allowUserInteraction]) {}
-        }
+        if !reducesMotion() { turnThePictures() }
         Task { [weak self] in
             guard let self else { return }
             await source.flip()
@@ -1300,14 +1667,14 @@ final class CaptureViewController: UIViewController {
     /// the picker it opens asks for access itself — where asking is expected.
     /// The camera still never asks: reading `access` asks nothing, and the
     /// thumbnail is only fetched where access is already granted.
+    ///
+    /// ⚠️ **ONE PICTURE, ASKED FOR ONCE.** It used to enumerate the picker's
+    /// whole Recents album on the main actor for this — see
+    /// `CaptureLibraryFace`.
     private func loadLibraryShortcut() {
-        guard let recents, makeLibraryPicker != nil else { return }
-        guard recents.access == .granted || recents.access == .limited else { return }
+        guard let libraryFace, makeLibraryPicker != nil else { return }
         Task { [weak self] in
-            guard let first = await recents.albums().first,
-                  let newest = await recents.items(in: first.id).first,
-                  let picture = await recents.thumbnail(for: newest.id, size: CGSize(width: 88, height: 88))
-            else { return }
+            guard let picture = await libraryFace() else { return }
             guard let self else { return }
             libraryButton.imageView?.contentMode = .scaleAspectFill
             libraryButton.backgroundColor = nil
@@ -1339,7 +1706,7 @@ final class CaptureViewController: UIViewController {
         self.notice = notice
         shutter.isUserInteractionEnabled = false
         shutter.alpha = 0.35
-        selector.isHidden = true
+        handOverSelector(animated: false)
         lensChips.isHidden = true
     }
 
@@ -1366,8 +1733,8 @@ final class CaptureViewController: UIViewController {
     /// values: re-running an arrival on a view that is already shown would
     /// flash it from nothing.
     ///
-    /// ⚠️ **`pops` IS FOR WHAT ARRIVES AS NEW** — undo and Next once a clip
-    /// lands, the library's face — never for chrome coming back after a clip:
+    /// ⚠️ **`pops` IS FOR WHAT ARRIVES AS NEW** — undo once a clip lands, the
+    /// library's face — never for chrome coming back after a clip:
     /// a selector that popped every time a recording ended would be noise. And
     /// nothing pops while recording, when the microphone is open.
     private func setShown(
@@ -1411,6 +1778,7 @@ final class CaptureViewController: UIViewController {
     // MARK: - Debug
 
     private(set) var debugPopIns = 0
+    private(set) var debugCardRefreshes = 0
     private(set) var debugLastToast: String?
     private(set) var debugToasts: [String] = []
     /// What the focus ring and the toast were staged at before they spring in.
@@ -1424,21 +1792,41 @@ final class CaptureViewController: UIViewController {
     private(set) var debugLastHandOff: ([MediaLibraryItem], [String: MediaEdits])?
     var debugSelector: IconSelectorBar { selector }
     var debugBand: MediaEditorBandView { band }
-    var debugFlashRow: CaptureChoiceRowView<CaptureFlashMode> { flashRow }
+    var debugLeadingBar: IconActionBar { leadingBar }
+    func debugPickFlash(_ mode: CaptureFlashMode) { setFlash(mode) }
+    var debugBarShare: (leading: CGFloat, trailing: CGFloat, available: CGFloat, leadingWants: CGFloat, floor: CGFloat)? {
+        guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else { return nil }
+        return (
+            leadingBar.frame.width, selector.frame.width, barGeometry.available(in: toolbar.bounds.width),
+            BottomBarShare.wantedWidth(of: leadingBar), selector.intrinsicContentSize.height
+        )
+    }
+    var debugHeldWidths: (leading: CGFloat, trailing: CGFloat) { (leadingWidth.constant, selectorWidth.constant) }
     var debugTimerRow: CaptureChoiceRowView<CaptureTimer> { timerRow }
     var debugRatioRow: CaptureChoiceRowView<CaptureRatio> { ratioRow }
     var debugFilterRow: MediaFilterRowView { filterRow }
     var debugLensChips: CaptureLensChipsView { lensChips }
     var debugLiveView: CaptureLiveView { liveView }
+    /// The view a flip turns.
+    var debugFlippingView: UIView? { flipHost }
     var debugGridIsShowing: Bool { !gridView.isHidden && gridView.alpha > 0 }
     var debugUndoIsShowing: Bool { !undoButton.isHidden && undoButton.isUserInteractionEnabled }
     var debugUndoIsEnabled: Bool { undoButton.isEnabled }
-    var debugNextIsShowing: Bool { !nextButton.isHidden && nextButton.isUserInteractionEnabled }
+    var debugNextIsShowing: Bool { debugNextItem != nil }
+    /// The header's "Next", as the bar holds it.
+    var debugNextItem: UIBarButtonItem? {
+        navigationItem.rightBarButtonItems?.first { $0.identifier == Self.nextItemID }
+    }
+    var debugUndoFrame: CGRect { undoButton.frame }
+    var debugLibraryFrame: CGRect { libraryButton.frame }
     var debugLibraryIsShowing: Bool { !libraryButton.isHidden && libraryButton.isUserInteractionEnabled }
     var debugLockIsShowing: Bool { lockView.isUserInteractionEnabled || (!lockView.isHidden && lockView.alpha > 0) }
     var debugWindow: CGRect { gridView.frame }
     var debugPreviewBounds: CGRect { previewContainer.bounds }
     var debugPreviewFrame: CGRect { previewContainer.frame }
+    var debugPreviewCorners: (top: CGFloat, bottom: CGFloat) {
+        (previewContainer.effectiveRadius(corner: .topLeft), previewContainer.effectiveRadius(corner: .bottomLeft))
+    }
     var debugNoticeIsShowing: Bool { notice != nil }
     var debugNotice: CaptureAccessNoticeView? { notice }
     func debugTapUndo() { undoTapped() }

@@ -54,7 +54,30 @@ final class CaptureShutterView: UIView {
     private(set) var look: Look = .idle
 
     private static let ringWidth: CGFloat = 5
-    private static let segmentGap: Double = 0.004
+    /// The clear arc between two clips, and between the last clip and the one
+    /// recording: 3° of the ring.
+    ///
+    /// ⚠️ **WAS 0.4% — 1.4° — AND DID NOT READ AS A BOUNDARY.** Asked for: "une
+    /// meilleure visualisation de séparation entre les segments". At 3° the
+    /// white ring shows through between two reds as an unmistakable notch,
+    /// over dark footage and bright alike (the ring and the segments carry a
+    /// soft shadow for the bright case).
+    static let segmentGap: Double = 3.0 / 360
+
+    /// However short a clip, it is never drawn shorter than 1° — its boundary
+    /// must still be seen. A clip shorter than the gap then gives up gap
+    /// rather than vanish.
+    static let shortestDrawn: Double = 1.0 / 360
+
+    /// Where each clip is drawn on the ring: each one short of the next by the
+    /// gap, the last one to its end.
+    static func strokes(for segments: [ClosedRange<Double>]) -> [ClosedRange<Double>] {
+        segments.enumerated().map { index, range in
+            guard index < segments.count - 1 else { return range }
+            let end = max(range.lowerBound + shortestDrawn, range.upperBound - segmentGap)
+            return range.lowerBound...min(max(range.lowerBound, end), range.upperBound)
+        }
+    }
 
     init() {
         super.init(frame: CGRect(x: 0, y: 0, width: Self.side, height: Self.side))
@@ -66,6 +89,14 @@ final class CaptureShutterView: UIView {
         ring.fillColor = UIColor.clear.cgColor
         ring.strokeColor = UIColor.white.withAlphaComponent(0.9).cgColor
         ring.lineWidth = Self.ringWidth
+        // A soft shadow under the ring and its segments, so the white gaps
+        // between clips still read over bright footage.
+        for layer in [ring, segmentsLayer, liveSegment] as [CALayer] {
+            layer.shadowColor = UIColor.black.cgColor
+            layer.shadowOpacity = 0.3
+            layer.shadowRadius = 2
+            layer.shadowOffset = .zero
+        }
         layer.addSublayer(ring)
         layer.addSublayer(segmentsLayer)
         liveSegment.fillColor = UIColor.clear.cgColor
@@ -168,7 +199,8 @@ final class CaptureShutterView: UIView {
     /// `armedLast` paints the last one as the undo would take it.
     func setSegments(_ segments: [ClosedRange<Double>], armedLast: Bool) {
         segmentsLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
-        for (index, range) in segments.enumerated() {
+        hasSegments = !segments.isEmpty
+        for (index, range) in Self.strokes(for: segments).enumerated() {
             let segment = CAShapeLayer()
             segment.frame = bounds
             segment.path = Self.arc(in: bounds)
@@ -187,9 +219,8 @@ final class CaptureShutterView: UIView {
                 segment.add(breath, forKey: "armed")
             }
             segment.lineWidth = Self.ringWidth
-            // A hairline gap between clips, so two clips never read as one.
             segment.strokeStart = range.lowerBound
-            segment.strokeEnd = max(range.lowerBound, range.upperBound - (index < segments.count - 1 ? Self.segmentGap : 0))
+            segment.strokeEnd = range.upperBound
             segmentsLayer.addSublayer(segment)
         }
         debugSegmentCount = segments.count
@@ -199,13 +230,30 @@ final class CaptureShutterView: UIView {
     /// The clip being recorded, from where the take stands to where it has
     /// reached. Called every frame while recording; no implicit animation, so
     /// the ring follows the clock rather than easing behind it.
+    ///
+    /// ⚠️ **AFTER THE SAME GAP AS BETWEEN TWO CLIPS**, so the clip being
+    /// recorded reads as a new segment from its first frame.
     func setLive(from start: Double, to end: Double) {
+        let begins = hasSegments && end > start ? start + Self.segmentGap : start
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        liveSegment.strokeStart = start
-        liveSegment.strokeEnd = max(start, end)
-        liveSegment.isHidden = end <= start
+        liveSegment.strokeStart = begins
+        liveSegment.strokeEnd = max(begins, end)
+        liveSegment.isHidden = end <= begins
         CATransaction.commit()
+    }
+
+    /// Whether the take already holds a clip — the live segment keeps its
+    /// distance from the last one.
+    private var hasSegments = false
+
+    /// Internal for tests: where the clips and the live clip are drawn.
+    var debugSegmentStrokes: [ClosedRange<Double>] {
+        (segmentsLayer.sublayers ?? []).compactMap { $0 as? CAShapeLayer }
+            .map { Double($0.strokeStart)...Double($0.strokeEnd) }
+    }
+    var debugLiveStroke: ClosedRange<Double>? {
+        liveSegment.isHidden ? nil : Double(liveSegment.strokeStart)...Double(liveSegment.strokeEnd)
     }
 
     private(set) var debugSegmentCount = 0

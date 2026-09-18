@@ -22,7 +22,45 @@ final class CapturedMediaLibrary: MediaLibraryReading {
 
     private var entries: [MediaLibraryItem.ID: Entry] = [:]
 
+    /// The screens reading each file, held weakly — see `hold(_:by:)`.
+    private var holders: [URL: [WeakHolder]] = [:]
+
+    private final class WeakHolder {
+        weak var object: AnyObject?
+        init(_ object: AnyObject) { self.object = object }
+    }
+
     init() {}
+
+    /// Records that `holder` reads the files behind `items` for as long as it
+    /// lives — the editor a capture was handed to, and the finalisation screen
+    /// after it.
+    ///
+    /// ⚠️ **A FILE THE CAMERA HANDED OVER OUTLIVES THE CAMERA'S OWN USE OF
+    /// IT.** "Post" keeps running when the author steps back — the finalisation
+    /// screen's publishing task holds that screen until it is done — and the
+    /// camera, reached again, deleted the joined take (a new clip replaces
+    /// it) or a one-clip take's clip (undo), which the export was still
+    /// reading. The camera now asks `isHeld` before deleting, and leaves a held
+    /// file for later.
+    func hold(_ items: [MediaLibraryItem], by holder: AnyObject) {
+        for item in items {
+            guard let url = entries[item.id]?.url else { continue }
+            holders[url, default: []].append(WeakHolder(holder))
+        }
+    }
+
+    /// Whether a screen that was handed `url` is still alive.
+    func isHeld(_ url: URL) -> Bool {
+        holders[url] = holders[url]?.filter { $0.object != nil }
+        return !(holders[url]?.isEmpty ?? true)
+    }
+
+    /// Internal for tests: how many live screens read `url`.
+    func holderCount(of url: URL) -> Int {
+        _ = isHeld(url)
+        return holders[url]?.count ?? 0
+    }
 
     /// Registers a file and returns the item that stands for it.
     func register(_ url: URL, kind: MediaLibraryItem.Kind) -> MediaLibraryItem {
