@@ -278,12 +278,14 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         // 1080p, 16:9 — video and photographs share the frame the preview shows,
         // so the ratio's crop is the same rectangle on both.
         session.sessionPreset = .high
+        // ⚠️ THE AUTHOR'S MUSIC KEEPS PLAYING. Left at its default the session
+        // configures the app's audio session to interrupt every other one, so
+        // opening the camera — to take a PHOTOGRAPH — stopped whatever was
+        // playing. Mixed, it plays on (and is heard in a clip, as it is in the
+        // room). `UISound` still never touches the audio session itself.
+        session.configuresApplicationAudioSessionToMixWithOthers = true
         installCamera(.back)
-        if includesAudio, let microphone = AVCaptureDevice.default(for: .audio),
-           let input = try? AVCaptureDeviceInput(device: microphone), session.canAddInput(input) {
-            session.addInput(input)
-            audioInput = input
-        }
+        // ⚠️ AND NO MICROPHONE UNTIL A CLIP RECORDS — see `attachMicrophone`.
         if session.canAddOutput(photoOutput) {
             session.addOutput(photoOutput)
             photoOutput.maxPhotoQualityPrioritization = .balanced
@@ -542,6 +544,7 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
                 promise.fulfil(.failure(CaptureSourceError.recordingFailed))
                 return
             }
+            attachMicrophone()
             applyConnections()
             setTorch(torch)
             recordingRequested = true
@@ -556,11 +559,40 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
                 queue.async { [self] in
                     setTorch(false)
                     recordingRequested = false
+                    detachMicrophone()
                 }
                 promise.fulfil(result)
             }
         }
         return promise
+    }
+
+    /// ⚠️ **THE MICROPHONE IS AN INPUT ONLY WHILE A CLIP RECORDS.** Added at
+    /// configuration, it held the microphone — and the system's orange
+    /// microphone indicator — for as long as the camera was open, photographs
+    /// included. The cost of adding it per clip is a reconfiguration at the
+    /// start of each recording, which touches no video format, so the preview
+    /// runs on. The movie output's audio connection is made when the input is
+    /// added, which is before `startRecording`. On `queue`.
+    private func attachMicrophone() {
+        guard includesAudio, audioInput == nil,
+              let microphone = AVCaptureDevice.default(for: .audio),
+              let input = try? AVCaptureDeviceInput(device: microphone) else { return }
+        session.beginConfiguration()
+        if session.canAddInput(input) {
+            session.addInput(input)
+            audioInput = input
+        }
+        session.commitConfiguration()
+    }
+
+    /// On `queue`.
+    private func detachMicrophone() {
+        guard let audioInput else { return }
+        session.beginConfiguration()
+        session.removeInput(audioInput)
+        session.commitConfiguration()
+        self.audioInput = nil
     }
 
     /// ⚠️ **A STOP FOLLOWS WHAT WAS ASKED FOR, NOT WHAT THE OUTPUT REPORTS.**
