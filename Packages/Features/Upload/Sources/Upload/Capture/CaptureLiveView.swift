@@ -124,6 +124,9 @@ final class CaptureLiveView: UIView {
     var debugFrameStats: (meanMilliseconds: Double, drawn: Int, dropped: Int) {
         renderer?.stats ?? (0, 0, 0)
     }
+
+    /// Internal for tests: the look every frame is being drawn in.
+    var debugLook: FrameLook { renderer?.look.look ?? .neutral }
 }
 
 /// The Metal half of `CaptureLiveView`: frames are handed in from the source's

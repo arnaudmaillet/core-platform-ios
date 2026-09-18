@@ -80,8 +80,10 @@ struct CaptureSourceTests {
     }
 
     /// A stop that arrives before the first frame still ends the recording —
-    /// the ordering `startRecording` promises.
-    @Test func aStopRightAfterTheStartEndsTheRecording() async throws {
+    /// the ordering `startRecording` promises. Time-limited: broken, it never
+    /// resolves at all.
+    @Test(.timeLimit(.minutes(1)))
+    func aStopRightAfterTheStartEndsTheRecording() async throws {
         let (source, folder) = try await running()
         defer { source.stop() }
         let promise = source.startRecording(to: folder.newFile("clip", pathExtension: "mov"), torch: false, limit: 60)

@@ -29,7 +29,9 @@ struct CaptureFlowTests {
         }
         func stop() { inner.stop() }
         var feed: CaptureFrameFeed { inner.feed }
-        var plainPreview: UIView? { nil }
+        /// A stand-in for the real camera's preview layer, when a test asks.
+        var plain: UIView?
+        var plainPreview: UIView? { plain }
         var onStateChange: (() -> Void)?
         var position: CapturePosition { inner.position }
         func flip() async {
@@ -97,10 +99,12 @@ struct CaptureFlowTests {
     private func open(
         answer: CaptureAuthorization = .authorized(microphone: false),
         recents: Recents? = nil,
-        takeLimit: TimeInterval = CaptureTake.maximum
+        takeLimit: TimeInterval = CaptureTake.maximum,
+        plainPreview: UIView? = nil
     ) async throws -> Screen {
         let source = SpySource()
         source.answer = answer
+        source.plain = plainPreview
         let handed = Handed()
         let folder = CaptureFolder()
         let camera = CaptureViewController(
@@ -393,9 +397,31 @@ struct CaptureFlowTests {
         screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
         screen.camera.debugFilterRow.debugTap(.mono)
         #expect(screen.camera.settings.filter == .mono)
+        #expect(screen.camera.debugLiveView.debugLook == FrameLook(preset: .mono), "the renderer draws Mono")
         #expect(!screen.camera.debugLiveView.isHidden)
         try await settle { screen.camera.debugLiveView.debugFrameStats.drawn > 3 }
         #expect(screen.camera.debugLiveView.debugFrameStats.drawn > 3, "frames are being drawn")
+    }
+
+    /// ⚠️ With a plain preview to show (the real camera's preview layer), the
+    /// drawn path costs nothing until it is needed: no look, no frames. A look
+    /// turns it on; so does the filter row, whose cards are the live frame.
+    @Test func theDrawnPreviewRunsOnlyWhenALookOrTheFilterRowNeedsIt() async throws {
+        let screen = try await open(plainPreview: UIView())
+        #expect(screen.camera.debugLiveView.isHidden, "the plain preview shows an unfiltered camera")
+        #expect(screen.source.deliversFrames.last == false, "and no frame is produced for nobody")
+
+        screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
+        #expect(screen.source.deliversFrames.last == true, "the cards need the live frame")
+        #expect(screen.camera.debugLiveView.isHidden, "but the picture itself is still plain")
+
+        screen.camera.debugFilterRow.debugTap(.fade)
+        #expect(!screen.camera.debugLiveView.isHidden, "a look is drawn")
+
+        screen.camera.debugFilterRow.debugTap(.original)
+        screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
+        #expect(screen.camera.debugLiveView.isHidden)
+        #expect(screen.source.deliversFrames.last == false, "back to the free path")
     }
 
     /// The filter row's cards are drawn from the live frame.

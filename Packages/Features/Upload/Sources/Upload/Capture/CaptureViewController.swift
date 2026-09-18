@@ -974,9 +974,10 @@ final class CaptureViewController: UIViewController {
     private func refreshTakeControls(animated: Bool) {
         let recordingOrCounting = isRecording || countdownTask != nil
         let hasClips = !take.isEmpty
-        setShown(libraryButton, !hasClips && !recordingOrCounting && libraryButton.image(for: .normal) != nil, animated: animated)
-        setShown(undoButton, hasClips && !recordingOrCounting, animated: animated)
-        setShown(nextButton, hasClips && !recordingOrCounting, animated: animated)
+        setShown(libraryButton, !hasClips && !recordingOrCounting && libraryButton.image(for: .normal) != nil, animated: animated, pops: true)
+        // Undo and Next arrive one after the other, as a band's row does.
+        setShown(undoButton, hasClips && !recordingOrCounting, animated: animated, pops: true)
+        setShown(nextButton, hasClips && !recordingOrCounting, animated: animated, pops: true, delay: BandPop.staggerStep)
         nextButton.isEnabled = !isBusy
         var undo = UIButton.Configuration.glass()
         if take.isArmedToUndo {
@@ -1142,7 +1143,14 @@ final class CaptureViewController: UIViewController {
     /// ALONE WHEN ALREADY WHERE THEY ARE ASKED TO BE.** Model values are end
     /// values: re-running an arrival on a view that is already shown would
     /// flash it from nothing.
-    private func setShown(_ element: UIView, _ shown: Bool, animated: Bool) {
+    ///
+    /// ⚠️ **`pops` IS FOR WHAT ARRIVES AS NEW** — undo and Next once a clip
+    /// lands, the library's face — never for chrome coming back after a clip:
+    /// a selector that popped every time a recording ended would be noise. And
+    /// nothing pops while recording, when the microphone is open.
+    private func setShown(
+        _ element: UIView, _ shown: Bool, animated: Bool, pops: Bool = false, delay: TimeInterval = 0
+    ) {
         let isShown = !element.isHidden && element.alpha > 0.01 && element.isUserInteractionEnabled
         guard shown != isShown || (shown && element.isHidden) else { return }
         element.isUserInteractionEnabled = shown
@@ -1153,11 +1161,12 @@ final class CaptureViewController: UIViewController {
             return
         }
         if shown {
+            if pops, !isRecording { UISound.pop.play(after: delay) }
             element.isHidden = false
             element.alpha = 0
             element.transform = BandPop.collapsedTransform
             UIView.animate(
-                withDuration: BandPop.duration, delay: 0, usingSpringWithDamping: BandPop.dampingRatio,
+                withDuration: BandPop.duration, delay: delay, usingSpringWithDamping: BandPop.dampingRatio,
                 initialSpringVelocity: 0, options: [.allowUserInteraction, .beginFromCurrentState]
             ) {
                 element.alpha = 1
