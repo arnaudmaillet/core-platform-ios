@@ -648,11 +648,18 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
             // recording ends at exactly `limit`, reported as a successful
             // finish (`AVErrorMaximumDurationReached` with
             // `AVErrorRecordingSuccessfullyFinishedKey`).
-            recorder.start(to: url, limit: limit) { [self] result in
+            // ⚠️ **WEAK: THE RECORDER KEEPS ITS LAST COMPLETION.** The movie
+            // output's recorder holds the last clip's delegate, the delegate
+            // holds this closure — and with `self` captured strongly that was a
+            // cycle through the engine's own `recorder`: every camera that
+            // recorded a clip leaked its engine, its session and its frame feed,
+            // and through the feed's consumer the Metal renderer.
+            recorder.start(to: url, limit: limit) { [weak self] result in
                 // Cleared on the queue BEFORE the promise resolves, so the
                 // next clip's `record` — which can only follow the promise —
                 // never finds this one still standing.
-                queue.async { [self] in
+                self?.queue.async { [weak self] in
+                    guard let self else { return }
                     setTorch(false)
                     recordingRequested = false
                     detachMicrophone()

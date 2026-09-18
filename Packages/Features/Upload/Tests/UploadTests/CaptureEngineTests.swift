@@ -18,6 +18,9 @@ struct CaptureEngineTests {
             var finished: (@Sendable (Result<CaptureClip, any Error>) -> Void)?
             var url: URL?
             var canRecord = true
+            /// ⚠️ KEPT, as the movie output's recorder keeps its last
+            /// delegate — which is what made the engine's cycle.
+            var lastFinished: (@Sendable (Result<CaptureClip, any Error>) -> Void)?
         }
 
         private let state = Mutex(State())
@@ -35,6 +38,7 @@ struct CaptureEngineTests {
             state.withLock {
                 $0.starts += 1
                 $0.finished = finished
+                $0.lastFinished = finished
                 $0.url = url
             }
         }
@@ -122,5 +126,24 @@ struct CaptureEngineTests {
             _ = try await engine.record(to: Self.url, torch: false, limit: 180).value
         }
         #expect(recorder.starts == 0)
+    }
+
+    /// ⚠️ A camera that recorded a clip is freed with its screen: the
+    /// recorder keeps its last completion, and that completion must not keep
+    /// the engine — its session, its feed, the renderer behind the feed.
+    @Test func theEngineIsFreedAfterItRecordedAClip() async throws {
+        let recorder = NotYetWriting()
+        weak var released: AVCaptureEngine?
+        do {
+            let engine = AVCaptureEngine(feed: CaptureFrameFeed(), recorder: recorder)
+            released = engine
+            let promise = engine.record(to: Self.url, torch: false, limit: 180)
+            engine.stopRecording()
+            try await settle { recorder.stops > 0 }
+            try #require(recorder.stops == 1)
+            _ = try await promise.value
+        }
+        try await settle { released == nil }
+        #expect(released == nil, "the engine outlived its last clip")
     }
 }
