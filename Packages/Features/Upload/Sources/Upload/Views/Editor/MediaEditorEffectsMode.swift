@@ -52,8 +52,21 @@ final class MediaEditorEffectsMode: MediaEditorMode {
     private struct CardsSource: Equatable {
         let id: String
         let look: FrameLook
+        /// The crop the cards were CUT BY, which is `.untouched` whenever they
+        /// are drawn from the reference photograph — see `fromReference`.
         let crop: MediaCrop
         let fromHeldPicture: Bool
+        /// Whether these cards were drawn from `MediaLookReference` rather than
+        /// from the page's own picture.
+        ///
+        /// ⚠️ **IN THE KEY EVEN THOUGH THE PAGE'S ID IS ALREADY IN IT.** Two
+        /// pages of different media never share an id, so the medium alone can
+        /// never smuggle the previous page's cards onto this one — but the
+        /// reference can also be ABSENT (a bundle with no such resource), and
+        /// then the very same video is dressed from its poster instead. Without
+        /// this field the key would call those two sets of cards the same
+        /// thing, and whichever was rendered first would stand.
+        let fromReference: Bool
     }
 
     private lazy var tools: MediaEffectsToolsView = {
@@ -214,8 +227,13 @@ final class MediaEditorEffectsMode: MediaEditorMode {
         return look.adjustments != opening.adjustments || look.effect != opening.effect
     }
 
-    /// Renders the effect pills' pictures from the page's own picture, cut and dressed
-    /// as the page is, each wearing its effect.
+    /// Renders the effect pills' pictures — from the page's own picture on a
+    /// photograph, cut and dressed as the page is, and from the reference
+    /// photograph on a video — each wearing its effect.
+    ///
+    /// ⚠️ **A VIDEO'S PILLS ARE DRAWN FROM `MediaLookReference`, WHOLE.** Its
+    /// note has the why, and the crop it is NOT cut by. A clip whose reference
+    /// is missing falls back to its poster, which is where this started.
     ///
     /// ⚠️ **OFF THE MAIN ACTOR, AND LATEST WINS.** Twelve looks are twelve Core
     /// Image renders; a result is kept only if the page and its look are still
@@ -223,10 +241,18 @@ final class MediaEditorEffectsMode: MediaEditorMode {
     private func dressCards(for id: String) {
         guard let host else { return }
         let edits = host.edits(for: id)
-        let held = host.heldPicture.flatMap { $0.id == id ? $0.image : nil }
+        let reference = MediaLookReference.standsIn(for: host.item(id)) ? MediaLookReference.picture : nil
+        // Asked for only when it is going to be used: on a video the page's
+        // poster is not wanted, and holding it here would make the key lie.
+        let held = reference == nil ? host.heldPicture.flatMap { $0.id == id ? $0.image : nil } : nil
         let source = CardsSource(
             id: id, look: FrameLook(preset: edits.filter, adjustments: edits.adjustments),
-            crop: edits.crop, fromHeldPicture: held != nil
+            // ⚠️ **THE CROP THAT WILL BE APPLIED, NOT THE ONE THE PAGE
+            // CARRIES.** The reference is never cut, so a video whose author
+            // moves the crop box must NOT re-render twelve cards that cannot
+            // differ by a pixel.
+            crop: reference == nil ? edits.crop : .untouched,
+            fromHeldPicture: held != nil, fromReference: reference != nil
         )
         guard source != dressedFrom else { return }
         dressedFrom = source
@@ -235,7 +261,7 @@ final class MediaEditorEffectsMode: MediaEditorMode {
         let pixels = side * max(1, tools.traitCollection.displayScale)
         let library = host.library
         dressing = Task { [weak self] in
-            var picture = held
+            var picture = reference ?? held
             if picture == nil {
                 picture = await library.thumbnail(for: id, size: CGSize(width: side, height: side))
             }
