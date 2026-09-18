@@ -12,13 +12,18 @@ import UIKit
 /// wrote black clips for its whole life because no test ever read a pixel out
 /// of one; these read the colour of a photograph and the length of a clip.
 ///
-/// ⚠️ **SERIALIZED, AND TIME-LIMITED.** Each test runs a camera drawing thirty
-/// frames a second and writes real clips in real time; run side by side on one
-/// main actor they starved each other, and a 0.8s hold measured 1.9s. One at a
-/// time, the clock the tests read is the clock the clips were recorded on. The
-/// limit is for a stop that never comes: broken, a recording never resolves.
+/// ⚠️ **SERIALIZED.** Each test runs a camera drawing thirty frames a second
+/// and writes real clips in real time; run side by side on one main actor they
+/// starved each other, and a 0.8s hold measured 1.9s.
+///
+/// ⚠️ **AND NOT TIME-LIMITED, THOUGH IT WAS.** A three-minute `.timeLimit` was
+/// added so a broken stop would fail rather than hang — and in the FULL Upload
+/// run, on a loaded machine where editor tests took three minutes each, two
+/// photographs overran it and the runner killed and relaunched the whole test
+/// process. A limit that takes 800 other tests down with it is worse than the
+/// hang it guards against.
 @MainActor
-@Suite(.serialized, .timeLimit(.minutes(3)))
+@Suite(.serialized)
 struct CaptureSourceTests {
     /// Runs the simulated camera until it has produced a frame.
     private func running() async throws -> (SimulatedCaptureSource, CaptureFolder) {
@@ -91,8 +96,7 @@ struct CaptureSourceTests {
     }
 
     /// A stop that arrives before the first frame still ends the recording —
-    /// the ordering `startRecording` promises. Time-limited: broken, it never
-    /// resolves at all.
+    /// the ordering `startRecording` promises.
     @Test func aStopRightAfterTheStartEndsTheRecording() async throws {
         let (source, folder) = try await running()
         defer { source.stop() }

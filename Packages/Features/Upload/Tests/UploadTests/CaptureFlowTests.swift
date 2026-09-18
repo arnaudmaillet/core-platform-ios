@@ -10,10 +10,11 @@ import UIKit
 /// source — photograph, hold, lock, undo, Next — up to the editor it hands
 /// over to, and, through the builder, to a published post.
 ///
-/// ⚠️ **SERIALIZED, AND TIME-LIMITED** — `CaptureSourceTests`' reasons: every
-/// test runs a live camera, a Metal renderer and a window on the main actor.
+/// ⚠️ **SERIALIZED, AND NOT TIME-LIMITED** — `CaptureSourceTests` says why for
+/// both: every test runs a live camera, a Metal renderer and a window on the
+/// main actor.
 @MainActor
-@Suite(.serialized, .timeLimit(.minutes(3)))
+@Suite(.serialized)
 struct CaptureFlowTests {
     /// The simulated camera, with the calls the screen makes written down.
     @MainActor
