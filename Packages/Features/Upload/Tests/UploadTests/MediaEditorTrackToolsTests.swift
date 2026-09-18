@@ -495,15 +495,47 @@ struct MediaEditorTrackToolsTests {
 
     // MARK: - Speed
 
+    /// Opens the rate chips the only way they open now: with a piece HELD —
+    /// the one under the needle, so a test that aimed the needle still sets
+    /// the rate on the piece it meant.
+    private func openTheRates(on screen: Screen, tools: MediaTimelineToolsView) {
+        tools.track.select(tools.track.momentUnderNeedle?.piece ?? 0)
+        screen.editor.debugActionBar.debugTap(MediaEditorViewController.TrackAction.speed.rawValue)
+        screen.window.layoutIfNeeded()
+    }
+
+    /// ⚠️ **NO PIECE HELD, NO RATE** — the rule the filter beside it already
+    /// had, asked for in those words. The speedometer used to fall back to the
+    /// piece under the needle, so the two icons side by side obeyed two rules
+    /// and a rate could land on a piece nobody had pointed at.
+    @Test func theSpeedometerWaitsForAHeldPieceLikeTheFilterBesideIt() throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        let tools = try tools(in: screen)
+        let speed = MediaEditorViewController.TrackAction.speed.rawValue
+
+        #expect(!screen.editor.debugActionBar.isEnabled(at: speed), "a rate offered with nothing held")
+        screen.editor.debugActionBar.debugTap(speed)
+        #expect(!tools.isOfferingSpeeds, "a disabled speedometer opened the rates")
+
+        tools.track.select(0)
+        #expect(screen.editor.debugActionBar.isEnabled(at: speed), "holding a piece did not wake it")
+
+        screen.editor.debugActionBar.debugTap(speed)
+        #expect(tools.isOfferingSpeeds, "guard: they are open")
+        tools.track.select(nil, notify: true)
+
+        #expect(!screen.editor.debugActionBar.isEnabled(at: speed), "letting go left it live")
+        #expect(!tools.isOfferingSpeeds, "the rates stayed open over a piece nobody holds")
+    }
+
     @Test func theSpeedometerOpensTheRatesAndLightsItself() throws {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
         let tools = try tools(in: screen)
         #expect(tools.isOfferingSpeeds == false, "guard: they start shut")
 
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         screen.window.layoutIfNeeded()
 
         #expect(tools.isOfferingSpeeds)
@@ -518,7 +550,8 @@ struct MediaEditorTrackToolsTests {
         let tools = try tools(in: screen)
         let speed = MediaEditorViewController.TrackAction.speed.rawValue
 
-        screen.editor.debugActionBar.debugTap(speed)
+        openTheRates(on: screen, tools: tools)
+        try #require(tools.isOfferingSpeeds, "guard: they opened — a shut row cannot be shut again")
         screen.editor.debugActionBar.debugTap(speed)
         screen.window.layoutIfNeeded()
 
@@ -534,9 +567,7 @@ struct MediaEditorTrackToolsTests {
         let screen = open(Self.items(1, videosAt: [0]))
         choose(Mode.trim, on: screen)
         let tools = try tools(in: screen)
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         #expect(tools.isOfferingSpeeds, "guard: they are open")
 
         choose(Mode.filters, on: screen)
@@ -551,9 +582,7 @@ struct MediaEditorTrackToolsTests {
         let tools = try tools(in: screen)
         putTheNeedle(at: 5, on: tools.track, in: screen)
 
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         tools.speeds.debugTap(rate: 2)
 
         #expect(MediaTimelining.rate(at: 5, in: tools.track.debugTimeline, withinSource: 10) == 2)
@@ -579,9 +608,7 @@ struct MediaEditorTrackToolsTests {
         screen.window.layoutIfNeeded()
         tools.track.debugTap(atContentX: tools.track.debugPieceFrames[1].lowerBound + 20)
         putTheNeedle(at: 7, on: tools.track, in: screen)
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         tools.speeds.debugTap(rate: 4)
 
         let pieces = MediaTimelining.resolved(tools.track.debugTimeline, withinSource: 10)
@@ -603,9 +630,7 @@ struct MediaEditorTrackToolsTests {
         putTheNeedle(at: 5, on: tools.track, in: screen)
         let loads = screen.preview.plans.count
 
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         tools.speeds.debugTap(rate: 2)
         try await landed(screen, beyond: loads)
 
@@ -627,9 +652,7 @@ struct MediaEditorTrackToolsTests {
         putTheNeedle(at: 5, on: tools.track, in: screen)
         let loads = screen.preview.plans.count
 
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         tools.speeds.debugTap(rate: 2)
         tools.speeds.debugTap(rate: 4)
         try await landed(screen, beyond: loads)
@@ -780,9 +803,7 @@ struct MediaEditorTrackToolsTests {
         try await landed(screen, beyond: loads)
 
         loads = screen.preview.plans.count
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         tools.speeds.debugTap(rate: 2)
         try await landed(screen, beyond: loads)
 
@@ -803,9 +824,7 @@ struct MediaEditorTrackToolsTests {
         putTheNeedle(at: 5, on: tools.track, in: screen)
         #expect(tools.track.debugRateStamps.isEmpty, "guard: as shot, nothing to say")
 
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         tools.speeds.debugTap(rate: 2)
         screen.window.layoutIfNeeded()
 
@@ -821,9 +840,7 @@ struct MediaEditorTrackToolsTests {
         putTheNeedle(at: 5, on: tools.track, in: screen)
         #expect(screen.editor.debugUndoItem.isEnabled == false, "guard: nothing to step back to")
 
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         tools.speeds.debugTap(rate: 2)
         #expect(screen.editor.debugUndoItem.isEnabled, "a rate is something to step back from")
 
@@ -869,9 +886,7 @@ struct MediaEditorTrackToolsTests {
         putTheNeedle(at: 4, on: tools.track, in: screen)
         #expect(tools.track.debugKeptText == "0:04 / 0:10", "guard: as shot, one clock")
 
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         tools.speeds.debugTap(rate: 2)
         screen.window.layoutIfNeeded()
 
@@ -1118,9 +1133,7 @@ struct MediaEditorTrackToolsTests {
         let tools = try tools(in: screen)
         let track = tools.track
         track.debugTap(atContentX: 40)
-        screen.editor.debugActionBar.debugTap(
-            MediaEditorViewController.TrackAction.speed.rawValue
-        )
+        openTheRates(on: screen, tools: tools)
         tools.speeds.debugTap(rate: 2)
         screen.window.layoutIfNeeded()
         let before = MediaTimelining.resolved(track.debugTimeline, withinSource: 10)

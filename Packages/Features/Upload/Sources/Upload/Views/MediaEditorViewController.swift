@@ -3009,18 +3009,19 @@ final class MediaEditorViewController: UIViewController {
         layPagesInTheirWindow(animated: true)
     }
 
-    /// The rate of the piece the actions are pointed at.
+    /// The piece a rate is set on: the one the author is holding, and ONLY that.
     ///
-    /// ⚠️ **THE PIECE THE AUTHOR IS HOLDING, AND THE NEEDLE'S ONLY IF THEY ARE
-    /// HOLDING NOTHING.** Tapping a segment and then choosing a rate has to
-    /// change THAT segment — the needle may be three pieces away, and applying
-    /// the rate there would be a control acting somewhere the author is not
-    /// looking. With nothing held, the needle is the only thing that says which
-    /// piece is meant, and it always says something.
+    /// ⚠️ **A RATE BELONGS TO A SELECTED PIECE, EXACTLY AS A PIECE'S FILTER
+    /// DOES** — asked for in those words: the speed option is "specific to a
+    /// selection in the timeline, like the filter option beside it; its icon
+    /// disabled when no segment is selected". It used to fall back to the piece
+    /// under the needle when nothing was held, which made the two icons side by
+    /// side obey two different rules — one needing a selection, the other
+    /// quietly inventing one — and a rate could land on a piece the author had
+    /// never pointed at.
     private var targetPiece: Int? {
         guard currentItemID != nil, trackSeconds > 0 else { return nil }
-        if let held = timelineTrack.selectedPiece { return held }
-        return timelineTrack.momentUnderNeedle?.piece
+        return timelineTrack.selectedPiece
     }
 
     private var rateOfTheTargetPiece: Double {
@@ -3068,7 +3069,13 @@ final class MediaEditorViewController: UIViewController {
         actionBar.setEnabled(
             transitionFocus == nil && segmentFilterMode.actionEnabled, at: TrackAction.filter.rawValue
         )
-        actionBar.setEnabled(!focused, at: TrackAction.speed.rawValue)
+        // ⚠️ **THE SAME RULE AS THE FILTER BESIDE IT: A PIECE MUST BE HELD** —
+        // see `targetPiece`. And the chips close with the selection they spoke
+        // for, or they would sit open over a clip with no piece chosen, their
+        // highlighted rate describing nothing.
+        let holdsAPiece = timelineTrack.selectedPiece != nil
+        actionBar.setEnabled(!focused && holdsAPiece, at: TrackAction.speed.rawValue)
+        if timelineTools.isOfferingSpeeds, !holdsAPiece { toggleTheRateChips() }
         actionBar.setEnabled(
             !focused && timelineTrack.momentUnderNeedle.map {
                 MediaTimelining.canSplit(
