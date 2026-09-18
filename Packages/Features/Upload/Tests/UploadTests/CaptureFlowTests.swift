@@ -1227,7 +1227,13 @@ struct CaptureFlowTests {
             let widths = camera.debugHeldWidths
             #expect(abs(camera.debugSelector.frame.width - widths.selector) < 0.5, "\(step): options \(camera.debugSelector.frame.width) vs \(widths.selector)")
             #expect(abs(camera.debugCloseBar.frame.width - widths.close) < 0.5, "\(step): close \(camera.debugCloseBar.frame.width) vs \(widths.close)")
-            #expect(camera.debugSelector.window != nil && camera.debugCloseBar.window != nil, "\(step): both on screen")
+            #expect(camera.debugSelector.window != nil && camera.debugCloseBar.window != nil, "\(step): both in the bar")
+            // ⚠️ IN A WINDOW IS NOT ON SCREEN: a selector held 200pt too wide
+            // kept both views in the window and passed. Where they stand says it.
+            let options = camera.debugSelector.convert(camera.debugSelector.bounds, to: nil)
+            let close = camera.debugCloseBar.convert(camera.debugCloseBar.bounds, to: nil)
+            #expect(options.minX >= 0 && close.maxX <= screen.window.bounds.maxX, "\(step): both inside the bar: \(options) \(close)")
+            #expect(options.maxX <= close.minX, "\(step): the close button after the options, not over them: \(options) \(close)")
         }
         func tap(_ item: UIBarButtonItem?) {
             item?.primaryAction?.performWithSender(nil, target: nil)
