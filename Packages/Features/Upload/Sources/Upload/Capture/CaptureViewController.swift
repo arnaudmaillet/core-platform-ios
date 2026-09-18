@@ -662,8 +662,17 @@ final class CaptureViewController: UIViewController {
 
     // MARK: - The shutter
 
+    /// A stop has been asked for and the clip's file is still being finished:
+    /// the take does not hold it yet, so nothing can know what a tap means.
+    ///
+    /// ⚠️ **THE SHUTTER REFUSES IN THIS WINDOW, AND LOOKS BUSY WHILE IT DOES.**
+    /// Before, a tap there saw an empty take and took a PHOTOGRAPH in the
+    /// middle of a video, or a hold was swallowed with the padlock shown for a
+    /// recording that never started.
+    private var isFinishingClip: Bool { isRecording && shutterLogic.phase == .idle }
+
     private func shutterTapped() {
-        guard authorizedToShoot, !isBusy else { return }
+        guard authorizedToShoot, !isBusy, !isFinishingClip else { return }
         if countdownTask != nil {
             // A tap during the countdown calls it off.
             cancelCountdown()
@@ -688,7 +697,7 @@ final class CaptureViewController: UIViewController {
     }
 
     private func holdBegan() {
-        guard authorizedToShoot, !isBusy, countdownTask == nil else { return }
+        guard authorizedToShoot, !isBusy, !isFinishingClip, countdownTask == nil else { return }
         take.disarm()
         let action = shutterLogic.beginHold(takeIsFull: take.isFull)
         guard case .startRecording = action else {
@@ -740,6 +749,8 @@ final class CaptureViewController: UIViewController {
     private func requestStop() {
         recordedAtStop = source.recordedDuration
         source.stopRecording()
+        // Busy until the clip lands — `recordingFinished` puts it back.
+        shutter.setLook(.busy, animated: true)
     }
 
     private var authorizedToShoot: Bool {

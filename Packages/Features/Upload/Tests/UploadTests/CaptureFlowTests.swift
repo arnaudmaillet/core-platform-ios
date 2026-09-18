@@ -595,6 +595,26 @@ struct CaptureFlowTests {
         #expect(screen.handed.editors == 1)
     }
 
+    /// ⚠️ A tap or a hold while the last clip is still being finished is
+    /// refused, the shutter looking busy — never a photograph in the middle of
+    /// a video, never a padlock for a recording that does not start.
+    @Test func theShutterRefusesWhileAClipIsBeingFinished() async throws {
+        let screen = try await open()
+        screen.camera.debugBeginHold()
+        try await Task.sleep(for: .milliseconds(500))
+        screen.camera.debugEndHold()
+        #expect(screen.camera.isRecording, "the clip is still being finished")
+        #expect(screen.camera.shutter.look == .busy)
+        screen.camera.debugTapShutter()
+        screen.camera.debugBeginHold()
+        screen.camera.debugEndHold()
+        try await settle { !screen.camera.isRecording }
+        #expect(screen.source.photoFlashes.isEmpty, "no photograph was taken mid-take")
+        #expect(screen.source.limits.count == 1, "and no second recording started")
+        #expect(screen.camera.take.clips.count == 1)
+        #expect(screen.camera.shutter.look == .idle)
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {
