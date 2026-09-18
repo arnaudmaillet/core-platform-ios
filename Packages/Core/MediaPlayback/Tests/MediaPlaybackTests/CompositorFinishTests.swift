@@ -104,26 +104,26 @@ struct CompositorFinishTests {
     }
 
     /// ⚠️ **A DISSOLVE BLENDS TWO PIECES THAT ALREADY WEAR THEIR LOOKS.** The red
-    /// piece is grey; the film either side of the cut is green (the lead-in of
-    /// the blue piece before it, the red piece's run-on after it).
+    /// piece is grey; the blue one is not dressed.
     ///
-    /// Before the cut, lane A is the grey piece and lane B the blue piece's
-    /// undressed lead-in, so the green comes through — measured (106,162,87) at
-    /// 0.9s. After it, lane B is the grey piece's run-on and wears ITS look, so
-    /// the green does not — measured (97,102,243) at 1.1s. A look laid over the
-    /// blend instead would turn 0.9s grey and leave 1.1s green.
+    /// Before the cut lane A is the grey piece and lane B holds the blue piece's
+    /// first frame; after it lane A is the blue piece and lane B holds the grey
+    /// piece's last frame, wearing ITS look — so on both sides of the cut the
+    /// blend is a grey (red equal to green) under some blue. Had the held
+    /// outgoing frame worn nothing, its red would lead green by ~200 after the
+    /// cut; had the look been laid over the blend instead, the blue would be
+    /// grey too.
     @Test func aDissolveBlendsTwoDressedPieces() async throws {
         let dissolve = try await arranged([
             VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve, look: .mono),
             VideoExportSegment(start: 2, end: 3)
         ])
 
-        let before = try await pixel(dissolve, at: 0.9).colour
-        #expect(before.g > before.r + 30, "the incoming lead-in lost its colour: \(before)")
-        #expect(abs(before.r - before.b) <= 30, "the outgoing piece is not grey in the blend: \(before)")
-        let after = try await pixel(dissolve, at: 1.1).colour
-        #expect(abs(after.r - after.g) <= 20, "the outgoing run-on is not grey: \(after)")
-        #expect(after.b > after.g + 80, "the incoming piece is not blue in the blend: \(after)")
+        for time in [0.9, 1.1] {
+            let got = try await pixel(dissolve, at: time).colour
+            #expect(abs(got.r - got.g) <= 20, "the outgoing piece is not grey in the blend at \(time)s: \(got)")
+            #expect(got.b > got.g + 30, "the incoming piece is not blue in the blend at \(time)s: \(got)")
+        }
     }
 
     /// ⚠️ **THE WHOLE LOOK GRADES THE FINISHED FILM — AFTER THE PIECE'S LOOK.**

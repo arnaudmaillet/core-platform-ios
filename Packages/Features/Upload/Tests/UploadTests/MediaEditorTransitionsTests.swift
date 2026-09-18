@@ -19,8 +19,8 @@ import UIKit
 @MainActor
 struct MediaEditorTransitionsTests {
     private enum Mode {
-        static let trim = 5
-        static let filters = 3
+        static let trim = "Trim"
+        static let filters = "Filters"
     }
 
     private struct Screen {
@@ -127,8 +127,8 @@ struct MediaEditorTransitionsTests {
         return Screen(editor: editor, window: window, navigation: navigation, preview: preview)
     }
 
-    private func choose(_ mode: Int, on screen: Screen) {
-        screen.editor.debugCategoryBar.select(mode)
+    private func choose(_ mode: String, on screen: Screen) {
+        screen.editor.debugChoose(mode)
         screen.window.layoutIfNeeded()
     }
 
@@ -153,7 +153,7 @@ struct MediaEditorTransitionsTests {
 
     /// The trim band open on a ten-second clip cut at five, with the real length
     /// known, nothing held and the first load landed.
-    private func cutClip(_ count: Int = 1) async throws -> (Screen, MediaTimelineToolsView) {
+    private func cutClip(_ count: Int = 1, at cut: Double = 5) async throws -> (Screen, MediaTimelineToolsView) {
         let screen = open(Self.videos(count))
         choose(Mode.trim, on: screen)
         let tools = try tools(in: screen)
@@ -161,7 +161,7 @@ struct MediaEditorTransitionsTests {
         let track = tools.track
         track.debugScroll(
             toContentOffset: MediaTimelining.contentOffset(
-                forPlayedSeconds: 5, trackWidth: track.bounds.width,
+                forPlayedSeconds: cut, trackWidth: track.bounds.width,
                 pointsPerSecond: track.debugPointsPerSecond
             )
         )
@@ -302,6 +302,100 @@ struct MediaEditorTransitionsTests {
         #expect(tools.track.debugTimeline == screen.editor.debugPreviewTimeline,
                 "the track and the item disagree")
         #expect(MediaTimelining.transition(atSeam: 0, in: tools.track.debugTimeline, withinSource: 10) == .dipToBlack)
+    }
+
+    // MARK: - Its length
+
+    /// ⚠️ **A LENGTH IS AN EDIT OF THE FILM** — stored, played by a new item,
+    /// and looped over its own, longer stretch (charter F29b). Asked for as
+    /// *"pouvoir changer/adapter la durée de la transition"*.
+    @Test func aChosenLengthReachesTheFilmAndTheLoop() async throws {
+        let (screen, tools) = try await cutClip()
+        tools.track.debugTapSeam(0)
+        tools.transitions.debugTap(.dissolve)
+        try await landed(screen, beyond: 0)
+        let loads = screen.preview.plans.count
+
+        tools.durations.debugTap(seconds: 1)
+        try await landed(screen, beyond: loads)
+
+        #expect(MediaTimelining.transitionSeconds(atSeam: 0, in: tools.track.debugTimeline, withinSource: 10) == 1)
+        let plan = try #require(screen.preview.plans.last)
+        #expect(plan.segments.first?.transitionSeconds == 1, "the item carries \(plan.segments)")
+        #expect(tools.durations.debugChosen == ["1s"], "the chips light \(tools.durations.debugChosen)")
+        let expected = try rehearsal(of: tools.track.debugTimeline, on: tools.track)
+        #expect(screen.preview.landings.last == VideoLoadLanding(seconds: expected.range.lowerBound, loop: expected.range),
+                "it landed on \(String(describing: screen.preview.landings.last))")
+        #expect(screen.editor.debugUndoItem.isEnabled == false, "guard: the arrows rest while the row is open")
+        tools.transitions.debugTapClose()
+        #expect(screen.editor.debugUndoItem.isEnabled, "and the length is a step they can take back")
+    }
+
+    /// ⚠️ **A CUT OPENS ON WHAT IT CARRIES, AND ON WHAT ITS PIECES CAN GIVE.**
+    /// Cut at 1.5s, the first piece can lend at most 0.75s either side of the
+    /// cut, so nothing past 1.5s is offered.
+    @Test func aCutOpensOnItsLengthAndDimsWhatItsPiecesCannotGive() async throws {
+        let (screen, tools) = try await cutClip(at: 1.5)
+        tools.track.debugTapSeam(0)
+        tools.transitions.debugTap(.dissolve)
+        try await landed(screen, beyond: 0)
+        tools.durations.debugTap(seconds: 0.25)
+        tools.transitions.debugTapClose()
+        screen.window.layoutIfNeeded()
+
+        tools.track.debugTapSeam(0)
+
+        #expect(tools.durations.debugChosen == ["0.25s"], "reopened on \(tools.durations.debugChosen)")
+        #expect(tools.durations.debugEnabled == ["0.25s", "0.5s", "1s", "1.5s"], "offers \(tools.durations.debugEnabled)")
+    }
+
+    /// ⚠️ **THE LENGTHS RAISE THE BAND, AND A FITTED PICTURE FOLLOWS IT IN THE
+    /// SAME TURN.** Its window runs from the bar to the head of the dots, and
+    /// the dots stand on the band. Any later layout pass would lay the picture
+    /// too — but as a jump; told in the same turn, the screen moves it with the
+    /// band (the rate chips' rule, `toggleTheRateChips`). So nothing here lays
+    /// the window out between the tap and the reading.
+    @Test func theLengthsLiftAFittedPictureWithTheBand() async throws {
+        let (screen, tools) = try await cutClip()
+        screen.editor.debugTapFit()
+        screen.window.layoutIfNeeded()
+        tools.track.debugTapSeam(0)
+        screen.window.layoutIfNeeded()
+        let dots = screen.editor.debugPageDotsTop
+        // The fit's own cross-fade must be over, or it would read as the move.
+        try await settle(until: { !screen.editor.debugPictureIsMoving(for: "video-0") })
+        try #require(!screen.editor.debugPictureIsMoving(for: "video-0"), "guard: the picture is at rest")
+
+        tools.transitions.debugTap(.dissolve)
+
+        #expect(tools.isOfferingDurations, "guard: the lengths came up")
+        #expect(screen.editor.debugPageDotsTop < dots - 1, "the screen did not follow the band")
+        let picture = screen.editor.debugPictureFrame(for: "video-0")
+        #expect(abs(picture.maxY - screen.editor.debugPageDotsTop) < 1,
+                "the picture's foot \(picture.maxY) stayed below the dots at \(screen.editor.debugPageDotsTop)")
+        #expect(screen.editor.debugPictureIsMoving(for: "video-0"), "and it jumped there")
+    }
+
+    /// ⚠️ **LEAVING THE TIMELINE WITH THE LENGTHS UP HANDS THE BAR OVER ONCE,
+    /// AND WITH ITS TRANSITION.** Closing the row lowered the lengths, whose
+    /// height callback laid the screen out mid-change and handed the bar over
+    /// unanimated before the animated hand-over could.
+    @Test func leavingTheTimelineWithTheLengthsUpKeepsTheBarsTransition() async throws {
+        let (screen, tools) = try await cutClip()
+        tools.track.debugTapSeam(0)
+        tools.transitions.debugTap(.dissolve)
+        screen.window.layoutIfNeeded()
+        try #require(tools.isOfferingDurations, "guard: the lengths are up")
+        try #require(screen.editor.debugToolbarItems.first?.customView is IconActionBar, "guard: the actions lead")
+        let before = screen.editor.debugRealHandovers
+
+        screen.editor.debugChoose("Effects")
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugToolbarItems.first?.customView is SoundPillView, "guard: the pill is back")
+        #expect(screen.editor.debugRealHandovers - before == 1,
+                "handed over \(screen.editor.debugRealHandovers - before) times")
+        #expect(screen.editor.debugLastHandoverWasAnimated, "the pill came back without the bar's transition")
     }
 
     @Test func twoChoicesInOneTurnLandOnce() async throws {

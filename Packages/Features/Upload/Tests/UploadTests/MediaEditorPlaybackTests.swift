@@ -262,6 +262,34 @@ struct MediaEditorPlaybackTests {
 
     // MARK: - Who stops
 
+    /// ⚠️ **A TAP ON THE PICTURE ANSWERS IN THE MIDDLE OF IT.** Asked for: a
+    /// play and a pause glyph, according to the state, flashing briefly each
+    /// time the video is tapped. It names the state the tap LEFT — a clip that
+    /// has just stopped shows a pause — because it is gone in half a second and
+    /// cannot stand for the next tap the way a permanent button can.
+    @Test func tappingTheClipFlashesTheStateItLeaves() async throws {
+        let screen = open(Self.items(3, videosAt: [1]))
+        screen.editor.debugScrollToPage(1)
+        try await settle(until: { screen.preview.played.count == 1 })
+        try #require(screen.preview.played.count == 1, "guard: the clip is bound")
+
+        screen.editor.debugTapTheMedia()
+        screen.editor.debugTapTheMedia()
+
+        #expect(screen.editor.debugPlaybackFlashes == [true, false],
+                "the flashes named \(screen.editor.debugPlaybackFlashes) for a pause then a play")
+    }
+
+    /// And a photograph, which has nothing to play, answers nothing.
+    @Test func tappingAPhotographFlashesNothing() throws {
+        let screen = open(Self.items(3, videosAt: [1]))
+
+        screen.editor.debugTapTheMedia()
+
+        #expect(screen.editor.debugPlaybackFlashes.isEmpty,
+                "a still photograph flashed a playback glyph")
+    }
+
     /// ⚠️ **THE BOX CARRIES THE FILM ON, AND SO DOES THE CANVAS WHEN IT TAKES IT
     /// BACK.** Asked for as "la vidéo devrait être la continuité / le même
     /// player": opening crop started the clip again from its first frame, which
@@ -276,7 +304,7 @@ struct MediaEditorPlaybackTests {
         try #require(screen.preview.landings.last?.seconds == 0, "guard: a fresh page starts at the top")
 
         screen.preview.playhead = 3.25
-        screen.editor.debugCategoryBar.select(4) // Crop
+        screen.editor.debugChoose("Crop")
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.played.count == 2 })
         try #require(screen.preview.played.count == 2, "the box never loaded its film")
@@ -285,7 +313,7 @@ struct MediaEditorPlaybackTests {
                 "the box started the film over: \(String(describing: screen.preview.landings.last))")
 
         screen.preview.playhead = 5.5
-        screen.editor.debugCategoryBar.select(3) // Filters — leaves the crop
+        screen.editor.debugChoose("Filters") // leaves the crop
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.played.count == 3 })
         try #require(screen.preview.played.count == 3, "the canvas never took the film back")
@@ -321,7 +349,7 @@ struct MediaEditorPlaybackTests {
         try await settle(until: { screen.preview.played.count == 1 })
         #expect(screen.preview.boundCount == 1, "guard: it was playing")
 
-        screen.editor.debugCategoryBar.select(4) // Crop
+        screen.editor.debugChoose("Crop")
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.played.count == 2 })
 
@@ -339,7 +367,7 @@ struct MediaEditorPlaybackTests {
         screen.editor.debugCropSurface.onChange?(cut)
         try #require(screen.editor.debugCrop(for: "video-1") == cut,
                      "guard: the crop was not stored: \(screen.editor.debugCrop(for: "video-1"))")
-        screen.editor.debugCategoryBar.select(3) // Filters — leaves the crop
+        screen.editor.debugChoose("Filters") // leaves the crop
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.plans.last?.finish.crop == cut })
 
@@ -351,7 +379,7 @@ struct MediaEditorPlaybackTests {
         // Until the author has cut something, "with the crop" and "without it"
         // are the same plan — which is exactly how a test can pass while the
         // box aims at already-cut film.
-        screen.editor.debugCategoryBar.select(4)
+        screen.editor.debugChoose("Crop")
         screen.window.layoutIfNeeded()
         try await settle(until: { screen.preview.plans.last?.finish.crop == .untouched })
 

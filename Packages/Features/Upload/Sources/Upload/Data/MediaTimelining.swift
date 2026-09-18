@@ -1209,11 +1209,85 @@ enum MediaTimelining {
             return Seam(
                 index: index, at: at, kind: kind,
                 half: VideoExporter.transitionHalf(
-                    kind, outgoingPlayedSeconds: pieces[index].playedSeconds,
+                    kind, seconds: pieces[index].transitionSeconds ?? VideoTransitionKind.standardSeconds,
+                    outgoingPlayedSeconds: pieces[index].playedSeconds,
                     incomingPlayedSeconds: pieces[index + 1].playedSeconds
                 )
             )
         }
+    }
+
+    /// The lengths a transition can be given, in PLAYED seconds — the chips over
+    /// the row of transitions (`MediaTransitionDurationRowView`).
+    ///
+    /// ⚠️ **FIVE, AND THE STANDARD HALF SECOND AMONG THEM.** A duration is chosen
+    /// once and judged by eye; a quarter second either way is the smallest change
+    /// anyone sees in a blend, and two seconds is already a scene of its own.
+    static let transitionLengths: [Double] = [0.25, 0.5, 1, 1.5, 2]
+
+    /// How a length is written: "0.25s", "0.5s", "1s".
+    static func transitionLengthLabel(_ seconds: Double) -> String {
+        guard seconds.isFinite else { return "0.5s" }
+        return String(format: "%gs", (seconds * 100).rounded() / 100)
+    }
+
+    /// How long the transition at cut `seam` runs, in PLAYED seconds, as the
+    /// author asked — nil when the cut carries none.
+    ///
+    /// ⚠️ **ASKED, NOT DRAWN.** What is drawn may be shorter: a piece trimmed
+    /// since can give less (`seams` holds what is drawn). Asked is what the
+    /// chips light, so a trim that is undone gives the length back.
+    static func transitionSeconds(
+        atSeam seam: Int, in timeline: MediaTimeline, withinSource duration: Double
+    ) -> Double? {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard seam >= 0, seam < pieces.count - 1, pieces[seam].transitionOut != nil else { return nil }
+        return pieces[seam].transitionSeconds ?? VideoTransitionKind.standardSeconds
+    }
+
+    /// The longest transition cut `seam` can carry, in PLAYED seconds: the
+    /// shorter of its two pieces, never past the last length offered. Zero where
+    /// there is no cut.
+    ///
+    /// ⚠️ **THE SHORTER NEIGHBOUR, WHOLE — AND THAT IS HALF OF EACH.** A
+    /// transition of `d` borrows `d / 2` from the end of the piece before its cut
+    /// and `d / 2` from the start of the piece after it, and a piece lends at most
+    /// half of itself so the transitions at its two ends can meet but never cross
+    /// (`VideoExporter.transitionHalf`, which applies the same rule to what is
+    /// drawn).
+    static func longestTransition(
+        atSeam seam: Int, in timeline: MediaTimeline, withinSource duration: Double
+    ) -> Double {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard seam >= 0, seam < pieces.count - 1 else { return 0 }
+        let reach = min(pieces[seam].playedSeconds, pieces[seam + 1].playedSeconds)
+        return min(reach, transitionLengths.last ?? VideoTransitionKind.standardSeconds)
+    }
+
+    /// Gives the transition at cut `seam` a length, clamped to what its two
+    /// pieces can give (`longestTransition`) and to the lengths offered.
+    ///
+    /// ⚠️ **ONLY A CUT THAT CARRIES A TRANSITION.** A length on a plain cut is a
+    /// second spelling of "nothing" (`MediaSegment.transitionSeconds`); the
+    /// timeline comes back unchanged, as it does for an index past the last cut.
+    ///
+    /// ⚠️ **CLAMPED HERE, AND AGAIN WHERE IT IS DRAWN.** Here, so what is stored
+    /// is what the author saw drawn when they chose it; there, because a piece
+    /// trimmed later can give less than it gave then.
+    static func settingTransitionDuration(
+        _ seconds: Double, atSeam seam: Int, in timeline: MediaTimeline,
+        withinSource duration: Double
+    ) -> MediaTimeline {
+        var pieces = resolved(timeline, withinSource: duration)
+        guard seam >= 0, seam < pieces.count - 1, pieces[seam].transitionOut != nil, seconds.isFinite
+        else { return timeline }
+        let longest = longestTransition(atSeam: seam, in: timeline, withinSource: duration)
+        let shortest = min(transitionLengths.first ?? 0, longest)
+        let clamped = min(max(seconds, shortest), longest)
+        let before = pieces[seam].transitionSeconds
+        pieces[seam].transitionSeconds = clamped
+        guard pieces[seam].transitionSeconds != before else { return timeline }
+        return MediaTimeline(segments: pieces)
     }
 
     /// The transition at one cut.
@@ -1230,6 +1304,10 @@ enum MediaTimelining {
     /// ⚠️ **ONLY A REAL CUT.** An untouched clip, a single piece, or an index past
     /// the last cut comes back unchanged: a transition stored where no cut is
     /// would be invisible and would publish.
+    ///
+    /// ⚠️ **ANOTHER KIND KEEPS THE LENGTH; NONE TAKES IT AWAY.** An author who
+    /// made a dissolve last a second and tries a swipe instead is comparing two
+    /// kinds, not two lengths.
     static func settingTransition(
         _ kind: VideoTransitionKind?, atSeam seam: Int, in timeline: MediaTimeline,
         withinSource duration: Double
@@ -1275,12 +1353,23 @@ enum MediaTimelining {
         return startsAt...(startsAt + length)
     }
 
+    /// The least film either side of a transition the preview loops, whatever
+    /// the transition's length (charter F30).
+    static let shortestRehearsalLead: Double = 0.5
+
     /// What the preview plays while a cut's transition is being chosen: the
     /// transition's own window, and `lead` seconds either side of it — never
     /// past the two pieces that meet there, nor outside the result.
     ///
     /// ⚠️ **PLAYED SECONDS THROUGHOUT** — the range is looped on the preview
     /// item, whose clock is the result's.
+    ///
+    /// ⚠️ **`lead` IS SIZED FOR THE STANDARD WINDOW, AND A LONGER ONE TAKES WHAT
+    /// IT ADDS OUT OF THE LEADS.** The track works it out so that half a second
+    /// of transition and a lead either side fit to the needle's right
+    /// (`MediaTimelineTrackView.rehearsalLead`); a two-second transition with the
+    /// same leads would run a second and a half off screen. Never under half a
+    /// second a side (charter F30), unless the lead given was shorter.
     static func rehearsal(
         atSeam index: Int, in timeline: MediaTimeline, withinSource duration: Double,
         lead: Double
@@ -1292,6 +1381,8 @@ enum MediaTimelining {
         let startsAt = seam.at - pieces[index].playedSeconds
         let endsAt = seam.at + pieces[index + 1].playedSeconds
         let total = playedSeconds(of: timeline, withinSource: duration)
+        let longer = max(seam.closes - seam.opens - VideoTransitionKind.standardSeconds, 0)
+        let lead = max(lead - longer / 2, min(max(lead, 0), shortestRehearsalLead))
         let lower = max(seam.opens - max(lead, 0), startsAt, 0)
         let upper = min(seam.closes + max(lead, 0), endsAt, total)
         guard upper > lower else { return nil }

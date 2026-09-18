@@ -2,6 +2,7 @@
 // URL that merely looks like one.
 import AVFoundation
 import CoreModels
+import DesignSystem
 // `PlaceholderVideoFetcher` — the feed's mock video source, which synthesises
 // the real H.264 bytes the publish path then opens for real.
 import MediaPlayback
@@ -819,6 +820,82 @@ struct NewPostTests {
         appear(screen)
 
         #expect(strip.debugArrivals.isEmpty, "a ripple ran under Reduce Motion: \(strip.debugArrivals)")
+    }
+
+    /// ⚠️ **THE RIPPLE STARTS AS THE PUSH BEGINS, NOT ONCE IT HAS LANDED.**
+    /// Asked for as *"déclencher avant, peut-être dès le tap sur Next"*: measured,
+    /// `viewDidAppear` waits for the whole transition to settle, most of a
+    /// second after the tap. So this is a real animated push from a real stack,
+    /// read before the transition could have finished — the tiles have already
+    /// been told to ripple, and the screen has not landed.
+    @Test func theThumbnailsRippleInWhileThePushIsStillUnderWay() throws {
+        let navigation = UINavigationController(rootViewController: UIViewController())
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = navigation
+        window.isHidden = false
+        window.layoutIfNeeded()
+        let post = NewPostViewController(
+            items: Self.items(3), library: StubLibrary(), composer: RecordingComposer(),
+            preview: StubPreview(), reducesMotion: { false }
+        ) { _ in }
+
+        navigation.pushViewController(post, animated: true)
+        window.layoutIfNeeded()
+
+        try #require(!post.debugHasLanded, "guard: the push had already landed, so this proves nothing")
+        let strip = try #require(Self.strips(in: window).first, "the push has not built the strip")
+        #expect(
+            strip.debugArrivals == [[0, 1, 2].map { BandPop.stagger(for: $0) }],
+            "the ripple waits for the landing: \(strip.debugArrivals)"
+        )
+        #expect(strip.debugHeldTileCount == 0, "a tile is still held invisible")
+    }
+
+    // MARK: - The thumbnails as buttons
+
+    /// ⚠️ **EVERY THUMBNAIL GIVES AND TICKS — A PHOTOGRAPH'S TOO — AND ONLY A
+    /// CLIP'S DOES ANYTHING ELSE.** Asked for as thumbnails that behave like
+    /// buttons, without an action being invented for a photograph. A tile is
+    /// an image view, born deaf to touches, so the photograph's has to have
+    /// been woken for the finger to reach it at all.
+    ///
+    /// ⚠️ **THE TOUCH ITSELF IS DESIGNSYSTEM'S TO TEST** (`PressFeedbackTests`:
+    /// a drag takes the press away silently, a tap beside it does not). What is
+    /// pinned here is that every tile wears it, and wears it on itself.
+    @Test func everyThumbnailGivesUnderTheFingerAndTicksOnATap() throws {
+        let screen = open(Self.items(2, videosAt: [1]))
+        appear(screen)
+        let strip = try #require(Self.strips(in: screen.window).first)
+
+        for id in ["photo-0", "video-1"] {
+            let feedback = try #require(strip.debugPressFeedback(for: id), "\(id)'s tile does not answer a press")
+            let tile = try #require(feedback.debugTarget)
+            #expect(feedback.style == .press)
+            #expect(tile.isUserInteractionEnabled, "\(id)'s tile never feels the finger")
+            #expect(feedback.debugRecognizer?.view === tile, "\(id)'s press is watched from somewhere else")
+
+            feedback.press()
+            feedback.release(asTap: true)
+
+            #expect(feedback.debugEvents == [
+                .pressed(scale: PressFeedback.pressedScale(for: tile.bounds.size)),
+                .released(tap: true, sprang: true)
+            ], "\(id): \(feedback.debugEvents)")
+        }
+    }
+
+    /// Reduce Motion reaches the tiles through the screen, as it reaches their
+    /// entrance: a press moves nothing, and the tap still ticks.
+    @Test func underReduceMotionAThumbnailTicksWithoutMoving() throws {
+        let screen = open(Self.items(1), reducesMotion: true)
+        let strip = try #require(Self.strips(in: screen.window).first)
+        let feedback = try #require(strip.debugPressFeedback(for: "photo-0"))
+
+        feedback.press()
+        feedback.release(asTap: true)
+
+        #expect(feedback.debugEvents == [.pressed(scale: 1), .released(tap: true, sprang: false)],
+                "\(feedback.debugEvents)")
     }
 
     // MARK: - The cover button

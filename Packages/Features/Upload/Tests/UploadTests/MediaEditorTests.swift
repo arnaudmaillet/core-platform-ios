@@ -142,16 +142,41 @@ struct MediaEditorTests {
         #expect(page.accessibilityLabel == "Video")
     }
 
+    // MARK: - What the media arrive wearing
+
+    /// ⚠️ **THE CAMERA'S CHOICES ARE WHERE EDITING STARTS, NOT A STEP.** A
+    /// capture arrives with the look and shape the author chose while shooting;
+    /// they are on the page from the first frame, and the back arrow has nothing
+    /// to take away until the author changes something here.
+    @Test func mediaCanArriveAlreadyWearingTheirEdits() {
+        let library = StubLibrary()
+        let handed = Handed()
+        var chosen = MediaEdits.untouched
+        chosen.filter = .mono
+        let editor = MediaEditorViewController(
+            items: Self.items(2), library: library,
+            initialEdits: ["item-0": chosen, "item-1": .untouched, "nobody": chosen]
+        ) { _, _ in handed.destination }
+        // The arrows are asked what they can do when the screen loads — a bar
+        // item is born enabled (`theArrowsAreDeadOnAScreenNobodyHasTouchedYet`).
+        editor.loadViewIfNeeded()
+
+        #expect(editor.edits(for: "item-0").filter == .mono, "the look it arrived with is not on the page")
+        #expect(!editor.debugHasEdits(for: "item-1"), "an untouched edit was stored as an entry")
+        #expect(!editor.debugHasEdits(for: "nobody"), "an edit for an item not on screen was kept")
+        #expect(!editor.debugUndoItem.isEnabled, "arriving is not a step to take back")
+    }
+
     // MARK: - The history
 
     private enum Band {
-        static let filters = 3
-        static let crop = 4
-        static let timeline = 5
+        static let filters = "Filters"
+        static let crop = "Crop"
+        static let timeline = "Trim"
     }
 
-    private func choose(_ band: Int, on screen: Screen) {
-        screen.editor.debugCategoryBar.select(band)
+    private func choose(_ band: String, on screen: Screen) {
+        screen.editor.debugChoose(band)
         screen.window.layoutIfNeeded()
     }
 
@@ -448,35 +473,92 @@ struct MediaEditorTests {
                 "the pill is drawn \(screen.editor.debugSoundPillWidth) wide and wants \(before)")
     }
 
-    /// ⚠️ **A STRIP THAT GROWS IS A STRIP THAT MUST BE HANDED OVER AGAIN.**
-    /// Swiping onto a video gives the strip one more category — 38pt of
-    /// intrinsic width — and nothing re-handed the bar, so UIKit went on
-    /// honouring a fit it decided for five.
-    @Test func swipingOntoAVideoHandsTheBarItsItemsAgain() async throws {
+    /// ⚠️ **A PHOTOGRAPH AND A CLIP WEAR TWO STRIPS, EACH NAMED BY ALL IT
+    /// OFFERS.** Asked for in those words: change the selector's whole content
+    /// and pass the whole content as its identifier, so the only animation is
+    /// the bar's own. The strip used to be one view that gained the timeline's
+    /// icon under an unchanged identifier, and UIKit's replace transition for
+    /// "the same item, new content" read on the device as the strip scaling
+    /// itself in.
+    @Test func aPhotographAndAClipWearTwoStripsNamedByWhatTheyOffer() async throws {
         let screen = open(Self.items(2, videoAt: 1))
         try await settle(until: { !Self.pages(in: screen.window).isEmpty })
         screen.window.layoutIfNeeded()
-        let before = screen.editor.debugHandoverWidths.count
-
+        let photo = try #require(screen.editor.debugToolbarItems.first { $0.customView is IconSelectorBar })
         let handed = screen.editor.debugRealHandovers
 
         screen.editor.debugScrollToPage(1)
         screen.window.layoutIfNeeded()
 
-        #expect(screen.editor.debugHandoverWidths.count > before,
-                "the strip gained a category and the bar was never told")
-        // ⚠️ **A REAL HAND-OVER, AND AN ANIMATED ONE.** Asked for: the timeline's
-        // icon arriving and leaving with the bar's own transition. With the
-        // same views in the same places a hand-over is skipped, so without the
-        // content flag nothing reached UIKit at all and the icon blinked in;
-        // with it, a fresh item under the old identifier is matched to the old
-        // one and UIKit animates the difference — measured on the device as the
-        // icons blurring out and back in over about 150ms.
-        #expect(screen.editor.debugRealHandovers > handed, "the bar was never actually handed anything")
+        let clip = try #require(screen.editor.debugToolbarItems.first { $0.customView is IconSelectorBar })
+        #expect(photo.identifier == "upload.editor.toolbar.categories.Effects,Text,Stickers,Filters,Crop")
+        #expect(clip.identifier == "upload.editor.toolbar.categories.Trim,Effects,Text,Stickers,Filters,Crop")
+        #expect(clip.customView !== photo.customView, "one strip re-dressed, not two strips")
+        // ⚠️ **A REAL HAND-OVER, AND AN ANIMATED ONE** — the bar's own
+        // transition is the only animation this change is allowed.
+        #expect(screen.editor.debugRealHandovers == handed + 1,
+                "handed over \(screen.editor.debugRealHandovers - handed) times")
         #expect(screen.editor.debugLastHandoverWasAnimated, "and it was handed over without its transition")
         let share = try #require(screen.editor.debugBarShare)
         #expect(abs(share.leading + share.trailing - share.available) < 0.5,
                 "and the share did not follow: \(share)")
+
+        screen.editor.debugScrollToPage(0)
+        screen.window.layoutIfNeeded()
+
+        let back = try #require(screen.editor.debugToolbarItems.first { $0.customView is IconSelectorBar })
+        #expect(back.identifier == photo.identifier && back.customView === photo.customView,
+                "the photograph's strip comes back, not a third one")
+    }
+
+    /// ⚠️ **A CLIP'S LIST OPENS ON THE TIMELINE** — *"[timeline, baguette
+    /// magique, texte, stickers, filtres, recadrement] pour une vidéo"*.
+    @Test func aClipsStripOpensOnTheTimeline() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        #expect(screen.editor.debugCategoryTitles == ["Trim", "Effects", "Text", "Stickers", "Filters", "Crop"])
+        // ⚠️ **AND IT WAS THE CLIP'S STRIP FROM THE FIRST HAND-OVER.** Dressed
+        // only on appearance, the bar was first handed the photograph's strip
+        // and then swapped it, animated, in front of the author arriving.
+        #expect(!screen.editor.debugLastHandoverWasAnimated, "the strip was swapped on arrival")
+    }
+
+    /// ⚠️ **LEAVING A CLIP WITH ITS TIMELINE OPEN HANDS THE BAR OVER ONCE.**
+    /// Two things change at that swipe — the strip, and the leading slot the
+    /// timeline gives back to the pill — and two hand-overs in one turn is
+    /// the second transition landing on the first.
+    @Test func leavingAClipWithItsTimelineOpenHandsTheBarOverOnce() async throws {
+        let screen = open(Self.items(2, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        choose(Band.timeline, on: screen)
+        screen.window.layoutIfNeeded()
+        try #require(screen.editor.debugToolbarItems.first?.customView is IconActionBar, "guard: the actions lead")
+        let before = screen.editor.debugRealHandovers
+
+        screen.editor.debugScrollToPage(1)
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugRealHandovers - before == 1,
+                "handed over \(screen.editor.debugRealHandovers - before) times")
+        #expect(screen.editor.debugToolbarItems.first?.customView is SoundPillView, "the pill came back")
+        #expect(screen.editor.debugSelectedCategory == nil)
+    }
+
+    /// ⚠️ **THE CHOICE CROSSES OVER BY NAME.** Filters sits fourth on a
+    /// photograph's strip and fifth on a clip's; carried by position, a swipe
+    /// would have moved the author from Filters to Stickers.
+    @Test func aChoiceSurvivesTheSwipeOntoTheOtherStrip() async throws {
+        let screen = open(Self.items(2, videoAt: 1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        choose(Band.filters, on: screen)
+
+        screen.editor.debugScrollToPage(1)
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugSelectedCategory == "Filters",
+                "the clip's strip chose \(String(describing: screen.editor.debugSelectedCategory))")
+        #expect(screen.editor.debugBand.debugIsShowing, "and the tools stayed up")
     }
 
     /// ⚠️ **THE STRIP IS THE SAME ITEM TO UIKit ACROSS EVERY HAND-OVER** — by

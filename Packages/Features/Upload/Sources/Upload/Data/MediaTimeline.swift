@@ -32,7 +32,35 @@ struct MediaSegment: Equatable, Sendable {
     /// piece is split (the cut it names is still after that half), and it is
     /// gone when its piece becomes the last one — there is no cut after the end
     /// of the film. `nil` is a plain cut.
-    var transitionOut: VideoTransitionKind?
+    ///
+    /// ⚠️ **TAKING IT AWAY TAKES ITS LENGTH WITH IT** — see `transitionSeconds`.
+    var transitionOut: VideoTransitionKind? {
+        didSet { if transitionOut == nil { transitionSeconds = nil } }
+    }
+    /// How long that transition runs, in PLAYED seconds, as the author asked —
+    /// what is drawn is clamped to what the two pieces can give
+    /// (`VideoExporter.transitionHalf`). Nil is the standard half second.
+    ///
+    /// ⚠️ **NIL FOR THE STANDARD, AND NIL ON A PLAIN CUT — WRITES ARE TURNED INTO
+    /// IT, IN THE INITIALISER TOO.** A length stored where no transition is, or
+    /// 0.5 spelled next to nil, would be two spellings of the same film and break
+    /// every equality that compares timelines — the rule `filter` and
+    /// `transitionOut` already follow. So the first edit made before a duration
+    /// existed is the same value today.
+    var transitionSeconds: Double? {
+        didSet {
+            let kept = Self.stored(transitionSeconds, for: transitionOut)
+            if kept != transitionSeconds { transitionSeconds = kept }
+        }
+    }
+
+    /// What `transitionSeconds` keeps of `seconds` on a cut carrying `kind`.
+    private static func stored(_ seconds: Double?, for kind: VideoTransitionKind?) -> Double? {
+        guard kind != nil, let seconds, seconds.isFinite,
+              abs(seconds - VideoTransitionKind.standardSeconds) >= 0.0005
+        else { return nil }
+        return seconds
+    }
     /// The look this piece alone wears, under the whole media's.
     ///
     /// ⚠️ **IT BELONGS TO THE PIECE, SO IT TRAVELS WITH IT** — re-ordered with
@@ -49,12 +77,14 @@ struct MediaSegment: Equatable, Sendable {
 
     init(
         start: Double, end: Double, speed: Double = 1, transitionOut: VideoTransitionKind? = nil,
-        filter: MediaFilter? = nil
+        transitionSeconds: Double? = nil, filter: MediaFilter? = nil
     ) {
         self.start = start
         self.end = end
         self.speed = speed
         self.transitionOut = transitionOut
+        // ⚠️ An initialiser runs no `didSet`: the same rule, said here too.
+        self.transitionSeconds = Self.stored(transitionSeconds, for: transitionOut)
         self.filter = filter == .original ? nil : filter
     }
 

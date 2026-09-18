@@ -20,6 +20,17 @@ public enum UISound: String, CaseIterable, Sendable {
     /// 40ms stagger this file was chosen against.
     case pop
 
+    /// The tick a control makes when a press on it turns out to be a tap — see
+    /// `PressFeedback`, which is the only thing that plays it.
+    ///
+    /// ⚠️ **A DIFFERENT SOUND FROM `pop`, AND IT HAS TO BE.** The pop says
+    /// "something arrived"; this says "your press was taken". The two live in
+    /// the same band — a row pops in, then the author taps its cards — and a
+    /// tap that sounded like the pop would announce an arrival that never came.
+    /// Chosen an octave and a third below it, and five times shorter; the
+    /// README has the measurements.
+    case tap
+
     /// Plays it, optionally `delay` seconds from now.
     ///
     /// ⚠️ **SCHEDULED ON THE AUDIO CLOCK, NOT ON A TIMER.** A row of nine

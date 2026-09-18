@@ -16,10 +16,10 @@ import UIKit
 @MainActor
 struct MediaEditorTextTests {
     private enum Mode {
-        static let effects = 0
-        static let text = 1
-        static let stickers = 2
-        static let filters = 3
+        static let effects = "Effects"
+        static let text = "Text"
+        static let stickers = "Stickers"
+        static let filters = "Filters"
     }
 
     private struct Screen {
@@ -93,8 +93,8 @@ struct MediaEditorTextTests {
         return Screen(editor: editor, navigation: navigation, window: window, preview: preview)
     }
 
-    private func choose(_ mode: Int, on screen: Screen) {
-        screen.editor.debugCategoryBar.select(mode)
+    private func choose(_ mode: String, on screen: Screen) {
+        screen.editor.debugChoose(mode)
         screen.window.layoutIfNeeded()
     }
 

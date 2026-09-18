@@ -74,13 +74,13 @@ struct MediaLookReferenceTests {
     }
 
     private static func openEffects(on screen: Screen) throws -> MediaEffectsToolsView {
-        screen.editor.debugCategoryBar.debugTap(0)
+        screen.editor.debugTapCategory("Effects")
         screen.window.layoutIfNeeded()
         return try #require(screen.editor.debugBand.content as? MediaEffectsToolsView)
     }
 
     private static func openFilters(on screen: Screen) throws -> MediaFilterRowView {
-        screen.editor.debugCategoryBar.select(3)
+        screen.editor.debugChoose("Filters")
         screen.window.layoutIfNeeded()
         return try #require(screen.editor.debugBand.content as? MediaFilterRowView)
     }

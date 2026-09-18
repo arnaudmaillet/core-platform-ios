@@ -77,6 +77,7 @@ final class MediaSoundtrackToolsView: UIView {
         })
         button.accessibilityLabel = "Remove the song"
         button.widthAnchor.constraint(equalToConstant: Metrics.chip).isActive = true
+        PressFeedback.attach(to: button)
         return button
     }()
 
@@ -289,6 +290,7 @@ final class MediaSoundtrackToolsView: UIView {
         button.heightAnchor.constraint(equalToConstant: Metrics.chip).isActive = true
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
         button.setContentHuggingPriority(.required, for: .horizontal)
+        PressFeedback.attach(to: button)
         return button
     }
 }
@@ -303,6 +305,9 @@ extension MediaSoundtrackToolsView {
     /// Internal for tests: a tap on Remove.
     func debugTapRemove() { remove.sendActions(for: .touchUpInside) }
     var debugCanRemove: Bool { remove.isEnabled }
+    /// Internal for tests: every button a finger can press. The two levels are
+    /// sliders, not buttons: iOS's own slider already answers a held finger.
+    var debugPressables: [UIControl] { [files, video, remove] }
     var debugCanPick: Bool { files.isEnabled && video.isEnabled }
     /// Internal for tests: the name the row shows.
     var debugTitle: String? { title.text }

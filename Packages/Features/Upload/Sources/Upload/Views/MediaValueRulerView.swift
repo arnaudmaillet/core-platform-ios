@@ -120,6 +120,10 @@ final class MediaValueRulerView: UIView {
     private let click = UISelectionFeedbackGenerator()
     private var lastDetent = 0
     private lazy var pan = UIPanGestureRecognizer(target: self, action: #selector(dragged))
+    /// The strip growing while a finger is on the ruler — `StraightenDialView`
+    /// states why the strip and not the readout, and why on the finger rather
+    /// than on the pan.
+    private lazy var hold = PressFeedback.attach(toView: self, style: .hold, moving: ruler)
 
     init() {
         super.init(frame: .zero)
@@ -149,6 +153,8 @@ final class MediaValueRulerView: UIView {
         heightAnchor.constraint(equalToConstant: Metrics.height).isActive = true
 
         addGestureRecognizer(pan)
+        // Installed now, not on the first drag that asks for its scale.
+        _ = hold
 
         isAccessibilityElement = true
         accessibilityTraits = .adjustable
@@ -201,7 +207,7 @@ final class MediaValueRulerView: UIView {
             let travel = pan.translation(in: self).x
             // Zeroed every sample: `advanced` takes the travel since the last.
             pan.setTranslation(.zero, in: self)
-            drag(by: travel)
+            drag(byFingerTravel: travel)
         case .ended, .cancelled, .failed:
             endDrag()
         default:
@@ -217,6 +223,13 @@ final class MediaValueRulerView: UIView {
 
     private func drag(by travel: CGFloat) {
         move(to: ValueRuler.advanced(value, by: travel, in: range))
+    }
+
+    /// ⚠️ **DIVIDED BY THE STRIP'S HELD SCALE** — `StraightenDialView` has the
+    /// arithmetic: the strip is drawn larger while held, so a percent is wider
+    /// on screen, and the tick the finger landed on must stay under it.
+    private func drag(byFingerTravel travel: CGFloat) {
+        drag(by: travel / hold.scale)
     }
 
     /// ⚠️ **THE LIFT IS A CHANGE TOO** — while a finger is down the screen may
@@ -381,6 +394,10 @@ extension MediaValueRulerView {
     /// lifting — the path a real drag takes.
     func debugBeginDrag() { beginDrag() }
     func debugDrag(by travel: CGFloat) { drag(by: travel) }
+    /// Internal for tests: a sample of a real drag, as the pan reports it.
+    func debugFingerTravel(_ travel: CGFloat) { drag(byFingerTravel: travel) }
+    /// Internal for tests: the feedback that grows the strip.
+    var debugHold: PressFeedback { hold }
     func debugEndDrag() { endDrag() }
     /// Internal for tests: one move straight to `value`, as VoiceOver's adjust
     /// makes — no finger, so announced as settled.

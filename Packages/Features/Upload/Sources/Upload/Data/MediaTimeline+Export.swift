@@ -22,6 +22,7 @@ extension MediaTimelining {
                 start: piece.start, end: piece.end, speed: piece.speed,
                 // ⚠️ Nothing after the last piece: there is no cut there.
                 transitionOut: index < pieces.count - 1 ? piece.transitionOut : nil,
+                transitionSeconds: piece.transitionSeconds ?? VideoTransitionKind.standardSeconds,
                 look: piece.filter
             )
         }

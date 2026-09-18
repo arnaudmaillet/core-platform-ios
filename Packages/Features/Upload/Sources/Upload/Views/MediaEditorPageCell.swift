@@ -194,6 +194,8 @@ final class MediaEditorPageCell: UICollectionViewCell {
 
     /// Internal for tests: where the picture actually sits in its page.
     var debugPictureFrame: CGRect { picture.frame }
+    /// Internal for tests: whether a curve is carrying the picture somewhere.
+    var debugPictureIsMoving: Bool { !(picture.layer.animationKeys() ?? []).isEmpty }
 
     /// Internal for tests: the picture on the page, to read its pixels.
     var debugPicture: UIImage? { picture.image }
