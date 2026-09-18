@@ -279,14 +279,23 @@ final class CaptureViewController: UIViewController {
         previewContainer.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         previewContainer.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(previewContainer)
-        let tall = previewContainer.heightAnchor.constraint(equalTo: previewContainer.widthAnchor, multiplier: 16.0 / 9.0)
-        tall.priority = .defaultHigh
+        // ⚠️ **ALWAYS THE FRAME'S OWN 9:16, NARROWED AND CENTRED WHEN THE
+        // HEIGHT RUNS OUT.** The container used to keep the full width and let
+        // its height give: on a height-capped sheet (an iPhone SE) it was wider
+        // than 9:16, the aspect fill cut the frame's top and bottom, and the
+        // 9:16 window — narrower than the container — left the picture's sides
+        // unmasked, showing more than a 9:16 crop keeps. At exactly 9:16 the
+        // fill cuts nothing and the window, the preview and the crop handed to
+        // the editor are the same rectangle; an SE gets thin bars at the sides.
+        let wide = previewContainer.widthAnchor.constraint(equalTo: view.widthAnchor)
+        wide.priority = .defaultHigh
         NSLayoutConstraint.activate([
             previewContainer.topAnchor.constraint(equalTo: view.topAnchor),
-            previewContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            previewContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            previewContainer.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            previewContainer.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor),
             previewContainer.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor),
-            tall
+            previewContainer.heightAnchor.constraint(equalTo: previewContainer.widthAnchor, multiplier: 16.0 / 9.0),
+            wide
         ])
 
         if let plain = source.plainPreview { plain.pin(to: previewContainer) }
@@ -1443,6 +1452,7 @@ final class CaptureViewController: UIViewController {
     var debugLockIsShowing: Bool { lockView.isUserInteractionEnabled || (!lockView.isHidden && lockView.alpha > 0) }
     var debugWindow: CGRect { gridView.frame }
     var debugPreviewBounds: CGRect { previewContainer.bounds }
+    var debugPreviewFrame: CGRect { previewContainer.frame }
     var debugNoticeIsShowing: Bool { notice != nil }
     var debugNotice: CaptureAccessNoticeView? { notice }
     func debugTapUndo() { undoTapped() }

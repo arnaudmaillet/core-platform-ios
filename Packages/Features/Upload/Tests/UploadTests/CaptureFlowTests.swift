@@ -123,7 +123,8 @@ struct CaptureFlowTests {
         recents: Recents? = nil,
         takeLimit: TimeInterval = CaptureTake.maximum,
         plainPreview: UIView? = nil,
-        motion: Bool = false
+        motion: Bool = false,
+        size: CGSize = CGSize(width: 402, height: 874)
     ) async throws -> Screen {
         let source = SpySource()
         source.answer = answer
@@ -144,7 +145,7 @@ struct CaptureFlowTests {
             return UIViewController()
         }
         let navigation = UploadNavigationController(rootViewController: camera)
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
         window.rootViewController = navigation
         window.isHidden = false
         window.layoutIfNeeded()
@@ -881,6 +882,20 @@ struct CaptureFlowTests {
         #expect(screen.camera.debugSelectorLabels == ["Flash, on", "Timer, 10 seconds", "Aspect ratio", "Filters", "Grid, on"])
         #expect(screen.camera.debugRatioRow.debugSpoken == ["Nine by sixteen", "Three by four", "Square"])
         #expect(screen.camera.debugTimerRow.debugSpoken == ["Off", "3 seconds", "10 seconds"])
+    }
+
+    /// ⚠️ On a sheet too short for a full-width 9:16 picture (an iPhone SE),
+    /// the preview narrows and centres at 9:16 rather than widening past it —
+    /// so nothing outside the 9:16 frame is shown unmasked.
+    @Test func aShortSheetKeepsThePreviewAtNineBySixteen() async throws {
+        let screen = try await open(size: CGSize(width: 375, height: 600))
+        screen.window.layoutIfNeeded()
+        let preview = screen.camera.debugPreviewFrame
+        #expect(abs(preview.width / preview.height - 9.0 / 16.0) < 0.002, "\(preview)")
+        #expect(abs(preview.height - 600) < 0.5, "as tall as the sheet allows")
+        #expect(abs(preview.midX - 187.5) < 0.5, "centred")
+        let window = screen.camera.debugWindow
+        #expect(window.width <= preview.width + 0.5, "the 9:16 window is the whole preview: \(window)")
     }
 
     // MARK: - End to end, through the builder
