@@ -7,11 +7,12 @@ import Testing
 /// **A TWO-PICTURE TRANSITION SHOWS BOTH SIDES OF ITS CUT, AND COSTS NO TIME.**
 ///
 /// A dissolve, a swipe or a page curl draws the outgoing piece and the incoming
-/// one at once. The second picture comes from lane B (`VideoExporter
-/// .otherSides`): before the cut, the film that LEADS INTO the incoming piece;
-/// after it, the film that FOLLOWS the outgoing one. Every assertion reads
-/// pixels an image generator or an export produced, never the instructions the
-/// builder wrote.
+/// one at once, across the whole window. Both come from the two pieces
+/// themselves (`VideoExporter.borrowedSides`): the outgoing piece's last half
+/// window on lane B, eased out, and the incoming piece's first half window in
+/// place of the window on the arrangement's own lane, eased in. Every
+/// assertion reads pixels an image generator or an export produced, never the
+/// instructions the builder wrote.
 ///
 /// The clip (`ColourClipWriter`) is red, green, blue, white for a second each,
 /// so which second of the file a lane read is visible in its colour.
@@ -75,13 +76,13 @@ struct CrossTransitionTests {
 
     // MARK: - The blend
 
-    /// Red for a second, then blue: the lead-in of the blue piece is the green
-    /// second before it, and the run-on of the red piece the green second
-    /// after it.
+    /// Red for a second, then blue: on both sides of the cut the picture is red
+    /// giving way to blue, `progress` of the way through the window.
     ///
-    /// ⚠️ **THE OTHER SIDE IS WHAT CONTINUES THAT PIECE, NOT THE PIECE ITSELF.**
-    /// Green is in neither kept piece, so green in the picture can only have
-    /// come from lane B reading the film either side of the kept pieces.
+    /// ⚠️ **BOTH SIDES ARE THE PIECES' OWN, NOT THE FILM AROUND THEM.** The film
+    /// just past either piece is the GREEN second, cut away; the handles this
+    /// used to read blended it in on both sides of the cut — (red → green) and
+    /// then (green → blue).
     @Test func aDissolveBlendsBothPictures() async throws {
         let dissolve = try await arranged([
             VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve),
@@ -91,35 +92,27 @@ struct CrossTransitionTests {
         let green = try await drawn(second: 1)
         let blue = try await drawn(second: 2)
 
-        let before = try await pixel(dissolve, at: 0.875)
-        let intoIt = progress(before.actual)
-        let expectedBefore = mix(red, green, intoIt)
-        #expect(distance(before.colour, expectedBefore) <= 20,
-                "at \(before.actual)s the picture is \(before.colour), red into the lead-in says \(expectedBefore)")
-        #expect(before.colour.g - red.g >= 30, "no green from the lead-in: \(before.colour)")
-        #expect(before.colour.r > before.colour.g, "the outgoing red does not lead: \(before.colour)")
-
-        let after = try await pixel(dissolve, at: 1.125)
-        let outOfIt = progress(after.actual)
-        let expectedAfter = mix(green, blue, outOfIt)
-        #expect(distance(after.colour, expectedAfter) <= 20,
-                "at \(after.actual)s the picture is \(after.colour), the run-on into blue says \(expectedAfter)")
-        #expect(after.colour.g - blue.g >= 30, "no green from the run-on: \(after.colour)")
-        #expect(after.colour.b > after.colour.g && after.colour.b > after.colour.r,
-                "the incoming blue does not lead: \(after.colour)")
+        for time in [0.875, 1.125] {
+            let got = try await pixel(dissolve, at: time)
+            let expected = mix(red, blue, progress(got.actual))
+            #expect(distance(got.colour, expected) <= 20,
+                    "at \(got.actual)s the picture is \(got.colour), red into blue says \(expected)")
+            #expect(got.colour.g <= max(red.g, blue.g) + 12,
+                    "cut-away green at \(got.actual)s: \(got.colour) (green is \(green))")
+        }
+        let early = try await pixel(dissolve, at: 0.875).colour
+        #expect(early.r > early.b, "the outgoing red does not lead before the cut: \(early)")
+        let late = try await pixel(dissolve, at: 1.125).colour
+        #expect(late.b > late.r, "the incoming blue does not lead after the cut: \(late)")
     }
 
-    /// ⚠️ **NO JUMP WHERE THE LANES SWAP.** At the cut lane A turns from the
-    /// outgoing piece to the incoming one and lane B the other way; if B holds
-    /// the film that continues each piece, the picture does not change there
-    /// by more than one frame's worth of fade.
+    /// ⚠️ **NO JUMP AT THE CUT.** Both sides run across the whole window, so the
+    /// picture does not change there by more than one frame's worth of fade.
     ///
-    /// ⚠️ **PIECES CUT INSIDE A COLOUR, ON PURPOSE.** Cut where the clip itself
-    /// changes colour (at a whole second), the film that continues a piece is a
-    /// different colour from the piece, and the picture jumps at the cut however
-    /// right the lanes are. Half a second of red and half a second of blue,
-    /// taken from the middle of their seconds, run on and lead in with the same
-    /// colours.
+    /// ⚠️ **PIECES CUT INSIDE A COLOUR, ON PURPOSE.** Each side eases through the
+    /// film at the end of its own piece; half a second of red and half a second
+    /// of blue, taken from the middle of their seconds, stay one colour however
+    /// far a side has got.
     @Test func thereIsNoJumpAtTheCut() async throws {
         func pieces(_ kind: VideoTransitionKind?) -> [VideoExportSegment] {
             [
@@ -256,11 +249,12 @@ struct CrossTransitionTests {
 
     // MARK: - The file's edges
 
-    /// ⚠️ **A PIECE THAT OPENS THE FILE HAS NO LEAD-IN, SO IT HOLDS ITS FIRST
-    /// FRAME.** Blue then red: the red piece starts at 0s, where nothing comes
-    /// before it — the incoming side of the dissolve is the red first frame,
-    /// so the blend is blue and red with no green in it.
-    @Test func aPieceOpeningTheFileHoldsItsFirstFrameAsItsLeadIn() async throws {
+    /// ⚠️ **A PIECE THAT OPENS THE FILE NEEDS NOTHING BEFORE IT.** Blue then
+    /// red: the red piece starts at 0s, where the file has no film before it.
+    /// The handles this replaced held the first frame there; borrowed from the
+    /// piece, the incoming side is simply the red piece's own opening, and the
+    /// blend is blue and red with no green in it.
+    @Test func aPieceOpeningTheFileBlendsItsOwnOpening() async throws {
         let dissolve = try await arranged([
             VideoExportSegment(start: 2, end: 3, transitionOut: .dissolve),
             VideoExportSegment(start: 0, end: 1)
@@ -272,17 +266,17 @@ struct CrossTransitionTests {
             let got = try await pixel(dissolve, at: time)
             let expected = mix(blue, red, progress(got.actual))
             #expect(distance(got.colour, expected) <= 20,
-                    "at \(got.actual)s the picture is \(got.colour), blue into the held red says \(expected)")
-            #expect(got.colour.g <= max(red.g, blue.g) + 12, "green leaked into the lead-in at \(got.actual)s: \(got.colour)")
-            #expect(got.colour.r - blue.r >= 30, "no red from the held first frame at \(got.actual)s: \(got.colour)")
+                    "at \(got.actual)s the picture is \(got.colour), blue into red says \(expected)")
+            #expect(got.colour.g <= max(red.g, blue.g) + 12, "green leaked into the blend at \(got.actual)s: \(got.colour)")
+            #expect(got.colour.r - blue.r >= 30, "no red from the incoming piece at \(got.actual)s: \(got.colour)")
         }
     }
 
-    /// ⚠️ **A PIECE THAT CLOSES THE FILE HAS NO RUN-ON, SO IT HOLDS ITS LAST
-    /// FRAME.** White (the file's last second) then red: after the cut the
-    /// outgoing side is the white last frame — the only place blue can come
-    /// from, since red has none.
-    @Test func aPieceClosingTheFileHoldsItsLastFrameAsItsRunOn() async throws {
+    /// ⚠️ **A PIECE THAT CLOSES THE FILE NEEDS NOTHING AFTER IT.** White (the
+    /// file's last second) then red: after the cut the outgoing side is still
+    /// the white piece's own closing film — the only place blue can come from,
+    /// since red has none.
+    @Test func aPieceClosingTheFileBlendsItsOwnClose() async throws {
         let file = try await ColourClipWriter.clip()
         let track = try #require(try await AVURLAsset(url: file).loadTracks(withMediaType: .video).first)
         let range = try await track.load(.timeRange)
@@ -299,20 +293,23 @@ struct CrossTransitionTests {
             let got = try await pixel(dissolve, at: time)
             let expected = mix(white, red, progress(got.actual))
             #expect(distance(got.colour, expected) <= 20,
-                    "at \(got.actual)s the picture is \(got.colour), the held white into red says \(expected)")
-            #expect(got.colour.b >= 40, "no white from the held last frame at \(got.actual)s: \(got.colour)")
+                    "at \(got.actual)s the picture is \(got.colour), white into red says \(expected)")
+            #expect(got.colour.b >= 40, "no white from the outgoing piece at \(got.actual)s: \(got.colour)")
         }
     }
 
     // MARK: - Time
 
-    /// ⚠️ **LANE B NEVER MOVES LANE A.** Its film is scaled on its own track,
-    /// after the pieces' rates are set; a composition-level scale issued there
-    /// would stretch the arrangement under it and the sound with it.
+    /// ⚠️ **THE WINDOW NEVER MOVES THE PIECES.** The incoming side is put in
+    /// place of the window on lane A, exactly as long, and the outgoing side on
+    /// lane B; both are scaled on their own tracks, after the pieces' rates are
+    /// set — a composition-level scale issued there would stretch the
+    /// arrangement under it and the sound with it.
     ///
-    /// Two seconds at 2x, then half a second at 0.5x: one second each, so the
-    /// lead-in is an eighth of a second stretched to a quarter and the run-on
-    /// half a second squeezed into one.
+    /// Two seconds at 2x, then half a second at 0.5x: one second each, so each
+    /// side lends a quarter of a second played — half a second of film from the
+    /// fast piece, an eighth from the slow one — eased across the half-second
+    /// window.
     ///
     /// ⚠️ **THE EXPORT'S LENGTH IS READ FROM ITS VIDEO TRACK.** The sound of a
     /// rated export runs 35–55ms past the pictures — measured 2.035, 2.043 and
@@ -334,8 +331,13 @@ struct CrossTransitionTests {
         try #require(tracks.count == 2, "guard: no second lane was laid: \(tracks.count) tracks")
         let laneA = try #require(tracks.min(by: { $0.trackID < $1.trackID }) as? AVCompositionTrack)
         let targets = laneA.segments.filter { !$0.isEmpty }.map { $0.timeMapping.target }
-        #expect(targets.map(\.start.seconds) == [0, 1] && targets.map(\.end.seconds) == [1, 2],
-                "lane B moved the pieces: \(targets.map { ($0.start.seconds, $0.end.seconds) })")
+        let spans = targets.map { ($0.start.seconds, $0.end.seconds) }
+        #expect(targets.first?.start == .zero && targets.last?.end.seconds == 2,
+                "the window moved the pieces: \(spans)")
+        #expect(zip(targets, targets.dropFirst()).allSatisfy { $0.end == $1.start }, "a gap in lane A: \(spans)")
+        #expect(targets.contains { $0.start.seconds == 0 && $0.end.seconds == 0.75 }
+                && targets.contains { $0.start.seconds == 1.25 && $0.end.seconds == 2 },
+                "the pieces outside the window were touched: \(spans)")
         let duration = try await arrangement.asset.load(.duration)
         #expect(abs(duration.seconds - played) < 0.001, "the arrangement lasts \(duration.seconds)s, not \(played)s")
 
@@ -389,17 +391,17 @@ struct CrossTransitionTests {
 
     /// ⚠️ **BOTH LANES ARE TURNED.** A clip recorded upright is stored on its
     /// side; lane B's frames need the same turn as lane A's, or inside the
-    /// window the other side is drawn sideways across the picture.
+    /// window the outgoing side is drawn sideways across the picture.
     @Test func aRotatedDissolveStaysUpright() async throws {
         let dissolve = try await arranged([
             VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve),
             VideoExportSegment(start: 2, end: 3)
         ], rotated: true)
         let red = try await drawn(second: 0)
-        let green = try await drawn(second: 1)
         let blue = try await drawn(second: 2)
 
-        for (time, from, to) in [(0.875, red, green), (1.125, green, blue)] {
+        for time in [0.875, 1.125] {
+            let (from, to) = (red, blue)
             let top = try await pixel(dissolve, at: time, x: 0.5, y: 0.05)
             #expect(top.size == CGSize(width: 120, height: 160), "the picture is not upright at \(time)s: \(top.size)")
             #expect(top.colour.near(.yellow, by: 40), "the band is not along the top at \(top.actual)s: \(top.colour)")
