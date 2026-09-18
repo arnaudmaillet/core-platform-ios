@@ -515,6 +515,31 @@ final class MediaEditorViewController: UIViewController {
     private(set) lazy var segmentFilterMode = MediaEditorSegmentFilterMode(host: self)
     /// Text and Stickers: one mode, told which of the two it is before it opens.
     private(set) lazy var overlayMode = MediaEditorOverlayMode(host: self)
+
+    /// Whether a text overlay is being typed over this screen right now — set
+    /// by `MediaEditorHosting.textEditingDidChange(_:)`, which the overlay mode
+    /// calls once at each end of a typing session.
+    ///
+    /// ⚠️ **THE SEAM ONLY: NOTHING HERE TOUCHES A BAR ITEM.** "Next" is meant
+    /// to read "Done" while this is true, and the composer's own Done button is
+    /// meant to go with it. Both are changes to `navigationItem`, which one
+    /// worker owns at a time; this property is what that change reads. Not
+    /// `private(set)`: the conformance lives in
+    /// `MediaEditorViewController+Host.swift`, and `private` is per FILE.
+    var isTypingText = false {
+        didSet {
+            #if DEBUG
+            textEditingChanges.append(isTypingText)
+            #endif
+        }
+    }
+
+    #if DEBUG
+    /// Internal for tests: every value `isTypingText` has been HANDED, in
+    /// order, deduped nowhere — so a mode that announced one session twice is
+    /// visible here as `[true, false, false]`.
+    private(set) var textEditingChanges: [Bool] = []
+    #endif
     /// The song under a clip — opened from the sound pill, not from the
     /// category bar.
     private(set) lazy var soundtrackMode = MediaEditorSoundtrackMode(host: self, sourcing: soundtracks)
@@ -580,8 +605,6 @@ final class MediaEditorViewController: UIViewController {
     }
 
     /// Which glyph the bar is currently wearing, so the item is only re-stated
-    /// when it actually changes — see `updateFitItem(animated:)`.
-    private var shownFit: ContentFit = .fill
 
     /// Which of several media is showing. Hides itself for a single one.
     private let pageDots = MediaPageDotsView()
@@ -1166,7 +1189,7 @@ final class MediaEditorViewController: UIViewController {
         // ⚠️ RIGHT ITEMS ARE LAID OUT FROM THE TRAILING EDGE INWARDS, so the
         // FIRST one written is the RIGHTMOST. `[next, fit]` is what draws
         // `[fit][next]` on screen — the order this screen promises.
-        navigationItem.rightBarButtonItems = [nextItem, makeFitItem(for: .fill)]
+        navigationItem.rightBarButtonItems = [nextItem]
         nextItem.style = .done
     }
 
@@ -2145,68 +2168,33 @@ final class MediaEditorViewController: UIViewController {
         change(id) { $0.fit = next }
         let page = canvas.cellForItem(at: IndexPath(item: currentIndex, section: 0))
         (page as? MediaEditorPageCell)?.lay(next, within: fitWindow, animated: true)
-        updateFitItem(animated: true)
+        showTheFitGlyph()
     }
 
-    private func makeFitItem(for fit: ContentFit) -> UIBarButtonItem {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: fit.symbolName),
-            primaryAction: UIAction { [weak self] _ in self?.toggleFit() }
-        )
-        item.accessibilityLabel = fit.actionName
-        return item
-    }
-
-    /// Keeps the glyph offering the move the viewer can actually make on the
-    /// picture in front of them — including after a swipe, when the next
-    /// picture may have been left in the other state.
+    /// Keeps the crop tools' glyph offering the move the author can actually
+    /// make on the picture in front of them — including after a swipe, when
+    /// the next picture may have been left in the other state.
     ///
-    /// ⚠️ **A NEW ITEM, NOT A NEW IMAGE.** Assigning `.image` on the item that
-    /// is already in the bar swaps the glyph in a single frame. UIKit animates
-    /// the capsule only when the ITEM ITSELF is replaced and the change is
-    /// stated through `setRightBarButtonItems(_:animated:)` — identity is what
-    /// it diffs on.
-    ///
-    /// ⚠️ **AND ONLY WHEN IT ACTUALLY CHANGES.** Re-stating the bar on every
-    /// settle would animate the item while swiping between two pictures that
-    /// share a fit state, which reads as a flicker for no reason.
-    private func updateFitItem(animated: Bool) {
-        // ⚠️ **NOT WHILE THE CROP SURFACE HOLDS THAT SLOT.** Undo stands where the
-        // fill/fit glyph does, and a settle arriving mid-crop would quietly put the
-        // glyph back over it. The canvas is locked while cropping so no settle
-        // should arrive — this is the guard that makes "should" unnecessary.
-        guard !isCropping else { return }
+    /// ⚠️ **IT LIVES IN THE CROP TOOLS NOW, NOT IN THE HEADER**, so there is no
+    /// bar item to replace and none of the identity dance that went with it: a
+    /// `UIBarButtonItem`'s glyph only animates when the ITEM is swapped, which
+    /// is why this used to rebuild one and guard against rebuilding it too
+    /// often. A button's image is just an image.
+    private func showTheFitGlyph() {
         let fit = currentFit
-        guard fit != shownFit else { return }
-        shownFit = fit
-        navigationItem.setRightBarButtonItems([nextItem, makeFitItem(for: fit)], animated: animated)
+        cropTools.showFit(symbol: fit.symbolName, label: fit.actionName)
     }
 
-    /// Puts undo in the bar while the crop surface is up, and the fill/fit glyph
-    /// back when it goes.
+    /// The header while the crop surface is up.
     ///
-    /// ⚠️ **THE FILL/FIT GLYPH LEAVES FOR THE DURATION, AND THAT IS DELIBERATE.**
-    /// Filling or fitting is a decision about how a picture is laid in the frame it
-    /// will be shown in; while the author is deciding what that picture even IS,
-    /// the control has nothing meaningful to act on. It comes back with the mode.
-    ///
-    /// ⚠️ **`shownFit` IS RE-SEEDED ON THE WAY BACK, NOT TRUSTED.** It records
-    /// which glyph the bar is WEARING, and while the mode was up the bar was
-    /// wearing neither — so restoring through `updateFitItem`'s "only when it
-    /// changes" rule would leave the slot empty whenever the fit had not moved.
+    /// ⚠️ **IT NO LONGER SWAPS THE FILL/FIT GLYPH IN AND OUT.** That control
+    /// used to stand in the header and leave for the duration of the mode,
+    /// because while the author is deciding what the picture even IS there is
+    /// nothing for it to act on. It now lives in the crop tools themselves,
+    /// where it is only reachable at exactly the moment it means something.
     private func showCropBarItems(_ isCropping: Bool, animated: Bool) {
-        if isCropping {
-            navigationItem.setLeftBarButtonItems([saveDraftItem, resetItem], animated: animated)
-            navigationItem.setRightBarButtonItems([nextItem], animated: animated)
-        } else {
-            navigationItem.setLeftBarButtonItems(
-                [saveDraftItem, resetItem], animated: animated
-            )
-            shownFit = currentFit
-            navigationItem.setRightBarButtonItems(
-                [nextItem, makeFitItem(for: shownFit)], animated: animated
-            )
-        }
+        navigationItem.setLeftBarButtonItems([saveDraftItem, resetItem], animated: animated)
+        navigationItem.setRightBarButtonItems([nextItem], animated: animated)
     }
 
     private func goNext() {
@@ -2229,6 +2217,7 @@ final class MediaEditorViewController: UIViewController {
         }
         tools.onQuarterTurn = { [weak self] in self?.cropSurface.turnQuarter() }
         tools.onFlip = { [weak self] in self?.cropSurface.flipAcross() }
+        tools.onFit = { [weak self] in self?.toggleFit() }
         return tools
     }()
 
@@ -3231,7 +3220,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
     /// `scrollToItem`. Every mode hears it (a filter row re-dressed for the new
     /// picture, an overlay layer rebuilt for it) before the page starts playing.
     private func pageSettled() {
-        updateFitItem(animated: true)
+        showTheFitGlyph()
         let settled = currentItemID
         dressCategoryStrip(for: settled)
         for mode in modes { mode.pageDidSettle(on: settled) }
@@ -3345,9 +3334,9 @@ extension MediaEditorViewController {
     /// Internal for tests: how many pages the canvas holds.
     var debugPageCount: Int { dataSource.snapshot().numberOfItems }
     /// Internal for tests: what the fill/fit button currently offers.
-    var debugFitActionName: String? {
-        navigationItem.rightBarButtonItems?.last?.accessibilityLabel
-    }
+    /// Internal for tests: what the fill/fit glyph offers — it stands in the
+    /// crop tools now, not in the header.
+    var debugFitActionName: String? { cropTools.debugFitLabel }
     /// Internal for tests: the fit chosen for an item, defaulting as the screen does.
     func debugFit(for id: String) -> ContentFit { edits(for: id).fit }
     /// Internal for tests: the path the fill/fit button takes, without a bar to tap.

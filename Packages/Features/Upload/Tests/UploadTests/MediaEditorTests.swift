@@ -149,17 +149,14 @@ struct MediaEditorTests {
     @Test func theTopBarKeepsItsPromisedOrder() throws {
         let screen = open(Self.items(2))
 
-        // ⚠️ THE FIRST RIGHT ITEM IS THE RIGHTMOST — bar items on that side lay
-        // out from the trailing edge inwards. `[Next, fit]` is what draws
-        // `[fit][Next]`, which is the order the screen promises.
+        // ⚠️ **THE TRAILING SIDE IS JUST "Next" NOW.** The fill/fit glyph used to
+        // stand beside it; it has gone to the crop tools, where it is reachable
+        // at the moment it means something.
         let right = try #require(screen.editor.navigationItem.rightBarButtonItems)
-        #expect(right.count == 2, "the fill/fit glyph, then Next at the edge")
+        #expect(right.count == 1, "got \(right.map { $0.title ?? $0.accessibilityLabel ?? "?" })")
         #expect(right.first?.title == "Next", "Next takes the edge")
-        #expect(right.last?.title == nil, "and the fit control is a glyph, not a word")
-        #expect(
-            right.last?.accessibilityLabel == "Fit the picture",
-            "named for what it will DO: the canvas fills, so the button offers fit"
-        )
+        #expect(screen.editor.debugFitActionName == "Fit the picture",
+                "named for what it will DO: the canvas fills, so the glyph offers fit")
         // ⚠️ **THE CHEVRON IS UIKit'S NOW, AND THAT IS WHAT KEEPS THE
         // BACK-SWIPE.** A custom leading item stands IN PLACE of the back button
         // and UIKit disables the interactive pop along with it — silently, so no
@@ -313,20 +310,26 @@ struct MediaEditorTests {
         #expect(page.debugContentMode == .scaleAspectFill)
     }
 
-    @Test func theFitButtonLaysTheCurrentPictureWhole() async throws {
+    /// ⚠️ **THE FILL/FIT GLYPH LEFT THE HEADER FOR THE CROP TOOLS**, beside the
+    /// quarter turn and the mirror — asked for in those words. All three say
+    /// how the picture sits in its frame, and none of them has anything to act
+    /// on while the author is somewhere else.
+    @Test func theFitGlyphLaysTheCurrentPictureWholeAndLivesWithTheCropTools() async throws {
         let screen = open(Self.items(2))
         try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        #expect(screen.editor.navigationItem.rightBarButtonItems?.count == 1,
+                "the header still carries the fill/fit glyph")
 
-        screen.editor.debugTapFit()
+        screen.editor.debugCropTools.debugTapFit()
         screen.window.layoutIfNeeded()
 
         #expect(screen.editor.debugFit(for: "item-0") == .fit)
         let page = try #require(Self.pages(in: screen.window).first { $0.representedID == "item-0" })
         #expect(page.debugContentMode == .scaleAspectFit, "shown whole, with the ground around it")
-        #expect(
-            screen.editor.navigationItem.rightBarButtonItems?.last?.accessibilityLabel == "Fill the screen",
-            "and the glyph now offers the way back"
-        )
+        #expect(screen.editor.debugCropTools.debugFitLabel == "Fill the screen",
+                "and the glyph now offers the way back")
+        #expect(screen.editor.debugCropTools.debugGlyphs.allSatisfy { $0 != nil },
+                "a symbol that does not resolve draws an empty button")
     }
 
     /// ⚠️ THE REGRESSION THIS PINS. A screen-wide flag would make choosing for

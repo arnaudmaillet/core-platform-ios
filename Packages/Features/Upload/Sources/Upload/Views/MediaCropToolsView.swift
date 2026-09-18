@@ -45,6 +45,8 @@ final class MediaCropToolsView: UIView {
     var onRatio: ((CropRatio) -> Void)?
     var onQuarterTurn: (() -> Void)?
     var onFlip: (() -> Void)?
+    /// The fill/fit glyph beside them — see `showFit`.
+    var onFit: (() -> Void)?
 
     private let dial = StraightenDialView()
     private let scroller = ChipScrollView()
@@ -60,7 +62,7 @@ final class MediaCropToolsView: UIView {
 
     /// The quarter turn and the mirror, standing over the strip.
     private lazy var turns: UIStackView = {
-        let stack = UIStackView(arrangedSubviews: [quarterTurn, flip])
+        let stack = UIStackView(arrangedSubviews: [quarterTurn, flip, fitGlyph])
         stack.axis = .horizontal
         stack.spacing = Spacing.xs
         return stack
@@ -99,6 +101,17 @@ final class MediaCropToolsView: UIView {
         symbol: "arrow.trianglehead.left.and.right.righttriangle.left.righttriangle.right",
         label: "Flip the picture left to right"
     ) { [weak self] in self?.onFlip?() }
+
+    /// ⚠️ **THE FILL/FIT GLYPH LIVES HERE NOW, NOT IN THE HEADER.** Asked for
+    /// in those words: *"on va supprimer l'option de fill/fit en haut dans le
+    /// header et on va plutôt le mettre dans les options de recadrage à côté
+    /// des icônes de rotation et de miroir"*. It belongs with them: all three
+    /// say how the picture sits in the frame, and it has nothing to act on
+    /// while the author is somewhere else. The row's dissolve follows it for
+    /// free — `layoutSubviews` measures the buttons' stack, whatever it holds.
+    private lazy var fitGlyph = makeButton(
+        symbol: "arrow.down.right.and.arrow.up.left", label: "Fit the picture"
+    ) { [weak self] in self?.onFit?() }
 
     init() {
         super.init(frame: .zero)
@@ -211,6 +224,13 @@ final class MediaCropToolsView: UIView {
     func adopt(angle: CGFloat, ratio: CropRatio) {
         dial.setAngle(angle)
         setChosen(ratio)
+    }
+
+    /// States which way the picture is laid, so the glyph offers the OTHER
+    /// state — the rule the header's item used to carry.
+    func showFit(symbol: String, label: String) {
+        fitGlyph.configuration?.image = UIImage(systemName: symbol)
+        fitGlyph.accessibilityLabel = label
     }
 
     private func pick(_ ratio: CropRatio) {
@@ -331,7 +351,16 @@ extension MediaCropToolsView {
     /// Internal for tests: the paths the two buttons take.
     func debugTapQuarterTurn() { onQuarterTurn?() }
     func debugTapFlip() { onFlip?() }
+    /// Internal for tests: the fill/fit glyph — the path a tap takes, and what
+    /// it is offering.
+    func debugTapFit() { onFit?() }
+    var debugFitLabel: String? { fitGlyph.accessibilityLabel }
     /// Internal for tests: the glyphs these buttons actually resolved to. A name
     /// that does not exist in the running SDK gives nil and draws nothing.
-    var debugGlyphs: [UIImage?] { [quarterTurn.configuration?.image, flip.configuration?.image] }
+    /// ⚠️ **WHAT STANDS IN THE ROW, NOT WHAT WAS BUILT.** This used to list the
+    /// buttons by name, so a button left out of the stack — present, configured
+    /// and invisible — read as present.
+    var debugGlyphs: [UIImage?] {
+        turns.arrangedSubviews.map { ($0 as? UIButton)?.configuration?.image }
+    }
 }

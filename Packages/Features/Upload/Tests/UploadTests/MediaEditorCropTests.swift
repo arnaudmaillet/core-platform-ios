@@ -287,30 +287,27 @@ struct MediaEditorCropTests {
                 "and the chevron still leads them — a custom leading item replaces it silently")
     }
 
-    /// ⚠️ **THE TRAILING SIDE IS "Next" ALONE WHILE CROPPING, AND FILL/FIT COMES
-    /// BACK AFTER.** Laying a picture into a frame is a decision about a picture
-    /// the author is still choosing; leaving the glyph there offers an act with
-    /// nothing to act on. Losing it permanently would be the real defect.
-    ///
-    /// ⚠️ **THE UNDO ARROW NO LONGER GOES WITH THE MODE, AND THAT IS A CHANGE
-    /// RATHER THAN A REGRESSION.** It used to belong to crop alone; it is now one
-    /// arrow whose MEANING is whichever mode is open — the rectangle and the
-    /// angle in crop, the cut in the timeline. Two arrows a few points apart,
-    /// each undoing a different thing, with nothing on screen to say which, is
-    /// the alternative. So what this asserts is that fill/fit steps aside and
-    /// comes back, and that the leading side keeps its two items throughout.
-    @Test func fillAndFitStepAsideForTheModeAndReturnWithIt() async throws {
+    /// ⚠️ **FILL AND FIT LIVE WITH THE CROP TOOLS, NOT IN THE HEADER.** They
+    /// used to stand in the bar and step aside for this mode, because while the
+    /// author is deciding what the picture even IS the control has nothing to
+    /// act on. Asked for the other way round: put it beside the rotate and
+    /// mirror glyphs, which is exactly the moment it does mean something.
+    @Test func fillAndFitStandWithTheTurnAndTheMirror() async throws {
         let screen = open(Self.items(1))
-        #expect(screen.editor.debugFitActionName != nil, "guard: the glyph is there to begin with")
+        #expect(screen.editor.navigationItem.rightBarButtonItems?.count == 1,
+                "the header still carries it")
 
         choose(Mode.crop, on: screen)
-        let whileCropping = screen.editor.debugFitActionName
 
-        choose(Mode.filters, on: screen)
+        let glyphs = screen.editor.debugCropTools.debugGlyphs
+        #expect(glyphs.count == 3, "the turn, the mirror and the fill/fit glyph")
+        #expect(glyphs.allSatisfy { $0 != nil }, "a symbol that does not resolve draws an empty button")
+        #expect(screen.editor.debugFitActionName == "Fit the picture", "guard: it offers the other state")
 
-        #expect(whileCropping == nil, "fill/fit stayed: \(String(describing: whileCropping))")
-        #expect(screen.editor.debugFitActionName != nil,
-                "and fill/fit is back: \(String(describing: screen.editor.debugFitActionName))")
+        screen.editor.debugCropTools.debugTapFit()
+
+        #expect(screen.editor.debugFit(for: "item-0") == .fit)
+        #expect(screen.editor.debugFitActionName == "Fill the screen", "the glyph did not turn round")
         #expect(screen.editor.debugLeadingBarItems.count == 2,
                 "the leading side is the draft and the undo arrow")
     }
