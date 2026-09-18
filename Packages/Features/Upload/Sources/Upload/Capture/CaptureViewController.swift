@@ -883,7 +883,15 @@ final class CaptureViewController: UIViewController {
         }
     }
 
+    /// ⚠️ **HANDED OVER ONLY WHILE THE CAMERA IS STILL WHAT IS SHOWN.** If
+    /// anything was pushed while the photograph was being written, the author
+    /// has gone somewhere else; the editor would land on top of it. The
+    /// photograph is dropped, file and all.
     private func photographed(_ photo: CapturedPhoto) {
+        guard navigationController?.topViewController === self else {
+            folder.discard(photo.url)
+            return
+        }
         let item = captures.register(photo.url, kind: .photo)
         let edits = handOffEdits(uprightSize: photo.uprightSize)
         openEditor([item], edits: [item.id: edits])
@@ -1043,7 +1051,8 @@ final class CaptureViewController: UIViewController {
                 let size = await CapturedMediaLibrary.uprightVideoSize(at: url) ?? .zero
                 // A take that changed while it was being joined is not the
                 // take on screen; nothing is handed over for it.
-                guard take.clips.map(\.url) == clips else { return }
+                guard take.clips.map(\.url) == clips,
+                      navigationController?.topViewController === self else { return }
                 let item = captures.register(url, kind: .video(duration: duration))
                 openEditor([item], edits: [item.id: handOffEdits(uprightSize: size)])
             } catch {
@@ -1072,7 +1081,7 @@ final class CaptureViewController: UIViewController {
     private func refreshTakeControls(animated: Bool) {
         let recordingOrCounting = isRecording || countdownTask != nil
         let hasClips = !take.isEmpty
-        setShown(libraryButton, !hasClips && !recordingOrCounting && makeLibraryPicker != nil, animated: animated, pops: true)
+        setShown(libraryButton, !hasClips && !recordingOrCounting && !isBusy && makeLibraryPicker != nil, animated: animated, pops: true)
         // Undo and Next arrive one after the other, as a band's row does.
         setShown(undoButton, hasClips && !recordingOrCounting, animated: animated, pops: true)
         setShown(nextButton, hasClips && !recordingOrCounting, animated: animated, pops: true, delay: BandPop.staggerStep)
@@ -1235,8 +1244,11 @@ final class CaptureViewController: UIViewController {
 
     private(set) var hasLibraryThumbnail = false
 
+    /// ⚠️ **NOT WHILE A CAPTURE IS IN FLIGHT.** A photograph still being
+    /// written when the shortcut was tapped finished on top of the picker, and
+    /// pushed the capture's editor over it.
     private func openLibrary() {
-        guard let picker = makeLibraryPicker?() else { return }
+        guard !isBusy, !isRecording, countdownTask == nil, let picker = makeLibraryPicker?() else { return }
         navigationController?.pushViewController(picker, animated: true)
     }
 
