@@ -118,14 +118,31 @@ struct CaptureEngineTests {
 
     /// ⚠️ With no camera connected, a recording fails without starting the
     /// output — whose `startRecording` would raise.
+    ///
+    /// ⚠️ **THE START IS CHECKED BEFORE ANYTHING WAITS ON THE PROMISE.** A
+    /// recording that did start never ends here — this output writes nothing
+    /// and nobody stops it — so awaiting the promise first hung the suite
+    /// instead of failing this test (found by breaking the guard).
     @Test func aRecordingWithNoCameraConnectedFailsWithoutStarting() async throws {
         let recorder = NotYetWriting()
         recorder.canRecord = false
         let engine = AVCaptureEngine(feed: CaptureFrameFeed(), recorder: recorder)
-        await #expect(throws: CaptureSourceError.recordingFailed) {
-            _ = try await engine.record(to: Self.url, torch: false, limit: 180).value
+        let promise = engine.record(to: Self.url, torch: false, limit: 180)
+        let outcome = Outcome()
+        Task { @MainActor in
+            do { _ = try await promise.value } catch { outcome.error = error }
+            outcome.settled = true
         }
-        #expect(recorder.starts == 0)
+        try await settle { outcome.settled || recorder.starts > 0 }
+        try #require(recorder.starts == 0, "the output was started with no camera connected")
+        #expect(outcome.error as? CaptureSourceError == .recordingFailed)
+    }
+
+    /// How a promise awaited on the side ended.
+    @MainActor
+    private final class Outcome {
+        var settled = false
+        var error: (any Error)?
     }
 
     /// ⚠️ A camera that recorded a clip is freed with its screen: the
