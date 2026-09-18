@@ -138,7 +138,10 @@ final class AVCaptureSource: CaptureSource {
         }
     }
 
+    /// The preview's angle, on both of the preview's paths: the plain layer,
+    /// and the video data output the drawn preview and the filter cards read.
     private func applyPreviewAngle(_ angle: CGFloat) {
+        engine.setPreviewAngle(angle)
         guard let connection = previewView.previewLayer.connection,
               connection.isVideoRotationAngleSupported(angle) else { return }
         connection.videoRotationAngle = angle
@@ -224,6 +227,10 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
     private var photoDelegates: [Int64: PhotoDelegate] = [:]
     private var recordingDelegate: RecordingDelegate?
     private var currentPosition: CapturePosition = .back
+    /// The angle the PREVIEW is drawn at, handed down from the main actor's
+    /// coordinator — see `setPreviewAngle`. 90 until it reports: a phone held
+    /// upright, which is how a sheet is opened.
+    private var previewAngle: CGFloat = 90
     private let wantsAudio = Mutex(false)
 
     var includesAudio: Bool {
@@ -333,13 +340,22 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
     }
 
     /// ⚠️ THE ROTATION IS THE COORDINATOR'S, READ AT EACH CAPTURE — so a photo
-    /// taken with the phone turned is level, and the preview follows the
-    /// interface. Mirroring follows what the author SAW: a front-camera capture
-    /// keeps the reflection the preview showed, the social cameras' convention.
+    /// taken with the phone turned is level. Mirroring follows what the author
+    /// SAW: a front-camera capture keeps the reflection the preview showed, the
+    /// social cameras' convention.
+    ///
+    /// ⚠️ **TWO ANGLES, AND THE DATA OUTPUT TAKES THE PREVIEW'S.** Its frames
+    /// ARE a preview — the drawn look and the filter cards. Given the capture
+    /// angle, which follows gravity rather than the interface, they turned a
+    /// quarter and were cropped by the aspect fill whenever the phone was held
+    /// sideways over a portrait screen.
     private func applyConnections() {
-        let angle = rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
+        let captureAngle = rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
         let mirrored = currentPosition == .front
-        for output in [photoOutput, movieOutput, dataOutput] as [AVCaptureOutput] {
+        let outputs: [(AVCaptureOutput, CGFloat)] = [
+            (photoOutput, captureAngle), (movieOutput, captureAngle), (dataOutput, previewAngle)
+        ]
+        for (output, angle) in outputs {
             guard let connection = output.connection(with: .video) else { continue }
             if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
             if connection.isVideoMirroringSupported {
@@ -422,6 +438,16 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
             }
             device.isSubjectAreaChangeMonitoringEnabled = true
             device.unlockForConfiguration()
+        }
+    }
+
+    /// The angle the preview is drawn at, from the main actor's coordinator.
+    func setPreviewAngle(_ angle: CGFloat) {
+        queue.async { [self] in
+            previewAngle = angle
+            guard let connection = dataOutput.connection(with: .video),
+                  connection.isVideoRotationAngleSupported(angle) else { return }
+            connection.videoRotationAngle = angle
         }
     }
 
