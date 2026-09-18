@@ -70,6 +70,9 @@ final class CaptureViewController: UIViewController {
 
     private let previewContainer = UIView()
     private let liveView = CaptureLiveView()
+    /// The pictures' host: what a flip turns, rounded like the zone on all
+    /// four corners — see `flip()` and `matchTheSheetsCorners`.
+    private let flipHost = UIView()
     private let letterboxTop = UIView()
     private let letterboxBottom = UIView()
     private let gridView = CaptureGridView()
@@ -404,8 +407,11 @@ final class CaptureViewController: UIViewController {
             wide
         ])
 
-        if let plain = source.plainPreview { plain.pin(to: previewContainer) }
-        liveView.pin(to: previewContainer)
+        // The pictures sit in a host of their own — what a flip turns.
+        flipHost.backgroundColor = .black
+        flipHost.pin(to: previewContainer)
+        if let plain = source.plainPreview { plain.pin(to: flipHost) }
+        liveView.pin(to: flipHost)
         // The feed's consumer is decided by `applyFrameDelivery`.
 
         for bar in [letterboxTop, letterboxBottom] {
@@ -473,6 +479,13 @@ final class CaptureViewController: UIViewController {
             bottomLeftRadius: .fixed(radius),
             bottomRightRadius: .fixed(radius)
         )
+        // ⚠️ **WHAT A FLIP TURNS WEARS THE SAME CORNERS, ALL FOUR.** A flip
+        // turns the pictures' host in 3D (`flip()`), away from the sheet's
+        // edge and inside the zone: with square corners of its own, square
+        // corners were what the author saw turning. At rest they coincide
+        // with the zone's and cannot be seen.
+        flipHost.cornerConfiguration = .uniformCorners(radius: .fixed(radius))
+        flipHost.clipsToBounds = true
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-camera-log-frames") {
             NSLog("[camera-corners] sheet radius %.2f", radius)
@@ -1554,6 +1567,64 @@ final class CaptureViewController: UIViewController {
         }
     }
 
+    /// The flip's turn: a quarter away and a quarter back, about the vertical
+    /// axis, in keyframes so every step is `turn(_:width:)` — never something
+    /// Core Animation interpolated between two of them.
+    private func turnThePictures() {
+        let width = flipHost.bounds.width
+        guard width > 0, !isTurning else { return }
+        isTurning = true
+        let steps = 8
+        func half(_ duration: TimeInterval, angle: @escaping (Double) -> CGFloat, then: @escaping () -> Void) {
+            UIView.animateKeyframes(withDuration: duration, delay: 0, options: [.allowUserInteraction, .calculationModeLinear]) {
+                for step in 1...steps {
+                    let progress = Double(step) / Double(steps)
+                    UIView.addKeyframe(withRelativeStartTime: progress - 1 / Double(steps), relativeDuration: 1 / Double(steps)) {
+                        self.flipHost.transform3D = Self.turn(angle(progress), width: width)
+                    }
+                }
+            } completion: { _ in then() }
+        }
+        // Away, easing in; back, easing out, from the other side.
+        half(0.2, angle: { .pi / 2 * $0 * $0 }) {
+            self.flipHost.transform3D = Self.turn(-.pi / 2, width: width)
+            half(0.22, angle: { -.pi / 2 * (1 - $0) * (1 - $0) }) {
+                self.flipHost.transform3D = CATransform3DIdentity
+                self.isTurning = false
+            }
+        }
+    }
+
+    private var isTurning = false
+
+    /// How far the eye is from the turning pictures, in points: the turn's
+    /// perspective.
+    static let turnDistance: CGFloat = 900
+
+    /// How much of the zone's height the turning pictures' nearer edge may
+    /// take at most.
+    static let turnMargin: CGFloat = 0.96
+
+    /// The pictures turned by `angle` about their vertical axis, seen with
+    /// perspective — and shrunk just enough to stay inside the zone.
+    ///
+    /// ⚠️ **SHRUNK, OR THE NEAR CORNERS ARE CUT SQUARE — MEASURED.** A turn in
+    /// perspective makes the nearer edge TALLER than the zone (by a quarter
+    /// at 60° here), and the zone clips it: the recording showed the far
+    /// corners rounded and the near ones cut flat by the zone's top and
+    /// bottom. The scale is the one that holds the near edge at
+    /// `turnMargin` of the zone's height, whatever the angle.
+    static func turn(_ angle: CGFloat, width: CGFloat) -> CATransform3D {
+        var transform = CATransform3DIdentity
+        transform.m34 = -1 / turnDistance
+        // The near edge comes forward by half the width times sin(angle),
+        // which enlarges it by 1 / (1 − scale · lift).
+        let lift = width / 2 * abs(sin(angle)) / turnDistance
+        let scale = turnMargin / (1 + turnMargin * lift)
+        transform = CATransform3DRotate(transform, angle, 0, 1, 0)
+        return CATransform3DScale(transform, scale, scale, 1)
+    }
+
     @objc private func doubleTapped(_ tap: UITapGestureRecognizer) {
         flip()
     }
@@ -1561,13 +1632,17 @@ final class CaptureViewController: UIViewController {
     /// ⚠️ **A FLIP WHILE RECORDING IS REFUSED**, not queued: the movie output
     /// cannot change inputs under a running file, and a clip is where a flip
     /// belongs anyway — between two of them.
+    ///
+    /// ⚠️ **TURNED BY HAND, NOT WITH `UIView.transition(.transitionFlipFromLeft)`
+    /// — MEASURED.** That transition was given a view with rounded, clipping
+    /// corners, and a recording of it still showed a card with SQUARE corners
+    /// turning: the transition draws the view without its corner mask. The
+    /// pictures' host is turned instead — a quarter away, then a quarter back
+    /// in with the other camera — and its own mask turns with it.
     private func flip() {
         guard !isRecording, !isBusy else { return }
         UISelectionFeedbackGenerator().selectionChanged()
-        let snapshot = liveView.isHidden ? source.plainPreview : liveView
-        if !reducesMotion(), let snapshot {
-            UIView.transition(with: snapshot, duration: 0.4, options: [.transitionFlipFromLeft, .allowUserInteraction]) {}
-        }
+        if !reducesMotion() { turnThePictures() }
         Task { [weak self] in
             guard let self else { return }
             await source.flip()
@@ -1723,6 +1798,8 @@ final class CaptureViewController: UIViewController {
     var debugFilterRow: MediaFilterRowView { filterRow }
     var debugLensChips: CaptureLensChipsView { lensChips }
     var debugLiveView: CaptureLiveView { liveView }
+    /// The view a flip turns.
+    var debugFlippingView: UIView? { flipHost }
     var debugGridIsShowing: Bool { !gridView.isHidden && gridView.alpha > 0 }
     var debugUndoIsShowing: Bool { !undoButton.isHidden && undoButton.isUserInteractionEnabled }
     var debugUndoIsEnabled: Bool { undoButton.isEnabled }

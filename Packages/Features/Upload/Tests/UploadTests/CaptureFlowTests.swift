@@ -1217,4 +1217,45 @@ struct CaptureFlowTests {
         #expect(abs(corners.top - 44) < 0.5, "the container's radius, read through the concentric top: \(corners)")
         #expect(abs(corners.bottom - corners.top) < 0.5, "and the foot wears it: \(corners)")
     }
+
+    /// ⚠️ What a flip turns — the picture itself — wears the zone's corners,
+    /// all four, and clips to them: turned in 3D away from the sheet's edge,
+    /// square corners were what the author saw.
+    @Test func whatAFlipTurnsWearsTheZonesCorners() async throws {
+        let screen = try await open()
+        screen.navigation.view.cornerConfiguration = .uniformCorners(radius: .fixed(44))
+        try await settle {
+            screen.window.setNeedsLayout()
+            screen.window.layoutIfNeeded()
+            screen.camera.view.setNeedsLayout()
+            screen.camera.view.layoutIfNeeded()
+            return screen.camera.sheetRadius > CaptureViewController.cornerFloor
+        }
+        let picture = try #require(screen.camera.debugFlippingView)
+        #expect(picture.clipsToBounds)
+        #expect(screen.camera.debugLiveView.isDescendant(of: picture), "the picture is inside what turns")
+        for corner: UIRectCorner in [.topLeft, .topRight, .bottomLeft, .bottomRight] {
+            #expect(abs(picture.effectiveRadius(corner: corner) - screen.camera.sheetRadius) < 0.5, "corner \(corner.rawValue)")
+        }
+    }
+
+    /// ⚠️ At every angle of the turn, all four corners of the turning
+    /// pictures stay inside the zone — none is cut square by its edge — on
+    /// the 18 Pro's zone and the SE's.
+    @Test func theTurnNeverOutgrowsTheZone() {
+        for size in [CGSize(width: 402, height: 700), CGSize(width: 375, height: 560)] {
+            for degrees in stride(from: -90.0, through: 90.0, by: 5.0) {
+                let turn = CaptureViewController.turn(degrees * .pi / 180, width: size.width)
+                for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                    let px = x * size.width / 2, py = y * size.height / 2
+                    // A point through the matrix, row-vector convention, then divided by w.
+                    let w = px * turn.m14 + py * turn.m24 + turn.m44
+                    let sx = (px * turn.m11 + py * turn.m21 + turn.m41) / w
+                    let sy = (px * turn.m12 + py * turn.m22 + turn.m42) / w
+                    #expect(abs(sx) <= size.width / 2 + 0.01 && abs(sy) <= size.height / 2 + 0.01,
+                            "\(size) at \(degrees)°: corner (\(x), \(y)) lands at (\(sx), \(sy))")
+                }
+            }
+        }
+    }
 }
