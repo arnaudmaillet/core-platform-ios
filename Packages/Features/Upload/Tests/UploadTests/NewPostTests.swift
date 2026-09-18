@@ -1398,6 +1398,65 @@ struct NewPostTests {
         #expect(alert?.title == "Posted", "said \(String(describing: alert?.title))")
     }
 
+    /// ⚠️ **THE FORM FREEZES WHILE THE POST GOES OUT** — a switch flipped
+    /// during a clip's export changed a post already on its way.
+    @Test func theFormFreezesWhileThePostGoesOut() {
+        let screen = open(Self.items(1))
+        #expect(screen.post.debugFormIsLive, "guard: the form starts live")
+
+        screen.post.debugTapPost()
+
+        #expect(!screen.post.debugFormIsLive, "the switches still take touches while the post goes out")
+    }
+
+    /// ⚠️ **A REFUSAL THAT LANDS DURING A POST IS NOT PRESENTED OVER IT.** The
+    /// switch goes back off, which says it; an alert standing there took the
+    /// sheet's own dismissal for itself.
+    @Test func aRefusalThatLandsDuringAPostIsNotPresentedOverIt() async throws {
+        let screen = open(Self.items(1), photoLibrary: StubPhotoLibrary(grants: false))
+
+        screen.post.debugFlip(saveToPhotos: true)
+        screen.post.debugTapPost()
+        try await settle(until: { screen.handed.entry != nil && screen.photoLibrary.asked == 1 })
+        try await breathe()
+
+        #expect(screen.post.debugSavesToPhotos == false, "the switch stayed on")
+        #expect(!(screen.post.presentedViewController is UIAlertController),
+                "an alert stands over a post on its way out")
+    }
+
+    /// ⚠️ **THE FLOW ENDS WITH THE WHOLE SHEET, WHATEVER STANDS OVER THE
+    /// SCREEN.** `dismiss` asked of a screen that is presenting an alert
+    /// dismisses the ALERT: the sheet stayed up over a live post, its Post
+    /// button dead for good. So the sheet's PRESENTER is the one asked.
+    ///
+    /// ⚠️ **THE DECISION IS WHAT IS ASSERTED, NOT UIKit's ANSWER TO IT.** In the
+    /// test host neither the alert over the screen nor the sheet's animated
+    /// dismissal completes (measured: `presentedViewController` stayed nil after
+    /// presenting, and the sheet was still up thirty seconds after the call),
+    /// so what can be pinned is who was asked.
+    @Test func aPublishedPostAsksTheSheetsPresenterToEndTheFlow() async throws {
+        let handed = Handed()
+        let post = NewPostViewController(
+            items: Self.items(1), library: StubLibrary(), composer: RecordingComposer(), preview: StubPreview(),
+            photoLibrary: StubPhotoLibrary(), reducesMotion: { true }
+        ) { handed.entry = $0 }
+        let sheet = UINavigationController(rootViewController: post)
+        let root = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = root
+        window.isHidden = false
+        root.present(sheet, animated: false)
+        try await settle(until: { root.presentedViewController === sheet })
+        try #require(post.presentingViewController === root, "guard: the screen sits in a presented sheet")
+
+        post.debugTapPost()
+        try await settle(until: { handed.entry != nil && post.debugFlowEndedBy != nil })
+
+        #expect(post.debugFlowEndedBy === root,
+                "the flow was ended by \(String(describing: post.debugFlowEndedBy)), not the sheet's presenter")
+    }
+
     /// Six switches in one card is a wall. Grouped, each card asks one question
     /// — and the engagement four are the group the author actually thinks about
     /// together.

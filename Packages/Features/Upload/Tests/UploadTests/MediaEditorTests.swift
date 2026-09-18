@@ -399,6 +399,10 @@ struct MediaEditorTests {
         choose(Band.filters, on: screen)
         try #require(screen.editor.debugPopOuts == outs + 1, "guard: nothing departed — motion is reduced")
         choose("Effects", on: screen)
+        // ⚠️ **AND IT STOPS LEAVING AT ONCE** — its departure had already
+        // written a faded, shrunk model, and at alpha 0 it took no tap.
+        #expect(effects.alpha == 1 && effects.transform == .identity,
+                "the reopened tenant is still leaving: alpha \(effects.alpha), \(effects.transform)")
         // ⚠️ **UNTIL EVERY CURVE ON IT HAS ENDED, NOT A FIXED BREATH.** The
         // departure's completion is what used to pull the tenant out, and a
         // simulator with slow animations on runs the 0.17s for ten times as

@@ -170,6 +170,9 @@ final class NewPostViewController: UIViewController {
 
     #if DEBUG
     private var hasRunTheDebugScript = false
+    /// Internal for tests: who was asked to end the flow — the sheet's
+    /// presenter, never this screen.
+    private(set) weak var debugFlowEndedBy: UIViewController?
     #endif
 
     private var postTitle = ""
@@ -1142,6 +1145,12 @@ final class NewPostViewController: UIViewController {
         guard !isPublishing else { return }
         isPublishing = true
         postItem.isEnabled = false
+        // ⚠️ **THE FORM FREEZES WHILE THE POST GOES OUT.** A clip's export and
+        // upload take seconds, and a switch flipped meanwhile — Save to Photos
+        // above all, whose refusal presents an alert — changed a post that was
+        // already on its way, and could leave an alert standing where the
+        // sheet's own dismissal would land.
+        if isViewLoaded { list.isUserInteractionEnabled = false }
         // ⚠️ **THE COVER STOPS BEFORE THE EXPORT STARTS.** Publishing a clip
         // builds an `AVAssetExportSession` over the very file the strip is
         // playing; leaving a composition decoding beside it buys the author
@@ -1250,14 +1259,14 @@ final class NewPostViewController: UIViewController {
                 // is tried once the post exists, and a failure is said before
                 // the sheet goes rather than swallowed with it.
                 if settings.savesToPhotos, !(await keepACopy(of: media, published: entry)) {
-                    present(Self.copyFailureAlert { [weak self] in self?.dismiss(animated: true) }, animated: true)
+                    present(Self.copyFailureAlert { [weak self] in self?.endTheFlow() }, animated: true)
                     return
                 }
-                // The flow ends here: the whole sheet goes, not just this screen.
-                dismiss(animated: true)
+                endTheFlow()
             } catch {
                 isPublishing = false
                 postItem.isEnabled = true
+                if isViewLoaded { list.isUserInteractionEnabled = true }
                 present(Self.failureAlert(error), animated: true)
             }
         }
@@ -1292,8 +1301,25 @@ final class NewPostViewController: UIViewController {
             settings.savesToPhotos = false
             draft.settings = settings
             reconfigure([.saveToPhotos])
+            // ⚠️ NOT OVER A POST ON ITS WAY OUT: the sheet is about to go, and
+            // the switch going back off already says it.
+            guard !isPublishing else { return }
             present(Self.accessRefusedAlert(), animated: true)
         }
+    }
+
+    /// The flow ends: the whole sheet goes, not just this screen.
+    ///
+    /// ⚠️ **ASKED OF THE SHEET'S PRESENTER, NOT OF THIS SCREEN.** `dismiss` on
+    /// a screen that is itself presenting something — an alert — dismisses
+    /// THAT, and the sheet stayed up over a post that was already live, with
+    /// its Post button dead for good.
+    private func endTheFlow() {
+        let presenter = presentingViewController
+        presenter?.dismiss(animated: true)
+        #if DEBUG
+        debugFlowEndedBy = presenter
+        #endif
     }
 
     /// Adds what was just published to the library. False when nothing, or
@@ -1446,5 +1472,7 @@ extension NewPostViewController {
     func debugFlip(saveToPhotos isOn: Bool) { setToggle(isOn, for: .saveToPhotos) }
     /// Internal for tests: what the switch says.
     var debugSavesToPhotos: Bool { settings.savesToPhotos }
+    /// Internal for tests: whether the form takes touches.
+    var debugFormIsLive: Bool { list.isUserInteractionEnabled }
 }
 #endif

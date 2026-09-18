@@ -3840,6 +3840,14 @@ extension MediaEditorViewController {
         // animated without lying about the band.
         let departing = animated && band.content !== accessory ? band.release() : nil
         if let accessory {
+            // ⚠️ **A TENANT TAKEN BACK MID-DEPARTURE STOPS LEAVING.** Its
+            // departure already wrote alpha 0 and the collapsed transform to
+            // the model, so shown again it went on fading and shrinking — and,
+            // at alpha 0, took no tap — until that curve ran out. The camera's
+            // option rows cut it short the same way.
+            accessory.layer.removeAllAnimations()
+            accessory.alpha = 1
+            accessory.transform = .identity
             band.show(accessory)
             backdropFromChrome.isActive = false
             backdropFromBand.isActive = true
