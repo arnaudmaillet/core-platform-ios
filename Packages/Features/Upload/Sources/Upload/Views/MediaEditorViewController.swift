@@ -3273,10 +3273,14 @@ final class MediaEditorViewController: UIViewController {
         // must now play the cut one. Unbinding first is what makes the reload
         // happen at all — `playSettledPage` returns early for a page that is
         // already the playing one.
+        // ⚠️ **THE BOX'S CLOCK, READ BEFORE THE STOP THAT FORGETS IT** — so the
+        // canvas takes the film back at the moment the author left it, not at
+        // its first frame. See `continuing`.
+        let carried = playheadOfTheFilmPlayingNow()
         stopPreview()
         // ⚠️ **NOT LEFT TO A SETTLE THAT MAY NEVER COME.** Nothing scrolls on
         // the way out, so nothing else would start it.
-        if resuming { playSettledPage() }
+        if resuming { playSettledPage(from: carried) }
     }
 
     /// The reverse of `settleIntoCrop`: the frame lets go and the picture opens
@@ -3493,7 +3497,7 @@ private extension MediaEditorViewController {
     /// and takes the gestures with it; a clip still running underneath would be
     /// moving pixels nobody is looking at, behind a still the author IS looking
     /// at.
-    func playSettledPage() {
+    func playSettledPage(from carried: Double? = nil) {
         // The crop surface holds the clip while its box is being aimed — see
         // `playInsideTheCropBox`.
         guard !isCropping else { return }
@@ -3527,7 +3531,9 @@ private extension MediaEditorViewController {
         // open; the funnel re-asks everything after its awaits, since a read can
         // take a moment and the author may have swiped on while it did.
         previewSubject = nil
-        loadPreview { _, _ in VideoLoadLanding(seconds: 0) }
+        loadPreview { timeline, fileSeconds in
+            VideoLoadLanding(seconds: Self.continuing(carried, in: timeline, fileSeconds: fileSeconds))
+        }
     }
 
     /// Unbinds whatever is playing and puts the page back to its poster.
@@ -3563,13 +3569,24 @@ private extension MediaEditorViewController {
     /// its own rather than the canvas's.
     private func playInsideTheCropBox(for id: String) {
         guard itemsByID[id]?.isVideo == true else { return }
+        // ⚠️ **READ BEFORE THE STOP, BECAUSE THE STOP IS WHAT FORGETS IT.**
+        let carried = playingID == id ? playheadOfTheFilmPlayingNow() : nil
         stopPreview()
         playingID = id
         boundSurface = cropSurface.videoSurface
         cropSurface.showsVideo(true)
         previewSubject = nil
-        loadPreview { _, _ in VideoLoadLanding(seconds: 0) }
+        loadPreview { timeline, fileSeconds in
+            VideoLoadLanding(seconds: Self.continuing(carried, in: timeline, fileSeconds: fileSeconds))
+        }
     }
+
+    /// Where the film playing now has got to, in played seconds.
+    private func playheadOfTheFilmPlayingNow() -> Double? {
+        guard let surface = boundSurface else { return nil }
+        return preview.playheadSeconds(in: surface)
+    }
+
 }
 
 // MARK: - The canvas reports its paging
@@ -4036,5 +4053,33 @@ private final class DisplayLinkProxy: NSObject {
             return
         }
         owner.followPlayhead()
+    }
+}
+
+// MARK: - Carrying a film between surfaces
+
+extension MediaEditorViewController {
+    /// The moment a film moving from one surface to another lands on.
+    ///
+    /// ⚠️ **THE SAME FILM, CARRIED ON — NOT A NEW ONE STARTED.** Asked for as
+    /// "la vidéo devrait être la continuité / le même player": opening crop on
+    /// a clip started it again from its first frame, which for the clip the
+    /// author recorded is a black title card — so the box they were aiming at
+    /// went black. The canvas and the box play different ITEMS (the box's is
+    /// uncut, see `playInsideTheCropBox`), so continuity is the second item
+    /// landing where the first had got to.
+    ///
+    /// ⚠️ **AND THE SECONDS LINE UP, WHICH IS WHAT MAKES THAT HONEST.** The two
+    /// plans differ only in the crop, and a crop changes what is framed, never
+    /// when: a played second of the one is the same moment of the other. Held
+    /// inside the arrangement, so a clock read a hair past the end lands on the
+    /// start rather than beyond the film.
+    nonisolated static func continuing(
+        _ seconds: Double?, in timeline: MediaTimeline, fileSeconds: Double
+    ) -> Double {
+        guard let seconds, seconds.isFinite, seconds > 0 else { return 0 }
+        let played = MediaTimelining.playedSeconds(of: timeline, withinSource: fileSeconds)
+        guard played > 0, seconds < played else { return 0 }
+        return seconds
     }
 }

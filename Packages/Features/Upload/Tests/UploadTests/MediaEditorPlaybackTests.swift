@@ -122,9 +122,15 @@ struct MediaEditorPlaybackTests {
             return Dictionary(uniqueKeysWithValues: seconds.map { ($0, swatch) })
         }
 
-        /// Playback's subject is binding and pausing, not the playhead — the
-        /// track's suite is where scrubbing is asked about.
-        func playheadSeconds(in surface: VideoRenderView) -> Double? { nil }
+        /// Where the film has "got to", as the test says — nil by default, which
+        /// is a player that cannot tell.
+        ///
+        /// ⚠️ **SETTABLE, BECAUSE CONTINUITY IS ASKED OF IT NOW.** Opening crop
+        /// carries the film on from the moment it was at, and leaving carries it
+        /// back; a stub that could only ever answer nil would let a screen that
+        /// started every surface at zero pass every test.
+        var playhead: Double?
+        func playheadSeconds(in surface: VideoRenderView) -> Double? { playhead }
         func advancingRate(in surface: VideoRenderView) -> Double { 0 }
         /// Every live look, mute and pair of levels the screen asked for, in
         /// order — recorded, because a stub that swallowed them could not say
@@ -255,6 +261,53 @@ struct MediaEditorPlaybackTests {
     }
 
     // MARK: - Who stops
+
+    /// ⚠️ **THE BOX CARRIES THE FILM ON, AND SO DOES THE CANVAS WHEN IT TAKES IT
+    /// BACK.** Asked for as "la vidéo devrait être la continuité / le même
+    /// player": opening crop started the clip again from its first frame, which
+    /// for the clip the author recorded is a black title card — the box they
+    /// were aiming at went black. The two surfaces play different items (the
+    /// box's is uncut), so continuity is the second landing where the first got
+    /// to, in both directions.
+    @Test func croppingCarriesTheFilmOnAndLeavingCarriesItBack() async throws {
+        let screen = open(Self.items(3, videosAt: [1]))
+        screen.editor.debugScrollToPage(1)
+        try await settle(until: { screen.preview.played.count == 1 })
+        try #require(screen.preview.landings.last?.seconds == 0, "guard: a fresh page starts at the top")
+
+        screen.preview.playhead = 3.25
+        screen.editor.debugCategoryBar.select(4) // Crop
+        screen.window.layoutIfNeeded()
+        try await settle(until: { screen.preview.played.count == 2 })
+        try #require(screen.preview.played.count == 2, "the box never loaded its film")
+
+        #expect(screen.preview.landings.last?.seconds == 3.25,
+                "the box started the film over: \(String(describing: screen.preview.landings.last))")
+
+        screen.preview.playhead = 5.5
+        screen.editor.debugCategoryBar.select(3) // Filters — leaves the crop
+        screen.window.layoutIfNeeded()
+        try await settle(until: { screen.preview.played.count == 3 })
+        try #require(screen.preview.played.count == 3, "the canvas never took the film back")
+
+        #expect(screen.preview.landings.last?.seconds == 5.5,
+                "the canvas started the film over: \(String(describing: screen.preview.landings.last))")
+    }
+
+    /// The moment a carried film lands on, as a rule — asked without a screen.
+    @Test func aCarriedMomentLandsInsideTheFilmOrAtItsStart() {
+        let whole = MediaTimeline.whole
+        #expect(MediaEditorViewController.continuing(3.2, in: whole, fileSeconds: 10) == 3.2)
+        #expect(MediaEditorViewController.continuing(nil, in: whole, fileSeconds: 10) == 0,
+                "a player that cannot tell lands at the top")
+        // ⚠️ **A CLOCK READ A HAIR PAST THE END IS THE TOP, NOT BEYOND THE
+        // FILM.** A looping item reports its duration at the very moment it
+        // wraps; landing there asks for a frame the item does not have.
+        #expect(MediaEditorViewController.continuing(10, in: whole, fileSeconds: 10) == 0)
+        #expect(MediaEditorViewController.continuing(12, in: whole, fileSeconds: 10) == 0)
+        #expect(MediaEditorViewController.continuing(-1, in: whole, fileSeconds: 10) == 0)
+        #expect(MediaEditorViewController.continuing(.nan, in: whole, fileSeconds: 10) == 0)
+    }
 
     /// ⚠️ **A CLIP IS AIMED AT WHILE IT PLAYS, AND THE FILM IN THE BOX IS
     /// UNCUT.** It used to stop on the way in and the author framed a poster
