@@ -118,6 +118,24 @@ struct CaptureFlowTests {
         let folder: CaptureFolder
     }
 
+    /// The screens earlier tests opened, closed before the next one opens.
+    ///
+    /// ⚠️ **A SHOWN WINDOW OUTLIVES ITS TEST.** Nothing hid them, so every
+    /// test's camera went on drawing thirty frames a second into its renderer
+    /// for the rest of the run — fifty cameras at once by the end of the
+    /// suite, on one simulator. The suite is serialized, so when a test opens
+    /// its screen the one before it is finished: its camera is stopped and its
+    /// window hidden here.
+    private static var opened: [Screen] = []
+
+    private static func closeOpened() {
+        for screen in opened {
+            screen.source.stop()
+            screen.window.isHidden = true
+        }
+        opened = []
+    }
+
     private func open(
         answer: CaptureAuthorization = .authorized(microphone: false),
         face: Face? = nil,
@@ -126,6 +144,7 @@ struct CaptureFlowTests {
         motion: Bool = false,
         size: CGSize = CGSize(width: 402, height: 874)
     ) async throws -> Screen {
+        Self.closeOpened()
         let source = SpySource()
         source.answer = answer
         source.plain = plainPreview
@@ -164,7 +183,9 @@ struct CaptureFlowTests {
         if case .authorized = answer {
             try await settle { source.feed.latestFrame != nil }
         }
-        return Screen(camera: camera, navigation: navigation, window: window, source: source, handed: handed, folder: folder)
+        let screen = Screen(camera: camera, navigation: navigation, window: window, source: source, handed: handed, folder: folder)
+        Self.opened.append(screen)
+        return screen
     }
 
     private func settle(for seconds: Double = 5, until condition: () -> Bool) async throws {
@@ -1056,9 +1077,12 @@ struct CaptureFlowTests {
         let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
         #expect(camera.navigationItem.leftBarButtonItems?.first?.title == "Cancel")
 
+        Self.closeOpened()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         window.rootViewController = navigation
         window.isHidden = false
+        // Hidden, the camera disappears and stops — see `opened`.
+        defer { window.isHidden = true }
         try await settle { camera.authorization != nil }
         try await settle { camera.debugLiveView.debugFrameStats.drawn > 0 }
         camera.debugTapShutter()
@@ -1089,9 +1113,12 @@ struct CaptureFlowTests {
         let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
         let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
         let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
+        Self.closeOpened()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         window.rootViewController = navigation
         window.isHidden = false
+        // Hidden, the camera disappears and stops — see `opened`.
+        defer { window.isHidden = true }
         try await settle { camera.authorization != nil }
         try await settle { camera.debugLiveView.debugFrameStats.drawn > 0 }
         camera.debugTapShutter()
