@@ -30,22 +30,32 @@ import Testing
 /// `VideoExporter.export` hands its session (`exportArrangement`, the same
 /// call), read the same way, over the window alone.
 ///
-/// ⚠️ **THE ENCODE IS PAID FOR ONCE, NOT PER KIND — AND THAT IS ENOUGH.** Every
-/// kind's pixels come out of one builder and one compositor; what an export
-/// adds is the session running that composition and an encoder squeezing its
-/// frames. So every kind is read from both compositions, a few kinds are
-/// exported for real and held to the frames of their own composition
-/// (`theExportedFileDrawsWhatItsCompositionSays`), and every kind is exported
-/// once for its length (`CrossTransitionTests.everyKindExportsAtThePlansLength`).
-/// Exporting every kind here, twice over, took two to four minutes of every
-/// core — and the real-time suites Swift Testing runs beside this one missed
-/// their deadlines in CI.
+/// ⚠️ **EVERY KIND ONCE, AND EACH ROUTE HELD TO IT — AND THAT IS ENOUGH.**
+/// Every kind's pixels come out of one builder and one compositor. What the
+/// canvas adds is kind-blind (upright always, a 1280px cap, a live look); what
+/// an export adds is the session running the composition and an encoder
+/// squeezing its frames. So every kind is read once, from the export's
+/// composition; one kind of each drawing is read from the canvas's too and held
+/// to it (`theCanvasDrawsWhatTheExportDraws`); three are exported for real and
+/// held to their own composition (`theExportedFileDrawsWhatItsCompositionSays`);
+/// and every kind is exported once for its length
+/// (`CrossTransitionTests.everyKindExportsAtThePlansLength`). Every kind
+/// exported and played here, twice over, saturated every core for minutes —
+/// and the real-time suites Swift Testing runs beside this one missed their
+/// deadlines in CI.
 ///
 /// ⚠️ **A REFERENCE FROM THE SAME ROUTE.** An export that composes nothing and
 /// one drawn by `VideoCompositor` differ by ~30 levels on every pixel of these
 /// clips (measured), so the plain cut is always composed too: a dip at a later
 /// cut, far from the window being read, keeps a compositor in the way.
-@MainActor
+///
+/// ⚠️ **NOT ON THE MAIN ACTOR — ONLY THE CANVAS'S CONTROLLER IS.** Measuring a
+/// window is arithmetic over thousands of points, and on the main actor it
+/// holds the thread `RehearsalLoopTests` wraps its loops on. Measured with the
+/// measuring there: two of four full runs had a looped playhead overshoot its
+/// range, by 0.04s and 0.27s; moved off it, eight of eight full runs passed —
+/// on a calmer machine, so a reason and not a proof. Only `canvasFrames` hops
+/// to the main actor, for the controller.
 @Suite(.serialized)
 struct TransitionVisibilityTests {
     typealias RGB = ColourClipWriter.RGB
@@ -161,17 +171,7 @@ struct TransitionVisibilityTests {
     ) async throws -> [Frame] {
         switch route {
         case .preview:
-            let controller = VideoPlaybackController(source: Passthrough(), poolSize: 1, capacity: 1)
-            let view = VideoRenderView()
-            view.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
-            defer { controller.stop(view) }
-            await controller.load(VideoExportPlan(sourceURL: file, segments: segments), in: view) {
-                VideoLoadLanding(seconds: 0)
-            }
-            let item = try #require(controller.debugItem(in: view), "the preview loaded nothing")
-            let composition = try #require(controller.debugComposition(in: view), "the preview composes nothing")
-            _ = controller.setPaused(true, in: view)
-            return try await read(item.asset, composition: composition, from: from, to: to)
+            return try await canvasFrames(segments, file: file, from: from, to: to)
         case .export:
             let arranged = try #require(
                 try await VideoExporter.exportArrangement(
@@ -182,6 +182,25 @@ struct TransitionVisibilityTests {
             let composition = try #require(arranged.videoComposition, "the export draws nothing")
             return try await read(arranged.asset, composition: composition, from: from, to: to)
         }
+    }
+
+    /// Every frame the canvas's composition draws — the controller is the main
+    /// actor's; the reading is not.
+    @MainActor
+    private static func canvasFrames(
+        _ segments: [VideoExportSegment], file: URL, from: Double, to: Double
+    ) async throws -> [Frame] {
+        let controller = VideoPlaybackController(source: Passthrough(), poolSize: 1, capacity: 1)
+        let view = VideoRenderView()
+        view.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
+        defer { controller.stop(view) }
+        await controller.load(VideoExportPlan(sourceURL: file, segments: segments), in: view) {
+            VideoLoadLanding(seconds: 0)
+        }
+        let item = try #require(controller.debugItem(in: view), "the preview loaded nothing")
+        let composition = try #require(controller.debugComposition(in: view), "the preview composes nothing")
+        _ = controller.setPaused(true, in: view)
+        return try await read(item.asset, composition: composition, from: from, to: to)
     }
 
     /// Every frame of the FILE `VideoExporter` writes for `segments`, in
@@ -270,9 +289,10 @@ struct TransitionVisibilityTests {
     /// as the window goes on; a ripple's ring of light and shade crosses the
     /// picture as it turns; the flash and the scan add light neither picture
     /// has; the fold uncovers blue at the TOP while its pleats still hold red
-    /// at the bottom.
-    @Test(arguments: Route.allCases)
-    func everyKindDrawsWhatItsNameSays(route: Route) async throws {
+    /// at the bottom. Read from the export's composition; the canvas's is held
+    /// to it by `theCanvasDrawsWhatTheExportDraws`.
+    @Test func everyKindDrawsWhatItsNameSays() async throws {
+        let route = Route.export
         let file = try await ColourClipWriter.clip()
         let plain = try await Self.frames(Self.redThenBlue(nil), file: file, route: route, from: 0.5, to: 1.0)
         try #require(plain.count >= 14, "guard: the plain window has \(plain.count) frames")
@@ -351,6 +371,27 @@ struct TransitionVisibilityTests {
         }
     }
 
+    /// ⚠️ **THE CANVAS DRAWS WHAT THE EXPORT DRAWS.** The preview's composition
+    /// differs from the export's in three things only — it is always turned
+    /// upright, capped at 1280px, and reads its whole look from a live board —
+    /// and none of them depends on the kind. So every kind is read from the
+    /// export's composition, and one kind of each drawing — a dip on one lane,
+    /// a blend, a Core Image edge, the fold drawn here — is read from the
+    /// controller's own composition too and held to it, frame by frame. Every
+    /// kind through both, twice over, is what made this suite a minute long.
+    @Test func theCanvasDrawsWhatTheExportDraws() async throws {
+        let file = try await ColourClipWriter.clip()
+        for kind in [VideoTransitionKind.dipToBlack, .dissolve, .swipe, .accordion] {
+            let exported = try await Self.frames(Self.redThenBlue(kind), file: file, route: .export, from: 0.5, to: 1.0)
+            let canvas = try await Self.frames(Self.redThenBlue(kind), file: file, route: .preview, from: 0.5, to: 1.0)
+            try #require(canvas.count == exported.count && exported.count >= 14,
+                         "\(kind): \(canvas.count) frames on the canvas, \(exported.count) in the export")
+            let apart = zip(canvas, exported).map { Self.changed($0, from: $1, by: 24) }
+            #expect((apart.max() ?? 1) <= 0.02,
+                    "\(kind): the canvas is not the export: \(apart.map { String(format: "%.2f", $0) })")
+        }
+    }
+
     // MARK: - One shot, cut in two
 
     /// A split at 2s of the moving stripes: [1, 2) then [2, 3), so the cut is
@@ -383,8 +424,8 @@ struct TransitionVisibilityTests {
     /// picture. After: the closest single moment still misses 8% of the
     /// picture for the swirl (whose bands each match one moment or the other),
     /// 18–19% for the crumble and the swipe, and 23–50% for the rest.
-    @Test(arguments: Route.allCases)
-    func onASplitEveryTwoPictureKindDrawsMoreThanTheFilm(route: Route) async throws {
+    @Test func onASplitEveryTwoPictureKindDrawsMoreThanTheFilm() async throws {
+        let route = Route.export
         let file = try await StripeClipWriter.clip()
         let film = try await Self.frames(Self.split(nil), file: file, route: route, from: 0.25, to: 1.75)
         try #require(film.count >= 44, "guard: the plain film has \(film.count) frames")
@@ -432,8 +473,8 @@ struct TransitionVisibilityTests {
     /// replaced blended that green into every kind; held from the pieces,
     /// no green reaches the window at all. (The flash and the scan are left
     /// out: their own light is green.)
-    @Test(arguments: Route.allCases)
-    func aTransitionShowsOnlyFilmThePiecesKeep(route: Route) async throws {
+    @Test func aTransitionShowsOnlyFilmThePiecesKeep() async throws {
+        let route = Route.export
         let file = try await ColourClipWriter.clip()
         for kind in VideoTransitionKind.allCases where kind.needsBothPictures && kind != .flash && kind != .copyMachine {
             let drawn = try await Self.frames([

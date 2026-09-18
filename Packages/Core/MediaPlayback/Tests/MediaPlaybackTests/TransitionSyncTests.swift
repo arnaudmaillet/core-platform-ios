@@ -26,7 +26,9 @@ import Testing
 /// ⚠️ **A SPLIT, SO THE SOUND NEVER JUMPS.** [1, 3) then [3, 5): the cut is at
 /// 2s on the result's clock, and the sound is at second `t + 1` of the file at
 /// every moment `t` — which the test checks too, before it trusts it.
-@MainActor
+///
+/// ⚠️ **NOT ON THE MAIN ACTOR** — `TransitionVisibilityTests`' reason; only
+/// `canvas` hops there, for the controller.
 @Suite(.serialized)
 struct TransitionSyncTests {
     struct Cell: Sendable {
@@ -68,22 +70,7 @@ struct TransitionSyncTests {
         }
         switch source {
         case .preview:
-            let controller = VideoPlaybackController(
-                source: TransitionVisibilityTests.Passthrough(), poolSize: 1, capacity: 1
-            )
-            let view = VideoRenderView()
-            view.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
-            defer { controller.stop(view) }
-            await controller.load(VideoExportPlan(sourceURL: file, segments: segments), in: view) {
-                VideoLoadLanding(seconds: 0)
-            }
-            let item = try #require(controller.debugItem(in: view), "the preview loaded nothing")
-            let composition = try #require(controller.debugComposition(in: view), "the preview composes nothing")
-            _ = controller.setPaused(true, in: view)
-            let pictures = try await TransitionVisibilityTests.read(
-                item.asset, composition: composition, from: from, to: to, sample: read
-            )
-            return (pictures, try await SoundProbe.listen(to: item.asset, mix: item.audioMix))
+            return try await canvas(segments, file: file, from: from, to: to, read: read)
         case .export:
             let arranged = try #require(
                 try await VideoExporter.exportArrangement(
@@ -95,7 +82,7 @@ struct TransitionSyncTests {
             let pictures = try await TransitionVisibilityTests.read(
                 arranged.asset, composition: composition, from: from, to: to, sample: read
             )
-            return (pictures, try await exportSound(segments, file: file))
+            return (pictures, try await SoundProbe.listen(to: arranged.asset, mix: arranged.audioMix))
         case .file:
             let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
             defer { try? FileManager.default.removeItem(at: exported.fileURL) }
@@ -107,28 +94,39 @@ struct TransitionSyncTests {
         }
     }
 
-    /// The sound of the export's own arrangement and mix.
-    ///
-    /// ⚠️ **BUILT AGAIN, OFF THE MAIN ACTOR.** An arrangement is not `Sendable`,
-    /// and one whose composition the pictures were read through on this actor
-    /// cannot then be handed to a reader that runs off it. The same plan builds
-    /// the same arrangement; building it is cheap, only an encode is not.
-    nonisolated private static func exportSound(_ segments: [VideoExportSegment], file: URL) async throws -> SoundProbe {
-        let arranged = try await VideoExporter.exportArrangement(
-            of: AVURLAsset(url: file), for: VideoExportPlan(sourceURL: file, segments: segments)
+    /// The canvas's pictures and sound — the controller is the main actor's;
+    /// the reading is not.
+    @MainActor
+    private static func canvas(
+        _ segments: [VideoExportSegment], file: URL, from: Double, to: Double,
+        read: @escaping @Sendable (CVPixelBuffer, Double) -> Picture
+    ) async throws -> (pictures: [Picture], sound: SoundProbe) {
+        let controller = VideoPlaybackController(
+            source: TransitionVisibilityTests.Passthrough(), poolSize: 1, capacity: 1
         )
-        guard let arranged else { throw CocoaError(.fileReadUnknown) }
-        return try await SoundProbe.listen(to: arranged.asset, mix: arranged.audioMix)
+        let view = VideoRenderView()
+        view.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
+        defer { controller.stop(view) }
+        await controller.load(VideoExportPlan(sourceURL: file, segments: segments), in: view) {
+            VideoLoadLanding(seconds: 0)
+        }
+        let item = try #require(controller.debugItem(in: view), "the preview loaded nothing")
+        let composition = try #require(controller.debugComposition(in: view), "the preview composes nothing")
+        _ = controller.setPaused(true, in: view)
+        let pictures = try await TransitionVisibilityTests.read(
+            item.asset, composition: composition, from: from, to: to, sample: read
+        )
+        return (pictures, try await SoundProbe.listen(to: item.asset, mix: item.audioMix))
     }
 
     /// ⚠️ **WITHIN ONE FRAME, AT EVERY FRAME OF THE WINDOW.** Away from the cut
     /// the brighter cell must be the sound's moment; within a tenth of the
     /// window of the cut, where the two sides are nearly as bright, one of the
     /// two must be. The standard half second and the longest length, two
-    /// seconds — where the eased sides were 62ms and 250ms off at the cut —
-    /// from the canvas's composition and the export's; and the two seconds
-    /// once more from the written file, the encoder's own delays included.
-    @Test(arguments: zip([Source.preview, .preview, .export, .export, .file], [0.5, 2.0, 0.5, 2.0, 2.0]))
+    /// seconds — where the eased sides were 62ms and 250ms off at the cut — from
+    /// the export's composition; the two seconds from the canvas's too, and once
+    /// more from the written file, the encoder's own delays included.
+    @Test(arguments: zip([Source.export, .export, .preview, .file], [0.5, 2.0, 2.0, 2.0]))
     func theDominantPictureIsWhereTheSoundIs(source: Source, seconds: Double) async throws {
         let file = try await TimecodeClipWriter.clip()
         let half = seconds / 2
