@@ -309,7 +309,7 @@ struct CaptureFlowTests {
         try await settle { !screen.camera.isRecording }
         #expect(!screen.camera.isRecording, "stopped with the finger still down")
         let clip = try #require(screen.camera.take.clips.first)
-        #expect(clip.duration <= 1.25 && clip.duration >= 1.0, "\(clip.duration)")
+        #expect(abs(clip.duration - 1.2) < 0.01, "a clip stopped by its limit is the limit long: \(clip.duration)")
         #expect(screen.camera.take.isFull)
         #expect(screen.camera.debugLastToast == "1-second limit reached")
         screen.camera.debugEndHold()

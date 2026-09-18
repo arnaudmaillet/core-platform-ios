@@ -383,8 +383,12 @@ final class SimulatedCaptureEngine: @unchecked Sendable {
         let length = (time - first).seconds
         // ⚠️ THE LIMIT IS CHECKED BEFORE THE FRAME IS WRITTEN, so a clip stopped
         // by it never runs past it by the frame that noticed.
-        if recording.stopRequested || length >= recording.limit {
+        if recording.stopRequested {
             finish(recording)
+            return
+        }
+        if length >= recording.limit {
+            finish(recording, endingAt: first + CMTime(seconds: recording.limit, preferredTimescale: 600))
             return
         }
         if recording.input.isReadyForMoreMediaData, recording.adaptor.append(buffer, withPresentationTime: time) {
@@ -393,7 +397,18 @@ final class SimulatedCaptureEngine: @unchecked Sendable {
         elapsed.withLock { $0 = length }
     }
 
-    private func finish(_ recording: Recording) {
+    /// Ends `recording` one frame after its last one — or at `end`, which is
+    /// how a clip stopped by its LIMIT ends.
+    ///
+    /// ⚠️ **A LIMIT-STOPPED CLIP IS EXACTLY ITS LIMIT LONG, AS THE MOVIE OUTPUT'S
+    /// IS.** `maxRecordedDuration` stops a phone's recording at the limit to
+    /// the frame. The simulated one used to end a frame after the last frame
+    /// written before the limit — anywhere from the limit to a whole frame gap
+    /// short of it, and on a loaded machine frames are late: the budget test
+    /// recorded 1.0s of a 1.2s limit and its own "full" expectation failed. The
+    /// session is ended at the limit instead, holding the last frame until
+    /// then.
+    private func finish(_ recording: Recording, endingAt limitEnd: CMTime? = nil) {
         self.recording = nil
         state.withLock { $0.torch = false }
         guard let first = recording.firstTime, let last = recording.lastTime else {
@@ -404,7 +419,7 @@ final class SimulatedCaptureEngine: @unchecked Sendable {
             return
         }
         let frame = CMTime(value: 1, timescale: Self.framesPerSecond)
-        let end = last + frame
+        let end = limitEnd ?? (last + frame)
         recording.writer.endSession(atSourceTime: end)
         recording.input.markAsFinished()
         let duration = (end - first).seconds

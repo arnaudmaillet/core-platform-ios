@@ -91,8 +91,9 @@ struct CaptureSourceTests {
 
         let capped = source.startRecording(to: folder.newFile("clip", pathExtension: "mov"), torch: false, limit: 0.5)
         let short = try await capped.value
-        #expect(short.duration <= 0.55, "stopped by its own limit: \(short.duration)")
-        #expect(short.duration >= 0.4)
+        #expect(abs(short.duration - 0.5) < 0.01, "stopped by its own limit, exactly: \(short.duration)")
+        let file = await CapturedMediaLibrary.duration(of: short.url)
+        #expect(abs(file - 0.5) < 0.05, "and the file says so: \(file)")
     }
 
     /// A stop that arrives before the first frame still ends the recording —
