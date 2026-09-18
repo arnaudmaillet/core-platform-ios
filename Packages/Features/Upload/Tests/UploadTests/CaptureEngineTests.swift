@@ -65,7 +65,10 @@ struct CaptureEngineTests {
         engine.stopRecording()
         try await settle { recorder.stops > 0 }
         #expect(recorder.starts == 1)
-        #expect(recorder.stops == 1, "the stop reached the output although it had not started writing")
+        // ⚠️ REQUIRED BEFORE THE AWAIT: broken, the stop never reaches the
+        // output, the promise never resolves, and an `#expect` here would let
+        // the test wait on it forever instead of failing.
+        try #require(recorder.stops == 1, "the stop reached the output although it had not started writing")
         let clip = try await promise.value
         #expect(clip.duration == 0)
     }
@@ -77,7 +80,7 @@ struct CaptureEngineTests {
         let promise = engine.record(to: Self.url, torch: false, limit: 180)
         engine.stop()
         try await settle { recorder.stops > 0 }
-        #expect(recorder.stops == 1)
+        try #require(recorder.stops == 1, "required before the await, for the reason above")
         _ = try await promise.value
     }
 
@@ -87,6 +90,8 @@ struct CaptureEngineTests {
         let engine = AVCaptureEngine(feed: CaptureFrameFeed(), recorder: recorder)
         let promise = engine.record(to: Self.url, torch: false, limit: 180)
         engine.stopRecording()
+        try await settle { recorder.stops > 0 }
+        try #require(recorder.stops == 1, "required before the await, for the reason above")
         _ = try await promise.value
         engine.stopRecording()
         try await Task.sleep(for: .milliseconds(200))
