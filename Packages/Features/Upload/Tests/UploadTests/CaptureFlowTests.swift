@@ -48,7 +48,7 @@ struct CaptureFlowTests {
         var zoom: CGFloat { inner.zoom }
         func setZoom(_ factor: CGFloat, smoothly: Bool) { inner.setZoom(factor, smoothly: smoothly) }
         func focus(at point: CGPoint) {}
-        var hasFlash: Bool { true }
+        var hasFlash: Bool { inner.hasFlash }
         func capturePhoto(flash: CaptureFlashMode, into folder: CaptureFolder) async throws -> CapturedPhoto {
             photoFlashes.append(flash)
             return try await inner.capturePhoto(flash: flash, into: folder)
@@ -263,8 +263,7 @@ struct CaptureFlowTests {
     /// The flash chosen is the flash fired.
     @Test func theFlashChosenIsTheFlashFired() async throws {
         let screen = try await open()
-        screen.camera.debugSelector.debugTap(CaptureOption.flash.rawValue)
-        screen.camera.debugFlashRow.debugPick(.on)
+        screen.camera.debugPickFlash(.on)
         screen.camera.debugTapShutter()
         try await settle { screen.handed.editors == 1 }
         #expect(screen.source.photoFlashes == [.on])
@@ -438,9 +437,9 @@ struct CaptureFlowTests {
     @Test func anIconOpensItsBandAndASecondTapClosesIt() async throws {
         let screen = try await open()
         let selector = screen.camera.debugSelector
-        selector.debugTap(CaptureOption.flash.rawValue)
-        #expect(screen.camera.openOption == .flash)
-        #expect(screen.camera.debugBand.content === screen.camera.debugFlashRow)
+        selector.debugTap(CaptureOption.ratio.rawValue)
+        #expect(screen.camera.openOption == .ratio)
+        #expect(screen.camera.debugBand.content === screen.camera.debugRatioRow)
 
         selector.debugTap(CaptureOption.timer.rawValue)
         #expect(screen.camera.openOption == .timer)
@@ -807,31 +806,31 @@ struct CaptureFlowTests {
     @Test func withMotionAnOptionReopenedMidDepartureKeepsItsRow() async throws {
         let screen = try await open(motion: true)
         let selector = screen.camera.debugSelector
-        let row = screen.camera.debugFlashRow
-        selector.debugTap(CaptureOption.flash.rawValue)
+        let row = screen.camera.debugTimerRow
+        selector.debugTap(CaptureOption.timer.rawValue)
         try await Task.sleep(for: .milliseconds(50))
-        selector.debugTap(CaptureOption.flash.rawValue)
+        selector.debugTap(CaptureOption.timer.rawValue)
         #expect(screen.camera.openOption == nil)
-        selector.debugTap(CaptureOption.flash.rawValue)
+        selector.debugTap(CaptureOption.timer.rawValue)
         try await Task.sleep(for: .seconds(BandPop.departure + BandPop.settled(after: 3) + 0.2))
-        #expect(screen.camera.openOption == .flash)
+        #expect(screen.camera.openOption == .timer)
         #expect(screen.camera.debugBand.content === row)
         #expect(row.superview === screen.camera.debugBand, "the row is still in the band")
         #expect(row.alpha == 1)
     }
 
-    /// With motion on, flash → timer → flash in quick succession ends on the
-    /// flash row, in the band.
+    /// With motion on, timer → ratio → timer in quick succession ends on the
+    /// timer row, in the band.
     @Test func withMotionQuickSwitchesEndOnTheLastRow() async throws {
         let screen = try await open(motion: true)
         let selector = screen.camera.debugSelector
-        selector.debugTap(CaptureOption.flash.rawValue)
         selector.debugTap(CaptureOption.timer.rawValue)
-        selector.debugTap(CaptureOption.flash.rawValue)
+        selector.debugTap(CaptureOption.ratio.rawValue)
+        selector.debugTap(CaptureOption.timer.rawValue)
         try await Task.sleep(for: .seconds(BandPop.departure + BandPop.settled(after: 3) + 0.2))
-        #expect(screen.camera.debugBand.content === screen.camera.debugFlashRow)
-        #expect(screen.camera.debugFlashRow.superview === screen.camera.debugBand)
-        #expect(screen.camera.debugTimerRow.superview == nil, "the timer's row has left")
+        #expect(screen.camera.debugBand.content === screen.camera.debugTimerRow)
+        #expect(screen.camera.debugTimerRow.superview === screen.camera.debugBand)
+        #expect(screen.camera.debugRatioRow.superview == nil, "the shape's row has left")
     }
 
     /// With motion on, a row's pills arrive one after another and all land
@@ -924,13 +923,11 @@ struct CaptureFlowTests {
     /// spoken as shapes rather than as times of day.
     @Test func theOptionsSpeakTheirState() async throws {
         let screen = try await open()
-        #expect(screen.camera.debugSelectorLabels == ["Flash, off", "Timer, off", "Aspect ratio", "Filters", "Grid, off"])
+        #expect(screen.camera.debugSelectorLabels == ["Timer, off", "Aspect ratio", "Filters", "Grid, off"])
         screen.camera.debugSelector.debugTap(CaptureOption.grid.rawValue)
-        screen.camera.debugSelector.debugTap(CaptureOption.flash.rawValue)
-        screen.camera.debugFlashRow.debugPick(.on)
         screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
         screen.camera.debugTimerRow.debugPick(.ten)
-        #expect(screen.camera.debugSelectorLabels == ["Flash, on", "Timer, 10 seconds", "Aspect ratio", "Filters", "Grid, on"])
+        #expect(screen.camera.debugSelectorLabels == ["Timer, 10 seconds", "Aspect ratio", "Filters", "Grid, on"])
         #expect(screen.camera.debugRatioRow.debugSpoken == ["Nine by sixteen", "Three by four", "Square"])
         #expect(screen.camera.debugTimerRow.debugSpoken == ["Off", "3 seconds", "10 seconds"])
     }
@@ -1018,31 +1015,101 @@ struct CaptureFlowTests {
         #expect(screen.camera.debugCardRefreshes >= before + 2, "the cards are redrawn from the live frame")
     }
 
-    /// ⚠️ The options are a REAL bar item in the stack's toolbar, trailing,
-    /// drawing no glass of their own — the editor's strip, not a lookalike —
-    /// minted fresh under one identifier at every hand-over, and taken away
-    /// (the toolbar staying up) while a clip records.
-    @Test func theOptionsAreATrailingItemInTheStacksToolbar() async throws {
+    /// ⚠️ The toolbar is the editor's two-strip bar: the flash and the flip
+    /// leading at their own width, the options trailing with the rest — never
+    /// less than one bubble — each a fresh item under a stable identifier at
+    /// every hand-over, both away (the toolbar staying up) while a clip records.
+    @Test func theToolbarIsTheEditorsTwoStripBar() async throws {
         let screen = try await open()
-        try await settle { screen.camera.toolbarItems?.isEmpty == false }
+        let camera = screen.camera
+        try await settle { camera.toolbarItems?.count == 4 }
         #expect(!screen.navigation.isToolbarHidden)
-        let items = try #require(screen.camera.toolbarItems)
-        #expect(items.count == 2)
-        let item = try #require(items.last)
-        #expect(item.customView === screen.camera.debugSelector)
-        #expect(item.identifier == CaptureViewController.optionsItemID)
-        #expect(screen.camera.debugSelector.suppressesBackdrop, "the toolbar supplies the glass")
-        #expect(items.first?.customView == nil && items.first !== item, "a flexible space pushes it trailing")
+        let items = try #require(camera.toolbarItems)
+        #expect(items.count == 4)
+        #expect(items[0].customView === camera.debugLeadingBar)
+        #expect(items[0].identifier == CaptureViewController.leadingItemID)
+        #expect(items[2].customView === camera.debugSelector)
+        #expect(items[2].identifier == CaptureViewController.optionsItemID)
+        #expect(camera.debugLeadingBar.suppressesBackdrop && camera.debugSelector.suppressesBackdrop, "the toolbar supplies the glass")
+        #expect(camera.navigationItem.rightBarButtonItems?.isEmpty ?? true, "the header keeps Cancel alone")
+
+        screen.window.layoutIfNeeded()
+        let share = try #require(camera.debugBarShare)
+        #expect(abs(share.leading - share.leadingWants) < 0.5, "the leading strip at its own width: \(share)")
+        #expect(abs(share.leading + share.trailing - share.available) < 0.5, "the options take the rest")
+        #expect(share.trailing >= share.floor - 0.5, "never less than one bubble")
 
         screen.camera.debugBeginHold()
-        #expect(screen.camera.toolbarItems?.isEmpty == true, "away while recording")
+        #expect(camera.toolbarItems?.isEmpty == true, "away while recording")
         #expect(!screen.navigation.isToolbarHidden, "the toolbar itself stays, and the shutter with it")
         screen.camera.debugEndHold()
-        try await settle { screen.camera.take.clips.count == 1 && !screen.camera.isRecording }
-        let back = try #require(screen.camera.toolbarItems?.last)
-        #expect(back.customView === screen.camera.debugSelector)
-        #expect(back !== item, "a fresh item, never the old one re-handed")
-        #expect(back.identifier == item.identifier)
+        try await settle { camera.take.clips.count == 1 && !camera.isRecording }
+        let back = try #require(camera.toolbarItems)
+        #expect(back.count == 4)
+        #expect(back[0] !== items[0] && back[2] !== items[2], "fresh items, never the old ones re-handed")
+        #expect(back[0].identifier == items[0].identifier && back[2].identifier == items[2].identifier)
+    }
+
+    /// ⚠️ On an SE's narrow bar the two strips never overrun it: at every
+    /// step of a recorded sequence — open, record, flash, flip, an option —
+    /// each strip's frame is the width it is held to and both are on screen
+    /// (a strip swept into a `•••` is not). The editor's own assertion.
+    @Test func theSEsNarrowBarNeverCollapses() async throws {
+        let screen = try await open(size: CGSize(width: 375, height: 667))
+        let camera = screen.camera
+        func held(_ step: String) {
+            screen.window.layoutIfNeeded()
+            let widths = camera.debugHeldWidths
+            #expect(abs(camera.debugLeadingBar.frame.width - widths.leading) < 0.5, "\(step): leading \(camera.debugLeadingBar.frame.width) vs \(widths.leading)")
+            #expect(abs(camera.debugSelector.frame.width - widths.trailing) < 0.5, "\(step): options \(camera.debugSelector.frame.width) vs \(widths.trailing)")
+            #expect(camera.debugLeadingBar.window != nil && camera.debugSelector.window != nil, "\(step): both strips on screen")
+        }
+        try await settle { camera.toolbarItems?.count == 4 }
+        held("opened")
+        try await record(screen, seconds: 0.6)
+        try await settle { camera.toolbarItems?.count == 4 }
+        held("after a clip")
+        camera.debugLeadingBar.debugTap(CaptureViewController.LeadingAction.flash.rawValue)
+        held("flash")
+        camera.debugLeadingBar.debugTap(CaptureViewController.LeadingAction.flip.rawValue)
+        try await settle { screen.source.position == .front }
+        held("front camera")
+        camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        held("timer open")
+        camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        held("timer closed")
+    }
+
+    /// ⚠️ The flash and the flip act from the leading strip: the flash cycles
+    /// Auto → On → Off with its icon and its spoken name following, and goes
+    /// dim on a camera with no flash.
+    @Test func theFlashAndTheFlipActFromTheLeadingStrip() async throws {
+        let screen = try await open()
+        let bar = screen.camera.debugLeadingBar
+        let flash = CaptureViewController.LeadingAction.flash.rawValue
+        let flip = CaptureViewController.LeadingAction.flip.rawValue
+        for mode in CaptureFlashMode.allCases {
+            #expect(UIImage(systemName: mode.symbolName) != nil, "\(mode.symbolName) exists at runtime")
+        }
+        #expect(bar.debugSymbols[flash] == "bolt.slash")
+        bar.debugTap(flash)
+        #expect(screen.camera.settings.flash == .auto)
+        #expect(bar.debugSymbols[flash] == "bolt.badge.automatic")
+        bar.debugTap(flash)
+        #expect(screen.camera.settings.flash == .on)
+        #expect(bar.debugSymbols[flash] == "bolt.fill")
+        bar.debugTap(flash)
+        #expect(screen.camera.settings.flash == .off)
+
+        bar.debugTap(flip)
+        try await settle { screen.source.position == .front }
+        #expect(screen.source.position == .front, "the flip turns the camera")
+        try await settle { !bar.isEnabled(at: flash) }
+        #expect(!bar.isEnabled(at: flash), "no flash on the front camera")
+        bar.debugTap(flip)
+        try await settle { screen.source.position == .back }
+        try await settle { bar.isEnabled(at: flash) }
+        #expect(bar.isEnabled(at: flash))
     }
 
     // MARK: - End to end, through the builder

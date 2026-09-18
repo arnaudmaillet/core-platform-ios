@@ -104,7 +104,16 @@ enum CaptureFlashMode: String, CaseIterable, Sendable {
         switch self {
         case .off: "bolt.slash"
         case .auto: "bolt.badge.automatic"
-        case .on: "bolt"
+        case .on: "bolt.fill"
+        }
+    }
+
+    /// The mode a tap on the flash moves to: Auto → On → Off → Auto.
+    var next: CaptureFlashMode {
+        switch self {
+        case .auto: .on
+        case .on: .off
+        case .off: .auto
         }
     }
 
@@ -149,8 +158,11 @@ enum CaptureTimer: Int, CaseIterable, Sendable {
 ///
 /// ⚠️ **APPENDED, NEVER INSERTED** — the raw value is the selector's index and
 /// the tests address the options by it, the editor's `TrackAction` rule.
+///
+/// ⚠️ **FLASH IS NOT AN OPTION HERE ANY MORE** — it sits with the flip in the
+/// toolbar's leading strip (`CaptureViewController.leadingBar`), its icon naming
+/// the mode, as the author asked.
 enum CaptureOption: Int, CaseIterable, Sendable {
-    case flash
     case timer
     case ratio
     case filters
@@ -158,7 +170,6 @@ enum CaptureOption: Int, CaseIterable, Sendable {
 
     var title: String {
         switch self {
-        case .flash: "Flash"
         case .timer: "Timer"
         case .ratio: "Aspect ratio"
         case .filters: "Filters"

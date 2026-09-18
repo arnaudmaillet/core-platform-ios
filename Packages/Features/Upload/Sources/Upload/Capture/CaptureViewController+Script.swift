@@ -13,7 +13,7 @@ import UIKit
 ///
 /// Steps: `wait:<s>`, `tap`, `hold:<s>` (press, wait, lift), `press`,
 /// `lock` (slide onto the padlock), `lift`, `undo`, `next`, `flip`,
-/// `option:<flash|timer|ratio|filters|grid>`, `ratio:<tall|classic|square>`,
+/// `option:<timer|ratio|filters|grid>`, `ratio:<tall|classic|square>`,
 /// `filter:<name>`, `flash:<off|auto|on>`, `timer:<0|3|10>`, `lens:<index>`,
 /// `library`, `frames` (logs the live view's frame time).
 ///
@@ -68,7 +68,7 @@ extension CaptureViewController {
             debugTapLibrary()
         case "option":
             let options: [String: CaptureOption] = [
-                "flash": .flash, "timer": .timer, "ratio": .ratio, "filters": .filters, "grid": .grid
+                "timer": .timer, "ratio": .ratio, "filters": .filters, "grid": .grid
             ]
             if let option = options[value] { debugSelector.debugTap(option.rawValue) }
         case "ratio":
@@ -76,7 +76,7 @@ extension CaptureViewController {
         case "filter":
             if let filter = MediaFilter(rawValue: value) { debugFilterRow.debugTap(filter) }
         case "flash":
-            if let flash = CaptureFlashMode(rawValue: value) { debugFlashRow.debugPick(flash) }
+            if let flash = CaptureFlashMode(rawValue: value) { debugPickFlash(flash) }
         case "timer":
             if let timer = CaptureTimer(rawValue: Int(value) ?? 0) { debugTimerRow.debugPick(timer) }
         case "lens":

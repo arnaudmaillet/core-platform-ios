@@ -18,7 +18,7 @@ import UIKit
 /// ```
 ///
 /// ⚠️ **THE OPTIONS ARE ICONS IN A SELECTOR, AND AN ICON OPENS A BAND — THE
-/// EDITOR'S PATTERN, NOT ITS CODE.** Choosing flash, timer, ratio or filters
+/// EDITOR'S PATTERN, NOT ITS CODE.** Choosing timer, ratio or filters
 /// opens that option's controls above the shutter; a second tap on the chosen
 /// icon closes them again (the editor's neutral state). The grid is a toggle
 /// and opens nothing. The band is `MediaEditorBandView`, its tenants arrive
@@ -115,9 +115,6 @@ final class CaptureViewController: UIViewController {
         )
     })
 
-    private lazy var flashRow = CaptureChoiceRowView(
-        choices: CaptureFlashMode.allCases, chosen: settings.flash, label: \.label, symbol: \.symbolName
-    )
     private lazy var timerRow = CaptureChoiceRowView(
         choices: CaptureTimer.allCases, chosen: settings.timer, label: \.label, spoken: \.spoken
     )
@@ -129,14 +126,60 @@ final class CaptureViewController: UIViewController {
     private lazy var cancelItem = UIBarButtonItem(
         title: "Cancel", primaryAction: UIAction { [weak self] _ in self?.cancelTapped() }
     )
-    private lazy var flipItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "arrow.triangle.2.circlepath.camera"),
-            primaryAction: UIAction { [weak self] _ in self?.flip() }
-        )
-        item.accessibilityLabel = "Switch camera"
-        return item
+    /// The toolbar's LEADING strip: the flash and the flip.
+    ///
+    /// ⚠️ **ASKED FOR IN THOSE WORDS**: both icons in the bottom toolbar, on the
+    /// left, "toujours en largeur sa taille intrinsèque (prioritaire)", the
+    /// options' selector taking the rest — "le même système qu'on a fait sur
+    /// l'écran d'édition des médias". So it is the editor's leading strip:
+    /// an `IconActionBar`, momentary, drawn without a backdrop inside the
+    /// toolbar's glass.
+    ///
+    /// ⚠️ **THE FLASH CYCLES ON A TAP — AUTO → ON → OFF — AND DOES NOT OPEN A
+    /// MENU.** `IconActionBar` is a row of momentary buttons with no menu to
+    /// carry, and giving it one is a DesignSystem change. The icon names the
+    /// mode it is in, so the author sees each step as they take it; VoiceOver
+    /// says it ("Flash, auto"). Dimmed where the camera has no flash — the
+    /// front one — rather than taken away, so the strip keeps its width and
+    /// the bar is not handed over again for it.
+    private(set) lazy var leadingBar: IconActionBar = {
+        let bar = IconActionBar(items: leadingItems())
+        bar.suppressesBackdrop = true
+        bar.onTap = { [weak self] index in
+            switch LeadingAction(rawValue: index) {
+            case .flash: self?.cycleFlash()
+            case .flip: self?.flip()
+            case nil: break
+            }
+        }
+        return bar
     }()
+
+    /// The leading strip's items. The raw value is the bar's index.
+    enum LeadingAction: Int, CaseIterable {
+        case flash
+        case flip
+    }
+
+    private func leadingItems() -> [IconActionBar.Item] {
+        let flash = source.hasFlash
+            ? "Flash, \(settings.flash.label.lowercased())"
+            : "Flash, unavailable"
+        return [
+            IconActionBar.Item(symbolName: settings.flash.symbolName, accessibilityLabel: flash),
+            IconActionBar.Item(symbolName: "arrow.triangle.2.circlepath.camera", accessibilityLabel: "Switch camera")
+        ]
+    }
+
+    private func refreshLeadingBar() {
+        leadingBar.setItems(leadingItems())
+        leadingBar.setEnabled(source.hasFlash, at: LeadingAction.flash.rawValue)
+    }
+
+    private func cycleFlash() {
+        UISelectionFeedbackGenerator().selectionChanged()
+        setFlash(settings.flash.next)
+    }
 
     private let ringLink = CaptureLinkProxy()
     private var cardsTimer: Timer?
@@ -249,7 +292,11 @@ final class CaptureViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutWindow()
-        if owesAHandover { handOverSelector(animated: false) }
+        let held = shareTheBar()
+        guard !isHandingOver else { return }
+        let moved = zip([handedWidths?.leading, handedWidths?.trailing], [held?.leading, held?.trailing])
+            .contains { abs(($0 ?? -1) - ($1 ?? -2)) > 0.5 }
+        if owesAHandover || moved { handOverSelector(animated: false) }
     }
 
     private func startCamera() {
@@ -277,7 +324,7 @@ final class CaptureViewController: UIViewController {
 
     private func configureBars() {
         navigationItem.leftBarButtonItems = [cancelItem]
-        navigationItem.rightBarButtonItems = [flipItem]
+        // The flip and the flash live in the toolbar's leading strip.
         navigationItem.backButtonDisplayMode = .minimal
         // ⚠️ TRANSPARENT, AND STATED ON THIS SCREEN'S ITEM — a bar appearance
         // set on the stack's bar would follow the author into the editor.
@@ -551,7 +598,6 @@ final class CaptureViewController: UIViewController {
         selector.onSelectNothing = { [weak self] in self?.showBand(nil) }
         selector.selectNothing(notify: false)
 
-        flashRow.onPick = { [weak self] in self?.setFlash($0) }
         timerRow.onPick = { [weak self] in self?.setTimer($0) }
         ratioRow.onPick = { [weak self] in self?.setRatio($0) }
         filterRow.onPick = { [weak self] in self?.setFilter($0) }
@@ -559,7 +605,6 @@ final class CaptureViewController: UIViewController {
 
     static func symbol(for option: CaptureOption, settings: CaptureSettings) -> String {
         switch option {
-        case .flash: settings.flash.symbolName
         case .timer: settings.timer.symbolName
         case .ratio: "aspectratio"
         case .filters: "camera.filters"
@@ -578,7 +623,6 @@ final class CaptureViewController: UIViewController {
     /// through the button's value instead.
     static func spokenName(for option: CaptureOption, settings: CaptureSettings) -> String {
         switch option {
-        case .flash: "\(option.title), \(settings.flash.label.lowercased())"
         case .timer: "\(option.title), \(settings.timer.spoken.lowercased())"
         case .grid: "\(option.title), \(settings.showsGrid ? "on" : "off")"
         case .ratio, .filters: option.title
@@ -635,7 +679,6 @@ final class CaptureViewController: UIViewController {
 
     private func tenant(for option: CaptureOption) -> UIView? {
         switch option {
-        case .flash: flashRow
         case .timer: timerRow
         case .ratio: ratioRow
         case .filters: filterRow
@@ -726,7 +769,7 @@ final class CaptureViewController: UIViewController {
 
     private func setFlash(_ mode: CaptureFlashMode) {
         settings.flash = mode
-        refreshSelectorIcons()
+        refreshLeadingBar()
     }
 
     private func setTimer(_ timer: CaptureTimer) {
@@ -1315,7 +1358,6 @@ final class CaptureViewController: UIViewController {
     private func setChromeHidden(_ hidden: Bool) {
         isChromeHidden = hidden
         cancelItem.isHidden = hidden
-        flipItem.isHidden = hidden
         handOverSelector(animated: true)
         if hidden { showBand(nil); selector.selectNothing(notify: false) }
         refreshTakeControls(animated: true)
@@ -1327,36 +1369,95 @@ final class CaptureViewController: UIViewController {
     /// pass once the screen is in a window.
     private var owesAHandover = false
 
-    /// Puts the options in the stack's toolbar — trailing, alone — or takes
-    /// them out while a clip records or a countdown runs.
+    /// Puts the two strips in the stack's toolbar — the flash and the flip
+    /// leading, the options trailing — or takes them out while a clip records
+    /// or a countdown runs.
     ///
-    /// ⚠️ **A FRESH ITEM ON EVERY HAND-OVER, UNDER ONE IDENTIFIER** — what the
-    /// editor learnt the hard way (`bar-item-wrapper-drift`): UIKit keeps the
-    /// wrapper it builds around a REUSED item's view, and that wrapper does not
-    /// follow the view's width; a fresh item gets a fresh wrapper, and the
-    /// shared identifier lets UIKit treat the two as one item across the
-    /// transition instead of cross-fading two sets.
+    /// ⚠️ **THE EDITOR'S BAR, SHARED RATHER THAN COPIED.** The leading strip is
+    /// held at its own width and the selector takes the rest, floored at one
+    /// bubble (`EditorSelectorLayout`), in the room the bar leaves once its
+    /// margins, platters and group gap are charged (`ToolbarGeometry`, measured
+    /// from the two platters through `BottomBarShare`).
     ///
-    /// ⚠️ **NEVER BEFORE THE SCREEN IS IN A WINDOW.** UIKit decides once, at the
-    /// hand-over, whether an item fits; a toolbar that has never been in a
-    /// window answers the SCREEN's width, so "has a width" is not "is laid
-    /// out". An early call is owed to `viewDidLayoutSubviews`.
+    /// ⚠️ **FRESH ITEMS ON EVERY HAND-OVER, UNDER STABLE IDENTIFIERS**
+    /// (`bar-item-wrapper-drift`): UIKit keeps the wrapper it builds around a
+    /// REUSED item's view, and that wrapper does not follow the view's width —
+    /// the editor lost its strip to a `•••` that way.
     ///
-    /// ⚠️ **THE TOOLBAR STAYS UP WHILE ITS ITEM IS AWAY.** Hiding the toolbar
+    /// ⚠️ **NEVER BEFORE THE SCREEN IS IN A WINDOW, AND THE WIDTHS BEFORE THE
+    /// ITEMS.** UIKit decides once, at the hand-over, whether an item fits; a
+    /// toolbar that has never been in a window answers the SCREEN's width. An
+    /// early call is owed to `viewDidLayoutSubviews`, which also hands over
+    /// again when the share has moved since the last hand-over.
+    ///
+    /// ⚠️ **THE TOOLBAR STAYS UP WHILE ITS ITEMS ARE AWAY.** Hiding the toolbar
     /// for a recording would lower the safe area the shutter rests on, and the
     /// shutter would drop under the author's thumb mid-clip.
     private func handOverSelector(animated: Bool) {
-        guard view.window != nil else {
+        guard view.window != nil, (navigationController?.toolbar.bounds.width ?? 0) > 0 else {
             owesAHandover = true
             return
         }
+        guard !isHandingOver else { return }
+        isHandingOver = true
+        defer { isHandingOver = false }
         owesAHandover = false
+        _ = shareTheBar()
         let offered = !isChromeHidden && notice == nil
-        let item = UIBarButtonItem(customView: selector)
-        item.identifier = Self.optionsItemID
-        setToolbarItems(offered ? [.flexibleSpace(), item] : [], animated: animated)
+        setToolbarItems(offered ? [
+            Self.barItem(leadingBar, as: Self.leadingItemID),
+            .fixedSpace(Spacing.sm),
+            Self.barItem(selector, as: Self.optionsItemID),
+            .flexibleSpace()
+        ] : [], animated: animated)
+        handedWidths = shareTheBar()
     }
 
+    private static func barItem(_ view: UIView, as identifier: String) -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: view)
+        item.identifier = identifier
+        return item
+    }
+
+    /// `setToolbarItems` lays the bar out, and this is called from that layout.
+    private var isHandingOver = false
+
+    /// The two widths the bar was last handed; a share that has moved since
+    /// is handed over again.
+    private var handedWidths: (leading: CGFloat, trailing: CGFloat)?
+
+    private(set) var barGeometry = ToolbarGeometry.fallback
+
+    private lazy var leadingWidth: NSLayoutConstraint =
+        leadingBar.widthAnchor.constraint(equalToConstant: IconActionBar.height)
+    private lazy var selectorWidth: NSLayoutConstraint =
+        selector.widthAnchor.constraint(equalToConstant: IconSelectorBar.height)
+
+    /// Holds the two strips to their share of the bar — the editor's
+    /// `shareTheBarBetweenTheTwoStrips`, for this bar's two strips.
+    @discardableResult
+    private func shareTheBar() -> (leading: CGFloat, trailing: CGFloat)? {
+        if let measured = BottomBarShare.measure(leading: leadingBar, trailing: selector) { barGeometry = measured }
+        guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else {
+            leadingWidth.isActive = false
+            selectorWidth.isActive = false
+            return nil
+        }
+        let held = EditorSelectorLayout.widths(
+            leadingWants: BottomBarShare.wantedWidth(of: leadingBar),
+            available: barGeometry.available(in: toolbar.bounds.width),
+            trailingFloor: selector.intrinsicContentSize.height
+        )
+        leadingWidth.constant = held.leading
+        selectorWidth.constant = held.trailing
+        leadingWidth.isActive = true
+        selectorWidth.isActive = true
+        leadingBar.frame.size.width = held.leading
+        selector.frame.size.width = held.trailing
+        return held
+    }
+
+    static let leadingItemID = "upload.camera.toolbar.leading"
     static let optionsItemID = "upload.camera.toolbar.options"
 
     private func showLock(_ shown: Bool) {
@@ -1368,6 +1469,8 @@ final class CaptureViewController: UIViewController {
     // MARK: - Zoom, focus, flip
 
     private func refreshLenses() {
+        // The camera changed, or reported: its flash comes and goes with it.
+        refreshLeadingBar()
         lensChips.setLenses(source.lenses, zoom: source.zoom)
         setShown(lensChips, openOption == nil && source.lenses.count > 1, animated: false)
     }
@@ -1572,7 +1675,16 @@ final class CaptureViewController: UIViewController {
     private(set) var debugLastHandOff: ([MediaLibraryItem], [String: MediaEdits])?
     var debugSelector: IconSelectorBar { selector }
     var debugBand: MediaEditorBandView { band }
-    var debugFlashRow: CaptureChoiceRowView<CaptureFlashMode> { flashRow }
+    var debugLeadingBar: IconActionBar { leadingBar }
+    func debugPickFlash(_ mode: CaptureFlashMode) { setFlash(mode) }
+    var debugBarShare: (leading: CGFloat, trailing: CGFloat, available: CGFloat, leadingWants: CGFloat, floor: CGFloat)? {
+        guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else { return nil }
+        return (
+            leadingBar.frame.width, selector.frame.width, barGeometry.available(in: toolbar.bounds.width),
+            BottomBarShare.wantedWidth(of: leadingBar), selector.intrinsicContentSize.height
+        )
+    }
+    var debugHeldWidths: (leading: CGFloat, trailing: CGFloat) { (leadingWidth.constant, selectorWidth.constant) }
     var debugTimerRow: CaptureChoiceRowView<CaptureTimer> { timerRow }
     var debugRatioRow: CaptureChoiceRowView<CaptureRatio> { ratioRow }
     var debugFilterRow: MediaFilterRowView { filterRow }

@@ -78,7 +78,9 @@ final class SimulatedCaptureSource: CaptureSource {
 
     func focus(at point: CGPoint) {}
 
-    var hasFlash: Bool { true }
+    /// At the back only, as a phone's torch — so the flash's control can be
+    /// seen going dim on the front camera.
+    var hasFlash: Bool { position == .back }
 
     func capturePhoto(flash: CaptureFlashMode, into folder: CaptureFolder) async throws -> CapturedPhoto {
         let url = folder.newFile("capture", pathExtension: "jpg")
