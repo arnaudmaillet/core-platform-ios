@@ -887,7 +887,7 @@ final class CaptureViewController: UIViewController {
         let url = folder.newFile("clip", pathExtension: "mov")
         let torch = settings.flash.lightsTorch && source.hasFlash
         isRecording = true
-        stitched = nil
+        dropStitch()
         let promise = source.startRecording(to: url, torch: torch, limit: take.remaining)
         shutter.setLook(locked ? .locked : .holding, animated: true)
         setChromeHidden(true)
@@ -963,7 +963,7 @@ final class CaptureViewController: UIViewController {
         case .deleted(let clip):
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             folder.discard(clip.url)
-            stitched = nil
+            dropStitch()
         }
         refreshTakeControls(animated: true)
     }
@@ -995,6 +995,7 @@ final class CaptureViewController: UIViewController {
                 } else {
                     url = try await CaptureStitcher.stitch(clips, to: folder.newFile("take", pathExtension: "mov"))
                     duration = await CapturedMediaLibrary.duration(of: url)
+                    dropStitch()
                     stitched = (clips, url, duration)
                 }
                 let size = await CapturedMediaLibrary.uprightVideoSize(at: url) ?? .zero
@@ -1007,6 +1008,21 @@ final class CaptureViewController: UIViewController {
                 say("The video could not be put together")
             }
         }
+    }
+
+    /// Forgets the joined take — and deletes its file.
+    ///
+    /// ⚠️ **THE FILE GOES WITH THE CACHE.** The first version only let go of
+    /// the reference: every Next, back, record left another full-length copy of
+    /// the take in the folder, for as long as the sheet was up — minutes of
+    /// video, twice over, on a phone. The one file never deleted here is a
+    /// one-clip take's, which is handed over as that clip itself and is still
+    /// the take's.
+    private func dropStitch() {
+        if let stitched, !stitched.clips.contains(stitched.url) {
+            folder.discard(stitched.url)
+        }
+        stitched = nil
     }
 
     /// Lays out what the take allows: the library shortcut while it is empty,

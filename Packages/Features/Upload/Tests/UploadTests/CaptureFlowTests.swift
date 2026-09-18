@@ -615,6 +615,53 @@ struct CaptureFlowTests {
         #expect(screen.camera.shutter.look == .idle)
     }
 
+    /// Back from the editor, after another clip, Next joins the take again —
+    /// and the file of the join it replaced is gone.
+    @Test func aReplacedJoinLeavesNoFileBehind() async throws {
+        let screen = try await open()
+        try await record(screen, seconds: 0.6)
+        try await record(screen, seconds: 0.6)
+        screen.camera.debugTapNext()
+        try await settle(for: 10) { screen.handed.editors == 1 }
+        let firstItem = try #require(screen.handed.items.first)
+        let firstFile = await screen.camera.captures.videoFile(for: firstItem.id)
+        let first = try #require(firstFile)
+        try await comeBack(to: screen)
+
+        try await record(screen, seconds: 0.6)
+        #expect(!FileManager.default.fileExists(atPath: first.path), "the old join went when the take changed")
+        screen.camera.debugTapNext()
+        try await settle(for: 10) { screen.handed.editors == 2 }
+        let secondFile = await screen.camera.captures.videoFile(for: try #require(screen.handed.items.first).id)
+        let second = try #require(secondFile)
+        #expect(FileManager.default.fileExists(atPath: second.path))
+        #expect(screen.camera.take.clips.allSatisfy { FileManager.default.fileExists(atPath: $0.url.path) })
+    }
+
+    /// A one-clip take is handed over as the clip itself — and that clip is
+    /// kept when the take grows.
+    @Test func aOneClipTakeKeepsItsClipWhenTheTakeGrows() async throws {
+        let screen = try await open()
+        try await record(screen, seconds: 0.6)
+        let clip = try #require(screen.camera.take.clips.first)
+        screen.camera.debugTapNext()
+        try await settle(for: 10) { screen.handed.editors == 1 }
+        let handed = await screen.camera.captures.videoFile(for: try #require(screen.handed.items.first).id)
+        #expect(handed == clip.url)
+        try await comeBack(to: screen)
+        try await record(screen, seconds: 0.6)
+        #expect(FileManager.default.fileExists(atPath: clip.url.path))
+    }
+
+    /// Pops back to the camera once the push has landed, and waits for frames.
+    private func comeBack(to screen: Screen) async throws {
+        try await settle { screen.navigation.viewControllers.count == 2 && screen.navigation.transitionCoordinator == nil }
+        screen.navigation.popViewController(animated: false)
+        try #require(screen.navigation.topViewController === screen.camera)
+        screen.source.feed.forgetLatest()
+        try await settle { screen.source.feed.latestFrame != nil }
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {
