@@ -197,6 +197,11 @@ final class CaptureViewController: UIViewController {
         navigationController?.setToolbarHidden(true, animated: animated)
         startCamera()
         sweepReleased()
+        // ⚠️ THE CARDS' TIMER STOPS WHEN THE CAMERA IS LEFT (`viewDidDisappear`)
+        // and the Filters band can still be open when the author comes back
+        // from the editor or the picker: without this the nine cards froze on
+        // the frame from before they left.
+        if openOption == .filters { startCardsTimer() }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -763,6 +768,7 @@ final class CaptureViewController: UIViewController {
                 CaptureLiveView.snapshot(of: frame, side: side)
             }.value
             guard let self, openOption == .filters, let picture else { return }
+            debugCardRefreshes += 1
             filterRow.show(picture)
             filterRow.setSelected(settings.filter)
         }
@@ -1481,6 +1487,7 @@ final class CaptureViewController: UIViewController {
     // MARK: - Debug
 
     private(set) var debugPopIns = 0
+    private(set) var debugCardRefreshes = 0
     private(set) var debugLastToast: String?
     private(set) var debugToasts: [String] = []
     /// What the focus ring and the toast were staged at before they spring in.

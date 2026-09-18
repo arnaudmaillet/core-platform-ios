@@ -968,6 +968,21 @@ struct CaptureFlowTests {
         #expect(!screen.folder.files.contains { $0.pathExtension == "jpg" }, "its file went too")
     }
 
+    /// ⚠️ Back from another screen with the Filters band still open, the
+    /// cards go on following the live frame.
+    @Test func theFilterCardsStayLiveAfterComingBack() async throws {
+        let screen = try await open()
+        screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
+        try await settle { screen.camera.debugCardRefreshes > 0 }
+        screen.navigation.pushViewController(UIViewController(), animated: false)
+        screen.navigation.popViewController(animated: false)
+        try #require(screen.navigation.topViewController === screen.camera)
+        #expect(screen.camera.openOption == .filters, "the band is still open")
+        let before = screen.camera.debugCardRefreshes
+        try await Task.sleep(for: .seconds(1.6))
+        #expect(screen.camera.debugCardRefreshes >= before + 2, "the cards are redrawn from the live frame")
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {
