@@ -654,6 +654,22 @@ struct CaptureFlowTests {
     }
 
     /// A refused camera says so, with the way to Settings, and shoots nothing.
+    /// ⚠️ With the camera refused there is nothing to choose, turn or light:
+    /// the header is empty and the toolbar holds the close button alone —
+    /// the one way out.
+    @Test func aRefusedCameraKeepsTheCloseButtonAlone() async throws {
+        let screen = try await open(answer: .denied)
+        try await settle { screen.camera.debugNoticeIsShowing && screen.camera.toolbarItems?.count == 2 }
+        let items = try #require(screen.camera.toolbarItems)
+        #expect(items.count == 2)
+        #expect(items.last?.customView === screen.camera.debugCloseBar)
+        #expect(items.last?.identifier == CaptureViewController.closeItemID)
+        #expect(!items.contains { $0.customView === screen.camera.debugSelector }, "no options")
+        #expect(screen.camera.navigationItem.leftBarButtonItems?.isEmpty ?? true, "no flip, no flash")
+        screen.camera.debugCloseBar.debugTap(0)
+        #expect(screen.camera.isClosing)
+    }
+
     @Test func aRefusedCameraShowsTheNoticeAndShootsNothing() async throws {
         let screen = try await open(answer: .denied)
         #expect(screen.camera.debugNoticeIsShowing)
@@ -1170,6 +1186,33 @@ struct CaptureFlowTests {
         }
         let strip = try #require(scroller(in: camera.debugSelector))
         #expect(strip.contentSize.width > strip.bounds.width + 1, "the rest scrolls: \(strip.contentSize.width) in \(strip.bounds.width)")
+    }
+
+    /// ⚠️ A bar that narrows keeps its own gap. At 312pt the options have
+    /// 30pt to spare, which the flexible space holds; had that slack been read
+    /// as the bar's gap, the bar would stay short by it for good, and at 282pt
+    /// — where the options just fit — they would be capped for nothing.
+    @Test func aBarThatNarrowsKeepsItsOwnGap() async throws {
+        let screen = try await open(size: CGSize(width: 312, height: 667))
+        let camera = screen.camera
+        try await settle { camera.toolbarItems?.count == 3 }
+        screen.window.layoutIfNeeded()
+        let wide = try #require(camera.debugBarShare)
+        #expect(abs(wide.selector - wide.selectorWants) < 0.5, "room to spare: \(wide)")
+
+        screen.window.frame.size.width = 282
+        try await settle {
+            screen.window.layoutIfNeeded()
+            return camera.navigationController?.toolbar.bounds.width == 282
+        }
+        for _ in 0..<5 {
+            screen.window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let narrow = try #require(camera.debugBarShare)
+        #expect(abs(narrow.selector - narrow.selectorWants) < 0.5, "the options still at their own width: \(narrow)")
+        #expect(camera.barGeometry.gap <= ToolbarGeometry.fallback.gap + 0.5, "the gap is the bar's own: \(camera.barGeometry)")
+        #expect(camera.debugSelector.window != nil && camera.debugCloseBar.window != nil, "both on screen")
     }
 
     /// ⚠️ On an SE's bar the two never overrun it: at every step of a
