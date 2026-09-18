@@ -938,7 +938,12 @@ final class CaptureViewController: UIViewController {
 
     // MARK: - Undo, Next
 
+    /// ⚠️ **NOT WHILE THE TAKE IS BEING STITCHED OR RECORDED.** Undo stayed
+    /// live under Next's spinner: a double tap deleted the last clip's file
+    /// while the stitcher was reading it, or after, so the editor opened on a
+    /// video holding a clip the author had just thrown away.
     private func undoTapped() {
+        guard !isBusy, !isRecording else { return }
         switch take.undo() {
         case .nothing:
             break
@@ -982,6 +987,9 @@ final class CaptureViewController: UIViewController {
                     stitched = (clips, url, duration)
                 }
                 let size = await CapturedMediaLibrary.uprightVideoSize(at: url) ?? .zero
+                // A take that changed while it was being joined is not the
+                // take on screen; nothing is handed over for it.
+                guard take.clips.map(\.url) == clips else { return }
                 let item = captures.register(url, kind: .video(duration: duration))
                 openEditor([item], edits: [item.id: handOffEdits(uprightSize: size)])
             } catch {
@@ -1000,6 +1008,7 @@ final class CaptureViewController: UIViewController {
         setShown(undoButton, hasClips && !recordingOrCounting, animated: animated, pops: true)
         setShown(nextButton, hasClips && !recordingOrCounting, animated: animated, pops: true, delay: BandPop.staggerStep)
         nextButton.isEnabled = !isBusy
+        undoButton.isEnabled = !isBusy
         var undo = UIButton.Configuration.glass()
         if take.isArmedToUndo {
             undo = .prominentGlass()
@@ -1222,6 +1231,7 @@ final class CaptureViewController: UIViewController {
     var debugLiveView: CaptureLiveView { liveView }
     var debugGridIsShowing: Bool { !gridView.isHidden && gridView.alpha > 0 }
     var debugUndoIsShowing: Bool { !undoButton.isHidden && undoButton.isUserInteractionEnabled }
+    var debugUndoIsEnabled: Bool { undoButton.isEnabled }
     var debugNextIsShowing: Bool { !nextButton.isHidden && nextButton.isUserInteractionEnabled }
     var debugLibraryIsShowing: Bool { !libraryButton.isHidden && libraryButton.isUserInteractionEnabled }
     var debugLockIsShowing: Bool { lockView.isUserInteractionEnabled || (!lockView.isHidden && lockView.alpha > 0) }

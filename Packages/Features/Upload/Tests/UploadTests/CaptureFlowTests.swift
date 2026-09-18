@@ -578,6 +578,23 @@ struct CaptureFlowTests {
         #expect(screen.source.photoFlashes.isEmpty)
     }
 
+    /// ⚠️ While Next joins the take, undo is dead: a double tap there deleted
+    /// a clip the stitcher was reading.
+    @Test func undoDoesNothingWhileNextIsJoiningTheTake() async throws {
+        let screen = try await open()
+        try await record(screen, seconds: 0.6)
+        try await record(screen, seconds: 0.6)
+        let clips = screen.camera.take.clips
+        screen.camera.debugTapNext()
+        #expect(!screen.camera.debugUndoIsEnabled, "disabled for as long as the take is being joined")
+        screen.camera.debugTapUndo()
+        screen.camera.debugTapUndo()
+        #expect(screen.camera.take.clips == clips, "nothing was armed or deleted")
+        #expect(clips.allSatisfy { FileManager.default.fileExists(atPath: $0.url.path) })
+        try await settle(for: 10) { screen.handed.editors == 1 }
+        #expect(screen.handed.editors == 1)
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {
