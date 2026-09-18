@@ -82,6 +82,26 @@ final class AVCaptureSource: CaptureSource {
 
     var onStateChange: (() -> Void)?
 
+    /// The coordinator the PREVIEW is turned by — built here, on the main
+    /// actor, with the preview layer itself.
+    ///
+    /// ⚠️ **A COORDINATOR WITHOUT A LAYER ANSWERS 0° FOR THE PREVIEW, BY
+    /// CONTRACT.** The iOS 27 header on `initWithDevice:previewLayer:`: "If nil,
+    /// the coordinator will return 0 degrees of rotation for horizon-level
+    /// preview." The first version built only the engine's layer-less one and
+    /// applied its preview angle — so on every phone the plain preview was
+    /// set to 0°, the sensor's landscape, inside a portrait window: sideways.
+    /// The engine keeps its own coordinator for the CAPTURE angle, which needs
+    /// no layer.
+    ///
+    /// ⚠️ **OBSERVED, NOT READ ONCE.** The angle changes with the interface
+    /// (this target allows landscape) and is 0 while the layer is outside a
+    /// view hierarchy; the header says it is key-value observable "and
+    /// delivers updates on the main queue". A flip replaces the coordinator,
+    /// because it is keyed on the device.
+    private var previewRotation: AVCaptureDevice.RotationCoordinator?
+    private var previewRotationObservation: NSKeyValueObservation?
+
     private func adopt(_ snapshot: AVCaptureEngine.Snapshot) {
         defer { onStateChange?() }
         position = snapshot.position
@@ -90,10 +110,38 @@ final class AVCaptureSource: CaptureSource {
         zoomRange = snapshot.zoomRange
         zoom = snapshot.zoom
         hasFlash = snapshot.hasFlash
-        if let angle = snapshot.previewRotation,
-           previewView.previewLayer.connection?.isVideoRotationAngleSupported(angle) == true {
-            previewView.previewLayer.connection?.videoRotationAngle = angle
+        followPreviewRotation(of: snapshot.deviceID)
+    }
+
+    private func followPreviewRotation(of deviceID: String?) {
+        guard let deviceID, previewRotation?.device?.uniqueID != deviceID,
+              let device = AVCaptureDevice(uniqueID: deviceID) else { return }
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewView.previewLayer)
+        previewRotation = coordinator
+        previewRotationObservation = Self.observePreviewAngle(of: coordinator) { [weak self] angle in
+            self?.applyPreviewAngle(angle)
         }
+    }
+
+    /// ⚠️ **THE KVO HANDLER IS FORMED HERE, IN A NONISOLATED FUNCTION, AND HOPS
+    /// TO THE MAIN ACTOR ITSELF.** Updates are documented to arrive on the main
+    /// queue, but a closure formed inside this `@MainActor` type would carry a
+    /// runtime isolation check, and the day one arrived elsewhere it would trap
+    /// (`dispatch_assert_queue_fail`, the PhotoKit incident twice over).
+    private nonisolated static func observePreviewAngle(
+        of coordinator: AVCaptureDevice.RotationCoordinator,
+        apply: @escaping @MainActor @Sendable (CGFloat) -> Void
+    ) -> NSKeyValueObservation {
+        coordinator.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.initial, .new]) { coordinator, _ in
+            let angle = coordinator.videoRotationAngleForHorizonLevelPreview
+            Task { @MainActor in apply(angle) }
+        }
+    }
+
+    private func applyPreviewAngle(_ angle: CGFloat) {
+        guard let connection = previewView.previewLayer.connection,
+              connection.isVideoRotationAngleSupported(angle) else { return }
+        connection.videoRotationAngle = angle
     }
 
     func flip() async {
@@ -155,7 +203,10 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         var zoomRange: ClosedRange<CGFloat>
         var zoom: CGFloat
         var hasFlash: Bool
-        var previewRotation: CGFloat?
+        /// The camera in use, by identifier — a `String` crosses to the main
+        /// actor where a device may not, and is all the preview's rotation
+        /// coordinator needs to find it again.
+        var deviceID: String?
     }
 
     let session = AVCaptureSession()
@@ -254,6 +305,9 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         session.addInput(input)
         videoInput = input
         currentPosition = position
+        // ⚠️ LAYER-LESS, AND THEREFORE FOR THE CAPTURE ANGLE ONLY: its preview
+        // angle is 0 by contract. The preview's own coordinator is built on the
+        // main actor with the layer — `AVCaptureSource.followPreviewRotation`.
         rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
         // Start on the wide lens, which is display factor 1.
         if (try? device.lockForConfiguration()) != nil {
@@ -308,7 +362,7 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         guard let device = videoInput?.device else {
             return Snapshot(
                 position: currentPosition, displayScale: 1, lensFactors: [1],
-                zoomRange: 1...1, zoom: 1, hasFlash: false, previewRotation: nil
+                zoomRange: 1...1, zoom: 1, hasFlash: false, deviceID: nil
             )
         }
         let scale = Self.displayScale(of: device)
@@ -325,7 +379,7 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
             position: currentPosition, displayScale: scale, lensFactors: factors,
             zoomRange: low...high, zoom: device.videoZoomFactor / scale,
             hasFlash: device.isFlashAvailable || device.hasTorch,
-            previewRotation: rotation?.videoRotationAngleForHorizonLevelPreview
+            deviceID: device.uniqueID
         )
     }
 
