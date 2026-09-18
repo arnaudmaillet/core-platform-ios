@@ -111,7 +111,7 @@ public struct UploadFeatureBuilder {
             source: makeCaptureSource(),
             folder: draft.captureFolder,
             captures: captures,
-            recents: recents,
+            libraryFace: { await Self.libraryFace(of: recents) },
             makeLibraryPicker: { [self] in
                 let picker = makePicker(library: recents, draft: draft)
                 // ⚠️ PUSHED, SO ITS WAY OUT IS THE CHEVRON BACK TO THE CAMERA.
@@ -150,6 +150,22 @@ public struct UploadFeatureBuilder {
             sheet.prefersGrabberVisible = true
         }
         return navigation
+    }
+
+    /// The face of the camera's library shortcut: the newest picture, fetched
+    /// alone and off the main actor for the device's library
+    /// (`CaptureLibraryFace`); asked of the stand-in library, which is
+    /// synthetic and cheap, in a DEBUG build handed one.
+    private static func libraryFace(of library: any MediaLibraryReading) async -> UIImage? {
+        #if DEBUG
+        if library is DebugMediaLibrary {
+            guard let first = await library.albums().first,
+                  let newest = await library.items(in: first.id).first else { return nil }
+            return await library.thumbnail(for: newest.id, size: CGSize(width: 44, height: 44))
+        }
+        #endif
+        let side = 44 * UITraitCollection.current.displayScale
+        return await CaptureLibraryFace.newestPicture(pixels: CGSize(width: side, height: side))?.image
     }
 
     /// The library picker and the editor → finalisation chain behind it, for

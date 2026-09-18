@@ -80,25 +80,22 @@ struct CaptureFlowTests {
         func setDeliversFrames(_ on: Bool) { deliversFrames.append(on) }
     }
 
-    /// A library that is ALREADY granted, counting whether anybody asked.
-    final class Recents: MediaLibraryReading {
-        var granted: MediaLibraryAccess = .granted
+    /// The shortcut's face, counting how often it is asked for.
+    @MainActor
+    final class Face {
+        var picture: UIImage?
         private(set) var asked = 0
-        var access: MediaLibraryAccess { granted }
-        func requestAccess() async -> MediaLibraryAccess {
+        func provide() async -> UIImage? {
             asked += 1
-            return granted
+            return picture
         }
-        func presentLimitedPicker(from host: UIViewController) {}
-        func albums() async -> [MediaLibraryAlbum] { [MediaLibraryAlbum(id: "recents", title: "Recents", count: 1)] }
-        func items(in album: MediaLibraryAlbum.ID) async -> [MediaLibraryItem] { [MediaLibraryItem(id: "newest", kind: .photo)] }
-        func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage? {
+
+        static var green: UIImage {
             UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
                 UIColor.green.setFill()
                 context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
             }
         }
-        func videoFile(for item: MediaLibraryItem.ID) async -> URL? { nil }
     }
 
     @MainActor
@@ -123,7 +120,7 @@ struct CaptureFlowTests {
 
     private func open(
         answer: CaptureAuthorization = .authorized(microphone: false),
-        recents: Recents? = nil,
+        face: Face? = nil,
         takeLimit: TimeInterval = CaptureTake.maximum,
         plainPreview: UIView? = nil,
         motion: Bool = false,
@@ -135,8 +132,13 @@ struct CaptureFlowTests {
         let handed = Handed()
         let folder = CaptureFolder()
         let captures = CapturedMediaLibrary()
+        var libraryFace: (@MainActor () async -> UIImage?)?
+        if let face {
+            libraryFace = { await face.provide() }
+        }
         let camera = CaptureViewController(
-            source: source, folder: folder, captures: captures, recents: recents,
+            source: source, folder: folder, captures: captures,
+            libraryFace: libraryFace,
             takeLimit: takeLimit, reducesMotion: { !motion },
             makeLibraryPicker: {
                 handed.pickers += 1
@@ -587,28 +589,38 @@ struct CaptureFlowTests {
         #expect(picker.navigationItem.leftBarButtonItems?.isEmpty ?? true, "no Cancel over the back chevron")
     }
 
-    /// ⚠️ The shortcut is always offered — with the newest picture where
-    /// access is already granted, a neutral face otherwise — and the camera
-    /// never asks for access: the picker it opens does.
-    @Test func theLibraryShortcutIsAlwaysOfferedAndNeverAsks() async throws {
-        let granted = Recents()
-        let shown = try await open(recents: granted)
+    /// ⚠️ The shortcut is always offered — with the newest picture as its face
+    /// where there is one, a neutral glyph otherwise — and its face is asked
+    /// for once, as one picture.
+    @Test func theLibraryShortcutIsAlwaysOfferedWithOnePictureAsItsFace() async throws {
+        let face = Face()
+        face.picture = Face.green
+        let shown = try await open(face: face)
         try await settle { shown.camera.hasLibraryThumbnail }
         #expect(shown.camera.debugLibraryIsShowing)
-        #expect(shown.camera.hasLibraryThumbnail, "the newest picture, where access allows")
+        #expect(shown.camera.hasLibraryThumbnail, "the newest picture")
+        #expect(face.asked == 1, "asked for once")
         shown.camera.debugTapLibrary()
         #expect(shown.handed.pickers == 1)
 
-        let unasked = Recents()
-        unasked.granted = .undetermined
-        let neutral = try await open(recents: unasked)
+        let faceless = Face()
+        let neutral = try await open(face: faceless)
         try await Task.sleep(for: .milliseconds(300))
         #expect(neutral.camera.debugLibraryIsShowing, "offered all the same")
         #expect(!neutral.camera.hasLibraryThumbnail, "with its neutral face")
-        #expect(unasked.asked == 0, "the camera never puts the Photos prompt up")
         neutral.camera.debugTapLibrary()
-        #expect(neutral.handed.pickers == 1, "the picker it opens asks")
-        #expect(granted.asked == 0)
+        #expect(neutral.handed.pickers == 1, "the picker it opens asks for access")
+    }
+
+    /// ⚠️ The face is ONE asset, the newest photo or video — never a walk of
+    /// the whole library.
+    @Test func theShortcutsFaceIsOneAssetNewestFirst() throws {
+        let options = CaptureLibraryFace.newestFetchOptions
+        #expect(options.fetchLimit == 1)
+        let order = try #require(options.sortDescriptors?.first)
+        #expect(order.key == "creationDate")
+        #expect(!order.ascending, "newest first")
+        #expect(options.predicate != nil, "photos and videos only")
     }
 
     /// A refused camera says so, with the way to Settings, and shoots nothing.
@@ -822,7 +834,9 @@ struct CaptureFlowTests {
     /// ⚠️ The library shortcut is not offered, and refuses, while a
     /// photograph is being written.
     @Test func theLibraryShortcutWaitsForAPhotographInFlight() async throws {
-        let screen = try await open(recents: Recents())
+        let face = Face()
+        face.picture = Face.green
+        let screen = try await open(face: face)
         try await settle { screen.camera.debugLibraryIsShowing }
         screen.camera.debugTapShutter()
         #expect(!screen.camera.debugLibraryIsShowing, "put away while the photograph is written")

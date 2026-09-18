@@ -46,9 +46,9 @@ final class CaptureViewController: UIViewController {
     private let folder: CaptureFolder
     /// The captures, as the editor and the finalisation screen will read them.
     let captures: CapturedMediaLibrary
-    /// The device library, asked for its newest picture only if access is
-    /// ALREADY granted — see `loadLibraryShortcut`.
-    private let recents: (any MediaLibraryReading)?
+    /// The library shortcut's face: the newest picture in the library, or nil
+    /// — see `CaptureLibraryFace`.
+    private let libraryFace: (@MainActor () async -> UIImage?)?
     private let makeEditor: MakeEditor
     private let makeLibraryPicker: (() -> UIViewController)?
     private let reducesMotion: () -> Bool
@@ -145,7 +145,7 @@ final class CaptureViewController: UIViewController {
         source: any CaptureSource,
         folder: CaptureFolder,
         captures: CapturedMediaLibrary,
-        recents: (any MediaLibraryReading)?,
+        libraryFace: (@MainActor () async -> UIImage?)?,
         takeLimit: TimeInterval = CaptureTake.maximum,
         reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled },
         makeLibraryPicker: (() -> UIViewController)?,
@@ -155,7 +155,7 @@ final class CaptureViewController: UIViewController {
         self.source = source
         self.folder = folder
         self.captures = captures
-        self.recents = recents
+        self.libraryFace = libraryFace
         self.reducesMotion = reducesMotion
         self.makeLibraryPicker = makeLibraryPicker
         self.makeEditor = makeEditor
@@ -1376,14 +1376,14 @@ final class CaptureViewController: UIViewController {
     /// the picker it opens asks for access itself — where asking is expected.
     /// The camera still never asks: reading `access` asks nothing, and the
     /// thumbnail is only fetched where access is already granted.
+    ///
+    /// ⚠️ **ONE PICTURE, ASKED FOR ONCE.** It used to enumerate the picker's
+    /// whole Recents album on the main actor for this — see
+    /// `CaptureLibraryFace`.
     private func loadLibraryShortcut() {
-        guard let recents, makeLibraryPicker != nil else { return }
-        guard recents.access == .granted || recents.access == .limited else { return }
+        guard let libraryFace, makeLibraryPicker != nil else { return }
         Task { [weak self] in
-            guard let first = await recents.albums().first,
-                  let newest = await recents.items(in: first.id).first,
-                  let picture = await recents.thumbnail(for: newest.id, size: CGSize(width: 88, height: 88))
-            else { return }
+            guard let picture = await libraryFace() else { return }
             guard let self else { return }
             libraryButton.imageView?.contentMode = .scaleAspectFill
             libraryButton.backgroundColor = nil
