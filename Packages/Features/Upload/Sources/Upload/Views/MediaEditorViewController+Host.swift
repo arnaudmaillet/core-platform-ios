@@ -94,6 +94,16 @@ protocol MediaEditorHosting: AnyObject {
     /// there from every test that could see it.
     func textEditingDidChange(_ isEditing: Bool)
 
+    /// Whether the composer currently holds any words — told when a session
+    /// opens and on every crossing after that.
+    ///
+    /// ⚠️ **A SECOND SEAM, BECAUSE IT ANSWERS A SECOND QUESTION.** One says
+    /// whether a session is open, and is guarded to fire exactly once at each
+    /// end of one; this says what is in the field, and fires whenever that
+    /// crosses. Folding them into one call would make the session's guard the
+    /// guard for both, and the glyph would stop following the words.
+    func typedWordsDidChange(_ hasWords: Bool)
+
     // MARK: The canvas
 
     func lockCanvas(by owner: CanvasLockOwner)
@@ -198,5 +208,9 @@ extension MediaEditorViewController: MediaEditorHosting {
     /// with two "Done"s and no "Next".
     func textEditingDidChange(_ isEditing: Bool) {
         isTypingText = isEditing
+    }
+
+    func typedWordsDidChange(_ hasWords: Bool) {
+        typedWords = hasWords
     }
 }

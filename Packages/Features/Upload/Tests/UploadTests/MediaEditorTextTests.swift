@@ -214,18 +214,92 @@ struct MediaEditorTextTests {
     /// used to carry its own white capsule a few points below the bar's
     /// trailing item: two controls at the same corner, one dismissing the
     /// keyboard and one leaving the screen for the finalisation page.
-    @Test func whileTypingTheTrailingSideSaysDoneAndTheComposerCarriesNone() async throws {
+    @Test func whileTypingTheTrailingSideFinishesAndTheComposerCarriesNoButton() async throws {
         let screen = open(Self.items(1))
         _ = try await page("item-0", on: screen)
         #expect(screen.editor.debugTrailingBarItems.first?.title == "Next", "guard")
 
         choose(Mode.text, on: screen)
 
-        #expect(screen.editor.debugTrailingBarItems.first?.title == "Done",
-                "got \(screen.editor.debugTrailingBarItems.map { $0.title ?? "?" })")
+        // ⚠️ **A GLYPH NOW, SO THE ASSERTION IS ON THE SPOKEN NAME.** "Next"
+        // became an icon for the length of a session; asserted by `title` it
+        // reads as nil, which is exactly the shape of a passing test over a
+        // button nobody can announce.
+        let button = try #require(screen.editor.debugTrailingBarItems.first)
+        #expect(button.title == nil, "the word went, the glyph replaced it")
+        #expect(button.image != nil, "and an item with no icon is a blank capsule")
+        #expect(button.accessibilityLabel == "Discard",
+                "got \(button.accessibilityLabel ?? "nothing")")
         let composer = try #require(screen.editor.overlayMode.debugComposer)
         #expect(Self.buttonTitles(in: composer) == [],
                 "the composer put a button of its own back under the bar's")
+    }
+
+    /// ⚠️ **THE BUTTON SAYS WHAT WILL HAPPEN, AND THE WORDS DECIDE.** Finishing
+    /// an empty field REMOVES the text — `composed(_:)`'s own rule — so a tick
+    /// over nothing would promise to keep something about to be thrown away.
+    /// Asked for that way, and it has to follow the field live rather than be
+    /// decided once when the composer opens.
+    @Test func theTypingButtonIsACrossOverNothingAndATickOverWords() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+
+        choose(Mode.text, on: screen)
+
+        let button = try #require(screen.editor.debugTrailingBarItems.first)
+        #expect(button.image == UIImage(systemName: "xmark"), "a new text opens on nothing")
+        #expect(button.accessibilityLabel == "Discard")
+
+        let composer = try #require(screen.editor.overlayMode.debugComposer)
+        composer.debugType("Hello")
+
+        #expect(button.image == UIImage(systemName: "checkmark"), "words arrived and the glyph did not follow")
+        #expect(button.accessibilityLabel == "Done")
+        #expect(screen.editor.debugTrailingBarItems.first === button,
+                "the glyph changed on the item that was already there, not by re-handing the group")
+
+        composer.debugType("")
+
+        #expect(button.image == UIImage(systemName: "xmark"), "the field was emptied and the glyph stayed a tick")
+        #expect(button.accessibilityLabel == "Discard")
+    }
+
+    /// And opening on a text that already has words shows the tick at once,
+    /// before a key is pressed.
+    @Test func openingOnAnExistingTextShowsTheTickAtOnce() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+        choose(Mode.text, on: screen)
+        try addText("Hello", on: screen)
+        choose(Mode.effects, on: screen)
+
+        choose(Mode.text, on: screen)
+
+        #expect(screen.editor.debugTrailingBarItems.first?.image == UIImage(systemName: "checkmark"),
+                "the composer opened on \"Hello\" and offered to throw it away")
+    }
+
+    /// ⚠️ **THE ARROWS GO DEAD FOR THE LENGTH OF A SESSION.** A step back while
+    /// the composer is up puts an edit on the page the composer knows nothing
+    /// about — including one that takes away the very overlay being typed,
+    /// which leaves a field with nowhere to land.
+    @Test func theHistoryArrowsAreDeadWhileTheComposerIsUp() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+        choose(Mode.text, on: screen)
+        try addText("Hello", on: screen)
+        #expect(screen.editor.debugUndoItem.isEnabled, "guard: a step exists once the words are placed")
+
+        screen.editor.overlayMode.debugTextTools.debugTapAdd()
+
+        #expect(screen.editor.overlayMode.debugComposer != nil, "guard: a session is open")
+        #expect(!screen.editor.debugUndoItem.isEnabled)
+        #expect(!screen.editor.debugRedoItem.isEnabled)
+
+        try #require(screen.editor.overlayMode.debugComposer).debugTapDone()
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugUndoItem.isEnabled, "and they come back when the session ends")
     }
 
     /// And tapping it finishes the sentence rather than leaving the screen.

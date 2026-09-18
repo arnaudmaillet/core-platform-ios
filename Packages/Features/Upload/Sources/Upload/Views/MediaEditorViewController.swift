@@ -277,10 +277,36 @@ final class MediaEditorViewController: UIViewController {
     /// finalisation page. There is one now, and it means the nearer thing:
     /// finish what is being typed. "Next" comes back the moment the session
     /// ends, because leaving the screen mid-sentence is not what "Done" is for.
-    private lazy var doneTypingItem = UIBarButtonItem(
-        title: "Done",
-        primaryAction: UIAction { [weak self] _ in self?.overlayMode.finishComposing() }
-    )
+    private lazy var doneTypingItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            primaryAction: UIAction { [weak self] _ in self?.overlayMode.finishComposing() }
+        )
+        item.image = Self.typingGlyph(hasWords: false)
+        item.accessibilityLabel = "Discard"
+        return item
+    }()
+
+    /// The glyph the one typing button wears.
+    ///
+    /// ⚠️ **IT IS THE SAME BUTTON AND THE SAME ACTION; ONLY THE PROMISE
+    /// CHANGES.** Finishing an empty field already removes the text — that is
+    /// `composed(_:)`'s documented rule — so a tick over nothing would promise
+    /// to keep something that is about to be thrown away. A cross says what
+    /// will actually happen. Two separate bar items would re-hand the whole
+    /// trailing group at each crossing; one item changing its image does not.
+    private static func typingGlyph(hasWords: Bool) -> UIImage? {
+        UIImage(systemName: hasWords ? "checkmark" : "xmark")
+    }
+
+    /// Whether the composer holds any words right now — see
+    /// `MediaEditorHosting.typedWordsDidChange`.
+    var typedWords = false {
+        didSet {
+            guard typedWords != oldValue else { return }
+            doneTypingItem.image = Self.typingGlyph(hasWords: typedWords)
+            doneTypingItem.accessibilityLabel = typedWords ? "Done" : "Discard"
+        }
+    }
 
     /// States the trailing side for what the screen is doing right now.
     ///
@@ -347,7 +373,9 @@ final class MediaEditorViewController: UIViewController {
     /// piece, the row is open on, and the row would be left pointing at
     /// nothing.
     func refreshHistoryItems() {
-        guard let id = currentItemID, transitionFocus == nil, !segmentFilterMode.isOpen else {
+        guard let id = currentItemID, transitionFocus == nil, !segmentFilterMode.isOpen,
+              !isTypingText
+        else {
             undoItem.isEnabled = false
             redoItem.isEnabled = false
             return
@@ -615,6 +643,12 @@ final class MediaEditorViewController: UIViewController {
     var isTypingText = false {
         didSet {
             showTheTrailingItem(animated: true)
+            // ⚠️ **AND THE ARROWS GO DEAD FOR THE LENGTH OF THE SESSION.** A
+            // step back while the composer is up would put an edit on the page
+            // that the open composer knows nothing about — including one that
+            // takes away the very overlay being typed, which leaves a field
+            // with no destination. Same rule as a transition row's.
+            refreshHistoryItems()
             #if DEBUG
             textEditingChanges.append(isTypingText)
             #endif
@@ -1291,7 +1325,6 @@ final class MediaEditorViewController: UIViewController {
         // a typing session — see `showTheTrailingItem`.
         showTheTrailingItem()
         nextItem.style = .done
-        doneTypingItem.style = .done
     }
 
     private func configureCategoryStrip() {
