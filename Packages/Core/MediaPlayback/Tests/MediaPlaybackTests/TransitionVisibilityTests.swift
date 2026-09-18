@@ -58,12 +58,12 @@ struct TransitionVisibilityTests {
         func playableURL(for url: URL) async throws -> URL { url }
     }
 
-    static let columns = 16
-    static let rows = 12
+    nonisolated static let columns = 16
+    nonisolated static let rows = 12
 
     // MARK: - Reading
 
-    private static func sample(_ buffer: CVPixelBuffer, at time: Double) -> Frame {
+    private nonisolated static func sample(_ buffer: CVPixelBuffer, at time: Double) -> Frame {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         let width = CVPixelBufferGetWidth(buffer)
@@ -107,13 +107,27 @@ struct TransitionVisibilityTests {
             start: CMTime(seconds: from, preferredTimescale: 600), end: CMTime(seconds: to, preferredTimescale: 600)
         )
         guard reader.startReading() else { throw reader.error ?? CocoaError(.fileReadUnknown) }
-        var frames: [Frame] = []
-        while let buffer = output.copyNextSampleBuffer() {
-            guard let pixels = CMSampleBufferGetImageBuffer(buffer) else { continue }
-            let time = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
-            guard time >= from - 0.0001, time < to - 0.0001 else { continue }
-            frames.append(sample(pixels, at: time))
-        }
+        // ⚠️ **OFF THE MAIN ACTOR, BECAUSE EACH COPY RENDERS A FRAME.** Read here,
+        // on this suite's own actor, every `copyNextSampleBuffer` blocked the
+        // main thread while the composition drew — fourteen kinds, two routes —
+        // and the suites that run beside this one starved: `RehearsalLoopTests`
+        // loops on a main-queue callback, and its playhead ran a second and a
+        // half past its range, in CI and on this machine alike, only while this
+        // suite ran next to it.
+        // ⚠️ `nonisolated(unsafe)`: the reader and its output were made above,
+        // are touched by nothing else while the task runs, and this function
+        // waits for it before reading `reader.status`.
+        nonisolated(unsafe) let pulled = output
+        let frames = await Task.detached { () -> [Frame] in
+            var frames: [Frame] = []
+            while let buffer = pulled.copyNextSampleBuffer() {
+                guard let pixels = CMSampleBufferGetImageBuffer(buffer) else { continue }
+                let time = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
+                guard time >= from - 0.0001, time < to - 0.0001 else { continue }
+                frames.append(Self.sample(pixels, at: time))
+            }
+            return frames
+        }.value
         #expect(reader.status == .completed, "the reader stopped with \(String(describing: reader.error))")
         return frames
     }
