@@ -190,12 +190,18 @@ final class CaptureViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        isClosing = false
         UISound.prepare()
         // The editor raises the stack's toolbar for its own strip; the camera
         // has its selector in its own layout and wants the foot clear.
         navigationController?.setToolbarHidden(true, animated: animated)
         startCamera()
         sweepReleased()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        if navigationController?.isBeingDismissed == true || isBeingDismissed { isClosing = true }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -249,9 +255,30 @@ final class CaptureViewController: UIViewController {
         navigationItem.compactAppearance = clear
     }
 
+    /// The sheet is on its way out: Cancel or Discard, or a swipe that
+    /// dismisses it. Cleared if the camera comes back.
+    private var isClosing = false
+
+    /// Whether a finished capture may still be handed over: the camera is what
+    /// the author sees, and the sheet is not leaving.
+    ///
+    /// ⚠️ **"ON TOP" IS NOT ENOUGH.** During a dismissal the camera is still the
+    /// top screen: a photograph, or a join of the take, that landed during
+    /// Cancel's slide-down was registered, and an editor built and pushed
+    /// inside the sheet on its way out. It is now dropped, file and all.
+    private var canHandOff: Bool {
+        !isClosing && view.window != nil && navigationController?.isBeingDismissed != true
+            && navigationController?.topViewController === self
+    }
+
+    private func close() {
+        isClosing = true
+        dismiss(animated: true)
+    }
+
     private func cancelTapped() {
         guard !take.isEmpty else {
-            dismiss(animated: true)
+            close()
             return
         }
         // ⚠️ CLIPS ARE WORK. A cancel that silently threw away a minute of
@@ -262,7 +289,7 @@ final class CaptureViewController: UIViewController {
             message: "What you recorded will be lost.", preferredStyle: .actionSheet
         )
         alert.addAction(UIAlertAction(title: "Discard", style: .destructive) { [weak self] _ in
-            self?.dismiss(animated: true)
+            self?.close()
         })
         alert.addAction(UIAlertAction(title: "Keep Recording", style: .cancel))
         alert.popoverPresentationController?.barButtonItem = cancelItem
@@ -973,7 +1000,7 @@ final class CaptureViewController: UIViewController {
     /// has gone somewhere else; the editor would land on top of it. The
     /// photograph is dropped, file and all.
     private func photographed(_ photo: CapturedPhoto) {
-        guard navigationController?.topViewController === self else {
+        guard canHandOff else {
             folder.discard(photo.url)
             return
         }
@@ -1137,8 +1164,7 @@ final class CaptureViewController: UIViewController {
                 let size = await CapturedMediaLibrary.uprightVideoSize(at: url) ?? .zero
                 // A take that changed while it was being joined is not the
                 // take on screen; nothing is handed over for it.
-                guard take.clips.map(\.url) == clips,
-                      navigationController?.topViewController === self else { return }
+                guard take.clips.map(\.url) == clips, canHandOff else { return }
                 let item = captures.register(url, kind: .video(duration: duration))
                 openEditor([item], edits: [item.id: handOffEdits(uprightSize: size)])
             } catch {

@@ -956,6 +956,18 @@ struct CaptureFlowTests {
         #expect(!FileManager.default.fileExists(atPath: joined.path), "and deleted once nobody reads it")
     }
 
+    /// ⚠️ A photograph that lands while the sheet is being closed is not
+    /// pushed into the closing sheet — it is dropped with its file.
+    @Test func aPhotographLandingDuringCancelIsDropped() async throws {
+        let screen = try await open()
+        screen.camera.debugTapShutter()
+        screen.camera.debugTapCancel()
+        try await settle(for: 10) { !screen.camera.isBusy }
+        try #require(!screen.camera.isBusy)
+        #expect(screen.handed.editors == 0)
+        #expect(!screen.folder.files.contains { $0.pathExtension == "jpg" }, "its file went too")
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {
