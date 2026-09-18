@@ -1785,10 +1785,14 @@ final class CaptureViewController: UIViewController {
     private(set) var debugFocusRingStart: CGAffineTransform?
     private(set) var debugToastStart: CGAffineTransform?
     func debugTapPreview(at point: CGPoint) { previewTapped(at: point) }
+    #if DEBUG
+    // ⚠️ DEBUG ONLY, LIKE THE BAR'S OWN `debugDrawnAlpha` IT READS — this
+    // section is compiled in Release too, and CI's Release build broke on it.
     var debugShapeIsDimmed: Bool {
         guard let index = CaptureOption.allCases.firstIndex(of: .ratio) else { return false }
         return selector.debugDrawnAlpha(at: index) < 0.5
     }
+    #endif
     private(set) var debugLastHandOff: ([MediaLibraryItem], [String: MediaEdits])?
     var debugSelector: IconSelectorBar { selector }
     var debugBand: MediaEditorBandView { band }
