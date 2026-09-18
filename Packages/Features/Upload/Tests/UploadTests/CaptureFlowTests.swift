@@ -997,6 +997,33 @@ struct CaptureFlowTests {
         #expect(screen.camera.debugCardRefreshes >= before + 2, "the cards are redrawn from the live frame")
     }
 
+    /// ⚠️ The options are a REAL bar item in the stack's toolbar, trailing,
+    /// drawing no glass of their own — the editor's strip, not a lookalike —
+    /// minted fresh under one identifier at every hand-over, and taken away
+    /// (the toolbar staying up) while a clip records.
+    @Test func theOptionsAreATrailingItemInTheStacksToolbar() async throws {
+        let screen = try await open()
+        try await settle { screen.camera.toolbarItems?.isEmpty == false }
+        #expect(!screen.navigation.isToolbarHidden)
+        let items = try #require(screen.camera.toolbarItems)
+        #expect(items.count == 2)
+        let item = try #require(items.last)
+        #expect(item.customView === screen.camera.debugSelector)
+        #expect(item.identifier == CaptureViewController.optionsItemID)
+        #expect(screen.camera.debugSelector.suppressesBackdrop, "the toolbar supplies the glass")
+        #expect(items.first?.customView == nil && items.first !== item, "a flexible space pushes it trailing")
+
+        screen.camera.debugBeginHold()
+        #expect(screen.camera.toolbarItems?.isEmpty == true, "away while recording")
+        #expect(!screen.navigation.isToolbarHidden, "the toolbar itself stays, and the shutter with it")
+        screen.camera.debugEndHold()
+        try await settle { screen.camera.take.clips.count == 1 && !screen.camera.isRecording }
+        let back = try #require(screen.camera.toolbarItems?.last)
+        #expect(back.customView === screen.camera.debugSelector)
+        #expect(back !== item, "a fresh item, never the old one re-handed")
+        #expect(back.identifier == item.identifier)
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {

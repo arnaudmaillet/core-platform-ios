@@ -192,9 +192,10 @@ final class CaptureViewController: UIViewController {
         super.viewWillAppear(animated)
         isClosing = false
         UISound.prepare()
-        // The editor raises the stack's toolbar for its own strip; the camera
-        // has its selector in its own layout and wants the foot clear.
-        navigationController?.setToolbarHidden(true, animated: animated)
+        // The options live in the stack's toolbar, as the editor's categories
+        // do — see `handOverSelector`.
+        navigationController?.setToolbarHidden(false, animated: animated)
+        configureToolbarAppearance()
         startCamera()
         sweepReleased()
         // ⚠️ THE CARDS' TIMER STOPS WHEN THE CAMERA IS LEFT (`viewDidDisappear`)
@@ -204,8 +205,34 @@ final class CaptureViewController: UIViewController {
         if openOption == .filters { startCardsTimer() }
     }
 
+    /// The toolbar's appearance as the camera found it, put back on the way out.
+    private var restoreToolbar: (() -> Void)?
+
+    /// ⚠️ **TRANSPARENT, AS THE EDITOR'S IS** — the preview runs under the bar
+    /// and a bar background would cut it — and put back on the way out: the
+    /// library's picker, pushed from here, draws its album strip on the same
+    /// toolbar with the appearance it expects.
+    private func configureToolbarAppearance() {
+        guard let toolbar = navigationController?.toolbar, restoreToolbar == nil else { return }
+        let standard = toolbar.standardAppearance
+        let compact = toolbar.compactAppearance
+        let scrollEdge = toolbar.scrollEdgeAppearance
+        restoreToolbar = { [weak toolbar] in
+            toolbar?.standardAppearance = standard
+            toolbar?.compactAppearance = compact
+            toolbar?.scrollEdgeAppearance = scrollEdge
+        }
+        let clear = UIToolbarAppearance()
+        clear.configureWithTransparentBackground()
+        toolbar.standardAppearance = clear
+        toolbar.compactAppearance = clear
+        toolbar.scrollEdgeAppearance = clear
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        restoreToolbar?()
+        restoreToolbar = nil
         if navigationController?.isBeingDismissed == true || isBeingDismissed { isClosing = true }
     }
 
@@ -222,6 +249,7 @@ final class CaptureViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutWindow()
+        if owesAHandover { handOverSelector(animated: false) }
     }
 
     private func startCamera() {
@@ -488,6 +516,7 @@ final class CaptureViewController: UIViewController {
     /// rule about contacting the render server before there is one.
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
+        handOverSelector(animated: false)
         if timePill.effect == nil { timePill.effect = UIGlassEffect() }
         if toast.effect == nil { toast.effect = UIGlassEffect() }
     }
@@ -497,18 +526,24 @@ final class CaptureViewController: UIViewController {
     private func configureSelector() {
         // ⚠️ THE SHUTTER STANDS INSIDE THE PICTURE, NEVER ACROSS ITS EDGE. On
         // the first run the preview's rounded foot cut through the ring. It
-        // rests just above the selector where the phone is tall enough, and is
-        // lifted into the preview where it is not (an SE's preview reaches the
-        // foot of the sheet, and the selector then lies over the picture).
-        let resting = shutter.bottomAnchor.constraint(equalTo: selector.topAnchor, constant: -Spacing.md)
+        // rests just above the stack's toolbar — the safe area's foot, which
+        // the visible toolbar raises — and is lifted into the preview where
+        // the phone is too short for both (an SE).
+        let resting = shutter.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.md)
         resting.priority = .defaultHigh
-        selector.constrain(in: view) { view in
-            selector.centerXAnchor.constraint(equalTo: view.centerXAnchor)
-            selector.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.sm)
-            shutter.bottomAnchor.constraint(lessThanOrEqualTo: selector.topAnchor, constant: -Spacing.md)
-            shutter.bottomAnchor.constraint(lessThanOrEqualTo: previewContainer.bottomAnchor, constant: -Spacing.lg)
+        NSLayoutConstraint.activate([
+            shutter.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.md),
+            shutter.bottomAnchor.constraint(lessThanOrEqualTo: previewContainer.bottomAnchor, constant: -Spacing.lg),
             resting
-        }
+        ])
+        // ⚠️ **A REAL BAR ITEM IN THE STACK'S TOOLBAR, TRAILING — THE EDITOR'S
+        // STRIP, NOT A LOOKALIKE.** It stood in the camera's own layout,
+        // centred, with its own glass capsule, and it read as a different
+        // control: the pill sat in a capsule of another height, with unequal
+        // margins at the top and the sides. The toolbar supplies the glass, so
+        // the bar draws none of its own — the rule `IconSelectorBar` states for
+        // any bar that lives in one.
+        selector.suppressesBackdrop = true
         selector.onSelect = { [weak self] index in self?.optionChosen(index) }
         // ⚠️ A SECOND TAP ON THE CHOSEN ICON PUTS ITS CONTROLS AWAY — the
         // editor's neutral state, asked for in the same words.
@@ -1278,12 +1313,51 @@ final class CaptureViewController: UIViewController {
     /// Everything but the shutter, the ring and the zoom steps back while a
     /// clip records or a countdown runs.
     private func setChromeHidden(_ hidden: Bool) {
+        isChromeHidden = hidden
         cancelItem.isHidden = hidden
         flipItem.isHidden = hidden
-        setShown(selector, !hidden, animated: true)
+        handOverSelector(animated: true)
         if hidden { showBand(nil); selector.selectNothing(notify: false) }
         refreshTakeControls(animated: true)
     }
+
+    private var isChromeHidden = false
+
+    /// A hand-over the toolbar could not take yet, owed to the first layout
+    /// pass once the screen is in a window.
+    private var owesAHandover = false
+
+    /// Puts the options in the stack's toolbar — trailing, alone — or takes
+    /// them out while a clip records or a countdown runs.
+    ///
+    /// ⚠️ **A FRESH ITEM ON EVERY HAND-OVER, UNDER ONE IDENTIFIER** — what the
+    /// editor learnt the hard way (`bar-item-wrapper-drift`): UIKit keeps the
+    /// wrapper it builds around a REUSED item's view, and that wrapper does not
+    /// follow the view's width; a fresh item gets a fresh wrapper, and the
+    /// shared identifier lets UIKit treat the two as one item across the
+    /// transition instead of cross-fading two sets.
+    ///
+    /// ⚠️ **NEVER BEFORE THE SCREEN IS IN A WINDOW.** UIKit decides once, at the
+    /// hand-over, whether an item fits; a toolbar that has never been in a
+    /// window answers the SCREEN's width, so "has a width" is not "is laid
+    /// out". An early call is owed to `viewDidLayoutSubviews`.
+    ///
+    /// ⚠️ **THE TOOLBAR STAYS UP WHILE ITS ITEM IS AWAY.** Hiding the toolbar
+    /// for a recording would lower the safe area the shutter rests on, and the
+    /// shutter would drop under the author's thumb mid-clip.
+    private func handOverSelector(animated: Bool) {
+        guard view.window != nil else {
+            owesAHandover = true
+            return
+        }
+        owesAHandover = false
+        let offered = !isChromeHidden && notice == nil
+        let item = UIBarButtonItem(customView: selector)
+        item.identifier = Self.optionsItemID
+        setToolbarItems(offered ? [.flexibleSpace(), item] : [], animated: animated)
+    }
+
+    static let optionsItemID = "upload.camera.toolbar.options"
 
     private func showLock(_ shown: Bool) {
         lockView.setLocked(false)
@@ -1415,7 +1489,7 @@ final class CaptureViewController: UIViewController {
         self.notice = notice
         shutter.isUserInteractionEnabled = false
         shutter.alpha = 0.35
-        selector.isHidden = true
+        handOverSelector(animated: false)
         lensChips.isHidden = true
     }
 
