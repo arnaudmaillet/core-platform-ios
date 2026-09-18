@@ -159,9 +159,9 @@ enum CaptureTimer: Int, CaseIterable, Sendable {
 /// ⚠️ **APPENDED, NEVER INSERTED** — the raw value is the selector's index and
 /// the tests address the options by it, the editor's `TrackAction` rule.
 ///
-/// ⚠️ **FLASH IS NOT AN OPTION HERE ANY MORE** — it sits with the flip in the
-/// toolbar's leading strip (`CaptureViewController.leadingBar`), its icon naming
-/// the mode, as the author asked.
+/// ⚠️ **FLASH IS NOT AN OPTION HERE ANY MORE** — it sits beside the flip in the
+/// header, each in its own bubble (`CaptureViewController.refreshHeader`), its
+/// icon naming the mode, as the author asked.
 enum CaptureOption: Int, CaseIterable, Sendable {
     case timer
     case ratio

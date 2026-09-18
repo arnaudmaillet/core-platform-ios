@@ -6,7 +6,7 @@ import UIKit
 /// media editor the moment a capture is done.
 ///
 /// ```
-/// │ Cancel                       Next │  ← the stack's bar; Next once there is a clip
+/// │ (⟲) (⚡)                     Next │  ← the stack's bar; Next once there is a clip
 /// │ ┌──────────────────────────────┐  │
 /// │ │                              │  │
 /// │ │     the preview, 9:16,       │  │  ← the ratio's window; grid, countdown
@@ -14,7 +14,7 @@ import UIKit
 /// │ │      [0.5] [1×] [2] [3]      │  │  ← lens chips (or the band, when open)
 /// │ │  ▣       (  ◉  )       ⌫     │  │  ← library · shutter · undo
 /// │ └──────────────────────────────┘  │
-/// │ [ ⚡ ⟲ ] [ ⏱  ▭  ◐  ⊞        ]    │  ← the toolbar: flash and flip, then the options
+/// │ [ ⏱  ▭  ◐  ⊞ ]              ( ✕ ) │  ← the toolbar: the options, then close
 /// ```
 ///
 /// ⚠️ **THE OPTIONS ARE ICONS IN A SELECTOR, AND AN ICON OPENS A BAND — THE
@@ -116,57 +116,82 @@ final class CaptureViewController: UIViewController {
     )
     private lazy var filterRow = MediaFilterRowView()
 
-    private lazy var cancelItem = UIBarButtonItem(
-        title: "Cancel", primaryAction: UIAction { [weak self] _ in self?.cancelTapped() }
-    )
-    /// The toolbar's LEADING strip: the flash and the flip.
+    /// The toolbar's TRAILING button: close the camera — what Cancel was.
     ///
-    /// ⚠️ **ASKED FOR IN THOSE WORDS**: both icons in the bottom toolbar, on the
-    /// left, "toujours en largeur sa taille intrinsèque (prioritaire)", the
-    /// options' selector taking the rest — "le même système qu'on a fait sur
-    /// l'écran d'édition des médias". So it is the editor's leading strip:
-    /// an `IconActionBar`, momentary, drawn without a backdrop inside the
-    /// toolbar's glass.
-    ///
-    /// ⚠️ **THE FLASH CYCLES ON A TAP — AUTO → ON → OFF — AND DOES NOT OPEN A
-    /// MENU.** `IconActionBar` is a row of momentary buttons with no menu to
-    /// carry, and giving it one is a DesignSystem change. The icon names the
-    /// mode it is in, so the author sees each step as they take it; VoiceOver
-    /// says it ("Flash, auto"). Dimmed where the camera has no flash — the
-    /// front one — rather than taken away, so the strip keeps its width and
-    /// the bar is not handed over again for it.
-    private(set) lazy var leadingBar: IconActionBar = {
-        let bar = IconActionBar(items: leadingItems())
+    /// ⚠️ **ASKED FOR**: "en bas … mettre le bouton X pour fermer l'appareil
+    /// photo". An `IconActionBar` of one `xmark`, drawn without a backdrop, so
+    /// the toolbar gives it the same glass bubble as the selector beside it —
+    /// the same height, on the same baseline — and it can be measured as a
+    /// strip (`BottomBarShare`).
+    private(set) lazy var closeBar: IconActionBar = {
+        let bar = IconActionBar(items: [IconActionBar.Item(symbolName: "xmark", accessibilityLabel: "Close camera")])
         bar.suppressesBackdrop = true
-        bar.onTap = { [weak self] index in
-            switch LeadingAction(rawValue: index) {
-            case .flash: self?.cycleFlash()
-            case .flip: self?.flip()
-            case nil: break
-            }
-        }
+        bar.onTap = { [weak self] _ in self?.closeTapped() }
         return bar
     }()
 
-    /// The leading strip's items. The raw value is the bar's index.
-    enum LeadingAction: Int, CaseIterable {
-        case flash
-        case flip
+    /// The header's flip and flash, while they are offered — see
+    /// `refreshHeader`.
+    private var headerItems: (flip: UIBarButtonItem, flash: UIBarButtonItem)?
+    static let flipItemID = "upload.camera.flip"
+    static let flashItemID = "upload.camera.flash"
+    /// The symbol the flash item was last given — a bar item does not say.
+    private(set) var flashSymbol: String?
+
+    /// Puts the flip and the flash on the header's leading side — each in a
+    /// Liquid Glass bubble of its own — or takes them out.
+    ///
+    /// ⚠️ **ASKED FOR IN THOSE WORDS**: Cancel leaves the header for "les
+    /// icônes de flash et de caméra", and "bien mettre chaque item dans une
+    /// bulle liquid glass dédiée, séparés". Two items side by side on one side
+    /// of an iOS 26 bar share ONE platter by default; `sharesBackground =
+    /// false` on each gives each its own.
+    ///
+    /// ⚠️ **THE FLASH CYCLES ON A TAP — AUTO → ON → OFF — AND DOES NOT OPEN A
+    /// MENU**, as it did in the toolbar: the icon names the mode it is in, and
+    /// VoiceOver says it ("Flash, auto"). Disabled where the camera has no
+    /// flash — the front one — rather than taken away.
+    ///
+    /// ⚠️ **FRESH ITEMS EACH TIME THEY ARRIVE, UNDER STABLE IDENTIFIERS**
+    /// (`bar-item-wrapper-drift`), and gone — as Cancel was — while a clip
+    /// records or a countdown runs, and while the camera cannot be used at all
+    /// (a notice): there is nothing to turn or to light.
+    private func refreshHeader(animated: Bool) {
+        let shown = !isChromeHidden && notice == nil
+        if shown, headerItems == nil {
+            let flip = UIBarButtonItem(
+                image: UIImage(systemName: "arrow.triangle.2.circlepath.camera"),
+                primaryAction: UIAction { [weak self] _ in self?.flip() }
+            )
+            flip.identifier = Self.flipItemID
+            flip.accessibilityLabel = "Switch camera"
+            flip.sharesBackground = false
+            let flash = UIBarButtonItem(
+                image: UIImage(systemName: settings.flash.symbolName),
+                primaryAction: UIAction { [weak self] _ in self?.cycleFlash() }
+            )
+            flash.identifier = Self.flashItemID
+            flash.sharesBackground = false
+            headerItems = (flip, flash)
+            // Left to right: the flip, then the flash.
+            navigationItem.setLeftBarButtonItems([flip, flash], animated: animated)
+        } else if !shown, headerItems != nil {
+            headerItems = nil
+            navigationItem.setLeftBarButtonItems(nil, animated: animated)
+        }
+        refreshFlashItem()
     }
 
-    private func leadingItems() -> [IconActionBar.Item] {
-        let flash = source.hasFlash
+    /// The flash item names its mode, says it, and is live only where the
+    /// camera has a flash.
+    private func refreshFlashItem() {
+        guard let flash = headerItems?.flash else { return }
+        flash.image = UIImage(systemName: settings.flash.symbolName)
+        flash.accessibilityLabel = source.hasFlash
             ? "Flash, \(settings.flash.label.lowercased())"
             : "Flash, unavailable"
-        return [
-            IconActionBar.Item(symbolName: settings.flash.symbolName, accessibilityLabel: flash),
-            IconActionBar.Item(symbolName: "arrow.triangle.2.circlepath.camera", accessibilityLabel: "Switch camera")
-        ]
-    }
-
-    private func refreshLeadingBar() {
-        leadingBar.setItems(leadingItems())
-        leadingBar.setEnabled(source.hasFlash, at: LeadingAction.flash.rawValue)
+        flash.isEnabled = source.hasFlash
+        flashSymbol = settings.flash.symbolName
     }
 
     private func cycleFlash() {
@@ -287,7 +312,7 @@ final class CaptureViewController: UIViewController {
         layoutWindow()
         let held = shareTheBar()
         guard !isHandingOver else { return }
-        let moved = zip([handedWidths?.leading, handedWidths?.trailing], [held?.leading, held?.trailing])
+        let moved = zip([handedWidths?.selector, handedWidths?.close], [held?.selector, held?.close])
             .contains { abs(($0 ?? -1) - ($1 ?? -2)) > 0.5 }
         if owesAHandover || moved { handOverSelector(animated: false) }
     }
@@ -316,8 +341,9 @@ final class CaptureViewController: UIViewController {
     // MARK: - Bars
 
     private func configureBars() {
-        navigationItem.leftBarButtonItems = [cancelItem]
-        // The flip and the flash live in the toolbar's leading strip.
+        // The flip and the flash, where Cancel was; the close button is at
+        // the toolbar's trailing end.
+        refreshHeader(animated: false)
         navigationItem.backButtonDisplayMode = .minimal
         // ⚠️ TRANSPARENT, AND STATED ON THIS SCREEN'S ITEM — a bar appearance
         // set on the stack's bar would follow the author into the editor.
@@ -328,16 +354,16 @@ final class CaptureViewController: UIViewController {
         navigationItem.compactAppearance = clear
     }
 
-    /// The sheet is on its way out: Cancel or Discard, or a swipe that
-    /// dismisses it. Cleared if the camera comes back.
-    private var isClosing = false
+    /// The sheet is on its way out: the close button or Discard, or a swipe
+    /// that dismisses it. Cleared if the camera comes back.
+    private(set) var isClosing = false
 
     /// Whether a finished capture may still be handed over: the camera is what
     /// the author sees, and the sheet is not leaving.
     ///
     /// ⚠️ **"ON TOP" IS NOT ENOUGH.** During a dismissal the camera is still the
     /// top screen: a photograph, or a join of the take, that landed during
-    /// Cancel's slide-down was registered, and an editor built and pushed
+    /// the close's slide-down was registered, and an editor built and pushed
     /// inside the sheet on its way out. It is now dropped, file and all.
     private var canHandOff: Bool {
         !isClosing && view.window != nil && navigationController?.isBeingDismissed != true
@@ -349,12 +375,14 @@ final class CaptureViewController: UIViewController {
         dismiss(animated: true)
     }
 
-    private func cancelTapped() {
+    /// The toolbar's close button — what Cancel was, and it asks what Cancel
+    /// asked.
+    private func closeTapped() {
         guard !take.isEmpty else {
             close()
             return
         }
-        // ⚠️ CLIPS ARE WORK. A cancel that silently threw away a minute of
+        // ⚠️ CLIPS ARE WORK. A close that silently threw away a minute of
         // recording would be the one tap on this screen that cannot be undone.
         let count = take.clips.count
         let alert = UIAlertController(
@@ -365,7 +393,8 @@ final class CaptureViewController: UIViewController {
             self?.close()
         })
         alert.addAction(UIAlertAction(title: "Keep Recording", style: .cancel))
-        alert.popoverPresentationController?.barButtonItem = cancelItem
+        alert.popoverPresentationController?.sourceView = closeBar
+        alert.popoverPresentationController?.sourceRect = closeBar.bounds
         present(alert, animated: true)
     }
 
@@ -807,7 +836,7 @@ final class CaptureViewController: UIViewController {
 
     private func setFlash(_ mode: CaptureFlashMode) {
         settings.flash = mode
-        refreshLeadingBar()
+        refreshFlashItem()
     }
 
     private func setTimer(_ timer: CaptureTimer) {
@@ -1364,7 +1393,7 @@ final class CaptureViewController: UIViewController {
         timeLabel.text = Self.clock(take.total, of: take.limit)
         setShown(timePill, hasClips || isRecording, animated: animated)
         // ⚠️ A SHEET WITH CLIPS IN IT DOES NOT SWIPE AWAY: the drag would throw
-        // the take out with no question asked. Cancel asks.
+        // the take out with no question asked. The close button asks.
         navigationController?.isModalInPresentation = hasClips || isRecording
         if !hasClips { hasSaidTheLookIsWhole = false }
         applyShapeLock()
@@ -1374,7 +1403,7 @@ final class CaptureViewController: UIViewController {
     ///
     /// ⚠️ **IN THE HEADER, AS THE PICKER'S AND THE EDITOR'S ARE — ASKED FOR**
     /// ("le bouton 'Next' sera affiché dans la toolbar du haut à droite"): a
-    /// prominent (`.done`) item at the trailing edge, `[Cancel] ---- [Next]`.
+    /// prominent (`.done`) item at the trailing edge, `(⟲)(⚡) ---- [Next]`.
     /// It arrives with the first clip, is disabled while the take is joined
     /// or a photograph written, and goes while a clip records or a countdown
     /// runs, with the rest of the chrome.
@@ -1409,7 +1438,7 @@ final class CaptureViewController: UIViewController {
     /// clip records or a countdown runs.
     private func setChromeHidden(_ hidden: Bool) {
         isChromeHidden = hidden
-        cancelItem.isHidden = hidden
+        refreshHeader(animated: true)
         handOverSelector(animated: true)
         if hidden { showBand(nil); selector.selectNothing(notify: false) }
         refreshTakeControls(animated: true)
@@ -1421,15 +1450,20 @@ final class CaptureViewController: UIViewController {
     /// pass once the screen is in a window.
     private var owesAHandover = false
 
-    /// Puts the two strips in the stack's toolbar — the flash and the flip
-    /// leading, the options trailing — or takes them out while a clip records
-    /// or a countdown runs.
+    /// Puts the options and the close button in the stack's toolbar —
+    /// `[selector] ---- [close]` — or takes them out while a clip records or a
+    /// countdown runs. With a notice up there is nothing to choose, and the
+    /// close button stands alone.
     ///
-    /// ⚠️ **THE EDITOR'S BAR, SHARED RATHER THAN COPIED.** The leading strip is
-    /// held at its own width and the selector takes the rest, floored at one
-    /// bubble (`EditorSelectorLayout`), in the room the bar leaves once its
-    /// margins, platters and group gap are charged (`ToolbarGeometry`, measured
-    /// from the two platters through `BottomBarShare`).
+    /// ⚠️ **THE SELECTOR TAKES AT MOST WHAT IT WANTS — ASKED FOR** ("il
+    /// faudrait plutôt qu'il prenne en largeur maximale la largeur restante
+    /// disponible, sinon sa largeur intrinsèque"). It used to take everything
+    /// the leading strip left. It is held at min(its own width, what the close
+    /// button leaves), never under one bubble, and a flexible space takes the
+    /// slack (`EditorSelectorLayout.leadingCapped`), in the room the bar
+    /// leaves once its margins, platters and group gap are charged
+    /// (`ToolbarGeometry`, read through `BottomBarShare` — the gap only while
+    /// the flexible space holds nothing).
     ///
     /// ⚠️ **FRESH ITEMS ON EVERY HAND-OVER, UNDER STABLE IDENTIFIERS**
     /// (`bar-item-wrapper-drift`): UIKit keeps the wrapper it builds around a
@@ -1455,13 +1489,19 @@ final class CaptureViewController: UIViewController {
         defer { isHandingOver = false }
         owesAHandover = false
         _ = shareTheBar()
-        let offered = !isChromeHidden && notice == nil
-        setToolbarItems(offered ? [
-            Self.barItem(leadingBar, as: Self.leadingItemID),
-            .fixedSpace(Spacing.sm),
-            Self.barItem(selector, as: Self.optionsItemID),
-            .flexibleSpace()
-        ] : [], animated: animated)
+        let items: [UIBarButtonItem]
+        if isChromeHidden {
+            items = []
+        } else if notice != nil {
+            items = [.flexibleSpace(), Self.barItem(closeBar, as: Self.closeItemID)]
+        } else {
+            items = [
+                Self.barItem(selector, as: Self.optionsItemID),
+                .flexibleSpace(),
+                Self.barItem(closeBar, as: Self.closeItemID)
+            ]
+        }
+        setToolbarItems(items, animated: animated)
         handedWidths = shareTheBar()
     }
 
@@ -1476,41 +1516,52 @@ final class CaptureViewController: UIViewController {
 
     /// The two widths the bar was last handed; a share that has moved since
     /// is handed over again.
-    private var handedWidths: (leading: CGFloat, trailing: CGFloat)?
+    private var handedWidths: (selector: CGFloat, close: CGFloat)?
 
     private(set) var barGeometry = ToolbarGeometry.fallback
 
-    private lazy var leadingWidth: NSLayoutConstraint =
-        leadingBar.widthAnchor.constraint(equalToConstant: IconActionBar.height)
+    /// Whether the last share left the flexible space nothing — the one
+    /// moment the gap between the two platters is the bar's own.
+    private var shareWasFlush = false
+
     private lazy var selectorWidth: NSLayoutConstraint =
         selector.widthAnchor.constraint(equalToConstant: IconSelectorBar.height)
+    private lazy var closeWidth: NSLayoutConstraint =
+        closeBar.widthAnchor.constraint(equalToConstant: IconActionBar.height)
 
-    /// Holds the two strips to their share of the bar — the editor's
-    /// `shareTheBarBetweenTheTwoStrips`, for this bar's two strips.
+    /// Holds the selector and the close button to their widths — see
+    /// `handOverSelector`.
     @discardableResult
-    private func shareTheBar() -> (leading: CGFloat, trailing: CGFloat)? {
-        if let measured = BottomBarShare.measure(leading: leadingBar, trailing: selector) { barGeometry = measured }
+    private func shareTheBar() -> (selector: CGFloat, close: CGFloat)? {
+        if let measured = BottomBarShare.measure(
+            leading: selector, trailing: closeBar, flush: shareWasFlush, keepingGap: barGeometry.gap
+        ) {
+            barGeometry = measured
+        }
         guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else {
-            leadingWidth.isActive = false
             selectorWidth.isActive = false
+            closeWidth.isActive = false
             return nil
         }
-        let held = EditorSelectorLayout.widths(
-            leadingWants: BottomBarShare.wantedWidth(of: leadingBar),
-            available: barGeometry.available(in: toolbar.bounds.width),
-            trailingFloor: selector.intrinsicContentSize.height
+        let available = barGeometry.available(in: toolbar.bounds.width)
+        let held = EditorSelectorLayout.leadingCapped(
+            leadingWants: BottomBarShare.wantedWidth(of: selector),
+            trailingWants: BottomBarShare.wantedWidth(of: closeBar),
+            available: available,
+            leadingFloor: selector.intrinsicContentSize.height
         )
-        leadingWidth.constant = held.leading
-        selectorWidth.constant = held.trailing
-        leadingWidth.isActive = true
+        shareWasFlush = available - held.leading - held.trailing < 0.5
+        selectorWidth.constant = held.leading
+        closeWidth.constant = held.trailing
         selectorWidth.isActive = true
-        leadingBar.frame.size.width = held.leading
-        selector.frame.size.width = held.trailing
-        return held
+        closeWidth.isActive = true
+        selector.frame.size.width = held.leading
+        closeBar.frame.size.width = held.trailing
+        return (held.leading, held.trailing)
     }
 
-    static let leadingItemID = "upload.camera.toolbar.leading"
     static let optionsItemID = "upload.camera.toolbar.options"
+    static let closeItemID = "upload.camera.toolbar.close"
 
     private func showLock(_ shown: Bool) {
         lockView.setLocked(false)
@@ -1522,7 +1573,7 @@ final class CaptureViewController: UIViewController {
 
     private func refreshLenses() {
         // The camera changed, or reported: its flash comes and goes with it.
-        refreshLeadingBar()
+        refreshFlashItem()
         lensChips.setLenses(source.lenses, zoom: source.zoom)
         setShown(lensChips, openOption == nil && source.lenses.count > 1, animated: false)
     }
@@ -1706,6 +1757,7 @@ final class CaptureViewController: UIViewController {
         self.notice = notice
         shutter.isUserInteractionEnabled = false
         shutter.alpha = 0.35
+        refreshHeader(animated: false)
         handOverSelector(animated: false)
         lensChips.isHidden = true
     }
@@ -1796,16 +1848,27 @@ final class CaptureViewController: UIViewController {
     private(set) var debugLastHandOff: ([MediaLibraryItem], [String: MediaEdits])?
     var debugSelector: IconSelectorBar { selector }
     var debugBand: MediaEditorBandView { band }
-    var debugLeadingBar: IconActionBar { leadingBar }
+    var debugCloseBar: IconActionBar { closeBar }
     func debugPickFlash(_ mode: CaptureFlashMode) { setFlash(mode) }
-    var debugBarShare: (leading: CGFloat, trailing: CGFloat, available: CGFloat, leadingWants: CGFloat, floor: CGFloat)? {
+    /// The header's flip and flash, as the bar holds them.
+    var debugFlipItem: UIBarButtonItem? {
+        navigationItem.leftBarButtonItems?.first { $0.identifier == Self.flipItemID }
+    }
+    var debugFlashItem: UIBarButtonItem? {
+        navigationItem.leftBarButtonItems?.first { $0.identifier == Self.flashItemID }
+    }
+    var debugBarShare: (
+        selector: CGFloat, close: CGFloat, available: CGFloat,
+        selectorWants: CGFloat, closeWants: CGFloat, floor: CGFloat
+    )? {
         guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else { return nil }
         return (
-            leadingBar.frame.width, selector.frame.width, barGeometry.available(in: toolbar.bounds.width),
-            BottomBarShare.wantedWidth(of: leadingBar), selector.intrinsicContentSize.height
+            selector.frame.width, closeBar.frame.width, barGeometry.available(in: toolbar.bounds.width),
+            BottomBarShare.wantedWidth(of: selector), BottomBarShare.wantedWidth(of: closeBar),
+            selector.intrinsicContentSize.height
         )
     }
-    var debugHeldWidths: (leading: CGFloat, trailing: CGFloat) { (leadingWidth.constant, selectorWidth.constant) }
+    var debugHeldWidths: (selector: CGFloat, close: CGFloat) { (selectorWidth.constant, closeWidth.constant) }
     var debugTimerRow: CaptureChoiceRowView<CaptureTimer> { timerRow }
     var debugRatioRow: CaptureChoiceRowView<CaptureRatio> { ratioRow }
     var debugFilterRow: MediaFilterRowView { filterRow }
@@ -1840,7 +1903,7 @@ final class CaptureViewController: UIViewController {
     func debugMoveHold(_ translation: CGPoint) { holdMoved(translation) }
     func debugEndHold() { holdEnded() }
     func debugTapLibrary() { openLibrary() }
-    func debugTapCancel() { cancelTapped() }
+    func debugTapClose() { closeTapped() }
     var debugTimeText: String? { timeLabel.text }
     /// The accessibility labels the selector's buttons carry, in order.
     var debugSelectorLabels: [String] {
