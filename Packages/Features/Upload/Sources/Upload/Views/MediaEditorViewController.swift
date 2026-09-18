@@ -196,6 +196,17 @@ final class MediaEditorViewController: UIViewController {
         if let standing, let index = wanted.firstIndex(where: { $0.title == standing }) {
             categoryBar.select(index, notify: false)
         }
+        // ⚠️ **A STRIP THAT GAINED A CATEGORY IS A STRIP UIKit HAS NOT
+        // MEASURED.** The width it is HELD to does not move — the trailing
+        // strip always takes "the rest" — so nothing downstream can notice;
+        // what moved is its own intrinsic width, which is the number UIKit read
+        // at the hand-over to decide whether the item fits at all. Swiping onto
+        // a video adds one 38pt segment, and the bar went on honouring a fit it
+        // decided for five. Re-entrancy is held by `refreshToolbarItems`.
+        //
+        // ⚠️ **ANIMATED, AND AS NEW CONTENT.** Asked for: the icon arriving and
+        // leaving with the bar's own transition rather than blinking in.
+        refreshToolbarItems(animated: true, contentChanged: true)
     }
 
     /// What the leading end of the toolbar offers while the timeline is open.
@@ -277,15 +288,51 @@ final class MediaEditorViewController: UIViewController {
     /// finalisation page. There is one now, and it means the nearer thing:
     /// finish what is being typed. "Next" comes back the moment the session
     /// ends, because leaving the screen mid-sentence is not what "Done" is for.
-    private lazy var doneTypingItem = UIBarButtonItem(
-        title: "Done",
-        primaryAction: UIAction { [weak self] _ in self?.overlayMode.finishComposing() }
-    )
+    private lazy var doneTypingItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            primaryAction: UIAction { [weak self] _ in self?.overlayMode.finishComposing() }
+        )
+        item.image = Self.typingGlyph(hasWords: false)
+        item.accessibilityLabel = "Discard"
+        return item
+    }()
+
+    /// The glyph the one typing button wears.
+    ///
+    /// ⚠️ **IT IS THE SAME BUTTON AND THE SAME ACTION; ONLY THE PROMISE
+    /// CHANGES.** Finishing an empty field already removes the text — that is
+    /// `composed(_:)`'s documented rule — so a tick over nothing would promise
+    /// to keep something that is about to be thrown away. A cross says what
+    /// will actually happen. Two separate bar items would re-hand the whole
+    /// trailing group at each crossing; one item changing its image does not.
+    private static func typingGlyph(hasWords: Bool) -> UIImage? {
+        UIImage(systemName: hasWords ? "checkmark" : "xmark")
+    }
+
+    /// Whether the composer holds any words right now — see
+    /// `MediaEditorHosting.typedWordsDidChange`.
+    var typedWords = false {
+        didSet {
+            guard typedWords != oldValue else { return }
+            doneTypingItem.image = Self.typingGlyph(hasWords: typedWords)
+            doneTypingItem.accessibilityLabel = typedWords ? "Done" : "Discard"
+        }
+    }
 
     /// States the trailing side for what the screen is doing right now.
+    ///
+    /// ⚠️ **THE TWO ARROWS STAND HERE, NOT WITH THE DRAFT** — asked for as
+    /// *"[back][save]-----[precedent, suivant][next]"*. They left the leading
+    /// side because that side is where LEAVING lives (the chevron, the draft)
+    /// and the arrows are not a way out; they belong with the action that moves
+    /// the work forward.
+    ///
+    /// ⚠️ **AND THE ORDER READS BACKWARDS HERE.** Trailing items are laid out
+    /// from the edge INWARDS, so the first one written is the RIGHTMOST: this
+    /// array draws `[◀][▶][Next]`.
     private func showTheTrailingItem(animated: Bool = false) {
         navigationItem.setRightBarButtonItems(
-            [isTypingText ? doneTypingItem : nextItem], animated: animated
+            [isTypingText ? doneTypingItem : nextItem, redoItem, undoItem], animated: animated
         )
     }
 
@@ -337,7 +384,9 @@ final class MediaEditorViewController: UIViewController {
     /// piece, the row is open on, and the row would be left pointing at
     /// nothing.
     func refreshHistoryItems() {
-        guard let id = currentItemID, transitionFocus == nil, !segmentFilterMode.isOpen else {
+        guard let id = currentItemID, transitionFocus == nil, !segmentFilterMode.isOpen,
+              !isTypingText
+        else {
             undoItem.isEnabled = false
             redoItem.isEnabled = false
             return
@@ -605,6 +654,12 @@ final class MediaEditorViewController: UIViewController {
     var isTypingText = false {
         didSet {
             showTheTrailingItem(animated: true)
+            // ⚠️ **AND THE ARROWS GO DEAD FOR THE LENGTH OF THE SESSION.** A
+            // step back while the composer is up would put an edit on the page
+            // that the open composer knows nothing about — including one that
+            // takes away the very overlay being typed, which leaves a field
+            // with no destination. Same rule as a transition row's.
+            refreshHistoryItems()
             #if DEBUG
             textEditingChanges.append(isTypingText)
             #endif
@@ -650,7 +705,7 @@ final class MediaEditorViewController: UIViewController {
     /// Opens a category's mode on the page in front of the author.
     private func open(_ mode: any MediaEditorMode) {
         guard let id = currentItemID, let item = itemsByID[id] else {
-            setEditingAccessory(nil)
+            setEditingAccessory(nil, animated: true)
             return
         }
         mode.open(for: id, item: item)
@@ -915,6 +970,11 @@ final class MediaEditorViewController: UIViewController {
     /// pop or it took the whole app down with a stack overflow.
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // ⚠️ **WARMED HERE, OR THE FIRST POP IS THE LATE ONE.** A first `play()`
+        // decodes the file and opens the route — tens of milliseconds on a cold
+        // app, which is long enough for the first element of the first row to
+        // be seen landing before it is heard.
+        UISound.prepare()
         navigationController?.setToolbarHidden(false, animated: animated)
         configureBarAppearance()
     }
@@ -1222,7 +1282,11 @@ final class MediaEditorViewController: UIViewController {
         layPagesInTheirWindow(animated: false)
         // The toolbar's width is only knowable once something has laid it out,
         // and it changes with rotation and with the sheet's own size.
-        shareTheBarBetweenTheTwoStrips()
+        let held = shareTheBarBetweenTheTwoStrips()
+        guard !isHandingOver else { return }
+        let moved = zip([handedWidths?.leading, handedWidths?.trailing], [held?.leading, held?.trailing])
+            .contains { abs(($0 ?? -1) - ($1 ?? -2)) > 0.5 }
+        if owesAHandover || moved { refreshToolbarItems(animated: false) }
     }
 
     /// The size a full-page picture is asked for, in points.
@@ -1268,9 +1332,9 @@ final class MediaEditorViewController: UIViewController {
         // ⚠️ AND THE OLD NOTE'S FEAR DOES NOT MATERIALISE: it warned that an
         // inherited button wears the previous screen's title, but no Upload
         // screen HAS a title, so it draws as a bare chevron. Verified on device.
-        // `[‹][save][◀][▶] ⋯ [next]` — the two arrows stand with the other
-        // things that act on the whole screen rather than on the picture.
-        navigationItem.leftBarButtonItems = [saveDraftItem, undoItem, redoItem]
+        // `[‹][save] ⋯ [◀][▶][next]` — the leading side is the ways OUT of this
+        // screen, and nothing else.
+        navigationItem.leftBarButtonItems = [saveDraftItem]
         navigationItem.leftItemsSupplementBackButton = true
         // The chevron the NEXT screen wears, kept wordless if a title ever lands
         // here.
@@ -1281,7 +1345,6 @@ final class MediaEditorViewController: UIViewController {
         // a typing session — see `showTheTrailingItem`.
         showTheTrailingItem()
         nextItem.style = .done
-        doneTypingItem.style = .done
     }
 
     private func configureCategoryStrip() {
@@ -1353,29 +1416,133 @@ final class MediaEditorViewController: UIViewController {
     /// reaching for. Charter F18, asked for in exactly those words: with the mode
     /// on, the bottom-left pill is replaced by a second bar carrying split and
     /// speed.
-    private func refreshToolbarItems(animated: Bool) {
+    private func refreshToolbarItems(animated: Bool, contentChanged: Bool = false) {
+        // ⚠️ **NOTHING IS HANDED OVER BEFORE THE BAR CAN HOLD IT.** UIKit
+        // decides whether an item fits ONCE, from the size its view has at the
+        // hand-over, and never reconsiders. The first call comes from
+        // `viewDidLoad`, where the toolbar is still hidden and its width is
+        // zero: `shareTheBarBetweenTheTwoStrips` then takes its own early
+        // return, turns both width constraints OFF and writes no frames, and
+        // the six-category strip goes over at its FULL intrinsic width beside a
+        // pill at its full width. The two overran the bar and iOS swept the
+        // strip into a `•••` — photographed by the author on an iPhone 18 Pro,
+        // where there is otherwise room to spare.
+        // ⚠️ **ON SCREEN, NOT MERELY NON-ZERO.** A `UIToolbar` that has never
+        // been in a window already answers the SCREEN's width — measured: 402
+        // on an iPhone 18 Pro, from `viewDidLoad`, before anything was laid
+        // out. So "does it have a width" is a question that is always yes and
+        // never true: the first hand-over was measured against a bar that does
+        // not exist yet, and is right only where the sheet happens to be as
+        // wide as the screen.
+        // ⚠️ **AND THE TOOLBAR'S OWN WINDOW IS TOO STRICT TO ASK FOR**: the bar
+        // is hidden until `viewWillAppear` raises it, so waiting on it would
+        // leave the screen with no items at all in every flow that never runs
+        // an appearance transition. This screen's own window is the moment its
+        // widths become real.
+        guard view.window != nil, (navigationController?.toolbar.bounds.width ?? 0) > 0 else {
+            owesAHandover = true
+            return
+        }
+        guard !isHandingOver else { return }
+        isHandingOver = true
+        defer { isHandingOver = false }
+        owesAHandover = false
         let leading: UIView = isTimelineShowing ? actionBar : soundPill
         refreshSoundPill()
-        // ⚠️ **BEFORE THE HAND-OVER, NOT AFTER.** UIKit decides whether a bar
-        // item fits once, from the size its view has when it is handed over,
-        // and never reconsiders (`navbar-leading-selector-collapse`). Held
+        // ⚠️ **BEFORE THE HAND-OVER, NOT AFTER**, for the same reason: held
         // afterwards, the two strips were measured at their full widths and
         // swept into a `•••` on an iPhone SE.
-        shareTheBarBetweenTheTwoStrips()
+        handedWidths = shareTheBarBetweenTheTwoStrips()
         #if DEBUG
+        debugHandoverWidths.append(view.window == nil ? 0 : (navigationController?.toolbar.bounds.width ?? 0))
         debugOnToolbarHandover?()
         #endif
-        setToolbarItems(
-            [
-                UIBarButtonItem(customView: leading),
-                .fixedSpace(Spacing.sm),
-                UIBarButtonItem(customView: categoryBar),
-                .flexibleSpace()
-            ],
-            animated: animated
-        )
-        shareTheBarBetweenTheTwoStrips()
+        // ⚠️ **THE SAME VIEWS IN THE SAME PLACES ARE NOT HANDED OVER AGAIN.**
+        // A hand-over that changes nothing is not free: UIKit starts a
+        // transition for it, and a transition started while another is still
+        // running is the moment the bar holds two sets of items at once.
+        let held = toolbarItems ?? []
+        // ⚠️ **UNLESS WHAT A VIEW SHOWS HAS CHANGED.** The same strip holding
+        // one category more is, to UIKit, the same item with new content — and
+        // that is precisely the case `identifier` exists for: a fresh item under
+        // the old identifier is matched to the old one, and UIKit animates the
+        // difference itself. Skipped, the timeline's icon appeared and vanished
+        // in a single frame as the author swiped between a clip and a photo.
+        let unchanged = !contentChanged
+            && held.count == 4
+            && held[0].customView === leading
+            && held[2].customView === categoryBar
+        if !unchanged {
+            #if DEBUG
+            debugRealHandovers += 1
+            debugLastHandoverWasAnimated = animated
+            #endif
+            setToolbarItems(
+                [
+                    Self.barItem(leading, as: ItemID.leading),
+                    .fixedSpace(Spacing.sm),
+                    Self.barItem(categoryBar, as: ItemID.categories),
+                    .flexibleSpace()
+                ],
+                animated: animated
+            )
+        }
+        handedWidths = shareTheBarBetweenTheTwoStrips()
     }
+
+    // MARK: - The bar's items
+
+    /// ⚠️ **NEW ITEMS EVERY HAND-OVER, AND THE SAME IDENTIFIER ON EACH — BOTH
+    /// HALVES OF THAT ARE THE FIX FOR THE `•••`.**
+    ///
+    /// Without an identifier, every hand-over was — to UIKit — a new set of
+    /// items replacing an old one, animated as a cross-fade: for the length of
+    /// it the bar held BOTH sets. `UIBarButtonItem.identifier` (iOS 26) is
+    /// UIKit's own answer, in its own words: "set the same value on two
+    /// different bar button items … to indicate that they should be treated as
+    /// the same item during transitions." The song pill and the timeline's
+    /// actions share one because they ARE one slot, so UIKit morphs one into
+    /// the other instead of fading two past each other.
+    ///
+    /// ⚠️ **AND "TWO DIFFERENT ITEMS" IS MEANT LITERALLY.** Keeping ONE item per
+    /// view and re-handing it was tried first, and it is worse: UIKit keeps the
+    /// wrapper it built around the custom view, and that wrapper does not follow
+    /// the view's width. Measured on the sequence the author recorded — a clip,
+    /// Crop, Trim, Crop, Trim — the strip's constraint said 177, 186, 177, 186
+    /// while its wrapper said 177, 186, 186, 195: nine points gained on every
+    /// round trip, nine being the song pill's width less the actions'. The two
+    /// strips overran the bar by exactly that and it swept one into a `•••`. A
+    /// fresh item gets a fresh wrapper, measured at the hand-over from the width
+    /// this screen has just written.
+    private enum ItemID {
+        static let leading = "upload.editor.toolbar.leading"
+        static let categories = "upload.editor.toolbar.categories"
+    }
+
+    private static func barItem(_ view: UIView, as identifier: String) -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: view)
+        item.identifier = identifier
+        return item
+    }
+
+    /// A hand-over the bar could not take yet, owed to the first layout pass
+    /// that gives it a width.
+    private var owesAHandover = false
+
+    /// ⚠️ **`setToolbarItems` LAYS THE BAR OUT, AND THIS IS CALLED FROM THAT
+    /// LAYOUT.** Without the flag, handing over re-enters itself.
+    private var isHandingOver = false
+
+    /// The two widths the bar was last HANDED.
+    ///
+    /// ⚠️ **A WIDTH THAT HAS MOVED SINCE IS A WIDTH UIKit IS NOT HONOURING.**
+    /// Both strips change their own content while the screen is up — the
+    /// category strip gains a category when the author swipes onto a video
+    /// (`dressCategoryStrip`), and the pill's title becomes a song's name
+    /// (`refreshSoundPill`) — and neither re-hands anything. Comparing what was
+    /// handed against what the rule now says is what catches both, without
+    /// either call site having to know about the bar.
+    private var handedWidths: (leading: CGFloat, trailing: CGFloat)?
 
     /// The pill names the page's song once it has one, and offers to add one
     /// otherwise — `MediaEditorSoundtrackMode.pillTitle` decides which.
@@ -1395,12 +1562,13 @@ final class MediaEditorViewController: UIViewController {
     /// slot the arrangement that ships today already works — the pill states a
     /// width floor and the strip is told it may give — so the constraints come
     /// off rather than being applied to a control the rule was not written for.
-    private func shareTheBarBetweenTheTwoStrips() {
+    @discardableResult
+    private func shareTheBarBetweenTheTwoStrips() -> (leading: CGFloat, trailing: CGFloat)? {
         measureTheBar()
         guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else {
             actionBarWidth.isActive = false
             categoryBarWidth.isActive = false
-            return
+            return nil
         }
         // ⚠️ **WHAT THE BAR CHARGES AROUND THE TWO GROUPS, NOT A SPACING** —
         // see `ToolbarGeometry`. Charged as one 8pt gap inside 8pt margins, the
@@ -1409,7 +1577,7 @@ final class MediaEditorViewController: UIViewController {
         let available = barGeometry.available(in: toolbar.bounds.width)
         let leading: UIView = isTimelineShowing ? actionBar : soundPill
         let held = EditorSelectorLayout.widths(
-            leadingWants: Self.wantedWidth(of: leading),
+            leadingWants: wantedWidthOfTheLeadingStrip(leading),
             available: available,
             trailingFloor: categoryBar.intrinsicContentSize.height
         )
@@ -1421,13 +1589,37 @@ final class MediaEditorViewController: UIViewController {
         // enough to leave the selector less than a bubble.
         actionBarWidth.isActive = isTimelineShowing
         actionBarWidth.constant = held.leading
-        soundPillCap.constant = available - held.trailing + (isTimelineShowing ? 0 : 0)
+        // ⚠️ **THE PILL IS CAPPED ONLY WHILE IT IS THE ONE IN THE BAR.** The
+        // ceiling used to be written on every pass whatever the leading view
+        // was, so opening the timeline capped the pill — which is not even in
+        // the bar then — at the action bar's 112pt, and it stayed there when
+        // the band closed. The author photographed the result: "Add a s...".
+        if !isTimelineShowing { soundPillCap.constant = held.leading }
         categoryBarWidth.constant = held.trailing
         categoryBarWidth.isActive = true
         // A bar item's view keeps its autoresizing mask, so the size UIKit
         // reads at the hand-over is the frame's.
         leading.frame.size.width = held.leading
         categoryBar.frame.size.width = held.trailing
+        return held
+    }
+
+    /// What the leading strip would take on its own.
+    ///
+    /// ⚠️ **MEASURED WITH ITS OWN CEILING OFF, OR THE CEILING IS A RATCHET.**
+    /// `systemLayoutSizeFitting` solves the constraints the view is carrying,
+    /// and `soundPillCap` is one of them — so the answer came back clamped by
+    /// the LAST pass's ceiling, which was then written back as the next one.
+    /// Every pass could lower it and none could raise it: a pill that had once
+    /// been squeezed stayed squeezed, and the words stayed truncated, for the
+    /// life of the screen.
+    private func wantedWidthOfTheLeadingStrip(_ leading: UIView) -> CGFloat {
+        guard leading === soundPill else { return Self.wantedWidth(of: leading) }
+        let wasActive = soundPillCap.isActive
+        soundPillCap.isActive = false
+        let wants = Self.wantedWidth(of: leading)
+        soundPillCap.isActive = wasActive
+        return wants
     }
 
     /// What the bar charges around its items — measured once it has hosted
@@ -1437,6 +1629,46 @@ final class MediaEditorViewController: UIViewController {
     #if DEBUG
     /// Internal for tests: runs just before the bar is handed its items.
     var debugOnToolbarHandover: (() -> Void)?
+    /// Internal for tests: how many elements each arrival staged, in order —
+    /// the choreography's DECISION, which is the half a test can see. The
+    /// drawing is a presentation-layer value that only exists while a curve is
+    /// actually running (`uiview-animate-from-value-trap`).
+    private(set) var debugPopIns: [Int] = []
+    /// Internal for tests: how many tenants were animated out.
+    private(set) var debugPopOuts = 0
+    /// Internal for tests: how many surfaces each arrival swept, in order.
+    private(set) var debugReveals: [Int] = []
+    /// Internal for tests: how many times the bar was ACTUALLY handed a new
+    /// set of items — as opposed to asked to, which is `debugHandoverWidths`.
+    private(set) var debugRealHandovers = 0
+    /// Internal for tests: whether the last real hand-over asked UIKit to
+    /// animate it.
+    private(set) var debugLastHandoverWasAnimated = false
+    /// Internal for tests: the items the bar is holding, by identity.
+    var debugToolbarItems: [UIBarButtonItem] { toolbarItems ?? [] }
+    /// Internal for tests: the toolbar's width at each hand-over, in order.
+    /// Every one of them must be greater than zero — see `refreshToolbarItems`.
+    private(set) var debugHandoverWidths: [CGFloat] = []
+    /// Internal for tests: the rule as it stands right now, so a test can ask
+    /// whether the bar is actually shared the way the screen promises.
+    var debugBarShare: (leading: CGFloat, trailing: CGFloat, available: CGFloat, leadingWants: CGFloat)? {
+        guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else { return nil }
+        let leading: UIView = isTimelineShowing ? actionBar : soundPill
+        return (
+            leading.frame.width,
+            categoryBar.frame.width,
+            barGeometry.available(in: toolbar.bounds.width),
+            wantedWidthOfTheLeadingStrip(leading)
+        )
+    }
+    /// Internal for tests: the geometry the bar was last measured at, and what
+    /// the strip's own width constraint says — to tell a stale measurement from
+    /// a stale write.
+    var debugBarGeometry: ToolbarGeometry { barGeometry }
+    var debugCategoryWidthConstant: CGFloat { categoryBarWidth.constant }
+    /// Internal for tests: the ceiling the pill is carrying.
+    var debugSoundPillCap: CGFloat { soundPillCap.constant }
+    var debugSoundPillWidth: CGFloat { soundPill.frame.width }
     #endif
 
     /// Reads `barGeometry` off whichever two items the bar is hosting.
@@ -1451,6 +1683,7 @@ final class MediaEditorViewController: UIViewController {
               let measured = ToolbarGeometry.measured(
                   leading: leading.convert(leading.bounds, to: nil),
                   leadingPlatter: leadingPlatter,
+                  trailing: categoryBar.convert(categoryBar.bounds, to: nil),
                   trailingPlatter: trailingPlatter
               )
         else { return }
@@ -1531,7 +1764,12 @@ final class MediaEditorViewController: UIViewController {
     /// ONLY DELEGATES TO IT.** What a mode shows — its tools, a notice, nothing
     /// — is the mode's to decide, in its own file.
     private func showAccessory(for category: String?) {
-        if isCropping, category != "Crop" { exitCrop() }
+        // ⚠️ **THE BAND IS NOT EMPTIED ON THE WAY PAST.** Every branch below
+        // puts something in it (or deliberately nothing), so letting `exitCrop`
+        // empty it first was a hand-over with nothing to show for itself — and
+        // the second hand-over of the same turn, landing on the first, is the
+        // sequence the author recorded collapsing the strip into a `•••`.
+        if isCropping, category != "Crop" { exitCrop(emptyingTheBand: false) }
         switch category {
         case "Effects":
             open(effectsMode)
@@ -1551,15 +1789,15 @@ final class MediaEditorViewController: UIViewController {
             // the strip is being re-dressed, and it closes the band rather than
             // keeping a track for a picture with no film.
             guard let id = currentItemID, case .video(let seconds)? = itemsByID[id]?.kind else {
-                setEditingAccessory(nil)
+                setEditingAccessory(nil, animated: true)
                 return
             }
-            setEditingAccessory(timelineTools)
+            setEditingAccessory(timelineTools, animated: true)
             refreshTimelineTrack(id: id, duration: seconds)
         case "Crop":
             enterCrop()
         default:
-            setEditingAccessory(nil)
+            setEditingAccessory(nil, animated: true)
         }
     }
 
@@ -1636,7 +1874,7 @@ final class MediaEditorViewController: UIViewController {
             // Decided on the FILE's length, not the declaration — the whole
             // reason the real duration is loaded above.
             guard length > MediaTimelining.shortestSourceSeconds else {
-                setEditingAccessory(trimTooShort)
+                setEditingAccessory(trimTooShort, animated: true)
                 return
             }
             trackSeconds = length
@@ -2287,7 +2525,7 @@ final class MediaEditorViewController: UIViewController {
     /// nothing for it to act on. It now lives in the crop tools themselves,
     /// where it is only reachable at exactly the moment it means something.
     private func showCropBarItems(_ isCropping: Bool, animated: Bool) {
-        navigationItem.setLeftBarButtonItems([saveDraftItem, undoItem, redoItem], animated: animated)
+        navigationItem.setLeftBarButtonItems([saveDraftItem], animated: animated)
         showTheTrailingItem(animated: animated)
     }
 
@@ -2650,22 +2888,40 @@ final class MediaEditorViewController: UIViewController {
     /// Bumped for every set of card pictures asked for: only the newest lands.
     private var pictureRequests = 0
 
-    /// Dresses every card with the piece's own frame in that card's look — then
-    /// the whole media's look over it, which is the order the compositor draws.
+    /// Dresses every card in that card's look — then the whole media's look over
+    /// it, which is the order the compositor draws.
     ///
-    /// ⚠️ **ONE FRAME, NINE LOOKS, OFF THE MAIN THREAD** — the filter row's rule.
+    /// ⚠️ **ONE PICTURE, NINE LOOKS, OFF THE MAIN THREAD** — the filter row's rule.
+    ///
+    /// ⚠️ **AND THE PICTURE IS THE REFERENCE PHOTOGRAPH, NOT THE PIECE'S OWN
+    /// FRAME** — reported from a screenshot of nine identical BLACK cards. F31
+    /// said "that piece's own frame" and it was written before F38; the two
+    /// disagreed and F38 is the one that survives, for the reason it gives: a
+    /// clip's frame is routinely black, blurred or one flat colour, and nine
+    /// looks drawn on it say nothing about any of them. The piece is still what
+    /// is REHEARSED — the loop under the row is the piece itself (F32), which is
+    /// where the author sees the look on their own film.
+    ///
+    /// ⚠️ **THE FALLBACK IS STILL THE PIECE'S FRAME**, for the case the bundle
+    /// has no such resource: a row of blank cards would be a worse answer than
+    /// a row of dark ones.
     private func dressSegmentFilterCards(id: String, piece: MediaSegment) {
         pictureRequests += 1
         let request = pictureRequests
         let whole = edits(for: id).look
         let row = timelineTools.segmentFilters
         let middle = (piece.start + piece.end) / 2
+        let reference = MediaLookReference.standsIn(for: item(id)) ? MediaLookReference.picture : nil
         Task { [weak self] in
-            guard let self, let file = await library.videoFile(for: id) else { return }
-            let frames = await preview.frames(
-                of: file, atSourceSeconds: [middle], height: MediaTransitionRowView.height * 2, spacing: 0
-            )
-            guard let frame = frames.values.first, pictureRequests == request else { return }
+            guard let self else { return }
+            var source = reference
+            if source == nil {
+                guard let file = await library.videoFile(for: id) else { return }
+                source = await preview.frames(
+                    of: file, atSourceSeconds: [middle], height: MediaTransitionRowView.height * 2, spacing: 0
+                ).values.first
+            }
+            guard let frame = source, pictureRequests == request else { return }
             let choices = MediaSegmentFilterRowView.filterChoices
             let pictures = await Task.detached(priority: .userInitiated) {
                 choices.map { choice -> UIImage? in
@@ -2943,7 +3199,7 @@ final class MediaEditorViewController: UIViewController {
         pageDots.isHidden = true
         croppingID = id
         showCropBarItems(true, animated: true)
-        setEditingAccessory(cropTools)
+        setEditingAccessory(cropTools, animated: true)
         showCropPicture(for: id)
         settleIntoCrop()
         playInsideTheCropBox(for: id)
@@ -2988,7 +3244,7 @@ final class MediaEditorViewController: UIViewController {
     ///
     /// `resuming` plays the settled page's clip again — with the crop just
     /// made, since the item is built anew — unless the screen is on its way out.
-    private func exitCrop(resuming: Bool = true) {
+    private func exitCrop(resuming: Bool = true, emptyingTheBand: Bool = true) {
         guard isCropping else { return }
         isCropping = false
         croppingID = nil
@@ -2999,7 +3255,7 @@ final class MediaEditorViewController: UIViewController {
         // it. Turning it then wrote crops computed from a detached view's stale
         // bounds, onto whichever picture happened to be in front. Invisible while
         // it happened, and in the post afterwards.
-        if band.content === cropTools { setEditingAccessory(nil) }
+        if emptyingTheBand, band.content === cropTools { setEditingAccessory(nil, animated: true) }
         unlockCanvas(by: .crop)
         showCropBarItems(false, animated: true)
         // ⚠️ BACK TO ITS OWN RULE, NOT TO `false`: the indicator hides itself
@@ -3017,10 +3273,14 @@ final class MediaEditorViewController: UIViewController {
         // must now play the cut one. Unbinding first is what makes the reload
         // happen at all — `playSettledPage` returns early for a page that is
         // already the playing one.
+        // ⚠️ **THE BOX'S CLOCK, READ BEFORE THE STOP THAT FORGETS IT** — so the
+        // canvas takes the film back at the moment the author left it, not at
+        // its first frame. See `continuing`.
+        let carried = playheadOfTheFilmPlayingNow()
         stopPreview()
         // ⚠️ **NOT LEFT TO A SETTLE THAT MAY NEVER COME.** Nothing scrolls on
         // the way out, so nothing else would start it.
-        if resuming { playSettledPage() }
+        if resuming { playSettledPage(from: carried) }
     }
 
     /// The reverse of `settleIntoCrop`: the frame lets go and the picture opens
@@ -3237,7 +3497,7 @@ private extension MediaEditorViewController {
     /// and takes the gestures with it; a clip still running underneath would be
     /// moving pixels nobody is looking at, behind a still the author IS looking
     /// at.
-    func playSettledPage() {
+    func playSettledPage(from carried: Double? = nil) {
         // The crop surface holds the clip while its box is being aimed — see
         // `playInsideTheCropBox`.
         guard !isCropping else { return }
@@ -3271,7 +3531,9 @@ private extension MediaEditorViewController {
         // open; the funnel re-asks everything after its awaits, since a read can
         // take a moment and the author may have swiped on while it did.
         previewSubject = nil
-        loadPreview { _, _ in VideoLoadLanding(seconds: 0) }
+        loadPreview { timeline, fileSeconds in
+            VideoLoadLanding(seconds: Self.continuing(carried, in: timeline, fileSeconds: fileSeconds))
+        }
     }
 
     /// Unbinds whatever is playing and puts the page back to its poster.
@@ -3307,13 +3569,24 @@ private extension MediaEditorViewController {
     /// its own rather than the canvas's.
     private func playInsideTheCropBox(for id: String) {
         guard itemsByID[id]?.isVideo == true else { return }
+        // ⚠️ **READ BEFORE THE STOP, BECAUSE THE STOP IS WHAT FORGETS IT.**
+        let carried = playingID == id ? playheadOfTheFilmPlayingNow() : nil
         stopPreview()
         playingID = id
         boundSurface = cropSurface.videoSurface
         cropSurface.showsVideo(true)
         previewSubject = nil
-        loadPreview { _, _ in VideoLoadLanding(seconds: 0) }
+        loadPreview { timeline, fileSeconds in
+            VideoLoadLanding(seconds: Self.continuing(carried, in: timeline, fileSeconds: fileSeconds))
+        }
     }
+
+    /// Where the film playing now has got to, in played seconds.
+    private func playheadOfTheFilmPlayingNow() -> Double? {
+        guard let surface = boundSurface else { return nil }
+        return preview.playheadSeconds(in: surface)
+    }
+
 }
 
 // MARK: - The canvas reports its paging
@@ -3395,7 +3668,7 @@ extension MediaEditorViewController {
     /// said "NOT A DEBUG HOOK" — the intent was right, only the placement was
     /// wrong, which is why a comment is no substitute for the right side of a
     /// `#if`. Before pushing anything added near those accessors, build Release.
-    func setEditingAccessory(_ accessory: UIView?) {
+    func setEditingAccessory(_ accessory: UIView?, animated: Bool = false) {
         // ⚠️ **EVERY MODE HEARS IT FIRST, WHOEVER IS ASKING.** A row, a sheet or
         // a lock a mode opened belongs to the band it opened in; this is the one
         // funnel every band change goes through, so it is the one place a mode
@@ -3404,6 +3677,13 @@ extension MediaEditorViewController {
         // ⚠️ **DEACTIVATE BEFORE ACTIVATING.** Both anchors pin the same edge, so
         // leaving the old one alive for even one pass gives Auto Layout a conflict
         // to arbitrate — and it may keep the one being replaced.
+        // ⚠️ **THE DEPARTING TENANT IS TAKEN OUT OF THE BAND BEFORE ANYTHING
+        // ELSE HAPPENS, WHATEVER IT IS ABOUT TO DO.** `band.content` is how this
+        // screen answers "what is up" in ten places; a tenant left in it for the
+        // length of a fade would have all ten answer for a view that is already
+        // leaving. `release()` hands it back detached, which is what lets it be
+        // animated without lying about the band.
+        let departing = animated && band.content !== accessory ? band.release() : nil
         if let accessory {
             band.show(accessory)
             backdropFromChrome.isActive = false
@@ -3441,6 +3721,94 @@ extension MediaEditorViewController {
         // rather than one band-height out of date.
         view.layoutIfNeeded()
         layPagesInTheirWindow(animated: true)
+        if let departing { popTheTenantOut(departing) }
+        if animated, let accessory { popTheTenantIn(accessory) }
+    }
+
+    /// The band's arrival curve: every element the tenant names, one after
+    /// another — see `BandPop`.
+    ///
+    /// ⚠️ **AFTER THE LAYOUT PASS, NOT BEFORE.** A scale transform is applied
+    /// about a view's centre, and a view that has not been laid out yet has no
+    /// centre worth scaling about: the whole row would pop from the band's
+    /// top-left corner. `setEditingAccessory` lays out just above, which is what
+    /// makes this the right side of the call.
+    private func popTheTenantIn(_ accessory: UIView) {
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        // ⚠️ **A TENANT THAT NAMES NOTHING STILL ARRIVES.** The soundtrack tools
+        // are a waveform and two sliders, not a row of items, and a screen where
+        // six bands ripple and the seventh blinks on reads as the seventh being
+        // broken. Named elements give a ripple; anything else pops as one piece.
+        // ⚠️ **THE RULERS START WITH THE FIRST ELEMENT, NOT AFTER THE LAST.**
+        // A ruler is the readout of whatever the row chooses; arriving after the
+        // row has settled it reads as a second thing happening. Its own sweep
+        // runs out from the needle, so the two motions are travelling the same
+        // way at the same time.
+        let surfaces = (accessory as? PoppingTenant)?.revealingSurfaces ?? []
+        for surface in surfaces { surface.reveal(after: 0) }
+        #if DEBUG
+        debugReveals.append(surfaces.count)
+        #endif
+        let named = (accessory as? PoppingTenant)?.poppableElements ?? []
+        let elements = named.isEmpty ? [accessory] : named
+        guard !elements.isEmpty else { return }
+        #if DEBUG
+        debugPopIns.append(elements.count)
+        #endif
+        for (index, element) in elements.enumerated() {
+            // ⚠️ **ONE POP PER ELEMENT, UP TO THE POINT THE EAR STOPS COUNTING.**
+            // The stagger is capped, so past `audibleElements` every remaining
+            // element arrives at the same moment — and nine sounds fired at one
+            // moment are not nine sounds, they are a click. What the ear hears
+            // is the ripple, and the ripple is the part that is staggered.
+            if index < BandPop.audibleElements { UISound.pop.play(after: BandPop.stagger(for: index)) }
+            element.alpha = 0
+            element.transform = BandPop.collapsedTransform
+            UIView.animate(
+                withDuration: BandPop.duration,
+                delay: BandPop.stagger(for: index),
+                usingSpringWithDamping: BandPop.dampingRatio,
+                initialSpringVelocity: 0,
+                // ⚠️ **THE ROW STAYS TAPPABLE WHILE IT ARRIVES.** Without this,
+                // a finger that follows its own tap onto the first card waits
+                // out the whole ripple before anything answers.
+                options: [.allowUserInteraction]
+            ) {
+                element.alpha = 1
+                element.transform = .identity
+            }
+        }
+    }
+
+    /// The departure curve, on a tenant the band has already let go of.
+    ///
+    /// ⚠️ **QUICKER THAN THE ARRIVAL, AND NOT STAGGERED.** Leaving is not an
+    /// event the author is reading — they have already asked for something else
+    /// — so the whole tenant goes at once and gets out of the way.
+    ///
+    /// ⚠️ **AND IT PUTS THE VIEW BACK AS IT FOUND IT.** Every tenant is built
+    /// once and shown again; a row left at 0 alpha and three-quarter scale
+    /// would come back invisible the next time it was asked for.
+    private func popTheTenantOut(_ departing: UIView) {
+        guard !UIAccessibility.isReduceMotionEnabled else {
+            departing.removeFromSuperview()
+            return
+        }
+        #if DEBUG
+        debugPopOuts += 1
+        #endif
+        UIView.animate(
+            withDuration: BandPop.departure,
+            delay: 0,
+            options: [.curveEaseIn, .allowUserInteraction]
+        ) {
+            departing.alpha = 0
+            departing.transform = BandPop.collapsedTransform
+        } completion: { _ in
+            departing.alpha = 1
+            departing.transform = .identity
+            departing.removeFromSuperview()
+        }
     }
 }
 
@@ -3580,6 +3948,9 @@ extension MediaEditorViewController {
     var debugCropSurface: MediaCropSurfaceView { cropSurface }
     /// Internal for tests: the tools in the band, to turn the dial without one.
     var debugCropTools: MediaCropToolsView { cropTools }
+    /// Internal for tests: the band seam a mode would use, so a test can put
+    /// something in the band that is not one of this screen's own tenants.
+    func debugShowInBand(_ accessory: UIView?) { showInBand(accessory) }
     /// Internal for tests: the crop stored for an item, defaulting as the screen does.
     func debugCrop(for id: String) -> MediaCrop { edits(for: id).crop }
     /// Internal for tests: whether anything at all is stored for an item — the
@@ -3634,9 +4005,11 @@ extension MediaEditorViewController {
     /// Internal for tests: whether the bar is offering the two arrows, and on
     /// which side.
     var debugBarOffersTheArrows: Bool {
-        let items = navigationItem.leftBarButtonItems ?? []
+        let items = navigationItem.rightBarButtonItems ?? []
         return items.contains { $0 === undoItem } && items.contains { $0 === redoItem }
     }
+    /// Internal for tests: the order the trailing side spells, edge inwards.
+    var debugTrailingBarItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
     /// Internal for tests: the order the leading side spells, after the chevron.
     var debugLeadingBarItems: [UIBarButtonItem] { navigationItem.leftBarButtonItems ?? [] }
 
@@ -3680,5 +4053,33 @@ private final class DisplayLinkProxy: NSObject {
             return
         }
         owner.followPlayhead()
+    }
+}
+
+// MARK: - Carrying a film between surfaces
+
+extension MediaEditorViewController {
+    /// The moment a film moving from one surface to another lands on.
+    ///
+    /// ⚠️ **THE SAME FILM, CARRIED ON — NOT A NEW ONE STARTED.** Asked for as
+    /// "la vidéo devrait être la continuité / le même player": opening crop on
+    /// a clip started it again from its first frame, which for the clip the
+    /// author recorded is a black title card — so the box they were aiming at
+    /// went black. The canvas and the box play different ITEMS (the box's is
+    /// uncut, see `playInsideTheCropBox`), so continuity is the second item
+    /// landing where the first had got to.
+    ///
+    /// ⚠️ **AND THE SECONDS LINE UP, WHICH IS WHAT MAKES THAT HONEST.** The two
+    /// plans differ only in the crop, and a crop changes what is framed, never
+    /// when: a played second of the one is the same moment of the other. Held
+    /// inside the arrangement, so a clock read a hair past the end lands on the
+    /// start rather than beyond the film.
+    nonisolated static func continuing(
+        _ seconds: Double?, in timeline: MediaTimeline, fileSeconds: Double
+    ) -> Double {
+        guard let seconds, seconds.isFinite, seconds > 0 else { return 0 }
+        let played = MediaTimelining.playedSeconds(of: timeline, withinSource: fileSeconds)
+        guard played > 0, seconds < played else { return 0 }
+        return seconds
     }
 }

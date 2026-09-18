@@ -214,18 +214,92 @@ struct MediaEditorTextTests {
     /// used to carry its own white capsule a few points below the bar's
     /// trailing item: two controls at the same corner, one dismissing the
     /// keyboard and one leaving the screen for the finalisation page.
-    @Test func whileTypingTheTrailingSideSaysDoneAndTheComposerCarriesNone() async throws {
+    @Test func whileTypingTheTrailingSideFinishesAndTheComposerCarriesNoButton() async throws {
         let screen = open(Self.items(1))
         _ = try await page("item-0", on: screen)
-        #expect(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) == ["Next"], "guard")
+        #expect(screen.editor.debugTrailingBarItems.first?.title == "Next", "guard")
 
         choose(Mode.text, on: screen)
 
-        #expect(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) == ["Done"],
-                "got \(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) ?? [])")
+        // ⚠️ **A GLYPH NOW, SO THE ASSERTION IS ON THE SPOKEN NAME.** "Next"
+        // became an icon for the length of a session; asserted by `title` it
+        // reads as nil, which is exactly the shape of a passing test over a
+        // button nobody can announce.
+        let button = try #require(screen.editor.debugTrailingBarItems.first)
+        #expect(button.title == nil, "the word went, the glyph replaced it")
+        #expect(button.image != nil, "and an item with no icon is a blank capsule")
+        #expect(button.accessibilityLabel == "Discard",
+                "got \(button.accessibilityLabel ?? "nothing")")
         let composer = try #require(screen.editor.overlayMode.debugComposer)
         #expect(Self.buttonTitles(in: composer) == [],
                 "the composer put a button of its own back under the bar's")
+    }
+
+    /// ⚠️ **THE BUTTON SAYS WHAT WILL HAPPEN, AND THE WORDS DECIDE.** Finishing
+    /// an empty field REMOVES the text — `composed(_:)`'s own rule — so a tick
+    /// over nothing would promise to keep something about to be thrown away.
+    /// Asked for that way, and it has to follow the field live rather than be
+    /// decided once when the composer opens.
+    @Test func theTypingButtonIsACrossOverNothingAndATickOverWords() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+
+        choose(Mode.text, on: screen)
+
+        let button = try #require(screen.editor.debugTrailingBarItems.first)
+        #expect(button.image == UIImage(systemName: "xmark"), "a new text opens on nothing")
+        #expect(button.accessibilityLabel == "Discard")
+
+        let composer = try #require(screen.editor.overlayMode.debugComposer)
+        composer.debugType("Hello")
+
+        #expect(button.image == UIImage(systemName: "checkmark"), "words arrived and the glyph did not follow")
+        #expect(button.accessibilityLabel == "Done")
+        #expect(screen.editor.debugTrailingBarItems.first === button,
+                "the glyph changed on the item that was already there, not by re-handing the group")
+
+        composer.debugType("")
+
+        #expect(button.image == UIImage(systemName: "xmark"), "the field was emptied and the glyph stayed a tick")
+        #expect(button.accessibilityLabel == "Discard")
+    }
+
+    /// And opening on a text that already has words shows the tick at once,
+    /// before a key is pressed.
+    @Test func openingOnAnExistingTextShowsTheTickAtOnce() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+        choose(Mode.text, on: screen)
+        try addText("Hello", on: screen)
+        choose(Mode.effects, on: screen)
+
+        choose(Mode.text, on: screen)
+
+        #expect(screen.editor.debugTrailingBarItems.first?.image == UIImage(systemName: "checkmark"),
+                "the composer opened on \"Hello\" and offered to throw it away")
+    }
+
+    /// ⚠️ **THE ARROWS GO DEAD FOR THE LENGTH OF A SESSION.** A step back while
+    /// the composer is up puts an edit on the page the composer knows nothing
+    /// about — including one that takes away the very overlay being typed,
+    /// which leaves a field with nowhere to land.
+    @Test func theHistoryArrowsAreDeadWhileTheComposerIsUp() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+        choose(Mode.text, on: screen)
+        try addText("Hello", on: screen)
+        #expect(screen.editor.debugUndoItem.isEnabled, "guard: a step exists once the words are placed")
+
+        screen.editor.overlayMode.debugTextTools.debugTapAdd()
+
+        #expect(screen.editor.overlayMode.debugComposer != nil, "guard: a session is open")
+        #expect(!screen.editor.debugUndoItem.isEnabled)
+        #expect(!screen.editor.debugRedoItem.isEnabled)
+
+        try #require(screen.editor.overlayMode.debugComposer).debugTapDone()
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugUndoItem.isEnabled, "and they come back when the session ends")
     }
 
     /// And tapping it finishes the sentence rather than leaving the screen.
@@ -241,7 +315,7 @@ struct MediaEditorTextTests {
 
         #expect(screen.editor.overlayMode.debugComposer == nil, "the session is over")
         #expect(screen.editor.edits(for: "item-0").overlays.count == 1, "and the words were kept")
-        #expect(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) == ["Next"],
+        #expect(screen.editor.debugTrailingBarItems.first?.title == "Next",
                 "the way forward came back")
         #expect(screen.navigation.topViewController === screen.editor,
                 "Done left the screen — it is not Next wearing another word")
@@ -382,6 +456,32 @@ struct MediaEditorTextTests {
         let bite = radius - (radius * radius - reach * reach).squareRoot()
         #expect(first.minX >= bite,
                 "the first control starts at \(first.minX) and the glass eats \(bite)")
+    }
+
+    /// ⚠️ **THE CONTROLS SPEAK THE CAPSULE'S LANGUAGE, NOT A SECOND ONE.** The
+    /// chips carried `layer.cornerRadius = 15` on a 44pt-tall button: a rounded
+    /// rectangle a few points inside a capsule, which is what the author saw and
+    /// asked to have matched. Asserted the way the capsule itself is — the
+    /// radius UIKit RESOLVES, with the layer's own radius held at zero, because
+    /// a layer-masked corner is not part of what UIKit interpolates.
+    @Test func theStyleBarsControlsAreTheSamePillAsTheBarAroundThem() throws {
+        let bar = styleBar()
+
+        let shaped = bar.debugShapedControls
+        #expect(shaped.count >= OverlayFont.allCases.count, "got \(shaped.count) shaped controls")
+        for control in shaped {
+            let height = control.view.bounds.height
+            try #require(height > 0, "a control with no height cannot be read")
+            #expect(abs(control.radius - height / 2) < 0.001,
+                    "\(type(of: control.view)) resolves \(control.radius) for a \(height)pt height")
+            // ⚠️ **AND IT IS THE CONFIGURATION THAT SAYS SO.** UIKit mirrors a
+            // resolved `cornerConfiguration` into `layer.cornerRadius`, so the
+            // radius above cannot tell a capsule asked for from a number
+            // written by hand — and a hand-written radius is the one that
+            // flashes square mid-animation (`GlassCapsule`).
+            #expect(control.asksForAShape,
+                    "\(type(of: control.view)) carries a layer radius, not a corner configuration")
+        }
     }
 
     /// ⚠️ **THE ROW STILL WINS FIRST REFUSAL, A LEVEL DEEPER IN THE TREE.**

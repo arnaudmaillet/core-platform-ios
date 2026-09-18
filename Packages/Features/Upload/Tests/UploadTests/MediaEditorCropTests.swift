@@ -271,20 +271,22 @@ struct MediaEditorCropTests {
         #expect(screen.editor.debugSuspendedPans == 0)
     }
 
-    /// ⚠️ **`[‹][Save draft][◀][▶] ⋯ [Next]`.** The two arrows act on the whole
-    /// screen, so they stand with the other things that do, after the draft, and
-    /// in the order they read: back, then forward. The trailing side keeps the
-    /// one action that moves the flow forward.
-    @Test func theArrowsStandAfterSaveDraftWhileCropping() async throws {
+    /// ⚠️ **`[‹][Save draft] ⋯ [◀][▶][Next]`.** The leading side is the ways out
+    /// of the screen; the two arrows stand with the action that moves the work
+    /// forward. The array below reads backwards on purpose — trailing items are
+    /// laid out from the edge inwards.
+    @Test func theArrowsStandBesideNextWhileCropping() async throws {
         let screen = open(Self.items(1))
 
         choose(Mode.crop, on: screen)
 
         let leading = screen.editor.debugLeadingBarItems
-        #expect(leading.count == 3, "got \(leading.count) leading items")
-        #expect(leading.dropFirst().first === screen.editor.debugUndoItem,
-                "back comes after the draft, not before it")
-        #expect(leading.last === screen.editor.debugRedoItem, "and forward after back")
+        #expect(leading.count == 1, "got \(leading.count) leading items")
+        let trailing = screen.editor.debugTrailingBarItems
+        #expect(trailing.count == 3, "got \(trailing.count) trailing items")
+        #expect(trailing.dropFirst().first === screen.editor.debugRedoItem,
+                "forward sits inside Next, so it DRAWS to the left of it")
+        #expect(trailing.last === screen.editor.debugUndoItem, "and back further in still")
         #expect(screen.editor.navigationItem.leftItemsSupplementBackButton,
                 "and the chevron still leads them — a custom leading item replaces it silently")
     }
@@ -296,8 +298,8 @@ struct MediaEditorCropTests {
     /// mirror glyphs, which is exactly the moment it does mean something.
     @Test func fillAndFitStandWithTheTurnAndTheMirror() async throws {
         let screen = open(Self.items(1))
-        #expect(screen.editor.navigationItem.rightBarButtonItems?.count == 1,
-                "the header still carries it")
+        #expect(screen.editor.navigationItem.rightBarButtonItems?.count == 3,
+                "Next and the two arrows, and no fill/fit glyph")
 
         choose(Mode.crop, on: screen)
 
@@ -310,8 +312,8 @@ struct MediaEditorCropTests {
 
         #expect(screen.editor.debugFit(for: "item-0") == .fit)
         #expect(screen.editor.debugFitActionName == "Fill the screen", "the glyph did not turn round")
-        #expect(screen.editor.debugLeadingBarItems.count == 3,
-                "the leading side is the draft and the two arrows")
+        #expect(screen.editor.debugLeadingBarItems.count == 1,
+                "the leading side is the draft, and the chevron UIKit adds")
     }
 
     /// ⚠️ **A STEP BELONGS TO THE PAGE, NOT TO THE BAND IT WAS TAKEN IN.** The

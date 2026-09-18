@@ -70,16 +70,35 @@ struct ToolbarGeometry: Equatable {
     /// bar's leading edge. Nil for an answer no bar would give — a measurement
     /// taken mid-transition is worse than the fallback.
     static func measured(
-        leading: CGRect, leadingPlatter: CGRect, trailingPlatter: CGRect
+        leading: CGRect, leadingPlatter: CGRect, trailing: CGRect, trailingPlatter: CGRect
     ) -> ToolbarGeometry? {
         let geometry = ToolbarGeometry(
             margin: leadingPlatter.minX,
             platter: leadingPlatter.width - leading.width,
             gap: trailingPlatter.minX - leadingPlatter.maxX
         )
-        guard (0...64).contains(geometry.margin),
-              (0...24).contains(geometry.platter),
-              (0...64).contains(geometry.gap)
+        // ⚠️ **THE TWO PLATTERS MUST AGREE, OR THE BAR IS STILL MOVING.** The
+        // bands below cannot tell a platter at rest from one caught half-way
+        // through a morph: the song pill (121pt) turning into the timeline's
+        // actions (112pt) passes through a platter 16pt wider than its view,
+        // which is well inside them. Measured, from the sequence the author
+        // recorded — a clip, Crop, Trim, Crop, Trim — the reading stuck, and
+        // the next share handed the strip 13pt more than the bar had: the
+        // `•••`. At rest both platters are the same distance wider than what
+        // they hold; mid-transition the one that is morphing is not.
+        let trailingExtra = trailingPlatter.width - trailing.width
+        guard abs(geometry.platter - trailingExtra) < 0.5 else { return nil }
+        // ⚠️ **THE BANDS REFUSE A MID-LAYOUT READ, WHICH MEANS THEY MUST NOT
+        // ADMIT ZERO.** They used to start at 0 on all three, and a pass caught
+        // before the platters had grown answers platter ≈ 0 and gap ≈ 0 — which
+        // passed, and made `available` up to 20pt LARGER than the bar really
+        // has. `barGeometry` never reverts, so one such reading poisons every
+        // later share for the life of the screen and the two groups overrun.
+        // A real bar's platter is the 10pt measured on every device this ships
+        // to, and its gap is 20; the floors are half of each.
+        guard (8...64).contains(geometry.margin),
+              (4...24).contains(geometry.platter),
+              (8...64).contains(geometry.gap)
         else { return nil }
         return geometry
     }

@@ -101,9 +101,22 @@ struct MediaEditorSegmentFiltersTests {
             seeks.append(seconds)
         }
 
+        /// ⚠️ **BLACK, BECAUSE THAT IS WHAT THE AUTHOR PHOTOGRAPHED.** A clip's
+        /// own frame is routinely black — a fade, a night shot, a title card —
+        /// and nine looks drawn on it are nine identical black squares. This
+        /// stub hands back exactly that, so a card that comes out black is a
+        /// card dressed from the film and a card with any spread in it is not.
+        private(set) var frameRequests: [[Double]] = []
         func frames(
             of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
-        ) async -> [Double: UIImage] { [:] }
+        ) async -> [Double: UIImage] {
+            frameRequests.append(seconds)
+            let black = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 30)).image { context in
+                UIColor.black.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+            }
+            return Dictionary(uniqueKeysWithValues: seconds.map { ($0, black) })
+        }
     }
 
     private static func videos(_ count: Int) -> [MediaLibraryItem] {
@@ -244,6 +257,36 @@ struct MediaEditorSegmentFiltersTests {
     }
 
     // MARK: - Choosing
+
+    /// ⚠️ **THE PER-PIECE CARDS ARE THE REFERENCE PHOTOGRAPH'S TOO.** Reported
+    /// from a screenshot of nine identical BLACK cards: this row was dressed
+    /// from the piece's own frame while the other two rows had already moved to
+    /// `MediaLookReference` (F38). F31 said "that piece's own frame" and it was
+    /// written first; the two clauses disagreed and F38 is the one that
+    /// survives, for the reason it gives — a clip's frame says nothing about
+    /// nine looks when it is black, blurred or one flat colour. The piece is
+    /// still what is REHEARSED (F32): the loop under the row is the piece.
+    @Test func aPiecesCardsAreTheReferencePhotographAndNotItsFilm() async throws {
+        let (screen, tools) = try await cutClip()
+        try #require(MediaLookReference.picture != nil, "the bundle has no reference photograph")
+        tools.track.select(0)
+
+        screen.editor.debugActionBar.debugTap(Action.filter.rawValue)
+        try await settle(until: { tools.segmentFilters.debugPictures.allSatisfy { $0 != nil } })
+
+        let cards = tools.segmentFilters.debugPictures
+        #expect(cards.count == MediaSegmentFilterRowView.filterChoices.count)
+        for card in cards {
+            let picture = try #require(card, "a card was never dressed")
+            #expect(PixelProbe.spread(picture) > 0.1,
+                    "a card is one flat colour — it was drawn from the film, not from the photograph")
+        }
+        // ⚠️ **NO ASSERTION ABOUT WHAT WAS FETCHED.** The film strip above the
+        // row asks for frames of its own, and it is right to: it draws the
+        // film. Reading the fetches here would pin the strip's behaviour from
+        // a test about the cards, and it fails for the wrong reason the day the
+        // strip changes its sampling.
+    }
 
     @Test func aChoiceIsStoredOnThatPieceAndPlayed() async throws {
         let (screen, tools) = try await cutClip()

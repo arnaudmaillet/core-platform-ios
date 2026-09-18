@@ -292,6 +292,7 @@ final class MediaEditorOverlayMode: MediaEditorMode {
         let composer = MediaTextComposerView(frame: screen.bounds)
         composer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         composer.onFinish = { [weak self] text in self?.composed(text) }
+        composer.onWordsChanged = { [weak self] has in self?.host?.typedWordsDidChange(has) }
         composing = (id, overlayID)
         self.composer = composer
         screen.addSubview(composer)

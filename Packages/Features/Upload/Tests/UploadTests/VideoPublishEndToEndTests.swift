@@ -45,6 +45,41 @@ struct VideoPublishEndToEndTests {
         var entry: FeedEntry?
     }
 
+    /// ⚠️ **THE ONE THING STOOD IN FOR BESIDES THE NETWORK, AND IT IS NOT PART
+    /// OF THE SUBJECT.** The finalisation screen plays its cover when the cover
+    /// is a clip, through `MediaVideoPreviewing`; left at its default that is a
+    /// real `MediaPreviewPlayer`, which would bind an `AVPlayer` to a surface in
+    /// an offscreen window and decode a composition of the very H.264 this suite
+    /// synthesises — on a CI runner already sharing one machine with eight other
+    /// package lanes, beside an export session doing the work under test.
+    /// Nothing here drives an appearance transition, so nothing would start
+    /// today either; the stub is what keeps that true when somebody adds one.
+    /// `NewPostTests` is where the cover's playback is actually pinned.
+    private final class SilentPreview: MediaVideoPreviewing {
+        func load(
+            _ plan: VideoExportPlan, in surface: VideoRenderView,
+            landing: @escaping @MainActor () -> VideoLoadLanding?
+        ) async {}
+        func setLoopRange(_ range: ClosedRange<Double>?, in surface: VideoRenderView) {}
+        func showAsShot(_ file: URL, in surface: VideoRenderView, atSourceSeconds seconds: Double) {}
+        func stop(_ surface: VideoRenderView) {}
+        func setPaused(_ paused: Bool, in surface: VideoRenderView) {}
+        func isPaused(in surface: VideoRenderView) -> Bool? { nil }
+        func advancingRate(in surface: VideoRenderView) -> Double { 0 }
+        func isBound(_ surface: VideoRenderView) -> Bool { false }
+        func playheadSeconds(in surface: VideoRenderView) -> Double? { nil }
+        func seek(
+            toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double
+        ) {}
+        func frames(
+            of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
+        ) async -> [Double: UIImage] { [:] }
+        @discardableResult
+        func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool { true }
+        func setMuted(_ muted: Bool, in surface: VideoRenderView) {}
+        func setMixLevels(music: Double, original: Double, in surface: VideoRenderView) {}
+    }
+
     private struct Harness {
         let screen: NewPostViewController
         let window: UIWindow
@@ -93,7 +128,8 @@ struct VideoPublishEndToEndTests {
 
         let handed = Handed()
         let screen = NewPostViewController(
-            items: items, edits: edits, library: library, composer: composer
+            items: items, edits: edits, library: library, composer: composer,
+            preview: SilentPreview()
         ) { handed.entry = $0 }
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = UINavigationController(rootViewController: screen)

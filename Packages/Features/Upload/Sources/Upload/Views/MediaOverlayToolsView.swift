@@ -177,3 +177,10 @@ final class MediaOverlayToolsView: UIView {
     /// Internal for tests: "Add", through the routine its card calls.
     func debugTapAdd() { onAction?(.add) }
 }
+
+// MARK: - Arriving
+
+extension MediaOverlayToolsView: PoppingTenant {
+    /// "Add text" and every card already placed.
+    var poppableElements: [UIView] { row.arrangedSubviews }
+}

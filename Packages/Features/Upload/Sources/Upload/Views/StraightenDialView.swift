@@ -84,6 +84,11 @@ enum StraightenDial {
 /// dissolve.
 @MainActor
 final class StraightenDialView: UIView {
+    /// Drives the graduations from nothing to whole — see `RevealDriver`.
+    private lazy var revealDriver = RevealDriver { [weak self] fraction in
+        self?.ruler.reveal = fraction
+    }
+
     private enum Metrics {
         static let readout: CGFloat = 18
         static let ruler: CGFloat = 34
@@ -275,6 +280,24 @@ final class StraightenDialView: UIView {
 
         required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+
+        /// How much of the ruler has arrived: 0 draws nothing, 1 draws it whole.
+        ///
+        /// ⚠️ **THE TICKS GROW OUT FROM THE NEEDLE, ONE BY ONE.** Scaling the
+        /// whole strip would squash the graduations toward each other, and the
+        /// spacing IS the information a ruler carries. What travels is each
+        /// tick's own length — the ones under the needle land first, the ends
+        /// last, and every one of them is whole at 1.
+        var reveal: CGFloat = 1 {
+            didSet { if reveal != oldValue { setNeedsDisplay() } }
+        }
+
+        /// How far along a tick at `x` is — `BandPop.landed` states the sweep,
+        /// once, for both rulers.
+        func landed(_ x: CGFloat) -> CGFloat {
+            BandPop.landed(x, reveal: reveal, width: bounds.width)
+        }
+
         override func draw(_ rect: CGRect) {
             guard let context = UIGraphicsGetCurrentContext(), bounds.width > 0 else { return }
             let middle = bounds.midX
@@ -294,10 +317,16 @@ final class StraightenDialView: UIView {
                 // window rather than stopping at it.
                 let distance = min(x, bounds.width - x)
                 let strength = min(1, max(0, distance / Metrics.fade))
-                let alpha = (isDetent ? 0.85 : 0.45) * strength
+                let arrived = landed(x)
+                guard arrived > 0 else {
+                    degree += 1
+                    continue
+                }
+                let alpha = (isDetent ? 0.85 : 0.45) * strength * arrived
+                let drawn = length * arrived
                 context.setStrokeColor(UIColor.label.withAlphaComponent(alpha).cgColor)
-                context.move(to: CGPoint(x: x, y: bounds.midY - length / 2))
-                context.addLine(to: CGPoint(x: x, y: bounds.midY + length / 2))
+                context.move(to: CGPoint(x: x, y: bounds.midY - drawn / 2))
+                context.addLine(to: CGPoint(x: x, y: bounds.midY + drawn / 2))
                 context.strokePath()
                 degree += 1
             }
@@ -325,4 +354,16 @@ extension StraightenDialView {
     var debugInk: UIColor? { readout.textColor }
     /// Internal for tests: the path a tap on the readout takes.
     func debugTapReadout() { tapped() }
+}
+
+// MARK: - Arriving
+
+extension StraightenDialView: RevealingSurface {
+    func reveal(after delay: TimeInterval) {
+        guard !UIAccessibility.isReduceMotionEnabled else {
+            revealDriver.stop()
+            return
+        }
+        revealDriver.run(after: delay)
+    }
 }

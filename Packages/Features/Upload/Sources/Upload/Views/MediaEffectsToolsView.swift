@@ -740,3 +740,16 @@ private final class EffectsPill: UIControl {
         )
     }
 }
+
+// MARK: - Arriving
+
+extension MediaEffectsToolsView: PoppingTenant {
+    /// ⚠️ **THE TWO FIXED ICONS FIRST, THEN THE PILLS.** They stand over the
+    /// leading end of the row and the pills pass behind them; arriving after
+    /// the pills they would appear on top of a row that had already settled,
+    /// which reads as a second thing happening rather than as one row landing.
+    /// The ruler is not among them — it is the readout of whatever is chosen,
+    /// and it is drawn by `MediaValueRulerView`'s own reveal.
+    var poppableElements: [UIView] { icons.arrangedSubviews + row.arrangedSubviews }
+    var revealingSurfaces: [RevealingSurface] { [ruler] }
+}

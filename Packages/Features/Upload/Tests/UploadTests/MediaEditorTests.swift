@@ -147,6 +147,7 @@ struct MediaEditorTests {
     private enum Band {
         static let filters = 3
         static let crop = 4
+        static let timeline = 5
     }
 
     private func choose(_ band: Int, on screen: Screen) {
@@ -260,12 +261,17 @@ struct MediaEditorTests {
     @Test func theTopBarKeepsItsPromisedOrder() throws {
         let screen = open(Self.items(2))
 
-        // ⚠️ **THE TRAILING SIDE IS JUST "Next" NOW.** The fill/fit glyph used to
-        // stand beside it; it has gone to the crop tools, where it is reachable
-        // at the moment it means something.
+        // ⚠️ **THE TRAILING SIDE CARRIES THE TWO ARROWS NOW, AND IT READS
+        // BACKWARDS.** Items are laid out from the edge INWARDS, so the array
+        // `[Next, Redo, Undo]` is what DRAWS `[◀][▶][Next]` — the order the
+        // author asked for. Asserted as the array, with the reading spelled
+        // out, because a test that asserted the drawn order would have to
+        // reverse it silently and the next reader would fix the "bug".
         let right = try #require(screen.editor.navigationItem.rightBarButtonItems)
-        #expect(right.count == 1, "got \(right.map { $0.title ?? $0.accessibilityLabel ?? "?" })")
+        #expect(right.map { $0.title ?? $0.accessibilityLabel ?? "?" } == ["Next", "Redo", "Undo"],
+                "got \(right.map { $0.title ?? $0.accessibilityLabel ?? "?" })")
         #expect(right.first?.title == "Next", "Next takes the edge")
+        #expect(right.dropFirst().allSatisfy { $0.image != nil }, "an icon item with no icon is a blank capsule")
         #expect(screen.editor.debugFitActionName == "Fit the picture",
                 "named for what it will DO: the canvas fills, so the glyph offers fit")
         // ⚠️ **THE CHEVRON IS UIKit'S NOW, AND THAT IS WHAT KEEPS THE
@@ -282,8 +288,8 @@ struct MediaEditorTests {
         // losing a control to exactly that. A titleless item asserted by `title`
         // reads as `[nil]`, which is why this asks the accessibility label: an
         // icon button with no spoken name is a button VoiceOver cannot announce.
-        #expect(left.map(\.accessibilityLabel) == ["Save draft", "Undo", "Redo"],
-                "the draft and the two history arrows; the chevron is the system's")
+        #expect(left.map(\.accessibilityLabel) == ["Save draft"],
+                "the leading side is the ways out: the chevron is the system's, then the draft")
         #expect(left.allSatisfy { $0.image != nil }, "an icon bar item with no icon is a blank capsule")
         #expect(screen.editor.navigationItem.leftItemsSupplementBackButton)
         #expect(
@@ -295,6 +301,270 @@ struct MediaEditorTests {
     /// The strip carries the editing categories, in the toolbar, with no backdrop
     /// of its own — the toolbar already supplies one.
     /// The foot reads `[song][categories]`, in that order, both leading.
+    // MARK: - How the band arrives and leaves
+
+    /// ⚠️ **THE ELEMENTS ARRIVE ONE AT A TIME, AND THE TENANT NAMES THEM.**
+    /// Walking the tree from outside would pop a scroll view's container, a
+    /// divider and the glass behind everything; the row says which views the
+    /// author reads as items, in the order they are read.
+    @Test func openingACategoryPopsTheThingsTheAuthorReadsAsItems() async throws {
+        let screen = open(Self.items(1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        choose(Band.filters, on: screen)
+
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        let staged = try #require(screen.editor.debugPopIns.last)
+        #expect(staged == row.poppableElements.count, "staged \(staged) of \(row.poppableElements.count)")
+        #expect(staged > 1, "a row of one element is not a ripple: \(staged)")
+    }
+
+    /// ⚠️ **A RULER SWEEPS, IT DOES NOT POP.** Scaling a strip of graduations
+    /// squashes them toward each other, and the spacing IS the information a
+    /// ruler carries — so the crop tools' dial and the effects row's ruler are
+    /// named separately and travel by tick length instead.
+    @Test func theToolsThatCarryARulerSweepItRatherThanPopIt() async throws {
+        let screen = open(Self.items(1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        choose(Band.crop, on: screen)
+
+        #expect(screen.editor.debugReveals.last == 1,
+                "the dial was not swept: \(String(describing: screen.editor.debugReveals.last))")
+        let tools = screen.editor.debugCropTools
+        #expect(!tools.poppableElements.contains { $0 === tools.revealingSurfaces.first },
+                "the dial is in both lists, so it is scaled as well as swept")
+    }
+
+    /// ⚠️ **THE BAND LETS GO OF THE OLD TENANT BEFORE IT HAS FINISHED
+    /// LEAVING.** `band.content` is how ten places on this screen answer "what
+    /// is up"; a departing view left in it for the length of its curve would
+    /// have all ten answer for a tenant that is already going, for a third of a
+    /// second, while the author is tapping the next category. It is handed back
+    /// detached — still drawn, no longer the band's.
+    @Test func theBandSurrendersItsIdentityBeforeTheOldTenantHasLeft() async throws {
+        let screen = open(Self.items(1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        choose(Band.filters, on: screen)
+        let leaving = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+
+        choose(Band.crop, on: screen)
+
+        #expect(screen.editor.debugBand.content === screen.editor.debugCropTools,
+                "the band still answers for the tenant that is leaving")
+        #expect(leaving.superview != nil, "the old row was taken off screen instead of animated out")
+        #expect(leaving.superview !== screen.editor.debugBand, "and it is still the band's")
+        #expect(screen.editor.debugPopOuts > 0, "nothing was animated out at all")
+    }
+
+    /// ⚠️ **A TENANT THAT NAMES NOTHING STILL ARRIVES.** A screen where six
+    /// bands ripple and the seventh blinks on reads as the seventh being
+    /// broken, so anything without named elements pops as one piece.
+    @Test func aTenantWithNoNamedElementsPopsAsOnePiece() async throws {
+        let screen = open(Self.items(1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        // The notice a photograph gets where a clip's tools would be: a line of
+        // text, not a row of items.
+        screen.editor.debugShowInBand(UIView())
+
+        #expect(screen.editor.debugPopIns.last == 1, "got \(String(describing: screen.editor.debugPopIns.last))")
+    }
+
+    // MARK: - How the two strips share the bar
+
+    /// ⚠️ **AN ITEM HANDED TO A BAR WITH NO WIDTH IS AN ITEM UIKit COLLAPSES.**
+    /// It decides whether an item fits ONCE, at the hand-over, and never
+    /// reconsiders. The first hand-over came from `viewDidLoad`, where the
+    /// toolbar is still hidden and measures zero: the share took its own early
+    /// return, turned both width constraints off and wrote no frames, and the
+    /// six-category strip went over at its full intrinsic width beside a pill
+    /// at its full width. The author photographed the result on an iPhone
+    /// 18 Pro — a truncated "Add a s..." and a `•••` — on a bar with room to
+    /// spare.
+    @Test func theBarIsNeverHandedItemsBeforeItHasAWidth() {
+        // ⚠️ **LOADED WITHOUT A WINDOW, WHICH IS THE WHOLE POINT.** Hosting it
+        // first gives the toolbar a width before `viewDidLoad` ever runs, and
+        // the test then passes whatever the screen does — it cannot fail, which
+        // is the one thing a test must be able to do. This drives the real
+        // order: the view loads, the strip is built, and the bar is still
+        // nowhere.
+        let library = StubLibrary()
+        let handed = Handed()
+        let editor = MediaEditorViewController(
+            items: Self.items(2, videoAt: 1), library: library
+        ) { _, _ in handed.destination }
+        let navigation = UINavigationController(rootViewController: editor)
+
+        editor.loadViewIfNeeded()
+
+        #expect(editor.debugHandoverWidths.isEmpty,
+                "handed over to a bar that measures \(editor.debugHandoverWidths)")
+
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = navigation
+        window.isHidden = false
+        window.layoutIfNeeded()
+
+        let widths = editor.debugHandoverWidths
+        #expect(!widths.isEmpty, "the bar got a width and was never handed anything")
+        #expect(widths.allSatisfy { $0 > 0 }, "handed over at widths \(widths)")
+    }
+
+    @Test func theLeadingStripTakesWhatItAsksForAndTheTrailingTakesTheRest() async throws {
+        let screen = open(Self.items(2, videoAt: 1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        screen.window.layoutIfNeeded()
+
+        let share = try #require(screen.editor.debugBarShare)
+        #expect(abs(share.leading + share.trailing - share.available) < 0.5,
+                "the two strips do not fill the bar: \(share)")
+        #expect(share.leading >= share.leadingWants - 0.5,
+                "the leading strip was squeezed under what it asked for: \(share)")
+        #expect(share.trailing >= IconSelectorBar.height - 0.5,
+                "the trailing strip fell under one bubble: \(share)")
+    }
+
+    /// ⚠️ **AND THE CEILING IS NOT A RATCHET.** The pill's cap was written on
+    /// every pass whatever the leading view was, so opening the timeline capped
+    /// a pill that is not even in the bar at the action bar's width — and it
+    /// stayed there once the band closed, because the next measurement was
+    /// itself taken through the cap. Every pass could lower it; none could
+    /// raise it.
+    @Test func openingTheTimelineDoesNotSqueezeTheSongPillForGood() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        screen.window.layoutIfNeeded()
+        let before = try #require(screen.editor.debugBarShare).leadingWants
+
+        choose(Band.timeline, on: screen)
+        screen.window.layoutIfNeeded()
+        choose(Band.timeline, on: screen)
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugSoundPillCap >= before - 0.5,
+                "the pill is capped at \(screen.editor.debugSoundPillCap) for a \(before)pt want")
+        #expect(screen.editor.debugSoundPillWidth >= before - 0.5,
+                "the pill is drawn \(screen.editor.debugSoundPillWidth) wide and wants \(before)")
+    }
+
+    /// ⚠️ **A STRIP THAT GROWS IS A STRIP THAT MUST BE HANDED OVER AGAIN.**
+    /// Swiping onto a video gives the strip one more category — 38pt of
+    /// intrinsic width — and nothing re-handed the bar, so UIKit went on
+    /// honouring a fit it decided for five.
+    @Test func swipingOntoAVideoHandsTheBarItsItemsAgain() async throws {
+        let screen = open(Self.items(2, videoAt: 1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        screen.window.layoutIfNeeded()
+        let before = screen.editor.debugHandoverWidths.count
+
+        let handed = screen.editor.debugRealHandovers
+
+        screen.editor.debugScrollToPage(1)
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugHandoverWidths.count > before,
+                "the strip gained a category and the bar was never told")
+        // ⚠️ **A REAL HAND-OVER, AND AN ANIMATED ONE.** Asked for: the timeline's
+        // icon arriving and leaving with the bar's own transition. With the
+        // same views in the same places a hand-over is skipped, so without the
+        // content flag nothing reached UIKit at all and the icon blinked in;
+        // with it, a fresh item under the old identifier is matched to the old
+        // one and UIKit animates the difference — measured on the device as the
+        // icons blurring out and back in over about 150ms.
+        #expect(screen.editor.debugRealHandovers > handed, "the bar was never actually handed anything")
+        #expect(screen.editor.debugLastHandoverWasAnimated, "and it was handed over without its transition")
+        let share = try #require(screen.editor.debugBarShare)
+        #expect(abs(share.leading + share.trailing - share.available) < 0.5,
+                "and the share did not follow: \(share)")
+    }
+
+    /// ⚠️ **THE STRIP IS THE SAME ITEM TO UIKit ACROSS EVERY HAND-OVER** — by
+    /// identifier, not by instance. Without one, each hand-over was a new set
+    /// of items cross-faded over the old, with both sets in the bar for the
+    /// length of the fade.
+    @Test func theCategoryStripKeepsItsIdentifierWhateverTheBandHolds() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        let before = try #require(screen.editor.debugToolbarItems.first { $0.customView is IconSelectorBar })
+
+        choose(Band.timeline, on: screen)
+        choose(Band.crop, on: screen)
+
+        let after = try #require(screen.editor.debugToolbarItems.first { $0.customView is IconSelectorBar })
+        #expect(before.identifier != nil && after.identifier == before.identifier,
+                "\(before.identifier ?? "nil") then \(after.identifier ?? "nil")")
+    }
+
+    /// ⚠️ **THE LEADING SLOT IS ONE ITEM TO UIKit, WHATEVER IT HOLDS.** The song
+    /// pill and the timeline's actions share an identifier — UIKit's own way of
+    /// saying "treat these as the same item across the transition" — so the
+    /// pill morphs into the actions instead of the two fading past each other.
+    @Test func theSongPillAndTheActionsAreTheSameSlotToUIKit() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        let pill = try #require(screen.editor.debugToolbarItems.first)
+        try #require(pill.customView is SoundPillView, "guard: the pill leads")
+
+        choose(Band.timeline, on: screen)
+
+        let actions = try #require(screen.editor.debugToolbarItems.first)
+        try #require(actions.customView is IconActionBar, "guard: the actions lead")
+        #expect(pill.identifier != nil && pill.identifier == actions.identifier,
+                "\(pill.identifier ?? "nil") vs \(actions.identifier ?? "nil")")
+        let strip = try #require(screen.editor.debugToolbarItems.first { $0.customView is IconSelectorBar })
+        #expect(strip.identifier != nil && strip.identifier != pill.identifier,
+                "the strip must be matched to itself, not to the leading slot")
+    }
+
+    /// ⚠️ **LEAVING CROP FOR THE TIMELINE HANDS THE BAR OVER ONCE.** It used to
+    /// be twice in one turn — the band emptied on the way past, then refilled —
+    /// and the second transition landing on the first is the recorded sequence
+    /// that swept the strip into a `•••`: a clip, Crop, Trim, Crop, Trim.
+    @Test func leavingCropForTheTimelineHandsTheBarOverOnce() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        choose(Band.crop, on: screen)
+        let before = screen.editor.debugRealHandovers
+        let asked = screen.editor.debugHandoverWidths.count
+
+        choose(Band.timeline, on: screen)
+
+        #expect(screen.editor.debugRealHandovers - before == 1,
+                "handed over \(screen.editor.debugRealHandovers - before) times")
+        // ⚠️ **AND ASKED ONCE, WHICH IS THE HALF THE COUNT ABOVE CANNOT SEE.**
+        // Since a hand-over of the same views is skipped, the band emptied on
+        // the way past no longer costs a SECOND hand-over — the pill was
+        // already leading in crop — so the count above reads 1 either way. What
+        // the emptying still costs is a band collapsed and re-opened, and the
+        // pages re-laid twice, in one turn; this is what says it is gone.
+        #expect(screen.editor.debugHandoverWidths.count - asked == 1,
+                "the bar was asked \(screen.editor.debugHandoverWidths.count - asked) times")
+    }
+
+    /// And the whole recorded sequence leaves the strip in the bar, held to
+    /// the rest of it.
+    @Test func theRecordedSequenceLeavesTheStripWhole() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        // ⚠️ **AT EVERY STEP, BECAUSE THE DRIFT IS CUMULATIVE.** The strip's
+        // wrapper gained nine points per round trip, so the first two steps
+        // were always right and only the fourth overran; asserted once at the
+        // end, a sequence one step shorter would have passed.
+        for band in [Band.crop, Band.timeline, Band.crop, Band.timeline] {
+            choose(band, on: screen)
+            screen.window.layoutIfNeeded()
+            #expect(abs(screen.editor.debugCategoryBar.frame.width - screen.editor.debugCategoryWidthConstant) < 0.5,
+                    "the strip is drawn \(screen.editor.debugCategoryBar.frame.width) wide against a held \(screen.editor.debugCategoryWidthConstant)")
+        }
+
+        let share = try #require(screen.editor.debugBarShare)
+        #expect(abs(share.leading + share.trailing - share.available) < 0.5, "\(share)")
+        #expect(share.trailing >= IconSelectorBar.height - 0.5, "\(share)")
+        #expect(screen.editor.debugCategoryBar.window != nil, "the strip left the bar")
+    }
+
     @Test func theSoundPillLeadsTheCategoryStripInTheToolbar() {
         let screen = open(Self.items(1))
 
@@ -428,8 +698,8 @@ struct MediaEditorTests {
     @Test func theFitGlyphLaysTheCurrentPictureWholeAndLivesWithTheCropTools() async throws {
         let screen = open(Self.items(2))
         try await settle(until: { !Self.pages(in: screen.window).isEmpty })
-        #expect(screen.editor.navigationItem.rightBarButtonItems?.count == 1,
-                "the header still carries the fill/fit glyph")
+        #expect(screen.editor.navigationItem.rightBarButtonItems?.count == 3,
+                "Next and the two arrows — and no fill/fit glyph among them")
 
         screen.editor.debugCropTools.debugTapFit()
         screen.window.layoutIfNeeded()

@@ -89,9 +89,25 @@ struct ToolbarGeometryTests {
         let measured = ToolbarGeometry.measured(
             leading: CGRect(x: 33, y: 0, width: 151.5, height: 38),
             leadingPlatter: CGRect(x: 28, y: 0, width: 161.5, height: 48),
+            trailing: CGRect(x: 214.5, y: 0, width: 90, height: 38),
             trailingPlatter: CGRect(x: 209.5, y: 0, width: 100, height: 48)
         )
         #expect(measured == ToolbarGeometry(margin: 28, platter: 10, gap: 20))
+    }
+
+    /// ⚠️ **A BAR CAUGHT MID-MORPH IS REFUSED, EVEN INSIDE THE BANDS.** The
+    /// song pill turning into the timeline's actions passes through a platter
+    /// 16pt wider than its view — plausible on its own, and wrong: the reading
+    /// stuck and the next share overran the bar by 13pt. At rest both platters
+    /// are the same distance wider than what they hold; mid-transition the one
+    /// that is morphing is not.
+    @Test func aPlatterThatDisagreesWithItsNeighbourIsStillMoving() {
+        #expect(ToolbarGeometry.measured(
+            leading: CGRect(x: 34, y: 0, width: 112, height: 38),
+            leadingPlatter: CGRect(x: 28, y: 0, width: 128, height: 48),
+            trailing: CGRect(x: 173, y: 0, width: 182, height: 38),
+            trailingPlatter: CGRect(x: 168, y: 0, width: 192, height: 48)
+        ) == nil, "a 16pt platter beside a 10pt one was accepted")
     }
 
     /// A platter caught mid-transition answers nonsense; nonsense is refused.
@@ -99,16 +115,19 @@ struct ToolbarGeometryTests {
         #expect(ToolbarGeometry.measured(
             leading: CGRect(x: 0, y: 0, width: 100, height: 38),
             leadingPlatter: CGRect(x: -40, y: 0, width: 110, height: 48),
+            trailing: CGRect(x: 95, y: 0, width: 90, height: 38),
             trailingPlatter: CGRect(x: 90, y: 0, width: 100, height: 48)
         ) == nil, "a negative margin")
         #expect(ToolbarGeometry.measured(
             leading: CGRect(x: 30, y: 0, width: 100, height: 38),
             leadingPlatter: CGRect(x: 28, y: 0, width: 300, height: 48),
+            trailing: CGRect(x: 145, y: 0, width: -100, height: 38),
             trailingPlatter: CGRect(x: 340, y: 0, width: 100, height: 48)
         ) == nil, "a platter far wider than its view")
         #expect(ToolbarGeometry.measured(
             leading: CGRect(x: 30, y: 0, width: 100, height: 38),
             leadingPlatter: CGRect(x: 28, y: 0, width: 110, height: 48),
+            trailing: CGRect(x: 125, y: 0, width: 90, height: 38),
             trailingPlatter: CGRect(x: 120, y: 0, width: 100, height: 48)
         ) == nil, "overlapping groups")
     }

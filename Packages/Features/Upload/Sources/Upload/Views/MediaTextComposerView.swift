@@ -40,6 +40,25 @@ final class MediaTextComposerView: UIView, UITextViewDelegate {
     /// dressed. Empty words are the caller's to turn into "remove it".
     var onFinish: ((TextOverlay) -> Void)?
 
+    /// Called whenever the field crosses between empty and not, and once when a
+    /// session opens — so the bar can offer a TICK over words and a CROSS over
+    /// nothing.
+    ///
+    /// ⚠️ **ONLY ON THE CROSSING, NOT PER KEYSTROKE.** The only thing the
+    /// listener does with this is choose one of two glyphs; announcing every
+    /// character would have the screen re-decide a bar item sixty times a
+    /// sentence for an answer that changed twice.
+    var onWordsChanged: ((Bool) -> Void)?
+
+    private var hadWords: Bool?
+
+    private func tellWhetherThereAreWords() {
+        let has = !(textView.text ?? "").isEmpty
+        guard has != hadWords else { return }
+        hadWords = has
+        onWordsChanged?(has)
+    }
+
     private(set) var style = TextOverlay.fresh
     let textView = UITextView()
     let styleBar = MediaTextStyleBar(frame: CGRect(x: 0, y: 0, width: 390, height: MediaTextStyleBar.height))
@@ -106,6 +125,10 @@ final class MediaTextComposerView: UIView, UITextViewDelegate {
         styleBar.show(text)
         textView.text = text.text
         dress()
+        // ⚠️ **STATED ON THE WAY IN, BEFORE A KEY IS PRESSED.** Opening on an
+        // existing text must show the tick at once; opening on a new one must
+        // show the cross. `hadWords` is nil here, so this always announces.
+        tellWhetherThereAreWords()
         textView.becomeFirstResponder()
     }
 
@@ -121,6 +144,7 @@ final class MediaTextComposerView: UIView, UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         style.text = textView.text ?? ""
         dress()
+        tellWhetherThereAreWords()
     }
 
     /// Puts the style on the words being typed.

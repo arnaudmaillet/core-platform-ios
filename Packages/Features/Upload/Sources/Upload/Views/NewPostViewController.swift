@@ -144,6 +144,9 @@ final class NewPostViewController: UIViewController {
     /// (see `post()`); the fit is honoured by the screens that draw the picture.
     private let edits: [String: MediaEdits]
     private let library: any MediaLibraryReading
+    /// What plays the cover's clip in the strip — the editor's seam, unchanged.
+    /// See `playCover` for why there is exactly one of these on this screen.
+    private let preview: any MediaVideoPreviewing
     private let composer: any PostComposing
     /// Where a published post hands back to — the flow's own dismissal.
     private let onPublished: (FeedEntry) -> Void
@@ -160,6 +163,52 @@ final class NewPostViewController: UIViewController {
 
     /// Which chosen item leads the carousel — a photo or a video.
     private var coverID: String?
+
+    /// The clip the strip is currently playing, and the surface it plays in.
+    /// Both nil while nothing plays, which is every selection whose cover is a
+    /// photograph.
+    /// What each clip tile is doing, by item id — see
+    /// `NewPostMediaCell.ClipState` and `clipTileTapped`.
+    ///
+    /// ⚠️ **THE SCREEN OWNS THIS, NOT THE CELL.** A list cell is rebuilt and
+    /// recycled without asking, and a state kept inside one would reset itself
+    /// every time the author changed a switch three rows down.
+    private var clipStates: [String: NewPostMediaCell.ClipState] = [:]
+
+    /// The frames each clip's sheet cycles, once they have been sampled.
+    ///
+    /// ⚠️ **SIX FRAMES AT THE TILE'S OWN HEIGHT IS 0.6MB A CLIP**, and the
+    /// selection is capped at twenty: twelve megabytes in the worst case, held
+    /// for a screen the author is looking at and freed with it. Sampling them at
+    /// the tile's PIXEL size would be four times that for detail nobody reads
+    /// in a moving 117pt thumbnail.
+    private var clipSheets: [String: [UIImage]] = [:]
+
+    /// The sampling in flight for each clip.
+    ///
+    /// ⚠️ **PER CLIP, NOT ONE COUNTER FOR THE STRIP.** `previewLoads` is global
+    /// because there is one player and a second load abandons the first; these
+    /// are independent reads of different files, and a shared counter made each
+    /// one cancel the last. Measured: with three clips only the final tile ever
+    /// got its frames, and the two before it sat on a still that looked exactly
+    /// like a sheet waiting to arrive.
+    private var sheetSamples: [String: Int] = [:]
+
+    private var playingCoverID: String?
+    private var coverSurface: VideoRenderView?
+    /// Bumped on every start and every stop, so a load that was overtaken while
+    /// it read a file abandons itself rather than binding to a cover the author
+    /// has since moved off. The editor's `previewLoads` is the same counter.
+    private var previewLoads = 0
+    /// Whether the screen is actually being looked at. A load that lands after
+    /// the screen has gone must not start anything.
+    private var isOnScreen = false
+
+    /// Whether the strip has made its entrance — see `bringTheStripIn`.
+    private var stripHasArrived = false
+    /// Whether motion is unwanted — `UIAccessibility`'s answer unless a test
+    /// says otherwise. See `NewPostMediaCell.reducesMotion`.
+    private let reducesMotion: () -> Bool
 
     private var list: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Row>!
@@ -205,14 +254,18 @@ final class NewPostViewController: UIViewController {
         edits: [String: MediaEdits] = [:],
         library: any MediaLibraryReading,
         composer: any PostComposing,
+        preview: any MediaVideoPreviewing = MediaPreviewPlayer(),
         draft: PostDraft = PostDraft(),
+        reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled },
         onPublished: @escaping (FeedEntry) -> Void
     ) {
         self.items = items
         self.edits = edits
         self.library = library
+        self.preview = preview
         self.composer = composer
         self.draft = draft
+        self.reducesMotion = reducesMotion
         self.onPublished = onPublished
         // ⚠️ **RESTORED BEFORE THE FIRST LAYOUT, NOT AFTER.** This screen is
         // rebuilt from scratch every time "Next" is pressed, so stepping back to
@@ -247,6 +300,53 @@ final class NewPostViewController: UIViewController {
         view.backgroundColor = .systemGroupedBackground
         configureList()
         applyRows()
+    }
+
+    /// ⚠️ **`viewDidAppear`, NOT `viewDidLoad` — THE TILE HAS TO EXIST FIRST.**
+    /// The surface is laid over a tile inside the strip's cell, and at load time
+    /// the collection view has dequeued nothing: `cellForItem` answers nil and
+    /// the cover would silently never start. This is also the moment a pop back
+    /// from anywhere lands on, which is what restarts the clip.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        isOnScreen = true
+        bringTheStripIn()
+        playCover()
+    }
+
+    /// The strip's entrance: its tiles, held invisible since they were built,
+    /// ripple in once the screen has landed — see `NewPostMediaCell.popTilesIn`.
+    ///
+    /// ⚠️ **ONCE PER SCREEN, AND A REBUILD DOES NOT REPLAY IT.** Changing the
+    /// cover reorders the strip, and the reorder rebuilds every tile — but the
+    /// author has made one small edit, and watching the whole row vanish and
+    /// ripple back from the first tile reads as the screen RELOADING, which is
+    /// the one thing it must not look like while the rest of their form sits
+    /// still. The new order simply appears. A step back to the editor and
+    /// "Next" again is a new screen (`UploadFeatureBuilder` builds one per
+    /// push), so that entrance does ripple, as it should.
+    ///
+    /// ⚠️ **LAID OUT BEFORE THE FLAG IS SET, NOT AFTER.** `viewDidAppear` can
+    /// run before the list has built its first cell (`playCover` carries the
+    /// same note); a strip built with the flag already up would never be held,
+    /// and the first entrance would quietly never happen.
+    private func bringTheStripIn() {
+        guard !stripHasArrived else { return }
+        list.layoutIfNeeded()
+        stripHasArrived = true
+        strip?.popTilesIn()
+    }
+
+    /// ⚠️ **`viewWillDisappear` COVERS A PUSH AS WELL AS A POP, AND THAT IS WHY
+    /// IT IS THIS ONE.** `viewDidDisappear` guarded on `isMovingFromParent`
+    /// would leave the cover running underneath a screen pushed on top of it —
+    /// a player decoding for a rectangle nobody can see, which is
+    /// `profile-gallery-player-leak` told from the other end. The editor stops
+    /// its preview from exactly here.
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        isOnScreen = false
+        stopCover()
     }
 
     // MARK: - Bars
@@ -304,9 +404,25 @@ final class NewPostViewController: UIViewController {
 
         let media = UICollectionView.CellRegistration<NewPostMediaCell, Row> { [weak self] cell, _, _ in
             guard let self else { return }
-            cell.show(publishOrder, coverID: coverID, edits: edits) { [weak self] id, size in
+            cell.reducesMotion = reducesMotion
+            cell.show(
+                publishOrder, coverID: coverID, edits: edits,
+                // Held only until the screen lands — see `bringTheStripIn`.
+                holdsForArrival: !stripHasArrived
+            ) { [weak self] id, size in
                 await self?.library.thumbnail(for: id, size: size)
             }
+            cell.onTileTapped = { [weak self] id in self?.clipTileTapped(id) }
+            // ⚠️ **AFTER EVERY BUILD, BECAUSE A BUILD FORGETS** — `show` tears
+            // every tile down and puts new ones up, so the state each clip was
+            // in, and the frames it had, live here rather than in the cell.
+            //
+            // ⚠️ **AND WITH THE CELL IN HAND, NOT LOOKED UP.** Inside its own
+            // registration block the cell is not yet answerable by
+            // `cellForItem(at:)` — the `strip` accessor returns nil there, so a
+            // lookup silently skipped the dressing on every build and every
+            // tile came up in whatever state the cell was born in.
+            dressTheClipTiles(on: cell)
         }
         let cover = UICollectionView.CellRegistration<NewPostButtonCell, Row> { [weak self] cell, _, _ in
             guard let self else { return }
@@ -562,7 +678,284 @@ final class NewPostViewController: UIViewController {
         // cover, so storing that would make "the author chose the first photo"
         // and "the author chose nothing" the same state on the way back.
         draft.coverID = id
+        // ⚠️ **STOPPED BEFORE THE STRIP IS REDRAWN, STARTED AFTER.** Changing the
+        // cover changes `publishOrder`, which changes the strip's signature,
+        // which rebuilds every tile — including the one a player is bound to.
+        // Stopping first is not belt and braces: the cell's `onSurfaceLost`
+        // would fire from inside the redraw, and a stop asked for there arrives
+        // while the row is half torn down.
+        stopCover()
+        // ⚠️ **A NEW COVER RESETS EVERY CLIP TILE TO ITS DEFAULT.** The cover is
+        // the tile that rests, so changing which one it is changes what two
+        // tiles should be doing — and keeping the old answers would leave the
+        // former cover resting for no reason anyone could see. The author has
+        // just changed what the post IS; the strip re-deriving its own resting
+        // state is the least surprising thing it can do.
+        clipStates.removeAll()
         reconfigure([.media, .cover])
+        playCover()
+    }
+
+    // MARK: - The cover, moving
+
+    /// Which clip tile holds the player, and what every other one is doing.
+    ///
+    /// ⚠️ **EVERY CLIP TILE IS INTERACTIVE; EXACTLY ONE OF THEM CAN MOVE.**
+    /// Asked for as "if the thumbnail is a video, make it interactive, the video
+    /// plays by default, a tap shows the spritesheet, another tap restarts it
+    /// from the beginning" — and for the COVER, "the spritesheet state by
+    /// default, and the Cover badge only in that state".
+    ///
+    /// The one player is why the default cannot be taken literally for every
+    /// tile at once: each clip is a full `VideoExportPlan` built into an
+    /// `AVComposition`, `MediaPreviewPlayer`'s pool is sized ONE, and asking it
+    /// for a second surface evicts the first. So the rule is "the first clip
+    /// that wants to play, gets to" — which IS every clip in the case that
+    /// actually happens (one), and degrades to the sheet for the rest rather
+    /// than to a frozen frame. That fallback is the reason the sheet is
+    /// installed UNDER the surface and not instead of it.
+    private func defaultClipState(for id: String) -> NewPostMediaCell.ClipState {
+        // ⚠️ **THE COVER RESTS.** It is the tile wearing the word "Cover", and
+        // the word is what the author is on this screen to check; a badge over
+        // moving film is the noise the editor keeps its own chrome off the
+        // picture to avoid.
+        id == coverID ? .sheet : .playing
+    }
+
+    /// A tap on a clip's tile: the film, or its frames.
+    private func clipTileTapped(_ id: String) {
+        let wants: NewPostMediaCell.ClipState = clipStates[id] == .playing ? .sheet : .playing
+        clipStates[id] = wants
+        if wants == .playing {
+            // ⚠️ **ONE AT A TIME, SO THE OTHERS YIELD.** Not a courtesy: the
+            // seam has one surface, and a tile left claiming `.playing` would
+            // keep asking for a player that is no longer its.
+            for other in clipStates.keys where other != id { clipStates[other] = .sheet }
+        }
+        dressTheClipTiles()
+        // ⚠️ **FROM THE BEGINNING, WHICH IS WHAT `stopCover` BUYS.** Asked for
+        // in those words. A tap that only un-paused would resume wherever the
+        // film happened to be, and the author who taps a thumbnail twice is
+        // asking to watch it again, not to carry on.
+        stopCover()
+        playCover()
+    }
+
+    /// States every clip tile, and samples the frames the ones at rest need.
+    private func dressTheClipTiles() {
+        guard let strip else { return }
+        dressTheClipTiles(on: strip)
+    }
+
+    private func dressTheClipTiles(on strip: NewPostMediaCell) {
+        for item in publishOrder where item.isVideo {
+            let state = clipStates[item.id] ?? defaultClipState(for: item.id)
+            clipStates[item.id] = state
+            if let frames = clipSheets[item.id] {
+                strip.showSheet(frames, for: item.id)
+            } else {
+                sampleSheet(for: item.id)
+            }
+            strip.setClipState(state, for: item.id)
+        }
+    }
+
+    /// Reads a handful of frames across the clip and hands them to its tile.
+    ///
+    /// ⚠️ **SAMPLED ONCE PER CLIP AND KEPT.** `frames(of:atSourceSeconds:…)` is
+    /// the expensive call on this path — the timeline's own strip is built from
+    /// it — and a sheet re-read on every state change would pay for it on every
+    /// tap.
+    ///
+    /// ⚠️ **AND THE FRAMES WEAR THE AUTHOR'S LOOK.** A sheet in colour under a
+    /// clip the author made mono is the same defect this strip already shipped
+    /// once for its stills.
+    private func sampleSheet(for id: String) {
+        guard clipSheets[id] == nil else { return }
+        let sample = (sheetSamples[id] ?? 0) + 1
+        sheetSamples[id] = sample
+        let declared: Double
+        if case .video(let seconds) = items.first(where: { $0.id == id })?.kind {
+            declared = seconds
+        } else {
+            declared = 0
+        }
+        let look = (edits[id] ?? .untouched).look
+        Task { [weak self] in
+            guard let self, let file = await library.videoFile(for: id) else { return }
+            let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
+            let length = real.isFinite && real > 0 ? real : declared
+            guard length > 0 else { return }
+            // Evenly across the film, skipping its very first and last moments:
+            // a clip's opening frame is the one that is routinely black.
+            let count = Self.sheetFrameCount
+            let moments = (0..<count).map { index in
+                length * (Double(index) + 0.5) / Double(count)
+            }
+            let sampled = await preview.frames(
+                of: file, atSourceSeconds: moments, height: Self.sheetFrameHeight, spacing: 0
+            )
+            guard sheetSamples[id] == sample, !sampled.isEmpty else { return }
+            let ordered = moments.compactMap { sampled[$0] }
+            guard !ordered.isEmpty else { return }
+            let dressed = await Task.detached(priority: .utility) {
+                ordered.compactMap { frame -> UIImage? in
+                    guard let source = CIImage(image: frame) else { return frame }
+                    let looked = FrameLookRenderer.apply(look, to: source, time: 0)
+                    guard let cg = EditingRenderContext.shared.createCGImage(looked, from: source.extent)
+                    else { return frame }
+                    return UIImage(cgImage: cg, scale: frame.scale, orientation: frame.imageOrientation)
+                }
+            }.value
+            guard sheetSamples[id] == sample, !dressed.isEmpty else { return }
+            clipSheets[id] = dressed
+            strip?.showSheet(dressed, for: id)
+            strip?.setClipState(clipStates[id] ?? defaultClipState(for: id), for: id)
+        }
+    }
+
+    /// ⚠️ **SIX, AND AT THE TILE'S POINT HEIGHT.** See `clipSheets` for the
+    /// arithmetic: this is the number that keeps a twenty-clip selection inside
+    /// twelve megabytes of decoded frames.
+    private static let sheetFrameCount = 6
+    private static let sheetFrameHeight: CGFloat = 208
+
+    /// Plays the clip whose tile is the one holding the player.
+    ///
+    /// ⚠️ **ONE PLAYER, ON THE COVER, AND ONLY WHEN THE COVER IS A CLIP.** The
+    /// obvious reading of "the thumbnails show a still for a video" is that
+    /// every video tile should move. It should not. The selection is capped at
+    /// twenty and each clip here is a full `VideoExportPlan` — pieces, rates,
+    /// crop, look and a song, built into an `AVComposition` per player — so a
+    /// strip of twenty moving thumbnails is twenty compositions decoding at once
+    /// behind a settings form. `profile-gallery-player-leak` is this repository's
+    /// record of what accumulating players does, and
+    /// `MediaPreviewPlayer`'s pool is sized ONE for the same reason one level
+    /// down: asking it for a second surface would evict the first anyway, so
+    /// "play them all" is not even expressible through this seam.
+    ///
+    /// The cover is the frame the post will actually show — the first
+    /// attachment is what every grid and feed draws a post by (see this
+    /// screen's own note above) — so it is the one worth spending the player on.
+    /// A photograph cover plays nothing and every tile stays a still, which is
+    /// the correct picture of a post that will not move either.
+    ///
+    /// ⚠️ **THE OVERLAYS DO NOT REACH THE PLAYING PICTURE, AND THAT IS THE
+    /// PREVIEW PATH, NOT THIS CALL.** `exportPlan` is asked the way the editor
+    /// asks it — without overlays and without artwork — because
+    /// `VideoPlaybackController.load` hands its compositor
+    /// `FrameFinish(crop:look:)` and nothing else: overlays are dropped whatever
+    /// this passes. So a clip carrying text shows it on the still and loses it
+    /// the moment it starts. The editor does not have this gap because its
+    /// canvas draws overlays as views over the surface; a 117pt tile does not,
+    /// and giving it one would be a second feature.
+    private func playCover() {
+        guard isOnScreen else { return }
+        // ⚠️ **PUBLISH ORDER DECIDES, SO THE ANSWER IS STABLE.** `clipStates` is
+        // a dictionary and its order is not; picking "a clip that wants to
+        // play" from it would hand the player to a different tile on different
+        // runs, and the author would see a different thumbnail moving each time
+        // they came back to the screen.
+        let wanting = publishOrder.first {
+            $0.isVideo && (clipStates[$0.id] ?? defaultClipState(for: $0.id)) == .playing
+        }
+        guard let id = wanting?.id else { return stopCover() }
+        // ⚠️ **LAID OUT FIRST, OR THERE IS NO TILE TO PLAY ON.** `viewDidAppear`
+        // can run before the list has dequeued its first cell — the strip is a
+        // cell like any other — and `cellForItem` answers nil for a row that has
+        // not been laid out. Asking for the layout is what makes the rectangle
+        // exist; without it the cover starts on the second appearance and never
+        // on the first.
+        list.layoutIfNeeded()
+        guard let strip, let surface = strip.videoSurface(over: id) else { return }
+        // Already playing this clip, in this very rectangle: a second appearance
+        // or a reload that changed nothing must not mint a second item.
+        guard playingCoverID != id || coverSurface !== surface else { return }
+        stopCover()
+        playingCoverID = id
+        coverSurface = surface
+        // ⚠️ THE CELL TELLS US WHEN THE RECTANGLE GOES. A strip redrawn under a
+        // bound surface — a cover change, a recycled cell — would otherwise
+        // leave the player decoding into a view with no superview.
+        strip.onSurfaceLost = { [weak self] lost in
+            guard let self, coverSurface === lost else { return }
+            stopCover()
+        }
+        loadCover(id, into: surface)
+    }
+
+    /// Reads the clip and hands the seam the arrangement the author made of it.
+    ///
+    /// ⚠️ **MUTED AFTER THE LOAD, NOT BEFORE, AND NOT LEFT TO THE SEAM.**
+    /// `MediaPreviewPlayer.load` ends with
+    /// `setMuted(!carriesSoundtrack(in:))` — a clip the author put a song under
+    /// therefore arrives UNMUTED, which is right on the editor's canvas and
+    /// wrong here: this is a form with a title field and six switches on it, and
+    /// a thumbnail that starts singing while somebody writes a caption is a
+    /// defect. Asked after the item is in, because that is when the seam makes
+    /// its own decision.
+    ///
+    /// ⚠️ **THE LANDING IS WHAT MAKES IT LOOP, AND `setLoopRange` IS NOT CALLED.**
+    /// A landing naming no range settles the player on `.wholeItem`
+    /// (`VideoPlaybackController.load`), so the arrangement runs to its end and
+    /// starts again — which is the whole of what a thumbnail wants.
+    /// `setLoopRange` exists for rehearsing a few seconds around a cut, a notion
+    /// this screen does not have; asked with nil straight after a fresh landing
+    /// it would write `.wholeItem` over `.wholeItem`, and a line that does
+    /// nothing is worse than none.
+    private func loadCover(_ id: String, into surface: VideoRenderView) {
+        previewLoads += 1
+        let load = previewLoads
+        let declared: Double
+        if case .video(let seconds) = items.first(where: { $0.id == id })?.kind {
+            declared = seconds
+        } else {
+            declared = 0
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let file = await library.videoFile(for: id) else { return }
+            // ⚠️ AGAINST THE FILE'S OWN LENGTH, NOT THE ITEM'S DECLARED ONE —
+            // the same read `post()` makes, for the same reason: a declaration
+            // can outlive the bytes it describes, and pieces resolved past the
+            // end play nothing.
+            let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
+            let length = real.isFinite && real > 0 ? real : declared
+            guard previewLoads == load else { return }
+            let edited = edits[id] ?? .untouched
+            await preview.load(
+                edited.exportPlan(
+                    sourceURL: file, fileSeconds: length, artwork: nil, includingOverlays: false
+                ),
+                in: surface
+            ) { [weak self] in
+                // ⚠️ RE-ASKED AS THE ITEM GOES IN. Reading the file takes a
+                // moment and the author may have changed the cover, pressed Post
+                // or left the screen; nil is how a load abandons itself.
+                guard let self, previewLoads == load, playingCoverID == id else { return nil }
+                return VideoLoadLanding(seconds: 0)
+            }
+            guard previewLoads == load, playingCoverID == id else { return }
+            preview.setMuted(true, in: surface)
+        }
+    }
+
+    /// Gives the player back and puts the cover's tile back to its still.
+    /// Idempotent: everything below is already true when nothing is playing.
+    private func stopCover() {
+        // Whatever is on its way belongs to a cover that is no longer playing.
+        previewLoads += 1
+        playingCoverID = nil
+        guard let surface = coverSurface else { return }
+        coverSurface = nil
+        preview.stop(surface)
+        strip?.onSurfaceLost = nil
+        strip?.hideVideoSurface()
+    }
+
+    /// The strip's cell, while the list is showing one.
+    private var strip: NewPostMediaCell? {
+        dataSource.indexPath(for: .media).flatMap { list.cellForItem(at: $0) } as? NewPostMediaCell
     }
 
     // MARK: - The settings
@@ -649,6 +1042,13 @@ final class NewPostViewController: UIViewController {
         guard !isPublishing else { return }
         isPublishing = true
         postItem.isEnabled = false
+        // ⚠️ **THE COVER STOPS BEFORE THE EXPORT STARTS.** Publishing a clip
+        // builds an `AVAssetExportSession` over the very file the strip is
+        // playing; leaving a composition decoding beside it buys the author
+        // nothing — the screen is on its way out — and takes decode bandwidth
+        // off the one piece of work they are waiting for. It also removes a
+        // race: the loop below reads `videoFile(for:)` for the same id.
+        stopCover()
 
         Task { [weak self] in
             guard let self else { return }

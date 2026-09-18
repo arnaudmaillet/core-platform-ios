@@ -71,6 +71,39 @@ final class MediaEditorBandView: UIView {
         isHidden = true
     }
 
+    /// Empties the band as `clear` does, but hands the tenant BACK, still on
+    /// screen at the same place, for a caller that wants to animate it out.
+    ///
+    /// ⚠️ **THE IDENTITY IS SURRENDERED UP FRONT, AND THAT IS THE WHOLE REASON
+    /// THIS EXISTS.** `content` is how ten places on this screen answer "what is
+    /// up" — which mode is showing, whether the timeline is up, whether a late
+    /// thumbnail still has somewhere to land. A pop-out that left `content`
+    /// pointing at the departing view for the length of its curve would have
+    /// every one of them answer for a tenant that is already leaving, for a
+    /// third of a second, while the author is tapping the next category.
+    ///
+    /// ⚠️ **AND THE VIEW IS RE-PARENTED, BECAUSE THIS BAND IS ABOUT TO BE
+    /// HIDDEN AND ZERO POINTS TALL.** A subview of a hidden host draws nothing,
+    /// so a fade left inside would be a fade nobody sees. It goes to the band's
+    /// own superview at the frame it was drawn in, carrying its autoresizing
+    /// mask back — `constrain(in:)` takes that off, and putting it back is what
+    /// makes `frame` mean something again.
+    func release() -> UIView? {
+        guard let view = content, let host = superview else {
+            clear()
+            return nil
+        }
+        let frame = convert(view.frame, to: host)
+        view.removeFromSuperview()
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.frame = frame
+        host.addSubview(view)
+        content = nil
+        collapsed.isActive = true
+        isHidden = true
+        return view
+    }
+
     /// Internal for tests: whether the band is standing open.
     var debugIsShowing: Bool { !isHidden && content != nil }
 }

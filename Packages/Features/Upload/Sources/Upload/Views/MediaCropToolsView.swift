@@ -364,3 +364,13 @@ extension MediaCropToolsView {
         turns.arrangedSubviews.map { ($0 as? UIButton)?.configuration?.image }
     }
 }
+
+// MARK: - Arriving
+
+extension MediaCropToolsView: PoppingTenant {
+    /// The turn, the mirror and the fill/fit glyph, then the shapes. The dial
+    /// is not among them: it is a continuous ruler, and it has a reveal of its
+    /// own.
+    var poppableElements: [UIView] { turns.arrangedSubviews + row.arrangedSubviews }
+    var revealingSurfaces: [RevealingSurface] { [dial] }
+}
