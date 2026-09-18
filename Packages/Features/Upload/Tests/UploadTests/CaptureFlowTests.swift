@@ -898,6 +898,24 @@ struct CaptureFlowTests {
         #expect(window.width <= preview.width + 0.5, "the 9:16 window is the whole preview: \(window)")
     }
 
+    /// ⚠️ Opening the camera deletes capture folders no presentation owns —
+    /// left by a process that died with its sheet up — and spares the ones
+    /// that are live.
+    @Test func openingTheCameraSweepsFoldersNobodyOwns() async throws {
+        let orphan = CaptureFolder.parent.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
+        try Data([1]).write(to: orphan.appendingPathComponent("clip.mov"))
+        let live = CaptureFolder()
+        let kept = live.newFile("clip", pathExtension: "mov")
+        try Data([2]).write(to: kept)
+
+        let builder = UploadFeatureBuilder(composer: RecordingComposer(), textPostScreens: { NoTextPosts() })
+        _ = builder.makeCameraViewController()
+        try await settle(for: 5) { !FileManager.default.fileExists(atPath: orphan.path) }
+        #expect(!FileManager.default.fileExists(atPath: orphan.path), "the orphan went")
+        #expect(FileManager.default.fileExists(atPath: kept.path), "the live folder stayed")
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {

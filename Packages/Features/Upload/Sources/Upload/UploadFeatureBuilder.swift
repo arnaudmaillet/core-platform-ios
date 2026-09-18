@@ -101,6 +101,9 @@ public struct UploadFeatureBuilder {
     /// it for items it never registered.
     public func makeCameraViewController() -> UIViewController {
         let draft = PostDraft()
+        // Captures left by a process that died with a camera sheet up — this
+        // draft's own folder is already registered, so it is spared.
+        CaptureFolder.sweepOrphans()
         let captures = CapturedMediaLibrary()
         let recents = Self.makeLibrary()
         let composer = self.composer
