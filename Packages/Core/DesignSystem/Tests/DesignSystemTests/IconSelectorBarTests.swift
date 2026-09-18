@@ -35,6 +35,43 @@ struct IconSelectorBarTests {
         bar.debugLensCentreX - bar.debugStripOffset
     }
 
+    // MARK: - Resting items
+
+    /// ⚠️ **A RESTING ITEM IS DRAWN FAINT, SAYS WHY, AND STILL ANSWERS A TAP**
+    /// — the host explains on that tap how to free it.
+    @Test func aRestingItemIsFaintSaysWhyAndStillAnswersATap() {
+        let bar = bar()
+        var chosen: [Int] = []
+        bar.onSelect = { chosen.append($0) }
+
+        bar.setDimmed(true, at: 2, note: "Locked")
+
+        #expect(bar.isDimmed(at: 2))
+        #expect(bar.debugDrawnAlpha(at: 2) < 0.5, "drawn at \(bar.debugDrawnAlpha(at: 2))")
+        #expect(bar.debugDrawnAlpha(at: 1) == 1, "and only that one")
+        #expect(bar.debugSpokenValue(at: 2) == "Locked")
+        bar.debugTap(2)
+        #expect(chosen == [2], "the tap was swallowed: \(chosen)")
+
+        bar.setDimmed(false, at: 2)
+        #expect(bar.debugDrawnAlpha(at: 2) == 1)
+        #expect(bar.debugSpokenValue(at: 2) == nil)
+    }
+
+    /// ⚠️ **A RE-DRESS KEEPS THE REST.** `setItems` builds new buttons; a host
+    /// that redraws a state into its symbols must not have to dim again.
+    @Test func aRestingItemStaysRestingThroughANewListAndIsForgottenWhenItsIndexGoes() {
+        let bar = bar()
+        bar.setDimmed(true, at: 3)
+
+        bar.setItems(Array(Self.four.reversed()))
+        #expect(bar.debugDrawnAlpha(at: 3) < 0.5, "a re-dress woke it: \(bar.debugDrawnAlpha(at: 3))")
+
+        bar.setItems(Array(Self.four.prefix(3)))
+        bar.setItems(Self.four)
+        #expect(!bar.isDimmed(at: 3), "an index the list lost came back resting")
+    }
+
     // MARK: - Nothing chosen
 
     /// ⚠️ **A STATE THE BAR COULD NOT HOLD.** `selectedIndex` is an `Int`, so

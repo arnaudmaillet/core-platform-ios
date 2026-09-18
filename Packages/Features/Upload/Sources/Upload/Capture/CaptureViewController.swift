@@ -506,8 +506,8 @@ final class CaptureViewController: UIViewController {
     ///
     /// ⚠️ **THE STATE WAS ONLY A PICTURE.** The grid opens no band, so a
     /// VoiceOver user had no way to learn whether it was on. The shape keeps
-    /// its bare title: its lock is found by it (`ratioButton`), and speaks
-    /// through the button's value instead.
+    /// its bare title, and its lock speaks through the item's value instead
+    /// (`IconSelectorBar.setDimmed`).
     static func spokenName(for option: CaptureOption, settings: CaptureSettings) -> String {
         switch option {
         case .flash: "\(option.title), \(settings.flash.label.lowercased())"
@@ -1192,28 +1192,11 @@ final class CaptureViewController: UIViewController {
     }
 
     /// Dims the shape's icon while the take has a clip — see `optionChosen`.
-    ///
-    /// ⚠️ **FOUND BY ITS LABEL, BECAUSE THE BAR HAS NO PER-ITEM STATE.**
-    /// `IconSelectorBar` offers no "dimmed" for one item, and DesignSystem is
-    /// not this change's to edit; its buttons carry their item's
-    /// accessibility label, which is how this one is found. Re-applied after
-    /// every re-dress, since `setItems` builds new buttons.
+    /// It rests rather than disabling: a tap on it explains how to free it.
     private func applyShapeLock() {
-        guard let button = ratioButton else { return }
+        guard let index = CaptureOption.allCases.firstIndex(of: .ratio) else { return }
         let locked = !take.isEmpty
-        button.alpha = locked ? 0.35 : 1
-        button.accessibilityValue = locked ? "Locked. Undo your clips to change the shape." : nil
-    }
-
-    private var ratioButton: UIButton? {
-        func find(in view: UIView) -> UIButton? {
-            if let button = view as? UIButton, button.accessibilityLabel == CaptureOption.ratio.title { return button }
-            for subview in view.subviews {
-                if let found = find(in: subview) { return found }
-            }
-            return nil
-        }
-        return find(in: selector)
+        selector.setDimmed(locked, at: index, note: locked ? "Locked. Undo your clips to change the shape." : nil)
     }
 
     /// Everything but the shutter, the ring and the zoom steps back while a
@@ -1434,7 +1417,10 @@ final class CaptureViewController: UIViewController {
     private(set) var debugFocusRingStart: CGAffineTransform?
     private(set) var debugToastStart: CGAffineTransform?
     func debugTapPreview(at point: CGPoint) { previewTapped(at: point) }
-    var debugShapeIsDimmed: Bool { (ratioButton?.alpha ?? 1) < 0.5 }
+    var debugShapeIsDimmed: Bool {
+        guard let index = CaptureOption.allCases.firstIndex(of: .ratio) else { return false }
+        return selector.debugDrawnAlpha(at: index) < 0.5
+    }
     private(set) var debugLastHandOff: ([MediaLibraryItem], [String: MediaEdits])?
     var debugSelector: IconSelectorBar { selector }
     var debugBand: MediaEditorBandView { band }
