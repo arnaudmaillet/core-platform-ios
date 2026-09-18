@@ -6,15 +6,15 @@ import UIKit
 /// media editor the moment a capture is done.
 ///
 /// ```
-/// │ Cancel                          ⟲ │  ← the stack's bar
+/// │ Cancel                       Next │  ← the stack's bar; Next once there is a clip
 /// │ ┌──────────────────────────────┐  │
 /// │ │                              │  │
 /// │ │     the preview, 9:16,       │  │  ← the ratio's window; grid, countdown
 /// │ │     the chosen look          │  │
 /// │ │      [0.5] [1×] [2] [3]      │  │  ← lens chips (or the band, when open)
-/// │ │  ▣       (  ◉  )      Next ›  │  │  ← library / undo · shutter · next
+/// │ │  ▣       (  ◉  )       ⌫     │  │  ← library · shutter · undo
 /// │ └──────────────────────────────┘  │
-/// │      ⚡  ⏱  ▭  ◐  ⊞                │  ← the options, an IconSelectorBar
+/// │ [ ⚡ ⟲ ] [ ⏱  ▭  ◐  ⊞        ]    │  ← the toolbar: flash and flip, then the options
 /// ```
 ///
 /// ⚠️ **THE OPTIONS ARE ICONS IN A SELECTOR, AND AN ICON OPENS A BAND — THE
@@ -97,19 +97,9 @@ final class CaptureViewController: UIViewController {
         button.addAction(UIAction { [weak self] _ in self?.undoTapped() }, for: .primaryActionTriggered)
         return button
     }()
-    private lazy var nextButton: UIButton = {
-        var configuration = UIButton.Configuration.prominentGlass()
-        configuration.title = "Next"
-        configuration.image = UIImage(systemName: "chevron.right")
-        configuration.imagePlacement = .trailing
-        configuration.imagePadding = Spacing.xs
-        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 12, weight: .bold)
-        configuration.baseBackgroundColor = .white
-        configuration.baseForegroundColor = .black
-        let button = UIButton(configuration: configuration)
-        button.addAction(UIAction { [weak self] _ in self?.nextTapped() }, for: .primaryActionTriggered)
-        return button
-    }()
+    /// The header's "Next", while the take has a clip — see `refreshNextItem`.
+    private var nextItem: UIBarButtonItem?
+    static let nextItemID = "upload.camera.next"
 
     private let selector = IconSelectorBar(items: CaptureOption.allCases.map {
         IconSelectorBar.Item(
@@ -549,22 +539,20 @@ final class CaptureViewController: UIViewController {
         libraryButton.addAction(UIAction { [weak self] _ in self?.openLibrary() }, for: .primaryActionTriggered)
         libraryButton.constrain(in: view) { _ in
             libraryButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
-            libraryButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: -112)
+            libraryButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: -Self.besideTheShutter)
             libraryButton.widthAnchor.constraint(equalToConstant: 44)
             libraryButton.heightAnchor.constraint(equalToConstant: 44)
         }
 
+        // ⚠️ **UNDO TO THE RIGHT OF THE SHUTTER, THE LIBRARY TO ITS LEFT —
+        // ASKED FOR** ("déplacer le bouton pour supprimer la prise… à droite du
+        // bouton de capture"), so the shortcut can stay beside a take. The row
+        // reads — and VoiceOver reads it — library, shutter, undo.
         undoButton.constrain(in: view) { _ in
             undoButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
-            undoButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: -112)
+            undoButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: Self.besideTheShutter)
             undoButton.widthAnchor.constraint(equalToConstant: 48)
             undoButton.heightAnchor.constraint(equalToConstant: 48)
-        }
-
-        nextButton.constrain(in: view) { _ in
-            nextButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
-            nextButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: 116)
-            nextButton.heightAnchor.constraint(equalToConstant: 44)
         }
 
         lensChips.onPick = { [weak self] lens in self?.pickLens(lens) }
@@ -604,6 +592,10 @@ final class CaptureViewController: UIViewController {
         ringLink.onTick = { [weak self] in self?.ringTick() }
         loadLibraryShortcut()
     }
+
+    /// How far the library shortcut and undo sit from the shutter's centre, on
+    /// either side.
+    static let besideTheShutter: CGFloat = 112
 
     /// ⚠️ **GLASS IS MATERIALISED ONCE A WINDOW EXISTS** — the `IconSelectorBar`
     /// rule about contacting the render server before there is one.
@@ -1265,18 +1257,16 @@ final class CaptureViewController: UIViewController {
         guard !take.isEmpty, !isRecording, !isBusy else { return }
         take.disarm()
         isBusy = true
+        // A bar item carries no spinner: the shutter says the take is being
+        // joined, with the look it wears while a photograph is written.
+        shutter.setLook(.busy, animated: true)
         refreshTakeControls(animated: true)
-        var busy = nextButton.configuration
-        busy?.showsActivityIndicator = true
-        nextButton.configuration = busy
         let clips = take.clips.map(\.url)
         Task { [weak self] in
             guard let self else { return }
             defer {
                 isBusy = false
-                var idle = nextButton.configuration
-                idle?.showsActivityIndicator = false
-                nextButton.configuration = idle
+                shutter.setLook(.idle, animated: true)
                 refreshTakeControls(animated: true)
             }
             do {
@@ -1343,16 +1333,22 @@ final class CaptureViewController: UIViewController {
         sweepReleased()
     }
 
-    /// Lays out what the take allows: the library shortcut while it is empty,
-    /// undo and Next once it holds a clip, the ring's segments, the clock.
+    /// Lays out what the take allows: the library shortcut, undo and Next once
+    /// it holds a clip, the ring's segments, the clock.
+    ///
+    /// ⚠️ **THE LIBRARY SHORTCUT STAYS BESIDE A TAKE.** It used to give way to
+    /// undo, which had its place; undo has moved to the other side of the
+    /// shutter, and the library is as much a way on from a take as from an
+    /// empty camera: the picker is pushed over the camera, the take waits
+    /// under it, and back comes back to it whole.
     private func refreshTakeControls(animated: Bool) {
         let recordingOrCounting = isRecording || countdownTask != nil
         let hasClips = !take.isEmpty
-        setShown(libraryButton, !hasClips && !recordingOrCounting && !isBusy && makeLibraryPicker != nil, animated: animated, pops: true)
-        // Undo and Next arrive one after the other, as a band's row does.
+        // It pops when it arrives on an empty camera, not when it comes back
+        // after each clip.
+        setShown(libraryButton, !recordingOrCounting && !isBusy && makeLibraryPicker != nil, animated: animated, pops: !hasClips)
         setShown(undoButton, hasClips && !recordingOrCounting, animated: animated, pops: true)
-        setShown(nextButton, hasClips && !recordingOrCounting, animated: animated, pops: true, delay: BandPop.staggerStep)
-        nextButton.isEnabled = !isBusy
+        refreshNextItem(shown: hasClips && !recordingOrCounting, animated: animated)
         undoButton.isEnabled = !isBusy
         var undo = UIButton.Configuration.glass()
         if take.isArmedToUndo {
@@ -1372,6 +1368,33 @@ final class CaptureViewController: UIViewController {
         navigationController?.isModalInPresentation = hasClips || isRecording
         if !hasClips { hasSaidTheLookIsWhole = false }
         applyShapeLock()
+    }
+
+    /// Puts "Next" in the header — or takes it out — and enables it.
+    ///
+    /// ⚠️ **IN THE HEADER, AS THE PICKER'S AND THE EDITOR'S ARE — ASKED FOR**
+    /// ("le bouton 'Next' sera affiché dans la toolbar du haut à droite"): a
+    /// prominent (`.done`) item at the trailing edge, `[Cancel] ---- [Next]`.
+    /// It arrives with the first clip, is disabled while the take is joined
+    /// or a photograph written, and goes while a clip records or a countdown
+    /// runs, with the rest of the chrome.
+    ///
+    /// ⚠️ **A FRESH ITEM EACH TIME IT ARRIVES, UNDER ONE IDENTIFIER**
+    /// (`bar-item-wrapper-drift`): an item handed back to a bar is never one
+    /// the bar already had. It is not rebuilt while it stays: only enabled or
+    /// not.
+    private func refreshNextItem(shown: Bool, animated: Bool) {
+        if shown, nextItem == nil {
+            let item = UIBarButtonItem(title: "Next", primaryAction: UIAction { [weak self] _ in self?.nextTapped() })
+            item.style = .done
+            item.identifier = Self.nextItemID
+            nextItem = item
+            navigationItem.setRightBarButtonItems([item], animated: animated)
+        } else if !shown, nextItem != nil {
+            nextItem = nil
+            navigationItem.setRightBarButtonItems(nil, animated: animated)
+        }
+        nextItem?.isEnabled = !isBusy
     }
 
     /// Dims the shape's icon while the take has a clip — see `optionChosen`.
@@ -1727,8 +1750,8 @@ final class CaptureViewController: UIViewController {
     /// values: re-running an arrival on a view that is already shown would
     /// flash it from nothing.
     ///
-    /// ⚠️ **`pops` IS FOR WHAT ARRIVES AS NEW** — undo and Next once a clip
-    /// lands, the library's face — never for chrome coming back after a clip:
+    /// ⚠️ **`pops` IS FOR WHAT ARRIVES AS NEW** — undo once a clip lands, the
+    /// library's face — never for chrome coming back after a clip:
     /// a selector that popped every time a recording ended would be noise. And
     /// nothing pops while recording, when the microphone is open.
     private func setShown(
@@ -1803,7 +1826,13 @@ final class CaptureViewController: UIViewController {
     var debugGridIsShowing: Bool { !gridView.isHidden && gridView.alpha > 0 }
     var debugUndoIsShowing: Bool { !undoButton.isHidden && undoButton.isUserInteractionEnabled }
     var debugUndoIsEnabled: Bool { undoButton.isEnabled }
-    var debugNextIsShowing: Bool { !nextButton.isHidden && nextButton.isUserInteractionEnabled }
+    var debugNextIsShowing: Bool { debugNextItem != nil }
+    /// The header's "Next", as the bar holds it.
+    var debugNextItem: UIBarButtonItem? {
+        navigationItem.rightBarButtonItems?.first { $0.identifier == Self.nextItemID }
+    }
+    var debugUndoFrame: CGRect { undoButton.frame }
+    var debugLibraryFrame: CGRect { libraryButton.frame }
     var debugLibraryIsShowing: Bool { !libraryButton.isHidden && libraryButton.isUserInteractionEnabled }
     var debugLockIsShowing: Bool { lockView.isUserInteractionEnabled || (!lockView.isHidden && lockView.alpha > 0) }
     var debugWindow: CGRect { gridView.frame }

@@ -1258,4 +1258,79 @@ struct CaptureFlowTests {
             }
         }
     }
+
+    // MARK: - Next in the header, undo beside the shutter
+
+    /// ⚠️ Next is the header's trailing item — `[Cancel] ---- [Next]`,
+    /// prominent, as the picker's and the editor's — from the first clip on.
+    /// Undo sits to the RIGHT of the shutter, and the library shortcut stays
+    /// at its LEFT, beside the take: the row reads, and VoiceOver reads it,
+    /// library, shutter, undo.
+    @Test func nextIsInTheHeaderAndUndoIsRightOfTheShutter() async throws {
+        let screen = try await open()
+        #expect(screen.camera.navigationItem.leftBarButtonItems?.count == 1, "Cancel alone on the leading side")
+        #expect(!screen.camera.debugNextIsShowing, "no Next before a clip")
+        try await record(screen, seconds: 0.6)
+
+        let next = try #require(screen.camera.debugNextItem)
+        #expect(screen.camera.navigationItem.rightBarButtonItems?.count == 1, "Next alone on the trailing side")
+        #expect(next.title == "Next")
+        #expect(next.style == .done, "prominent")
+        #expect(next.isEnabled)
+        #expect(screen.camera.debugUndoIsShowing)
+        #expect(screen.camera.debugLibraryIsShowing, "the library stays beside a take")
+
+        screen.camera.view.layoutIfNeeded()
+        let shutter = screen.camera.shutter.frame
+        let undo = screen.camera.debugUndoFrame
+        let library = screen.camera.debugLibraryFrame
+        #expect(undo.minX > shutter.maxX, "undo right of the shutter: \(undo) vs \(shutter)")
+        #expect(library.maxX < shutter.minX, "the library left of it: \(library)")
+        #expect(abs(undo.midY - shutter.midY) < 0.5 && abs(library.midY - shutter.midY) < 0.5, "one row")
+        #expect(undo.maxX <= screen.camera.view.bounds.maxX, "on screen")
+
+        // The library opens from beside a take, and the take waits under it.
+        let clips = screen.camera.take.clips
+        screen.camera.debugTapLibrary()
+        #expect(screen.handed.pickers == 1)
+        #expect(screen.camera.take.clips == clips)
+    }
+
+    /// ⚠️ Next is disabled while the take is joined, and gone — with undo and
+    /// the library — while a clip records or a countdown runs. Each time it
+    /// comes back it is a FRESH item under the same identifier; while it
+    /// stays it is the same one.
+    @Test func nextIsDisabledWhileJoiningAndGoneWhileRecordingOrCounting() async throws {
+        let screen = try await open()
+        try await record(screen, seconds: 0.6)
+        let first = try #require(screen.camera.debugNextItem)
+
+        screen.camera.debugBeginHold()
+        try await settle { screen.camera.isRecording }
+        #expect(!screen.camera.debugNextIsShowing, "gone while a clip records")
+        #expect(!screen.camera.debugUndoIsShowing)
+        #expect(!screen.camera.debugLibraryIsShowing)
+        try await Task.sleep(for: .milliseconds(500))
+        screen.camera.debugEndHold()
+        try await settle { screen.camera.take.clips.count == 2 && !screen.camera.isRecording }
+
+        let second = try #require(screen.camera.debugNextItem)
+        #expect(second !== first, "a fresh item each time it arrives")
+        #expect(second.identifier == CaptureViewController.nextItemID && first.identifier == second.identifier)
+
+        screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        screen.camera.debugTimerRow.debugPick(.three)
+        screen.camera.debugTapShutter()
+        #expect(!screen.camera.isRecording, "counting down")
+        #expect(!screen.camera.debugNextIsShowing, "gone while a countdown runs")
+        screen.camera.debugTapShutter()
+        try await settle { screen.camera.debugNextIsShowing }
+
+        let third = try #require(screen.camera.debugNextItem)
+        screen.camera.debugTapNext()
+        #expect(screen.camera.debugNextItem === third, "the same item while it stays")
+        #expect(!third.isEnabled, "disabled while the take is joined")
+        try await settle(for: 10) { screen.handed.editors == 1 }
+        #expect(screen.handed.editors == 1)
+    }
 }
