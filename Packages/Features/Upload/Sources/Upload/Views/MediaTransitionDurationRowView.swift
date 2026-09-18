@@ -84,6 +84,9 @@ final class MediaTransitionDurationRowView: UIView {
             chip.addAction(
                 UIAction { [weak self] _ in self?.onPick?(seconds) }, for: .primaryActionTriggered
             )
+            // Gives under the finger and ticks on a tap, as every button of
+            // the editing tools does (`PressFeedback`).
+            PressFeedback.attach(to: chip)
             chip.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 chip.widthAnchor.constraint(equalToConstant: Metrics.chipWidth),
@@ -143,6 +146,8 @@ final class MediaTransitionDurationRowView: UIView {
 extension MediaTransitionDurationRowView {
     /// Internal for tests: the length each chip offers, in the order shown.
     var debugTitles: [String] { chips.compactMap { $0.title(for: .normal) } }
+    /// Internal for tests: every control that should give under a finger.
+    var debugPressables: [UIControl] { chips }
     /// Internal for tests: which chip is DRAWN as the current one — read off
     /// its fill, not off the value beside it.
     var debugChosen: [String] {

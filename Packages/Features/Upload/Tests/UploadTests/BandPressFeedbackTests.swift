@@ -95,6 +95,26 @@ struct BandPressFeedbackTests {
         everyControlAnswers(row.debugPressables, expected: MediaTransitionCatalog.choices.count + 1, "transitions")
     }
 
+    /// The rate chips over the track.
+    @Test func everyRateChipGivesAndTicks() {
+        let row = MediaSpeedRowView()
+        row.frame = CGRect(x: 0, y: 0, width: 390, height: 40)
+        row.layoutIfNeeded()
+
+        everyControlAnswers(row.debugPressables, expected: MediaTimelining.rates.count, "rates")
+    }
+
+    /// The lengths a transition can be given.
+    @Test func everyLengthChipGivesAndTicks() {
+        let row = MediaTransitionDurationRowView()
+        row.frame = CGRect(x: 0, y: 0, width: 390, height: 40)
+        row.layoutIfNeeded()
+
+        everyControlAnswers(
+            row.debugPressables, expected: MediaTimelining.transitionLengths.count, "lengths"
+        )
+    }
+
     @Test func everyPieceFilterCardGivesAndTicks() {
         let row = MediaSegmentFilterRowView()
         row.frame = CGRect(x: 0, y: 0, width: 390, height: MediaSegmentFilterRowView.height)
