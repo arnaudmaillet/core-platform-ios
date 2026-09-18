@@ -70,13 +70,24 @@ struct ToolbarGeometry: Equatable {
     /// bar's leading edge. Nil for an answer no bar would give — a measurement
     /// taken mid-transition is worse than the fallback.
     static func measured(
-        leading: CGRect, leadingPlatter: CGRect, trailingPlatter: CGRect
+        leading: CGRect, leadingPlatter: CGRect, trailing: CGRect, trailingPlatter: CGRect
     ) -> ToolbarGeometry? {
         let geometry = ToolbarGeometry(
             margin: leadingPlatter.minX,
             platter: leadingPlatter.width - leading.width,
             gap: trailingPlatter.minX - leadingPlatter.maxX
         )
+        // ⚠️ **THE TWO PLATTERS MUST AGREE, OR THE BAR IS STILL MOVING.** The
+        // bands below cannot tell a platter at rest from one caught half-way
+        // through a morph: the song pill (121pt) turning into the timeline's
+        // actions (112pt) passes through a platter 16pt wider than its view,
+        // which is well inside them. Measured, from the sequence the author
+        // recorded — a clip, Crop, Trim, Crop, Trim — the reading stuck, and
+        // the next share handed the strip 13pt more than the bar had: the
+        // `•••`. At rest both platters are the same distance wider than what
+        // they hold; mid-transition the one that is morphing is not.
+        let trailingExtra = trailingPlatter.width - trailing.width
+        guard abs(geometry.platter - trailingExtra) < 0.5 else { return nil }
         // ⚠️ **THE BANDS REFUSE A MID-LAYOUT READ, WHICH MEANS THEY MUST NOT
         // ADMIT ZERO.** They used to start at 0 on all three, and a pass caught
         // before the platters had grown answers platter ≈ 0 and gap ≈ 0 — which

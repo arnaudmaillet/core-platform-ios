@@ -1454,16 +1454,64 @@ final class MediaEditorViewController: UIViewController {
         debugHandoverWidths.append(view.window == nil ? 0 : (navigationController?.toolbar.bounds.width ?? 0))
         debugOnToolbarHandover?()
         #endif
-        setToolbarItems(
-            [
-                UIBarButtonItem(customView: leading),
-                .fixedSpace(Spacing.sm),
-                UIBarButtonItem(customView: categoryBar),
-                .flexibleSpace()
-            ],
-            animated: animated
-        )
+        // ⚠️ **THE SAME VIEWS IN THE SAME PLACES ARE NOT HANDED OVER AGAIN.**
+        // A hand-over that changes nothing is not free: UIKit starts a
+        // transition for it, and a transition started while another is still
+        // running is the moment the bar holds two sets of items at once.
+        let held = toolbarItems ?? []
+        let unchanged = held.count == 4
+            && held[0].customView === leading
+            && held[2].customView === categoryBar
+        if !unchanged {
+            #if DEBUG
+            debugRealHandovers += 1
+            #endif
+            setToolbarItems(
+                [
+                    Self.barItem(leading, as: ItemID.leading),
+                    .fixedSpace(Spacing.sm),
+                    Self.barItem(categoryBar, as: ItemID.categories),
+                    .flexibleSpace()
+                ],
+                animated: animated
+            )
+        }
         handedWidths = shareTheBarBetweenTheTwoStrips()
+    }
+
+    // MARK: - The bar's items
+
+    /// ⚠️ **NEW ITEMS EVERY HAND-OVER, AND THE SAME IDENTIFIER ON EACH — BOTH
+    /// HALVES OF THAT ARE THE FIX FOR THE `•••`.**
+    ///
+    /// Without an identifier, every hand-over was — to UIKit — a new set of
+    /// items replacing an old one, animated as a cross-fade: for the length of
+    /// it the bar held BOTH sets. `UIBarButtonItem.identifier` (iOS 26) is
+    /// UIKit's own answer, in its own words: "set the same value on two
+    /// different bar button items … to indicate that they should be treated as
+    /// the same item during transitions." The song pill and the timeline's
+    /// actions share one because they ARE one slot, so UIKit morphs one into
+    /// the other instead of fading two past each other.
+    ///
+    /// ⚠️ **AND "TWO DIFFERENT ITEMS" IS MEANT LITERALLY.** Keeping ONE item per
+    /// view and re-handing it was tried first, and it is worse: UIKit keeps the
+    /// wrapper it built around the custom view, and that wrapper does not follow
+    /// the view's width. Measured on the sequence the author recorded — a clip,
+    /// Crop, Trim, Crop, Trim — the strip's constraint said 177, 186, 177, 186
+    /// while its wrapper said 177, 186, 186, 195: nine points gained on every
+    /// round trip, nine being the song pill's width less the actions'. The two
+    /// strips overran the bar by exactly that and it swept one into a `•••`. A
+    /// fresh item gets a fresh wrapper, measured at the hand-over from the width
+    /// this screen has just written.
+    private enum ItemID {
+        static let leading = "upload.editor.toolbar.leading"
+        static let categories = "upload.editor.toolbar.categories"
+    }
+
+    private static func barItem(_ view: UIView, as identifier: String) -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: view)
+        item.identifier = identifier
+        return item
     }
 
     /// A hand-over the bar could not take yet, owed to the first layout pass
@@ -1579,6 +1627,11 @@ final class MediaEditorViewController: UIViewController {
     private(set) var debugPopOuts = 0
     /// Internal for tests: how many surfaces each arrival swept, in order.
     private(set) var debugReveals: [Int] = []
+    /// Internal for tests: how many times the bar was ACTUALLY handed a new
+    /// set of items — as opposed to asked to, which is `debugHandoverWidths`.
+    private(set) var debugRealHandovers = 0
+    /// Internal for tests: the items the bar is holding, by identity.
+    var debugToolbarItems: [UIBarButtonItem] { toolbarItems ?? [] }
     /// Internal for tests: the toolbar's width at each hand-over, in order.
     /// Every one of them must be greater than zero — see `refreshToolbarItems`.
     private(set) var debugHandoverWidths: [CGFloat] = []
@@ -1594,6 +1647,11 @@ final class MediaEditorViewController: UIViewController {
             wantedWidthOfTheLeadingStrip(leading)
         )
     }
+    /// Internal for tests: the geometry the bar was last measured at, and what
+    /// the strip's own width constraint says — to tell a stale measurement from
+    /// a stale write.
+    var debugBarGeometry: ToolbarGeometry { barGeometry }
+    var debugCategoryWidthConstant: CGFloat { categoryBarWidth.constant }
     /// Internal for tests: the ceiling the pill is carrying.
     var debugSoundPillCap: CGFloat { soundPillCap.constant }
     var debugSoundPillWidth: CGFloat { soundPill.frame.width }
@@ -1611,6 +1669,7 @@ final class MediaEditorViewController: UIViewController {
               let measured = ToolbarGeometry.measured(
                   leading: leading.convert(leading.bounds, to: nil),
                   leadingPlatter: leadingPlatter,
+                  trailing: categoryBar.convert(categoryBar.bounds, to: nil),
                   trailingPlatter: trailingPlatter
               )
         else { return }
@@ -1691,7 +1750,12 @@ final class MediaEditorViewController: UIViewController {
     /// ONLY DELEGATES TO IT.** What a mode shows — its tools, a notice, nothing
     /// — is the mode's to decide, in its own file.
     private func showAccessory(for category: String?) {
-        if isCropping, category != "Crop" { exitCrop() }
+        // ⚠️ **THE BAND IS NOT EMPTIED ON THE WAY PAST.** Every branch below
+        // puts something in it (or deliberately nothing), so letting `exitCrop`
+        // empty it first was a hand-over with nothing to show for itself — and
+        // the second hand-over of the same turn, landing on the first, is the
+        // sequence the author recorded collapsing the strip into a `•••`.
+        if isCropping, category != "Crop" { exitCrop(emptyingTheBand: false) }
         switch category {
         case "Effects":
             open(effectsMode)
@@ -3166,7 +3230,7 @@ final class MediaEditorViewController: UIViewController {
     ///
     /// `resuming` plays the settled page's clip again — with the crop just
     /// made, since the item is built anew — unless the screen is on its way out.
-    private func exitCrop(resuming: Bool = true) {
+    private func exitCrop(resuming: Bool = true, emptyingTheBand: Bool = true) {
         guard isCropping else { return }
         isCropping = false
         croppingID = nil
@@ -3177,7 +3241,7 @@ final class MediaEditorViewController: UIViewController {
         // it. Turning it then wrote crops computed from a detached view's stale
         // bounds, onto whichever picture happened to be in front. Invisible while
         // it happened, and in the post afterwards.
-        if band.content === cropTools { setEditingAccessory(nil, animated: true) }
+        if emptyingTheBand, band.content === cropTools { setEditingAccessory(nil, animated: true) }
         unlockCanvas(by: .crop)
         showCropBarItems(false, animated: true)
         // ⚠️ BACK TO ITS OWN RULE, NOT TO `false`: the indicator hides itself

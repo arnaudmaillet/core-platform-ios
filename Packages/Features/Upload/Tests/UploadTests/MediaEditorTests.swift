@@ -468,6 +468,92 @@ struct MediaEditorTests {
                 "and the share did not follow: \(share)")
     }
 
+    /// ⚠️ **THE STRIP IS THE SAME ITEM TO UIKit ACROSS EVERY HAND-OVER** — by
+    /// identifier, not by instance. Without one, each hand-over was a new set
+    /// of items cross-faded over the old, with both sets in the bar for the
+    /// length of the fade.
+    @Test func theCategoryStripKeepsItsIdentifierWhateverTheBandHolds() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        let before = try #require(screen.editor.debugToolbarItems.first { $0.customView is IconSelectorBar })
+
+        choose(Band.timeline, on: screen)
+        choose(Band.crop, on: screen)
+
+        let after = try #require(screen.editor.debugToolbarItems.first { $0.customView is IconSelectorBar })
+        #expect(before.identifier != nil && after.identifier == before.identifier,
+                "\(before.identifier ?? "nil") then \(after.identifier ?? "nil")")
+    }
+
+    /// ⚠️ **THE LEADING SLOT IS ONE ITEM TO UIKit, WHATEVER IT HOLDS.** The song
+    /// pill and the timeline's actions share an identifier — UIKit's own way of
+    /// saying "treat these as the same item across the transition" — so the
+    /// pill morphs into the actions instead of the two fading past each other.
+    @Test func theSongPillAndTheActionsAreTheSameSlotToUIKit() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        let pill = try #require(screen.editor.debugToolbarItems.first)
+        try #require(pill.customView is SoundPillView, "guard: the pill leads")
+
+        choose(Band.timeline, on: screen)
+
+        let actions = try #require(screen.editor.debugToolbarItems.first)
+        try #require(actions.customView is IconActionBar, "guard: the actions lead")
+        #expect(pill.identifier != nil && pill.identifier == actions.identifier,
+                "\(pill.identifier ?? "nil") vs \(actions.identifier ?? "nil")")
+        let strip = try #require(screen.editor.debugToolbarItems.first { $0.customView is IconSelectorBar })
+        #expect(strip.identifier != nil && strip.identifier != pill.identifier,
+                "the strip must be matched to itself, not to the leading slot")
+    }
+
+    /// ⚠️ **LEAVING CROP FOR THE TIMELINE HANDS THE BAR OVER ONCE.** It used to
+    /// be twice in one turn — the band emptied on the way past, then refilled —
+    /// and the second transition landing on the first is the recorded sequence
+    /// that swept the strip into a `•••`: a clip, Crop, Trim, Crop, Trim.
+    @Test func leavingCropForTheTimelineHandsTheBarOverOnce() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        choose(Band.crop, on: screen)
+        let before = screen.editor.debugRealHandovers
+        let asked = screen.editor.debugHandoverWidths.count
+
+        choose(Band.timeline, on: screen)
+
+        #expect(screen.editor.debugRealHandovers - before == 1,
+                "handed over \(screen.editor.debugRealHandovers - before) times")
+        // ⚠️ **AND ASKED ONCE, WHICH IS THE HALF THE COUNT ABOVE CANNOT SEE.**
+        // Since a hand-over of the same views is skipped, the band emptied on
+        // the way past no longer costs a SECOND hand-over — the pill was
+        // already leading in crop — so the count above reads 1 either way. What
+        // the emptying still costs is a band collapsed and re-opened, and the
+        // pages re-laid twice, in one turn; this is what says it is gone.
+        #expect(screen.editor.debugHandoverWidths.count - asked == 1,
+                "the bar was asked \(screen.editor.debugHandoverWidths.count - asked) times")
+    }
+
+    /// And the whole recorded sequence leaves the strip in the bar, held to
+    /// the rest of it.
+    @Test func theRecordedSequenceLeavesTheStripWhole() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        // ⚠️ **AT EVERY STEP, BECAUSE THE DRIFT IS CUMULATIVE.** The strip's
+        // wrapper gained nine points per round trip, so the first two steps
+        // were always right and only the fourth overran; asserted once at the
+        // end, a sequence one step shorter would have passed.
+        for band in [Band.crop, Band.timeline, Band.crop, Band.timeline] {
+            choose(band, on: screen)
+            screen.window.layoutIfNeeded()
+            #expect(abs(screen.editor.debugCategoryBar.frame.width - screen.editor.debugCategoryWidthConstant) < 0.5,
+                    "the strip is drawn \(screen.editor.debugCategoryBar.frame.width) wide against a held \(screen.editor.debugCategoryWidthConstant)")
+        }
+
+        let share = try #require(screen.editor.debugBarShare)
+        #expect(abs(share.leading + share.trailing - share.available) < 0.5, "\(share)")
+        #expect(share.trailing >= IconSelectorBar.height - 0.5, "\(share)")
+        #expect(screen.editor.debugCategoryBar.window != nil, "the strip left the bar")
+    }
+
     @Test func theSoundPillLeadsTheCategoryStripInTheToolbar() {
         let screen = open(Self.items(1))
 
