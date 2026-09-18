@@ -35,9 +35,8 @@ struct CaptureTake: Equatable, Sendable {
     /// ring and too short to find in the editor. It is thrown away, file and all.
     static let shortest: TimeInterval = 0.3
 
-    /// ⚠️ **"FULL" HAS A TOLERANCE.** A recording stopped by its own limit ends
-    /// a frame or two either side of it; demanding exactly zero left would
-    /// offer a 30ms "remaining" that no hold can use.
+    /// ⚠️ **A LIMIT-STOPPED CLIP CAN END A FRAME OR TWO SHORT OF ITS LIMIT** —
+    /// the margin `isFull` keeps above `shortest` for it.
     static let fullTolerance: TimeInterval = 0.1
 
     private(set) var clips: [CaptureClip] = []
@@ -51,7 +50,16 @@ struct CaptureTake: Equatable, Sendable {
 
     var remaining: TimeInterval { max(0, limit - total) }
 
-    var isFull: Bool { remaining <= Self.fullTolerance }
+    /// Whether what is left can no longer make a clip the take would keep.
+    ///
+    /// ⚠️ **NOT "NOTHING LEFT".** It was `remaining <= 0.1`, and between 0.1s
+    /// and 0.3s left the take was not full — the shutter still recorded — but
+    /// every clip it could record was under `shortest` and thrown away without
+    /// a word: a dead zone at the end of every take. Full now means under
+    /// `shortest`, plus the frame or two a clip stopped by its own limit can
+    /// end short of it, so any recording the shutter still allows is handed at
+    /// least 0.4s and keeps what it records.
+    var isFull: Bool { remaining < Self.shortest + Self.fullTolerance }
 
     /// What the screen says when the budget runs out: "3-minute limit reached".
     var limitReachedMessage: String {

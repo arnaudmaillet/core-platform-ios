@@ -23,6 +23,20 @@ struct CaptureTakeTests {
         #expect(take.remaining == 0)
     }
 
+    /// ⚠️ With less left than a clip the take would keep, the take is full —
+    /// so the shutter refuses and says so, rather than recording clips that
+    /// are then thrown away.
+    @Test func aTakeWithLessLeftThanAKeepableClipIsFull() {
+        var take = CaptureTake(limit: 10)
+        take.append(Self.clip(9.8))
+        #expect(take.remaining > CaptureTake.fullTolerance, "0.2s left, which the old rule called room")
+        #expect(take.isFull, "but no clip of 0.2s is kept")
+
+        var roomy = CaptureTake(limit: 10)
+        roomy.append(Self.clip(9.5))
+        #expect(!roomy.isFull, "0.5s left is a clip")
+    }
+
     /// A hold lifted at once leaves two frames, not a clip.
     @Test func aSlipShorterThanTheShortestClipIsNotKept() {
         var take = CaptureTake()
