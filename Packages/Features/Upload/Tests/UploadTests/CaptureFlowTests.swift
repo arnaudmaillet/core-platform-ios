@@ -1198,4 +1198,23 @@ struct CaptureFlowTests {
         try await settle { navigation.topViewController is NewPostViewController }
         #expect(camera.captures.holderCount(of: url) == 2, "and so does the finalisation screen")
     }
+
+    /// ⚠️ The camera zone's foot is rounded like the top of its container:
+    /// the radius UIKit answers for the zone's concentric top corners — in the
+    /// app, the sheet's — is the one its foot wears. (A test host cannot
+    /// present a sheet, so the container here is given a radius of its own.)
+    @Test func theCameraZonesFootIsRoundedLikeItsContainersTop() async throws {
+        let screen = try await open()
+        screen.navigation.view.cornerConfiguration = .uniformCorners(radius: .fixed(44))
+        try await settle {
+            screen.window.setNeedsLayout()
+            screen.window.layoutIfNeeded()
+            screen.camera.view.setNeedsLayout()
+            screen.camera.view.layoutIfNeeded()
+            return screen.camera.sheetRadius > CaptureViewController.cornerFloor
+        }
+        let corners = screen.camera.debugPreviewCorners
+        #expect(abs(corners.top - 44) < 0.5, "the container's radius, read through the concentric top: \(corners)")
+        #expect(abs(corners.bottom - corners.top) < 0.5, "and the foot wears it: \(corners)")
+    }
 }

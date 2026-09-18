@@ -381,10 +381,8 @@ final class CaptureViewController: UIViewController {
     private func configurePreview() {
         previewContainer.backgroundColor = .black
         previewContainer.clipsToBounds = true
-        previewContainer.layer.cornerRadius = 24
-        previewContainer.layer.cornerCurve = .continuous
-        // Only the foot is rounded: the sheet already rounds the top.
-        previewContainer.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        // Its corners are the sheet's — see `matchTheSheetsCorners`.
+        previewContainer.cornerConfiguration = .corners(radius: .containerConcentric(minimum: Self.cornerFloor))
         previewContainer.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(previewContainer)
         // ⚠️ **ALWAYS THE FRAME'S OWN 9:16, NARROWED AND CENTRED WHEN THE
@@ -455,7 +453,42 @@ final class CaptureViewController: UIViewController {
 
     /// Where the ratio's window stands in the preview, and the letterbox
     /// around it.
+    /// The camera zone's foot, rounded like the top of the sheet.
+    ///
+    /// ⚠️ **ASKED FOR: THE FOOT OF THE CAMERA ZONE ROUNDED LIKE THE TOP OF THE
+    /// SHEET.** The radius is not hard-coded, and not read from anything
+    /// private: the zone's top corners are CONCENTRIC with their container —
+    /// the sheet, whose top edge they sit on — so UIKit answers the sheet's
+    /// radius as their effective radius (`effectiveRadius(corner:)`, iOS 26),
+    /// and the foot is given that same number. Where there is no sheet to be
+    /// concentric with (a test's window), the floor stands in.
+    private func matchTheSheetsCorners() {
+        let top = previewContainer.effectiveRadius(corner: .topLeft)
+        let radius = max(Self.cornerFloor, top)
+        guard abs(radius - sheetRadius) > 0.25 else { return }
+        sheetRadius = radius
+        previewContainer.cornerConfiguration = .corners(
+            topLeftRadius: .containerConcentric(minimum: Self.cornerFloor),
+            topRightRadius: .containerConcentric(minimum: Self.cornerFloor),
+            bottomLeftRadius: .fixed(radius),
+            bottomRightRadius: .fixed(radius)
+        )
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-camera-log-frames") {
+            NSLog("[camera-corners] sheet radius %.2f", radius)
+        }
+        #endif
+    }
+
+    /// The sheet's corner radius as last read — see `matchTheSheetsCorners`.
+    private(set) var sheetRadius: CGFloat = 0
+
+    /// The least the camera zone's corners are rounded, where no sheet says
+    /// otherwise.
+    static let cornerFloor: CGFloat = 24
+
     private func layoutWindow() {
+        matchTheSheetsCorners()
         let bounds = previewContainer.bounds
         guard bounds.width > 0 else { return }
         let window = settings.ratio.window(in: bounds)
@@ -1699,6 +1732,9 @@ final class CaptureViewController: UIViewController {
     var debugWindow: CGRect { gridView.frame }
     var debugPreviewBounds: CGRect { previewContainer.bounds }
     var debugPreviewFrame: CGRect { previewContainer.frame }
+    var debugPreviewCorners: (top: CGFloat, bottom: CGFloat) {
+        (previewContainer.effectiveRadius(corner: .topLeft), previewContainer.effectiveRadius(corner: .bottomLeft))
+    }
     var debugNoticeIsShowing: Bool { notice != nil }
     var debugNotice: CaptureAccessNoticeView? { notice }
     func debugTapUndo() { undoTapped() }
