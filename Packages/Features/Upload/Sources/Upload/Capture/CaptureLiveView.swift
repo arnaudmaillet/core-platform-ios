@@ -4,6 +4,7 @@ import Metal
 import QuartzCore
 import Synchronization
 import UIKit
+import VideoToolbox
 
 /// The live preview when it has to be DRAWN: every camera frame through Core
 /// Image — the look, then an aspect fill — straight into a Metal drawable.
@@ -13,11 +14,28 @@ import UIKit
 /// `FrameLook` with, so the preview shows the look the editor will open on —
 /// not an approximation of it.
 ///
-/// ⚠️ **RENDERED ON THE FRAME'S OWN QUEUE, AND LATE FRAMES ARE DROPPED.** A
-/// frame arrives on the source's queue and is encoded there; while the GPU is
-/// still busy with the last one the new one is skipped rather than queued, so
-/// a slow look costs frames, never latency — a preview that lags the hand is
-/// worse than one that drops.
+/// ⚠️ **RENDERED ON A THREAD OF ITS OWN, WITH A STACK OF ITS OWN — AND THE
+/// SIMULATOR IS WHY.** The first version encoded each frame on the queue that
+/// delivered it, and the app died three times in twenty minutes on the
+/// simulator with `EXC_BAD_ACCESS` — "Thread stack size exceeded" — inside
+/// `CIContext.render(_:to:commandBuffer:…)`, 57 frames deep: Core Image binding
+/// an IOSurface as a Metal texture goes through `MTLSimDriver`, which messages
+/// the host GPU over XPC with buffers on the stack, and a dispatch worker's
+/// 512KB stack does not hold it. A `Thread` states its stack size; this one has
+/// 8MB. On a phone the driver is not in the path, and the thread still keeps
+/// rendering off the capture queue, which AVFoundation asks to be left free.
+///
+/// ⚠️ **THE LATEST FRAME WINS, AND LATE FRAMES ARE DROPPED.** A frame waiting to
+/// be drawn is replaced by a newer one, and while the GPU is still busy with
+/// the last frame the next is skipped rather than queued — a slow look costs
+/// frames, never latency; a preview that lags the hand is worse than one that
+/// drops.
+///
+/// ⚠️ **MEASURED ON THE SIMULATED SOURCE** (iPhone 18 Pro simulator, iOS 27,
+/// 720×1280 frames at 30 a second into a 1206×2144 drawable, `-camera-log-frames`,
+/// each figure the mean of the last 120 frames, from hand-off to GPU completion):
+/// 2.8ms with no look, 3.9ms in Noir with the filter row's cards redrawing twice a
+/// second, and no frame dropped in 450 — a tenth of the 33ms a frame is given.
 ///
 /// ⚠️ **`VideoLiveLook` IS THE BOARD THE LOOK IS READ FROM**, the compositor's
 /// own mechanism: the main actor writes it on a pick, the render queue reads it
@@ -70,22 +88,35 @@ final class CaptureLiveView: UIView {
         renderer?.look.set(look)
     }
 
-    /// A small picture of the latest frame in `look`, for the filter row's
-    /// cards. Nil before any frame.
+    /// A small square picture of `frame`, for the filter row's cards.
+    ///
+    /// ⚠️ **ON THE CPU, NOT THROUGH CORE IMAGE** — the renderer's stack note:
+    /// a GPU render of an IOSurface from a cooperative thread is the path that
+    /// overflowed a worker's stack on the simulator. VideoToolbox copies the
+    /// buffer into a `CGImage` and UIKit scales it; at 56pt, twice a second,
+    /// that is nothing.
     nonisolated static func snapshot(of frame: CaptureFrame, side: CGFloat) -> UIImage? {
-        var image = CIImage(cvPixelBuffer: frame.pixelBuffer)
-        if frame.isMirrored {
-            image = image.transformed(by: CGAffineTransform(scaleX: -1, y: 1))
-                .transformed(by: CGAffineTransform(translationX: image.extent.width, y: 0))
+        var picture: CGImage?
+        VTCreateCGImageFromCVPixelBuffer(frame.pixelBuffer, options: nil, imageOut: &picture)
+        guard let picture else { return nil }
+        let width = CGFloat(picture.width)
+        let height = CGFloat(picture.height)
+        let scale = side / max(1, min(width, height))
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
+            let cg = context.cgContext
+            if frame.isMirrored {
+                cg.translateBy(x: side, y: 0)
+                cg.scaleBy(x: -1, y: 1)
+            }
+            // `UIImage.draw` keeps the picture upright in UIKit's flipped context.
+            UIImage(cgImage: picture).draw(in: CGRect(
+                x: (side - width * scale) / 2, y: (side - height * scale) / 2,
+                width: width * scale, height: height * scale
+            ))
         }
-        let extent = image.extent
-        let scale = side / min(extent.width, extent.height)
-        let scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let square = CGRect(
-            x: scaled.extent.midX - side / 2, y: scaled.extent.midY - side / 2, width: side, height: side
-        ).integral
-        guard let cgImage = EditingRenderContext.shared.createCGImage(scaled, from: square) else { return nil }
-        return UIImage(cgImage: cgImage)
     }
 
     /// Internal for tests and the frame-time log: the mean render time over the
@@ -95,7 +126,8 @@ final class CaptureLiveView: UIView {
     }
 }
 
-/// The Metal half of `CaptureLiveView`, touched from the frame queue.
+/// The Metal half of `CaptureLiveView`: frames are handed in from the source's
+/// queue and drawn on the renderer's own thread.
 final class CaptureLiveRenderer: Sendable {
     let device: any MTLDevice
     private let commandQueue: any MTLCommandQueue
@@ -104,6 +136,10 @@ final class CaptureLiveRenderer: Sendable {
     private let target = Mutex<CAMetalLayerBox?>(nil)
     private let drawableSize = Mutex(CGSize.zero)
     private let inFlight = Atomic(false)
+    /// The frame waiting to be drawn — only ever the newest.
+    private let pending = Mutex<CaptureFrame?>(nil)
+    private let wake = DispatchSemaphore(value: 0)
+    private let stopped = Atomic(false)
     private let timing = Mutex(Timing())
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
@@ -126,6 +162,28 @@ final class CaptureLiveRenderer: Sendable {
         // `EditingRenderContext`'s rule. No intermediates cached: every frame is
         // a new picture.
         context = CIContext(mtlCommandQueue: queue, options: [.cacheIntermediates: false])
+        let wake = self.wake
+        let thread = Thread { [weak self] in
+            while true {
+                wake.wait()
+                guard let self, !self.stopped.load(ordering: .acquiring) else { return }
+                if let frame = self.pending.withLock({ frame -> CaptureFrame? in
+                    defer { frame = nil }
+                    return frame
+                }) {
+                    self.draw(frame)
+                }
+            }
+        }
+        thread.name = "capture.live-render"
+        thread.stackSize = 8 << 20
+        thread.qualityOfService = .userInteractive
+        thread.start()
+    }
+
+    deinit {
+        stopped.store(true, ordering: .releasing)
+        wake.signal()
     }
 
     static func make() -> CaptureLiveRenderer? {
@@ -148,7 +206,20 @@ final class CaptureLiveRenderer: Sendable {
         }
     }
 
+    /// Hands `frame` to the render thread, replacing one not yet drawn.
     func render(_ frame: CaptureFrame) {
+        let replaced = pending.withLock { waiting -> Bool in
+            defer { waiting = frame }
+            return waiting != nil
+        }
+        if replaced {
+            timing.withLock { $0.dropped += 1 }
+        } else {
+            wake.signal()
+        }
+    }
+
+    private func draw(_ frame: CaptureFrame) {
         guard inFlight.compareExchange(expected: false, desired: true, ordering: .acquiring).exchanged else {
             timing.withLock { $0.dropped += 1 }
             return
