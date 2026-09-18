@@ -34,10 +34,41 @@ enum TimecodeClipWriter {
 
     static var frames: Int { seconds * 30 }
 
+    /// The clip, written once per process and shared.
+    ///
+    /// ⚠️ **ONE WRITE IN FLIGHT, WHOEVER ASKS.** The sync test's four cases run
+    /// side by side, and each used to write the clip itself when it found no
+    /// file: four H.264 encodes at once. On the CI runner one of them stalled —
+    /// "the picture at frame 3 input never became ready" in the legacy lane
+    /// while the default lane, the same code, passed. Every caller now awaits
+    /// the same write; a failed one is forgotten, so the next caller tries
+    /// again.
     static func clip() async throws -> URL {
+        try await Writing.shared.clip()
+    }
+
+    private actor Writing {
+        static let shared = Writing()
+        private var inFlight: Task<URL, Error>?
+
+        func clip() async throws -> URL {
+            if let inFlight { return try await inFlight.value }
+            let task = Task { try await TimecodeClipWriter.write() }
+            inFlight = task
+            do {
+                return try await task.value
+            } catch {
+                inFlight = nil
+                throw error
+            }
+        }
+    }
+
+    private static func write() async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("timecode-clip-fed-apart.mov")
         if FileManager.default.fileExists(atPath: url.path) { return url }
-        // ⚠️ A NAME OF ITS OWN: two suites run side by side and may both write it.
+        // ⚠️ A NAME OF ITS OWN: another process on the same simulator may be
+        // writing it too.
         let partial = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(UUID().uuidString)-timecode-clip-fed-apart.mov")
 
