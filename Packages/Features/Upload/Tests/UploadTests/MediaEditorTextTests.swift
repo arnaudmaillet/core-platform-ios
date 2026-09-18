@@ -18,6 +18,7 @@ struct MediaEditorTextTests {
     private enum Mode {
         static let effects = 0
         static let text = 1
+        static let stickers = 2
         static let filters = 3
     }
 
@@ -150,6 +151,253 @@ struct MediaEditorTextTests {
 
         #expect(screen.editor.debugCanvasScrolls)
         #expect(!screen.editor.debugSheetIsPinned)
+    }
+
+    // MARK: - The keyboard comes with the category
+
+    /// ⚠️ **"THE KEYBOARD IS UP" IS ASKED OF THE RESPONDER CHAIN, NOT OF A
+    /// SCREENSHOT.** The software keyboard is hidden on the simulator this
+    /// suite runs on (see the type's note), so the only honest reading of
+    /// "the author can type" is that the composer is on screen and its text
+    /// view holds first responder — which is exactly what UIKit puts a
+    /// keyboard up for.
+    @Test func choosingTextPutsTheKeyboardUpAtOnce() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+
+        choose(Mode.text, on: screen)
+
+        let composer = try #require(screen.editor.overlayMode.debugComposer, "a composer is up")
+        #expect(composer.superview === screen.editor.view, "over the editor, not presented")
+        #expect(composer.textView.isFirstResponder, "and it is the first responder")
+        #expect(composer.textView.text.isEmpty, "on a new text, because the page has none")
+        #expect(screen.editor.debugBand.content is MediaOverlayToolsView, "the cards are behind it")
+    }
+
+    /// The witness for the decision written into `MediaEditorOverlayMode.open`:
+    /// a page that already carries text opens on the LAST one written, not on a
+    /// blank composer over it — and every other text is still one tap away in
+    /// the band.
+    @Test func choosingTextAgainOpensTheLastTextWritten() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+        choose(Mode.text, on: screen)
+        try addText("Hello", on: screen)
+        try addText("Goodbye", on: screen)
+        choose(Mode.effects, on: screen)
+
+        choose(Mode.text, on: screen)
+
+        let composer = try #require(screen.editor.overlayMode.debugComposer)
+        #expect(composer.textView.isFirstResponder)
+        #expect(composer.textView.text == "Goodbye", "the last one written, not a blank one")
+        #expect(screen.editor.overlayMode.debugTextTools.cardIDs.count == 2, "and both cards are there")
+        #expect(screen.editor.edits(for: "item-0").overlays.count == 2, "nothing was added by looking")
+    }
+
+    /// The other witness: Stickers shares this mode and opens no composer. Its
+    /// "Add sticker" is a sheet full of pictures, and nobody asked for it to
+    /// open itself.
+    @Test func choosingStickersOpensNoComposer() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+
+        choose(Mode.stickers, on: screen)
+
+        #expect(screen.editor.overlayMode.debugComposer == nil)
+        #expect(screen.editor.debugBand.content === screen.editor.overlayMode.debugStickerTools)
+    }
+
+    // MARK: - The one button
+
+    /// ⚠️ **"Next" BECOMES "Done", AND NOTHING SITS UNDER IT.** The composer
+    /// used to carry its own white capsule a few points below the bar's
+    /// trailing item: two controls at the same corner, one dismissing the
+    /// keyboard and one leaving the screen for the finalisation page.
+    @Test func whileTypingTheTrailingSideSaysDoneAndTheComposerCarriesNone() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+        #expect(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) == ["Next"], "guard")
+
+        choose(Mode.text, on: screen)
+
+        #expect(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) == ["Done"],
+                "got \(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) ?? [])")
+        let composer = try #require(screen.editor.overlayMode.debugComposer)
+        #expect(Self.buttonTitles(in: composer) == [],
+                "the composer put a button of its own back under the bar's")
+    }
+
+    /// And tapping it finishes the sentence rather than leaving the screen.
+    @Test func theHeadersDoneFinishesTheTypingAndGivesNextBack() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+        choose(Mode.text, on: screen)
+        let composer = try #require(screen.editor.overlayMode.debugComposer)
+        composer.debugType("Hello")
+
+        screen.editor.debugTapTheTrailingItem()
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.overlayMode.debugComposer == nil, "the session is over")
+        #expect(screen.editor.edits(for: "item-0").overlays.count == 1, "and the words were kept")
+        #expect(screen.editor.navigationItem.rightBarButtonItems?.map(\.title) == ["Next"],
+                "the way forward came back")
+        #expect(screen.navigation.topViewController === screen.editor,
+                "Done left the screen — it is not Next wearing another word")
+    }
+
+    /// Every button title inside a view, however deep.
+    private static func buttonTitles(in view: UIView) -> [String] {
+        var found: [String] = []
+        if let button = view as? UIButton,
+           let title = button.configuration?.title ?? button.title(for: .normal) {
+            found.append(title)
+        }
+        for child in view.subviews { found += buttonTitles(in: child) }
+        return found
+    }
+
+    /// ⚠️ **THE SEAM THE BAR ITEMS READ, AND IT IS COUNTED, NOT SAMPLED.**
+    /// `MediaEditorViewController.textEditingChanges` records every value it is
+    /// HANDED with no deduping of its own, so a mode that said "ended" for each
+    /// of `compose`'s and `close`'s calls to `finishComposing` shows up here as
+    /// a third entry. See `MediaEditorHosting.textEditingDidChange`.
+    @Test func theTypingSeamFiresOnceAtEachEndOfASession() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+
+        choose(Mode.text, on: screen)
+        #expect(screen.editor.textEditingChanges == [true], "once, on the way in")
+        #expect(screen.editor.isTypingText)
+
+        let composer = try #require(screen.editor.overlayMode.debugComposer)
+        composer.debugType("Hello")
+        composer.debugTapDone()
+
+        #expect(screen.editor.textEditingChanges == [true, false], "and once on the way out")
+        #expect(!screen.editor.isTypingText)
+
+        // Leaving the mode with nothing being typed has nothing to say.
+        choose(Mode.effects, on: screen)
+        #expect(screen.editor.textEditingChanges == [true, false])
+    }
+
+    /// And a session abandoned by leaving the mode closes exactly once too —
+    /// the path where `close` finishes the composer instead of its own button.
+    @Test func leavingTheModeClosesTheTypingSessionOnce() async throws {
+        let screen = open(Self.items(1))
+        _ = try await page("item-0", on: screen)
+        choose(Mode.text, on: screen)
+        try #require(screen.editor.overlayMode.debugComposer != nil)
+
+        choose(Mode.filters, on: screen)
+
+        #expect(screen.editor.textEditingChanges == [true, false], "\(screen.editor.textEditingChanges)")
+        #expect(screen.editor.overlayMode.debugComposer == nil)
+    }
+
+    /// ⚠️ **THE PAGE AND THE PAGE'S RECORD MUST NOT DISAGREE.** Every edit this
+    /// mode makes goes through `store`, which writes and then draws again from
+    /// what was written. A step back writes behind it, so it has to say so —
+    /// `editsWereRestored` — or the words stay on the canvas and a card stays
+    /// in the band for an overlay nothing stores any more.
+    @Test func aStepBackTakesTheTextOffTheCanvasAndOutOfTheBand() async throws {
+        let screen = open(Self.items(1))
+        let page = try await page("item-0", on: screen)
+        choose(Mode.text, on: screen)
+        try addText("Hello", on: screen)
+        try #require(screen.editor.edits(for: "item-0").overlays.count == 1)
+        try #require(page.overlayHost.items.count == 1, "guard: it is drawn")
+        try #require(screen.editor.debugUndoItem.isEnabled, "guard: there is a step to take")
+
+        screen.editor.debugTapUndo()
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.edits(for: "item-0").overlays.isEmpty, "the record lost it")
+        #expect(page.overlayHost.items.isEmpty, "and so did the canvas")
+        #expect(screen.editor.overlayMode.debugTextTools.cardIDs.isEmpty, "and so did the band")
+    }
+
+    // MARK: - The style bar
+
+    private func styleBar() -> MediaTextStyleBar {
+        let bar = MediaTextStyleBar(
+            frame: CGRect(x: 0, y: 0, width: 390, height: MediaTextStyleBar.height)
+        )
+        bar.layoutIfNeeded()
+        return bar
+    }
+
+    /// ⚠️ **WHAT IS DRAWN, NOT WHAT WAS ASSIGNED.** The capsule's radius is
+    /// asked of UIKit through `effectiveRadius(corner:)`, which resolves the
+    /// `cornerConfiguration` the view actually carries — and the layer radius is
+    /// asserted to be ZERO, because `GlassCapsule`'s note says a layer-masked
+    /// radius is not part of what UIKit interpolates and flashes as a hard
+    /// square for a frame.
+    @Test func theStyleBarIsOneGlassCapsuleAcrossTheBar() throws {
+        let bar = styleBar()
+
+        let materials = bar.debugMaterials
+        try #require(materials.count == 1, "one material, never two: \(materials.count)")
+        #expect(materials[0].effect is UIGlassEffect,
+                "the house material: \(String(describing: materials[0].effect))")
+        #expect(bar.backgroundColor == nil || bar.backgroundColor == .clear,
+                "and no plate under it: \(String(describing: bar.backgroundColor))")
+
+        let capsule = bar.debugCapsuleFrame
+        #expect(capsule.minX > 0 && capsule.maxX < bar.bounds.width,
+                "inset from the window's ends, not edge to edge: \(capsule)")
+        #expect(capsule.width > bar.bounds.width - 40,
+                "and spanning everything but those insets: \(capsule) of \(bar.bounds.width)")
+        #expect(abs(capsule.minX - (bar.bounds.width - capsule.maxX)) < 0.001, "evenly at both ends")
+        #expect(capsule.minY > 0 && capsule.maxY < bar.bounds.height, "clear of the keyboard's edge")
+        #expect(abs(capsule.minY - (bar.bounds.height - capsule.maxY)) < 0.001, "evenly above and below")
+
+        #expect(abs(bar.debugCapsuleRadius(.topLeft) - capsule.height / 2) < 0.001,
+                "a capsule: \(bar.debugCapsuleRadius(.topLeft)) for a \(capsule.height)pt height")
+        #expect(abs(bar.debugCapsuleRadius(.bottomRight) - capsule.height / 2) < 0.001)
+        #expect(bar.debugCapsuleLayerRadius == 0, "the shape is the corner configuration's, never the layer's")
+    }
+
+    /// The controls are inside the glass, and clear of the curve at its ends —
+    /// a chip flush against the capsule's bounding box has its corner eaten.
+    @Test func theStyleBarsControlsSitInsideTheCapsuleAndClearItsCurve() throws {
+        let bar = styleBar()
+        let glass = try #require(bar.debugMaterials.first)
+        #expect(bar.debugScroller.superview === glass.contentView, "the row scrolls inside the glass")
+        #expect(bar.debugScroller.bounds.height == bar.debugCapsuleFrame.height, "and fills it")
+
+        let first = try #require(bar.debugFirstControlFrame)
+        let radius = bar.debugCapsuleRadius(.topLeft)
+        // How far in the capsule's own edge already is, level with the top of
+        // the control: r − √(r² − (h/2)²).
+        //
+        // ⚠️ **HELD AT THE WIDEST PART OF THE CURVE, OR THE ROOT GOES
+        // IMAGINARY.** A control taller than the capsule's diameter reaches
+        // past the curve's own middle, where the deepest bite is the whole
+        // radius; without the clamp that case answers NaN, which compares false
+        // against everything and would fail this test for the wrong reason.
+        let reach = min(first.height / 2, radius)
+        let bite = radius - (radius * radius - reach * reach).squareRoot()
+        #expect(first.minX >= bite,
+                "the first control starts at \(first.minX) and the glass eats \(bite)")
+    }
+
+    /// ⚠️ **THE ROW STILL WINS FIRST REFUSAL, A LEVEL DEEPER IN THE TREE.**
+    /// `ChipScrollView`'s whole reason for existing is that a drag beginning in
+    /// it must be offered to it before any ancestor's pan — the sheet's
+    /// dismissal, the stack's back swipe. Putting it inside a glass host moved
+    /// it; the rule is about ancestry, and ancestry did not change.
+    @Test func theStyleBarsRowStillWinsFirstRefusalInsideTheGlass() throws {
+        let bar = styleBar()
+        let scroller = try #require(bar.debugScroller as? ChipScrollView)
+        let ancestor = UIView()
+        let outsider = UIPanGestureRecognizer()
+        ancestor.addGestureRecognizer(outsider)
+
+        #expect(scroller.gestureRecognizer(scroller.panGestureRecognizer, shouldBeRequiredToFailBy: outsider),
+                "an ancestor's pan waits for the row's")
     }
 
     // MARK: - Typing

@@ -267,6 +267,28 @@ final class MediaEditorViewController: UIViewController {
         primaryAction: UIAction { [weak self] _ in self?.goNext() }
     )
 
+    /// What the trailing side says while a text overlay is being typed.
+    ///
+    /// ⚠️ **"Next" BECOMES "Done"; A SECOND BUTTON UNDER IT IS THE BUG.** The
+    /// composer used to carry its own white "Done" capsule a few points below
+    /// this item — *"le bouton 'Done' ne doit pas etre sous 'Next', c'est
+    /// 'Next' qui devient 'Done'"* — two controls at the same corner of the
+    /// screen, one putting the keyboard away and one leaving for the
+    /// finalisation page. There is one now, and it means the nearer thing:
+    /// finish what is being typed. "Next" comes back the moment the session
+    /// ends, because leaving the screen mid-sentence is not what "Done" is for.
+    private lazy var doneTypingItem = UIBarButtonItem(
+        title: "Done",
+        primaryAction: UIAction { [weak self] _ in self?.overlayMode.finishComposing() }
+    )
+
+    /// States the trailing side for what the screen is doing right now.
+    private func showTheTrailingItem(animated: Bool = false) {
+        navigationItem.setRightBarButtonItems(
+            [isTypingText ? doneTypingItem : nextItem], animated: animated
+        )
+    }
+
     /// ⚠️ **THE HEADER WALKS THE AUTHOR'S OWN HISTORY NOW, AND THE ONE-MODE
     /// UNDO IS GONE.** It used to carry a single arrow whose meaning was the
     /// mode: Crop reset the rectangle, the timeline reset the cut, every other
@@ -582,6 +604,7 @@ final class MediaEditorViewController: UIViewController {
     /// `MediaEditorViewController+Host.swift`, and `private` is per FILE.
     var isTypingText = false {
         didSet {
+            showTheTrailingItem(animated: true)
             #if DEBUG
             textEditingChanges.append(isTypingText)
             #endif
@@ -1240,11 +1263,13 @@ final class MediaEditorViewController: UIViewController {
         // The chevron the NEXT screen wears, kept wordless if a title ever lands
         // here.
         navigationItem.backButtonDisplayMode = .minimal
-        // ⚠️ RIGHT ITEMS ARE LAID OUT FROM THE TRAILING EDGE INWARDS, so the
-        // FIRST one written is the RIGHTMOST. `[next, fit]` is what draws
-        // `[fit][next]` on screen — the order this screen promises.
-        navigationItem.rightBarButtonItems = [nextItem]
+        // ⚠️ **ONE ITEM ON THE TRAILING SIDE, AND WHICH ONE IS THE SCREEN'S
+        // STATE.** The fill/fit glyph used to stand beside it and has gone to
+        // the crop tools; what shares the slot now is "Done", for the length of
+        // a typing session — see `showTheTrailingItem`.
+        showTheTrailingItem()
         nextItem.style = .done
+        doneTypingItem.style = .done
     }
 
     private func configureCategoryStrip() {
@@ -2251,7 +2276,7 @@ final class MediaEditorViewController: UIViewController {
     /// where it is only reachable at exactly the moment it means something.
     private func showCropBarItems(_ isCropping: Bool, animated: Bool) {
         navigationItem.setLeftBarButtonItems([saveDraftItem, undoItem, redoItem], animated: animated)
-        navigationItem.setRightBarButtonItems([nextItem], animated: animated)
+        showTheTrailingItem(animated: animated)
     }
 
     private func goNext() {
@@ -3515,6 +3540,16 @@ extension MediaEditorViewController {
     var debugPreviewLoop: ClosedRange<Double>? { previewSubject?.loop }
     /// Internal for tests: the path "Next" takes, without a bar to tap.
     func debugTapNext() { goNext() }
+    /// Internal for tests: the trailing item, through ITS OWN action.
+    ///
+    /// ⚠️ **DISPATCHED, NOT COPIED.** Calling `goNext()` or `finishComposing()`
+    /// from here would test this line and not the bar — and WHICH routine the
+    /// trailing item is carrying is the whole subject. `performWithSender`
+    /// runs the `UIAction` the item was built with, which is what a finger on
+    /// it runs.
+    func debugTapTheTrailingItem() {
+        navigationItem.rightBarButtonItems?.first?.primaryAction?.performWithSender(nil, target: nil)
+    }
     /// Internal for tests: the scissors, through the routine the bar calls.
     func debugSplitAtTheNeedle() { splitAtTheNeedle() }
     /// Internal for tests: the undo arrow, through the routine it actually calls.

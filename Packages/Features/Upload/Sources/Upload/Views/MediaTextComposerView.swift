@@ -7,13 +7,22 @@ import UIKit
 ///
 /// ```
 /// ┌──────────────────────────┐
-/// │░░░░░░░░░░░░░░░░░░░ Done ░│
+/// │ ‹  Save  ◀ ▶        Done │  ← the editor's own header, still live
 /// │░░░░░░░░░░░░░░░░░░░░░░░░░░│
 /// │░░░░░░ Hello there ░░░░░░░│
 /// │[≡][A̲] Classic Rounded … ●│
 /// │ q w e r t y u i o p      │
 /// └──────────────────────────┘
 /// ```
+///
+/// ⚠️ **IT CARRIES NO "Done" OF ITS OWN** — asked for that way: *"le bouton
+/// 'Done' ne doit pas etre sous 'Next', c'est 'Next' qui devient 'Done'"*. It
+/// used to wear a white capsule at the top right, a few points under the bar's
+/// own trailing item, and the two did different things — one put the keyboard
+/// away, the other left the screen for the finalisation page. The screen turns
+/// its trailing item into "Done" for the length of the session instead
+/// (`MediaEditorViewController.isTypingText`), and this view lies UNDER the
+/// translucent navigation bar, so that item stays reachable over it.
 ///
 /// ⚠️ **A VIEW OVER THE EDITOR, NOT A PRESENTED SCREEN.** The editor already
 /// sits in a sheet; presenting over it would stack a second sheet whose
@@ -34,7 +43,6 @@ final class MediaTextComposerView: UIView, UITextViewDelegate {
     private(set) var style = TextOverlay.fresh
     let textView = UITextView()
     let styleBar = MediaTextStyleBar(frame: CGRect(x: 0, y: 0, width: 390, height: MediaTextStyleBar.height))
-    private let doneButton = UIButton(type: .system)
     /// The page's picture width in points, which the words are sized against
     /// — so what is typed is the size it lands on the picture.
     private var mediaWidth: CGFloat = 375
@@ -44,16 +52,6 @@ final class MediaTextComposerView: UIView, UITextViewDelegate {
         super.init(frame: frame)
         backgroundColor = UIColor.black.withAlphaComponent(0.55)
         accessibilityViewIsModal = true
-
-        var done = UIButton.Configuration.filled()
-        done.title = "Done"
-        done.baseBackgroundColor = .white
-        done.baseForegroundColor = .black
-        done.cornerStyle = .capsule
-        doneButton.configuration = done
-        doneButton.addAction(UIAction { [weak self] _ in self?.finish() }, for: .touchUpInside)
-        doneButton.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(doneButton)
 
         textView.backgroundColor = .clear
         textView.isScrollEnabled = false
@@ -69,16 +67,16 @@ final class MediaTextComposerView: UIView, UITextViewDelegate {
         textView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(textView)
 
-        // ⚠️ **BETWEEN THE BUTTON AND THE KEYBOARD, CENTRED IN WHAT IS LEFT.**
-        // The words may be many lines; they are held under the button and over
-        // the keyboard, and centred between the two while they fit.
+        // ⚠️ **BETWEEN THE HEADER AND THE KEYBOARD, CENTRED IN WHAT IS LEFT.**
+        // The words may be many lines; they are held under the bar and over the
+        // keyboard, and centred between the two while they fit. The safe area
+        // is where the header ends — this view lies under a translucent
+        // navigation bar, which is also what keeps that bar's "Done" tappable
+        // while this one is up.
         let above = UILayoutGuide()
         addLayoutGuide(above)
         NSLayoutConstraint.activate([
-            doneButton.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: Spacing.sm),
-            doneButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Spacing.lg),
-            doneButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
-            above.topAnchor.constraint(equalTo: doneButton.bottomAnchor, constant: Spacing.sm),
+            above.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: Spacing.sm),
             above.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor, constant: -Spacing.sm),
             textView.centerYAnchor.constraint(equalTo: above.centerYAnchor).withPriority(.defaultHigh),
             textView.topAnchor.constraint(greaterThanOrEqualTo: above.topAnchor),
@@ -153,7 +151,7 @@ final class MediaTextComposerView: UIView, UITextViewDelegate {
         textView.textAlignment = style.alignment.nsAlignment
     }
 
-    /// Internal for tests: "Done", through the routine the button calls.
+    /// Internal for tests: "Done", through the routine the header's item calls.
     func debugTapDone() { finish() }
     /// Internal for tests: typing, without a keyboard.
     func debugType(_ text: String) {

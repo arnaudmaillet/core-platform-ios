@@ -88,10 +88,30 @@ final class MediaEditorOverlayMode: MediaEditorMode {
         return tools
     }
 
+    /// ⚠️ **CHOOSING "Text" PUTS THE KEYBOARD UP, IN THE SAME TURN.** It used
+    /// to show the band and stop: the composer opened only from "Add text", a
+    /// card, or a double tap on the picture, so writing a caption — the thing
+    /// the category is named after — was two taps and a guess at which. The
+    /// band still fills, and it is still what is left behind when the composer
+    /// closes, so every card stays one tap away.
+    ///
+    /// ⚠️ **AND ON THE LAST TEXT WRITTEN WHEN THE PAGE ALREADY HAS ONE.** The
+    /// decision, spelled out because neither obvious answer is right on its
+    /// own: a NEW empty text every visit is wrong — an author coming back to
+    /// fix a word gets a blank composer over the text they meant to fix, and
+    /// has to dismiss it to reach the card — and showing only the cards is
+    /// wrong too, because then the keyboard is still two taps away, which is
+    /// the whole complaint. The last text in the array is the front-most in
+    /// z-order and the one most recently written, which makes it the one
+    /// definite referent for "what I was writing"; a SECOND text is what "Add
+    /// text" in the band is for. Stickers are untouched: their composer is a
+    /// sheet full of pictures, and nobody asked for it to open itself.
     func open(for id: String, item: MediaLibraryItem) {
         guard let host else { return }
         host.showInBand(tools)
         begin(on: id)
+        guard kind == .text else { return }
+        compose(on: id, editing: host.edits(for: id).overlays.last(where: belongs)?.id)
     }
 
     func bandWillChange(to accessory: UIView?) {
@@ -120,11 +140,21 @@ final class MediaEditorOverlayMode: MediaEditorMode {
         close()
     }
 
-    /// Always false, on purpose: each overlay has its own delete, and a one-tap
-    /// "remove every overlay" is too destructive.
-    var canReset: Bool { false }
-
-    func reset() {}
+    /// ⚠️ **A STEP BACK IS THE ONE EDIT THIS MODE DOES NOT MAKE ITSELF, AND
+    /// NOTHING ELSE REDRAWS THE LAYER.** Every edit of its own goes through
+    /// `store`, which writes and then draws again from what was written; a step
+    /// back writes behind it. Without this, undoing "Add text" left the words
+    /// on the canvas and a card in the band for an overlay that is no longer
+    /// stored — the page and the page's record disagreeing, which is the exact
+    /// thing `store` exists to prevent.
+    ///
+    /// The whole state is restated rather than diffed, because a step back can
+    /// put an overlay back, take one away, move one and change its words all at
+    /// once.
+    func editsWereRestored(for id: String) {
+        if let cell = host?.pageCell(for: id) { dress(cell, for: id) }
+        if isOpen { refreshTools() }
+    }
 
     // MARK: - Opening and closing
 
@@ -267,20 +297,52 @@ final class MediaEditorOverlayMode: MediaEditorMode {
         screen.addSubview(composer)
         composer.layoutIfNeeded()
         composer.begin(with: style, mediaWidth: layer?.mediaRect.width ?? screen.bounds.width)
+        beganTyping()
         guard !UIAccessibility.isReduceMotionEnabled else { return }
         composer.alpha = 0
         UIView.animate(withDuration: 0.2) { composer.alpha = 1 }
     }
 
     /// "Done" on whatever is being typed, if anything is.
-    private func finishComposing() {
+    ///
+    /// ⚠️ **THE SCREEN CALLS THIS, WHICH IS WHY IT IS NOT PRIVATE.** The header's
+    /// trailing item reads "Done" for the length of a typing session, and this
+    /// is what it does; the composer carries no button of its own any more.
+    func finishComposing() {
         composer?.finish()
+    }
+
+    // MARK: - The seam the bar items read
+
+    /// Whether a typing session is open, so each end of one is announced
+    /// exactly once.
+    ///
+    /// ⚠️ **THE GUARD LIVES HERE AND NOWHERE ELSE.** `compose` finishes
+    /// whatever was being typed before it opens the next composer, and `close`
+    /// finishes it again on the way out, so the naive wiring says "ended" two
+    /// or three times for one session — and the screen, which turns "Next" into
+    /// "Done" on it, would flip the bar item for each. The host is told
+    /// verbatim: if this flag were also re-checked there, a double announcement
+    /// here could never be seen by a test.
+    private var isTyping = false
+
+    private func beganTyping() {
+        guard !isTyping else { return }
+        isTyping = true
+        host?.textEditingDidChange(true)
+    }
+
+    private func endedTyping() {
+        guard isTyping else { return }
+        isTyping = false
+        host?.textEditingDidChange(false)
     }
 
     /// ⚠️ **EMPTY WORDS REMOVE THE TEXT**, whether it was new or not.
     private func composed(_ typed: TextOverlay) {
         guard let (id, overlayID) = composing else { return }
         composing = nil
+        endedTyping()
         if let composer {
             self.composer = nil
             composer.removeFromSuperview()

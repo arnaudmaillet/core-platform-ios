@@ -77,6 +77,23 @@ protocol MediaEditorHosting: AnyObject {
     /// again. ⚠️ **UIKit DOES NOT SAY THIS** — see the implementation.
     func sheetDidClose()
 
+    /// A text overlay is being typed over the editor, or is no longer — told
+    /// once when a session opens and once when it closes.
+    ///
+    /// ⚠️ **A SEAM FOR THE BAR ITEMS, NOT A REQUEST TO CHANGE THEM.** The
+    /// editor wants "Next" to read "Done" while the composer is up, so the
+    /// author has one button to finish with instead of the composer's own
+    /// sitting under the bar's. Only the screen may touch
+    /// `navigationItem.rightBarButtonItems`, and only one worker at a time may
+    /// touch them; this is where that change reads its truth from.
+    ///
+    /// ⚠️ **AND IT IS TOLD VERBATIM, WITH NO DEDUPING HERE.** The guard against
+    /// saying "ended" three times for one session belongs to
+    /// `MediaEditorOverlayMode`, which is the only object that knows where a
+    /// session begins. A second guard on this side would hide a broken one
+    /// there from every test that could see it.
+    func textEditingDidChange(_ isEditing: Bool)
+
     // MARK: The canvas
 
     func lockCanvas(by owner: CanvasLockOwner)
@@ -173,4 +190,13 @@ extension MediaEditorViewController: MediaEditorHosting {
     }
 
     func fileSeconds(for id: String) -> Double? { fileLengths[id] }
+
+    /// See the protocol. This stores the fact and nothing else; the trailing
+    /// item is re-decided from the one place that owns it
+    /// (`showTheTrailingItem`, off `isTypingText`'s own `didSet`). Deciding
+    /// `rightBarButtonItems` from two places at once is how a screen ends up
+    /// with two "Done"s and no "Next".
+    func textEditingDidChange(_ isEditing: Bool) {
+        isTypingText = isEditing
+    }
 }

@@ -87,7 +87,7 @@ final class MediaOverlayItemView: UIView, UIGestureRecognizerDelegate {
         addSubview(lettering)
         outline.fillColor = nil
         outline.strokeColor = UIColor.white.withAlphaComponent(0.9).cgColor
-        outline.lineDashPattern = [6, 4]
+        outline.lineDashPattern = Self.dash
         outline.isHidden = true
         layer.addSublayer(outline)
 
@@ -240,8 +240,26 @@ final class MediaOverlayItemView: UIView, UIGestureRecognizerDelegate {
     func setSelected(_ selected: Bool) {
         isSelected = selected
         outline.isHidden = !selected
+        if !selected { setSquared(false) }
         describe()
     }
+
+    /// Says the overlay's turn is resting on a right angle — 0, 90, 180 or 270.
+    ///
+    /// ⚠️ **THE MARK IS THE OUTLINE GOING SOLID, WHICH IS WHY IT IS DRAWN HERE
+    /// AND NOT IN THE LAYER.** The two centring guides are lines across the
+    /// picture; a third line for the angle would fall exactly on top of one of
+    /// them whenever the overlay is both centred and square. The dash
+    /// disappearing belongs unmistakably to the one overlay that is square, and
+    /// costs no new layer.
+    func setSquared(_ squared: Bool) {
+        guard squared != isSquared else { return }
+        isSquared = squared
+        outline.lineDashPattern = squared ? nil : Self.dash
+    }
+
+    private(set) var isSquared = false
+    private static let dash: [NSNumber] = [6, 4]
 
     // MARK: - Touches
 
@@ -379,5 +397,8 @@ final class MediaOverlayItemView: UIView, UIGestureRecognizerDelegate {
     var debugDrawnScale: Double { drawnScale }
     /// Internal for tests: the item's recognisers, to read how they are wired.
     var debugTap: UITapGestureRecognizer { tap }
+    /// Internal for tests: what the selection outline is DRAWN with — nil when
+    /// it is solid, which is the mark a square turn wears.
+    var debugOutlineDash: [NSNumber]? { outline.lineDashPattern }
     var debugTogetherRecognisers: [UIGestureRecognizer] { [pan, pinch, rotation] }
 }
