@@ -845,6 +845,44 @@ struct CaptureFlowTests {
         #expect(moving.camera.debugToastStart != .identity)
     }
 
+    // MARK: - Accessibility
+
+    /// ⚠️ The shutter says what a tap does NOW, and offers a video without a
+    /// hold — which Switch Control, Voice Control and many VoiceOver users
+    /// cannot make.
+    @Test func theShutterSaysWhatATapWillDoAndOffersVideoWithoutAHold() async throws {
+        let screen = try await open()
+        let shutter = screen.camera.shutter
+        #expect(shutter.accessibilityHint == "Takes a photo. Touch and hold to record a video.")
+        let record = try #require(shutter.accessibilityCustomActions?.first { $0.name == "Record video" })
+        #expect(record.actionHandler?(record) == true)
+        #expect(screen.camera.isRecording, "a hands-free recording")
+        #expect(screen.camera.shutterLogic.phase == .locked)
+        #expect(screen.source.photoFlashes.isEmpty, "not a photograph")
+        #expect(shutter.accessibilityHint == nil)
+        try await Task.sleep(for: .milliseconds(600))
+        let stop = try #require(shutter.accessibilityCustomActions?.first { $0.name == "Stop recording" })
+        #expect(stop.actionHandler?(stop) == true)
+        try await settle { screen.camera.take.clips.count == 1 && !screen.camera.isRecording }
+        #expect(screen.camera.take.clips.count == 1)
+        #expect(shutter.accessibilityHint == "Records the next clip hands-free.")
+    }
+
+    /// The selector speaks the state its icons draw, and the shape pills are
+    /// spoken as shapes rather than as times of day.
+    @Test func theOptionsSpeakTheirState() async throws {
+        let screen = try await open()
+        #expect(screen.camera.debugSelectorLabels == ["Flash, off", "Timer, off", "Aspect ratio", "Filters", "Grid, off"])
+        screen.camera.debugSelector.debugTap(CaptureOption.grid.rawValue)
+        screen.camera.debugSelector.debugTap(CaptureOption.flash.rawValue)
+        screen.camera.debugFlashRow.debugPick(.on)
+        screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        screen.camera.debugTimerRow.debugPick(.ten)
+        #expect(screen.camera.debugSelectorLabels == ["Flash, on", "Timer, 10 seconds", "Aspect ratio", "Filters", "Grid, on"])
+        #expect(screen.camera.debugRatioRow.debugSpoken == ["Nine by sixteen", "Three by four", "Square"])
+        #expect(screen.camera.debugTimerRow.debugSpoken == ["Off", "3 seconds", "10 seconds"])
+    }
+
     // MARK: - End to end, through the builder
 
     private actor RecordingComposer: PostComposing {

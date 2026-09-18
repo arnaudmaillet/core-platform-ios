@@ -22,7 +22,12 @@ final class CaptureChoiceRowView<Choice: Equatable>: UIView, PoppingTenant {
 
     static var height: CGFloat { 44 }
 
-    init(choices: [Choice], chosen: Choice, label: (Choice) -> String, symbol: ((Choice) -> String?)? = nil) {
+    /// `spoken` is what VoiceOver says for a choice, where its label would be
+    /// read wrongly — "9:16" is read as a time of day.
+    init(
+        choices: [Choice], chosen: Choice, label: (Choice) -> String,
+        spoken: ((Choice) -> String)? = nil, symbol: ((Choice) -> String?)? = nil
+    ) {
         self.chosen = chosen
         super.init(frame: .zero)
         row.axis = .horizontal
@@ -39,6 +44,8 @@ final class CaptureChoiceRowView<Choice: Equatable>: UIView, PoppingTenant {
         for choice in choices {
             let button = UIButton(configuration: .glass())
             button.configuration?.title = label(choice)
+            // Survives `dress()`, which replaces the configuration and traits.
+            button.accessibilityLabel = spoken?(choice)
             if let name = symbol?(choice) {
                 button.configuration?.image = UIImage(systemName: name)
                 button.configuration?.imagePadding = Spacing.xs
@@ -93,6 +100,7 @@ final class CaptureChoiceRowView<Choice: Equatable>: UIView, PoppingTenant {
     /// Internal for tests.
     func debugPick(_ choice: Choice) { pick(choice) }
     var debugTitles: [String] { buttons.compactMap { $0.button.configuration?.title } }
+    var debugSpoken: [String?] { buttons.map(\.button.accessibilityLabel) }
 }
 
 /// The lens stops over the shutter — "0.5  1×  2  3" — the chosen one wearing

@@ -109,17 +109,20 @@ final class CaptureViewController: UIViewController {
     }()
 
     private let selector = IconSelectorBar(items: CaptureOption.allCases.map {
-        IconSelectorBar.Item(symbolName: CaptureViewController.symbol(for: $0, settings: CaptureSettings()), accessibilityLabel: $0.title)
+        IconSelectorBar.Item(
+            symbolName: CaptureViewController.symbol(for: $0, settings: CaptureSettings()),
+            accessibilityLabel: CaptureViewController.spokenName(for: $0, settings: CaptureSettings())
+        )
     })
 
     private lazy var flashRow = CaptureChoiceRowView(
         choices: CaptureFlashMode.allCases, chosen: settings.flash, label: \.label, symbol: \.symbolName
     )
     private lazy var timerRow = CaptureChoiceRowView(
-        choices: CaptureTimer.allCases, chosen: settings.timer, label: \.label
+        choices: CaptureTimer.allCases, chosen: settings.timer, label: \.label, spoken: \.spoken
     )
     private lazy var ratioRow = CaptureChoiceRowView(
-        choices: CaptureRatio.allCases, chosen: settings.ratio, label: \.label
+        choices: CaptureRatio.allCases, chosen: settings.ratio, label: \.label, spoken: \.spoken
     )
     private lazy var filterRow = MediaFilterRowView()
 
@@ -489,9 +492,28 @@ final class CaptureViewController: UIViewController {
 
     /// The icons wear the state they set: the bolt is slashed while the flash
     /// is off, the timer shows its seconds, the grid its lines.
+    /// What VoiceOver says for an option: its name, and the state its icon
+    /// draws — the grid on or off, the flash and the timer as set.
+    ///
+    /// ⚠️ **THE STATE WAS ONLY A PICTURE.** The grid opens no band, so a
+    /// VoiceOver user had no way to learn whether it was on. The shape keeps
+    /// its bare title: its lock is found by it (`ratioButton`), and speaks
+    /// through the button's value instead.
+    static func spokenName(for option: CaptureOption, settings: CaptureSettings) -> String {
+        switch option {
+        case .flash: "\(option.title), \(settings.flash.label.lowercased())"
+        case .timer: "\(option.title), \(settings.timer.spoken.lowercased())"
+        case .grid: "\(option.title), \(settings.showsGrid ? "on" : "off")"
+        case .ratio, .filters: option.title
+        }
+    }
+
     private func refreshSelectorIcons() {
         selector.setItems(CaptureOption.allCases.map {
-            IconSelectorBar.Item(symbolName: Self.symbol(for: $0, settings: settings), accessibilityLabel: $0.title)
+            IconSelectorBar.Item(
+                symbolName: Self.symbol(for: $0, settings: settings),
+                accessibilityLabel: Self.spokenName(for: $0, settings: settings)
+            )
         })
         applyShapeLock()
     }
@@ -802,6 +824,52 @@ final class CaptureViewController: UIViewController {
         shutter.setLook(.busy, animated: true)
     }
 
+    /// ⚠️ **WHAT THE SHUTTER WILL DO, SAID FOR WHAT IT WILL DO NOW.** The hint
+    /// was fixed at "tap for a photo", which is wrong the moment the take holds
+    /// a clip (a tap then records the next one hands-free); and recording
+    /// needed a HOLD, which Switch Control, Voice Control and many VoiceOver
+    /// users cannot make. "Record video" starts a hands-free recording the way
+    /// a hold slid onto the padlock does; "Stop recording" ends one.
+    private func refreshShutterAccessibility() {
+        if isRecording {
+            shutter.accessibilityHint = nil
+            shutter.accessibilityCustomActions = [
+                UIAccessibilityCustomAction(name: "Stop recording") { [weak self] _ in
+                    guard let self, isRecording, !isFinishingClip else { return false }
+                    shutterTapped()
+                    return true
+                }
+            ]
+        } else if take.isEmpty {
+            shutter.accessibilityHint = "Takes a photo. Touch and hold to record a video."
+            shutter.accessibilityCustomActions = [
+                UIAccessibilityCustomAction(name: "Record video") { [weak self] _ in
+                    self?.recordHandsFree() ?? false
+                }
+            ]
+        } else {
+            shutter.accessibilityHint = "Records the next clip hands-free."
+            shutter.accessibilityCustomActions = []
+        }
+    }
+
+    /// A recording that needs no finger on the shutter: locked from the start,
+    /// after the timer if one is set. What a hold becomes once slid onto the
+    /// padlock, or when a timer is set.
+    @discardableResult
+    private func recordHandsFree() -> Bool {
+        guard authorizedToShoot, !isBusy, !isFinishingClip, !isRecording, countdownTask == nil else { return false }
+        take.disarm()
+        guard case .startRecording = shutterLogic.beginHold(takeIsFull: take.isFull) else {
+            if take.isFull { say(take.limitReachedMessage) }
+            return false
+        }
+        _ = shutterLogic.moveHold(by: CGPoint(x: -CaptureShutterLogic.lockDistance, y: 0))
+        afterCountdown { [weak self] in self?.startRecording(locked: true) }
+        refreshTakeControls(animated: true)
+        return true
+    }
+
     private var authorizedToShoot: Bool {
         if case .authorized = authorization { return true }
         return false
@@ -1104,6 +1172,7 @@ final class CaptureViewController: UIViewController {
         undoButton.configuration = undo
         undoButton.accessibilityLabel = take.isArmedToUndo ? "Delete last clip — tap again to confirm" : "Delete last clip"
         shutter.setSegments(take.segments, armedLast: take.isArmedToUndo)
+        refreshShutterAccessibility()
         timeLabel.text = Self.clock(take.total, of: take.limit)
         setShown(timePill, hasClips || isRecording, animated: animated)
         // ⚠️ A SHEET WITH CLIPS IN IT DOES NOT SWIPE AWAY: the drag would throw
@@ -1385,6 +1454,14 @@ final class CaptureViewController: UIViewController {
     func debugTapLibrary() { openLibrary() }
     func debugTapCancel() { cancelTapped() }
     var debugTimeText: String? { timeLabel.text }
+    /// The accessibility labels the selector's buttons carry, in order.
+    var debugSelectorLabels: [String] {
+        func buttons(in view: UIView) -> [UIButton] {
+            (view as? UIButton).map { [$0] } ?? view.subviews.flatMap(buttons(in:))
+        }
+        return buttons(in: selector).sorted { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
+            .compactMap(\.accessibilityLabel)
+    }
     func debugFlip() { flip() }
 }
 

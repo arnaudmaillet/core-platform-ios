@@ -61,7 +61,7 @@ final class CaptureShutterView: UIView {
         isAccessibilityElement = true
         accessibilityTraits = [.button, .startsMediaSession]
         accessibilityLabel = "Shutter"
-        accessibilityHint = "Tap for a photo. Touch and hold to record a video."
+        accessibilityHint = "Takes a photo. Touch and hold to record a video."
 
         ring.fillColor = UIColor.clear.cgColor
         ring.strokeColor = UIColor.white.withAlphaComponent(0.9).cgColor

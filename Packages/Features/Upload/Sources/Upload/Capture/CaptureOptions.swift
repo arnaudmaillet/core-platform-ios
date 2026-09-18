@@ -128,6 +128,14 @@ enum CaptureTimer: Int, CaseIterable, Sendable {
         }
     }
 
+    var spoken: String {
+        switch self {
+        case .off: "Off"
+        case .three: "3 seconds"
+        case .ten: "10 seconds"
+        }
+    }
+
     var symbolName: String {
         switch self {
         case .off: "timer"
