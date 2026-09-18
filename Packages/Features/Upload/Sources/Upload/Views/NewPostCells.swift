@@ -62,8 +62,8 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// frames have not been sampled yet, which is the state a test is most
     /// likely to be asking about.
     private var clipStates: [String: ClipState] = [:]
-    /// The tiles built invisible, waiting for the screen to say it has landed —
-    /// see `popTilesIn()`.
+    /// The tiles built invisible, waiting for the screen to say it is appearing
+    /// — see `popTilesIn()`.
     private var heldForArrival: [UIView] = []
 
     /// Told when a clip's tile is tapped — the screen owns what a tap means.
@@ -203,6 +203,21 @@ final class NewPostMediaCell: UICollectionViewListCell {
             picture.isAccessibilityElement = true
             let isCover = item.id == coverID
             picture.accessibilityLabel = Self.label(for: item, isCover: isCover)
+            // ⚠️ **EVERY TILE GIVES UNDER THE FINGER AND TICKS ON A TAP — AND A
+            // PHOTOGRAPH'S DOES NOTHING ELSE.** Asked for as thumbnails that
+            // "behave like buttons". A clip's tile has something to do with the
+            // tap (film or frames); a photograph has no second state, and
+            // inventing one was explicitly not asked. The press says the tile
+            // felt the finger, which is true of both.
+            // ⚠️ **A RECOGNISER, NOT A CONTROL.** The tile is an image view the
+            // strip's `CarouselScrollView` scrolls, and a control in its place
+            // would keep a drag that begins on it: a `UIScrollView` refuses to
+            // cancel a `UIControl`'s touches unless told to, and that scroller
+            // is not told to (nor is it this change's to tell). A recogniser
+            // needs no permission: `PressFeedback`'s never recognises, gives
+            // way to the carousel's pan and to the stack's back-swipe, and
+            // leaves the clip's own tap alone.
+            PressFeedback.attach(toView: picture) { [weak self] in self?.reducesMotion() ?? false }
 
             if isCover {
                 let badge = Self.badge(text: "Cover")
@@ -243,9 +258,9 @@ final class NewPostMediaCell: UICollectionViewListCell {
             }
         }
         // ⚠️ **HELD HERE, AT BUILD, AND NOT WHEN THE RIPPLE STARTS.** The build
-        // runs while the push is laying the screen out, a beat before it lands;
-        // tiles staged invisible only at the landing would be drawn whole for
-        // the length of the slide and then blink out to pop back in.
+        // is the list's layout, and it can run without the screen asking for it
+        // — a tile staged invisible only when the ripple is asked for could be
+        // drawn whole for a frame first, and then blink out to pop back in.
         // ⚠️ AND NOT AT ALL UNDER REDUCE MOTION — a held tile is a promise of a
         // curve, and there will not be one.
         if holdsForArrival, !reducesMotion() {
@@ -266,13 +281,14 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// ⚠️ **THE SCREEN SAYS WHEN, AND IT SAYS IT ONCE.** A list cell is
     /// configured inside the collection view's own layout pass, where a first
     /// build and a rebuild look exactly alike — and the moment that matters is
-    /// the screen LANDING, which only the controller sees (`viewDidAppear`). A
+    /// the screen APPEARING, which only the controller sees (`viewIsAppearing`,
+    /// as the push begins — see there for why not later, and not earlier). A
     /// strip REBUILT later (a cover change reorders it) is not held and not
     /// rippled: see `NewPostViewController.bringTheStripIn`.
     ///
     /// ⚠️ **SILENT, UNLIKE THE BAND.** The band's pops are heard because a tap on
     /// a category asked for them; nothing here was tapped — the author pressed
-    /// "Next" a screen ago — and seven clicks as a screen lands would be noise.
+    /// "Next" a screen ago — and seven clicks as a screen arrives would be noise.
     func popTilesIn() {
         let tiles = heldForArrival
         heldForArrival = []
@@ -615,6 +631,10 @@ final class NewPostMediaCell: UICollectionViewListCell {
 
     /// Internal for tests: what each clip tile is doing.
     func debugClipState(for id: String) -> ClipState? { clipStates[id] }
+    /// Internal for tests: the press on `id`'s tile.
+    func debugPressFeedback(for id: String) -> PressFeedback? {
+        tiles[id].flatMap { PressFeedback.attached(to: $0) }
+    }
     /// Internal for tests: whether `id`'s sheet is actually cycling — the
     /// drawing, next to the state above.
     func debugSheetIsCycling(for id: String) -> Bool { sheets[id]?.isAnimating == true }
