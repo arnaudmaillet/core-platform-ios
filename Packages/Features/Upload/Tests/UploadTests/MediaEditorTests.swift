@@ -301,6 +301,76 @@ struct MediaEditorTests {
     /// The strip carries the editing categories, in the toolbar, with no backdrop
     /// of its own — the toolbar already supplies one.
     /// The foot reads `[song][categories]`, in that order, both leading.
+    // MARK: - How the band arrives and leaves
+
+    /// ⚠️ **THE ELEMENTS ARRIVE ONE AT A TIME, AND THE TENANT NAMES THEM.**
+    /// Walking the tree from outside would pop a scroll view's container, a
+    /// divider and the glass behind everything; the row says which views the
+    /// author reads as items, in the order they are read.
+    @Test func openingACategoryPopsTheThingsTheAuthorReadsAsItems() async throws {
+        let screen = open(Self.items(1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        choose(Band.filters, on: screen)
+
+        let row = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+        let staged = try #require(screen.editor.debugPopIns.last)
+        #expect(staged == row.poppableElements.count, "staged \(staged) of \(row.poppableElements.count)")
+        #expect(staged > 1, "a row of one element is not a ripple: \(staged)")
+    }
+
+    /// ⚠️ **A RULER SWEEPS, IT DOES NOT POP.** Scaling a strip of graduations
+    /// squashes them toward each other, and the spacing IS the information a
+    /// ruler carries — so the crop tools' dial and the effects row's ruler are
+    /// named separately and travel by tick length instead.
+    @Test func theToolsThatCarryARulerSweepItRatherThanPopIt() async throws {
+        let screen = open(Self.items(1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        choose(Band.crop, on: screen)
+
+        #expect(screen.editor.debugReveals.last == 1,
+                "the dial was not swept: \(String(describing: screen.editor.debugReveals.last))")
+        let tools = screen.editor.debugCropTools
+        #expect(!tools.poppableElements.contains { $0 === tools.revealingSurfaces.first },
+                "the dial is in both lists, so it is scaled as well as swept")
+    }
+
+    /// ⚠️ **THE BAND LETS GO OF THE OLD TENANT BEFORE IT HAS FINISHED
+    /// LEAVING.** `band.content` is how ten places on this screen answer "what
+    /// is up"; a departing view left in it for the length of its curve would
+    /// have all ten answer for a tenant that is already going, for a third of a
+    /// second, while the author is tapping the next category. It is handed back
+    /// detached — still drawn, no longer the band's.
+    @Test func theBandSurrendersItsIdentityBeforeTheOldTenantHasLeft() async throws {
+        let screen = open(Self.items(1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        choose(Band.filters, on: screen)
+        let leaving = try #require(screen.editor.debugBand.content as? MediaFilterRowView)
+
+        choose(Band.crop, on: screen)
+
+        #expect(screen.editor.debugBand.content === screen.editor.debugCropTools,
+                "the band still answers for the tenant that is leaving")
+        #expect(leaving.superview != nil, "the old row was taken off screen instead of animated out")
+        #expect(leaving.superview !== screen.editor.debugBand, "and it is still the band's")
+        #expect(screen.editor.debugPopOuts > 0, "nothing was animated out at all")
+    }
+
+    /// ⚠️ **A TENANT THAT NAMES NOTHING STILL ARRIVES.** A screen where six
+    /// bands ripple and the seventh blinks on reads as the seventh being
+    /// broken, so anything without named elements pops as one piece.
+    @Test func aTenantWithNoNamedElementsPopsAsOnePiece() async throws {
+        let screen = open(Self.items(1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+
+        // The notice a photograph gets where a clip's tools would be: a line of
+        // text, not a row of items.
+        screen.editor.debugShowInBand(UIView())
+
+        #expect(screen.editor.debugPopIns.last == 1, "got \(String(describing: screen.editor.debugPopIns.last))")
+    }
+
     // MARK: - How the two strips share the bar
 
     /// ⚠️ **AN ITEM HANDED TO A BAR WITH NO WIDTH IS AN ITEM UIKit COLLAPSES.**

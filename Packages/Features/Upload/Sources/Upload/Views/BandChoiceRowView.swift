@@ -521,3 +521,10 @@ extension BandChoiceRowView where Choice == MediaFilter? {
         }
     }
 }
+
+// MARK: - Arriving
+
+extension BandChoiceRowView: PoppingTenant {
+    /// The cards — a transition's, or a piece's looks.
+    var poppableElements: [UIView] { row.arrangedSubviews }
+}

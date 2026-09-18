@@ -82,6 +82,11 @@ enum ValueRuler {
 /// drag can only do by landing on it.
 @MainActor
 final class MediaValueRulerView: UIView {
+    /// Drives the graduations from nothing to whole — see `RevealDriver`.
+    private lazy var revealDriver = RevealDriver { [weak self] fraction in
+        self?.ruler.reveal = fraction
+    }
+
     private enum Metrics {
         static let readout: CGFloat = 18
         static let ruler: CGFloat = 34
@@ -280,6 +285,23 @@ final class MediaValueRulerView: UIView {
             didSet { if state != oldValue { setNeedsDisplay() } }
         }
 
+        /// How much of the ruler has arrived: 0 draws nothing, 1 draws it whole.
+        ///
+        /// ⚠️ **THE TICKS GROW OUT FROM THE NEEDLE, ONE BY ONE.** Scaling the
+        /// whole strip would squash the graduations toward each other, and the
+        /// spacing IS the information a ruler carries. What travels is each
+        /// tick's own length — the ones under the needle land first, the ends
+        /// last, and every one of them is whole at 1.
+        var reveal: CGFloat = 1 {
+            didSet { if reveal != oldValue { setNeedsDisplay() } }
+        }
+
+        /// How far along a tick at `x` is — `BandPop.landed` states the sweep,
+        /// once, for both rulers.
+        func landed(_ x: CGFloat) -> CGFloat {
+            BandPop.landed(x, reveal: reveal, width: bounds.width)
+        }
+
         init() {
             super.init(frame: .zero)
             backgroundColor = .clear
@@ -323,10 +345,13 @@ final class MediaValueRulerView: UIView {
                 let ink: UIColor = tinted.contains(Double(percent)) && tinted.upperBound > tinted.lowerBound
                     ? tintColor
                     : .label
-                let alpha = (isDetent ? 0.85 : 0.45) * strength
+                let arrived = landed(x)
+                guard arrived > 0 else { continue }
+                let alpha = (isDetent ? 0.85 : 0.45) * strength * arrived
+                let drawn = length * arrived
                 context.setStrokeColor(ink.withAlphaComponent(alpha).cgColor)
-                context.move(to: CGPoint(x: x, y: bounds.midY - length / 2))
-                context.addLine(to: CGPoint(x: x, y: bounds.midY + length / 2))
+                context.move(to: CGPoint(x: x, y: bounds.midY - drawn / 2))
+                context.addLine(to: CGPoint(x: x, y: bounds.midY + drawn / 2))
                 context.strokePath()
             }
 
@@ -368,4 +393,16 @@ extension MediaValueRulerView {
     func debugTapReadout() { readoutTapped() }
     /// Internal for tests: the ruler strip, to render what it draws.
     var debugStrip: UIView { ruler }
+}
+
+// MARK: - Arriving
+
+extension MediaValueRulerView: RevealingSurface {
+    func reveal(after delay: TimeInterval) {
+        guard !UIAccessibility.isReduceMotionEnabled else {
+            revealDriver.stop()
+            return
+        }
+        revealDriver.run(after: delay)
+    }
 }

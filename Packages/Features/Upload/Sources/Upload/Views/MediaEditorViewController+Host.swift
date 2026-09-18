@@ -176,7 +176,12 @@ extension MediaEditorViewController: MediaEditorHosting {
         refreshHistoryItems()
     }
 
-    func showInBand(_ accessory: UIView?) { setEditingAccessory(accessory) }
+    /// ⚠️ **A MODE'S BAND CHANGE IS ALWAYS THE AUTHOR'S, SO IT ALWAYS
+    /// ANIMATES.** Every call here is a category tapped, a row closed or a
+    /// sheet's tools arriving; the routes that are NOT the author's — a settle
+    /// re-dressing the band behind a swipe, crop's own exit — call
+    /// `setEditingAccessory` directly and leave the default alone.
+    func showInBand(_ accessory: UIView?) { setEditingAccessory(accessory, animated: true) }
 
     var bandContent: UIView? { band.content }
 

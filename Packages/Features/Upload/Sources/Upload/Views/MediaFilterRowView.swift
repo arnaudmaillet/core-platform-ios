@@ -323,3 +323,10 @@ private final class FilterChip: UIView {
     var ringColour: UIColor? { picture.layer.borderColor.map(UIColor.init(cgColor:)) }
     var ringWidth: CGFloat { picture.layer.borderWidth }
 }
+
+// MARK: - Arriving
+
+extension MediaFilterRowView: PoppingTenant {
+    /// The nine look cards, in the order they are read.
+    var poppableElements: [UIView] { row.arrangedSubviews }
+}

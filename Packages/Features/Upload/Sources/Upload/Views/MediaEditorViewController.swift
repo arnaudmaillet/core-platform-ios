@@ -702,7 +702,7 @@ final class MediaEditorViewController: UIViewController {
     /// Opens a category's mode on the page in front of the author.
     private func open(_ mode: any MediaEditorMode) {
         guard let id = currentItemID, let item = itemsByID[id] else {
-            setEditingAccessory(nil)
+            setEditingAccessory(nil, animated: true)
             return
         }
         mode.open(for: id, item: item)
@@ -967,6 +967,11 @@ final class MediaEditorViewController: UIViewController {
     /// pop or it took the whole app down with a stack overflow.
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // ⚠️ **WARMED HERE, OR THE FIRST POP IS THE LATE ONE.** A first `play()`
+        // decodes the file and opens the route — tens of milliseconds on a cold
+        // app, which is long enough for the first element of the first row to
+        // be seen landing before it is heard.
+        UISound.prepare()
         navigationController?.setToolbarHidden(false, animated: animated)
         configureBarAppearance()
     }
@@ -1565,6 +1570,15 @@ final class MediaEditorViewController: UIViewController {
     #if DEBUG
     /// Internal for tests: runs just before the bar is handed its items.
     var debugOnToolbarHandover: (() -> Void)?
+    /// Internal for tests: how many elements each arrival staged, in order —
+    /// the choreography's DECISION, which is the half a test can see. The
+    /// drawing is a presentation-layer value that only exists while a curve is
+    /// actually running (`uiview-animate-from-value-trap`).
+    private(set) var debugPopIns: [Int] = []
+    /// Internal for tests: how many tenants were animated out.
+    private(set) var debugPopOuts = 0
+    /// Internal for tests: how many surfaces each arrival swept, in order.
+    private(set) var debugReveals: [Int] = []
     /// Internal for tests: the toolbar's width at each hand-over, in order.
     /// Every one of them must be greater than zero — see `refreshToolbarItems`.
     private(set) var debugHandoverWidths: [CGFloat] = []
@@ -1697,15 +1711,15 @@ final class MediaEditorViewController: UIViewController {
             // the strip is being re-dressed, and it closes the band rather than
             // keeping a track for a picture with no film.
             guard let id = currentItemID, case .video(let seconds)? = itemsByID[id]?.kind else {
-                setEditingAccessory(nil)
+                setEditingAccessory(nil, animated: true)
                 return
             }
-            setEditingAccessory(timelineTools)
+            setEditingAccessory(timelineTools, animated: true)
             refreshTimelineTrack(id: id, duration: seconds)
         case "Crop":
             enterCrop()
         default:
-            setEditingAccessory(nil)
+            setEditingAccessory(nil, animated: true)
         }
     }
 
@@ -1782,7 +1796,7 @@ final class MediaEditorViewController: UIViewController {
             // Decided on the FILE's length, not the declaration — the whole
             // reason the real duration is loaded above.
             guard length > MediaTimelining.shortestSourceSeconds else {
-                setEditingAccessory(trimTooShort)
+                setEditingAccessory(trimTooShort, animated: true)
                 return
             }
             trackSeconds = length
@@ -3107,7 +3121,7 @@ final class MediaEditorViewController: UIViewController {
         pageDots.isHidden = true
         croppingID = id
         showCropBarItems(true, animated: true)
-        setEditingAccessory(cropTools)
+        setEditingAccessory(cropTools, animated: true)
         showCropPicture(for: id)
         settleIntoCrop()
         playInsideTheCropBox(for: id)
@@ -3163,7 +3177,7 @@ final class MediaEditorViewController: UIViewController {
         // it. Turning it then wrote crops computed from a detached view's stale
         // bounds, onto whichever picture happened to be in front. Invisible while
         // it happened, and in the post afterwards.
-        if band.content === cropTools { setEditingAccessory(nil) }
+        if band.content === cropTools { setEditingAccessory(nil, animated: true) }
         unlockCanvas(by: .crop)
         showCropBarItems(false, animated: true)
         // ⚠️ BACK TO ITS OWN RULE, NOT TO `false`: the indicator hides itself
@@ -3559,7 +3573,7 @@ extension MediaEditorViewController {
     /// said "NOT A DEBUG HOOK" — the intent was right, only the placement was
     /// wrong, which is why a comment is no substitute for the right side of a
     /// `#if`. Before pushing anything added near those accessors, build Release.
-    func setEditingAccessory(_ accessory: UIView?) {
+    func setEditingAccessory(_ accessory: UIView?, animated: Bool = false) {
         // ⚠️ **EVERY MODE HEARS IT FIRST, WHOEVER IS ASKING.** A row, a sheet or
         // a lock a mode opened belongs to the band it opened in; this is the one
         // funnel every band change goes through, so it is the one place a mode
@@ -3568,6 +3582,13 @@ extension MediaEditorViewController {
         // ⚠️ **DEACTIVATE BEFORE ACTIVATING.** Both anchors pin the same edge, so
         // leaving the old one alive for even one pass gives Auto Layout a conflict
         // to arbitrate — and it may keep the one being replaced.
+        // ⚠️ **THE DEPARTING TENANT IS TAKEN OUT OF THE BAND BEFORE ANYTHING
+        // ELSE HAPPENS, WHATEVER IT IS ABOUT TO DO.** `band.content` is how this
+        // screen answers "what is up" in ten places; a tenant left in it for the
+        // length of a fade would have all ten answer for a view that is already
+        // leaving. `release()` hands it back detached, which is what lets it be
+        // animated without lying about the band.
+        let departing = animated && band.content !== accessory ? band.release() : nil
         if let accessory {
             band.show(accessory)
             backdropFromChrome.isActive = false
@@ -3605,6 +3626,94 @@ extension MediaEditorViewController {
         // rather than one band-height out of date.
         view.layoutIfNeeded()
         layPagesInTheirWindow(animated: true)
+        if let departing { popTheTenantOut(departing) }
+        if animated, let accessory { popTheTenantIn(accessory) }
+    }
+
+    /// The band's arrival curve: every element the tenant names, one after
+    /// another — see `BandPop`.
+    ///
+    /// ⚠️ **AFTER THE LAYOUT PASS, NOT BEFORE.** A scale transform is applied
+    /// about a view's centre, and a view that has not been laid out yet has no
+    /// centre worth scaling about: the whole row would pop from the band's
+    /// top-left corner. `setEditingAccessory` lays out just above, which is what
+    /// makes this the right side of the call.
+    private func popTheTenantIn(_ accessory: UIView) {
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        // ⚠️ **A TENANT THAT NAMES NOTHING STILL ARRIVES.** The soundtrack tools
+        // are a waveform and two sliders, not a row of items, and a screen where
+        // six bands ripple and the seventh blinks on reads as the seventh being
+        // broken. Named elements give a ripple; anything else pops as one piece.
+        // ⚠️ **THE RULERS START WITH THE FIRST ELEMENT, NOT AFTER THE LAST.**
+        // A ruler is the readout of whatever the row chooses; arriving after the
+        // row has settled it reads as a second thing happening. Its own sweep
+        // runs out from the needle, so the two motions are travelling the same
+        // way at the same time.
+        let surfaces = (accessory as? PoppingTenant)?.revealingSurfaces ?? []
+        for surface in surfaces { surface.reveal(after: 0) }
+        #if DEBUG
+        debugReveals.append(surfaces.count)
+        #endif
+        let named = (accessory as? PoppingTenant)?.poppableElements ?? []
+        let elements = named.isEmpty ? [accessory] : named
+        guard !elements.isEmpty else { return }
+        #if DEBUG
+        debugPopIns.append(elements.count)
+        #endif
+        for (index, element) in elements.enumerated() {
+            // ⚠️ **ONE POP PER ELEMENT, UP TO THE POINT THE EAR STOPS COUNTING.**
+            // The stagger is capped, so past `audibleElements` every remaining
+            // element arrives at the same moment — and nine sounds fired at one
+            // moment are not nine sounds, they are a click. What the ear hears
+            // is the ripple, and the ripple is the part that is staggered.
+            if index < BandPop.audibleElements { UISound.pop.play(after: BandPop.stagger(for: index)) }
+            element.alpha = 0
+            element.transform = BandPop.collapsedTransform
+            UIView.animate(
+                withDuration: BandPop.duration,
+                delay: BandPop.stagger(for: index),
+                usingSpringWithDamping: BandPop.dampingRatio,
+                initialSpringVelocity: 0,
+                // ⚠️ **THE ROW STAYS TAPPABLE WHILE IT ARRIVES.** Without this,
+                // a finger that follows its own tap onto the first card waits
+                // out the whole ripple before anything answers.
+                options: [.allowUserInteraction]
+            ) {
+                element.alpha = 1
+                element.transform = .identity
+            }
+        }
+    }
+
+    /// The departure curve, on a tenant the band has already let go of.
+    ///
+    /// ⚠️ **QUICKER THAN THE ARRIVAL, AND NOT STAGGERED.** Leaving is not an
+    /// event the author is reading — they have already asked for something else
+    /// — so the whole tenant goes at once and gets out of the way.
+    ///
+    /// ⚠️ **AND IT PUTS THE VIEW BACK AS IT FOUND IT.** Every tenant is built
+    /// once and shown again; a row left at 0 alpha and three-quarter scale
+    /// would come back invisible the next time it was asked for.
+    private func popTheTenantOut(_ departing: UIView) {
+        guard !UIAccessibility.isReduceMotionEnabled else {
+            departing.removeFromSuperview()
+            return
+        }
+        #if DEBUG
+        debugPopOuts += 1
+        #endif
+        UIView.animate(
+            withDuration: BandPop.duration * 0.6,
+            delay: 0,
+            options: [.curveEaseIn, .allowUserInteraction]
+        ) {
+            departing.alpha = 0
+            departing.transform = BandPop.collapsedTransform
+        } completion: { _ in
+            departing.alpha = 1
+            departing.transform = .identity
+            departing.removeFromSuperview()
+        }
     }
 }
 
@@ -3744,6 +3853,9 @@ extension MediaEditorViewController {
     var debugCropSurface: MediaCropSurfaceView { cropSurface }
     /// Internal for tests: the tools in the band, to turn the dial without one.
     var debugCropTools: MediaCropToolsView { cropTools }
+    /// Internal for tests: the band seam a mode would use, so a test can put
+    /// something in the band that is not one of this screen's own tenants.
+    func debugShowInBand(_ accessory: UIView?) { showInBand(accessory) }
     /// Internal for tests: the crop stored for an item, defaulting as the screen does.
     func debugCrop(for id: String) -> MediaCrop { edits(for: id).crop }
     /// Internal for tests: whether anything at all is stored for an item — the
