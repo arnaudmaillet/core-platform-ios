@@ -7,10 +7,9 @@ import Testing
 /// **A TWO-PICTURE TRANSITION SHOWS BOTH SIDES OF ITS CUT, AND COSTS NO TIME.**
 ///
 /// A dissolve, a swipe or a page curl draws the outgoing piece and the incoming
-/// one at once, across the whole window. Both come from the two pieces
-/// themselves (`VideoExporter.borrowedSides`): the outgoing piece's last half
-/// window on lane B, eased out, and the incoming piece's first half window in
-/// place of the window on the arrangement's own lane, eased in. Every
+/// one at once. Lane A is the arrangement, untouched; lane B holds the other
+/// piece's edge frame (`VideoExporter.heldSides`): before the cut, the incoming
+/// piece's FIRST frame; after it, the outgoing piece's LAST frame. Every
 /// assertion reads pixels an image generator or an export produced, never the
 /// instructions the builder wrote.
 ///
@@ -106,13 +105,14 @@ struct CrossTransitionTests {
         #expect(late.b > late.r, "the incoming blue does not lead after the cut: \(late)")
     }
 
-    /// ⚠️ **NO JUMP AT THE CUT.** Both sides run across the whole window, so the
-    /// picture does not change there by more than one frame's worth of fade.
+    /// ⚠️ **NO JUMP WHERE THE LANES SWAP.** At the cut lane A turns from the
+    /// outgoing piece to the incoming one and lane B the other way; B holds the
+    /// very frame A shows on its side of the cut, so the picture does not change
+    /// there by more than one frame's worth of fade.
     ///
-    /// ⚠️ **PIECES CUT INSIDE A COLOUR, ON PURPOSE.** Each side eases through the
-    /// film at the end of its own piece; half a second of red and half a second
-    /// of blue, taken from the middle of their seconds, stay one colour however
-    /// far a side has got.
+    /// ⚠️ **PIECES CUT INSIDE A COLOUR, ON PURPOSE.** Half a second of red and
+    /// half a second of blue, taken from the middle of their seconds, so no
+    /// change of colour in the clip itself can pass for a jump.
     @Test func thereIsNoJumpAtTheCut() async throws {
         func pieces(_ kind: VideoTransitionKind?) -> [VideoExportSegment] {
             [
@@ -251,9 +251,8 @@ struct CrossTransitionTests {
 
     /// ⚠️ **A PIECE THAT OPENS THE FILE NEEDS NOTHING BEFORE IT.** Blue then
     /// red: the red piece starts at 0s, where the file has no film before it.
-    /// The handles this replaced held the first frame there; borrowed from the
-    /// piece, the incoming side is simply the red piece's own opening, and the
-    /// blend is blue and red with no green in it.
+    /// Held from the piece, the incoming side is simply the red piece's own
+    /// first frame, and the blend is blue and red with no green in it.
     @Test func aPieceOpeningTheFileBlendsItsOwnOpening() async throws {
         let dissolve = try await arranged([
             VideoExportSegment(start: 2, end: 3, transitionOut: .dissolve),
@@ -300,16 +299,15 @@ struct CrossTransitionTests {
 
     // MARK: - Time
 
-    /// ⚠️ **THE WINDOW NEVER MOVES THE PIECES.** The incoming side is put in
-    /// place of the window on lane A, exactly as long, and the outgoing side on
-    /// lane B; both are scaled on their own tracks, after the pieces' rates are
-    /// set — a composition-level scale issued there would stretch the
-    /// arrangement under it and the sound with it.
+    /// ⚠️ **LANE B NEVER MOVES LANE A — AND NOTHING TOUCHES LANE A.** The held
+    /// frames are scaled on lane B's own track, after the pieces' rates are
+    /// set; a composition-level scale issued there would stretch the
+    /// arrangement under it and the sound with it. Lane A is the arrangement
+    /// exactly as `insertPieces` laid it, one segment per piece, which is what
+    /// keeps the picture that dominates in sync with its sound
+    /// (`TransitionSyncTests`).
     ///
-    /// Two seconds at 2x, then half a second at 0.5x: one second each, so each
-    /// side lends a quarter of a second played — half a second of film from the
-    /// fast piece, an eighth from the slow one — eased across the half-second
-    /// window.
+    /// Two seconds at 2x, then half a second at 0.5x: one second each.
     ///
     /// ⚠️ **THE EXPORT'S LENGTH IS READ FROM ITS VIDEO TRACK.** The sound of a
     /// rated export runs 35–55ms past the pictures — measured 2.035, 2.043 and
@@ -331,13 +329,8 @@ struct CrossTransitionTests {
         try #require(tracks.count == 2, "guard: no second lane was laid: \(tracks.count) tracks")
         let laneA = try #require(tracks.min(by: { $0.trackID < $1.trackID }) as? AVCompositionTrack)
         let targets = laneA.segments.filter { !$0.isEmpty }.map { $0.timeMapping.target }
-        let spans = targets.map { ($0.start.seconds, $0.end.seconds) }
-        #expect(targets.first?.start == .zero && targets.last?.end.seconds == 2,
-                "the window moved the pieces: \(spans)")
-        #expect(zip(targets, targets.dropFirst()).allSatisfy { $0.end == $1.start }, "a gap in lane A: \(spans)")
-        #expect(targets.contains { $0.start.seconds == 0 && $0.end.seconds == 0.75 }
-                && targets.contains { $0.start.seconds == 1.25 && $0.end.seconds == 2 },
-                "the pieces outside the window were touched: \(spans)")
+        #expect(targets.map(\.start.seconds) == [0, 1] && targets.map(\.end.seconds) == [1, 2],
+                "lane A is not the two pieces: \(targets.map { ($0.start.seconds, $0.end.seconds) })")
         let duration = try await arrangement.asset.load(.duration)
         #expect(abs(duration.seconds - played) < 0.001, "the arrangement lasts \(duration.seconds)s, not \(played)s")
 

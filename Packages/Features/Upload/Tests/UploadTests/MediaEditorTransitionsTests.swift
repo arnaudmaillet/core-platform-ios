@@ -376,6 +376,28 @@ struct MediaEditorTransitionsTests {
         #expect(screen.editor.debugPictureIsMoving(for: "video-0"), "and it jumped there")
     }
 
+    /// ⚠️ **LEAVING THE TIMELINE WITH THE LENGTHS UP HANDS THE BAR OVER ONCE,
+    /// AND WITH ITS TRANSITION.** Closing the row lowered the lengths, whose
+    /// height callback laid the screen out mid-change and handed the bar over
+    /// unanimated before the animated hand-over could.
+    @Test func leavingTheTimelineWithTheLengthsUpKeepsTheBarsTransition() async throws {
+        let (screen, tools) = try await cutClip()
+        tools.track.debugTapSeam(0)
+        tools.transitions.debugTap(.dissolve)
+        screen.window.layoutIfNeeded()
+        try #require(tools.isOfferingDurations, "guard: the lengths are up")
+        try #require(screen.editor.debugToolbarItems.first?.customView is IconActionBar, "guard: the actions lead")
+        let before = screen.editor.debugRealHandovers
+
+        screen.editor.debugChoose("Effects")
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugToolbarItems.first?.customView is SoundPillView, "guard: the pill is back")
+        #expect(screen.editor.debugRealHandovers - before == 1,
+                "handed over \(screen.editor.debugRealHandovers - before) times")
+        #expect(screen.editor.debugLastHandoverWasAnimated, "the pill came back without the bar's transition")
+    }
+
     @Test func twoChoicesInOneTurnLandOnce() async throws {
         let (screen, tools) = try await cutClip()
         tools.track.debugTapSeam(0)

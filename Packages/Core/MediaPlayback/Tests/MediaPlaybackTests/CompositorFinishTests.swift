@@ -106,11 +106,13 @@ struct CompositorFinishTests {
     /// ⚠️ **A DISSOLVE BLENDS TWO PIECES THAT ALREADY WEAR THEIR LOOKS.** The red
     /// piece is grey; the blue one is not dressed.
     ///
-    /// Across the whole window lane B is the grey piece's own closing film and
-    /// wears ITS look, and lane A the blue piece's opening — so on both sides of
-    /// the cut the blend is a grey (red equal to green) under some blue. Had the
-    /// outgoing side worn nothing, its red would lead green by ~200; had the
-    /// look been laid over the blend instead, the blue would be grey too.
+    /// Before the cut lane A is the grey piece and lane B holds the blue piece's
+    /// first frame; after it lane A is the blue piece and lane B holds the grey
+    /// piece's last frame, wearing ITS look — so on both sides of the cut the
+    /// blend is a grey (red equal to green) under some blue. Had the held
+    /// outgoing frame worn nothing, its red would lead green by ~200 after the
+    /// cut; had the look been laid over the blend instead, the blue would be
+    /// grey too.
     @Test func aDissolveBlendsTwoDressedPieces() async throws {
         let dissolve = try await arranged([
             VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve, look: .mono),
