@@ -10,6 +10,7 @@ import UIKit
 /// source — photograph, hold, lock, undo, Next — up to the editor it hands
 /// over to, and, through the builder, to a published post.
 @MainActor
+@Suite(.timeLimit(.minutes(1)))
 struct CaptureFlowTests {
     /// The simulated camera, with the calls the screen makes written down.
     @MainActor

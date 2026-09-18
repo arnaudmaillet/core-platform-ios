@@ -12,6 +12,7 @@ import UIKit
 /// wrote black clips for its whole life because no test ever read a pixel out
 /// of one; these read the colour of a photograph and the length of a clip.
 @MainActor
+@Suite(.timeLimit(.minutes(1)))
 struct CaptureSourceTests {
     /// Runs the simulated camera until it has produced a frame.
     private func running() async throws -> (SimulatedCaptureSource, CaptureFolder) {
