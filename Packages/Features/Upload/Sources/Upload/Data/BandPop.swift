@@ -20,6 +20,15 @@ enum BandPop {
     /// them, where a long curve reads as lag rather than as motion.
     static let duration: TimeInterval = 0.28
 
+    /// How long a departure takes.
+    ///
+    /// ⚠️ **QUICKER THAN THE ARRIVAL, AND ONE NUMBER FOR EVERYTHING THAT
+    /// LEAVES.** Leaving is not an event the author is reading — they have
+    /// already asked for something else — so it gets out of the way. It was
+    /// written as `duration * 0.6` in two places, the band's tenants and the
+    /// finalisation strip's cover badge, which is two numbers waiting to drift.
+    static let departure: TimeInterval = duration * 0.6
+
     /// Just under-damped — a trace of settle, so an element feels placed rather
     /// than switched on. The map's pins use 0.75 for a transform of half size;
     /// these start closer to full size, so they want a touch more bounce to

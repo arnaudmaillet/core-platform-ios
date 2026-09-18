@@ -62,9 +62,20 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// frames have not been sampled yet, which is the state a test is most
     /// likely to be asking about.
     private var clipStates: [String: ClipState] = [:]
+    /// The tiles built invisible, waiting for the screen to say it has landed —
+    /// see `popTilesIn()`.
+    private var heldForArrival: [UIView] = []
 
     /// Told when a clip's tile is tapped — the screen owns what a tap means.
     var onTileTapped: ((String) -> Void)?
+
+    /// Whether motion is unwanted, asked at the moment each curve would run.
+    ///
+    /// ⚠️ **A CLOSURE THE SCREEN HANDS DOWN, NOT A READ OF THE SETTING.** The
+    /// simulator a test runs on cannot switch Reduce Motion on, so a cell that
+    /// read `UIAccessibility` itself could only ever be tested with motion —
+    /// and "instant under Reduce Motion" would be a promise nothing checked.
+    var reducesMotion: () -> Bool = { UIAccessibility.isReduceMotionEnabled }
 
     /// ⚠️ **ONE SURFACE, BUILT ONCE AND MOVED — NOT ONE PER TILE.** The strip
     /// holds up to twenty tiles and the screen plays exactly one of them (see
@@ -139,10 +150,15 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// the crop alone would have made it two of three.
     /// `MediaEdits.applied(to:artwork:)` is now the one render both this strip and
     /// `post()` go through.
+    ///
+    /// `holdsForArrival` builds the tiles invisible and small, for
+    /// `popTilesIn()` to bring in — see the note there on why the screen says
+    /// WHEN and this cell only says HOW.
     func show(
         _ items: [MediaLibraryItem],
         coverID: String?,
         edits: [String: MediaEdits] = [:],
+        holdsForArrival: Bool = false,
         thumbnail: @escaping @MainActor (String, CGSize) async -> UIImage?
     ) {
         // ⚠️ **THE KEY CARRIES EVERY DECISION, NOT JUST THE IDENTITY** — the same
@@ -164,6 +180,7 @@ final class NewPostMediaCell: UICollectionViewListCell {
         coverBadges.removeAll()
         clips.removeAll()
         clipStates.removeAll()
+        heldForArrival.removeAll()
         for view in row.arrangedSubviews { view.removeFromSuperview() }
 
         let size = CGSize(width: Metrics.width * 2, height: Metrics.height * 2)
@@ -225,6 +242,62 @@ final class NewPostMediaCell: UICollectionViewListCell {
                 picture?.image = image.map { chosen.applied(to: $0, artwork: nil) }
             }
         }
+        // ⚠️ **HELD HERE, AT BUILD, AND NOT WHEN THE RIPPLE STARTS.** The build
+        // runs while the push is laying the screen out, a beat before it lands;
+        // tiles staged invisible only at the landing would be drawn whole for
+        // the length of the slide and then blink out to pop back in.
+        // ⚠️ AND NOT AT ALL UNDER REDUCE MOTION — a held tile is a promise of a
+        // curve, and there will not be one.
+        if holdsForArrival, !reducesMotion() {
+            heldForArrival = row.arrangedSubviews
+            for tile in heldForArrival {
+                tile.alpha = 0
+                tile.transform = BandPop.collapsedTransform
+            }
+        }
+    }
+
+    /// Brings the held tiles in on the editing band's curve — each one scaling
+    /// and fading up from `BandPop.collapsedTransform`, one after another — so
+    /// the strip arrives as a ripple rather than as a slab switched on. The
+    /// filter row does exactly this (`MediaEditorViewController.popTheTenantIn`),
+    /// and these are the same numbers on purpose: the two screens are one flow.
+    ///
+    /// ⚠️ **THE SCREEN SAYS WHEN, AND IT SAYS IT ONCE.** A list cell is
+    /// configured inside the collection view's own layout pass, where a first
+    /// build and a rebuild look exactly alike — and the moment that matters is
+    /// the screen LANDING, which only the controller sees (`viewDidAppear`). A
+    /// strip REBUILT later (a cover change reorders it) is not held and not
+    /// rippled: see `NewPostViewController.bringTheStripIn`.
+    ///
+    /// ⚠️ **SILENT, UNLIKE THE BAND.** The band's pops are heard because a tap on
+    /// a category asked for them; nothing here was tapped — the author pressed
+    /// "Next" a screen ago — and seven clicks as a screen lands would be noise.
+    func popTilesIn() {
+        let tiles = heldForArrival
+        heldForArrival = []
+        guard !tiles.isEmpty else { return }
+        let delays = tiles.indices.map { BandPop.stagger(for: $0) }
+        #if DEBUG
+        debugArrivals.append(delays)
+        #endif
+        for (tile, delay) in zip(tiles, delays) {
+            // ⚠️ A SPRING, WHICH TAKES ITS FROM-VALUE FROM THE MODEL — the
+            // alpha and scale staged at build, a turn or more ago. See
+            // `uiview-animate-from-value-trap` for the option that would read
+            // it from the presentation layer instead.
+            UIView.animate(
+                withDuration: BandPop.duration,
+                delay: delay,
+                usingSpringWithDamping: BandPop.dampingRatio,
+                initialSpringVelocity: 0,
+                // A clip's tile is a control, and it stays one while it arrives.
+                options: [.allowUserInteraction]
+            ) {
+                tile.alpha = 1
+                tile.transform = .identity
+            }
+        }
     }
 
     @objc private func tileTapped(_ tap: UITapGestureRecognizer) {
@@ -252,9 +325,16 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// started playing, on the one tile that needs it most". Asked for the
     /// other way: the word is there to name a tile at rest, and a label over
     /// moving film is the same noise the editor's own chrome is kept off the
-    /// picture to avoid. The badge comes back the moment the film stops.
+    /// picture to avoid. The badge comes back the moment the film stops — on a
+    /// curve, see `setCoverBadge(showing:for:animated:)`.
     func setClipState(_ state: ClipState, for id: String) {
         guard clips.contains(id) else { return }
+        // ⚠️ **A TILE'S FIRST STATE IS ITS DRESS, NOT A CHANGE.** `show` builds
+        // every badge showing and forgets every state, so the first answer after
+        // a build is the tile being put right, not the author doing something —
+        // a fresh cover tile that is to play would otherwise be seen wearing its
+        // word for a moment and then shrug it off.
+        let isAChange = clipStates[id].map { $0 != state } ?? false
         let sheet = sheets[id]
         sheet?.isHidden = false
         switch state {
@@ -270,11 +350,100 @@ final class NewPostMediaCell: UICollectionViewListCell {
             sheet?.startAnimating()
         }
         clipStates[id] = state
-        coverBadges[id]?.isHidden = state == .playing
+        setCoverBadge(showing: state == .sheet, for: id, animated: isAChange)
         tiles[id]?.accessibilityHint = state == .playing
             ? "Double-tap to show this clip's frames"
             : "Double-tap to play this clip"
     }
+
+    /// Shows or hides the "Cover" capsule on `id`'s tile.
+    ///
+    /// ⚠️ **THE BAND'S NUMBERS, NOT NEW ONES.** It arrives on `BandPop`'s spring
+    /// — `duration`, `dampingRatio`, from `collapsedScale` — and leaves on the
+    /// band's departure: 0.6 of that duration, eased in, not a spring
+    /// (`MediaEditorViewController.popTheTenantOut`). A capsule is smaller than
+    /// a filter card, and BandPop's note on `collapsedScale` is about keeping a
+    /// CAPTION legible for the whole curve; "Cover" is a caption, so the
+    /// reasoning carries over rather than asking for a scale of its own.
+    ///
+    /// ⚠️ **LEAVING IS QUICKER BECAUSE NOBODY IS READING IT.** The word goes
+    /// because the film started, and the film is what the author is now
+    /// watching; a slow fade would hold a label over the first half-second of
+    /// the very picture it was taken off to reveal.
+    ///
+    /// ⚠️ **THE MODEL IS THE DECISION, SET AT ONCE; `isHidden` FOLLOWS THE
+    /// CURVE.** Alpha reads 0 the moment a departure is asked for, and the view
+    /// is only hidden when the curve ends — and only if nothing has asked for it
+    /// back in the meantime, which is what the completion's own check is for.
+    private func setCoverBadge(showing: Bool, for id: String, animated: Bool) {
+        guard let badge = coverBadges[id] else { return }
+        let isShowing = !badge.isHidden && badge.alpha > 0
+        guard showing != isShowing else { return }
+        let moves = animated && !reducesMotion()
+        // ⚠️ DECIDED ONCE, AND THE CURVES BELOW ARE HANDED THESE — so what the
+        // debug record says is what was asked of UIKit, not a second opinion.
+        let duration = moves ? (showing ? BandPop.duration : Self.badgeDeparture) : 0
+        let spring = BandPop.dampingRatio
+        #if DEBUG
+        debugBadgeChanges.append(BadgeChange(
+            id: id, showing: showing, duration: duration,
+            dampingRatio: moves && showing ? spring : nil
+        ))
+        #endif
+        guard moves else {
+            badge.layer.removeAllAnimations()
+            badge.isHidden = !showing
+            badge.alpha = 1
+            badge.transform = .identity
+            return
+        }
+        guard showing else {
+            // ⚠️ `.beginFromCurrentState` IS SAFE HERE BECAUSE NOTHING IS STAGED:
+            // it reads the from-value off the presentation layer, which for a
+            // badge on screen is exactly what the eye last saw — including one
+            // caught half way through arriving.
+            UIView.animate(
+                withDuration: duration,
+                delay: 0,
+                options: [.curveEaseIn, .beginFromCurrentState, .allowUserInteraction]
+            ) {
+                badge.alpha = 0
+                badge.transform = BandPop.collapsedTransform
+            } completion: { [weak badge] _ in
+                guard let badge, badge.alpha == 0 else { return }
+                badge.isHidden = true
+            }
+            return
+        }
+        if badge.isHidden {
+            badge.isHidden = false
+            badge.alpha = 0
+            badge.transform = BandPop.collapsedTransform
+        } else if let now = badge.layer.presentation() {
+            // A departure still under way: turn round from where it has got to,
+            // rather than jumping to nothing and starting again.
+            badge.layer.removeAllAnimations()
+            badge.alpha = CGFloat(now.opacity)
+            badge.transform = CATransform3DGetAffineTransform(now.transform)
+        }
+        // ⚠️ A SPRING, WHOSE FROM-VALUE IS THE MODEL STAGED JUST ABOVE — the
+        // plain curve with `.beginFromCurrentState` would read it off a
+        // presentation layer that never drew it, and run end to end, invisibly
+        // (`uiview-animate-from-value-trap`).
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            usingSpringWithDamping: spring,
+            initialSpringVelocity: 0,
+            options: [.allowUserInteraction]
+        ) {
+            badge.alpha = 1
+            badge.transform = .identity
+        }
+    }
+
+    /// The band's departure — see `setCoverBadge(showing:for:animated:)`.
+    private static let badgeDeparture = BandPop.departure
 
     /// Hands `id`'s tile the frames it falls back to.
     ///
@@ -398,9 +567,40 @@ final class NewPostMediaCell: UICollectionViewListCell {
         coverBadges.removeAll()
         clips.removeAll()
         clipStates.removeAll()
+        heldForArrival.removeAll()
     }
 
     #if DEBUG
+    /// A change to a cover badge, as it was decided.
+    struct BadgeChange: Equatable {
+        let id: String
+        let showing: Bool
+        /// Zero for a change made at once.
+        let duration: TimeInterval
+        /// Nil for a curve that is not a spring.
+        let dampingRatio: CGFloat?
+    }
+
+    /// Internal for tests: every change to a cover badge, in order.
+    ///
+    /// ⚠️ **THE DECISION, BECAUSE THE DRAWING CANNOT BE ASKED.** `UIView.animate`
+    /// writes the END values to the model when it is called, so `alpha` and
+    /// `transform` read the same whether a curve ran, is running, or was never
+    /// asked for (`uiview-animate-from-value-trap`). What can be asked is what
+    /// was chosen: which way, how long, and on what curve.
+    private(set) var debugBadgeChanges: [BadgeChange] = []
+    /// Internal for tests: each ripple the strip played, as the delay of every
+    /// tile in strip order — the choreography's decision, for the reason given
+    /// on `debugBadgeChanges`.
+    private(set) var debugArrivals: [[TimeInterval]] = []
+    /// Internal for tests: how many tiles are built invisible, waiting for the
+    /// screen to land.
+    var debugHeldTileCount: Int { heldForArrival.count }
+    /// Internal for tests: the item each tile stands for, in strip order.
+    var debugTileIDs: [String] {
+        row.arrangedSubviews.compactMap { view in tiles.first { $0.value === view }?.key }
+    }
+
     /// Internal for tests: which tile the video surface is laid over, by item
     /// id — nil when nothing is laid over anything.
     ///
@@ -418,10 +618,16 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// Internal for tests: whether `id`'s sheet is actually cycling — the
     /// drawing, next to the state above.
     func debugSheetIsCycling(for id: String) -> Bool { sheets[id]?.isAnimating == true }
-    /// Internal for tests: whether the cover's word is showing on `id`'s tile.
+    /// Internal for tests: whether the cover's word is showing on `id`'s tile —
+    /// or will be, once any curve under way has run.
+    ///
+    /// ⚠️ **THE MODEL, WHICH IS WHERE A CURVE ENDS.** A departure leaves
+    /// `isHidden` false until it finishes, so asking `isHidden` alone would
+    /// answer "showing" for the length of every fade-out. Alpha is set to its
+    /// end value the moment the curve is asked for.
     func debugCoverBadgeIsShowing(for id: String) -> Bool {
         guard let badge = coverBadges[id] else { return false }
-        return !badge.isHidden
+        return !badge.isHidden && badge.alpha > 0
     }
     /// Internal for tests: how many frames `id`'s sheet is cycling.
     func debugSheetFrameCount(for id: String) -> Int { sheets[id]?.animationImages?.count ?? 0 }
@@ -555,20 +761,61 @@ private final class CoverBadgeHost: UIView {
 /// A button rather than a selectable list row, because it opens a menu: the
 /// menu has to hang off a view UIKit can present from, and a list cell's
 /// selection is not one.
+///
+/// ⚠️ **THE BUTTON HUGS ITS WORDS, BECAUSE A FULL-WIDTH ONE TOOK THE WHOLE SHEET
+/// OFF THE SCREEN.** Reported as "tapping Change cover makes the window
+/// disappear": with the menu open the MAP showed where the upload sheet had
+/// been, and the sheet came back once the menu closed. The button used to be
+/// pinned to the row's full width with its title centred inside it. Measured
+/// on the iPhone 18 Pro simulator (iOS 27, 402pt wide), ONE button with ONE
+/// menu, only its width changed at runtime from the debugger:
+///
+/// | width | menu opens               | sheet    |
+/// |-------|--------------------------|----------|
+/// | 402   | at the window's top, y=79 | vanishes |
+/// | 396   | at the window's top       | vanishes |
+/// | 370   | on the button             | stays    |
+/// | 142   | on the button             | stays    |
+///
+/// `.plain()` and `.gray()` behaved alike, and hiding the strip above changed
+/// nothing; the Comments menu on the same screen, hung off a capsule in a row's
+/// accessory, never did it. The dismiss tap (`dismissTapName`) is not involved
+/// — the narrow button carries it too — and neither is `setCover`: the sheet is
+/// gone before any choice is made.
+///
+/// ⚠️ **NOTHING IN THE VIEW TREE SAYS SO — THE SYMPTOM LIVES IN THE RENDER
+/// SERVER.** Read with the sheet gone from the screen: the menu is a
+/// `_UIContextMenuActionsOnlyViewController` presented BY the upload stack, and
+/// the sheet's `UIDropShadowView` still sits at (0, 62, 402, 812), not hidden,
+/// alpha 1, with no animation on its layer. So no assertion on the hierarchy
+/// can see the defect; what a test can pin is the width that causes it
+/// (`NewPostTests.theCoverButtonLeavesItsRowRoomEitherSide`).
+///
+/// ⚠️ **CAPPED, WELL SHORT OF THE EDGE, BECAUSE THE EDGE IS NOT PUBLISHED.** It
+/// lies somewhere between 370 and 396 on a 402pt window, and UIKit does not say
+/// where or what it is measured against. The cap is 80% of the row — under the
+/// 92% measured safe — so a title that grows at a large type size wraps
+/// instead of widening back into the band that fails. Only one phone width
+/// was measured.
 final class NewPostButtonCell: UICollectionViewListCell {
     private let button = UIButton(configuration: .plain())
+
+    /// The most of the row the button may take — see the type's note.
+    static let widestShare: CGFloat = 0.8
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         button.showsMenuAsPrimaryAction = true
+        button.configuration?.contentInsets = .zero
         // Centred in the screen, not tucked against the leading edge: it is the
         // one action belonging to the strip above it, so it sits under its
         // middle rather than beside its first tile.
-        button.contentHorizontalAlignment = .center
-        button.configuration?.contentInsets = .zero
-        button.pin(to: contentView, insets: NSDirectionalEdgeInsets(
-            top: Spacing.xs, leading: 0, bottom: Spacing.xs, trailing: 0
-        ))
+        button.constrain(in: contentView) { host in
+            button.topAnchor.constraint(equalTo: host.topAnchor, constant: Spacing.xs)
+            button.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -Spacing.xs)
+            button.centerXAnchor.constraint(equalTo: host.centerXAnchor)
+            button.widthAnchor.constraint(lessThanOrEqualTo: host.widthAnchor, multiplier: Self.widestShare)
+        }
     }
 
     @available(*, unavailable)
@@ -584,6 +831,15 @@ final class NewPostButtonCell: UICollectionViewListCell {
         button.menu = menu
         button.isEnabled = isEnabled
     }
+
+    #if DEBUG
+    /// Internal for tests: where the button sits in its row, and how wide the
+    /// row is — the geometry the type's note is about.
+    var debugButtonFrame: CGRect { button.frame }
+    var debugRowWidth: CGFloat { contentView.bounds.width }
+    /// Internal for tests: the menu the button opens.
+    var debugMenu: UIMenu? { button.menu }
+    #endif
 }
 
 /// The title field.

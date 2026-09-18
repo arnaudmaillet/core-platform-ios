@@ -204,6 +204,12 @@ final class NewPostViewController: UIViewController {
     /// the screen has gone must not start anything.
     private var isOnScreen = false
 
+    /// Whether the strip has made its entrance — see `bringTheStripIn`.
+    private var stripHasArrived = false
+    /// Whether motion is unwanted — `UIAccessibility`'s answer unless a test
+    /// says otherwise. See `NewPostMediaCell.reducesMotion`.
+    private let reducesMotion: () -> Bool
+
     private var list: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Row>!
 
@@ -250,6 +256,7 @@ final class NewPostViewController: UIViewController {
         composer: any PostComposing,
         preview: any MediaVideoPreviewing = MediaPreviewPlayer(),
         draft: PostDraft = PostDraft(),
+        reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled },
         onPublished: @escaping (FeedEntry) -> Void
     ) {
         self.items = items
@@ -258,6 +265,7 @@ final class NewPostViewController: UIViewController {
         self.preview = preview
         self.composer = composer
         self.draft = draft
+        self.reducesMotion = reducesMotion
         self.onPublished = onPublished
         // ⚠️ **RESTORED BEFORE THE FIRST LAYOUT, NOT AFTER.** This screen is
         // rebuilt from scratch every time "Next" is pressed, so stepping back to
@@ -302,7 +310,31 @@ final class NewPostViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         isOnScreen = true
+        bringTheStripIn()
         playCover()
+    }
+
+    /// The strip's entrance: its tiles, held invisible since they were built,
+    /// ripple in once the screen has landed — see `NewPostMediaCell.popTilesIn`.
+    ///
+    /// ⚠️ **ONCE PER SCREEN, AND A REBUILD DOES NOT REPLAY IT.** Changing the
+    /// cover reorders the strip, and the reorder rebuilds every tile — but the
+    /// author has made one small edit, and watching the whole row vanish and
+    /// ripple back from the first tile reads as the screen RELOADING, which is
+    /// the one thing it must not look like while the rest of their form sits
+    /// still. The new order simply appears. A step back to the editor and
+    /// "Next" again is a new screen (`UploadFeatureBuilder` builds one per
+    /// push), so that entrance does ripple, as it should.
+    ///
+    /// ⚠️ **LAID OUT BEFORE THE FLAG IS SET, NOT AFTER.** `viewDidAppear` can
+    /// run before the list has built its first cell (`playCover` carries the
+    /// same note); a strip built with the flag already up would never be held,
+    /// and the first entrance would quietly never happen.
+    private func bringTheStripIn() {
+        guard !stripHasArrived else { return }
+        list.layoutIfNeeded()
+        stripHasArrived = true
+        strip?.popTilesIn()
     }
 
     /// ⚠️ **`viewWillDisappear` COVERS A PUSH AS WELL AS A POP, AND THAT IS WHY
@@ -372,7 +404,12 @@ final class NewPostViewController: UIViewController {
 
         let media = UICollectionView.CellRegistration<NewPostMediaCell, Row> { [weak self] cell, _, _ in
             guard let self else { return }
-            cell.show(publishOrder, coverID: coverID, edits: edits) { [weak self] id, size in
+            cell.reducesMotion = reducesMotion
+            cell.show(
+                publishOrder, coverID: coverID, edits: edits,
+                // Held only until the screen lands — see `bringTheStripIn`.
+                holdsForArrival: !stripHasArrived
+            ) { [weak self] id, size in
                 await self?.library.thumbnail(for: id, size: size)
             }
             cell.onTileTapped = { [weak self] id in self?.clipTileTapped(id) }

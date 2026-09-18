@@ -272,20 +272,39 @@ struct NewPostTests {
         }
     }
 
+    /// ⚠️ **REDUCE MOTION IS STATED, NEVER READ OFF THE SIMULATOR.** Left to
+    /// `UIAccessibility`, every curve-deciding test below would pass or fail
+    /// with a setting on whatever machine ran it.
+    ///
+    /// ⚠️ **`landed: false` IS FOR THE ONE QUESTION THAT NEEDS THE MOMENT BEFORE
+    /// THE SCREEN LANDS.** Made the root of a window that is then shown, the
+    /// screen is sent `viewDidAppear` before this returns — measured: the strip's
+    /// entrance, which nothing but `viewDidAppear` starts, had already run. A
+    /// window left hidden lays out no cells at all. So the view is laid in a
+    /// shown window WITHOUT its controller being the root, and appearance is
+    /// then `appear()`'s alone to send.
     private func open(
         _ items: [MediaLibraryItem],
-        edits: [String: MediaEdits] = [:]
+        edits: [String: MediaEdits] = [:],
+        reducesMotion: Bool = false,
+        landed: Bool = true
     ) -> Screen {
         let library = StubLibrary()
         let composer = RecordingComposer()
         let preview = StubPreview()
         let handed = Handed()
         let post = NewPostViewController(
-            items: items, edits: edits, library: library, composer: composer, preview: preview
+            items: items, edits: edits, library: library, composer: composer, preview: preview,
+            reducesMotion: { reducesMotion }
         ) { handed.entry = $0 }
         let navigation = UINavigationController(rootViewController: post)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        window.rootViewController = navigation
+        if landed {
+            window.rootViewController = navigation
+        } else {
+            post.view.frame = window.bounds
+            window.addSubview(post.view)
+        }
         window.isHidden = false
         window.layoutIfNeeded()
         return Screen(
@@ -294,11 +313,15 @@ struct NewPostTests {
         )
     }
 
-    /// ⚠️ **APPEARANCE IS DRIVEN BY HAND, BECAUSE A HOSTED WINDOW DOES NOT SEND
-    /// IT.** Setting `rootViewController` and laying out gives the screen a view
-    /// and a rectangle and nothing else — `viewDidAppear` never fires, which is
-    /// where the cover starts. `MediaEditorPlaybackTests` drives its editor the
-    /// same way.
+    /// ⚠️ **APPEARANCE IS DRIVEN BY HAND — AND THE REASON THAT STOOD HERE WAS
+    /// WRONG.** It said a hosted window never sends `viewDidAppear`. Under
+    /// `open()` it does, before `open` returns: measured 2026-09-18 on iOS 27,
+    /// the strip's entrance — which nothing but `viewDidAppear` starts — had
+    /// already run by the first line after it. Sending it again is harmless (the
+    /// cover's re-entrancy guard and the entrance's once-only flag both exist
+    /// for a second appearance) and keeps each test saying where the screen
+    /// lands. `open(landed: false)` is how to ask about the moment before.
+    /// `MediaEditorPlaybackTests` drives its editor the same way.
     private func appear(_ screen: Screen) {
         screen.post.beginAppearanceTransition(true, animated: false)
         screen.post.endAppearanceTransition()
@@ -742,6 +765,88 @@ struct NewPostTests {
         )
     }
 
+    // MARK: - The strip's entrance
+
+    /// ⚠️ **HELD UNTIL THE SCREEN LANDS, THEN ONE AFTER ANOTHER.** Asked for:
+    /// the thumbnails arrive staggered, "like the filter row". The DECISION is
+    /// what is asserted — how many tiles were staged and with what delays —
+    /// because `alpha` and `transform` read their end values the moment
+    /// `UIView.animate` is called (`uiview-animate-from-value-trap`).
+    @Test func theThumbnailsWaitForTheScreenToLandThenArriveOneAfterAnother() async throws {
+        let screen = open(Self.items(3), landed: false)
+        let strip = try #require(Self.strips(in: screen.window).first, "the first layout built no strip")
+        try #require(strip.debugArrivals.isEmpty, "guard: the screen had not landed yet")
+        #expect(strip.debugHeldTileCount == 3, "the tiles were drawn before the screen landed")
+
+        appear(screen)
+
+        #expect(
+            strip.debugArrivals == [[0, 1, 2].map { BandPop.stagger(for: $0) }],
+            "not the band's ripple: \(strip.debugArrivals)"
+        )
+        #expect(strip.debugHeldTileCount == 0, "a tile was left invisible")
+    }
+
+    /// ⚠️ **A NEW COVER IS A SMALL EDIT, AND THE STRIP DOES NOT RE-ENTER FOR
+    /// IT.** The reorder rebuilds every tile; rippling them all back in from
+    /// the first would read as the screen reloading. The new order just
+    /// appears — nothing held invisible, nothing replayed.
+    @Test func aNewCoverRebuildsTheStripWithoutReplayingItsEntrance() async throws {
+        let screen = open(Self.items(3))
+        appear(screen)
+        let strip = try #require(Self.strips(in: screen.window).first)
+        try #require(strip.debugArrivals.count == 1, "guard: the strip made its entrance")
+
+        screen.post.debugSetCover("photo-2")
+        screen.window.layoutIfNeeded()
+
+        let rebuilt = try #require(Self.strips(in: screen.window).first)
+        try #require(rebuilt === strip, "guard: the reconfigure kept the cell")
+        try #require(rebuilt.debugTileIDs == ["photo-2", "photo-0", "photo-1"],
+                     "guard: the strip was rebuilt in the new order: \(rebuilt.debugTileIDs)")
+        #expect(rebuilt.debugHeldTileCount == 0,
+                "the new tiles are held invisible for an entrance that already happened")
+        #expect(rebuilt.debugArrivals.count == 1, "the entrance replayed: \(rebuilt.debugArrivals)")
+    }
+
+    /// Reduce Motion: the thumbnails are simply there — never held invisible
+    /// for a curve that will not run.
+    @Test func underReduceMotionTheThumbnailsAreSimplyThere() async throws {
+        let screen = open(Self.items(3), reducesMotion: true, landed: false)
+        let strip = try #require(Self.strips(in: screen.window).first, "the first layout built no strip")
+        #expect(strip.debugHeldTileCount == 0, "tiles held invisible under Reduce Motion")
+
+        appear(screen)
+
+        #expect(strip.debugArrivals.isEmpty, "a ripple ran under Reduce Motion: \(strip.debugArrivals)")
+    }
+
+    // MARK: - The cover button
+
+    /// ⚠️ **THE REGRESSION NO VIEW-TREE ASSERTION CAN SEE.** Pinned to the
+    /// row's full width, this button's menu took the whole upload sheet off the
+    /// screen while it was open — and the hierarchy said the sheet was still
+    /// there, unhidden, at full alpha. The symptom lives in the render server,
+    /// so what is pinned is its cause: the button's width. See
+    /// `NewPostButtonCell` for the measurements.
+    @Test func theCoverButtonLeavesItsRowRoomEitherSide() async throws {
+        let screen = open(Self.items(3))
+        try await settle(until: { !Self.views(of: NewPostButtonCell.self, in: screen.window).isEmpty })
+        screen.window.layoutIfNeeded()
+        let cell = try #require(Self.views(of: NewPostButtonCell.self, in: screen.window).first)
+        let titles = cell.debugMenu?.children.compactMap { ($0 as? UIAction)?.title }
+        try #require(titles == ["Photo 1", "Photo 2", "Photo 3"], "guard: this is the cover's button")
+        let row = cell.debugRowWidth
+        let button = cell.debugButtonFrame
+        try #require(row > 300 && button.width > 0, "guard: laid out — row \(row), button \(button)")
+
+        // Measured on a 402pt window: 396 lost the sheet, 370 kept it.
+        #expect(NewPostButtonCell.widestShare < 370.0 / 402.0, "the cap is inside the band that failed")
+        #expect(button.width <= row * NewPostButtonCell.widestShare + 0.5,
+                "the button spans \(button.width) of a \(row)pt row")
+        #expect(abs(button.midX - row / 2) < 1, "and it left the strip's middle: \(button)")
+    }
+
     // MARK: - The cover, moving
 
     /// **ONE PLAYER, ON ONE CLIP, WHATEVER WAS CHOSEN.**
@@ -867,6 +972,77 @@ struct NewPostTests {
         try await breathe()
 
         #expect(strip.debugCoverBadgeIsShowing(for: "video-0"), "and it did not come back")
+    }
+
+    /// ⚠️ **THE WORD ARRIVES ON THE BAND'S SPRING AND LEAVES QUICKER THAN IT
+    /// CAME.** Asked for: "spring scale + fade", in and out. What is asserted is
+    /// the curve that was CHOSEN — `alpha` reads its end value the moment a curve
+    /// is asked for, so it cannot say whether one ran.
+    @Test func theCoversWordSpringsInAndSlipsOutOnTheBandsCurve() async throws {
+        let screen = open(Self.items(2, videosAt: [0]))
+        appear(screen)
+        try await breathe()
+        screen.window.layoutIfNeeded()
+        let strip = try #require(Self.strips(in: screen.window).first)
+        try #require(strip.debugClipState(for: "video-0") == .sheet, "guard: the cover rests")
+        #expect(strip.debugBadgeChanges.isEmpty,
+                "putting a new tile right is not a change: \(strip.debugBadgeChanges)")
+
+        strip.debugTapTile("video-0")
+
+        let leaving = try #require(strip.debugBadgeChanges.last, "the word never went")
+        #expect(leaving.id == "video-0" && !leaving.showing, "got \(leaving)")
+        #expect(leaving.duration > 0, "cut rather than faded")
+        #expect(leaving.duration < BandPop.duration, "leaving is as slow as arriving: \(leaving.duration)")
+        #expect(leaving.dampingRatio == nil, "a departure that bounces")
+
+        strip.debugTapTile("video-0")
+
+        #expect(strip.debugBadgeChanges.count == 2, "got \(strip.debugBadgeChanges)")
+        #expect(
+            strip.debugBadgeChanges.last == NewPostMediaCell.BadgeChange(
+                id: "video-0", showing: true,
+                duration: BandPop.duration, dampingRatio: BandPop.dampingRatio
+            ),
+            "not the band's spring: \(String(describing: strip.debugBadgeChanges.last))"
+        )
+    }
+
+    /// Reduce Motion: the word still comes and goes, with no curve at all.
+    @Test func underReduceMotionTheCoversWordComesAndGoesAtOnce() async throws {
+        let screen = open(Self.items(2, videosAt: [0]), reducesMotion: true)
+        appear(screen)
+        try await breathe()
+        screen.window.layoutIfNeeded()
+        let strip = try #require(Self.strips(in: screen.window).first)
+        try #require(strip.debugClipState(for: "video-0") == .sheet, "guard: the cover rests")
+
+        strip.debugTapTile("video-0")
+        #expect(!strip.debugCoverBadgeIsShowing(for: "video-0"), "the word stayed over the film")
+        strip.debugTapTile("video-0")
+        #expect(strip.debugCoverBadgeIsShowing(for: "video-0"), "and it did not come back")
+
+        let changes = strip.debugBadgeChanges
+        try #require(changes.map(\.showing) == [false, true], "guard: it went and came back: \(changes)")
+        #expect(changes.allSatisfy { $0.duration == 0 }, "a curve ran under Reduce Motion: \(changes)")
+    }
+
+    /// ⚠️ **A TILE'S FIRST STATE IS ITS DRESS.** `show` builds every badge
+    /// showing and forgets every state, so a cover tile rebuilt while it is
+    /// meant to be playing — a recycled cell — would be seen wearing its word
+    /// and then shrugging it off. Asked of the cell directly, because no route
+    /// through the screen rebuilds the strip without also resetting the states.
+    @Test func aTileBuiltPlayingTakesItsWordOffWithoutACurve() throws {
+        let strip = NewPostMediaCell(frame: CGRect(x: 0, y: 0, width: 390, height: 224))
+        strip.reducesMotion = { false }
+        strip.show(Self.items(2, videosAt: [0]), coverID: "video-0") { _, _ in nil }
+        try #require(strip.debugCoverBadgeIsShowing(for: "video-0"), "guard: a badge is built showing")
+
+        strip.setClipState(.playing, for: "video-0")
+
+        #expect(!strip.debugCoverBadgeIsShowing(for: "video-0"))
+        #expect(strip.debugBadgeChanges.map(\.duration) == [0],
+                "a fresh tile was dressed on a curve: \(strip.debugBadgeChanges)")
     }
 
     /// ⚠️ **A FALLBACK HOLDS STILL.** The sheet under a playing surface is there
@@ -1015,10 +1191,14 @@ struct NewPostTests {
     /// The strip cell, dug out of the hosted window — the same recursive shape
     /// `MediaEditorTests` uses to find its pages.
     private static func strips(in view: UIView) -> [NewPostMediaCell] {
-        var found: [NewPostMediaCell] = []
+        views(of: NewPostMediaCell.self, in: view)
+    }
+
+    private static func views<Kind: UIView>(of kind: Kind.Type, in view: UIView) -> [Kind] {
+        var found: [Kind] = []
         for subview in view.subviews {
-            if let strip = subview as? NewPostMediaCell { found.append(strip) }
-            found += strips(in: subview)
+            if let match = subview as? Kind { found.append(match) }
+            found += views(of: kind, in: subview)
         }
         return found
     }

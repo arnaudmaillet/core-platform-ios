@@ -3798,7 +3798,7 @@ extension MediaEditorViewController {
         debugPopOuts += 1
         #endif
         UIView.animate(
-            withDuration: BandPop.duration * 0.6,
+            withDuration: BandPop.departure,
             delay: 0,
             options: [.curveEaseIn, .allowUserInteraction]
         ) {
