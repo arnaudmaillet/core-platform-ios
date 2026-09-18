@@ -169,6 +169,11 @@ final class MediaEditorSoundtrackMode: MediaEditorMode {
             await land(picked, on: id)
             isPicking = false
             tools.setBusy(false)
+            // ⚠️ **THE SHEET HAS GONE AND UIKIT SAID NOTHING** — a page sheet
+            // leaves the editor on screen, so it gets no appearance callback
+            // either way. The pick resolving IS the signal, on a cancel as much
+            // as on a choice.
+            host.sheetDidClose()
         }
     }
 

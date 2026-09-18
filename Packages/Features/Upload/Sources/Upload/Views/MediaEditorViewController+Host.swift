@@ -69,6 +69,10 @@ protocol MediaEditorHosting: AnyObject {
     func refreshSoundPill()
     func presentSheet(_ controller: UIViewController)
 
+    /// Says the sheet this mode put up has gone, so the clip it covered may run
+    /// again. ⚠️ **UIKit DOES NOT SAY THIS** — see the implementation.
+    func sheetDidClose()
+
     // MARK: The canvas
 
     func lockCanvas(by owner: CanvasLockOwner)
@@ -138,8 +142,23 @@ extension MediaEditorViewController: MediaEditorHosting {
 
     var bandContent: UIView? { band.content }
 
+    /// ⚠️ **A SHEET OVER THE EDITOR STOPS THE CLIP, AND THE EDITOR IS NEVER
+    /// TOLD IT WENT UP.** A page sheet does not remove the presenting view from
+    /// the hierarchy, so none of `viewWillDisappear`, `viewDidDisappear`,
+    /// `viewWillAppear` or `viewDidAppear` fires for a cover — measured with a
+    /// thread sample while the song picker was up: the editor's frame clock was
+    /// still ticking and the composed reader still decoding, for a picture
+    /// nobody could see. This seam is the one funnel every sheet goes through,
+    /// so it is where the cover is raised.
     func presentSheet(_ controller: UIViewController) {
         present(controller, animated: true)
+        pauseUnderACover()
+    }
+
+    /// The sheet a mode put up has gone — see `presentSheet`. Whoever presented
+    /// it says so, because UIKit will not.
+    func sheetDidClose() {
+        resumeAfterACover(retries: 2)
     }
 
     func fileSeconds(for id: String) -> Double? { fileLengths[id] }

@@ -219,6 +219,7 @@ final class MediaEditorOverlayMode: MediaEditorMode {
         guard let host else { return }
         let picker = MediaStickerPickerViewController()
         picker.onPick = { [weak self] content in self?.place(content, on: id) }
+        picker.onGone = { [weak self] in self?.host?.sheetDidClose() }
         if let sheet = picker.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true

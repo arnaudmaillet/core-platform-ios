@@ -96,7 +96,14 @@ struct MediaEditorPlaybackTests {
             boundSurfaces.remove(ObjectIdentifier(surface))
         }
 
-        func setPaused(_ paused: Bool, in surface: VideoRenderView) {}
+        /// Every pause and resume asked of the player, in order — the cover's
+        /// whole story is told here.
+        private(set) var pauses: [Bool] = []
+
+        func setPaused(_ paused: Bool, in surface: VideoRenderView) {
+            pauses.append(paused)
+            self.paused = paused
+        }
 
         /// Frames the strip can lay out, without decoding anything: the editor's
         /// subject is what it ASKS for and where it puts the answer.
@@ -275,6 +282,93 @@ struct MediaEditorPlaybackTests {
 
         #expect(screen.preview.plans.last?.finish.crop == cut,
                 "the clip came back without its crop: \(String(describing: screen.preview.plans.last?.finish.crop))")
+    }
+
+    /// ⚠️ **A SHEET OVER THE EDITOR STOPS THE CLIP, AND UIKIT NEVER SAYS IT
+    /// WENT UP.** A page sheet leaves the presenting view in the hierarchy, so
+    /// the editor gets no appearance callback either way; measured with a
+    /// thread sample while the song picker was up, its frame clock was still
+    /// ticking and the composed reader still decoding a picture nobody could
+    /// see.
+    @Test func aSheetOverTheEditorStopsTheClip() async throws {
+        let screen = open(Self.items(2, videosAt: [0]))
+        try await settle(until: { screen.preview.played.count == 1 })
+        #expect(screen.preview.paused == false, "guard: the clip is running")
+
+        screen.editor.presentSheet(UIViewController())
+
+        try await settle(until: { screen.preview.paused == true })
+        #expect(screen.preview.paused == true, "the clip ran on behind the sheet")
+        #expect(screen.editor.isCovered)
+    }
+
+    /// ⚠️ **AND NEWS OF THE SHEET GOING IS NOT TAKEN ON TRUST.** A picker says
+    /// it is going from its own `viewDidDisappear`, which runs while the
+    /// dismissal is still in flight — and a second sheet may be opening behind
+    /// it. Nothing starts while anything is still standing over the editor.
+    @Test func aClipDoesNotStartWhileSomethingIsStillCoveringIt() async throws {
+        let screen = open(Self.items(2, videosAt: [0]))
+        try await settle(until: { screen.preview.played.count == 1 })
+        screen.editor.presentSheet(UIViewController())
+        try await settle(until: { screen.preview.paused == true })
+
+        screen.editor.sheetDidClose()
+        try await Task.sleep(for: .milliseconds(120))
+
+        #expect(screen.editor.isCovered, "guard: the sheet is still up")
+        #expect(screen.preview.paused == true,
+                "the clip started under a sheet: \(screen.preview.pauses)")
+    }
+
+    /// Once nothing is covering it, the clip runs again — at whatever the
+    /// AUTHOR last asked for.
+    @Test func theClipRunsAgainOnceNothingCoversIt() async throws {
+        let screen = open(Self.items(2, videosAt: [0]))
+        try await settle(until: { screen.preview.played.count == 1 })
+        screen.editor.pauseUnderACover()
+        #expect(screen.preview.paused == true, "guard: the cover stopped it")
+
+        screen.editor.sheetDidClose()
+
+        try await settle(until: { screen.preview.paused == false })
+        #expect(screen.preview.paused == false,
+                "the clip never started again: \(screen.preview.pauses)")
+    }
+
+    /// ⚠️ **AND A CLIP THAT ARRIVES WHILE THE COVER IS UP ARRIVES STOPPED.**
+    /// The landing decides whether a fresh item runs, and it knew only about
+    /// the finger and the author — so a page settling behind a sheet started
+    /// decoding for nobody.
+    @Test func aClipLandingBehindASheetLandsStopped() async throws {
+        let screen = open(Self.items(2, videosAt: [0, 1]))
+        try await settle(until: { screen.preview.played.count == 1 })
+        screen.editor.presentSheet(UIViewController())
+        try await settle(until: { screen.preview.paused == true })
+
+        screen.editor.debugScrollToPage(1)
+        try await settle(until: { screen.preview.played.count == 2 })
+
+        #expect(screen.preview.played.count == 2, "guard: the second clip was loaded")
+        #expect(screen.preview.paused == true,
+                "the clip that landed behind the sheet started: \(screen.preview.pauses)")
+    }
+
+    /// ⚠️ **AND A COVER IS NOT A DECISION THE AUTHOR MADE.** A clip the author
+    /// stopped themselves is still stopped when the sheet goes — the cover must
+    /// never write `pausedByAuthor`, or the sheet closing would start a clip
+    /// they had deliberately paused.
+    @Test func aCoverDoesNotUndoTheAuthorsOwnPause() async throws {
+        let screen = open(Self.items(2, videosAt: [0]))
+        try await settle(until: { screen.preview.played.count == 1 })
+        screen.editor.debugTapMedia()
+        #expect(screen.preview.paused == true, "guard: the author stopped it")
+
+        screen.editor.pauseUnderACover()
+        screen.editor.sheetDidClose()
+        try await Task.sleep(for: .milliseconds(120))
+
+        #expect(screen.preview.paused == true,
+                "the cover lifting started a clip the author had stopped: \(screen.preview.pauses)")
     }
 
     @Test func leavingTheScreenStopsTheClip() async throws {

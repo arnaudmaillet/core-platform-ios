@@ -1719,6 +1719,46 @@ final class MediaEditorViewController: UIViewController {
         let soundtrack: VideoSoundtrack?
     }
 
+    /// Whether something is standing over the editor — a picker, a sheet.
+    ///
+    /// ⚠️ **READ, NOT STORED.** A flag would have to be lowered by whoever
+    /// raised it, and a path that forgot would leave the clip stopped for good;
+    /// `presentedViewController` is the truth and cannot go stale. It is a THIRD
+    /// term beside the finger and the author's own pause, and it is never
+    /// written into `pausedByAuthor` — a cover is not a decision the author
+    /// made, and treating it as one would leave the clip stopped after the
+    /// sheet had gone.
+    var isCovered: Bool { presentedViewController != nil }
+
+    /// Stops the clip while a sheet stands over it.
+    func pauseUnderACover() {
+        guard let surface = playingSurface else { return }
+        preview.setPaused(true, in: surface)
+        timelineTrack.showPaused(true)
+    }
+
+    /// Lets it run again once the sheet has gone — at whatever the AUTHOR last
+    /// asked for, which may well be "stopped".
+    ///
+    /// ⚠️ **THE NEWS ARRIVES BEFORE UIKIT HAS FINISHED, SO IT IS ASKED AGAIN.**
+    /// A picker says it is going from its own `viewDidDisappear`, which runs
+    /// while the dismissal is still in flight: `presentedViewController` is
+    /// still answering, the guard below refuses, and the clip would stay
+    /// stopped for good. Measured in the test that found it. A couple of turns
+    /// of the runloop is all it takes, and the guard is what stops a resume
+    /// landing under a SECOND sheet opened straight after the first.
+    func resumeAfterACover(retries: Int = 0) {
+        guard !isCovered else {
+            guard retries > 0 else { return }
+            DispatchQueue.main.async { [weak self] in self?.resumeAfterACover(retries: retries - 1) }
+            return
+        }
+        guard let surface = playingSurface else { return }
+        let paused = fingerOnTrack || pausedByAuthor
+        preview.setPaused(paused, in: surface)
+        timelineTrack.showPaused(paused)
+    }
+
     private var previewSubject: PreviewSubject?
     /// Bumped for every load asked for: only the newest may land.
     private var previewLoads = 0
@@ -1810,7 +1850,7 @@ final class MediaEditorViewController: UIViewController {
             // owed a new item left the player stopped rather than let it run on
             // the old one for a few frames; the pause is the author's, or the
             // finger's if one has come down since.
-            let paused = fingerOnTrack || pausedByAuthor
+            let paused = fingerOnTrack || pausedByAuthor || isCovered
             preview.setPaused(paused, in: surface)
             timelineTrack.showPaused(paused)
             if !fingerOnTrack { handover = MediaTimelining.Handover(target: landed.seconds) }
