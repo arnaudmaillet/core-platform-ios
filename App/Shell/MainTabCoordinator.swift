@@ -603,7 +603,7 @@ extension MainTabCoordinator {
         // under one, so this only ever turns away the debug hook.
         guard tabBarController.presentedViewController == nil else { return }
         let screen: UIViewController = switch destination {
-        case .camera: CameraViewController()
+        case .camera: container.uploadFeature.makeCameraViewController()
         case .upload: container.uploadFeature.makeMediaUploadViewController()
         case .text: container.uploadFeature.makeTextPostViewController()
         }
