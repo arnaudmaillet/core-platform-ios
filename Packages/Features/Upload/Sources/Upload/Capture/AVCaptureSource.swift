@@ -33,11 +33,12 @@ final class AVCaptureSource: CaptureSource {
     private let previewView = CapturePreviewLayerView()
 
     /// Whether any camera exists — see `makeCaptureSource()`.
-    static var hasAnyCamera: Bool {
-        !AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external], mediaType: .video, position: .unspecified
-        ).devices.isEmpty
-    }
+    /// ⚠️ **WHETHER THE ENGINE CAN INSTALL A CAMERA — THE SAME QUESTION ITS
+    /// `installable(preferring:)` ANSWERS.** It asked a looser one (any
+    /// wide-angle or external camera), so a device whose only camera the
+    /// engine could not install got a session with no video input — and a
+    /// shutter tap then raised in `capturePhoto`.
+    static var hasAnyCamera: Bool { AVCaptureEngine.installable(preferring: .back) != nil }
 
     init() {
         engine = AVCaptureEngine(feed: feed)
@@ -320,7 +321,11 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         // playing. Mixed, it plays on (and is heard in a clip, as it is in the
         // room). `UISound` still never touches the audio session itself.
         session.configuresApplicationAudioSessionToMixWithOthers = true
-        installCamera(.back)
+        // ⚠️ THE BACK CAMERA IF THERE IS ONE — NOT ONLY IF. A Mac or a Vision
+        // Pro running this iPad app, or a device whose one camera faces the
+        // author, has no back camera, and the first version then ran a session
+        // with no video input at all.
+        if let device = Self.installable(preferring: .back) { install(device) }
         // ⚠️ AND NO MICROPHONE UNTIL A CLIP RECORDS — see `attachMicrophone`.
         if session.canAddOutput(photoOutput) {
             session.addOutput(photoOutput)
@@ -336,6 +341,12 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         applyConnections()
     }
 
+    /// The camera to install for `position`: that one, else the other one,
+    /// else whatever the system calls its default video device.
+    static func installable(preferring position: CapturePosition) -> AVCaptureDevice? {
+        device(for: position) ?? device(for: position.flipped) ?? AVCaptureDevice.default(for: .video)
+    }
+
     private static func device(for position: CapturePosition) -> AVCaptureDevice? {
         let types: [AVCaptureDevice.DeviceType] = position == .back
             ? [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
@@ -347,9 +358,10 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         return discovery.devices.first
     }
 
-    private func installCamera(_ position: CapturePosition) {
-        guard let device = Self.device(for: position),
-              let input = try? AVCaptureDeviceInput(device: device) else { return }
+    /// Installs `device` in place of the camera in use. A device facing the
+    /// author is the front camera; anything else is treated as the back one.
+    private func install(_ device: AVCaptureDevice) {
+        guard let input = try? AVCaptureDeviceInput(device: device) else { return }
         if let videoInput { session.removeInput(videoInput) }
         guard session.canAddInput(input) else {
             if let videoInput { session.addInput(videoInput) }
@@ -357,7 +369,7 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         }
         session.addInput(input)
         videoInput = input
-        currentPosition = position
+        currentPosition = device.position == .front ? .front : .back
         // ⚠️ LAYER-LESS, AND THEREFORE FOR THE CAPTURE ANGLE ONLY: its preview
         // angle is 0 by contract. The preview's own coordinator is built on the
         // main actor with the layer — `AVCaptureSource.followPreviewRotation`.
@@ -459,7 +471,9 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 session.beginConfiguration()
-                installCamera(currentPosition.flipped)
+                // Only a camera that really faces the other way: with one camera
+                // there is nothing to flip to, and the one in use stays.
+                if let other = Self.device(for: currentPosition.flipped) { install(other) }
                 applyConnections()
                 session.commitConfiguration()
                 adoptPhotoDimensions()
@@ -557,6 +571,13 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
                 applyConnections()
+                // ⚠️ `capturePhoto` RAISES — an Objective-C exception, not an
+                // error — without an active, enabled video connection. No camera
+                // installed is a failed photograph, never a crash.
+                guard let connection = photoOutput.connection(with: .video), connection.isActive, connection.isEnabled else {
+                    continuation.resume(throwing: CaptureSourceError.photoFailed)
+                    return
+                }
                 let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
                 settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
                 let wanted: AVCaptureDevice.FlashMode = switch flash {
@@ -586,6 +607,13 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         let promise = CaptureClipPromise()
         queue.async { [self] in
             guard !recordingRequested, !recorder.isRecording else {
+                promise.fulfil(.failure(CaptureSourceError.recordingFailed))
+                return
+            }
+            // ⚠️ AND `startRecording` RAISES WITHOUT A VIDEO CONNECTION, as
+            // `capturePhoto` does. Asked of the recorder, so the engine stays
+            // testable with no camera attached.
+            guard recorder.canRecord else {
                 promise.fulfil(.failure(CaptureSourceError.recordingFailed))
                 return
             }
@@ -710,6 +738,9 @@ private final class PhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unc
 protocol CaptureMovieRecording: AnyObject {
     /// True once the first sample has been written, as the movie output says.
     var isRecording: Bool { get }
+    /// Whether a recording can start at all — the output has an active,
+    /// enabled video connection.
+    var canRecord: Bool { get }
     var recordedSeconds: TimeInterval { get }
     /// Starts one clip, ending by itself after `limit` seconds. `finished` is
     /// called exactly once, on any queue.
@@ -730,6 +761,10 @@ private final class MovieFileRecorder: CaptureMovieRecording {
     }
 
     var isRecording: Bool { output.isRecording }
+    var canRecord: Bool {
+        guard let connection = output.connection(with: .video) else { return false }
+        return connection.isActive && connection.isEnabled
+    }
     var recordedSeconds: TimeInterval { output.recordedDuration.seconds }
 
     func start(to url: URL, limit: TimeInterval, finished: @escaping @Sendable (Result<CaptureClip, any Error>) -> Void) {

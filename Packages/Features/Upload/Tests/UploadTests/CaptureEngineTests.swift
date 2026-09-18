@@ -17,11 +17,16 @@ struct CaptureEngineTests {
             var stops = 0
             var finished: (@Sendable (Result<CaptureClip, any Error>) -> Void)?
             var url: URL?
+            var canRecord = true
         }
 
         private let state = Mutex(State())
 
         var isRecording: Bool { false }
+        var canRecord: Bool {
+            get { state.withLock { $0.canRecord } }
+            set { state.withLock { $0.canRecord = newValue } }
+        }
         var recordedSeconds: TimeInterval { 0 }
         var starts: Int { state.withLock { $0.starts } }
         var stops: Int { state.withLock { $0.stops } }
@@ -96,5 +101,26 @@ struct CaptureEngineTests {
         engine.stopRecording()
         try await Task.sleep(for: .milliseconds(200))
         #expect(recorder.stops == 1)
+    }
+
+    /// ⚠️ With no camera connected, a photograph fails — it does not reach
+    /// `capturePhoto`, which raises an exception and takes the app down.
+    @Test func aPhotographWithNoCameraConnectedFailsInsteadOfRaising() async throws {
+        let engine = AVCaptureEngine(feed: CaptureFrameFeed(), recorder: NotYetWriting())
+        await #expect(throws: CaptureSourceError.photoFailed) {
+            _ = try await engine.photograph(to: Self.url, flash: .off)
+        }
+    }
+
+    /// ⚠️ With no camera connected, a recording fails without starting the
+    /// output — whose `startRecording` would raise.
+    @Test func aRecordingWithNoCameraConnectedFailsWithoutStarting() async throws {
+        let recorder = NotYetWriting()
+        recorder.canRecord = false
+        let engine = AVCaptureEngine(feed: CaptureFrameFeed(), recorder: recorder)
+        await #expect(throws: CaptureSourceError.recordingFailed) {
+            _ = try await engine.record(to: Self.url, torch: false, limit: 180).value
+        }
+        #expect(recorder.starts == 0)
     }
 }
