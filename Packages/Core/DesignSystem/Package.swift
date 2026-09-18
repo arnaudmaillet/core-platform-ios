@@ -8,7 +8,10 @@ let package = Package(
         .library(name: "DesignSystem", targets: ["DesignSystem"])
     ],
     targets: [
-        .target(name: "DesignSystem"),
+        .target(
+            name: "DesignSystem",
+            resources: [.copy("Resources/Sounds")]
+        ),
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"])
     ]
 )
