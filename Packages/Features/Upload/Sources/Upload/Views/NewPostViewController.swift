@@ -70,6 +70,10 @@ final class NewPostViewController: UIViewController {
         case engagement
         case sharing
         case disclosure
+        /// What happens on the author's own phone — the one card here whose
+        /// choice this screen can honour completely, so it is kept apart from
+        /// the three the server has never heard of (§22).
+        case device
     }
 
     private enum Row: Hashable {
@@ -83,6 +87,7 @@ final class NewPostViewController: UIViewController {
         case reposts
         case bookmarks
         case downloads
+        case saveToPhotos
     }
 
     /// Everything the author decides about the post, beyond its content.
@@ -128,6 +133,11 @@ final class NewPostViewController: UIViewController {
         // was made with AI, which is a false statement rather than a permissive
         // default.
         var disclosesAI = false
+        // ⚠️ **OFF BY DEFAULT — ASKED FOR IN THOSE WORDS.** A capture is not
+        // kept in the author's library by itself (*"non seulement dans le
+        // post"*); keeping one is a choice made here, for this post
+        // (*"une option pour sauvegarder … le ou les médias"*).
+        var savesToPhotos = false
     }
 
     /// The size a full-bleed thumbnail is asked for. Generous, because the
@@ -148,6 +158,8 @@ final class NewPostViewController: UIViewController {
     /// See `playCover` for why there is exactly one of these on this screen.
     private let preview: any MediaVideoPreviewing
     private let composer: any PostComposing
+    /// Where a copy of what is published goes, when the author asks for one.
+    private let photoLibrary: any PhotoLibrarySaving
     /// Where a published post hands back to — the flow's own dismissal.
     private let onPublished: (FeedEntry) -> Void
 
@@ -256,9 +268,11 @@ final class NewPostViewController: UIViewController {
         composer: any PostComposing,
         preview: any MediaVideoPreviewing = MediaPreviewPlayer(),
         draft: PostDraft = PostDraft(),
+        photoLibrary: any PhotoLibrarySaving = PhotoLibrarySaver(),
         reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled },
         onPublished: @escaping (FeedEntry) -> Void
     ) {
+        self.photoLibrary = photoLibrary
         self.items = items
         self.edits = edits
         self.library = library
@@ -551,7 +565,7 @@ final class NewPostViewController: UIViewController {
             case .title: view.dequeueConfiguredReusableCell(using: title, for: indexPath, item: row)
             case .caption: view.dequeueConfiguredReusableCell(using: caption, for: indexPath, item: row)
             case .comments: view.dequeueConfiguredReusableCell(using: comments, for: indexPath, item: row)
-            case .aiDisclosure, .points, .reposts, .bookmarks, .downloads:
+            case .aiDisclosure, .points, .reposts, .bookmarks, .downloads, .saveToPhotos:
                 view.dequeueConfiguredReusableCell(using: toggle, for: indexPath, item: row)
             }
         }
@@ -590,7 +604,7 @@ final class NewPostViewController: UIViewController {
                 configuration = UICollectionLayoutListConfiguration(appearance: .plain)
                 configuration.backgroundColor = .clear
                 configuration.showsSeparators = false
-            case .text, .disclosure, .engagement, .sharing:
+            case .text, .disclosure, .engagement, .sharing, .device:
                 configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
             }
             // Asked for only where there is something to say: an empty header or
@@ -607,6 +621,7 @@ final class NewPostViewController: UIViewController {
         case .disclosure: "Disclosure"
         case .engagement: "Engagement"
         case .sharing: "Sharing"
+        case .device: "On this device"
         }
     }
 
@@ -628,6 +643,8 @@ final class NewPostViewController: UIViewController {
             post yet — comments stay on, counts stay visible, and every post is \
             public.
             """
+        case .device:
+            nil
         }
     }
 
@@ -639,6 +656,7 @@ final class NewPostViewController: UIViewController {
         snapshot.appendItems([.comments, .points, .reposts, .bookmarks], toSection: .engagement)
         snapshot.appendItems([.downloads], toSection: .sharing)
         snapshot.appendItems([.aiDisclosure], toSection: .disclosure)
+        snapshot.appendItems([.saveToPhotos], toSection: .device)
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
@@ -1016,6 +1034,12 @@ final class NewPostViewController: UIViewController {
             ("Show bookmarks", "Anyone can see how often it has been saved.", settings.showsBookmarks)
         case .downloads:
             ("Allow downloads", "Let anyone save this post to their device.", settings.allowsDownloads)
+        case .saveToPhotos:
+            (
+                "Save to Photos",
+                "Keep a copy of the edited photos and videos in your library when you post.",
+                settings.savesToPhotos
+            )
         default:
             nil
         }
@@ -1031,7 +1055,10 @@ final class NewPostViewController: UIViewController {
         case .reposts: settings.showsReposts = isOn
         case .bookmarks: settings.showsBookmarks = isOn
         case .downloads: settings.allowsDownloads = isOn
-        // ⚠️ `Row` CARRIES TEN CASES AND ONLY FIVE ARE SWITCHES. The rest —
+        case .saveToPhotos:
+            settings.savesToPhotos = isOn
+            if isOn { confirmLibraryAccess() }
+        // ⚠️ `Row` CARRIES ELEVEN CASES AND ONLY SIX ARE SWITCHES. The rest —
         // media, cover, title, caption, comments — never reach here, so leaving
         // early is both the exhaustiveness the compiler wants and a refusal to
         // rewrite the draft for a row that changed nothing.
@@ -1189,6 +1216,14 @@ final class NewPostViewController: UIViewController {
                 }
                 let entry = try await composer.publish(media: media, caption: caption, as: nil)
                 onPublished(entry)
+                // ⚠️ **AFTER THE POST IS UP, NEVER INSTEAD OF IT.** A copy that
+                // cannot be kept costs the author the copy, not the post — so it
+                // is tried once the post exists, and a failure is said before
+                // the sheet goes rather than swallowed with it.
+                if settings.savesToPhotos, !(await keepACopy(of: media, published: entry)) {
+                    present(Self.copyFailureAlert { [weak self] in self?.dismiss(animated: true) }, animated: true)
+                    return
+                }
                 // The flow ends here: the whole sheet goes, not just this screen.
                 dismiss(animated: true)
             } catch {
@@ -1212,6 +1247,82 @@ final class NewPostViewController: UIViewController {
         return await StickerFrameBaker.shared.artwork(
             for: ids, side: StickerFrameBaker.exportSide, motion: motion
         )
+    }
+
+    // MARK: - A copy in the library
+
+    /// Switching the copy on is when the library is asked — not at publish,
+    /// where a prompt would stand between the author and a post that is
+    /// already on its way.
+    ///
+    /// ⚠️ **REFUSED, THE SWITCH GOES BACK OFF AND SAYS WHY.** Left on, it would
+    /// promise a copy the library had already declined to take.
+    private func confirmLibraryAccess() {
+        Task { [weak self] in
+            guard let self, await !photoLibrary.requestAccess(), settings.savesToPhotos else { return }
+            settings.savesToPhotos = false
+            draft.settings = settings
+            reconfigure([.saveToPhotos])
+            present(Self.accessRefusedAlert(), animated: true)
+        }
+    }
+
+    /// Adds what was just published to the library. False when nothing, or
+    /// not everything, could be kept.
+    private func keepACopy(of media: [ComposeMedia], published entry: FeedEntry) async -> Bool {
+        let copies = Self.libraryCopies(of: media, published: entry.post.attachments)
+        guard copies.count == media.count else { return false }
+        do {
+            try await photoLibrary.save(copies)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// What goes into the library for each piece of the post, in its order.
+    ///
+    /// ⚠️ **A CLIP'S COPY IS THE EXPORTED FILE, FOUND ON THE ENTRY.** The
+    /// export happens inside the composer, and the entry it hands back plays a
+    /// clip from that local file (`PostComposer.uploadVideo`) — the one file
+    /// with every edit burned in. An attachment that is not a local file has
+    /// no copy to give, and is left out rather than replaced by the unedited
+    /// original, so the count tells `keepACopy` that something was missed.
+    static func libraryCopies(of media: [ComposeMedia], published attachments: [MediaAttachment]) -> [PhotoLibraryCopy] {
+        media.enumerated().compactMap { index, piece in
+            switch piece {
+            case .image(let picked):
+                return picked.image.jpegData(compressionQuality: 0.95).map(PhotoLibraryCopy.photo)
+            case .video:
+                guard attachments.indices.contains(index), let file = attachments[index].url, file.isFileURL
+                else { return nil }
+                return .video(file)
+            }
+        }
+    }
+
+    private static func accessRefusedAlert() -> UIAlertController {
+        let alert = UIAlertController(
+            title: "Photos access is off",
+            message: "Allow adding to Photos in Settings to keep a copy of your posts.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Not now", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Settings", style: .default) { _ in
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        })
+        return alert
+    }
+
+    private static func copyFailureAlert(then done: @escaping () -> Void) -> UIAlertController {
+        let alert = UIAlertController(
+            title: "Posted",
+            message: "Your post is up, but a copy couldn't be saved to Photos.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in done() })
+        return alert
     }
 
     private static func failureAlert(_ error: Error) -> UIAlertController {
@@ -1301,5 +1412,10 @@ extension NewPostViewController {
     func debugType(caption: String) { self.caption = caption }
     /// Internal for tests: the path "Post" takes, without a bar to tap.
     func debugTapPost() { post() }
+    /// Internal for tests: flipping a switch, through the routine the switch
+    /// itself calls.
+    func debugFlip(saveToPhotos isOn: Bool) { setToggle(isOn, for: .saveToPhotos) }
+    /// Internal for tests: what the switch says.
+    var debugSavesToPhotos: Bool { settings.savesToPhotos }
 }
 #endif

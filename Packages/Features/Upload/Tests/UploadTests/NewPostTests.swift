@@ -26,6 +26,37 @@ struct NewPostTests {
         let composer: RecordingComposer
         let preview: StubPreview
         let handed: Handed
+        let photoLibrary: StubPhotoLibrary
+    }
+
+    /// Records the copies it was handed, and answers access as told.
+    ///
+    /// ⚠️ **A CLASS WITH A LOCK, NOT AN ACTOR,** so `settle(until:)` — which
+    /// takes a synchronous condition — can wait on what it saved.
+    private final class StubPhotoLibrary: PhotoLibrarySaving, @unchecked Sendable {
+        private let lock = NSLock()
+        private let grants: Bool
+        private let fails: Bool
+        private var _saved: [PhotoLibraryCopy] = []
+        private var _asked = 0
+
+        init(grants: Bool = true, fails: Bool = false) {
+            self.grants = grants
+            self.fails = fails
+        }
+
+        var saved: [PhotoLibraryCopy] { lock.withLock { _saved } }
+        var asked: Int { lock.withLock { _asked } }
+
+        func requestAccess() async -> Bool {
+            lock.withLock { _asked += 1 }
+            return grants
+        }
+
+        func save(_ copies: [PhotoLibraryCopy]) async throws {
+            if fails { throw CocoaError(.fileWriteNoPermission) }
+            lock.withLock { _saved += copies }
+        }
     }
 
     /// Records what the screen ASKED the playback seam for, which is the whole
@@ -252,10 +283,25 @@ struct NewPostTests {
             let by = author ?? AuthorSummary(
                 id: ProfileID("first"), handle: "first", displayName: "First", avatarURL: nil
             )
+            // ⚠️ **THE ATTACHMENTS ARE THE REAL COMPOSER'S SHAPE**: a picture at
+            // a CDN address, a clip at the LOCAL file it was exported to — the
+            // file the optimistic entry plays, and the one a copy in Photos
+            // is made from.
+            let attachments: [MediaAttachment] = media.enumerated().map { index, piece in
+                switch piece {
+                case .image:
+                    let url = URL(string: "https://cdn.example/\(index).jpg")
+                    return MediaAttachment(url: url, thumbnailURL: url, mimeType: "image/jpeg", pixelWidth: 1, pixelHeight: 1)
+                case .video(let clip):
+                    return MediaAttachment(
+                        url: clip.sourceURL, thumbnailURL: nil, mimeType: "video/mp4", pixelWidth: 1, pixelHeight: 1
+                    )
+                }
+            }
             return FeedEntry(
                 post: Post(
                     id: PostID("new"), authorID: by.id, caption: caption,
-                    attachments: [], publishedAt: Date()
+                    attachments: attachments, publishedAt: Date()
                 ),
                 author: by
             )
@@ -288,7 +334,8 @@ struct NewPostTests {
         _ items: [MediaLibraryItem],
         edits: [String: MediaEdits] = [:],
         reducesMotion: Bool = false,
-        landed: Bool = true
+        landed: Bool = true,
+        photoLibrary: StubPhotoLibrary = StubPhotoLibrary()
     ) -> Screen {
         let library = StubLibrary()
         let composer = RecordingComposer()
@@ -296,7 +343,7 @@ struct NewPostTests {
         let handed = Handed()
         let post = NewPostViewController(
             items: items, edits: edits, library: library, composer: composer, preview: preview,
-            reducesMotion: { reducesMotion }
+            photoLibrary: photoLibrary, reducesMotion: { reducesMotion }
         ) { handed.entry = $0 }
         let navigation = UINavigationController(rootViewController: post)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -310,7 +357,8 @@ struct NewPostTests {
         window.layoutIfNeeded()
         return Screen(
             post: post, navigation: navigation, window: window,
-            library: library, composer: composer, preview: preview, handed: handed
+            library: library, composer: composer, preview: preview, handed: handed,
+            photoLibrary: photoLibrary
         )
     }
 
@@ -1280,16 +1328,88 @@ struct NewPostTests {
         return found
     }
 
+    // MARK: - A copy in Photos
+
+    /// ⚠️ **NOTHING IS KEPT UNLESS ASKED** — *"non seulement dans le post"*:
+    /// a capture is not saved to the library by itself.
+    @Test func nothingIsCopiedToPhotosUnlessAsked() async throws {
+        let screen = open(Self.items(2, videosAt: [1]))
+        #expect(screen.post.debugSavesToPhotos == false, "the switch rests off")
+
+        screen.post.debugTapPost()
+        try await settle(until: { screen.handed.entry != nil })
+        try await breathe()
+
+        #expect(screen.photoLibrary.saved.isEmpty, "copied \(screen.photoLibrary.saved)")
+        #expect(screen.photoLibrary.asked == 0, "and the library was never even asked")
+    }
+
+    /// ⚠️ **WHAT WAS PUBLISHED, IN ITS ORDER** — the baked picture and the
+    /// exported clip, not the originals the author started from.
+    @Test func aCopyOfWhatWasPublishedGoesToPhotosInItsOrder() async throws {
+        let screen = open(Self.items(3, videosAt: [1]))
+        screen.post.debugFlip(saveToPhotos: true)
+        try await settle(until: { screen.photoLibrary.asked == 1 })
+        #expect(screen.post.debugSavesToPhotos, "the switch stayed on")
+
+        screen.post.debugTapPost()
+        try await settle(until: { screen.photoLibrary.saved.count == 3 })
+
+        let saved = screen.photoLibrary.saved
+        let calls = await screen.composer.calls
+        let clip = try #require(calls.first?.videos.first)
+        guard saved.count == 3, case .photo(let first) = saved[0], case .video(let file) = saved[1],
+              case .photo = saved[2]
+        else {
+            Issue.record("copied \(saved)")
+            return
+        }
+        #expect(file == clip.sourceURL, "the copy is not the file the post was made from")
+        let picture = try #require(UIImage(data: first))
+        let published = try #require(calls.first?.images.first?.image)
+        #expect(picture.size.width * picture.scale == published.size.width * published.scale,
+                "the copy is \(picture.size) and the published picture \(published.size)")
+    }
+
+    /// ⚠️ **REFUSED, THE SWITCH GOES BACK OFF AND SAYS WHY.** Left on, it would
+    /// promise a copy the library had already declined to take.
+    @Test func aRefusedLibraryTurnsTheSwitchBackOff() async throws {
+        let screen = open(Self.items(1), photoLibrary: StubPhotoLibrary(grants: false))
+
+        screen.post.debugFlip(saveToPhotos: true)
+        try await settle(until: { !screen.post.debugSavesToPhotos })
+
+        #expect(screen.post.debugSavesToPhotos == false)
+        let alert = screen.post.presentedViewController as? UIAlertController
+        #expect(alert?.title == "Photos access is off", "said \(String(describing: alert?.title))")
+    }
+
+    /// ⚠️ **A COPY THAT FAILS COSTS THE COPY, NOT THE POST — AND IT IS SAID.**
+    @Test func aCopyThatCannotBeKeptIsSaidBeforeTheSheetGoes() async throws {
+        let screen = open(Self.items(1), photoLibrary: StubPhotoLibrary(fails: true))
+        screen.post.debugFlip(saveToPhotos: true)
+        try await settle(until: { screen.photoLibrary.asked == 1 })
+
+        screen.post.debugTapPost()
+        try await settle(until: { screen.post.presentedViewController is UIAlertController })
+
+        #expect(screen.handed.entry != nil, "the post itself went up")
+        let alert = screen.post.presentedViewController as? UIAlertController
+        #expect(alert?.title == "Posted", "said \(String(describing: alert?.title))")
+    }
+
     /// Six switches in one card is a wall. Grouped, each card asks one question
     /// — and the engagement four are the group the author actually thinks about
     /// together.
     @Test func theSettingsAreGroupedRatherThanStackedInOneCard() {
         let screen = open(Self.items(1))
 
-        #expect(screen.post.debugSectionCount == 5, "media, text, and three settings cards")
+        #expect(screen.post.debugSectionCount == 6, "media, text, three settings cards and the device's")
         #expect(screen.post.debugHeaderText(forSection: 2) == "Engagement")
         #expect(screen.post.debugHeaderText(forSection: 3) == "Sharing")
         #expect(screen.post.debugHeaderText(forSection: 4) == "Disclosure", "moved below Sharing")
+        #expect(screen.post.debugHeaderText(forSection: 5) == "On this device", "kept apart from what the server ignores")
+        #expect(screen.post.debugRowCount(inSection: 5) == 1, "save to Photos")
         #expect(screen.post.debugRowCount(inSection: 2) == 4, "comments, points, reposts, bookmarks")
         #expect(screen.post.debugHeaderText(forSection: 0) == nil, "the media wears no header")
     }
