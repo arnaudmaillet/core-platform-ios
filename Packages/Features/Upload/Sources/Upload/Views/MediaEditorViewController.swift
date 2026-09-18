@@ -196,6 +196,14 @@ final class MediaEditorViewController: UIViewController {
         if let standing, let index = wanted.firstIndex(where: { $0.title == standing }) {
             categoryBar.select(index, notify: false)
         }
+        // ⚠️ **A STRIP THAT GAINED A CATEGORY IS A STRIP UIKit HAS NOT
+        // MEASURED.** The width it is HELD to does not move — the trailing
+        // strip always takes "the rest" — so nothing downstream can notice;
+        // what moved is its own intrinsic width, which is the number UIKit read
+        // at the hand-over to decide whether the item fits at all. Swiping onto
+        // a video adds one 38pt segment, and the bar went on honouring a fit it
+        // decided for five. Re-entrancy is held by `refreshToolbarItems`.
+        refreshToolbarItems(animated: false)
     }
 
     /// What the leading end of the toolbar offers while the timeline is open.
@@ -1266,7 +1274,11 @@ final class MediaEditorViewController: UIViewController {
         layPagesInTheirWindow(animated: false)
         // The toolbar's width is only knowable once something has laid it out,
         // and it changes with rotation and with the sheet's own size.
-        shareTheBarBetweenTheTwoStrips()
+        let held = shareTheBarBetweenTheTwoStrips()
+        guard !isHandingOver else { return }
+        let moved = zip([handedWidths?.leading, handedWidths?.trailing], [held?.leading, held?.trailing])
+            .contains { abs(($0 ?? -1) - ($1 ?? -2)) > 0.5 }
+        if owesAHandover || moved { refreshToolbarItems(animated: false) }
     }
 
     /// The size a full-page picture is asked for, in points.
@@ -1397,15 +1409,44 @@ final class MediaEditorViewController: UIViewController {
     /// on, the bottom-left pill is replaced by a second bar carrying split and
     /// speed.
     private func refreshToolbarItems(animated: Bool) {
+        // ⚠️ **NOTHING IS HANDED OVER BEFORE THE BAR CAN HOLD IT.** UIKit
+        // decides whether an item fits ONCE, from the size its view has at the
+        // hand-over, and never reconsiders. The first call comes from
+        // `viewDidLoad`, where the toolbar is still hidden and its width is
+        // zero: `shareTheBarBetweenTheTwoStrips` then takes its own early
+        // return, turns both width constraints OFF and writes no frames, and
+        // the six-category strip goes over at its FULL intrinsic width beside a
+        // pill at its full width. The two overran the bar and iOS swept the
+        // strip into a `•••` — photographed by the author on an iPhone 18 Pro,
+        // where there is otherwise room to spare.
+        // ⚠️ **ON SCREEN, NOT MERELY NON-ZERO.** A `UIToolbar` that has never
+        // been in a window already answers the SCREEN's width — measured: 402
+        // on an iPhone 18 Pro, from `viewDidLoad`, before anything was laid
+        // out. So "does it have a width" is a question that is always yes and
+        // never true: the first hand-over was measured against a bar that does
+        // not exist yet, and is right only where the sheet happens to be as
+        // wide as the screen.
+        // ⚠️ **AND THE TOOLBAR'S OWN WINDOW IS TOO STRICT TO ASK FOR**: the bar
+        // is hidden until `viewWillAppear` raises it, so waiting on it would
+        // leave the screen with no items at all in every flow that never runs
+        // an appearance transition. This screen's own window is the moment its
+        // widths become real.
+        guard view.window != nil, (navigationController?.toolbar.bounds.width ?? 0) > 0 else {
+            owesAHandover = true
+            return
+        }
+        guard !isHandingOver else { return }
+        isHandingOver = true
+        defer { isHandingOver = false }
+        owesAHandover = false
         let leading: UIView = isTimelineShowing ? actionBar : soundPill
         refreshSoundPill()
-        // ⚠️ **BEFORE THE HAND-OVER, NOT AFTER.** UIKit decides whether a bar
-        // item fits once, from the size its view has when it is handed over,
-        // and never reconsiders (`navbar-leading-selector-collapse`). Held
+        // ⚠️ **BEFORE THE HAND-OVER, NOT AFTER**, for the same reason: held
         // afterwards, the two strips were measured at their full widths and
         // swept into a `•••` on an iPhone SE.
-        shareTheBarBetweenTheTwoStrips()
+        handedWidths = shareTheBarBetweenTheTwoStrips()
         #if DEBUG
+        debugHandoverWidths.append(view.window == nil ? 0 : (navigationController?.toolbar.bounds.width ?? 0))
         debugOnToolbarHandover?()
         #endif
         setToolbarItems(
@@ -1417,8 +1458,27 @@ final class MediaEditorViewController: UIViewController {
             ],
             animated: animated
         )
-        shareTheBarBetweenTheTwoStrips()
+        handedWidths = shareTheBarBetweenTheTwoStrips()
     }
+
+    /// A hand-over the bar could not take yet, owed to the first layout pass
+    /// that gives it a width.
+    private var owesAHandover = false
+
+    /// ⚠️ **`setToolbarItems` LAYS THE BAR OUT, AND THIS IS CALLED FROM THAT
+    /// LAYOUT.** Without the flag, handing over re-enters itself.
+    private var isHandingOver = false
+
+    /// The two widths the bar was last HANDED.
+    ///
+    /// ⚠️ **A WIDTH THAT HAS MOVED SINCE IS A WIDTH UIKit IS NOT HONOURING.**
+    /// Both strips change their own content while the screen is up — the
+    /// category strip gains a category when the author swipes onto a video
+    /// (`dressCategoryStrip`), and the pill's title becomes a song's name
+    /// (`refreshSoundPill`) — and neither re-hands anything. Comparing what was
+    /// handed against what the rule now says is what catches both, without
+    /// either call site having to know about the bar.
+    private var handedWidths: (leading: CGFloat, trailing: CGFloat)?
 
     /// The pill names the page's song once it has one, and offers to add one
     /// otherwise — `MediaEditorSoundtrackMode.pillTitle` decides which.
@@ -1438,12 +1498,13 @@ final class MediaEditorViewController: UIViewController {
     /// slot the arrangement that ships today already works — the pill states a
     /// width floor and the strip is told it may give — so the constraints come
     /// off rather than being applied to a control the rule was not written for.
-    private func shareTheBarBetweenTheTwoStrips() {
+    @discardableResult
+    private func shareTheBarBetweenTheTwoStrips() -> (leading: CGFloat, trailing: CGFloat)? {
         measureTheBar()
         guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else {
             actionBarWidth.isActive = false
             categoryBarWidth.isActive = false
-            return
+            return nil
         }
         // ⚠️ **WHAT THE BAR CHARGES AROUND THE TWO GROUPS, NOT A SPACING** —
         // see `ToolbarGeometry`. Charged as one 8pt gap inside 8pt margins, the
@@ -1452,7 +1513,7 @@ final class MediaEditorViewController: UIViewController {
         let available = barGeometry.available(in: toolbar.bounds.width)
         let leading: UIView = isTimelineShowing ? actionBar : soundPill
         let held = EditorSelectorLayout.widths(
-            leadingWants: Self.wantedWidth(of: leading),
+            leadingWants: wantedWidthOfTheLeadingStrip(leading),
             available: available,
             trailingFloor: categoryBar.intrinsicContentSize.height
         )
@@ -1464,13 +1525,37 @@ final class MediaEditorViewController: UIViewController {
         // enough to leave the selector less than a bubble.
         actionBarWidth.isActive = isTimelineShowing
         actionBarWidth.constant = held.leading
-        soundPillCap.constant = available - held.trailing + (isTimelineShowing ? 0 : 0)
+        // ⚠️ **THE PILL IS CAPPED ONLY WHILE IT IS THE ONE IN THE BAR.** The
+        // ceiling used to be written on every pass whatever the leading view
+        // was, so opening the timeline capped the pill — which is not even in
+        // the bar then — at the action bar's 112pt, and it stayed there when
+        // the band closed. The author photographed the result: "Add a s...".
+        if !isTimelineShowing { soundPillCap.constant = held.leading }
         categoryBarWidth.constant = held.trailing
         categoryBarWidth.isActive = true
         // A bar item's view keeps its autoresizing mask, so the size UIKit
         // reads at the hand-over is the frame's.
         leading.frame.size.width = held.leading
         categoryBar.frame.size.width = held.trailing
+        return held
+    }
+
+    /// What the leading strip would take on its own.
+    ///
+    /// ⚠️ **MEASURED WITH ITS OWN CEILING OFF, OR THE CEILING IS A RATCHET.**
+    /// `systemLayoutSizeFitting` solves the constraints the view is carrying,
+    /// and `soundPillCap` is one of them — so the answer came back clamped by
+    /// the LAST pass's ceiling, which was then written back as the next one.
+    /// Every pass could lower it and none could raise it: a pill that had once
+    /// been squeezed stayed squeezed, and the words stayed truncated, for the
+    /// life of the screen.
+    private func wantedWidthOfTheLeadingStrip(_ leading: UIView) -> CGFloat {
+        guard leading === soundPill else { return Self.wantedWidth(of: leading) }
+        let wasActive = soundPillCap.isActive
+        soundPillCap.isActive = false
+        let wants = Self.wantedWidth(of: leading)
+        soundPillCap.isActive = wasActive
+        return wants
     }
 
     /// What the bar charges around its items — measured once it has hosted
@@ -1480,6 +1565,24 @@ final class MediaEditorViewController: UIViewController {
     #if DEBUG
     /// Internal for tests: runs just before the bar is handed its items.
     var debugOnToolbarHandover: (() -> Void)?
+    /// Internal for tests: the toolbar's width at each hand-over, in order.
+    /// Every one of them must be greater than zero — see `refreshToolbarItems`.
+    private(set) var debugHandoverWidths: [CGFloat] = []
+    /// Internal for tests: the rule as it stands right now, so a test can ask
+    /// whether the bar is actually shared the way the screen promises.
+    var debugBarShare: (leading: CGFloat, trailing: CGFloat, available: CGFloat, leadingWants: CGFloat)? {
+        guard let toolbar = navigationController?.toolbar, toolbar.bounds.width > 0 else { return nil }
+        let leading: UIView = isTimelineShowing ? actionBar : soundPill
+        return (
+            leading.frame.width,
+            categoryBar.frame.width,
+            barGeometry.available(in: toolbar.bounds.width),
+            wantedWidthOfTheLeadingStrip(leading)
+        )
+    }
+    /// Internal for tests: the ceiling the pill is carrying.
+    var debugSoundPillCap: CGFloat { soundPillCap.constant }
+    var debugSoundPillWidth: CGFloat { soundPill.frame.width }
     #endif
 
     /// Reads `barGeometry` off whichever two items the bar is hosting.

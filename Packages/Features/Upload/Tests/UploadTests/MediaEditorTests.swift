@@ -147,6 +147,7 @@ struct MediaEditorTests {
     private enum Band {
         static let filters = 3
         static let crop = 4
+        static let timeline = 5
     }
 
     private func choose(_ band: Int, on screen: Screen) {
@@ -300,6 +301,103 @@ struct MediaEditorTests {
     /// The strip carries the editing categories, in the toolbar, with no backdrop
     /// of its own — the toolbar already supplies one.
     /// The foot reads `[song][categories]`, in that order, both leading.
+    // MARK: - How the two strips share the bar
+
+    /// ⚠️ **AN ITEM HANDED TO A BAR WITH NO WIDTH IS AN ITEM UIKit COLLAPSES.**
+    /// It decides whether an item fits ONCE, at the hand-over, and never
+    /// reconsiders. The first hand-over came from `viewDidLoad`, where the
+    /// toolbar is still hidden and measures zero: the share took its own early
+    /// return, turned both width constraints off and wrote no frames, and the
+    /// six-category strip went over at its full intrinsic width beside a pill
+    /// at its full width. The author photographed the result on an iPhone
+    /// 18 Pro — a truncated "Add a s..." and a `•••` — on a bar with room to
+    /// spare.
+    @Test func theBarIsNeverHandedItemsBeforeItHasAWidth() {
+        // ⚠️ **LOADED WITHOUT A WINDOW, WHICH IS THE WHOLE POINT.** Hosting it
+        // first gives the toolbar a width before `viewDidLoad` ever runs, and
+        // the test then passes whatever the screen does — it cannot fail, which
+        // is the one thing a test must be able to do. This drives the real
+        // order: the view loads, the strip is built, and the bar is still
+        // nowhere.
+        let library = StubLibrary()
+        let handed = Handed()
+        let editor = MediaEditorViewController(
+            items: Self.items(2, videoAt: 1), library: library
+        ) { _, _ in handed.destination }
+        let navigation = UINavigationController(rootViewController: editor)
+
+        editor.loadViewIfNeeded()
+
+        #expect(editor.debugHandoverWidths.isEmpty,
+                "handed over to a bar that measures \(editor.debugHandoverWidths)")
+
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = navigation
+        window.isHidden = false
+        window.layoutIfNeeded()
+
+        let widths = editor.debugHandoverWidths
+        #expect(!widths.isEmpty, "the bar got a width and was never handed anything")
+        #expect(widths.allSatisfy { $0 > 0 }, "handed over at widths \(widths)")
+    }
+
+    @Test func theLeadingStripTakesWhatItAsksForAndTheTrailingTakesTheRest() async throws {
+        let screen = open(Self.items(2, videoAt: 1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        screen.window.layoutIfNeeded()
+
+        let share = try #require(screen.editor.debugBarShare)
+        #expect(abs(share.leading + share.trailing - share.available) < 0.5,
+                "the two strips do not fill the bar: \(share)")
+        #expect(share.leading >= share.leadingWants - 0.5,
+                "the leading strip was squeezed under what it asked for: \(share)")
+        #expect(share.trailing >= IconSelectorBar.height - 0.5,
+                "the trailing strip fell under one bubble: \(share)")
+    }
+
+    /// ⚠️ **AND THE CEILING IS NOT A RATCHET.** The pill's cap was written on
+    /// every pass whatever the leading view was, so opening the timeline capped
+    /// a pill that is not even in the bar at the action bar's width — and it
+    /// stayed there once the band closed, because the next measurement was
+    /// itself taken through the cap. Every pass could lower it; none could
+    /// raise it.
+    @Test func openingTheTimelineDoesNotSqueezeTheSongPillForGood() async throws {
+        let screen = open(Self.items(1, videoAt: 0))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        screen.window.layoutIfNeeded()
+        let before = try #require(screen.editor.debugBarShare).leadingWants
+
+        choose(Band.timeline, on: screen)
+        screen.window.layoutIfNeeded()
+        choose(Band.timeline, on: screen)
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugSoundPillCap >= before - 0.5,
+                "the pill is capped at \(screen.editor.debugSoundPillCap) for a \(before)pt want")
+        #expect(screen.editor.debugSoundPillWidth >= before - 0.5,
+                "the pill is drawn \(screen.editor.debugSoundPillWidth) wide and wants \(before)")
+    }
+
+    /// ⚠️ **A STRIP THAT GROWS IS A STRIP THAT MUST BE HANDED OVER AGAIN.**
+    /// Swiping onto a video gives the strip one more category — 38pt of
+    /// intrinsic width — and nothing re-handed the bar, so UIKit went on
+    /// honouring a fit it decided for five.
+    @Test func swipingOntoAVideoHandsTheBarItsItemsAgain() async throws {
+        let screen = open(Self.items(2, videoAt: 1))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        screen.window.layoutIfNeeded()
+        let before = screen.editor.debugHandoverWidths.count
+
+        screen.editor.debugScrollToPage(1)
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.editor.debugHandoverWidths.count > before,
+                "the strip gained a category and the bar was never told")
+        let share = try #require(screen.editor.debugBarShare)
+        #expect(abs(share.leading + share.trailing - share.available) < 0.5,
+                "and the share did not follow: \(share)")
+    }
+
     @Test func theSoundPillLeadsTheCategoryStripInTheToolbar() {
         let screen = open(Self.items(1))
 

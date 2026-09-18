@@ -77,9 +77,17 @@ struct ToolbarGeometry: Equatable {
             platter: leadingPlatter.width - leading.width,
             gap: trailingPlatter.minX - leadingPlatter.maxX
         )
-        guard (0...64).contains(geometry.margin),
-              (0...24).contains(geometry.platter),
-              (0...64).contains(geometry.gap)
+        // ⚠️ **THE BANDS REFUSE A MID-LAYOUT READ, WHICH MEANS THEY MUST NOT
+        // ADMIT ZERO.** They used to start at 0 on all three, and a pass caught
+        // before the platters had grown answers platter ≈ 0 and gap ≈ 0 — which
+        // passed, and made `available` up to 20pt LARGER than the bar really
+        // has. `barGeometry` never reverts, so one such reading poisons every
+        // later share for the life of the screen and the two groups overrun.
+        // A real bar's platter is the 10pt measured on every device this ships
+        // to, and its gap is 20; the floors are half of each.
+        guard (8...64).contains(geometry.margin),
+              (4...24).contains(geometry.platter),
+              (8...64).contains(geometry.gap)
         else { return nil }
         return geometry
     }
