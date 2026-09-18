@@ -45,5 +45,14 @@ final class PostDraft {
     /// when the draft goes.
     let soundtrackFiles = TempFileBag()
 
+    /// What the camera captured for this post — photographs, clips and the
+    /// video a take is stitched into.
+    ///
+    /// ⚠️ **HERE FOR `soundtrackFiles`' REASON.** The editor and the
+    /// finalisation screen both read these files, and publishing reads them
+    /// last; the folder is removed when the draft goes, which is when the sheet
+    /// does. See `CaptureFolder`.
+    let captureFolder = CaptureFolder()
+
     init() {}
 }
