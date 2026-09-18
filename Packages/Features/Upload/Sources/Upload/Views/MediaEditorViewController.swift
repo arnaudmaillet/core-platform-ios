@@ -3958,9 +3958,16 @@ extension MediaEditorViewController {
         ) {
             departing.alpha = 0
             departing.transform = BandPop.collapsedTransform
-        } completion: { _ in
+        } completion: { [weak self] _ in
             departing.alpha = 1
             departing.transform = .identity
+            // ⚠️ **NOT IF THE BAND HAS TAKEN IT BACK.** Tenants are built once
+            // and shown again: reopened within the departure's 0.17s — Effects,
+            // Filters, Effects — a tenant was back in the band when this ran,
+            // and was pulled out of it, leaving an open band holding nothing
+            // under a chosen icon. The camera's option rows had the same race
+            // (found by review there first).
+            guard departing !== self?.band.content else { return }
             departing.removeFromSuperview()
         }
     }

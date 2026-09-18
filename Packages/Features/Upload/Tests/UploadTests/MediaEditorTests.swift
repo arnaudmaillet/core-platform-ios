@@ -385,6 +385,34 @@ struct MediaEditorTests {
     /// ⚠️ **A TENANT THAT NAMES NOTHING STILL ARRIVES.** A screen where six
     /// bands ripple and the seventh blinks on reads as the seventh being
     /// broken, so anything without named elements pops as one piece.
+    /// ⚠️ **A TENANT TAKEN BACK DURING ITS DEPARTURE STAYS IN THE BAND.**
+    /// Effects, Filters, Effects inside the 0.17s the first one takes to leave:
+    /// its departure's completion used to pull it out of the band it had just
+    /// been shown in again.
+    @Test func aTenantReopenedWhileLeavingStaysInTheBand() async throws {
+        let screen = open(Self.items(2))
+        try await settle(until: { !Self.pages(in: screen.window).isEmpty })
+        choose("Effects", on: screen)
+        let effects = try #require(screen.editor.debugBand.content, "guard: effects opened")
+
+        let outs = screen.editor.debugPopOuts
+        choose(Band.filters, on: screen)
+        try #require(screen.editor.debugPopOuts == outs + 1, "guard: nothing departed — motion is reduced")
+        choose("Effects", on: screen)
+        // ⚠️ **UNTIL EVERY CURVE ON IT HAS ENDED, NOT A FIXED BREATH.** The
+        // departure's completion is what used to pull the tenant out, and a
+        // simulator with slow animations on runs the 0.17s for ten times as
+        // long: a half-second wait passed with the defect still in.
+        for _ in 0..<600 where !(effects.layer.animationKeys() ?? []).isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        try #require((effects.layer.animationKeys() ?? []).isEmpty, "guard: the curves never ended")
+
+        #expect(screen.editor.debugBand.content === effects, "the band holds \(String(describing: screen.editor.debugBand.content))")
+        #expect(effects.superview != nil, "the tenant was pulled out of the band it is showing in")
+    }
+
     @Test func aTenantWithNoNamedElementsPopsAsOnePiece() async throws {
         let screen = open(Self.items(1))
         try await settle(until: { !Self.pages(in: screen.window).isEmpty })
