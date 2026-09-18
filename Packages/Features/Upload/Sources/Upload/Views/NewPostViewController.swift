@@ -167,6 +167,33 @@ final class NewPostViewController: UIViewController {
     /// The clip the strip is currently playing, and the surface it plays in.
     /// Both nil while nothing plays, which is every selection whose cover is a
     /// photograph.
+    /// What each clip tile is doing, by item id — see
+    /// `NewPostMediaCell.ClipState` and `clipTileTapped`.
+    ///
+    /// ⚠️ **THE SCREEN OWNS THIS, NOT THE CELL.** A list cell is rebuilt and
+    /// recycled without asking, and a state kept inside one would reset itself
+    /// every time the author changed a switch three rows down.
+    private var clipStates: [String: NewPostMediaCell.ClipState] = [:]
+
+    /// The frames each clip's sheet cycles, once they have been sampled.
+    ///
+    /// ⚠️ **SIX FRAMES AT THE TILE'S OWN HEIGHT IS 0.6MB A CLIP**, and the
+    /// selection is capped at twenty: twelve megabytes in the worst case, held
+    /// for a screen the author is looking at and freed with it. Sampling them at
+    /// the tile's PIXEL size would be four times that for detail nobody reads
+    /// in a moving 117pt thumbnail.
+    private var clipSheets: [String: [UIImage]] = [:]
+
+    /// The sampling in flight for each clip.
+    ///
+    /// ⚠️ **PER CLIP, NOT ONE COUNTER FOR THE STRIP.** `previewLoads` is global
+    /// because there is one player and a second load abandons the first; these
+    /// are independent reads of different files, and a shared counter made each
+    /// one cancel the last. Measured: with three clips only the final tile ever
+    /// got its frames, and the two before it sat on a still that looked exactly
+    /// like a sheet waiting to arrive.
+    private var sheetSamples: [String: Int] = [:]
+
     private var playingCoverID: String?
     private var coverSurface: VideoRenderView?
     /// Bumped on every start and every stop, so a load that was overtaken while
@@ -348,6 +375,17 @@ final class NewPostViewController: UIViewController {
             cell.show(publishOrder, coverID: coverID, edits: edits) { [weak self] id, size in
                 await self?.library.thumbnail(for: id, size: size)
             }
+            cell.onTileTapped = { [weak self] id in self?.clipTileTapped(id) }
+            // ⚠️ **AFTER EVERY BUILD, BECAUSE A BUILD FORGETS** — `show` tears
+            // every tile down and puts new ones up, so the state each clip was
+            // in, and the frames it had, live here rather than in the cell.
+            //
+            // ⚠️ **AND WITH THE CELL IN HAND, NOT LOOKED UP.** Inside its own
+            // registration block the cell is not yet answerable by
+            // `cellForItem(at:)` — the `strip` accessor returns nil there, so a
+            // lookup silently skipped the dressing on every build and every
+            // tile came up in whatever state the cell was born in.
+            dressTheClipTiles(on: cell)
         }
         let cover = UICollectionView.CellRegistration<NewPostButtonCell, Row> { [weak self] cell, _, _ in
             guard let self else { return }
@@ -610,13 +648,142 @@ final class NewPostViewController: UIViewController {
         // would fire from inside the redraw, and a stop asked for there arrives
         // while the row is half torn down.
         stopCover()
+        // ⚠️ **A NEW COVER RESETS EVERY CLIP TILE TO ITS DEFAULT.** The cover is
+        // the tile that rests, so changing which one it is changes what two
+        // tiles should be doing — and keeping the old answers would leave the
+        // former cover resting for no reason anyone could see. The author has
+        // just changed what the post IS; the strip re-deriving its own resting
+        // state is the least surprising thing it can do.
+        clipStates.removeAll()
         reconfigure([.media, .cover])
         playCover()
     }
 
     // MARK: - The cover, moving
 
-    /// Plays the cover in the strip, when the cover is a clip.
+    /// Which clip tile holds the player, and what every other one is doing.
+    ///
+    /// ⚠️ **EVERY CLIP TILE IS INTERACTIVE; EXACTLY ONE OF THEM CAN MOVE.**
+    /// Asked for as "if the thumbnail is a video, make it interactive, the video
+    /// plays by default, a tap shows the spritesheet, another tap restarts it
+    /// from the beginning" — and for the COVER, "the spritesheet state by
+    /// default, and the Cover badge only in that state".
+    ///
+    /// The one player is why the default cannot be taken literally for every
+    /// tile at once: each clip is a full `VideoExportPlan` built into an
+    /// `AVComposition`, `MediaPreviewPlayer`'s pool is sized ONE, and asking it
+    /// for a second surface evicts the first. So the rule is "the first clip
+    /// that wants to play, gets to" — which IS every clip in the case that
+    /// actually happens (one), and degrades to the sheet for the rest rather
+    /// than to a frozen frame. That fallback is the reason the sheet is
+    /// installed UNDER the surface and not instead of it.
+    private func defaultClipState(for id: String) -> NewPostMediaCell.ClipState {
+        // ⚠️ **THE COVER RESTS.** It is the tile wearing the word "Cover", and
+        // the word is what the author is on this screen to check; a badge over
+        // moving film is the noise the editor keeps its own chrome off the
+        // picture to avoid.
+        id == coverID ? .sheet : .playing
+    }
+
+    /// A tap on a clip's tile: the film, or its frames.
+    private func clipTileTapped(_ id: String) {
+        let wants: NewPostMediaCell.ClipState = clipStates[id] == .playing ? .sheet : .playing
+        clipStates[id] = wants
+        if wants == .playing {
+            // ⚠️ **ONE AT A TIME, SO THE OTHERS YIELD.** Not a courtesy: the
+            // seam has one surface, and a tile left claiming `.playing` would
+            // keep asking for a player that is no longer its.
+            for other in clipStates.keys where other != id { clipStates[other] = .sheet }
+        }
+        dressTheClipTiles()
+        // ⚠️ **FROM THE BEGINNING, WHICH IS WHAT `stopCover` BUYS.** Asked for
+        // in those words. A tap that only un-paused would resume wherever the
+        // film happened to be, and the author who taps a thumbnail twice is
+        // asking to watch it again, not to carry on.
+        stopCover()
+        playCover()
+    }
+
+    /// States every clip tile, and samples the frames the ones at rest need.
+    private func dressTheClipTiles() {
+        guard let strip else { return }
+        dressTheClipTiles(on: strip)
+    }
+
+    private func dressTheClipTiles(on strip: NewPostMediaCell) {
+        for item in publishOrder where item.isVideo {
+            let state = clipStates[item.id] ?? defaultClipState(for: item.id)
+            clipStates[item.id] = state
+            if let frames = clipSheets[item.id] {
+                strip.showSheet(frames, for: item.id)
+            } else {
+                sampleSheet(for: item.id)
+            }
+            strip.setClipState(state, for: item.id)
+        }
+    }
+
+    /// Reads a handful of frames across the clip and hands them to its tile.
+    ///
+    /// ⚠️ **SAMPLED ONCE PER CLIP AND KEPT.** `frames(of:atSourceSeconds:…)` is
+    /// the expensive call on this path — the timeline's own strip is built from
+    /// it — and a sheet re-read on every state change would pay for it on every
+    /// tap.
+    ///
+    /// ⚠️ **AND THE FRAMES WEAR THE AUTHOR'S LOOK.** A sheet in colour under a
+    /// clip the author made mono is the same defect this strip already shipped
+    /// once for its stills.
+    private func sampleSheet(for id: String) {
+        guard clipSheets[id] == nil else { return }
+        let sample = (sheetSamples[id] ?? 0) + 1
+        sheetSamples[id] = sample
+        let declared: Double
+        if case .video(let seconds) = items.first(where: { $0.id == id })?.kind {
+            declared = seconds
+        } else {
+            declared = 0
+        }
+        let look = (edits[id] ?? .untouched).look
+        Task { [weak self] in
+            guard let self, let file = await library.videoFile(for: id) else { return }
+            let real = (try? await AVURLAsset(url: file).load(.duration).seconds) ?? declared
+            let length = real.isFinite && real > 0 ? real : declared
+            guard length > 0 else { return }
+            // Evenly across the film, skipping its very first and last moments:
+            // a clip's opening frame is the one that is routinely black.
+            let count = Self.sheetFrameCount
+            let moments = (0..<count).map { index in
+                length * (Double(index) + 0.5) / Double(count)
+            }
+            let sampled = await preview.frames(
+                of: file, atSourceSeconds: moments, height: Self.sheetFrameHeight, spacing: 0
+            )
+            guard sheetSamples[id] == sample, !sampled.isEmpty else { return }
+            let ordered = moments.compactMap { sampled[$0] }
+            guard !ordered.isEmpty else { return }
+            let dressed = await Task.detached(priority: .utility) {
+                ordered.compactMap { frame -> UIImage? in
+                    guard let source = CIImage(image: frame) else { return frame }
+                    let looked = FrameLookRenderer.apply(look, to: source, time: 0)
+                    guard let cg = EditingRenderContext.shared.createCGImage(looked, from: source.extent)
+                    else { return frame }
+                    return UIImage(cgImage: cg, scale: frame.scale, orientation: frame.imageOrientation)
+                }
+            }.value
+            guard sheetSamples[id] == sample, !dressed.isEmpty else { return }
+            clipSheets[id] = dressed
+            strip?.showSheet(dressed, for: id)
+            strip?.setClipState(clipStates[id] ?? defaultClipState(for: id), for: id)
+        }
+    }
+
+    /// ⚠️ **SIX, AND AT THE TILE'S POINT HEIGHT.** See `clipSheets` for the
+    /// arithmetic: this is the number that keeps a twenty-clip selection inside
+    /// twelve megabytes of decoded frames.
+    private static let sheetFrameCount = 6
+    private static let sheetFrameHeight: CGFloat = 208
+
+    /// Plays the clip whose tile is the one holding the player.
     ///
     /// ⚠️ **ONE PLAYER, ON THE COVER, AND ONLY WHEN THE COVER IS A CLIP.** The
     /// obvious reading of "the thumbnails show a still for a video" is that
@@ -647,9 +814,15 @@ final class NewPostViewController: UIViewController {
     /// and giving it one would be a second feature.
     private func playCover() {
         guard isOnScreen else { return }
-        guard let id = coverID, items.first(where: { $0.id == id })?.isVideo == true else {
-            return stopCover()
+        // ⚠️ **PUBLISH ORDER DECIDES, SO THE ANSWER IS STABLE.** `clipStates` is
+        // a dictionary and its order is not; picking "a clip that wants to
+        // play" from it would hand the player to a different tile on different
+        // runs, and the author would see a different thumbnail moving each time
+        // they came back to the screen.
+        let wanting = publishOrder.first {
+            $0.isVideo && (clipStates[$0.id] ?? defaultClipState(for: $0.id)) == .playing
         }
+        guard let id = wanting?.id else { return stopCover() }
         // ⚠️ **LAID OUT FIRST, OR THERE IS NO TILE TO PLAY ON.** `viewDidAppear`
         // can run before the list has dequeued its first cell — the strip is a
         // cell like any other — and `cellForItem` answers nil for a row that has

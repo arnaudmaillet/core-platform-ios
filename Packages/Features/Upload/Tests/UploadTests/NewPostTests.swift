@@ -85,9 +85,26 @@ struct NewPostTests {
         func seek(
             toSeconds seconds: Double, in surface: VideoRenderView, toleranceSeconds: Double
         ) {}
+        /// ⚠️ **IT HAS TO ANSWER NOW: THE SHEETS ARE BUILT FROM THIS.** Every
+        /// clip tile samples a few frames for the preview it falls back to, and
+        /// a stub answering nothing would leave every tile without one — so the
+        /// whole state machine would read as working while nothing was ever
+        /// drawn. Each frame is a distinct grey, so a test can tell one from
+        /// another.
+        private(set) var frameRequests: [[Double]] = []
         func frames(
             of file: URL, atSourceSeconds seconds: [Double], height: CGFloat, spacing: Double
-        ) async -> [Double: UIImage] { [:] }
+        ) async -> [Double: UIImage] {
+            frameRequests.append(seconds)
+            return Dictionary(uniqueKeysWithValues: seconds.enumerated().map { index, second in
+                let shade = CGFloat(index + 1) / CGFloat(seconds.count + 1)
+                let frame = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 20)).image { context in
+                    UIColor(white: shade, alpha: 1).setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 12, height: 20))
+                }
+                return (second, frame)
+            })
+        }
         @discardableResult
         func setLiveLook(_ look: FrameLook, in surface: VideoRenderView) -> Bool { true }
         func setMuted(_ muted: Bool, in surface: VideoRenderView) {
@@ -151,6 +168,15 @@ struct NewPostTests {
 
         /// Every video the publish loop asked for a file for, in order.
         private(set) var videoRequests: [String] = []
+
+        /// Forgets what has been asked for so far.
+        ///
+        /// ⚠️ **THE STRIP READS CLIPS TOO NOW.** Every clip tile samples a few
+        /// frames for the sheet it falls back to, so "which files did this
+        /// screen open" stopped being the same question as "which files did the
+        /// PUBLISH open". Clearing the record is what keeps the second one
+        /// exact, rather than asserting a superset and calling it an order.
+        func forgetVideoRequests() { videoRequests = [] }
 
         /// Makes `videoFile` answer nothing — how "a clip that cannot be read
         /// stops the publish" is told apart from "it silently shrinks it".
@@ -492,6 +518,12 @@ struct NewPostTests {
     @Test func aVideoIsPublishedAlongsideThePhotosInCarouselOrder() async throws {
         let screen = open(Self.items(4, videosAt: [1, 2]))
 
+        // ⚠️ **THE STRIP HAS ALREADY OPENED BOTH CLIPS.** Every clip tile samples
+        // a few frames for the sheet it falls back to, so what this screen has
+        // read is no longer what the PUBLISH read. Cleared, so the assertion
+        // below stays exact rather than becoming a superset wearing the word
+        // "order".
+        screen.library.forgetVideoRequests()
         screen.post.debugTapPost()
         // ⚠️ WAITING ON THE HAND-BACK, NOT ON THE COMPOSER. `settle(until:)` takes
         // a SYNCHRONOUS condition and the composer is an actor, so reading its
@@ -505,8 +537,13 @@ struct NewPostTests {
                 "in the order they were chosen: \(calls.first?.kinds ?? [])")
         #expect(screen.library.publishedIDs == ["photo-0", "photo-3"],
                 "only the photographs are fetched as images")
-        #expect(screen.library.videoRequests == ["video-1", "video-2"],
-                "and the clips are fetched as files")
+        // ⚠️ **A SET, NOT A SEQUENCE, AND THE ORDER IS PINNED ABOVE.** The strip
+        // samples frames for every clip tile on its own schedule, so reads from
+        // the sheet land among the publish's whenever they finish. The claim
+        // that matters — that the clips go in the order they were chosen — is
+        // the `kinds` assertion above, which reads what the composer was handed.
+        #expect(Set(screen.library.videoRequests).isSuperset(of: ["video-1", "video-2"]),
+                "the clips were not fetched as files: \(screen.library.videoRequests)")
     }
 
     /// ⚠️ **A URL IS NOT A VIDEO, AND ONLY OPENING IT SAYS SO.** `PostComposer`
@@ -707,12 +744,13 @@ struct NewPostTests {
 
     // MARK: - The cover, moving
 
-    /// **ONE PLAYER, ON THE COVER, AND ONLY WHEN THE COVER IS A CLIP.**
+    /// **ONE PLAYER, ON ONE CLIP, WHATEVER WAS CHOSEN.**
     ///
-    /// Three clips are chosen here on purpose: "the cover plays" is satisfied
-    /// just as well by a strip that starts every tile, and the count is the only
-    /// thing that can tell those apart.
-    @Test func theCoverClipPlaysMutedOnItsOwnTileAndNothingElseDoes() async throws {
+    /// Three clips are chosen here on purpose: "a clip plays" is satisfied just
+    /// as well by a strip that starts every tile, and the count is the only
+    /// thing that can tell those apart. The cover among them rests, so the one
+    /// that plays is the next in publish order.
+    @Test func oneClipPlaysMutedOnItsOwnTileAndNothingElseDoes() async throws {
         let screen = open(Self.items(3, videosAt: [0, 1, 2]))
         appear(screen)
         // Silencing is the LAST thing a cover load does, so waiting on it means
@@ -725,13 +763,12 @@ struct NewPostTests {
         let strip = try #require(Self.strips(in: screen.window).first)
         #expect(screen.preview.plans.count == 1, "one clip moves, whatever was chosen")
         #expect(screen.preview.boundCount == 1, "exactly one surface holds a player")
-        #expect(screen.library.videoRequests == ["video-0"],
-                "the other two clips were never even read: \(screen.library.videoRequests)")
         let started = try #require(screen.preview.plans.first)
-        // What was ASKED FOR: the cover's own file, in the cover's own tile.
-        #expect(started.plan.sourceURL == screen.library.vended["video-0"])
-        #expect(strip.debugSurfaceTileID == "video-0",
-                "the surface sits on the cover's tile: \(strip.debugSurfaceTileID ?? "nothing")")
+        // What was ASKED FOR: one clip's file, in that clip's own tile. It is
+        // `video-1` because `video-0` is the cover and the cover rests.
+        #expect(started.plan.sourceURL == screen.library.vended["video-1"])
+        #expect(strip.debugSurfaceTileID == "video-1",
+                "the surface sits on \(strip.debugSurfaceTileID ?? "nothing")")
         #expect(started.surface === strip.debugVideoSurface,
                 "the seam was handed the surface the tile is hosting")
         // ⚠️ SILENCED EXPLICITLY, AND AFTER THE ITEM IS IN. `MediaPreviewPlayer`
@@ -747,24 +784,156 @@ struct NewPostTests {
     /// The witness. Without it, a seam that played nothing at all — a library
     /// answering nil, a surface never found — would satisfy every "stops"
     /// assertion below and read as careful bookkeeping.
-    @Test func aPhotographCoverAsksForNothing() async throws {
-        let screen = open(Self.items(3, videosAt: [1, 2]))
+    @Test func aStripWithNoFilmInItAsksForNothing() async throws {
+        let screen = open(Self.items(3))
         appear(screen)
         try await breathe()
         screen.window.layoutIfNeeded()
 
         let strip = try #require(Self.strips(in: screen.window).first)
-        #expect(screen.preview.plans.isEmpty, "the cover is a photograph; nothing moves")
+        #expect(screen.preview.plans.isEmpty, "three photographs; nothing moves")
         #expect(screen.library.videoRequests.isEmpty,
                 "not even read: \(screen.library.videoRequests)")
         #expect(screen.preview.boundCount == 0)
         #expect(strip.debugSurfaceTileID == nil, "no tile wears a video surface")
     }
 
+    /// ⚠️ **THE COVER RESTS ON ITS FRAMES AND THE NEXT CLIP PLAYS.** Asked for:
+    /// a clip tile is interactive and plays by default, and the COVER's default
+    /// is its frames instead — it is the tile wearing the word the author is
+    /// here to check, and a label over moving film is noise. With one player,
+    /// that also settles who gets it: the first clip in publish order that
+    /// wants to play.
+    @Test func theCoverRestsOnItsFramesWhileTheNextClipPlays() async throws {
+        let screen = open(Self.items(3, videosAt: [0, 2]))
+        appear(screen)
+        try await settle(until: { screen.preview.plans.count == 1 })
+        screen.window.layoutIfNeeded()
+
+        let strip = try #require(Self.strips(in: screen.window).first)
+        #expect(strip.debugSurfaceTileID == "video-2",
+                "the player went to \(strip.debugSurfaceTileID ?? "nothing")")
+        #expect(strip.debugCoverBadgeIsShowing(for: "video-0"), "the resting cover lost its word")
+        #expect(!strip.debugCoverBadgeIsShowing(for: "video-2"), "a tile that is not the cover wears the word")
+    }
+
+    /// ⚠️ **A TAP TAKES THE FILM OFF, AND A SECOND ONE STARTS IT AGAIN FROM THE
+    /// BEGINNING.** Asked for in those words. Not a pause: an author who taps a
+    /// thumbnail twice is asking to watch it again, not to carry on from
+    /// wherever it happened to be.
+    @Test func tappingAClipShowsItsFramesAndTappingAgainRestartsIt() async throws {
+        let screen = open(Self.items(2, videosAt: [1]))
+        appear(screen)
+        try await settle(until: { screen.preview.plans.count == 1 })
+        screen.window.layoutIfNeeded()
+        let strip = try #require(Self.strips(in: screen.window).first)
+        try #require(strip.debugSurfaceTileID == "video-1", "guard: it started")
+
+        strip.debugTapTile("video-1")
+        try await breathe()
+
+        #expect(strip.debugSurfaceTileID == nil, "the surface stayed over a tile that stopped")
+        #expect(screen.preview.stopped.count == 1, "the player was not given back")
+        #expect(strip.debugClipState(for: "video-1") == .sheet)
+
+        strip.debugTapTile("video-1")
+        try await settle(until: { screen.preview.plans.count == 2 })
+
+        #expect(screen.preview.plans.count == 2, "a second item — the film starts over")
+        #expect(screen.preview.landings.last == VideoLoadLanding(seconds: 0), "and from the beginning")
+        #expect(strip.debugSurfaceTileID == "video-1")
+    }
+
+    /// ⚠️ **THE WORD IS FOR A TILE AT REST.** Asked for: show "Cover" only while
+    /// that thumbnail is on its frames. A label over moving film is the noise
+    /// the editor keeps its own chrome off the picture to avoid — and it comes
+    /// back the moment the film stops.
+    @Test func theCoversWordGoesWhileItsFilmRunsAndComesBackAfter() async throws {
+        let screen = open(Self.items(2, videosAt: [0]))
+        appear(screen)
+        try await breathe()
+        screen.window.layoutIfNeeded()
+        let strip = try #require(Self.strips(in: screen.window).first)
+        try #require(strip.debugClipState(for: "video-0") == .sheet, "guard: the cover rests")
+        #expect(strip.debugCoverBadgeIsShowing(for: "video-0"), "a resting cover with no word")
+
+        strip.debugTapTile("video-0")
+        try await settle(until: { screen.preview.plans.count == 1 })
+
+        #expect(strip.debugClipState(for: "video-0") == .playing, "the tap did not start it")
+        #expect(!strip.debugCoverBadgeIsShowing(for: "video-0"), "the word stayed over the film")
+
+        strip.debugTapTile("video-0")
+        try await breathe()
+
+        #expect(strip.debugCoverBadgeIsShowing(for: "video-0"), "and it did not come back")
+    }
+
+    /// ⚠️ **A FALLBACK HOLDS STILL.** The sheet under a playing surface is there
+    /// for the moment before the first frame lands, and for the load that never
+    /// arrives — left cycling it would be a second picture changing behind an
+    /// opaque one, for nobody. It runs on the tiles that are AT REST.
+    @Test func theFallbackUnderTheFilmHoldsStillWhileTheFilmRuns() async throws {
+        let screen = open(Self.items(3, videosAt: [0, 2]))
+        appear(screen)
+        try await settle(until: { screen.preview.plans.count == 1 })
+        screen.window.layoutIfNeeded()
+        let strip = try #require(Self.strips(in: screen.window).first)
+        // ⚠️ **REQUIRED, NOT WAITED FOR AND HOPED.** `settle(until:)` returns
+        // when it gives up as well as when it succeeds, so a sheet that never
+        // arrived would fall through to the assertions below and fail there
+        // saying something else entirely. It did: a shared staleness counter
+        // let each clip's sampling cancel the one before it, and what this
+        // read as was "the frames are frozen".
+        try await settle(until: { strip.debugSheetFrameCount(for: "video-0") > 0 })
+        try await settle(until: { strip.debugSheetFrameCount(for: "video-2") > 0 })
+        try #require(strip.debugSheetFrameCount(for: "video-0") > 0, "the cover's frames never arrived")
+        try #require(strip.debugSheetFrameCount(for: "video-2") > 0, "the playing clip's frames never arrived")
+
+        #expect(strip.debugSheetIsCycling(for: "video-0"), "the resting cover's frames are frozen")
+        #expect(!strip.debugSheetIsCycling(for: "video-2"),
+                "the frames under the running film are cycling too")
+    }
+
+    /// ⚠️ **THE SHEET IS UNDER THE SURFACE, WHICH IS WHAT MAKES IT A FALLBACK.**
+    /// Asked for in those words. Over it, a tile would show sampled frames on
+    /// top of the film it sampled them from; under it, the frames are what shows
+    /// until the first real one lands — and if it never does.
+    @Test func theFramesSitUnderTheFilmTheyWereSampledFrom() async throws {
+        let screen = open(Self.items(2, videosAt: [1]))
+        appear(screen)
+        try await settle(until: { screen.preview.plans.count == 1 })
+        screen.window.layoutIfNeeded()
+        let strip = try #require(Self.strips(in: screen.window).first)
+        try await settle(until: { strip.debugSheetFrameCount(for: "video-1") > 0 })
+
+        // See the note in `theFallbackUnderTheFilmHoldsStillWhileTheFilmRuns`:
+        // a settle that gave up reads as a wrong answer rather than as no
+        // answer, so the count is required before it is judged.
+        try #require(strip.debugSheetFrameCount(for: "video-1") > 0, "the frames never arrived")
+        #expect(strip.debugSheetFrameCount(for: "video-1") > 1, "one frame is not a sheet")
+        #expect(strip.debugSheetIsUnderTheSurface(for: "video-1") == true,
+                "the sheet is over the film, or one of them is not installed")
+
+        // ⚠️ **AND AGAIN AFTER A ROUND TRIP, WHICH IS THE ORDER THAT CAN GO
+        // WRONG.** On the first play the sheet does not exist yet — it is
+        // sampled asynchronously and inserted underneath whatever is already
+        // there, so the layering comes out right by accident. It is the SECOND
+        // play, over a tile that already has its frames, where the surface has
+        // to be put above them by name rather than at an index.
+        strip.debugTapTile("video-1")
+        try await breathe()
+        strip.debugTapTile("video-1")
+        try await settle(until: { screen.preview.plans.count == 2 })
+
+        #expect(strip.debugSheetIsUnderTheSurface(for: "video-1") == true,
+                "the second play put the film under its own fallback")
+    }
+
     /// ⚠️ **A PUSH IS A DISAPPEARANCE TOO**, which is why the stop lives in
     /// `viewWillDisappear` rather than behind an `isMovingFromParent` guard.
-    @Test func leavingTheScreenStopsTheCover() async throws {
-        let screen = open(Self.items(2, videosAt: [0]))
+    @Test func leavingTheScreenStopsThePlayingClip() async throws {
+        let screen = open(Self.items(2, videosAt: [1]))
         appear(screen)
         try await settle(until: { screen.preview.plans.count == 1 })
         screen.window.layoutIfNeeded()
@@ -780,8 +949,8 @@ struct NewPostTests {
     }
 
     /// Publishing builds an export over the very file the strip is playing.
-    @Test func postingStopsTheCover() async throws {
-        let screen = open(Self.items(2, videosAt: [0]))
+    @Test func postingStopsThePlayingClip() async throws {
+        let screen = open(Self.items(2, videosAt: [1]))
         appear(screen)
         try await settle(until: { screen.preview.plans.count == 1 })
         screen.window.layoutIfNeeded()
@@ -794,24 +963,34 @@ struct NewPostTests {
         #expect(strip.debugSurfaceTileID == nil)
     }
 
-    /// The cover row is a real control, and the player follows it.
-    @Test func changingTheCoverMovesThePlayerToTheNewClip() async throws {
+    /// The cover row is a real control, and the player follows it — AWAY from
+    /// the new cover.
+    ///
+    /// ⚠️ **THIS REVERSES THE DIRECTION IT WAS FIRST WRITTEN IN.** When the
+    /// cover was the only tile that could move, naming a clip as cover was how
+    /// you played it. The cover is now the tile that RESTS, so naming one is how
+    /// you stop it — and the player goes to the next clip that wants it. Both
+    /// readings are "the player follows the cover row"; only one of them is
+    /// what the author asked for.
+    @Test func changingTheCoverMovesThePlayerOffTheNewCover() async throws {
         let screen = open(Self.items(3, videosAt: [0, 2]))
         appear(screen)
         try await settle(until: { screen.preview.plans.count == 1 })
         screen.window.layoutIfNeeded()
+        try #require(Self.strips(in: screen.window).first?.debugSurfaceTileID == "video-2",
+                     "guard: the non-cover clip is the one playing")
 
         screen.post.debugSetCover("video-2")
         try await settle(until: { screen.preview.plans.count == 2 })
         screen.window.layoutIfNeeded()
 
         let strip = try #require(Self.strips(in: screen.window).first)
-        #expect(screen.preview.plans.count == 2, "the first clip stopped and the new one started")
         #expect(screen.preview.boundCount == 1, "not two players, one moved")
-        #expect(screen.preview.plans.last?.plan.sourceURL == screen.library.vended["video-2"])
-        #expect(strip.debugSurfaceTileID == "video-2",
-                "on the new cover's tile: \(strip.debugSurfaceTileID ?? "nothing")")
+        #expect(strip.debugSurfaceTileID == "video-0",
+                "the player stayed on the new cover: \(strip.debugSurfaceTileID ?? "nothing")")
+        #expect(screen.preview.plans.last?.plan.sourceURL == screen.library.vended["video-0"])
         #expect(screen.preview.plans.last?.surface === strip.debugVideoSurface)
+        #expect(strip.debugCoverBadgeIsShowing(for: "video-2"), "the new cover does not wear the word")
     }
 
     /// ⚠️ **THE RE-ENTRANCY PIN.** `viewDidAppear` runs again on every return to
@@ -819,8 +998,8 @@ struct NewPostTests {
     /// cover" is asked far more often than the cover changes. Asking twice for
     /// the same clip in the same rectangle must mint nothing: a second item over
     /// a bound player restarts the picture the author is watching.
-    @Test func askingTwiceForTheSameCoverBindsNothingFurther() async throws {
-        let screen = open(Self.items(2, videosAt: [0]))
+    @Test func askingTwiceForTheSameClipBindsNothingFurther() async throws {
+        let screen = open(Self.items(2, videosAt: [1]))
         appear(screen)
         try await settle(until: { screen.preview.plans.count == 1 })
         screen.window.layoutIfNeeded()

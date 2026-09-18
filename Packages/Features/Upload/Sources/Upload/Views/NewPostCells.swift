@@ -26,6 +26,11 @@ final class NewPostMediaCell: UICollectionViewListCell {
         /// filling always crops: the choice becomes visible on sight.
         static let width: CGFloat = (208 * 9 / 16).rounded()
         static let corner: CGFloat = 14
+        /// ⚠️ **EIGHT FRAMES A SECOND, WHICH IS A PREVIEW AND NOT A FILM.** The
+        /// sheet exists to say "this is a clip and this is roughly what is in
+        /// it"; at twenty-five frames a second it would need three times the
+        /// pictures to say the same thing, and each one is held decoded.
+        static let sheetSecondsPerFrame: Double = 0.125
     }
 
     /// ⚠️ A `CarouselScrollView`, NOT A PLAIN ONE: at its leading edge it
@@ -39,6 +44,27 @@ final class NewPostMediaCell: UICollectionViewListCell {
     /// The tiles by item id, so the cover can be found again without walking
     /// the row — the order is `publishOrder`'s, which changes under us.
     private var tiles: [String: UIImageView] = [:]
+    /// The sprite sheet each clip tile falls back to, by item id — built on
+    /// demand by the screen, kept here because the tile is what draws it.
+    ///
+    /// ⚠️ **UNDER THE SURFACE, OVER THE STILL** — asked for in those words. The
+    /// order inside a clip's tile is `still → sheet → surface → badges`, so a
+    /// tile that has lost the player (or never had it) shows moving frames
+    /// rather than a frozen one, and a surface that has not received a frame
+    /// yet shows the sheet through it rather than the still.
+    private var sheets: [String: UIImageView] = [:]
+    /// The "Cover" capsule, so it can be shown and hidden with the state.
+    private var coverBadges: [String: UIView] = [:]
+    /// Which tiles stand for a clip: the only ones that take a tap.
+    private var clips: Set<String> = []
+    /// What each clip tile was last told to be. ⚠️ **STORED, NOT INFERRED.**
+    /// Reading it back off `isAnimating` answers "playing" for a clip whose
+    /// frames have not been sampled yet, which is the state a test is most
+    /// likely to be asking about.
+    private var clipStates: [String: ClipState] = [:]
+
+    /// Told when a clip's tile is tapped — the screen owns what a tap means.
+    var onTileTapped: ((String) -> Void)?
 
     /// ⚠️ **ONE SURFACE, BUILT ONCE AND MOVED — NOT ONE PER TILE.** The strip
     /// holds up to twenty tiles and the screen plays exactly one of them (see
@@ -134,6 +160,10 @@ final class NewPostMediaCell: UICollectionViewListCell {
         // pushing frames at it.
         surrenderSurface()
         tiles.removeAll()
+        sheets.removeAll()
+        coverBadges.removeAll()
+        clips.removeAll()
+        clipStates.removeAll()
         for view in row.arrangedSubviews { view.removeFromSuperview() }
 
         let size = CGSize(width: Metrics.width * 2, height: Metrics.height * 2)
@@ -158,9 +188,17 @@ final class NewPostMediaCell: UICollectionViewListCell {
             picture.accessibilityLabel = Self.label(for: item, isCover: isCover)
 
             if isCover {
-                picture.addSubview(Self.badge(text: "Cover"))
+                let badge = Self.badge(text: "Cover")
+                picture.addSubview(badge)
+                coverBadges[item.id] = badge
             }
             if item.isVideo {
+                clips.insert(item.id)
+                picture.isUserInteractionEnabled = true
+                let tap = UITapGestureRecognizer(
+                    target: self, action: #selector(tileTapped)
+                )
+                picture.addGestureRecognizer(tap)
                 // ⚠️ **`video.fill`, NOT `video.slash.fill`.** The slash meant
                 // "this will not be posted" and was true for as long as the
                 // publish loop dropped videos. It no longer is, and a slashed
@@ -188,6 +226,95 @@ final class NewPostMediaCell: UICollectionViewListCell {
             }
         }
     }
+
+    @objc private func tileTapped(_ tap: UITapGestureRecognizer) {
+        guard let tile = tap.view,
+              let id = tiles.first(where: { $0.value === tile })?.key,
+              clips.contains(id)
+        else { return }
+        onTileTapped?(id)
+    }
+
+    /// What a clip's tile is doing right now.
+    enum ClipState: Equatable {
+        /// The film is running in the surface, over its sheet.
+        case playing
+        /// The sheet is what shows: sampled frames cycling, or the still until
+        /// they arrive.
+        case sheet
+    }
+
+    /// Draws `id`'s tile in `state`.
+    ///
+    /// ⚠️ **THE "Cover" CAPSULE BELONGS TO THE SHEET STATE, AND THIS REVERSES
+    /// AN EARLIER DECISION.** The note that stood here argued the badge must
+    /// survive playback — "the cover badge would vanish the moment the cover
+    /// started playing, on the one tile that needs it most". Asked for the
+    /// other way: the word is there to name a tile at rest, and a label over
+    /// moving film is the same noise the editor's own chrome is kept off the
+    /// picture to avoid. The badge comes back the moment the film stops.
+    func setClipState(_ state: ClipState, for id: String) {
+        guard clips.contains(id) else { return }
+        let sheet = sheets[id]
+        sheet?.isHidden = false
+        switch state {
+        case .playing:
+            // ⚠️ **HELD ON ONE FRAME, NOT RUNNING UNDER THE FILM.** The sheet is
+            // under the surface as a FALLBACK — what shows through until the
+            // first frame lands (`videoSurface(over:)`'s note on
+            // `paintsOpaqueGround`) and if the load never arrives. Left
+            // animating it would be a second picture changing sixty times a
+            // minute behind an opaque one, for nobody.
+            sheet?.stopAnimating()
+        case .sheet:
+            sheet?.startAnimating()
+        }
+        clipStates[id] = state
+        coverBadges[id]?.isHidden = state == .playing
+        tiles[id]?.accessibilityHint = state == .playing
+            ? "Double-tap to show this clip's frames"
+            : "Double-tap to play this clip"
+    }
+
+    /// Hands `id`'s tile the frames it falls back to.
+    ///
+    /// ⚠️ **`animationImages`, NOT A BAKED GRID.** The map's markers carry a
+    /// real sprite sheet because their frames arrive as one downloaded asset
+    /// (`PinCardView`); here the frames are sampled from a file on the device
+    /// and are already separate images, so composing a grid and slicing it back
+    /// would be work with a picture at both ends of it. UIKit's own cycling is
+    /// the same thing with none of that.
+    func showSheet(_ frames: [UIImage], for id: String) {
+        guard clips.contains(id), let tile = tiles[id], !frames.isEmpty else { return }
+        let sheet = sheets[id] ?? {
+            let view = UIImageView()
+            view.contentMode = tile.contentMode
+            view.clipsToBounds = true
+            view.translatesAutoresizingMaskIntoConstraints = false
+            // ⚠️ **AT THE BOTTOM, SO THE SURFACE CAN GO ABOVE IT.** `insertSubview(at: 0)`
+            // puts it over the tile's own image and under everything else the
+            // tile holds; the surface is then inserted ABOVE this one by name
+            // rather than by index, which is what keeps the two in order
+            // however many times either is installed.
+            tile.insertSubview(view, at: 0)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: tile.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: tile.trailingAnchor),
+                view.topAnchor.constraint(equalTo: tile.topAnchor),
+                view.bottomAnchor.constraint(equalTo: tile.bottomAnchor)
+            ])
+            sheets[id] = view
+            return view
+        }()
+        sheet.animationImages = frames
+        sheet.animationDuration = Double(frames.count) * Metrics.sheetSecondsPerFrame
+        sheet.animationRepeatCount = 0
+        sheet.image = frames.first
+        sheet.startAnimating()
+    }
+
+    /// Whether `id`'s tile already has its frames.
+    func hasSheet(for id: String) -> Bool { sheets[id]?.animationImages?.isEmpty == false }
 
     /// Lays the video surface over the tile standing for `id` and hands it back,
     /// or nil when no tile stands for it.
@@ -223,7 +350,11 @@ final class NewPostMediaCell: UICollectionViewListCell {
         // badges would end up underneath, which is the whole thing the index
         // above exists to avoid.
         surface.translatesAutoresizingMaskIntoConstraints = false
-        tile.insertSubview(surface, at: 0)
+        if let sheet = sheets[id] {
+            tile.insertSubview(surface, aboveSubview: sheet)
+        } else {
+            tile.insertSubview(surface, at: 0)
+        }
         NSLayoutConstraint.activate([
             surface.leadingAnchor.constraint(equalTo: tile.leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: tile.trailingAnchor),
@@ -263,6 +394,10 @@ final class NewPostMediaCell: UICollectionViewListCell {
         onSurfaceLost = nil
         shown = []
         tiles.removeAll()
+        sheets.removeAll()
+        coverBadges.removeAll()
+        clips.removeAll()
+        clipStates.removeAll()
     }
 
     #if DEBUG
@@ -278,6 +413,34 @@ final class NewPostMediaCell: UICollectionViewListCell {
         return tiles.first { $0.value === host }?.key
     }
 
+    /// Internal for tests: what each clip tile is doing.
+    func debugClipState(for id: String) -> ClipState? { clipStates[id] }
+    /// Internal for tests: whether `id`'s sheet is actually cycling — the
+    /// drawing, next to the state above.
+    func debugSheetIsCycling(for id: String) -> Bool { sheets[id]?.isAnimating == true }
+    /// Internal for tests: whether the cover's word is showing on `id`'s tile.
+    func debugCoverBadgeIsShowing(for id: String) -> Bool {
+        guard let badge = coverBadges[id] else { return false }
+        return !badge.isHidden
+    }
+    /// Internal for tests: how many frames `id`'s sheet is cycling.
+    func debugSheetFrameCount(for id: String) -> Int { sheets[id]?.animationImages?.count ?? 0 }
+    /// Internal for tests: whether the sheet is UNDER the surface on `id`'s
+    /// tile — the fallback position, asked of the view order rather than
+    /// assumed from the call that installed them.
+    func debugSheetIsUnderTheSurface(for id: String) -> Bool? {
+        guard let tile = tiles[id], let sheet = sheets[id], surface.superview === tile else { return nil }
+        guard let sheetAt = tile.subviews.firstIndex(of: sheet),
+              let surfaceAt = tile.subviews.firstIndex(of: surface)
+        else { return nil }
+        return sheetAt < surfaceAt
+    }
+    /// Internal for tests: a tap on a clip's tile, through the routine the
+    /// recogniser calls — so a test drives the wiring and not a copy of it.
+    func debugTapTile(_ id: String) {
+        guard clips.contains(id) else { return }
+        onTileTapped?(id)
+    }
     /// Internal for tests: the surface itself, only while it is installed — so
     /// a test can say the seam was handed THIS one.
     var debugVideoSurface: VideoRenderView? { surface.superview == nil ? nil : surface }
