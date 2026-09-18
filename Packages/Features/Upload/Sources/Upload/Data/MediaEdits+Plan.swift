@@ -18,12 +18,12 @@ extension MediaEdits {
     /// against — the declared one can be wrong.
     func exportPlan(
         sourceURL: URL, fileSeconds: Double,
-        artwork: (any OverlayArtwork)?, includingOverlays: Bool
+        artwork: (any OverlayArtwork)?, includingOverlays: Bool, includingCrop: Bool = true
     ) -> VideoExportPlan {
         VideoExportPlan(
             sourceURL: sourceURL,
             segments: MediaTimelining.exportSegments(timeline, withinSource: fileSeconds),
-            finish: finish(includingOverlays: includingOverlays),
+            finish: finish(includingOverlays: includingOverlays, includingCrop: includingCrop),
             soundtrack: soundtrack,
             artwork: artwork
         )

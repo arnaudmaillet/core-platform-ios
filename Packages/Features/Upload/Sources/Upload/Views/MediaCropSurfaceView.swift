@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaPlayback
 import UIKit
 
 /// The shape a crop is held to.
@@ -99,6 +100,14 @@ final class MediaCropSurfaceView: UIView {
     private var isMirrored = false
 
     private let picture = UIImageView()
+    /// ⚠️ **A CLIP IS AIMED AT WHILE IT PLAYS.** The box used to be drawn over a
+    /// poster frame — still, and often the least representative frame of the
+    /// film — which is fine for a rectangle that is the same on every frame and
+    /// wrong for the author, who is framing a MOVING picture. Asked for as
+    /// *"problème lors de l'édition du recadrage d'une vidéo, la vidéo ne se
+    /// joue pas dans la fenêtre"*. The surface is laid by exactly the same
+    /// placement as the still beneath it, so the two cannot drift apart.
+    private let video = VideoRenderView()
     private let dimming = UIView()
     private let hole = CAShapeLayer()
     private let outline = CropFrameView()
@@ -122,6 +131,16 @@ final class MediaCropSurfaceView: UIView {
 
         picture.contentMode = .scaleToFill
         addSubview(picture)
+        // ⚠️ **`.resize`, TO MATCH `scaleToFill` EXACTLY.** The placement below
+        // sizes this view to the picture's own pixels and then turns and scales
+        // it; a gravity that preserved the aspect ratio would letterbox INSIDE
+        // that frame and the film would sit a few points off the still.
+        video.videoGravity = .resize
+        // Until the first composed frame lands there is nothing to show, and
+        // the still underneath is what the author should see.
+        video.paintsOpaqueGround = false
+        video.isHidden = true
+        addSubview(video)
 
         // ⚠️ **THE SCRIM IS THE GROUND, NOT BLACK.** It covers the picture outside
         // the box AND the bare margins beside it. A black scrim over a white ground
@@ -339,6 +358,22 @@ final class MediaCropSurfaceView: UIView {
         apply()
     }
 
+    /// The surface the clip plays on while its box is being aimed, and whether
+    /// it is showing at all.
+    var videoSurface: VideoRenderView { video }
+
+    func showsVideo(_ showing: Bool) {
+        video.isHidden = !showing
+    }
+
+    /// Internal for tests: whether the film is showing over the still, and
+    /// whether it is laid exactly where the still is.
+    var debugShowsVideo: Bool { !video.isHidden }
+    var debugVideoMatchesThePicture: Bool {
+        video.bounds == picture.bounds && video.center == picture.center
+            && video.transform == picture.transform
+    }
+
     private func apply() {
         picture.bounds = CGRect(origin: .zero, size: source)
         picture.center = placement.centre
@@ -353,6 +388,10 @@ final class MediaCropSurfaceView: UIView {
         picture.transform = CGAffineTransform(
             rotationAngle: MediaCropGeometry.radians(placement.angle)
         ).scaledBy(x: placement.isMirrored ? -placement.scale : placement.scale, y: placement.scale)
+        // The film is laid exactly as the still is — one statement, two views.
+        video.bounds = picture.bounds
+        video.center = picture.center
+        video.transform = picture.transform
 
         outline.frame = box
         hole.frame = bounds

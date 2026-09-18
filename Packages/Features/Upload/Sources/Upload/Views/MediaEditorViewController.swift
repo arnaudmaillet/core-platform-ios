@@ -1846,7 +1846,8 @@ final class MediaEditorViewController: UIViewController {
             // canvas draws as views: overlays, and so the art for their stickers.
             await preview.load(
                 edited.exportPlan(
-                    sourceURL: file, fileSeconds: fileSeconds, artwork: nil, includingOverlays: false
+                    sourceURL: file, fileSeconds: fileSeconds, artwork: nil, includingOverlays: false,
+                    includingCrop: !isCropping
                 ),
                 in: surface
             ) { [weak self] in
@@ -1961,13 +1962,15 @@ final class MediaEditorViewController: UIViewController {
     private var lastScrubbedSeconds: Double?
 
     /// The surface the settled page is playing in, if it is playing at all.
-    var playingSurface: VideoRenderView? {
-        guard let id = playingID, let index = items.firstIndex(where: { $0.id == id }),
-              let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
-                as? MediaEditorPageCell
-        else { return nil }
-        return page.videoSurface
-    }
+    /// ⚠️ **REMEMBERED, NOT RE-DERIVED.** It used to be looked up through the
+    /// canvas's cell for the playing page, which answers nil whenever the cell
+    /// is not reachable — while a sheet covers the screen, for one, so the
+    /// clip could not be told anything until the cell came back. It is also the
+    /// only way the CROP surface can hold the clip: the film plays there while
+    /// its box is aimed, and that surface belongs to no cell.
+    var playingSurface: VideoRenderView? { boundSurface }
+
+    private var boundSurface: VideoRenderView?
 
     /// The film moved under the needle, or a handle moved: put that moment on
     /// the canvas.
@@ -2808,13 +2811,10 @@ final class MediaEditorViewController: UIViewController {
         guard let id = currentItemID, itemsByID[id] != nil else { return }
         guard !isCropping else { return }
         isCropping = true
-        // ⚠️ **A CLIP IS CROPPED ON ITS POSTER, AND IT STOPS WHILE IT IS.** The
-        // crop is a rectangle of the picture, the same on every frame, so the
-        // poster is enough to aim it; the playing item is put away because the
-        // surface covers it and its render size is about to change. Leaving the
-        // mode settles the canvas, which plays the clip again — composed with the
-        // crop the compositor now draws, and published with it.
-        stopPreview()
+        // ⚠️ **THE CLIP KEEPS PLAYING, ON THE CROP SURFACE.** It used to stop
+        // and the author aimed at a poster frame — still, and often the least
+        // representative frame there is. The binding moves to the surface at
+        // the end of this routine, once the box and the still are in place.
         lockCanvas(by: .crop)
 
         cropSurface.translatesAutoresizingMaskIntoConstraints = false
@@ -2843,6 +2843,7 @@ final class MediaEditorViewController: UIViewController {
         setEditingAccessory(cropTools)
         showCropPicture(for: id)
         settleIntoCrop()
+        playInsideTheCropBox(for: id)
     }
 
     /// The picture shrinking into the frame it is about to be cut in.
@@ -2908,8 +2909,14 @@ final class MediaEditorViewController: UIViewController {
         // picture is already held, which it is: the surface has been showing it.
         if let id = croppingID ?? currentItemID { redraw(id) }
         leaveCropGracefully()
-        // ⚠️ **NOT LEFT TO A SETTLE THAT MAY NEVER COME.** Entering stopped the
-        // clip; nothing scrolls on the way out, so nothing else would start it.
+        // ⚠️ **THE BOX'S FILM IS UNCUT, SO IT CANNOT SIMPLY CARRY ON.** The clip
+        // was bound to the crop surface and playing the WHOLE film; the canvas
+        // must now play the cut one. Unbinding first is what makes the reload
+        // happen at all — `playSettledPage` returns early for a page that is
+        // already the playing one.
+        stopPreview()
+        // ⚠️ **NOT LEFT TO A SETTLE THAT MAY NEVER COME.** Nothing scrolls on
+        // the way out, so nothing else would start it.
         if resuming { playSettledPage() }
     }
 
@@ -3125,7 +3132,9 @@ private extension MediaEditorViewController {
     /// moving pixels nobody is looking at, behind a still the author IS looking
     /// at.
     func playSettledPage() {
-        guard !isCropping else { return stopPreview() }
+        // The crop surface holds the clip while its box is being aimed — see
+        // `playInsideTheCropBox`.
+        guard !isCropping else { return }
         guard let id = currentItemID, itemsByID[id]?.isVideo == true else {
             return stopPreview()
         }
@@ -3140,6 +3149,7 @@ private extension MediaEditorViewController {
 
         playingID = id
         page.beginShowingVideo()
+        boundSurface = page.videoSurface
         // ⚠️ THE CELL TELLS US WHEN IT IS TAKEN AWAY. A canvas recycles pages
         // without asking, and a surface handed to a player and then re-used for
         // another item would keep the previous clip's frames.
@@ -3168,13 +3178,35 @@ private extension MediaEditorViewController {
         previewSubject = nil
         previewLoads += 1
         previewPending = false
+        // ⚠️ **WHATEVER IT WAS BOUND TO, WHICH IS NOT ALWAYS A PAGE.** The crop
+        // surface holds the clip while a box is being aimed at it, and it
+        // belongs to no cell.
+        if let surface = boundSurface { preview.stop(surface) }
+        boundSurface = nil
+        cropSurface.showsVideo(false)
         guard let index = items.firstIndex(where: { $0.id == id }),
               let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
                 as? MediaEditorPageCell
         else { return }
         page.onReuse = nil
-        preview.stop(page.videoSurface)
         page.stopShowingVideo()
+    }
+
+    /// Plays the clip ON the crop surface, uncut, while its box is being aimed.
+    ///
+    /// ⚠️ **UNCUT, AND THAT IS THE WHOLE POINT.** The plan the canvas plays
+    /// carries the crop, so the compositor hands back film that is already cut;
+    /// aiming a box at that would crop a crop, and every rectangle the author
+    /// drew would bite twice. `includingCrop: false` is why this is a load of
+    /// its own rather than the canvas's.
+    private func playInsideTheCropBox(for id: String) {
+        guard itemsByID[id]?.isVideo == true else { return }
+        stopPreview()
+        playingID = id
+        boundSurface = cropSurface.videoSurface
+        cropSurface.showsVideo(true)
+        previewSubject = nil
+        loadPreview { _, _ in VideoLoadLanding(seconds: 0) }
     }
 }
 

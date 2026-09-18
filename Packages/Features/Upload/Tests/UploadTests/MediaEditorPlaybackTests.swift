@@ -256,11 +256,13 @@ struct MediaEditorPlaybackTests {
 
     // MARK: - Who stops
 
-    /// ⚠️ **CROPPING A CLIP STOPS IT, AND LEAVING PLAYS IT CROPPED.** The
-    /// surface covers the canvas and the render size is about to change, so the
-    /// item goes; the settle that ends the mode brings a new one, carrying the
-    /// crop the author just made.
-    @Test func croppingAClipStopsItAndLeavingPlaysItCropped() async throws {
+    /// ⚠️ **A CLIP IS AIMED AT WHILE IT PLAYS, AND THE FILM IN THE BOX IS
+    /// UNCUT.** It used to stop on the way in and the author framed a poster
+    /// frame — still, and often the least representative frame of the film.
+    /// Reported as *"la vidéo ne se joue pas dans la fenêtre"*. And the plan
+    /// the box plays must leave the crop OUT: film the compositor has already
+    /// cut would have the author cropping a crop, every rectangle biting twice.
+    @Test func croppingAClipPlaysItUncutInTheBoxAndLeavingPlaysItCropped() async throws {
         let screen = open(Self.items(3, videosAt: [1]))
         screen.editor.debugScrollToPage(1)
         try await settle(until: { screen.preview.played.count == 1 })
@@ -268,9 +270,17 @@ struct MediaEditorPlaybackTests {
 
         screen.editor.debugCategoryBar.select(4) // Crop
         screen.window.layoutIfNeeded()
+        try await settle(until: { screen.preview.played.count == 2 })
 
         #expect(screen.editor.debugIsCropping, "crop refused the video")
-        #expect(screen.preview.boundCount == 0, "the clip played on under the crop")
+        #expect(screen.preview.boundCount == 1, "nothing is playing in the box")
+        #expect(screen.editor.playingSurface === screen.editor.debugCropSurface.videoSurface,
+                "the clip is bound to the page, not to the surface the author is looking at")
+        #expect(screen.editor.debugCropSurface.debugShowsVideo, "the film is not showing in the box")
+        #expect(screen.editor.debugCropSurface.debugVideoMatchesThePicture,
+                "the film and the still it replaces are laid differently")
+        #expect(screen.preview.plans.last?.finish.crop == .untouched,
+                "the box is aimed at film that is already cut: \(String(describing: screen.preview.plans.last?.finish.crop))")
 
         let cut = MediaCrop(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1))
         screen.editor.debugCropSurface.onChange?(cut)
@@ -278,10 +288,23 @@ struct MediaEditorPlaybackTests {
                      "guard: the crop was not stored: \(screen.editor.debugCrop(for: "video-1"))")
         screen.editor.debugCategoryBar.select(3) // Filters — leaves the crop
         screen.window.layoutIfNeeded()
-        try await settle(until: { screen.preview.played.count == 2 })
+        try await settle(until: { screen.preview.plans.last?.finish.crop == cut })
 
         #expect(screen.preview.plans.last?.finish.crop == cut,
                 "the clip came back without its crop: \(String(describing: screen.preview.plans.last?.finish.crop))")
+        #expect(!screen.editor.debugCropSurface.debugShowsVideo, "the surface kept the film")
+
+        // ⚠️ **AND BACK INTO THE BOX, NOW THAT THERE IS A CROP TO LEAVE OUT.**
+        // Until the author has cut something, "with the crop" and "without it"
+        // are the same plan — which is exactly how a test can pass while the
+        // box aims at already-cut film.
+        screen.editor.debugCategoryBar.select(4)
+        screen.window.layoutIfNeeded()
+        try await settle(until: { screen.preview.plans.last?.finish.crop == .untouched })
+
+        #expect(screen.preview.plans.last?.finish.crop == .untouched,
+                "the box is aimed at film already cut to \(String(describing: screen.preview.plans.last?.finish.crop))")
+        #expect(screen.editor.debugCrop(for: "video-1") == cut, "and the author's crop is still stored")
     }
 
     /// ⚠️ **A SHEET OVER THE EDITOR STOPS THE CLIP, AND UIKIT NEVER SAYS IT
