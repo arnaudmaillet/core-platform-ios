@@ -237,6 +237,11 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
     private var previewAngle: CGFloat = 90
     /// Watches the current camera for a changed scene after a tap-to-focus.
     private var subjectAreaObserver: (any NSObjectProtocol)?
+    /// Whether the screen wants the camera running — so a reset that arrives
+    /// after `stop()` does not start a camera behind a closed sheet. Touched
+    /// on `queue` only.
+    private var wantsRunning = false
+    private var sessionObservers: [any NSObjectProtocol] = []
     private let wantsAudio = Mutex(false)
 
     var includesAudio: Bool {
@@ -249,10 +254,39 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         self.feed = feed
         self.recorder = recorder ?? MovieFileRecorder(output: movieOutput)
         super.init()
+        watchSession()
+    }
+
+    /// ⚠️ **A SESSION THAT DIES IS STARTED AGAIN.** A media-services reset
+    /// (`AVError.mediaServicesWereReset`) stops the session for good, and the
+    /// first version left the camera black until the sheet was closed and
+    /// opened again. An interruption — a call, another app taking the camera
+    /// in Split View — ends with the session usually resuming itself; if it
+    /// has not, it is started here. Both only while the screen wants a camera.
+    /// Formed here, in the nonisolated engine, for the queue-trap reason.
+    private func watchSession() {
+        let center = NotificationCenter.default
+        let restart: @Sendable (Notification) -> Void = { [weak self] _ in
+            guard let self else { return }
+            queue.async { [self] in
+                if wantsRunning, !session.isRunning { session.startRunning() }
+            }
+        }
+        sessionObservers = [
+            center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { note in
+                let code = (note.userInfo?[AVCaptureSessionErrorKey] as? NSError)?.code
+                guard code == AVError.mediaServicesWereReset.rawValue else { return }
+                restart(note)
+            },
+            center.addObserver(
+                forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil, using: restart
+            )
+        ]
     }
 
     func start(_ report: @escaping @Sendable (Snapshot) -> Void) {
         queue.async { [self] in
+            wantsRunning = true
             if !isConfigured {
                 isConfigured = true
                 configure()
@@ -264,6 +298,7 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
 
     func stop() {
         queue.async { [self] in
+            wantsRunning = false
             stopRequestedRecording()
             if session.isRunning { session.stopRunning() }
         }
@@ -494,6 +529,7 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
 
     deinit {
         if let subjectAreaObserver { NotificationCenter.default.removeObserver(subjectAreaObserver) }
+        for observer in sessionObservers { NotificationCenter.default.removeObserver(observer) }
     }
 
     /// Switches the data output on or off to match `feed.wantsFrames`.
