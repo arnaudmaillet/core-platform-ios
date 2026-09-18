@@ -1002,12 +1002,22 @@ struct CaptureFlowTests {
 
     /// ⚠️ Back from another screen with the Filters band still open, the
     /// cards go on following the live frame.
+    ///
+    /// ⚠️ **THE CAMERA REALLY LEAVES FIRST.** A push and a pop in the same turn
+    /// never took the camera off screen: it never disappeared, its timer was
+    /// never stopped, and the test passed with the restart deleted.
     @Test func theFilterCardsStayLiveAfterComingBack() async throws {
         let screen = try await open()
         screen.camera.debugSelector.debugTap(CaptureOption.filters.rawValue)
         try await settle { screen.camera.debugCardRefreshes > 0 }
         screen.navigation.pushViewController(UIViewController(), animated: false)
+        try await settle { screen.camera.viewIfLoaded?.window == nil }
+        try #require(screen.camera.viewIfLoaded?.window == nil, "the camera is off screen")
+        let away = screen.camera.debugCardRefreshes
+        try await Task.sleep(for: .seconds(1.1))
+        #expect(screen.camera.debugCardRefreshes == away, "the cards rest while the camera is away")
         screen.navigation.popViewController(animated: false)
+        try await settle { screen.camera.viewIfLoaded?.window != nil }
         try #require(screen.navigation.topViewController === screen.camera)
         #expect(screen.camera.openOption == .filters, "the band is still open")
         let before = screen.camera.debugCardRefreshes
