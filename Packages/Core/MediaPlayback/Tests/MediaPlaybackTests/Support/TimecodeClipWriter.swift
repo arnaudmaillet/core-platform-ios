@@ -180,10 +180,13 @@ enum TimecodeClipWriter {
         }
     }
 
-    /// Waits for `input` to take more, and gives up after ten seconds — a
+    /// Waits for `input` to take more, and gives up after a minute — a
     /// writer that never becomes ready again is a failure, not a hang.
     private static func ready(_ input: AVAssetWriterInput, of writer: AVAssetWriter, _ name: String) async throws {
-        let deadline = Date().addingTimeInterval(10)
+        // A minute, not ten seconds: the clip is written once per process, and
+        // CI's slowest lane took two hundred seconds for a suite this machine
+        // runs in forty.
+        let deadline = Date().addingTimeInterval(60)
         while !input.isReadyForMoreMediaData {
             if writer.status == .failed { throw writer.error ?? CocoaError(.fileWriteUnknown) }
             guard Date() < deadline else {

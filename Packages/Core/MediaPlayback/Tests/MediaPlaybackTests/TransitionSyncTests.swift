@@ -29,7 +29,13 @@ import Testing
 ///
 /// ⚠️ **NOT ON THE MAIN ACTOR** — `TransitionVisibilityTests`' reason; only
 /// `canvas` hops there, for the controller.
-@Suite(.serialized)
+/// ⚠️ **THE DEFAULT LANE ONLY.** The pictures read here are the COMPOSITION's
+/// and the export's, and neither depends on which layer draws the canvas — so
+/// the legacy lane would read the very same frames a second time. It was
+/// already the slowest lane (203s on develop's CI), and these suites running
+/// beside its real-time ones pushed `RehearsalLoopTests` past its range.
+/// `CompositorFinishTests` is gated the same way.
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
 struct TransitionSyncTests {
     struct Cell: Sendable {
         let frame: Int
