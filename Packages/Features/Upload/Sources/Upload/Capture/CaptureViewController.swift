@@ -545,6 +545,11 @@ final class CaptureViewController: UIViewController {
         let departing = band.content != nil ? band.release() : nil
         openOption = wanted == nil ? nil : option
         if let wanted {
+            // ⚠️ A ROW SHOWN AGAIN MID-DEPARTURE ARRIVES WHOLE, AT ONCE: its
+            // departure is cut short, and `popOut` leaves it with the band.
+            wanted.layer.removeAllAnimations()
+            wanted.alpha = 1
+            wanted.transform = .identity
             band.show(wanted)
         } else {
             band.clear()
@@ -597,9 +602,15 @@ final class CaptureViewController: UIViewController {
         UIView.animate(withDuration: BandPop.departure, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
             departing.alpha = 0
             departing.transform = BandPop.collapsedTransform
-        } completion: { _ in
+        } completion: { [weak self] _ in
             departing.alpha = 1
             departing.transform = .identity
+            // ⚠️ **NOT IF THE BAND HAS TAKEN IT BACK.** The rows are built once
+            // and shown again: reopened within the 0.17s of its departure, a
+            // row was back in the band when this ran, and was pulled out of it
+            // — an open band holding nothing, with its icon chosen. Every flow
+            // test ran with motion reduced, which skips this block entirely.
+            guard departing !== self?.band.content else { return }
             departing.removeFromSuperview()
         }
     }

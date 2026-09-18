@@ -122,7 +122,8 @@ struct CaptureFlowTests {
         answer: CaptureAuthorization = .authorized(microphone: false),
         recents: Recents? = nil,
         takeLimit: TimeInterval = CaptureTake.maximum,
-        plainPreview: UIView? = nil
+        plainPreview: UIView? = nil,
+        motion: Bool = false
     ) async throws -> Screen {
         let source = SpySource()
         source.answer = answer
@@ -131,7 +132,7 @@ struct CaptureFlowTests {
         let folder = CaptureFolder()
         let camera = CaptureViewController(
             source: source, folder: folder, captures: CapturedMediaLibrary(), recents: recents,
-            takeLimit: takeLimit, reducesMotion: { true },
+            takeLimit: takeLimit, reducesMotion: { !motion },
             makeLibraryPicker: {
                 handed.pickers += 1
                 return UIViewController()
@@ -697,6 +698,59 @@ struct CaptureFlowTests {
         screen.camera.debugFilterRow.debugTap(.mono)
         #expect(screen.camera.settings.filter == .mono)
         #expect(screen.camera.debugToasts.filter { $0 == "The look applies to the whole video" }.count == 1)
+    }
+
+    // MARK: - With motion
+
+    /// ⚠️ With motion ON — every other flow test reduces it, which skips the
+    /// band's animations — an option closed and opened again within its row's
+    /// departure keeps its row in the band, whole.
+    @Test func withMotionAnOptionReopenedMidDepartureKeepsItsRow() async throws {
+        let screen = try await open(motion: true)
+        let selector = screen.camera.debugSelector
+        let row = screen.camera.debugFlashRow
+        selector.debugTap(CaptureOption.flash.rawValue)
+        try await Task.sleep(for: .milliseconds(50))
+        selector.debugTap(CaptureOption.flash.rawValue)
+        #expect(screen.camera.openOption == nil)
+        selector.debugTap(CaptureOption.flash.rawValue)
+        try await Task.sleep(for: .seconds(BandPop.departure + BandPop.settled(after: 3) + 0.2))
+        #expect(screen.camera.openOption == .flash)
+        #expect(screen.camera.debugBand.content === row)
+        #expect(row.superview === screen.camera.debugBand, "the row is still in the band")
+        #expect(row.alpha == 1)
+    }
+
+    /// With motion on, flash → timer → flash in quick succession ends on the
+    /// flash row, in the band.
+    @Test func withMotionQuickSwitchesEndOnTheLastRow() async throws {
+        let screen = try await open(motion: true)
+        let selector = screen.camera.debugSelector
+        selector.debugTap(CaptureOption.flash.rawValue)
+        selector.debugTap(CaptureOption.timer.rawValue)
+        selector.debugTap(CaptureOption.flash.rawValue)
+        try await Task.sleep(for: .seconds(BandPop.departure + BandPop.settled(after: 3) + 0.2))
+        #expect(screen.camera.debugBand.content === screen.camera.debugFlashRow)
+        #expect(screen.camera.debugFlashRow.superview === screen.camera.debugBand)
+        #expect(screen.camera.debugTimerRow.superview == nil, "the timer's row has left")
+    }
+
+    /// With motion on, a row's pills arrive one after another and all land
+    /// whole; undo and Next arrive once a clip lands.
+    @Test func withMotionRowsAndTakeControlsArriveWhole() async throws {
+        let screen = try await open(motion: true)
+        screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        #expect(screen.camera.debugPopIns == 1)
+        try await Task.sleep(for: .seconds(BandPop.settled(after: 3) + 0.2))
+        for pill in screen.camera.debugTimerRow.poppableElements {
+            #expect(pill.alpha == 1)
+            #expect(pill.transform == .identity)
+        }
+        screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        try await record(screen, seconds: 0.6)
+        try await Task.sleep(for: .seconds(BandPop.duration + BandPop.staggerStep + 0.2))
+        #expect(screen.camera.debugUndoIsShowing)
+        #expect(screen.camera.debugNextIsShowing)
     }
 
     // MARK: - End to end, through the builder
