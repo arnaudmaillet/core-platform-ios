@@ -188,6 +188,20 @@ struct MediaTransitionDurationRowTests {
         #expect(picked == [1], "got \(picked)")
     }
 
+    /// ⚠️ **A CHOSEN LENGTH THE PIECES CAN NO LONGER GIVE STILL SAYS WHAT IT
+    /// IS.** Reached by a trim after the choice, or by a neighbour at 4x: the
+    /// standard half second chosen, a quarter the most the pieces can give. It
+    /// was white ink on its white fill — a blank pill.
+    @Test func aChosenLengthThePiecesCannotGiveStaysLegible() {
+        let row = MediaTransitionDurationRowView()
+
+        row.show(seconds: 0.5, longest: 0.25)
+
+        #expect(row.debugChosen == ["0.5s"], "guard: chose \(row.debugChosen)")
+        #expect(row.debugEnabled == ["0.25s"], "guard: offers \(row.debugEnabled)")
+        #expect(row.debugLegible == row.debugTitles, "only these can be read: \(row.debugLegible)")
+    }
+
     private func hosted() -> (MediaTimelineToolsView, UIWindow) {
         let tools = MediaTimelineToolsView()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 400))

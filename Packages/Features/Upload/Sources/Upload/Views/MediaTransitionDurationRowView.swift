@@ -120,7 +120,12 @@ final class MediaTransitionDurationRowView: UIView {
             chip.alpha = isReachable ? 1 : Metrics.refused
             chip.backgroundColor = isShowing ? .white : .clear
             chip.setTitleColor(isShowing ? .black : .white, for: .normal)
-            chip.setTitleColor(.white, for: .disabled)
+            // ⚠️ **A CHOSEN LENGTH THE PIECES CAN NO LONGER GIVE KEEPS ITS INK.**
+            // It is dimmed with the other refused ones, but white on its white
+            // fill it was a blank pill — and the one chip saying what the cut
+            // carries said nothing. A trim after the choice, or a neighbour at
+            // 4x, gets there.
+            chip.setTitleColor(isShowing ? .black : .white, for: .disabled)
             // ⚠️ **A SHADOW ON THE UNCHOSEN ONES ONLY** — `MediaSpeedRowView`'s
             // reason: white ink on a photograph needs the lift, and a shadow
             // under a filled capsule reads as a plate.
@@ -152,6 +157,14 @@ extension MediaTransitionDurationRowView {
     /// its fill, not off the value beside it.
     var debugChosen: [String] {
         chips.filter { $0.backgroundColor == .white }.compactMap { $0.title(for: .normal) }
+    }
+    /// Internal for tests: the chips whose label can be read against their
+    /// own fill, in the state they are in.
+    var debugLegible: [String] {
+        chips.filter { chip in
+            let ink = chip.titleColor(for: chip.isEnabled ? .normal : .disabled)
+            return ink != (chip.backgroundColor ?? .clear)
+        }.compactMap { $0.title(for: .normal) }
     }
     /// Internal for tests: the chips that take a tap.
     var debugEnabled: [String] {

@@ -39,6 +39,10 @@ final class MediaPlaybackFlashView: UIView {
     /// fade the newer one out when its own hold ends.
     private var generation = 0
 
+    /// Whether the device asks for less motion — a seam, so a test can state it
+    /// rather than inherit the setting of the machine that runs it.
+    var reducesMotion: () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+
     init() {
         super.init(frame: CGRect(x: 0, y: 0, width: Metrics.side, height: Metrics.side))
         isUserInteractionEnabled = false
@@ -76,10 +80,16 @@ final class MediaPlaybackFlashView: UIView {
         // listener gets the same news as an announcement, since the tap that
         // caused it landed on a picture with nothing to focus.
         UIAccessibility.post(notification: .announcement, argument: paused ? "Paused" : "Playing")
-        guard !UIAccessibility.isReduceMotionEnabled else {
+        guard !reducesMotion() else {
             alpha = 1
             transform = .identity
-            UIView.animate(withDuration: Metrics.departure, delay: Metrics.hold, options: [.beginFromCurrentState]) {
+            // ⚠️ **NO `.beginFromCurrentState`.** It takes the from-value from the
+            // PRESENTATION layer, which still holds the last flash's committed
+            // 0 — the 1 staged just above is not committed yet — so every flash
+            // after the first faded from 0 to 0 and was never seen
+            // (`uiview-animate-from-value-trap`). The flash in flight is
+            // already cancelled by `removeAllAnimations` above.
+            UIView.animate(withDuration: Metrics.departure, delay: Metrics.hold, options: []) {
                 self.alpha = 0
             }
             return

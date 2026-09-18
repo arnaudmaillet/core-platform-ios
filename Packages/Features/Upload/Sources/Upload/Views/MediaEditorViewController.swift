@@ -2714,8 +2714,16 @@ final class MediaEditorViewController: UIViewController {
         // ⚠️ THE LENGTHS RAISE AND LOWER THE BAND, AND THE BAND IS THE FOOT OF
         // A FITTED PICTURE'S WINDOW — the rate chips' two lines, for their
         // reason (`toggleTheRateChips`).
+        // ⚠️ **ONLY WHILE THE TOOLS ARE THE BAND'S TENANT.** Leaving the
+        // timeline with the lengths up closes the row, which lowers them — and
+        // that callback, laying the screen out in the middle of
+        // `setEditingAccessory`, handed the bar over UNANIMATED from inside the
+        // layout pass, before the animated hand-over that follows could; that
+        // one then found nothing to change. `setEditingAccessory` follows the
+        // band itself once the new tenant is in.
         tools.onHeightChange = { [weak self] in
-            self?.followTheBand(animated: true)
+            guard let self, isTimelineShowing else { return }
+            followTheBand(animated: true)
         }
         tools.segmentFilters.onPick = { [weak self] filter in
             self?.chooseSegmentFilter(filter)
