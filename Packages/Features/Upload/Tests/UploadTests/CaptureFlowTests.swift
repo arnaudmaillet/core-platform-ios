@@ -53,13 +53,30 @@ struct CaptureFlowTests {
             photoFlashes.append(flash)
             return try await inner.capturePhoto(flash: flash, into: folder)
         }
+        /// Recordings that FAIL when stopped, having recorded `failingRecorded`
+        /// seconds — a movie output stopped before its first sample.
+        var failsRecordings = false
+        var failingRecorded: TimeInterval = 0
+        private var failing: CaptureClipPromise?
         func startRecording(to url: URL, torch: Bool, limit: TimeInterval) -> CaptureClipPromise {
             limits.append(limit)
             torches.append(torch)
+            if failsRecordings {
+                let promise = CaptureClipPromise()
+                failing = promise
+                return promise
+            }
             return inner.startRecording(to: url, torch: torch, limit: limit)
         }
-        func stopRecording() { inner.stopRecording() }
-        var recordedDuration: TimeInterval { inner.recordedDuration }
+        func stopRecording() {
+            if let failing {
+                self.failing = nil
+                failing.fulfil(.failure(CaptureSourceError.recordingFailed))
+                return
+            }
+            inner.stopRecording()
+        }
+        var recordedDuration: TimeInterval { failsRecordings ? failingRecorded : inner.recordedDuration }
         func setDeliversFrames(_ on: Bool) { deliversFrames.append(on) }
     }
 
@@ -245,6 +262,32 @@ struct CaptureFlowTests {
         screen.camera.debugTapShutter()
         try await settle { screen.camera.take.clips.count == 2 }
         #expect(screen.camera.take.clips.count == 2)
+    }
+
+    /// A hold let go at once, whose output then reports a failure because it
+    /// never wrote a sample, is a slip: nothing is said.
+    @Test func aFailedClipStoppedAtOnceIsASlipNotAnError() async throws {
+        let screen = try await open()
+        screen.source.failsRecordings = true
+        screen.source.failingRecorded = 0
+        screen.camera.debugBeginHold()
+        screen.camera.debugEndHold()
+        try await settle { !screen.camera.isRecording }
+        try #require(!screen.camera.isRecording)
+        #expect(screen.camera.debugLastToast == nil, "said: \(screen.camera.debugLastToast ?? "")")
+        #expect(screen.camera.take.isEmpty)
+    }
+
+    /// The same failure after a real recording is an error, and says so.
+    @Test func aFailedClipThatHadRecordedSaysSo() async throws {
+        let screen = try await open()
+        screen.source.failsRecordings = true
+        screen.source.failingRecorded = 2
+        screen.camera.debugBeginHold()
+        screen.camera.debugEndHold()
+        try await settle { !screen.camera.isRecording }
+        try #require(!screen.camera.isRecording)
+        #expect(screen.camera.debugLastToast == "The clip could not be recorded")
     }
 
     /// Each clip is handed exactly what the take has left — the source's hard

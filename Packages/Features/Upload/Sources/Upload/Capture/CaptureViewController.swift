@@ -198,7 +198,7 @@ final class CaptureViewController: UIViewController {
         super.viewDidDisappear(animated)
         // ⚠️ A RUNNING SESSION HOLDS THE CAMERA AND BURNS POWER — the deleted
         // screen's rule. A clip still recording is ended, not lost.
-        if isRecording { source.stopRecording() }
+        if isRecording { requestStop() }
         cancelCountdown()
         stopCardsTimer()
         source.stop()
@@ -675,7 +675,7 @@ final class CaptureViewController: UIViewController {
             // The logic already stands locked; the recording waits out the timer.
             afterCountdown { [weak self] in self?.startRecording(locked: locked) }
         case .stopRecording:
-            source.stopRecording()
+            requestStop()
         case .none where take.isFull:
             say(take.limitReachedMessage)
         default:
@@ -726,7 +726,17 @@ final class CaptureViewController: UIViewController {
     private func holdEnded() {
         let action = shutterLogic.endHold()
         showLock(false)
-        if action == .stopRecording { source.stopRecording() }
+        if action == .stopRecording { requestStop() }
+    }
+
+    /// What the source had recorded when the running clip was asked to stop;
+    /// nil while nothing is being stopped.
+    private var recordedAtStop: TimeInterval?
+
+    /// Every stop the author asks for goes through here.
+    private func requestStop() {
+        recordedAtStop = source.recordedDuration
+        source.stopRecording()
     }
 
     private var authorizedToShoot: Bool {
@@ -882,7 +892,15 @@ final class CaptureViewController: UIViewController {
         }
     }
 
+    /// ⚠️ **A FAILED CLIP THAT WAS STOPPED BEFORE IT WAS A CLIP IS A SLIP, NOT
+    /// AN ERROR.** A movie output asked to stop before its first sample still
+    /// calls back — with an error, since there is nothing in the file — and the
+    /// author, who only let go of the shutter at once, would read "could not be
+    /// recorded". Stopped under `CaptureTake.shortest`, it goes as a slip goes:
+    /// silently.
     private func recordingFinished(_ clip: CaptureClip?) {
+        let wasSlip = clip == nil && (recordedAtStop ?? .infinity) < CaptureTake.shortest
+        recordedAtStop = nil
         isRecording = false
         ringLink.stop()
         shutterLogic.recordingEnded()
@@ -895,7 +913,7 @@ final class CaptureViewController: UIViewController {
         shutter.setLook(.idle, animated: true)
         setChromeHidden(false)
         refreshTakeControls(animated: true)
-        if clip == nil { say("The clip could not be recorded") }
+        if clip == nil, !wasSlip { say("The clip could not be recorded") }
         if take.isFull { say(take.limitReachedMessage) }
     }
 

@@ -225,7 +225,11 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
     private var isConfigured = false
     private var rotation: AVCaptureDevice.RotationCoordinator?
     private var photoDelegates: [Int64: PhotoDelegate] = [:]
-    private var recordingDelegate: RecordingDelegate?
+    /// What records a clip — the movie output, or a test's double.
+    private let recorder: any CaptureMovieRecording
+    /// Whether a recording has been ASKED FOR and has not finished — see
+    /// `stopRecording()`. Touched on `queue` only.
+    private var recordingRequested = false
     private var currentPosition: CapturePosition = .back
     /// The angle the PREVIEW is drawn at, handed down from the main actor's
     /// coordinator — see `setPreviewAngle`. 90 until it reports: a phone held
@@ -238,8 +242,10 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
         set { wantsAudio.withLock { $0 = newValue } }
     }
 
-    init(feed: CaptureFrameFeed) {
+    /// `recorder` is the movie output unless a test hands in a double.
+    init(feed: CaptureFrameFeed, recorder: (any CaptureMovieRecording)? = nil) {
         self.feed = feed
+        self.recorder = recorder ?? MovieFileRecorder(output: movieOutput)
         super.init()
     }
 
@@ -256,7 +262,7 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
 
     func stop() {
         queue.async { [self] in
-            if movieOutput.isRecording { movieOutput.stopRecording() }
+            stopRequestedRecording()
             if session.isRunning { session.stopRunning() }
         }
     }
@@ -489,40 +495,52 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
     // MARK: - Recording
 
     var recordedDuration: TimeInterval {
-        movieOutput.isRecording ? movieOutput.recordedDuration.seconds : 0
+        recorder.isRecording ? recorder.recordedSeconds : 0
     }
 
     func record(to url: URL, torch: Bool, limit: TimeInterval) -> CaptureClipPromise {
         let promise = CaptureClipPromise()
         queue.async { [self] in
-            guard !movieOutput.isRecording else {
+            guard !recordingRequested, !recorder.isRecording else {
                 promise.fulfil(.failure(CaptureSourceError.recordingFailed))
                 return
             }
             applyConnections()
             setTorch(torch)
+            recordingRequested = true
             // ⚠️ THE TAKE'S BUDGET AS THE OUTPUT'S OWN HARD STOP: the
             // recording ends at exactly `limit`, reported as a successful
             // finish (`AVErrorMaximumDurationReached` with
             // `AVErrorRecordingSuccessfullyFinishedKey`).
-            movieOutput.maxRecordedDuration = CMTime(seconds: limit, preferredTimescale: 600)
-            let delegate = RecordingDelegate { [self] result in
+            recorder.start(to: url, limit: limit) { [self] result in
+                // Cleared on the queue BEFORE the promise resolves, so the
+                // next clip's `record` — which can only follow the promise —
+                // never finds this one still standing.
                 queue.async { [self] in
                     setTorch(false)
-                    recordingDelegate = nil
+                    recordingRequested = false
                 }
                 promise.fulfil(result)
             }
-            recordingDelegate = delegate
-            movieOutput.startRecording(to: url, recordingDelegate: delegate)
         }
         return promise
     }
 
+    /// ⚠️ **A STOP FOLLOWS WHAT WAS ASKED FOR, NOT WHAT THE OUTPUT REPORTS.**
+    /// `isRecording` stays false until the first sample is written, so the
+    /// first version — `if movieOutput.isRecording { stop }` — dropped the stop
+    /// of a hold released at once, or of a second tap on a locked clip that
+    /// came quickly: the output then started a moment later and recorded
+    /// until the take's remaining budget, up to three minutes, with no finger
+    /// on anything. `stopRecording()` has no precondition and queues behind the
+    /// start, and `didFinishRecordingTo` is always called.
     func stopRecording() {
-        queue.async { [self] in
-            if movieOutput.isRecording { movieOutput.stopRecording() }
-        }
+        queue.async { [self] in stopRequestedRecording() }
+    }
+
+    /// On `queue`.
+    private func stopRequestedRecording() {
+        if recordingRequested || recorder.isRecording { recorder.stop() }
     }
 
     private func setTorch(_ on: Bool) {
@@ -566,6 +584,48 @@ private final class PhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unc
         }
         done(.success(CapturedPhoto(url: url, uprightSize: CapturedMediaLibrary.uprightImageSize(at: url) ?? .zero)))
     }
+}
+
+/// What records one clip at a time — `AVCaptureMovieFileOutput` on a phone.
+///
+/// ⚠️ **A SEAM FOR ONE REASON: THE STOP THAT COMES BEFORE THE FIRST SAMPLE.**
+/// The engine's stop logic is the only thing on this side of AVFoundation that
+/// can be wrong without a camera, and a double whose `isRecording` stays false
+/// is exactly the output in the moment that mattered. Everything else still
+/// goes through the output itself.
+protocol CaptureMovieRecording: AnyObject {
+    /// True once the first sample has been written, as the movie output says.
+    var isRecording: Bool { get }
+    var recordedSeconds: TimeInterval { get }
+    /// Starts one clip, ending by itself after `limit` seconds. `finished` is
+    /// called exactly once, on any queue.
+    func start(to url: URL, limit: TimeInterval, finished: @escaping @Sendable (Result<CaptureClip, any Error>) -> Void)
+    func stop()
+}
+
+/// The movie output behind `CaptureMovieRecording`. Touched on the engine's
+/// queue only.
+private final class MovieFileRecorder: CaptureMovieRecording {
+    private let output: AVCaptureMovieFileOutput
+    /// ⚠️ HELD HERE UNTIL THE CLIP FINISHES: kept alive by the engine, never
+    /// left to whatever the output does with it.
+    private var delegate: RecordingDelegate?
+
+    init(output: AVCaptureMovieFileOutput) {
+        self.output = output
+    }
+
+    var isRecording: Bool { output.isRecording }
+    var recordedSeconds: TimeInterval { output.recordedDuration.seconds }
+
+    func start(to url: URL, limit: TimeInterval, finished: @escaping @Sendable (Result<CaptureClip, any Error>) -> Void) {
+        output.maxRecordedDuration = CMTime(seconds: limit, preferredTimescale: 600)
+        let delegate = RecordingDelegate(done: finished)
+        self.delegate = delegate
+        output.startRecording(to: url, recordingDelegate: delegate)
+    }
+
+    func stop() { output.stopRecording() }
 }
 
 /// One clip's delegate.
