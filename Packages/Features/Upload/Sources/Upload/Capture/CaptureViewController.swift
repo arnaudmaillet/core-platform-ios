@@ -1,0 +1,1222 @@
+import DesignSystem
+import MediaPlayback
+import UIKit
+
+/// The camera: "+" → Camera. Photographs and multi-clip videos, handed to the
+/// media editor the moment a capture is done.
+///
+/// ```
+/// │ Cancel                          ⟲ │  ← the stack's bar
+/// │ ┌──────────────────────────────┐  │
+/// │ │                              │  │
+/// │ │     the preview, 9:16,       │  │  ← the ratio's window; grid, countdown
+/// │ │     the chosen look          │  │
+/// │ │      [0.5] [1×] [2] [3]      │  │  ← lens chips (or the band, when open)
+/// │ │  ▣       (  ◉  )      Next ›  │  │  ← library / undo · shutter · next
+/// │ └──────────────────────────────┘  │
+/// │      ⚡  ⏱  ▭  ◐  ⊞                │  ← the options, an IconSelectorBar
+/// ```
+///
+/// ⚠️ **THE OPTIONS ARE ICONS IN A SELECTOR, AND AN ICON OPENS A BAND — THE
+/// EDITOR'S PATTERN, NOT ITS CODE.** Choosing flash, timer, ratio or filters
+/// opens that option's controls above the shutter; a second tap on the chosen
+/// icon closes them again (the editor's neutral state). The grid is a toggle
+/// and opens nothing. The band is `MediaEditorBandView`, its tenants arrive
+/// with `BandPop` and `UISound.pop`, and leave quicker than they came.
+///
+/// ⚠️ **A CAPTURE IS NEVER BAKED: THE LOOK AND THE RATIO TRAVEL AS THE EDITOR'S
+/// OWN EDITS.** The files keep the whole frame and the untouched picture; the
+/// chosen filter becomes `MediaEdits.filter` and the ratio a centred
+/// `MediaEdits.crop`, handed over through `initialEdits`. The author can still
+/// change both in the editor, and no pixel is rendered twice. The preview SHOWS
+/// both while shooting — the look through `CaptureLiveView`, the ratio as the
+/// window the letterbox leaves.
+///
+/// ⚠️ **ONCE A TAKE HAS A CLIP, THE SHUTTER RECORDS; IT NEVER PHOTOGRAPHS.** See
+/// `CaptureShutterLogic` for why, and `CaptureTake` for the three-minute budget
+/// and the two-tap undo.
+///
+/// ⚠️ **ALWAYS DARK**, for the editor's reason: a capture surface is a viewing
+/// surface, and the colour that disappears next to a picture is black.
+@MainActor
+final class CaptureViewController: UIViewController {
+    typealias MakeEditor = ([MediaLibraryItem], [String: MediaEdits]) -> UIViewController
+
+    private let source: any CaptureSource
+    private let folder: CaptureFolder
+    /// The captures, as the editor and the finalisation screen will read them.
+    let captures: CapturedMediaLibrary
+    /// The device library, asked for its newest picture only if access is
+    /// ALREADY granted — see `loadLibraryShortcut`.
+    private let recents: (any MediaLibraryReading)?
+    private let makeEditor: MakeEditor
+    private let makeLibraryPicker: (() -> UIViewController)?
+    private let reducesMotion: () -> Bool
+
+    private(set) var settings = CaptureSettings()
+    private(set) var take = CaptureTake()
+    private(set) var shutterLogic = CaptureShutterLogic()
+    private(set) var authorization: CaptureAuthorization?
+    private(set) var isRecording = false
+    /// A photograph being written or a take being stitched: the shutter waits.
+    private(set) var isBusy = false
+    private var countdownTask: Task<Void, Never>?
+    private var holdBaseZoom: CGFloat = 1
+    private var pinchBaseZoom: CGFloat = 1
+    /// The last stitch, reused while the take has not changed since.
+    private var stitched: (clips: [URL], url: URL, duration: TimeInterval)?
+
+    // MARK: Views
+
+    private let previewContainer = UIView()
+    private let liveView = CaptureLiveView()
+    private let letterboxTop = UIView()
+    private let letterboxBottom = UIView()
+    private let gridView = CaptureGridView()
+    private let flashView = UIView()
+    private let countdownLabel = UILabel()
+    private let focusRing = UIView()
+    private let timePill = UIVisualEffectView(effect: nil)
+    private let timeLabel = UILabel()
+    private let toast = UIVisualEffectView(effect: nil)
+    private let toastLabel = UILabel()
+    private var notice: CaptureAccessNoticeView?
+
+    let shutter = CaptureShutterView()
+    private let lockView = CaptureLockView()
+    private let lensChips = CaptureLensChipsView()
+    private let band = MediaEditorBandView()
+    private let libraryButton = UIButton(type: .custom)
+    private lazy var undoButton: UIButton = {
+        let button = UIButton(configuration: .glass())
+        button.configuration?.image = UIImage(systemName: "delete.left.fill")
+        button.accessibilityLabel = "Delete last clip"
+        button.addAction(UIAction { [weak self] _ in self?.undoTapped() }, for: .primaryActionTriggered)
+        return button
+    }()
+    private lazy var nextButton: UIButton = {
+        var configuration = UIButton.Configuration.prominentGlass()
+        configuration.title = "Next"
+        configuration.image = UIImage(systemName: "chevron.right")
+        configuration.imagePlacement = .trailing
+        configuration.imagePadding = Spacing.xs
+        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 12, weight: .bold)
+        configuration.baseBackgroundColor = .white
+        configuration.baseForegroundColor = .black
+        let button = UIButton(configuration: configuration)
+        button.addAction(UIAction { [weak self] _ in self?.nextTapped() }, for: .primaryActionTriggered)
+        return button
+    }()
+
+    private let selector = IconSelectorBar(items: CaptureOption.allCases.map {
+        IconSelectorBar.Item(symbolName: CaptureViewController.symbol(for: $0, settings: CaptureSettings()), accessibilityLabel: $0.title)
+    })
+
+    private lazy var flashRow = CaptureChoiceRowView(
+        choices: CaptureFlashMode.allCases, chosen: settings.flash, label: \.label, symbol: \.symbolName
+    )
+    private lazy var timerRow = CaptureChoiceRowView(
+        choices: CaptureTimer.allCases, chosen: settings.timer, label: \.label
+    )
+    private lazy var ratioRow = CaptureChoiceRowView(
+        choices: CaptureRatio.allCases, chosen: settings.ratio, label: \.label
+    )
+    private lazy var filterRow = MediaFilterRowView()
+
+    private lazy var cancelItem = UIBarButtonItem(
+        title: "Cancel", primaryAction: UIAction { [weak self] _ in self?.cancelTapped() }
+    )
+    private lazy var flipItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.triangle.2.circlepath.camera"),
+            primaryAction: UIAction { [weak self] _ in self?.flip() }
+        )
+        item.accessibilityLabel = "Switch camera"
+        return item
+    }()
+
+    private let ringLink = CaptureLinkProxy()
+    private var cardsTimer: Timer?
+
+    init(
+        source: any CaptureSource,
+        folder: CaptureFolder,
+        captures: CapturedMediaLibrary,
+        recents: (any MediaLibraryReading)?,
+        reducesMotion: @escaping () -> Bool = { UIAccessibility.isReduceMotionEnabled },
+        makeLibraryPicker: (() -> UIViewController)?,
+        makeEditor: @escaping MakeEditor
+    ) {
+        self.source = source
+        self.folder = folder
+        self.captures = captures
+        self.recents = recents
+        self.reducesMotion = reducesMotion
+        self.makeLibraryPicker = makeLibraryPicker
+        self.makeEditor = makeEditor
+        super.init(nibName: nil, bundle: nil)
+        // The top bar belongs to the screen — a navigation controller reads
+        // `navigationItem` on the way in (the picker's and editor's note).
+        configureBars()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+
+    // MARK: - Lifecycle
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        overrideUserInterfaceStyle = .dark
+        view.backgroundColor = .black
+        edgesForExtendedLayout = .all
+        extendedLayoutIncludesOpaqueBars = true
+        configurePreview()
+        configureControls()
+        configureSelector()
+        refreshTakeControls(animated: false)
+        applyFrameDelivery()
+        #if DEBUG
+        runDebugScriptIfAsked()
+        #endif
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        UISound.prepare()
+        // The editor raises the stack's toolbar for its own strip; the camera
+        // has its selector in its own layout and wants the foot clear.
+        navigationController?.setToolbarHidden(true, animated: animated)
+        startCamera()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // ⚠️ A RUNNING SESSION HOLDS THE CAMERA AND BURNS POWER — the deleted
+        // screen's rule. A clip still recording is ended, not lost.
+        if isRecording { source.stopRecording() }
+        cancelCountdown()
+        stopCardsTimer()
+        source.stop()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutWindow()
+    }
+
+    private func startCamera() {
+        Task { [weak self] in
+            guard let self else { return }
+            let answer = await source.authorize()
+            authorization = answer
+            if case .denied = answer {
+                showNotice()
+            } else {
+                notice?.removeFromSuperview()
+                notice = nil
+                // A real session reports its lenses once it is running.
+                source.onStateChange = { [weak self] in self?.refreshLenses() }
+                source.start()
+                refreshLenses()
+            }
+        }
+    }
+
+    // MARK: - Bars
+
+    private func configureBars() {
+        navigationItem.leftBarButtonItems = [cancelItem]
+        navigationItem.rightBarButtonItems = [flipItem]
+        navigationItem.backButtonDisplayMode = .minimal
+        // ⚠️ TRANSPARENT, AND STATED ON THIS SCREEN'S ITEM — a bar appearance
+        // set on the stack's bar would follow the author into the editor.
+        let clear = UINavigationBarAppearance()
+        clear.configureWithTransparentBackground()
+        navigationItem.standardAppearance = clear
+        navigationItem.scrollEdgeAppearance = clear
+        navigationItem.compactAppearance = clear
+    }
+
+    private func cancelTapped() {
+        guard !take.isEmpty else {
+            dismiss(animated: true)
+            return
+        }
+        // ⚠️ CLIPS ARE WORK. A cancel that silently threw away a minute of
+        // recording would be the one tap on this screen that cannot be undone.
+        let count = take.clips.count
+        let alert = UIAlertController(
+            title: count == 1 ? "Discard this clip?" : "Discard \(count) clips?",
+            message: "What you recorded will be lost.", preferredStyle: .actionSheet
+        )
+        alert.addAction(UIAlertAction(title: "Discard", style: .destructive) { [weak self] _ in
+            self?.dismiss(animated: true)
+        })
+        alert.addAction(UIAlertAction(title: "Keep Recording", style: .cancel))
+        alert.popoverPresentationController?.barButtonItem = cancelItem
+        present(alert, animated: true)
+    }
+
+    // MARK: - Preview
+
+    private func configurePreview() {
+        previewContainer.backgroundColor = .black
+        previewContainer.clipsToBounds = true
+        previewContainer.layer.cornerRadius = 24
+        previewContainer.layer.cornerCurve = .continuous
+        // Only the foot is rounded: the sheet already rounds the top.
+        previewContainer.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        previewContainer.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(previewContainer)
+        let tall = previewContainer.heightAnchor.constraint(equalTo: previewContainer.widthAnchor, multiplier: 16.0 / 9.0)
+        tall.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            previewContainer.topAnchor.constraint(equalTo: view.topAnchor),
+            previewContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            previewContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            previewContainer.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor),
+            tall
+        ])
+
+        if let plain = source.plainPreview { plain.pin(to: previewContainer) }
+        liveView.pin(to: previewContainer)
+        source.feed.setConsumer(liveView.makeSink())
+
+        for bar in [letterboxTop, letterboxBottom] {
+            bar.backgroundColor = UIColor.black.withAlphaComponent(0.9)
+            bar.isUserInteractionEnabled = false
+            previewContainer.addSubview(bar)
+        }
+        gridView.isHidden = true
+        previewContainer.addSubview(gridView)
+
+        focusRing.bounds = CGRect(x: 0, y: 0, width: 72, height: 72)
+        focusRing.layer.borderColor = UIColor.systemYellow.cgColor
+        focusRing.layer.borderWidth = 1.5
+        focusRing.alpha = 0
+        focusRing.isUserInteractionEnabled = false
+        previewContainer.addSubview(focusRing)
+
+        flashView.backgroundColor = .white
+        flashView.alpha = 0
+        flashView.isUserInteractionEnabled = false
+        flashView.pin(to: previewContainer)
+
+        countdownLabel.font = .systemFont(ofSize: 132, weight: .heavy).rounded
+        countdownLabel.textColor = .white
+        countdownLabel.textAlignment = .center
+        countdownLabel.alpha = 0
+        countdownLabel.layer.shadowColor = UIColor.black.cgColor
+        countdownLabel.layer.shadowOpacity = 0.35
+        countdownLabel.layer.shadowRadius = 12
+        countdownLabel.layer.shadowOffset = .zero
+        countdownLabel.constrain(in: previewContainer) { container in
+            countdownLabel.centerXAnchor.constraint(equalTo: container.centerXAnchor)
+            countdownLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -40)
+        }
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
+        previewContainer.addGestureRecognizer(pinch)
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        previewContainer.addGestureRecognizer(doubleTap)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(previewTapped(_:)))
+        tap.require(toFail: doubleTap)
+        previewContainer.addGestureRecognizer(tap)
+    }
+
+    /// Where the ratio's window stands in the preview, and the letterbox
+    /// around it.
+    private func layoutWindow() {
+        let bounds = previewContainer.bounds
+        guard bounds.width > 0 else { return }
+        let window = settings.ratio.window(in: bounds)
+        letterboxTop.frame = CGRect(x: 0, y: 0, width: bounds.width, height: window.minY)
+        letterboxBottom.frame = CGRect(x: 0, y: window.maxY, width: bounds.width, height: bounds.height - window.maxY)
+        gridView.frame = window
+    }
+
+    // MARK: - Controls
+
+    private func configureControls() {
+        shutter.onTap = { [weak self] in self?.shutterTapped() }
+        shutter.onHoldBegan = { [weak self] in self?.holdBegan() }
+        shutter.onHoldMoved = { [weak self] in self?.holdMoved($0) }
+        shutter.onHoldEnded = { [weak self] in self?.holdEnded() }
+
+        shutter.constrain(in: view) { view in
+            shutter.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+            shutter.widthAnchor.constraint(equalToConstant: CaptureShutterView.side)
+            shutter.heightAnchor.constraint(equalToConstant: CaptureShutterView.side)
+        }
+
+        lockView.alpha = 0
+        lockView.constrain(in: view) { _ in
+            lockView.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
+            lockView.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: -(CaptureShutterLogic.lockDistance + 12))
+        }
+
+        libraryButton.clipsToBounds = true
+        libraryButton.layer.cornerRadius = 10
+        libraryButton.layer.cornerCurve = .continuous
+        libraryButton.layer.borderColor = UIColor.white.cgColor
+        libraryButton.layer.borderWidth = 2
+        libraryButton.imageView?.contentMode = .scaleAspectFill
+        libraryButton.accessibilityLabel = "Choose from library"
+        libraryButton.isHidden = true
+        libraryButton.addAction(UIAction { [weak self] _ in self?.openLibrary() }, for: .primaryActionTriggered)
+        libraryButton.constrain(in: view) { _ in
+            libraryButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
+            libraryButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: -112)
+            libraryButton.widthAnchor.constraint(equalToConstant: 44)
+            libraryButton.heightAnchor.constraint(equalToConstant: 44)
+        }
+
+        undoButton.constrain(in: view) { _ in
+            undoButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
+            undoButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: -112)
+            undoButton.widthAnchor.constraint(equalToConstant: 48)
+            undoButton.heightAnchor.constraint(equalToConstant: 48)
+        }
+
+        nextButton.constrain(in: view) { _ in
+            nextButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
+            nextButton.centerXAnchor.constraint(equalTo: shutter.centerXAnchor, constant: 116)
+            nextButton.heightAnchor.constraint(equalToConstant: 44)
+        }
+
+        lensChips.onPick = { [weak self] lens in self?.pickLens(lens) }
+        lensChips.constrain(in: view) { view in
+            lensChips.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+            lensChips.bottomAnchor.constraint(equalTo: shutter.topAnchor, constant: -Spacing.md)
+        }
+
+        band.constrain(in: view) { view in
+            band.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+            band.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            band.bottomAnchor.constraint(equalTo: shutter.topAnchor, constant: -Spacing.sm)
+        }
+
+        timePill.cornerConfiguration = .capsule()
+        timeLabel.font = .monospacedDigitSystemFont(ofSize: 14, weight: .semibold)
+        timeLabel.textColor = .white
+        timeLabel.pin(to: timePill.contentView, insets: NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+        timePill.alpha = 0
+        timePill.constrain(in: view) { view in
+            timePill.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+            timePill.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm)
+        }
+
+        toast.cornerConfiguration = .capsule()
+        toastLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        toastLabel.textColor = .white
+        toastLabel.textAlignment = .center
+        toastLabel.pin(to: toast.contentView, insets: NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+        toast.alpha = 0
+        toast.isUserInteractionEnabled = false
+        toast.constrain(in: view) { view in
+            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+            toast.centerYAnchor.constraint(equalTo: previewContainer.centerYAnchor)
+        }
+
+        ringLink.onTick = { [weak self] in self?.ringTick() }
+        loadLibraryShortcut()
+    }
+
+    /// ⚠️ **GLASS IS MATERIALISED ONCE A WINDOW EXISTS** — the `IconSelectorBar`
+    /// rule about contacting the render server before there is one.
+    override func viewIsAppearing(_ animated: Bool) {
+        super.viewIsAppearing(animated)
+        if timePill.effect == nil { timePill.effect = UIGlassEffect() }
+        if toast.effect == nil { toast.effect = UIGlassEffect() }
+    }
+
+    // MARK: - Selector
+
+    private func configureSelector() {
+        // ⚠️ THE SHUTTER STANDS INSIDE THE PICTURE, NEVER ACROSS ITS EDGE. On
+        // the first run the preview's rounded foot cut through the ring. It
+        // rests just above the selector where the phone is tall enough, and is
+        // lifted into the preview where it is not (an SE's preview reaches the
+        // foot of the sheet, and the selector then lies over the picture).
+        let resting = shutter.bottomAnchor.constraint(equalTo: selector.topAnchor, constant: -Spacing.md)
+        resting.priority = .defaultHigh
+        selector.constrain(in: view) { view in
+            selector.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+            selector.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -Spacing.sm)
+            shutter.bottomAnchor.constraint(lessThanOrEqualTo: selector.topAnchor, constant: -Spacing.md)
+            shutter.bottomAnchor.constraint(lessThanOrEqualTo: previewContainer.bottomAnchor, constant: -Spacing.lg)
+            resting
+        }
+        selector.onSelect = { [weak self] index in self?.optionChosen(index) }
+        // ⚠️ A SECOND TAP ON THE CHOSEN ICON PUTS ITS CONTROLS AWAY — the
+        // editor's neutral state, asked for in the same words.
+        selector.onReselect = { [weak self] _ in self?.closeOption() }
+        selector.onSelectNothing = { [weak self] in self?.showBand(nil) }
+        selector.selectNothing(notify: false)
+
+        flashRow.onPick = { [weak self] in self?.setFlash($0) }
+        timerRow.onPick = { [weak self] in self?.setTimer($0) }
+        ratioRow.onPick = { [weak self] in self?.setRatio($0) }
+        filterRow.onPick = { [weak self] in self?.setFilter($0) }
+    }
+
+    static func symbol(for option: CaptureOption, settings: CaptureSettings) -> String {
+        switch option {
+        case .flash: settings.flash.symbolName
+        case .timer: settings.timer.symbolName
+        case .ratio: "aspectratio"
+        case .filters: "camera.filters"
+        case .grid: settings.showsGrid ? "squareshape.split.3x3" : "square.dashed"
+        }
+    }
+
+    /// The icons wear the state they set: the bolt is slashed while the flash
+    /// is off, the timer shows its seconds, the grid its lines.
+    private func refreshSelectorIcons() {
+        selector.setItems(CaptureOption.allCases.map {
+            IconSelectorBar.Item(symbolName: Self.symbol(for: $0, settings: settings), accessibilityLabel: $0.title)
+        })
+    }
+
+    private func optionChosen(_ index: Int) {
+        guard let option = CaptureOption(rawValue: index) else { return }
+        take.disarm()
+        refreshTakeControls(animated: true)
+        if option == .grid {
+            settings.showsGrid.toggle()
+            applyGrid(animated: true)
+            refreshSelectorIcons()
+            selector.selectNothing(notify: false)
+            showBand(nil)
+            return
+        }
+        showBand(option)
+    }
+
+    private func closeOption() {
+        selector.selectNothing(notify: false)
+        showBand(nil)
+    }
+
+    /// The option whose controls are standing in the band.
+    private(set) var openOption: CaptureOption?
+
+    private func tenant(for option: CaptureOption) -> UIView? {
+        switch option {
+        case .flash: flashRow
+        case .timer: timerRow
+        case .ratio: ratioRow
+        case .filters: filterRow
+        case .grid: nil
+        }
+    }
+
+    /// ⚠️ **THE DEPARTING TENANT IS RELEASED BEFORE ANYTHING ELSE** —
+    /// `MediaEditorBandView.release()`'s reason: `openOption` answers "what is
+    /// up" at once, while the old row fades out on its own.
+    private func showBand(_ option: CaptureOption?) {
+        let wanted = option.flatMap(tenant(for:))
+        guard wanted !== band.content else { return }
+        let departing = band.content != nil ? band.release() : nil
+        openOption = wanted == nil ? nil : option
+        if let wanted {
+            band.show(wanted)
+        } else {
+            band.clear()
+        }
+        view.layoutIfNeeded()
+        if let departing { popOut(departing) }
+        if let wanted { popIn(wanted) }
+        // The band takes the chips' place; they come back when it closes.
+        setShown(lensChips, wanted == nil && lensChips.debugTitles.count > 1, animated: true)
+        if option == .filters {
+            startCardsTimer()
+        } else {
+            stopCardsTimer()
+        }
+        applyFrameDelivery()
+    }
+
+    /// The editor's arrival curve — each element the tenant names, one after
+    /// another, each with its pop — read, not shared: that function is the
+    /// editor's own.
+    private func popIn(_ tenant: UIView) {
+        guard !reducesMotion() else { return }
+        let named = (tenant as? PoppingTenant)?.poppableElements ?? []
+        let elements = named.isEmpty ? [tenant] : named
+        for (index, element) in elements.enumerated() {
+            // ⚠️ SILENT WHILE RECORDING: the microphone is open, and a pop
+            // would be in the clip.
+            if index < BandPop.audibleElements, !isRecording {
+                UISound.pop.play(after: BandPop.stagger(for: index))
+            }
+            element.alpha = 0
+            element.transform = BandPop.collapsedTransform
+            UIView.animate(
+                withDuration: BandPop.duration, delay: BandPop.stagger(for: index),
+                usingSpringWithDamping: BandPop.dampingRatio, initialSpringVelocity: 0,
+                options: [.allowUserInteraction]
+            ) {
+                element.alpha = 1
+                element.transform = .identity
+            }
+        }
+        debugPopIns += 1
+    }
+
+    private func popOut(_ departing: UIView) {
+        guard !reducesMotion() else {
+            departing.removeFromSuperview()
+            return
+        }
+        UIView.animate(withDuration: BandPop.departure, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
+            departing.alpha = 0
+            departing.transform = BandPop.collapsedTransform
+        } completion: { _ in
+            departing.alpha = 1
+            departing.transform = .identity
+            departing.removeFromSuperview()
+        }
+    }
+
+    // MARK: - Settings
+
+    private func setFlash(_ mode: CaptureFlashMode) {
+        settings.flash = mode
+        refreshSelectorIcons()
+    }
+
+    private func setTimer(_ timer: CaptureTimer) {
+        settings.timer = timer
+        refreshSelectorIcons()
+    }
+
+    private func setRatio(_ ratio: CaptureRatio) {
+        settings.ratio = ratio
+        let animate = !reducesMotion()
+        UIView.animate(
+            withDuration: animate ? 0.45 : 0, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            self.layoutWindow()
+        }
+    }
+
+    private func setFilter(_ filter: MediaFilter) {
+        settings.filter = filter
+        liveView.setLook(FrameLook(preset: filter))
+        applyFrameDelivery()
+    }
+
+    private func applyGrid(animated: Bool) {
+        setShown(gridView, settings.showsGrid, animated: animated)
+    }
+
+    /// ⚠️ **THE CHEAPEST PREVIEW THAT SHOWS THE TRUTH.** With no look chosen
+    /// and a source that has a plain preview, the Metal view is hidden and the
+    /// source stops delivering frames — unless the filter row is open, whose
+    /// cards are drawn from the live frame.
+    private func applyFrameDelivery() {
+        let hasPlain = source.plainPreview != nil
+        let needsLook = settings.filter != .original
+        liveView.isHidden = hasPlain && !needsLook
+        source.setDeliversFrames(!hasPlain || needsLook || openOption == .filters)
+    }
+
+    /// The filter row's cards, redrawn from the newest frame while the row is
+    /// open — twice a second, which reads as live and costs nine 56pt renders.
+    private func startCardsTimer() {
+        refreshCards()
+        guard cardsTimer == nil else { return }
+        cardsTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshCards() }
+        }
+    }
+
+    private func stopCardsTimer() {
+        cardsTimer?.invalidate()
+        cardsTimer = nil
+    }
+
+    private func refreshCards() {
+        guard let frame = source.feed.latestFrame else { return }
+        let side = MediaFilterRowView.thumbnailSide * (view.window?.screen.scale ?? 3)
+        Task { [weak self] in
+            let picture = await Task.detached(priority: .userInitiated) {
+                CaptureLiveView.snapshot(of: frame, side: side)
+            }.value
+            guard let self, openOption == .filters, let picture else { return }
+            filterRow.show(picture)
+            filterRow.setSelected(settings.filter)
+        }
+    }
+
+    // MARK: - The shutter
+
+    private func shutterTapped() {
+        guard authorizedToShoot, !isBusy else { return }
+        if countdownTask != nil {
+            // A tap during the countdown calls it off.
+            cancelCountdown()
+            return
+        }
+        take.disarm()
+        let action = shutterLogic.tap(takeIsEmpty: take.isEmpty, takeIsFull: take.isFull)
+        switch action {
+        case .takePhoto:
+            afterCountdown { [weak self] in self?.takePhoto() }
+        case .startRecording(let locked):
+            // The logic already stands locked; the recording waits out the timer.
+            afterCountdown { [weak self] in self?.startRecording(locked: locked) }
+        case .stopRecording:
+            source.stopRecording()
+        case .none where take.isFull:
+            say("3-minute limit reached")
+        default:
+            break
+        }
+        refreshTakeControls(animated: true)
+    }
+
+    private func holdBegan() {
+        guard authorizedToShoot, !isBusy, countdownTask == nil else { return }
+        take.disarm()
+        let action = shutterLogic.beginHold(takeIsFull: take.isFull)
+        guard case .startRecording = action else {
+            if take.isFull { say("3-minute limit reached") }
+            return
+        }
+        holdBaseZoom = source.zoom
+        // ⚠️ A HOLD WITH A TIMER SET IS HANDS-FREE: the timer exists so the
+        // author can step back, and a finger on the shutter cannot.
+        if settings.timer != .off {
+            _ = shutterLogic.moveHold(by: CGPoint(x: -CaptureShutterLogic.lockDistance, y: 0))
+            afterCountdown { [weak self] in self?.startRecording(locked: true) }
+            return
+        }
+        startRecording(locked: false)
+        showLock(true)
+    }
+
+    private func holdMoved(_ translation: CGPoint) {
+        guard isRecording, shutterLogic.phase == .holding else { return }
+        lockView.setProgress(CaptureShutterLogic.lockProgress(for: translation))
+        // An upward slide zooms, from where the zoom stood when the hold began.
+        if translation.y < -8 {
+            let zoom = CaptureShutterLogic.zoom(from: holdBaseZoom, translation: translation)
+            source.setZoom(zoom, smoothly: false)
+            lensChips.setZoom(source.zoom)
+        }
+        if shutterLogic.moveHold(by: translation) == .lock {
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+            lockView.setLocked(true)
+            shutter.setLook(.locked, animated: true)
+            UIView.animate(withDuration: 0.25, delay: 0.35, options: [.beginFromCurrentState]) {
+                self.lockView.alpha = 0
+            }
+        }
+    }
+
+    private func holdEnded() {
+        let action = shutterLogic.endHold()
+        showLock(false)
+        if action == .stopRecording { source.stopRecording() }
+    }
+
+    private var authorizedToShoot: Bool {
+        if case .authorized = authorization { return true }
+        return false
+    }
+
+    // MARK: - Countdown
+
+    private func afterCountdown(_ body: @escaping () -> Void) {
+        let seconds = settings.timer.rawValue
+        guard seconds > 0 else {
+            body()
+            return
+        }
+        countdownTask = Task { [weak self] in
+            for remaining in stride(from: seconds, through: 1, by: -1) {
+                guard let self, !Task.isCancelled else { return }
+                self.tickCountdown(remaining)
+                try? await Task.sleep(for: .seconds(1))
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.countdownLabel.alpha = 0
+            self.countdownTask = nil
+            body()
+        }
+        setChromeHidden(true)
+    }
+
+    private func tickCountdown(_ remaining: Int) {
+        countdownLabel.text = "\(remaining)"
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        guard !reducesMotion() else {
+            countdownLabel.alpha = 1
+            return
+        }
+        countdownLabel.alpha = 0
+        countdownLabel.transform = CGAffineTransform(scaleX: 1.6, y: 1.6)
+        UIView.animate(withDuration: 0.35, delay: 0, usingSpringWithDamping: 0.6, initialSpringVelocity: 0) {
+            self.countdownLabel.alpha = 1
+            self.countdownLabel.transform = .identity
+        }
+        UIView.animate(withDuration: 0.3, delay: 0.65, options: [.curveEaseIn]) {
+            self.countdownLabel.alpha = 0.15
+            self.countdownLabel.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+        }
+    }
+
+    private func cancelCountdown() {
+        guard let task = countdownTask else { return }
+        task.cancel()
+        countdownTask = nil
+        countdownLabel.alpha = 0
+        // A countdown for a recording had already put the shutter's logic in
+        // the phase the recording would have started in.
+        if !isRecording { shutterLogic.recordingEnded() }
+        setChromeHidden(false)
+    }
+
+    // MARK: - Photograph
+
+    private func takePhoto() {
+        guard !isBusy else { return }
+        isBusy = true
+        shutter.setLook(.busy, animated: true)
+        flashScreen()
+        let flash = source.hasFlash ? settings.flash : .off
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let photo = try await source.capturePhoto(flash: flash, into: folder)
+                photographed(photo)
+            } catch {
+                say("The photo could not be taken")
+            }
+            isBusy = false
+            shutter.setLook(.idle, animated: true)
+            setChromeHidden(false)
+        }
+    }
+
+    /// The shutter's blink — a white flash over the preview, over in a quarter
+    /// of a second. With motion reduced, a dimmer and shorter one.
+    private func flashScreen() {
+        flashView.alpha = reducesMotion() ? 0.4 : 0.85
+        UIView.animate(withDuration: reducesMotion() ? 0.1 : 0.28, delay: 0.02, options: [.curveEaseOut]) {
+            self.flashView.alpha = 0
+        }
+    }
+
+    private func photographed(_ photo: CapturedPhoto) {
+        let item = captures.register(photo.url, kind: .photo)
+        let edits = handOffEdits(uprightSize: photo.uprightSize)
+        openEditor([item], edits: [item.id: edits])
+    }
+
+    /// What the capture arrives in the editor wearing: the look and the ratio
+    /// chosen here, as the editor's own edits.
+    func handOffEdits(uprightSize: CGSize) -> MediaEdits {
+        var edits = MediaEdits()
+        edits.filter = settings.filter
+        edits.crop = settings.ratio.crop(forUpright: uprightSize)
+        return edits
+    }
+
+    private func openEditor(_ items: [MediaLibraryItem], edits: [String: MediaEdits]) {
+        let editor = makeEditor(items, edits)
+        debugLastHandOff = (items, edits)
+        navigationController?.pushViewController(editor, animated: true)
+    }
+
+    // MARK: - Recording
+
+    private func startRecording(locked: Bool) {
+        guard !isRecording else { return }
+        guard !take.isFull else {
+            shutterLogic.recordingEnded()
+            say("3-minute limit reached")
+            return
+        }
+        let url = folder.newFile("clip", pathExtension: "mov")
+        let torch = settings.flash.lightsTorch && source.hasFlash
+        isRecording = true
+        stitched = nil
+        let promise = source.startRecording(to: url, torch: torch, limit: take.remaining)
+        shutter.setLook(locked ? .locked : .holding, animated: true)
+        setChromeHidden(true)
+        ringLink.start()
+        Task { [weak self] in
+            do {
+                var clip = try await promise.value
+                if clip.duration <= 0 {
+                    clip = CaptureClip(url: clip.url, duration: await CapturedMediaLibrary.duration(of: clip.url))
+                }
+                self?.recordingFinished(clip)
+            } catch {
+                self?.recordingFinished(nil)
+                self?.folder.discard(url)
+            }
+        }
+    }
+
+    private func recordingFinished(_ clip: CaptureClip?) {
+        isRecording = false
+        ringLink.stop()
+        shutterLogic.recordingEnded()
+        showLock(false)
+        shutter.setLive(from: 0, to: 0)
+        if let clip, !take.append(clip) {
+            // Too short to be a clip: its file goes at once.
+            folder.discard(clip.url)
+        }
+        shutter.setLook(.idle, animated: true)
+        setChromeHidden(false)
+        refreshTakeControls(animated: true)
+        if clip == nil { say("The clip could not be recorded") }
+        if take.isFull { say("3-minute limit reached") }
+    }
+
+    private func ringTick() {
+        guard isRecording else { return }
+        let start = take.total / CaptureTake.limit
+        let now = min(take.remaining, source.recordedDuration)
+        shutter.setLive(from: start, to: start + now / CaptureTake.limit)
+        timeLabel.text = Self.clock(take.total + now)
+    }
+
+    static func clock(_ seconds: TimeInterval) -> String {
+        let whole = Int(seconds.rounded(.down))
+        return String(format: "%d:%02d / 3:00", whole / 60, whole % 60)
+    }
+
+    // MARK: - Undo, Next
+
+    private func undoTapped() {
+        switch take.undo() {
+        case .nothing:
+            break
+        case .armed:
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .deleted(let clip):
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            folder.discard(clip.url)
+            stitched = nil
+        }
+        refreshTakeControls(animated: true)
+    }
+
+    private func nextTapped() {
+        guard !take.isEmpty, !isRecording, !isBusy else { return }
+        take.disarm()
+        isBusy = true
+        refreshTakeControls(animated: true)
+        var busy = nextButton.configuration
+        busy?.showsActivityIndicator = true
+        nextButton.configuration = busy
+        let clips = take.clips.map(\.url)
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                isBusy = false
+                var idle = nextButton.configuration
+                idle?.showsActivityIndicator = false
+                nextButton.configuration = idle
+                refreshTakeControls(animated: true)
+            }
+            do {
+                let url: URL
+                let duration: TimeInterval
+                if let stitched, stitched.clips == clips {
+                    url = stitched.url
+                    duration = stitched.duration
+                } else {
+                    url = try await CaptureStitcher.stitch(clips, to: folder.newFile("take", pathExtension: "mov"))
+                    duration = await CapturedMediaLibrary.duration(of: url)
+                    stitched = (clips, url, duration)
+                }
+                let size = await CapturedMediaLibrary.uprightVideoSize(at: url) ?? .zero
+                let item = captures.register(url, kind: .video(duration: duration))
+                openEditor([item], edits: [item.id: handOffEdits(uprightSize: size)])
+            } catch {
+                say("The video could not be put together")
+            }
+        }
+    }
+
+    /// Lays out what the take allows: the library shortcut while it is empty,
+    /// undo and Next once it holds a clip, the ring's segments, the clock.
+    private func refreshTakeControls(animated: Bool) {
+        let recordingOrCounting = isRecording || countdownTask != nil
+        let hasClips = !take.isEmpty
+        setShown(libraryButton, !hasClips && !recordingOrCounting && libraryButton.image(for: .normal) != nil, animated: animated)
+        setShown(undoButton, hasClips && !recordingOrCounting, animated: animated)
+        setShown(nextButton, hasClips && !recordingOrCounting, animated: animated)
+        nextButton.isEnabled = !isBusy
+        var undo = UIButton.Configuration.glass()
+        if take.isArmedToUndo {
+            undo = .prominentGlass()
+            undo.baseBackgroundColor = .systemRed
+        }
+        undo.image = UIImage(systemName: "delete.left.fill")
+        undo.baseForegroundColor = .white
+        undoButton.configuration = undo
+        undoButton.accessibilityLabel = take.isArmedToUndo ? "Delete last clip — tap again to confirm" : "Delete last clip"
+        shutter.setSegments(take.segments, armedLast: take.isArmedToUndo)
+        timeLabel.text = Self.clock(take.total)
+        setShown(timePill, hasClips || isRecording, animated: animated)
+        // ⚠️ A SHEET WITH CLIPS IN IT DOES NOT SWIPE AWAY: the drag would throw
+        // the take out with no question asked. Cancel asks.
+        navigationController?.isModalInPresentation = hasClips || isRecording
+    }
+
+    /// Everything but the shutter, the ring and the zoom steps back while a
+    /// clip records or a countdown runs.
+    private func setChromeHidden(_ hidden: Bool) {
+        cancelItem.isHidden = hidden
+        flipItem.isHidden = hidden
+        setShown(selector, !hidden, animated: true)
+        if hidden { showBand(nil); selector.selectNothing(notify: false) }
+        refreshTakeControls(animated: true)
+    }
+
+    private func showLock(_ shown: Bool) {
+        lockView.setLocked(false)
+        lockView.setProgress(0)
+        setShown(lockView, shown, animated: true)
+    }
+
+    // MARK: - Zoom, focus, flip
+
+    private func refreshLenses() {
+        lensChips.setLenses(source.lenses, zoom: source.zoom)
+        setShown(lensChips, openOption == nil && source.lenses.count > 1, animated: false)
+    }
+
+    private func pickLens(_ lens: CaptureLens) {
+        source.setZoom(lens.factor, smoothly: true)
+        lensChips.setZoom(source.zoom)
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    @objc private func pinched(_ pinch: UIPinchGestureRecognizer) {
+        switch pinch.state {
+        case .began:
+            pinchBaseZoom = source.zoom
+        case .changed:
+            source.setZoom(pinchBaseZoom * pinch.scale, smoothly: false)
+            lensChips.setZoom(source.zoom)
+        default:
+            break
+        }
+    }
+
+    @objc private func previewTapped(_ tap: UITapGestureRecognizer) {
+        // A tap on the preview closes an open band first — the finger was
+        // reaching for the picture, not for focus.
+        if openOption != nil {
+            closeOption()
+            return
+        }
+        let point = tap.location(in: previewContainer)
+        let bounds = previewContainer.bounds
+        guard bounds.width > 0 else { return }
+        source.focus(at: CGPoint(x: point.x / bounds.width, y: point.y / bounds.height))
+        focusRing.center = point
+        focusRing.transform = CGAffineTransform(scaleX: 1.4, y: 1.4)
+        focusRing.alpha = 1
+        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0) {
+            self.focusRing.transform = .identity
+        }
+        UIView.animate(withDuration: 0.3, delay: 0.9, options: [.beginFromCurrentState]) {
+            self.focusRing.alpha = 0
+        }
+    }
+
+    @objc private func doubleTapped(_ tap: UITapGestureRecognizer) {
+        flip()
+    }
+
+    /// ⚠️ **A FLIP WHILE RECORDING IS REFUSED**, not queued: the movie output
+    /// cannot change inputs under a running file, and a clip is where a flip
+    /// belongs anyway — between two of them.
+    private func flip() {
+        guard !isRecording, !isBusy else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        let snapshot = liveView.isHidden ? source.plainPreview : liveView
+        if !reducesMotion(), let snapshot {
+            UIView.transition(with: snapshot, duration: 0.4, options: [.transitionFlipFromLeft, .allowUserInteraction]) {}
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            await source.flip()
+            refreshLenses()
+        }
+    }
+
+    // MARK: - Library shortcut
+
+    /// The newest picture in the library, as the shortcut's face.
+    ///
+    /// ⚠️ **ONLY IF ACCESS IS ALREADY GRANTED.** Reading `access` asks nothing;
+    /// `requestAccess()` would put the Photos prompt in front of a person who
+    /// opened the CAMERA. With no access the shortcut is simply not offered —
+    /// the "+" menu's "Upload Media" asks, where asking is expected.
+    private func loadLibraryShortcut() {
+        guard let recents, makeLibraryPicker != nil else { return }
+        guard recents.access == .granted || recents.access == .limited else { return }
+        Task { [weak self] in
+            guard let first = await recents.albums().first,
+                  let newest = await recents.items(in: first.id).first,
+                  let picture = await recents.thumbnail(for: newest.id, size: CGSize(width: 88, height: 88))
+            else { return }
+            guard let self else { return }
+            libraryButton.setImage(picture, for: .normal)
+            refreshTakeControls(animated: true)
+        }
+    }
+
+    private func openLibrary() {
+        guard let picker = makeLibraryPicker?() else { return }
+        navigationController?.pushViewController(picker, animated: true)
+    }
+
+    // MARK: - Notices
+
+    private func showNotice() {
+        guard notice == nil else { return }
+        let notice = CaptureAccessNoticeView()
+        notice.onOpenSettings = {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        }
+        notice.pin(to: previewContainer)
+        self.notice = notice
+        shutter.isUserInteractionEnabled = false
+        shutter.alpha = 0.35
+        selector.isHidden = true
+        lensChips.isHidden = true
+    }
+
+    private func say(_ text: String) {
+        toastLabel.text = text
+        debugLastToast = text
+        toast.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
+            self.toast.alpha = 1
+            self.toast.transform = .identity
+        }
+        UIView.animate(withDuration: 0.3, delay: 2, options: [.beginFromCurrentState]) {
+            self.toast.alpha = 0
+        }
+    }
+
+    // MARK: - Appearing and leaving
+
+    /// ⚠️ **ELEMENTS ARRIVE WITH `BandPop` AND LEAVE QUICKER — AND ARE LEFT
+    /// ALONE WHEN ALREADY WHERE THEY ARE ASKED TO BE.** Model values are end
+    /// values: re-running an arrival on a view that is already shown would
+    /// flash it from nothing.
+    private func setShown(_ element: UIView, _ shown: Bool, animated: Bool) {
+        let isShown = !element.isHidden && element.alpha > 0.01 && element.isUserInteractionEnabled
+        guard shown != isShown || (shown && element.isHidden) else { return }
+        element.isUserInteractionEnabled = shown
+        guard animated, !reducesMotion(), element.window != nil else {
+            element.isHidden = !shown
+            element.alpha = shown ? 1 : 0
+            element.transform = .identity
+            return
+        }
+        if shown {
+            element.isHidden = false
+            element.alpha = 0
+            element.transform = BandPop.collapsedTransform
+            UIView.animate(
+                withDuration: BandPop.duration, delay: 0, usingSpringWithDamping: BandPop.dampingRatio,
+                initialSpringVelocity: 0, options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
+                element.alpha = 1
+                element.transform = .identity
+            }
+        } else {
+            UIView.animate(
+                withDuration: BandPop.departure, delay: 0, options: [.curveEaseIn, .beginFromCurrentState]
+            ) {
+                element.alpha = 0
+                element.transform = BandPop.collapsedTransform
+            } completion: { finished in
+                guard finished, !element.isUserInteractionEnabled else { return }
+                element.isHidden = true
+                element.transform = .identity
+            }
+        }
+    }
+
+    // MARK: - Debug
+
+    private(set) var debugPopIns = 0
+    private(set) var debugLastToast: String?
+    private(set) var debugLastHandOff: ([MediaLibraryItem], [String: MediaEdits])?
+    var debugSelector: IconSelectorBar { selector }
+    var debugBand: MediaEditorBandView { band }
+    var debugFlashRow: CaptureChoiceRowView<CaptureFlashMode> { flashRow }
+    var debugTimerRow: CaptureChoiceRowView<CaptureTimer> { timerRow }
+    var debugRatioRow: CaptureChoiceRowView<CaptureRatio> { ratioRow }
+    var debugFilterRow: MediaFilterRowView { filterRow }
+    var debugLensChips: CaptureLensChipsView { lensChips }
+    var debugLiveView: CaptureLiveView { liveView }
+    var debugGridIsShowing: Bool { !gridView.isHidden && gridView.alpha > 0 }
+    var debugUndoIsShowing: Bool { !undoButton.isHidden && undoButton.isUserInteractionEnabled }
+    var debugNextIsShowing: Bool { !nextButton.isHidden && nextButton.isUserInteractionEnabled }
+    var debugLibraryIsShowing: Bool { !libraryButton.isHidden && libraryButton.isUserInteractionEnabled }
+    var debugLockIsShowing: Bool { lockView.isUserInteractionEnabled || (!lockView.isHidden && lockView.alpha > 0) }
+    var debugWindow: CGRect { gridView.frame }
+    var debugPreviewBounds: CGRect { previewContainer.bounds }
+    var debugNoticeIsShowing: Bool { notice != nil }
+    func debugTapUndo() { undoTapped() }
+    func debugTapNext() { nextTapped() }
+    func debugTapShutter() { shutterTapped() }
+    func debugBeginHold() { holdBegan() }
+    func debugMoveHold(_ translation: CGPoint) { holdMoved(translation) }
+    func debugEndHold() { holdEnded() }
+    func debugTapLibrary() { openLibrary() }
+    func debugFlip() { flip() }
+}
+
+/// Holds the ring's display link weakly, the `RevealLinkProxy` shape — a link
+/// holds its target strongly and the run loop holds the link.
+@MainActor
+final class CaptureLinkProxy: NSObject {
+    var onTick: (() -> Void)?
+    private var link: CADisplayLink?
+
+    func start() {
+        guard link == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    /// ⚠️ **STOPPED THE MOMENT RECORDING ENDS** — `RevealDriver`'s rule: a link
+    /// left running is a callback at screen rate for the life of the screen.
+    func stop() {
+        link?.invalidate()
+        link = nil
+    }
+
+    @objc private func tick() { onTick?() }
+}
+
+private extension UIFont {
+    var rounded: UIFont {
+        guard let descriptor = fontDescriptor.withDesign(.rounded) else { return self }
+        return UIFont(descriptor: descriptor, size: pointSize)
+    }
+}

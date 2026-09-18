@@ -2,7 +2,12 @@ import FeedInterface
 import UIKit
 
 /// The screens behind the tab bar's "+" menu that belong to this package:
-/// Upload Media and Text Post.
+/// Camera, Upload Media and Text Post.
+///
+/// CAMERA IS THIS PACKAGE'S OWN SCREEN TOO, because its output IS an upload:
+/// `CaptureViewController` photographs and records, and hands what it caught to
+/// the same editor and the same finalisation screen the library's picks go to
+/// — see `makeCameraViewController()`.
 ///
 /// TEXT POST IS DRAWN BY FEED. It is a text post's own page, born empty — the
 /// same header, stream, composer and footer — and the first message the viewer
@@ -59,24 +64,7 @@ public struct UploadFeatureBuilder {
         // looking exactly like the fix. It lives as long as this sheet and dies
         // with it — session-scoped, nothing on disk, nothing global.
         let draft = PostDraft()
-        let picker = MediaPickerViewController(library: library) { chosen in
-            // ⚠️ THE DRAFT'S BAG, so an imported song outlives the editor
-            // until the post is out — see `PostDraft.soundtrackFiles`.
-            MediaEditorViewController(
-                items: chosen, library: library,
-                soundtracks: SystemSoundtrackSource(files: draft.soundtrackFiles)
-            ) { editing, edits in
-                // ⚠️ THE SCREEN DISMISSES ITSELF. This closure cannot reach the
-                // navigation controller — it is built below, after the picker
-                // that owns this one — and a published post is broadcast on
-                // `ComposedPostChannel`, so the feed already has it and nobody
-                // here needs telling.
-                NewPostViewController(
-                    items: editing, edits: edits,
-                    library: library, composer: composer, draft: draft
-                ) { _ in }
-            }
-        }
+        let picker = makePicker(library: library, draft: draft)
         // ⚠️ NOT A PLAIN `UINavigationController`: UIKit's full-width back-swipe
         // would let a drag anywhere on the screen leave the flow, and this one is
         // wanted from the window's edge only. See `UploadNavigationController`.
@@ -93,6 +81,90 @@ public struct UploadFeatureBuilder {
             sheet.prefersGrabberVisible = true
         }
         return navigation
+    }
+
+    /// "Camera" — a photograph or a video, captured here.
+    ///
+    /// The sheet the picker is — full height, one detent, "Cancel" at the top
+    /// left — opening on the camera; a capture goes on to the editor and the
+    /// finalisation screen exactly as a library pick does.
+    ///
+    /// ⚠️ **THE DRAFT OWNS THE CAPTURES' FILES.** `PostDraft.captureFolder` is
+    /// removed when the draft goes, which is when this sheet does — after the
+    /// post is out, never under the export reading it.
+    ///
+    /// ⚠️ **TWO LIBRARIES, EACH FOR ITS OWN SCREENS.** The editor and the
+    /// finalisation screen of a CAPTURE read `CapturedMediaLibrary`, which
+    /// serves the files in the draft's folder; the library shortcut beside the
+    /// shutter opens the ordinary picker, whose editor reads the device's
+    /// library as it always has. Handing either the other's library would ask
+    /// it for items it never registered.
+    public func makeCameraViewController() -> UIViewController {
+        let draft = PostDraft()
+        let captures = CapturedMediaLibrary()
+        let recents = Self.makeLibrary()
+        let composer = self.composer
+        let camera = CaptureViewController(
+            source: makeCaptureSource(),
+            folder: draft.captureFolder,
+            captures: captures,
+            recents: recents,
+            makeLibraryPicker: { [self] in
+                let picker = makePicker(library: recents, draft: draft)
+                // ⚠️ PUSHED, SO ITS WAY OUT IS THE CHEVRON BACK TO THE CAMERA.
+                // The picker states "Cancel" for the sheet it is usually the
+                // root of; kept here, it would close the whole camera from a
+                // screen the author reached by one tap from it.
+                picker.navigationItem.leftBarButtonItems = nil
+                return picker
+            }
+        ) { items, initialEdits in
+            MediaEditorViewController(
+                items: items, library: captures,
+                soundtracks: SystemSoundtrackSource(files: draft.soundtrackFiles),
+                initialEdits: initialEdits
+            ) { editing, edits in
+                NewPostViewController(
+                    items: editing, edits: edits,
+                    library: captures, composer: composer, draft: draft
+                ) { _ in }
+            }
+        }
+        let navigation = UploadNavigationController(rootViewController: camera)
+        navigation.modalPresentationStyle = .pageSheet
+        if let sheet = navigation.sheetPresentationController {
+            // The picker's sheet, for the picker's reasons: full height, one
+            // detent, nothing to resolve. Asked for over a zoom transition.
+            sheet.detents = [.large()]
+            sheet.selectedDetentIdentifier = .large
+            sheet.prefersGrabberVisible = true
+        }
+        return navigation
+    }
+
+    /// The library picker and the editor → finalisation chain behind it, for
+    /// `library` and `draft`.
+    ///
+    /// ⚠️ **THE DRAFT'S BAG, so an imported song outlives the editor until the
+    /// post is out — see `PostDraft.soundtrackFiles`.**
+    private func makePicker(library: any MediaLibraryReading, draft: PostDraft) -> MediaPickerViewController {
+        let composer = self.composer
+        return MediaPickerViewController(library: library) { chosen in
+            MediaEditorViewController(
+                items: chosen, library: library,
+                soundtracks: SystemSoundtrackSource(files: draft.soundtrackFiles)
+            ) { editing, edits in
+                // ⚠️ THE SCREEN DISMISSES ITSELF. This closure cannot reach the
+                // navigation controller — it is built after the picker that
+                // owns this one — and a published post is broadcast on
+                // `ComposedPostChannel`, so the feed already has it and nobody
+                // here needs telling.
+                NewPostViewController(
+                    items: editing, edits: edits,
+                    library: library, composer: composer, draft: draft
+                ) { _ in }
+            }
+        }
     }
 
     /// "Text Post" — a post with no media, written on its own page.
