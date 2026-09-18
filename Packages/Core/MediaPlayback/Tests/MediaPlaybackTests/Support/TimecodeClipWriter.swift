@@ -35,11 +35,11 @@ enum TimecodeClipWriter {
     static var frames: Int { seconds * 30 }
 
     static func clip() async throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("timecode-clip.mov")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("timecode-clip-fed-apart.mov")
         if FileManager.default.fileExists(atPath: url.path) { return url }
         // ⚠️ A NAME OF ITS OWN: two suites run side by side and may both write it.
         let partial = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(UUID().uuidString)-timecode-clip.mov")
+            .appendingPathComponent("\(UUID().uuidString)-timecode-clip-fed-apart.mov")
 
         let writer = try AVAssetWriter(outputURL: partial, fileType: .mov)
         let video = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -74,38 +74,49 @@ enum TimecodeClipWriter {
         guard writer.startWriting() else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
         writer.startSession(atSourceTime: .zero)
 
-        // ⚠️ INTERLEAVED, WITH THE SOUND HALF A SECOND AHEAD AND FINISHED AS
-        // SOON AS IT IS ALL GIVEN. The writer interleaves what it is given and
-        // will not run one input far past the other. Six seconds of sound first
-        // (`ColourClipWriter`'s order, which its four get away with) left the
-        // SOUND input never ready again; sound given as the pictures went but
-        // finished only after them left the PICTURE input never ready at frame
-        // 169 of 180 — the AAC encoder hands over its last packets only once it
-        // is told the sound is finished. Both measured, both a hang on
-        // `isReadyForMoreMediaData`, hence `ready`'s deadline.
-        let total = Int(rate) * seconds
-        var written = 0
-        for frame in 0..<frames {
-            let soundUntil = min(Int((Double(frame + 1) / 30 + 0.5) * rate), total)
-            if soundUntil > written {
-                try await ready(audio, of: writer, "sound at frame \(frame)")
-                guard audio.append(try chirp(from: written, count: soundUntil - written)) else {
-                    throw writer.error ?? CocoaError(.fileWriteUnknown)
+        // ⚠️ **TWO FEEDERS, EACH AT ITS OWN PACE — NEVER ONE LOOP IN LOCKSTEP.**
+        // The writer interleaves what it is given and holds back whichever
+        // input runs ahead, so a single loop that decides the order itself can
+        // wait on an input the writer is holding for the OTHER one. Measured:
+        // six seconds of sound first left the sound input never ready; sound
+        // finished after the pictures left the picture input never ready at
+        // frame 169; and sound kept half a second ahead, which passed here,
+        // left CI's picture input never ready at frame 8 — ten seconds of
+        // waiting per test, which starved every real-time suite beside it.
+        // Fed side by side, the writer takes from whichever it needs.
+        let job = Job(writer: writer, video: video, adaptor: adaptor, audio: audio)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for frame in 0..<frames {
+                    try await ready(job.video, of: job.writer, "picture at frame \(frame)")
+                    guard let pool = job.adaptor.pixelBufferPool else { throw CocoaError(.fileWriteUnknown) }
+                    var made: CVPixelBuffer?
+                    CVPixelBufferPoolCreatePixelBuffer(nil, pool, &made)
+                    guard let pixels = made else { throw CocoaError(.fileWriteUnknown) }
+                    paint(pixels, frame: frame)
+                    guard job.adaptor.append(pixels, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30))
+                    else { throw job.writer.error ?? CocoaError(.fileWriteUnknown) }
                 }
-                written = soundUntil
-                // ⚠️ FINISHED THE MOMENT IT IS ALL GIVEN — the encoder hands over
-                // its last packets only then, and the pictures wait for them.
-                if written == total { audio.markAsFinished() }
+                job.video.markAsFinished()
             }
-            try await ready(video, of: writer, "picture at frame \(frame)")
-            guard let pool = adaptor.pixelBufferPool else { throw CocoaError(.fileWriteUnknown) }
-            var made: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &made)
-            guard let pixels = made else { throw CocoaError(.fileWriteUnknown) }
-            paint(pixels, frame: frame)
-            adaptor.append(pixels, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30))
+            group.addTask {
+                let total = Int(rate) * seconds
+                let chunk = Int(rate) / 30
+                var written = 0
+                while written < total {
+                    let count = min(chunk, total - written)
+                    try await ready(job.audio, of: job.writer, "sound at sample \(written)")
+                    guard job.audio.append(try chirp(from: written, count: count)) else {
+                        throw job.writer.error ?? CocoaError(.fileWriteUnknown)
+                    }
+                    written += count
+                }
+                // ⚠️ FINISHED THE MOMENT IT IS ALL GIVEN — the AAC encoder hands
+                // over its last packets only then.
+                job.audio.markAsFinished()
+            }
+            try await group.waitForAll()
         }
-        video.markAsFinished()
         await writer.finishWriting()
         guard writer.status == .completed else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
         do {
@@ -114,6 +125,28 @@ enum TimecodeClipWriter {
             try? FileManager.default.removeItem(at: partial)
         }
         return url
+    }
+
+    /// The writer and its inputs, handed to the two feeders.
+    ///
+    /// ⚠️ `@unchecked Sendable`: each feeder touches only its own input (the
+    /// picture one also the adaptor over it), the writer only for its status
+    /// and error, and `clip()` waits for both before it finishes the file.
+    private final class Job: @unchecked Sendable {
+        let writer: AVAssetWriter
+        let video: AVAssetWriterInput
+        let adaptor: AVAssetWriterInputPixelBufferAdaptor
+        let audio: AVAssetWriterInput
+
+        init(
+            writer: AVAssetWriter, video: AVAssetWriterInput,
+            adaptor: AVAssetWriterInputPixelBufferAdaptor, audio: AVAssetWriterInput
+        ) {
+            self.writer = writer
+            self.video = video
+            self.adaptor = adaptor
+            self.audio = audio
+        }
     }
 
     /// Waits for `input` to take more, and gives up after ten seconds — a
