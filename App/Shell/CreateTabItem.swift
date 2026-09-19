@@ -17,6 +17,12 @@ import UIKit
 ///     of the type: "UISearchTab also automatically separates the search tab
 ///     from other tabs when the tab bar is compact."
 ///
+/// ⚠️ **iOS 27 CHANGED THE RULE.** The type alone no longer detaches it: the
+/// separate bubble is now the "prominent" treatment, given to the tab named
+/// by `UITabBarController.prominentTabIdentifier` — or, when none is named,
+/// only to a search tab that activates search on selection. So
+/// `MainTabCoordinator` names this one.
+///
 /// `title` and `image` are `{ get set }` on `UITab` and are not redeclared
 /// read-only by the subclass, so the search tab wears a "+". ⚠️ The system
 /// still knows it as the search ROLE: `UISearchTab.identifier` is
