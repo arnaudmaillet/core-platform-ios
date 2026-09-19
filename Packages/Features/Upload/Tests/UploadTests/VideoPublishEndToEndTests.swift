@@ -465,8 +465,16 @@ struct VideoPublishEndToEndTests {
         let faded = try await published(.dipToBlack)
         let plain = try await published(nil)
 
+        // ⚠️ **THE TWO FRAMES EITHER SIDE OF THE MIDDLE, NOT A TIME BETWEEN
+        // THEM.** The dip is black only at the exact middle of its overlap,
+        // 0.95s, and a 30fps file has no frame there: 28/30 and 29/30 each sit
+        // a sixtieth away, a fifteenth of the way back towards the picture.
+        // Measured: 27 at 0.95 against a witness of 493 — a threshold of 30 sat
+        // on the answer and went red on CI. The darker of the two frames is the
+        // dip; a margin of 60 still leaves the witness eight times brighter.
+        let darkest = min(try await ink(of: faded, at: 28.0 / 30), try await ink(of: faded, at: 29.0 / 30))
         #expect(try await ink(of: plain, at: 0.95) > 90, "guard: the witness is dark there anyway")
-        #expect(try await ink(of: faded, at: 0.95) < 30, "the published clip does not dip at the middle of its overlap")
+        #expect(darkest < 60, "the published clip does not dip at the middle of its overlap: \(darkest)")
     }
 
     /// ⚠️ **AND THE ORDER SURVIVES, BECAUSE THE ORDER IS THE CAROUSEL.**
