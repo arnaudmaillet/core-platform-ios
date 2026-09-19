@@ -18,8 +18,9 @@ struct TransitionCompositionTests {
     // ⚠️ Scaled H.264 bleeds the red around the square into the cyan: measured
     // (74,253,253) where the square fills the frame, hence the wider slack.
 
-    /// Red for a second, then blue for a second: the cut is at 1.0s, and a
-    /// standard transition reaches a quarter second either side of it.
+    /// Red for a second, then blue for a second, overlapping by the standard
+    /// half second: the window is [0.5, 1.0), its middle — where a dip or a
+    /// zoom changes piece — is 0.75s, and the result lasts 1.5s.
     private func cut(_ kind: VideoTransitionKind?) -> [VideoExportSegment] {
         [
             VideoExportSegment(start: 0, end: 1, transitionOut: kind),
@@ -47,43 +48,48 @@ struct TransitionCompositionTests {
 
     // MARK: - The picture
 
-    @Test func aFadeToBlackIsBlackAtTheCut() async throws {
+    @Test func aFadeToBlackIsBlackAtTheMiddle() async throws {
         let dip = try await arranged(cut(.dipToBlack))
 
-        let atTheCut = try await pixel(dip, at: 1.0).colour
-        #expect(atTheCut.r <= 8 && atTheCut.g <= 8 && atTheCut.b <= 8, "the cut is \(atTheCut)")
+        let atTheMiddle = try await pixel(dip, at: 0.75).colour
+        #expect(atTheMiddle.r <= 8 && atTheMiddle.g <= 8 && atTheMiddle.b <= 8, "the middle is \(atTheMiddle)")
 
         // Half way down: as bright as the ramp says at the frame actually drawn.
-        let halfway = try await pixel(dip, at: 0.875)
-        let opacity = max(0, min(1, (1.0 - halfway.actual) / 0.25))
+        let halfway = try await pixel(dip, at: 0.625)
+        let opacity = max(0, min(1, (0.75 - halfway.actual) / 0.25))
         #expect(abs(Double(halfway.colour.r) - 255 * opacity) <= 25,
                 "at \(halfway.actual)s the red is \(halfway.colour.r), the ramp says \(Int(255 * opacity))")
+        // ⚠️ AND IT COMES BACK UP ON THE INCOMING PIECE: both play through the
+        // whole overlap, so a dip that kept the outgoing one past the middle
+        // would fade red back in.
+        let rising = try await pixel(dip, at: 0.875).colour
+        #expect(rising.b > rising.r + 60, "the fade does not come back up on the incoming piece: \(rising)")
 
-        #expect(try await pixel(dip, at: 0.5).colour.near(.red), "the fade reached back before its window")
-        #expect(try await pixel(dip, at: 1.5).colour.near(.blue), "the fade ran on after its window")
+        #expect(try await pixel(dip, at: 0.3).colour.near(.red), "the fade reached back before its window")
+        #expect(try await pixel(dip, at: 1.2).colour.near(.blue), "the fade ran on after its window")
     }
 
-    @Test func aFadeToWhiteIsWhiteAtTheCut() async throws {
+    @Test func aFadeToWhiteIsWhiteAtTheMiddle() async throws {
         let dip = try await arranged(cut(.dipToWhite))
 
-        let atTheCut = try await pixel(dip, at: 1.0).colour
-        #expect(atTheCut.r >= 247 && atTheCut.g >= 247 && atTheCut.b >= 247, "the cut is \(atTheCut)")
-        #expect(try await pixel(dip, at: 0.5).colour.near(.red))
+        let atTheMiddle = try await pixel(dip, at: 0.75).colour
+        #expect(atTheMiddle.r >= 247 && atTheMiddle.g >= 247 && atTheMiddle.b >= 247, "the middle is \(atTheMiddle)")
+        #expect(try await pixel(dip, at: 0.3).colour.near(.red))
     }
 
-    /// ⚠️ **THE ZOOM GOES THROUGH THE MIDDLE OF THE PICTURE.** At the cut the
-    /// cyan square, which covers the middle half, fills the frame; before the
-    /// window the edge is still the clip's own colour.
-    @Test func aZoomFillsTheFrameAtTheCut() async throws {
+    /// ⚠️ **THE ZOOM GOES THROUGH THE MIDDLE OF THE PICTURE.** At the middle of
+    /// the window the cyan square, which covers the middle half, fills the
+    /// frame; before the window the edge is still the clip's own colour.
+    @Test func aZoomFillsTheFrameAtTheMiddle() async throws {
         let zoom = try await arranged(cut(.zoom))
 
-        let lastBefore = try await pixel(zoom, at: 1.0 - 1.0 / 30)
-        #expect(lastBefore.colour.near(.cyan, by: 90), "a frame before the cut is not zoomed in: \(lastBefore)")
-        let beforeTheWindow = try await pixel(zoom, at: 0.75 - 1.0 / 30)
+        let lastBefore = try await pixel(zoom, at: 0.75 - 1.0 / 30)
+        #expect(lastBefore.colour.near(.cyan, by: 90), "a frame before the middle is not zoomed in: \(lastBefore)")
+        let beforeTheWindow = try await pixel(zoom, at: 0.5 - 1.0 / 30)
         #expect(beforeTheWindow.colour.near(.red), "the zoom began before its window: \(beforeTheWindow)")
-        let atTheCut = try await pixel(zoom, at: 1.0)
-        #expect(atTheCut.colour.near(.cyan, by: 90), "the incoming piece is not zoomed out of: \(atTheCut)")
-        let after = try await pixel(zoom, at: 1.5)
+        let atTheMiddle = try await pixel(zoom, at: 0.75)
+        #expect(atTheMiddle.colour.near(.cyan, by: 90), "the incoming piece is not zoomed out of: \(atTheMiddle)")
+        let after = try await pixel(zoom, at: 1.2)
         #expect(after.colour.near(.blue), "the zoom ran on after its window: \(after)")
     }
 
@@ -91,11 +97,11 @@ struct TransitionCompositionTests {
     @Test func aRotatedZoomStaysUpright() async throws {
         let zoom = try await arranged(cut(.zoom), rotated: true)
 
-        let plain = try await pixel(zoom, at: 0.5, x: 0.5, y: 0.05)
+        let plain = try await pixel(zoom, at: 0.3, x: 0.5, y: 0.05)
         #expect(plain.size == CGSize(width: 120, height: 160), "the picture is not upright: \(plain.size)")
         #expect(plain.colour.near(.yellow), "the band is not along the top: \(plain.colour)")
-        let atTheCut = try await pixel(zoom, at: 1.0, x: 0.5, y: 0.05)
-        #expect(atTheCut.colour.near(.cyan, by: 90), "the zoom is not about the upright picture's middle: \(atTheCut)")
+        let atTheMiddle = try await pixel(zoom, at: 0.75, x: 0.5, y: 0.05)
+        #expect(atTheMiddle.colour.near(.cyan, by: 90), "the zoom is not about the upright picture's middle: \(atTheMiddle)")
     }
 
     /// ⚠️ **SAMPLED ACROSS THE WINDOW AND ACROSS THE FRAME.** A swipe or a
@@ -103,7 +109,7 @@ struct TransitionCompositionTests {
     /// time says nothing about them. What every kind must do is change the
     /// picture SOMEWHERE inside its window.
     @Test func everyKindDrawsSomething() async throws {
-        let times = [0.8, 0.9, 1.0, 1.1, 1.2]
+        let times = [0.55, 0.65, 0.75, 0.85, 0.95]
         let points = [0.1, 0.3, 0.5, 0.7, 0.9]
         let plain = try await arranged(cut(nil))
         var reference: [ColourClipWriter.RGB] = []
@@ -130,15 +136,18 @@ struct TransitionCompositionTests {
 
     // MARK: - The structure
 
-    /// ⚠️ **NOTHING DRAWN, NO COMPOSITOR** — the seams charter T12 measured stay
-    /// exactly what they were.
+    /// ⚠️ **NOTHING DRAWN, NO COMPOSITOR — AND NO SECOND LANE.** Plain cuts
+    /// overlap nothing, so the pieces follow each other on one track, and the
+    /// seams charter T12 measured stay exactly what they were.
     @Test func noTransitionAttachesNoVideoComposition() async throws {
         let plain = try await arranged(cut(nil), orientation: .always)
 
         #expect(plain.videoComposition == nil)
         #expect(plain.audioMix == nil)
         #expect(plain.windows.isEmpty)
-        let track = try #require(try await plain.asset.loadTracks(withMediaType: .video).first as? AVCompositionTrack)
+        let tracks = try await plain.asset.loadTracks(withMediaType: .video)
+        #expect(tracks.count == 1, "a plain cut laid \(tracks.count) video lanes")
+        let track = try #require(tracks.first as? AVCompositionTrack)
         let targets = track.segments.map { $0.timeMapping.target }
         #expect(targets.map(\.start.seconds) == [0, 1] && targets.map(\.end.seconds) == [1, 2], "got \(targets)")
     }
@@ -150,29 +159,32 @@ struct TransitionCompositionTests {
         )
         defer { try? FileManager.default.removeItem(at: exported.fileURL) }
 
-        #expect(abs(exported.durationSeconds - 2) < 0.05, "the fade changed the length: \(exported.durationSeconds)")
-        #expect(exported.transitionWindows == [0.75...1.25], "got \(exported.transitionWindows)")
-        let atTheCut = try await ColourClipWriter.pixel(
-            of: AVURLAsset(url: exported.fileURL), composition: nil, at: 1.0, x: 0.1
+        #expect(abs(exported.durationSeconds - 1.5) < 0.05, "the fade is not its pieces less the overlap: \(exported.durationSeconds)")
+        #expect(exported.transitionWindows == [0.5...1.0], "got \(exported.transitionWindows)")
+        let atTheMiddle = try await ColourClipWriter.pixel(
+            of: AVURLAsset(url: exported.fileURL), composition: nil, at: 0.75, x: 0.1
         ).colour
-        #expect(atTheCut.r <= 16 && atTheCut.g <= 16 && atTheCut.b <= 16, "the export is not black at the cut: \(atTheCut)")
+        #expect(atTheMiddle.r <= 16 && atTheMiddle.g <= 16 && atTheMiddle.b <= 16,
+                "the export is not black at the middle: \(atTheMiddle)")
     }
 
-    /// ⚠️ **THE CUT IS WHERE THE PIECES MEET IN PLAYED TIME** — two seconds of
-    /// film at 2x end at one second, not two.
+    /// ⚠️ **THE WINDOW IS WHERE THE PIECES OVERLAP IN PLAYED TIME** — two
+    /// seconds of film at 2x end at one second, not two.
     @Test func aFadeOnARatedPieceSitsWhereTheTrackDrawsIt() async throws {
         let dip = try await arranged([
             VideoExportSegment(start: 0, end: 2, speed: 2, transitionOut: .dipToBlack),
             VideoExportSegment(start: 2, end: 3)
         ])
 
-        #expect(dip.windows == [0.75...1.25], "got \(dip.windows)")
-        let atTheCut = try await pixel(dip, at: 1.0).colour
-        #expect(atTheCut.r <= 8 && atTheCut.g <= 8 && atTheCut.b <= 8, "the cut is \(atTheCut)")
+        #expect(dip.windows == [0.5...1.0], "got \(dip.windows)")
+        let atTheMiddle = try await pixel(dip, at: 0.75).colour
+        #expect(atTheMiddle.r <= 8 && atTheMiddle.g <= 8 && atTheMiddle.b <= 8, "the middle is \(atTheMiddle)")
     }
 
     /// ⚠️ **TWO WINDOWS AROUND A SHORT PIECE TOUCH AND NEVER CROSS** — crossing
-    /// instructions fail the export.
+    /// windows would ask for three pictures on two lanes, and crossing
+    /// instructions fail the export. A piece played 0.367s gives each side at
+    /// most half of itself: 0.183s either way, so the two windows meet.
     @Test func theWindowsTouchButNeverCross() async throws {
         let segments = [
             VideoExportSegment(start: 0, end: 2, transitionOut: .dipToBlack),
@@ -200,81 +212,149 @@ struct TransitionCompositionTests {
 
         let asset = AVURLAsset(url: exported.fileURL)
         #expect(try await asset.loadTracks(withMediaType: .video).count == 1)
-        let atTheCut = try await ColourClipWriter.pixel(of: asset, composition: nil, at: 1.0, x: 0.1).colour
-        #expect(atTheCut.r <= 16 && atTheCut.g <= 16 && atTheCut.b <= 16,
-                "passthrough dropped the fade: \(atTheCut)")
+        let atTheMiddle = try await ColourClipWriter.pixel(of: asset, composition: nil, at: 0.75, x: 0.1).colour
+        #expect(atTheMiddle.r <= 16 && atTheMiddle.g <= 16 && atTheMiddle.b <= 16,
+                "passthrough dropped the fade: \(atTheMiddle)")
     }
 
     // MARK: - The sound
 
-    private func loudness(_ arrangement: VideoExporter.Arrangement) async throws -> (Double) -> Double {
-        let reader = try AVAssetReader(asset: arrangement.asset)
-        let tracks = try await arrangement.asset.loadTracks(withMediaType: .audio)
-        let output = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 44_100,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false
-        ])
-        output.audioMix = arrangement.audioMix
-        reader.add(output)
-        reader.startReading()
-        var samples: [Int16] = []
-        while let buffer = output.copyNextSampleBuffer() {
-            guard let block = CMSampleBufferGetDataBuffer(buffer) else { continue }
-            var length = 0
-            var pointer: UnsafeMutablePointer<CChar>?
-            CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &pointer)
-            guard let pointer else { continue }
-            pointer.withMemoryRebound(to: Int16.self, capacity: length / 2) { values in
-                samples.append(contentsOf: UnsafeBufferPointer(start: values, count: length / 2))
-            }
+    /// Each lane's sound as the mix leaves it, heard on its own: the outgoing
+    /// piece's lane and the incoming one's, in track order.
+    private func lanes(_ arrangement: VideoExporter.Arrangement) async throws -> [SoundProbe] {
+        let tracks = try await arrangement.asset.loadTracks(withMediaType: .audio).sorted { $0.trackID < $1.trackID }
+        var heard: [SoundProbe] = []
+        for track in tracks {
+            heard.append(try await SoundProbe.listen(to: arrangement.asset, tracks: [track], mix: arrangement.audioMix))
         }
-        return { centre in
-            let from = max(Int((centre - 0.025) * 44_100), 0)
-            let to = min(Int((centre + 0.025) * 44_100), samples.count)
-            guard to > from else { return 0 }
-            let energy = samples[from..<to].reduce(0.0) { $0 + Double($1) * Double($1) }
-            return (energy / Double(to - from)).squareRoot()
-        }
+        return heard
     }
 
+    /// ⚠️ **THE TWO SOUNDS CROSS OVER THE WHOLE OVERLAP**, the outgoing one down
+    /// as the incoming one comes up, each at its own place in its own piece.
+    /// Heard lane by lane, since the clip's one tone sounds the same from both:
+    /// mixed, the two could cancel or add and say nothing about either level.
+    @Test func aDissolveCrossesTheTwoSounds() async throws {
+        let dissolve = try await arranged([
+            VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve),
+            VideoExportSegment(start: 1, end: 2)
+        ])
+        let heard = try await lanes(dissolve)
+        try #require(heard.count == 2, "guard: \(heard.count) lanes of sound")
+        let (outgoing, incoming) = (heard[0], heard[1])
+
+        let full = outgoing.rms(at: 0.3)
+        #expect(full > 5_000, "guard: the tone is not there: \(full)")
+        #expect(incoming.rms(at: 0.3) < full * 0.02, "the incoming sound plays before the window: \(incoming.rms(at: 0.3))")
+        // ⚠️ AND DOES NOT BURST IN WHERE IT OPENS: a ramp laid on a track's
+        // first sample took hold only ~25ms in, measured at full volume until
+        // then — so the lane is silenced before the piece arrives.
+        #expect(incoming.rms(at: 0.51, width: 0.02) < full * 0.1,
+                "the incoming sound bursts in where the window opens: \(incoming.rms(at: 0.51, width: 0.02)) of \(full)")
+        for (time, share) in [(0.625, 0.25), (0.75, 0.5), (0.875, 0.75)] {
+            #expect(abs(outgoing.rms(at: time) / full - (1 - share)) < 0.1,
+                    "at \(time)s the outgoing sound is \(outgoing.rms(at: time) / full) of full, not \(1 - share)")
+            #expect(abs(incoming.rms(at: time) / full - share) < 0.1,
+                    "at \(time)s the incoming sound is \(incoming.rms(at: time) / full) of full, not \(share)")
+        }
+        #expect(outgoing.rms(at: 1.2) < full * 0.02, "the outgoing sound plays after the window: \(outgoing.rms(at: 1.2))")
+        #expect(incoming.rms(at: 1.2) > full * 0.9, "the incoming sound does not come up: \(incoming.rms(at: 1.2))")
+    }
+
+    /// A dip takes the sound through silence with its picture: the outgoing
+    /// sound down to nothing by the middle, the incoming one up from it.
     @Test func theSoundDipsWithThePicture() async throws {
         let dip = try await arranged([
             VideoExportSegment(start: 0, end: 1, transitionOut: .dipToBlack),
-            VideoExportSegment(start: 1, end: 1.9)
+            VideoExportSegment(start: 1, end: 2)
         ])
-        let rms = try await loudness(dip)
+        let rms = try await SoundProbe.listen(to: dip.asset, mix: dip.audioMix)
 
-        let full = rms(0.4)
+        let full = rms.rms(at: 0.3)
         #expect(full > 5_000, "guard: the tone is not there: \(full)")
-        #expect(rms(1.0) < full * 0.1, "the sound does not dip at the cut: \(rms(1.0)) of \(full)")
-        #expect(rms(0.85) < full * 0.8, "the sound does not fall towards the cut: \(rms(0.85))")
-        #expect(rms(1.5) > full * 0.8, "the sound does not come back: \(rms(1.5))")
+        #expect(rms.rms(at: 0.75) < full * 0.1, "the sound does not dip at the middle: \(rms.rms(at: 0.75)) of \(full)")
+        #expect(rms.rms(at: 0.6) < full * 0.8, "the sound does not fall towards the middle: \(rms.rms(at: 0.6))")
+        #expect(rms.rms(at: 1.2) > full * 0.8, "the sound does not come back: \(rms.rms(at: 1.2))")
     }
 
-    /// ⚠️ **A RATED NEIGHBOUR DIPS THE PICTURE AND NOT THE SOUND** — a volume
-    /// ramp over a rate change froze the export once in twelve.
-    @Test func aRatedNeighbourDipsThePictureButNotTheSound() async throws {
-        let dip = try await arranged([
-            VideoExportSegment(start: 0, end: 2, transitionOut: .dipToBlack),
+    /// ⚠️ **NEXT TO A RATED PIECE THE SOUNDS DO NOT CROSS — THEY ARE CUT AT THE
+    /// MIDDLE OF THE OVERLAP.** A volume ramp over a rate change froze the export
+    /// once in twelve (memory `export-volume-ramp-hang`), so the outgoing sound
+    /// is laid up to the middle and the incoming one from it: an edit, no mix at
+    /// all, each sound still under its own picture, the rated one on a track of
+    /// its own. Half a second at 1x, then a second and a half at 3x: they overlap
+    /// by a quarter second, [0.25, 0.5), and the sound changes piece at 0.375s.
+    /// Heard both ways round with the clip's tone on one side only — its first
+    /// two seconds sound, the rest is silent — so each side can be told apart.
+    @Test func aRatedNeighbourCutsTheTwoSoundsAtTheMiddle() async throws {
+        let toneFirst = try await arranged([
+            VideoExportSegment(start: 1.5, end: 2, transitionOut: .dipToBlack),
             VideoExportSegment(start: 2, end: 3.5, speed: 3)
         ])
+        let toneAfter = try await arranged([
+            VideoExportSegment(start: 2.5, end: 3, transitionOut: .dipToBlack),
+            VideoExportSegment(start: 0, end: 1.5, speed: 3)
+        ])
 
-        #expect(dip.audioMix == nil, "a ramp was laid over a rate change")
-        let atTheCut = try await pixel(dip, at: 2.0).colour
-        #expect(atTheCut.r <= 8 && atTheCut.g <= 8 && atTheCut.b <= 8, "the picture did not dip: \(atTheCut)")
+        for dip in [toneFirst, toneAfter] {
+            #expect(dip.audioMix == nil, "a ramp was laid over a rate change")
+            try #require(dip.windows == [0.25...0.5], "guard: the window is \(dip.windows)")
+            let tracks = try await dip.asset.loadTracks(withMediaType: .audio)
+            #expect(tracks.count == 2, "guard: \(tracks.count) tracks of sound")
+        }
+        let atTheMiddle = try await pixel(toneFirst, at: 0.375).colour
+        #expect(atTheMiddle.r <= 8 && atTheMiddle.g <= 8 && atTheMiddle.b <= 8, "the picture did not dip: \(atTheMiddle)")
+        let outgoing = try await SoundProbe.listen(to: toneFirst.asset, mix: nil)
+        let incoming = try await SoundProbe.listen(to: toneAfter.asset, mix: nil)
+        let full = outgoing.rms(at: 0.1)
+        #expect(full > 5_000, "guard: the tone is not there: \(full)")
+        #expect(outgoing.rms(at: 0.33) > full * 0.9 && incoming.rms(at: 0.33) < full * 0.02,
+                "before the middle the outgoing sound alone is heard: \(outgoing.rms(at: 0.33)), \(incoming.rms(at: 0.33))")
+        #expect(outgoing.rms(at: 0.42) < full * 0.02 && incoming.rms(at: 0.42) > full * 0.5,
+                "after the middle the incoming sound alone is heard: \(outgoing.rms(at: 0.42)), \(incoming.rms(at: 0.42))")
     }
 
-    @Test func aZoomLeavesTheSoundAlone() async throws {
+    /// ⚠️ **A RATED PIECE'S SOUND HAS A TRACK OF ITS OWN, EMPTY UP TO IT.** Laid
+    /// on its picture's lane, after the first piece's sound and a gap, a 3x
+    /// piece's sound played SILENT when this ran beside two other suites: the
+    /// log said `AppendRateChange: scheduling rate change at unscaled t=60638,
+    /// but we previously did a conversion for t=64512` — 60638 samples is
+    /// 1.375s, where the piece's sound begins, and the line the export freeze
+    /// of `export-volume-ramp-hang` left. A 3x piece laid end to end after
+    /// 0.375s of its neighbour's sound was silent in 4 exports of 12. On a
+    /// track where nothing plays before its rate is set, in none of 12, in
+    /// every shape measured (`VideoExporter.insertPieces`). A
+    /// second, a second, and a second and a half of tone at 3x: they overlap by
+    /// half a second, then a quarter; the dip into the 3x piece does not cross,
+    /// and its sound runs from the middle of that overlap, 1.375s, to the end,
+    /// 1.75s — and is heard.
+    @Test func aRatedSoundHasATrackOfItsOwn() async throws {
+        let arranged = try await arranged([
+            VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve),
+            VideoExportSegment(start: 1, end: 2, transitionOut: .dipToBlack),
+            VideoExportSegment(start: 0, end: 1.5, speed: 3)
+        ])
+        try #require(arranged.windows == [0.5...1.0, 1.25...1.5], "guard: the windows are \(arranged.windows)")
+        let tracks = try await arranged.asset.loadTracks(withMediaType: .audio)
+            .compactMap { $0 as? AVCompositionTrack }
+        let laid = tracks.map { $0.segments.map { ($0.isEmpty, $0.timeMapping.target) } }
+        let own = try #require(laid.first { $0.contains { !$0.0 && abs($0.1.start.seconds - 1.375) < 0.001 } },
+                               "the rated sound is not laid at 1.375s: \(laid)")
+        #expect(own.filter { !$0.0 }.count == 1, "the rated sound shares its track: \(own)")
+        let heard = try await SoundProbe.listen(to: arranged.asset, mix: arranged.audioMix)
+        let full = heard.rms(at: 0.3)
+        #expect(full > 5_000, "guard: the tone is not there: \(full)")
+        #expect(heard.rms(at: 1.6) > full * 0.5, "the rated piece is silent: \(heard.rms(at: 1.6)) of \(full)")
+    }
+
+    /// Every kind but the dips crosses the two sounds, the zoom included.
+    @Test func aZoomCrossesTheSoundToo() async throws {
         let zoom = try await arranged([
             VideoExportSegment(start: 0, end: 1, transitionOut: .zoom),
             VideoExportSegment(start: 1, end: 1.9)
         ])
 
-        #expect(zoom.audioMix == nil)
+        #expect(zoom.audioMix != nil, "the zoom's two sounds do not cross")
     }
 
     // MARK: - Orientation
@@ -292,7 +372,7 @@ struct TransitionCompositionTests {
         #expect(size == CGSize(width: 120, height: 160) && transform.isIdentity,
                 "the export is not upright in its pixels: \(size) \(transform)")
         let top = try await ColourClipWriter.pixel(
-            of: AVURLAsset(url: exported.fileURL), composition: nil, at: 0.5, x: 0.5, y: 0.05
+            of: AVURLAsset(url: exported.fileURL), composition: nil, at: 0.3, x: 0.5, y: 0.05
         ).colour
         #expect(top.near(.yellow, by: 40), "the band is not along the top: \(top)")
     }
@@ -308,16 +388,16 @@ struct TransitionCompositionTests {
         let composition = try #require(capped.videoComposition)
         #expect(composition.renderSize == CGSize(width: 60, height: 80), "got \(composition.renderSize)")
         let top = try await ColourClipWriter.pixel(
-            of: capped.asset, composition: composition, at: 0.5, x: 0.5, y: 0.05
+            of: capped.asset, composition: composition, at: 0.3, x: 0.5, y: 0.05
         )
         #expect(top.size == CGSize(width: 60, height: 80), "guard: read at \(top.size)")
         #expect(top.colour.near(.yellow, by: 60), "the band is not along the top: \(top.colour)")
         let side = try await ColourClipWriter.pixel(
-            of: capped.asset, composition: composition, at: 0.5, x: 0.1, y: 0.6
+            of: capped.asset, composition: composition, at: 0.3, x: 0.1, y: 0.6
         )
         #expect(side.colour.near(.red), "the picture is off the canvas: \(side.colour)")
         let square = try await ColourClipWriter.pixel(
-            of: capped.asset, composition: composition, at: 0.5, x: 0.5, y: 0.5
+            of: capped.asset, composition: composition, at: 0.3, x: 0.5, y: 0.5
         )
         #expect(square.colour.near(.cyan, by: 90), "the middle is not the square: \(square.colour)")
         // Never scaled up.
@@ -371,9 +451,10 @@ struct TransitionCompositionTests {
         #expect(VideoExporter.posterSeconds(duration: 20, avoiding: [1...1.5]) == 1, "the window's own edge is clean")
     }
 
-    /// ⚠️ **A DIP AT THE POSTER'S MOMENT DOES NOT PUBLISH A DARK THUMBNAIL.** Cut
-    /// at half a second, the fade covers the moment a 3.5s clip's poster is
-    /// taken from (a tenth of the way in).
+    /// ⚠️ **A DIP AT THE POSTER'S MOMENT DOES NOT PUBLISH A DARK THUMBNAIL.** Half
+    /// a second then three, overlapping by a quarter second: the fade, over
+    /// [0.25, 0.5), covers the moment a 3.25s clip's poster is taken from (a
+    /// tenth of the way in).
     @Test func aPosterIsNeverTakenInsideATransition() async throws {
         let file = try await ColourClipWriter.clip()
         let exported = try await VideoExporter(preset: AVAssetExportPresetHighestQuality).export(
@@ -383,7 +464,7 @@ struct TransitionCompositionTests {
             ])
         )
         defer { try? FileManager.default.removeItem(at: exported.fileURL) }
-        try #require(exported.transitionWindows == [0.25...0.75], "got \(exported.transitionWindows)")
+        try #require(exported.transitionWindows == [0.25...0.5], "got \(exported.transitionWindows)")
 
         let careless = try await ColourClipWriter.pixel(
             of: AVURLAsset(url: exported.fileURL), composition: nil, at: 0.35, x: 0.1
@@ -443,10 +524,10 @@ struct TransitionPreviewTests {
         defer { controller.stop(view) }
 
         let composition = try #require(controller.debugComposition(in: view), "the preview item draws nothing")
-        let atTheCut = try await ColourClipWriter.pixel(
-            of: item.asset, composition: composition, at: 1.0, x: 0.1
+        let atTheMiddle = try await ColourClipWriter.pixel(
+            of: item.asset, composition: composition, at: 0.75, x: 0.1
         ).colour
-        #expect(atTheCut.r <= 8 && atTheCut.g <= 8 && atTheCut.b <= 8, "the preview is not black at the cut")
+        #expect(atTheMiddle.r <= 8 && atTheMiddle.g <= 8 && atTheMiddle.b <= 8, "the preview is not black at the middle of the overlap")
         let mix = try #require(item.audioMix, "the preview item does not dip its sound")
         let owned = Set(try await item.asset.loadTracks(withMediaType: .audio).map(\.trackID))
         #expect(mix.inputParameters.allSatisfy { owned.contains($0.trackID) },

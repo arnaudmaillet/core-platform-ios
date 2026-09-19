@@ -129,21 +129,22 @@ struct SoundtrackCompositionTests {
     /// and come back to half — not jump to full on the way in.
     @Test func originalVolumeScalesTheDips() async throws {
         let quiet = try ToneWriter.tone(named: "silence", seconds: 6) { _ in (1_000, 0) }
+        // Overlapping by half a second: the dip is [0.5, 1.0), silent at 0.75s.
         let cut = [
             VideoExportSegment(start: 0, end: 1, transitionOut: .dipToBlack),
-            VideoExportSegment(start: 1, end: 1.9)
+            VideoExportSegment(start: 1, end: 2)
         ]
         let bare = try await listen(try await arranged(cut, song: nil))
         let halved = try await listen(try await arranged(cut, song: VideoSoundtrack(
             fileURL: quiet, title: "Silence", musicVolume: 0, originalVolume: 0.5
         )))
 
-        let full = bare.rms(at: 0.4)
+        let full = bare.rms(at: 0.3)
         #expect(full > 5_000, "guard: the film's tone is not there")
-        #expect(abs(halved.rms(at: 0.4) / full - 0.5) < 0.08, "before the dip: \(halved.rms(at: 0.4) / full)")
-        #expect(halved.rms(at: 1.0) < full * 0.05, "the film does not dip at the cut: \(halved.rms(at: 1.0))")
-        #expect(halved.rms(at: 0.85) < full * 0.4, "the film does not fall from its level: \(halved.rms(at: 0.85))")
-        #expect(abs(halved.rms(at: 1.5) / full - 0.5) < 0.08, "after the dip: \(halved.rms(at: 1.5) / full)")
+        #expect(abs(halved.rms(at: 0.3) / full - 0.5) < 0.08, "before the dip: \(halved.rms(at: 0.3) / full)")
+        #expect(halved.rms(at: 0.75) < full * 0.05, "the film does not dip at the middle: \(halved.rms(at: 0.75))")
+        #expect(halved.rms(at: 0.6) < full * 0.4, "the film does not fall from its level: \(halved.rms(at: 0.6))")
+        #expect(abs(halved.rms(at: 1.2) / full - 0.5) < 0.08, "after the dip: \(halved.rms(at: 1.2) / full)")
     }
 
     // MARK: - The export
@@ -182,11 +183,14 @@ struct SoundtrackCompositionTests {
     }
 
     /// ⚠️ **TWELVE EXPORTS, EACH UNDER A WATCHDOG** (memory
-    /// `export-volume-ramp-hang`). A song runs under pieces played at 3x and 4x
-    /// and beside a dip between two pieces at 1x; a volume ramp at a rate change
-    /// once froze the export one time in twelve, silently, so a single passing
-    /// export proves nothing. An export whose progress stands still for two
-    /// minutes is cancelled and counted as hung.
+    /// `export-volume-ramp-hang`). A song runs under pieces played at 3x and 4x;
+    /// the two pieces at 1x before them cross their sounds over a dissolve, so
+    /// both lanes carry ramps and the second is taken to silence before its
+    /// own; and the dip into the 3x piece cuts the sounds at the middle
+    /// instead, and the 3x and 4x pieces play on tracks of their own. A volume ramp at a
+    /// rate change once froze the export one time in twelve, silently, so a
+    /// single passing export proves nothing. An export whose progress stands
+    /// still for two minutes is cancelled and counted as hung.
     ///
     /// ⚠️ **A STALL, NOT A DEADLINE — MEASURED.** With a 60 s deadline this
     /// reported 2 of 12 hung on a machine at load average ~900; 24 exports of
@@ -201,8 +205,8 @@ struct SoundtrackCompositionTests {
             title: "Stress", startSeconds: 1, musicVolume: 0.8, originalVolume: 0.6
         )
         let cut = [
-            VideoExportSegment(start: 0, end: 1, transitionOut: .dipToBlack),
-            VideoExportSegment(start: 1, end: 1.8),
+            VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve),
+            VideoExportSegment(start: 1, end: 1.8, transitionOut: .dipToBlack),
             VideoExportSegment(start: 1.8, end: 3.3, speed: 3),
             VideoExportSegment(start: 0.5, end: 3.7, speed: 4)
         ]
@@ -212,7 +216,11 @@ struct SoundtrackCompositionTests {
             let arranged = try await VideoExporter.arrangement(
                 of: AVURLAsset(url: file), cut: cut, orientation: .whenComposited, soundtrack: song
             )
-            try #require(arranged.sound != nil, "guard: no song was laid")
+            let sound = try #require(arranged.sound, "guard: no song was laid")
+            let levels = sound.steps.filter { if case .level = $0.shape { true } else { false } }
+            // The second lane taken to silence before it crosses in.
+            try #require(levels.count == 1 && Set(sound.steps.map(\.track)).count == 2,
+                         "guard: the film's sound is not crossed on both lanes: \(sound.steps)")
             let output = FileManager.default.temporaryDirectory
                 .appendingPathComponent("stress-\(run)-\(UUID().uuidString).mp4")
             defer { try? FileManager.default.removeItem(at: output) }

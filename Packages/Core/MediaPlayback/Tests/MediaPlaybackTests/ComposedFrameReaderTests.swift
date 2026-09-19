@@ -20,12 +20,13 @@ struct ComposedFrameReaderTests {
 
     private static let frame = 1.0 / 30
 
-    /// A dissolve at 1s between red and blue — two seconds that need a
-    /// compositor, so the arrangement has something to read.
+    /// A second of red dissolving into a second and a half of blue and white —
+    /// overlapping by half a second, so two seconds that need a compositor,
+    /// and the arrangement has something to read.
     private func arranged(
         _ segments: [VideoExportSegment] = [
             VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve),
-            VideoExportSegment(start: 2, end: 3)
+            VideoExportSegment(start: 2, end: 3.5)
         ]
     ) async throws -> (VideoExporter.Arrangement, ComposedVideo) {
         let file = try await ColourClipWriter.clip()
@@ -134,9 +135,9 @@ struct ComposedFrameReaderTests {
     /// the plain colours by 200).
     @Test func aRequestIsAnsweredWithTheFrameAtItsTime() async throws {
         let (arrangement, composed) = try await arranged()
-        // In the plain red, either side of the cut inside the window, in the
+        // In the plain red, either side of the middle of the window, in the
         // plain blue, and off the composition's frame grid.
-        for seconds in [0.5, 0.9, 1.1, 1.5, 0.51] {
+        for seconds in [0.3, 0.7, 0.8, 1.3, 0.31] {
             let reader = ComposedFrameReader(composed)
             defer { reader.close() }
             _ = reader.frame(at: time(seconds))
@@ -192,15 +193,16 @@ struct ComposedFrameReaderTests {
         ])
         let reader = ComposedFrameReader(composed)
         defer { reader.close() }
-        let late = try #require(try await poll(reader, at: 2.5), "guard: nothing answered 2.5s")
-        #expect(colour(of: late.buffer, x: 0.1, y: 0.5).near(.white), "guard: 2.5s is not the file's white")
+        // 2s is 1.5s into the second piece, which started at 0.5s: the file's 3.5s.
+        let late = try #require(try await poll(reader, at: 2), "guard: nothing answered 2s")
+        #expect(colour(of: late.buffer, x: 0.1, y: 0.5).near(.white), "guard: 2s is not the file's white")
 
-        let early = try #require(try await poll(reader, at: 0.5, within: 3), "the jump back was never answered")
+        let early = try #require(try await poll(reader, at: 0.4, within: 3), "the jump back was never answered")
         let at = early.time.seconds
-        #expect(at <= 0.5 + 0.000_001 && 0.5 - at < Self.frame + 0.001, "the jump back to 0.5s handed the frame at \(at)s")
+        #expect(at <= 0.4 + 0.000_001 && 0.4 - at < Self.frame + 0.001, "the jump back to 0.4s handed the frame at \(at)s")
         let read = colour(of: early.buffer, x: 0.1, y: 0.5)
         let generated = try await ColourClipWriter.pixel(
-            of: arrangement.asset, composition: arrangement.videoComposition, at: 0.5, x: 0.1, y: 0.5
+            of: arrangement.asset, composition: arrangement.videoComposition, at: 0.4, x: 0.1, y: 0.5
         ).colour
         #expect(distance(read, generated) <= 20, "the jump back drew \(read), the generator \(generated)")
         #expect(read.r > read.b + 100, "the jump back is not the red it asked for: \(read)")

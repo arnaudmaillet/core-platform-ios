@@ -106,20 +106,18 @@ struct CompositorFinishTests {
     /// ⚠️ **A DISSOLVE BLENDS TWO PIECES THAT ALREADY WEAR THEIR LOOKS.** The red
     /// piece is grey; the blue one is not dressed.
     ///
-    /// Before the cut lane A is the grey piece and lane B holds the blue piece's
-    /// first frame; after it lane A is the blue piece and lane B holds the grey
-    /// piece's last frame, wearing ITS look — so on both sides of the cut the
-    /// blend is a grey (red equal to green) under some blue. Had the held
-    /// outgoing frame worn nothing, its red would lead green by ~200 after the
-    /// cut; had the look been laid over the blend instead, the blue would be
-    /// grey too.
+    /// The two overlap over [0.5, 1.0): lane A is the grey piece's last half
+    /// second, wearing ITS look, and lane B the blue piece's first — so across
+    /// the window the blend is a grey (red equal to green) under some blue. Had
+    /// the outgoing lane worn nothing, its red would lead green by ~200; had
+    /// the look been laid over the blend instead, the blue would be grey too.
     @Test func aDissolveBlendsTwoDressedPieces() async throws {
         let dissolve = try await arranged([
             VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve, look: .mono),
             VideoExportSegment(start: 2, end: 3)
         ])
 
-        for time in [0.9, 1.1] {
+        for time in [0.65, 0.85] {
             let got = try await pixel(dissolve, at: time).colour
             #expect(abs(got.r - got.g) <= 20, "the outgoing piece is not grey in the blend at \(time)s: \(got)")
             #expect(got.b > got.g + 30, "the incoming piece is not blue in the blend at \(time)s: \(got)")
