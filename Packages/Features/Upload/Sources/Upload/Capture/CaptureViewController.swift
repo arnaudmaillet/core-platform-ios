@@ -126,6 +126,8 @@ final class CaptureViewController: UIViewController {
     private(set) lazy var closeBar: IconActionBar = {
         let bar = IconActionBar(items: [IconActionBar.Item(symbolName: "xmark", accessibilityLabel: "Close camera")])
         bar.suppressesBackdrop = true
+        // Red, as asked: the one control on the screen that throws a take away.
+        bar.tintColor = .systemRed
         bar.onTap = { [weak self] _ in self?.closeTapped() }
         return bar
     }()
