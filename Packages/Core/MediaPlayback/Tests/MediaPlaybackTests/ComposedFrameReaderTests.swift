@@ -14,7 +14,7 @@ import Testing
 /// ⚠️ **`frame(at:)` NEVER WAITS**, so every test polls: ask, sleep a few
 /// milliseconds, ask again, within a bounded time. A nil is "not yet", and only
 /// a nil that outlasts the bound is an answer.
-@Suite(.serialized)
+@Suite(.serialized, .exclusiveMediaWork)
 struct ComposedFrameReaderTests {
     typealias RGB = ColourClipWriter.RGB
 

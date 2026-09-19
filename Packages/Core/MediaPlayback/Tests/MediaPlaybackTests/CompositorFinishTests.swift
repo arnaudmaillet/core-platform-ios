@@ -20,7 +20,7 @@ import Testing
 /// Process tints a grey teal. Measured on red: mono then process is
 /// (36,141,145), process then mono is (136,136,136) — so the order of the two
 /// stages shows as "tinted or not", far outside what encoding moves.
-@Suite(.serialized)
+@Suite(.serialized, .exclusiveMediaWork)
 struct CompositorFinishTests {
     typealias RGB = ColourClipWriter.RGB
 
@@ -327,7 +327,7 @@ struct CompositorFinishTests {
 /// be asked is asked by `LiveLookOnEitherBackingTests` below, which runs in
 /// both lanes.
 @MainActor
-@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer), .exclusiveMediaWork)
 struct LiveLookTests {
     typealias RGB = ColourClipWriter.RGB
 
@@ -512,7 +512,7 @@ struct LiveLookTests {
 /// shows the author an edit that never arrives — which is exactly what the
 /// editor's reload is for.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .exclusiveMediaWork)
 struct LiveLookOnEitherBackingTests {
     private struct Passthrough: VideoSource {
         func playableURL(for url: URL) async throws -> URL { url }
@@ -540,7 +540,7 @@ struct LiveLookOnEitherBackingTests {
 }
 
 /// **A REFRESHED READER DRAWS THE PAUSED MOMENT AGAIN.**
-@Suite(.serialized)
+@Suite(.serialized, .exclusiveMediaWork)
 struct ComposedFrameRefreshTests {
     typealias RGB = ColourClipWriter.RGB
 

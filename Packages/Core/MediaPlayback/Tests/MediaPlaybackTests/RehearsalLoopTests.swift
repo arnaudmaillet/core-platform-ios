@@ -9,7 +9,7 @@ import Testing
 /// A real player over a real file: whether the playhead stays inside the range
 /// is AVFoundation's answer, and a stub would answer whatever it was written to.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .exclusiveMediaWork)
 struct RehearsalLoopTests {
     private struct Passthrough: VideoSource {
         func playableURL(for url: URL) async throws -> URL { url }

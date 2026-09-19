@@ -4,6 +4,7 @@ import Testing
 import UIKit
 @testable import MediaPlayback
 
+@Suite(.exclusiveMediaWork)
 struct VideoExporterTests {
     /// A real source clip to export: synthesize one with the placeholder fetcher.
     private func sourceClip() async throws -> URL {

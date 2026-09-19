@@ -41,7 +41,7 @@ import Testing
 /// already the slowest lane (203s on develop's CI), and these suites running
 /// beside its real-time ones pushed `RehearsalLoopTests` past its range.
 /// `CompositorFinishTests` is gated the same way.
-@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer), .exclusiveMediaWork)
 struct TransitionSyncTests {
     struct Cell: Sendable {
         let frame: Int

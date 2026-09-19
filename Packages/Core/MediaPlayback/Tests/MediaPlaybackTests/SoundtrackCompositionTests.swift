@@ -19,7 +19,7 @@ import Testing
 /// would do the same work twice, a dozen stress exports included, beside the
 /// real-time suites it runs with (memory `parallel-suite-starvation`).
 /// `SoundtrackPreviewTests`, which plays through the controller, runs in both.
-@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer), .exclusiveMediaWork)
 struct SoundtrackCompositionTests {
     private func arranged(
         _ segments: [VideoExportSegment], sound: Bool = true, song: VideoSoundtrack?
@@ -402,7 +402,7 @@ struct SoundtrackCompositionTests {
 
 /// **THE EDITOR'S PLAYER HEARS THE SONG, AT THE LEVELS BEING DRAGGED.**
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .exclusiveMediaWork)
 struct SoundtrackPreviewTests {
     private struct Passthrough: VideoSource {
         func playableURL(for url: URL) async throws -> URL { url }

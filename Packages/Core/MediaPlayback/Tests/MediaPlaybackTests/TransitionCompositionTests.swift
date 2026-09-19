@@ -18,7 +18,7 @@ import Testing
 /// so the legacy lane would do the same work twice beside its real-time
 /// suites (memory `parallel-suite-starvation`). `TransitionPreviewTests`,
 /// which loads the controller, runs in both.
-@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer), .exclusiveMediaWork)
 struct TransitionCompositionTests {
     typealias RGB = ColourClipWriter.RGB
     // ⚠️ Scaled H.264 bleeds the red around the square into the cyan: measured
@@ -557,7 +557,7 @@ struct TransitionCompositionTests {
 
 /// **THE EDITOR'S PREVIEW IS HANDED WHAT THE EXPORT DRAWS.**
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .exclusiveMediaWork)
 struct TransitionPreviewTests {
     private struct Passthrough: VideoSource {
         func playableURL(for url: URL) async throws -> URL { url }

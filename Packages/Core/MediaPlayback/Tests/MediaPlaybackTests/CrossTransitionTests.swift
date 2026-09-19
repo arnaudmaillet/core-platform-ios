@@ -30,7 +30,7 @@ import Testing
 /// generator or an export, never through the canvas's layer, so the legacy
 /// lane would draw the same pixels twice beside its real-time suites (memory
 /// `parallel-suite-starvation`).
-@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer), .exclusiveMediaWork)
 struct CrossTransitionTests {
     typealias RGB = ColourClipWriter.RGB
 
