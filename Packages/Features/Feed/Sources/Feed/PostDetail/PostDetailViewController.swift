@@ -443,6 +443,12 @@ final class PostDetailViewController: UIViewController {
         let isCommentList = mode == .commentsOnly
         collectionView.alwaysBounceVertical = true
         collectionView.bounces = true
+        // Every context this stream appears in — the pushed post, the text page,
+        // the composer, the comments over media — shows the SYSTEM fade under its
+        // header as well as any frost of its own, and on iOS 27 `.automatic` makes
+        // that fade a hard band cutting the stream at a hairline. See
+        // `prefersSoftTopEdge`.
+        collectionView.prefersSoftTopEdge()
         collectionView.keyboardDismissMode = .interactive
         // A bare tap on the stream retires the keyboard (the drag path
         // above already does; taps should match). Non-cancelling, so row

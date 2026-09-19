@@ -104,6 +104,15 @@ struct ConversationThreadViewControllerTests {
         #expect(stream.cellForItem(at: IndexPath(item: 0, section: 0)) is ThreadRowCell)
     }
 
+    /// ⚠️ Under the header frost the system's own fade still draws, and left
+    /// `.automatic` iOS 27 makes it a hard band with a hairline that cuts a
+    /// message in half just below the frost — measured. See `prefersSoftTopEdge`.
+    @Test func theStreamFadesUnderTheHeaderRatherThanCuttingAtALine() throws {
+        let (screen, _, _, _) = makeScreen()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        #expect(stream.topEdgeEffect.style == .soft)
+    }
+
     @Test func anEmptyConversationIsThePostsEmptyPage() throws {
         let (screen, _, _, _) = makeScreen(phase: .content([]))
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))

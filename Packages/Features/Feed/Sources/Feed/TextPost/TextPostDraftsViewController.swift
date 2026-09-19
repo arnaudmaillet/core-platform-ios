@@ -70,6 +70,9 @@ final class TextPostDraftsViewController: UIViewController {
             frame: .zero, collectionViewLayout: UICollectionViewCompositionalLayout.list(using: configuration)
         )
         collectionView.backgroundColor = .systemBackground
+        // The soft fade under the bar, not iOS 27's hard band — see
+        // `prefersSoftTopEdge`.
+        collectionView.prefersSoftTopEdge()
         collectionView.delegate = self
         collectionView.pin(to: view)
 

@@ -54,6 +54,14 @@ struct CommentStreamScrollLockTests {
         #expect(stream.isScrollEnabled, "the comments were left dead after the gesture")
     }
 
+    /// ⚠️ The stream asks for the SOFT fade under its header. Left `.automatic`,
+    /// iOS 27 draws a hard band across it with a hairline — measured on the
+    /// pushed post. See `prefersSoftTopEdge`.
+    @Test func theStreamFadesUnderItsHeaderRatherThanCuttingAtALine() throws {
+        let stream = try stream(of: detail())
+        #expect(stream.topEdgeEffect.style == .soft)
+    }
+
     /// The cancel path is the one that strands a screen. A drag released below
     /// the completion threshold leaves the post on display, and it has to be
     /// readable.
