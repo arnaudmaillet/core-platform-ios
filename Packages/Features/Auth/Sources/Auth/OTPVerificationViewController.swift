@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The verification card presented as a native sheet after the SMS
@@ -37,6 +38,9 @@ final class OTPVerificationViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Enter Code"
+        // The soft fade under the bar, not iOS 27's hard band — see
+        // `prefersSoftTopEdge`.
+        tableView.prefersSoftTopEdge()
         navigationItem.rightBarButtonItem = verifyButton
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel,

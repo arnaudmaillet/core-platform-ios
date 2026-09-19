@@ -32,6 +32,9 @@ class BottomAnchoredTableViewController: UITableViewController {
         super.viewDidLoad()
         // A bottom-pinned form shouldn't bounce when everything fits.
         tableView.alwaysBounceVertical = false
+        // The soft fade under the bar once a large type size makes the form
+        // scroll, not iOS 27's hard band — see `prefersSoftTopEdge`.
+        tableView.prefersSoftTopEdge()
         tableView.sectionHeaderHeight = UITableView.automaticDimension
         tableView.estimatedSectionHeaderHeight = 24
         tableView.sectionHeaderTopPadding = 0
