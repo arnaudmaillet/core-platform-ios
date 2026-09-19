@@ -25,7 +25,12 @@ import Testing
 /// references are the clip's own colours read through the same compositor
 /// where no transition reaches, and the progress is taken from the generator's
 /// answer, never from the time asked for.
-@Suite(.serialized)
+///
+/// ⚠️ **THE DEFAULT LANE ONLY.** Every picture here comes from an image
+/// generator or an export, never through the canvas's layer, so the legacy
+/// lane would draw the same pixels twice beside its real-time suites (memory
+/// `parallel-suite-starvation`).
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
 struct CrossTransitionTests {
     typealias RGB = ColourClipWriter.RGB
 

@@ -12,7 +12,13 @@ import Testing
 ///
 /// The clip (`ColourClipWriter`) is red, green, blue, white for a second each,
 /// with a cyan square over its middle half and a yellow band along its top.
-@Suite(.serialized)
+///
+/// ⚠️ **THE DEFAULT LANE ONLY.** Nothing here goes through the canvas's layer
+/// — pictures come from an image generator or an export, sound from a reader —
+/// so the legacy lane would do the same work twice beside its real-time
+/// suites (memory `parallel-suite-starvation`). `TransitionPreviewTests`,
+/// which loads the controller, runs in both.
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
 struct TransitionCompositionTests {
     typealias RGB = ColourClipWriter.RGB
     // ⚠️ Scaled H.264 bleeds the red around the square into the cyan: measured

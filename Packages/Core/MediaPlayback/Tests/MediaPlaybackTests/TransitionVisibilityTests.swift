@@ -555,7 +555,9 @@ struct TransitionVisibilityTests {
 
 /// **A TRANSITION'S LENGTH, AS ARITHMETIC — AND WHAT IT TAKES OFF THE FILM.**
 /// The rules `TransitionVisibilityTests` reads off the pixels, asked of the
-/// functions that make them.
+/// functions that make them — the default lane only, as it is: an export
+/// does not depend on the canvas's layer.
+@Suite(.enabled(if: VideoRenderFlags.usesSampleBufferLayer))
 struct TransitionLengthTests {
     /// ⚠️ **NEVER MORE THAN THE SHORTER NEIGHBOUR CAN GIVE.** Two seconds asked
     /// between a 0.6s piece and a 1.5s one: each gives at most half of itself,

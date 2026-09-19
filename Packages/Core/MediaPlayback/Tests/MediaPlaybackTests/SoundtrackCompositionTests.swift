@@ -13,7 +13,13 @@ import Testing
 ///
 /// The film (`ColourClipWriter`) is four seconds long with a 440 Hz tone for
 /// the first two and silence after; `sound: false` has no audio track at all.
-@Suite(.serialized)
+///
+/// ⚠️ **THE DEFAULT LANE ONLY.** Nothing here goes near the canvas's layer —
+/// every sample comes from an arrangement or an export — so the legacy lane
+/// would do the same work twice, a dozen stress exports included, beside the
+/// real-time suites it runs with (memory `parallel-suite-starvation`).
+/// `SoundtrackPreviewTests`, which plays through the controller, runs in both.
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
 struct SoundtrackCompositionTests {
     private func arranged(
         _ segments: [VideoExportSegment], sound: Bool = true, song: VideoSoundtrack?
