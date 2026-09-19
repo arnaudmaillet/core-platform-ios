@@ -35,11 +35,9 @@ struct VideoCompositionScene: Sendable, Equatable {
 
     /// Which piece's look each lane wears.
     ///
-    /// ⚠️ **THE LANES SWAP PIECES AT THE CUT, SO THEIR LOOKS SWAP TOO.** Before
-    /// the cut lane A plays the outgoing piece and lane B holds the incoming
-    /// one's first frame; after it A plays the incoming piece and B holds the
-    /// outgoing one's last frame. A look follows its piece's film, whichever
-    /// lane carries it.
+    /// ⚠️ **A LOOK FOLLOWS ITS PIECE'S FILM.** Inside a window lane A is the
+    /// outgoing piece and lane B the incoming one; outside, lane A is the one
+    /// piece playing.
     struct Looks: Sendable, Equatable {
         var a: LookPreset?
         var b: LookPreset?
@@ -47,8 +45,9 @@ struct VideoCompositionScene: Sendable, Equatable {
 
     struct Transition: Sendable, Equatable {
         var kind: VideoTransitionKind
-        /// The window on the composition's clock, in seconds: it opens `half`
-        /// before the cut and closes `half` after it.
+        /// The window on the composition's clock, in seconds: it opens where
+        /// the incoming piece starts, closes where the outgoing one ends, and
+        /// `cut` is its middle.
         var opens: Double
         var cut: Double
         var closes: Double
@@ -64,12 +63,11 @@ struct VideoCompositionScene: Sendable, Equatable {
 
 /// A stretch of the composition and what to draw over it.
 ///
-/// ⚠️ **LANE A IS THE ARRANGEMENT; LANE B IS ONLY EVER THE OTHER SIDE OF A
-/// CUT.** Before a cut, A plays the outgoing piece and B holds the incoming
-/// one's first frame; after it, A plays the incoming piece and B holds the
-/// outgoing one's last frame (`VideoExporter.heldSides`). Which is which follows
-/// from the time, so the instruction only names the tracks — and the picture
-/// that dominates is always A, in sync with the sound.
+/// ⚠️ **INSIDE A WINDOW, LANE A IS THE OUTGOING PIECE AND LANE B THE INCOMING
+/// ONE — BOTH REAL FILM, EACH AT ITS OWN PACE, EACH OVER ITS OWN SOUND.** The
+/// two pieces overlap there (`VideoExporter.insertPieces`), each on the track
+/// of its own lane. Outside a window lane A is the one piece playing and there
+/// is no lane B.
 final class VideoCompositorInstruction: NSObject, AVVideoCompositionInstructionProtocol,
     @unchecked Sendable {
     // ⚠️ `@unchecked` BECAUSE EVERY STORED PROPERTY IS A `let` OF A SENDABLE
@@ -281,6 +279,10 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
             return (a ?? background).composited(over: background).cropped(to: canvas)
         }
         let beforeCut = seconds < transition.cut
+        let b = upright(laneB, wearing: scene.looks.b)
+        // What a dip or a zoom shows: the outgoing piece up to the middle of the
+        // overlap, the incoming one from it.
+        let shown = (beforeCut ? a : b) ?? a ?? b ?? background
         let drawn: CIImage
         switch transition.kind {
         case .dipToBlack, .dipToWhite:
@@ -291,7 +293,7 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
                 ? (beforeCut ? (seconds - transition.opens) : (transition.closes - seconds)) / half
                 : 0
             let alpha = CGFloat(1 - min(max(into, 0), 1))
-            let faded = (a ?? background).applyingFilter("CIColorMatrix", parameters: [
+            let faded = shown.applyingFilter("CIColorMatrix", parameters: [
                 "inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)
             ])
             drawn = faded.composited(over: colour.cropped(to: canvas))
@@ -302,14 +304,12 @@ final class VideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
                 : 0
             let scale = 1 + (VideoExporter.zoomThroughScale - 1) * CGFloat(min(max(into, 0), 1))
             let centre = CGPoint(x: canvas.midX, y: canvas.midY)
-            drawn = (a ?? background).transformed(by: VideoExporter.zoom(about: centre, by: scale))
+            drawn = shown.transformed(by: VideoExporter.zoom(about: centre, by: scale))
         default:
-            // ⚠️ THE ROLES SWAP AT THE CUT: lane A — the arrangement, in sync
-            // with the sound — is the picture going out before it and the one
-            // coming in after it; lane B's held frame is always the other.
-            let other = upright(laneB, wearing: scene.looks.b) ?? a ?? background
-            let from = beforeCut ? (a ?? background) : other
-            let to = beforeCut ? other : (a ?? background)
+            // The outgoing piece on lane A into the incoming one on lane B,
+            // across the whole overlap.
+            let from = a ?? b ?? background
+            let to = b ?? from
             drawn = cross(
                 transition.kind, from: from, to: to,
                 progress: transition.progress(at: seconds), canvas: canvas

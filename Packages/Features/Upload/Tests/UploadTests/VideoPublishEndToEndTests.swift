@@ -436,8 +436,9 @@ struct VideoPublishEndToEndTests {
 
     /// ⚠️ **A TRANSITION CHOSEN IN THE EDITOR IS IN THE PUBLISHED FILE.** The
     /// preview draws it from the same builder; this asks the file that came out
-    /// of the whole chain, at the cut, with a witness cut by the same pieces and
-    /// no transition.
+    /// of the whole chain, at the middle of the overlap — the two pieces play
+    /// over each other for half a second, [0.7, 1.2) — with a witness cut by the
+    /// same pieces and no transition.
     @Test func aPublishedClipKeepsItsFade() async throws {
         func published(_ kind: VideoTransitionKind?) async throws -> URL {
             var edited = MediaEdits.untouched
@@ -464,8 +465,16 @@ struct VideoPublishEndToEndTests {
         let faded = try await published(.dipToBlack)
         let plain = try await published(nil)
 
-        #expect(try await ink(of: plain, at: 1.2) > 90, "guard: the witness is dark at the cut anyway")
-        #expect(try await ink(of: faded, at: 1.2) < 30, "the published clip does not dip at the cut")
+        // ⚠️ **THE TWO FRAMES EITHER SIDE OF THE MIDDLE, NOT A TIME BETWEEN
+        // THEM.** The dip is black only at the exact middle of its overlap,
+        // 0.95s, and a 30fps file has no frame there: 28/30 and 29/30 each sit
+        // a sixtieth away, a fifteenth of the way back towards the picture.
+        // Measured: 27 at 0.95 against a witness of 493 — a threshold of 30 sat
+        // on the answer and went red on CI. The darker of the two frames is the
+        // dip; a margin of 60 still leaves the witness eight times brighter.
+        let darkest = min(try await ink(of: faded, at: 28.0 / 30), try await ink(of: faded, at: 29.0 / 30))
+        #expect(try await ink(of: plain, at: 0.95) > 90, "guard: the witness is dark there anyway")
+        #expect(darkest < 60, "the published clip does not dip at the middle of its overlap: \(darkest)")
     }
 
     /// ⚠️ **AND THE ORDER SURVIVES, BECAUSE THE ORDER IS THE CAROUSEL.**

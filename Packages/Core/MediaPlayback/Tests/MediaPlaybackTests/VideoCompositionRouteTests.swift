@@ -26,6 +26,7 @@ import Testing
 /// cheap — half a second of synthesised clip each.
 ///
 /// Recorded in `dev/IOS_VIDEO_CAPTURE_UPLOAD.md` §5 P4.
+@Suite(.exclusiveMediaWork)
 struct VideoCompositionRouteTests {
     private func clip(width: Int, height: Int) async throws -> URL {
         try await PlaceholderVideoFetcher(durationSeconds: 0.5)
