@@ -193,6 +193,16 @@ final class MainTabCoordinator: NSObject, Coordinator {
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
         tabBarController.tabs = orderedTabs.map { $0.1.tab } + [createItem.tab]
         tabBarController.delegate = self
+        // ⚠️ **iOS 27 STOPPED DETACHING A SEARCH TAB BY ITS TYPE ALONE.** It now
+        // gives the separate bubble — its "prominent" treatment — to the tab
+        // named by `prominentTabIdentifier`, and when that is nil only to a
+        // `UISearchTab` whose `automaticallyActivatesSearch` is on, which the
+        // "+" is not (it opens a menu). Unnamed, the "+" was drawn inside the
+        // other four's bubble. Named, it stands apart again — measured on an
+        // iPhone 18 Pro under iOS 27; iOS 26 separates it by type, as before.
+        if #available(iOS 27, *) {
+            tabBarController.prominentTabIdentifier = createItem.tab.identifier
+        }
         // The bar's menus: Profile's long-press switcher, For You's lens menu
         // and the "+". `UITab` carries no menu of its own — `UITab`, `UITabBar`,
         // `UITabBarItem` and the controller delegate were all checked against
