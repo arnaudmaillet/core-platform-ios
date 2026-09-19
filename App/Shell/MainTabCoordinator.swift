@@ -200,9 +200,22 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // "+" is not (it opens a menu). Unnamed, the "+" was drawn inside the
         // other four's bubble. Named, it stands apart again — measured on an
         // iPhone 18 Pro under iOS 27; iOS 26 separates it by type, as before.
+        //
+        // ⚠️ **AN iOS 27 SDK API, AND CI STILL BUILDS WITH XCODE 26.** Its SDK
+        // does not declare `prominentTabIdentifier`, so `#available` alone does
+        // not compile there. Built with an iOS 27 SDK (Swift 6.4), the call is
+        // typed; built without one, the same public setter is reached by name,
+        // and still runs on an iOS 27 device.
+        #if compiler(>=6.4)
         if #available(iOS 27, *) {
             tabBarController.prominentTabIdentifier = createItem.tab.identifier
         }
+        #else
+        let setter = NSSelectorFromString("setProminentTabIdentifier:")
+        if tabBarController.responds(to: setter) {
+            _ = tabBarController.perform(setter, with: createItem.tab.identifier)
+        }
+        #endif
         // The bar's menus: Profile's long-press switcher, For You's lens menu
         // and the "+". `UITab` carries no menu of its own — `UITab`, `UITabBar`,
         // `UITabBarItem` and the controller delegate were all checked against
