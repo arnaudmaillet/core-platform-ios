@@ -131,6 +131,8 @@ public final class IconSelectorBar: UIView {
     private var lensSide: CGFloat { Metrics.segmentSide - lensClearance * 2 }
 
     private enum Metrics {
+        /// How faint a resting item is drawn — the shape the camera locks.
+        static let restingAlpha: CGFloat = 0.35
         /// The square each icon occupies. Stated once for every icon bar in
         /// `IconBarMetrics`, because the action bar sits beside this one.
         static var segmentSide: CGFloat { IconBarMetrics.segmentSide }
@@ -337,6 +339,7 @@ public final class IconSelectorBar: UIView {
                 onSelectNothing?()
             }
         }
+        restingNotes = restingNotes.filter { items.indices.contains($0.key) }
         progress = CGFloat(selectedIndex)
         applySelectionAppearance()
         invalidateIntrinsicContentSize()
@@ -348,6 +351,35 @@ public final class IconSelectorBar: UIView {
         items = newItems
         rebuildSegments()
     }
+
+    // MARK: - Resting items
+
+    /// Dims one item while leaving it tappable, or lifts the dimming.
+    ///
+    /// ⚠️ **DIMMED, NOT DISABLED.** A resting item still answers a tap, so the
+    /// host can say WHY it rests — the camera's shape, locked once a take has a
+    /// clip, explains that undoing the clips frees it. A disabled one would
+    /// swallow the tap and explain nothing. `note` is what VoiceOver reads as
+    /// the item's value while it rests.
+    ///
+    /// ⚠️ **KEPT ACROSS `setItems`** for the indices the new list still has:
+    /// a host that re-dresses its icons (a state drawn into a symbol) must not
+    /// have to remember to dim again. The camera found its item by its
+    /// accessibility label before this existed.
+    public func setDimmed(_ dimmed: Bool, at index: Int, note: String? = nil) {
+        if dimmed {
+            restingNotes[index] = note ?? ""
+        } else {
+            restingNotes[index] = nil
+        }
+        applySelectionAppearance()
+    }
+
+    /// Whether the item at `index` is resting.
+    public func isDimmed(at index: Int) -> Bool { restingNotes[index] != nil }
+
+    /// What each resting item says as its value; present means resting.
+    private var restingNotes: [Int: String] = [:]
 
     // MARK: - Choosing
 
@@ -409,6 +441,9 @@ public final class IconSelectorBar: UIView {
             let image = UIImage(systemName: name) ?? UIImage(systemName: item.symbolName)
             button.configuration?.image = image
             button.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
+            let note = restingNotes[index]
+            button.alpha = note == nil ? 1 : Metrics.restingAlpha
+            button.accessibilityValue = note.flatMap { $0.isEmpty ? nil : $0 }
         }
     }
 
@@ -725,6 +760,10 @@ extension IconSelectorBar {
     /// `select(_:notify:)` is the programmatic door and takes a different path;
     /// a test that used it would be testing the wrong one.
     public func debugTap(_ index: Int) { tapped(index) }
+    /// Internal for tests: how opaque the item at `index` is DRAWN, and what
+    /// VoiceOver reads as its value.
+    public func debugDrawnAlpha(at index: Int) -> CGFloat { buttons[index].alpha }
+    public func debugSpokenValue(at index: Int) -> String? { buttons[index].accessibilityValue }
 
     /// Whether a touch at this point in the scrolled content would pick the pill
     /// up — the same predicate the recognizer is asked.

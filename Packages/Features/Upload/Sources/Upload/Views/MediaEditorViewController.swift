@@ -1749,33 +1749,8 @@ final class MediaEditorViewController: UIViewController {
     /// and a geometry read from one would be the collapse measuring itself.
     private func measureTheBar() {
         let leading: UIView = isTimelineShowing ? actionBar : soundPill
-        guard let window = leading.window, categoryBar.window === window,
-              let leadingPlatter = Self.platter(of: leading),
-              let trailingPlatter = Self.platter(of: categoryBar),
-              let measured = ToolbarGeometry.measured(
-                  leading: leading.convert(leading.bounds, to: nil),
-                  leadingPlatter: leadingPlatter,
-                  trailing: categoryBar.convert(categoryBar.bounds, to: nil),
-                  trailingPlatter: trailingPlatter
-              )
-        else { return }
+        guard let measured = BottomBarShare.measure(leading: leading, trailing: categoryBar) else { return }
         barGeometry = measured
-    }
-
-    /// The first ancestor wider than `view`, in window coordinates — the
-    /// platter a bar item sits on.
-    private static func platter(of view: UIView) -> CGRect? {
-        guard let window = view.window else { return nil }
-        let own = view.convert(view.bounds, to: nil)
-        var node = view.superview
-        while let current = node, current !== window {
-            let frame = current.convert(current.bounds, to: nil)
-            if frame.width > own.width + 0.5 {
-                return frame.width < window.bounds.width ? frame : nil
-            }
-            node = current.superview
-        }
-        return nil
     }
 
     private lazy var actionBarWidth: NSLayoutConstraint =
@@ -1789,16 +1764,10 @@ final class MediaEditorViewController: UIViewController {
         return cap
     }()
 
-    /// The width a strip would take on its own.
-    ///
-    /// ⚠️ **NOT `intrinsicContentSize` ALONE.** `IconActionBar` states one;
-    /// `SoundPillView` answers `noIntrinsicMetric` (-1) because its size comes
-    /// from its own subviews' constraints, and -1 read as a width gave the
-    /// selector the whole bar and the pill nothing.
+    /// The width a strip would take on its own — `BottomBarShare`, shared with
+    /// the camera's bar.
     private static func wantedWidth(of view: UIView) -> CGFloat {
-        let stated = view.intrinsicContentSize.width
-        guard stated == UIView.noIntrinsicMetric else { return stated }
-        return view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        BottomBarShare.wantedWidth(of: view)
     }
 
     private lazy var photoStripWidth: NSLayoutConstraint =
@@ -3840,6 +3809,14 @@ extension MediaEditorViewController {
         // animated without lying about the band.
         let departing = animated && band.content !== accessory ? band.release() : nil
         if let accessory {
+            // ⚠️ **A TENANT TAKEN BACK MID-DEPARTURE STOPS LEAVING.** Its
+            // departure already wrote alpha 0 and the collapsed transform to
+            // the model, so shown again it went on fading and shrinking — and,
+            // at alpha 0, took no tap — until that curve ran out. The camera's
+            // option rows cut it short the same way.
+            accessory.layer.removeAllAnimations()
+            accessory.alpha = 1
+            accessory.transform = .identity
             band.show(accessory)
             backdropFromChrome.isActive = false
             backdropFromBand.isActive = true
@@ -3958,9 +3935,16 @@ extension MediaEditorViewController {
         ) {
             departing.alpha = 0
             departing.transform = BandPop.collapsedTransform
-        } completion: { _ in
+        } completion: { [weak self] _ in
             departing.alpha = 1
             departing.transform = .identity
+            // ⚠️ **NOT IF THE BAND HAS TAKEN IT BACK.** Tenants are built once
+            // and shown again: reopened within the departure's 0.17s — Effects,
+            // Filters, Effects — a tenant was back in the band when this ran,
+            // and was pulled out of it, leaving an open band holding nothing
+            // under a chosen icon. The camera's option rows had the same race
+            // (found by review there first).
+            guard departing !== self?.band.content else { return }
             departing.removeFromSuperview()
         }
     }
