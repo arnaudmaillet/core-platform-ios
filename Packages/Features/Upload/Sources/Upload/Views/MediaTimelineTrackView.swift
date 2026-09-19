@@ -2610,13 +2610,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// the first pinch, after which the start handle's hit area sat somewhere the
     /// start handle was not. Found by the compiler, when both were finally made
     /// to come from one place.
-    /// How wide one piece is drawn right now.
-    private func width(ofPiece index: Int) -> CGFloat {
-        MediaTimelining.placements(
-            timeline, withinSource: duration, pointsPerSecond: pointsPerSecond
-        ).first { $0.index == index }?.width ?? 0
-    }
-
+    ///
     /// ⚠️ **AND THERE ARE NONE UNTIL A PIECE IS HELD.** With nothing selected the
     /// track has no handles at all, so every touch on it is a scroll — which is
     /// what makes "tap to select" possible in the first place: a tap that had to
@@ -2991,20 +2985,43 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// one. Converting a drag straight to source seconds — which is what the
     /// single-clock version did — moves a fast piece's edge twice as far as the
     /// finger went.
+    ///
+    /// ⚠️ **AND WHAT THE FINGER MOVES IS THE CAP, NOT A LENGTH OF FILM.** Where
+    /// the held piece is the shorter side of a transition, trimming it shortens
+    /// the overlap too (`MediaTimelining.Laid`): its film starts elsewhere and
+    /// the cut before or after it moves with it. Converting the travel straight
+    /// into film left the cap at half the finger's speed and slid the cap that
+    /// should stand still — found by review. So the edge moves until the drawn
+    /// width has changed by the finger's travel (`moved(changingDrawnWidthBy:)`),
+    /// and the track scrolls by however far the OTHER cap moved on the clock.
     private func track(byPoints points: CGFloat) {
         guard let grip, let index = selected else { return }
-        let pieces = MediaTimelining.resolved(timeline, withinSource: duration)
-        guard pieces.indices.contains(index) else { return }
-        let wide = width(ofPiece: index)
+        let before = MediaTimelining.laid(timeline, withinSource: duration)
+        guard before.indices.contains(index) else { return }
         timeline = MediaTimelining.moved(
             timeline, piece: index, edge: grip,
             // The SIGNED converter. `playedSeconds(atX:)` floors at zero and
-            // would turn every leftward sample into no movement at all.
-            bySourceSeconds: MediaTimelining.sourceSeconds(
-                ofPoints: points, atSpeed: pieces[index].speed, pointsPerSecond: pointsPerSecond
+            // would turn every leftward sample into no movement at all. An end
+            // dragged right widens the piece; a start dragged right narrows it.
+            changingDrawnWidthBy: MediaTimelining.playedSeconds(
+                ofPoints: grip == .end ? points : -points, pointsPerSecond: pointsPerSecond
             ),
             withinSource: duration
         )
+        let after = MediaTimelining.laid(timeline, withinSource: duration)
+        guard after.indices.contains(index) else { return }
+        // ⚠️ **THE RIGHT PINCE HOLDS ITS START CAP STILL.** Where the piece
+        // limits the overlap before it, its drawn start moves with the trim;
+        // the track follows it, so the cap and the cut before it stand where
+        // the eye left them.
+        if grip == .end {
+            let shift = CGFloat(after[index].drawnFrom - before[index].drawnFrom) * pointsPerSecond
+            if abs(shift) > 0.01 {
+                isFollowingPlayback = true
+                scroller.contentOffset.x += shift
+                isFollowingPlayback = false
+            }
+        }
         // ⚠️ **THE LEFT PINCE IS THE MIRROR OF THE RIGHT ONE, AND THE TRACK IS
         // WHAT MOVES TO MAKE IT SO.** Asked for in those words: *"si on tire la
         // pince gauche vers la gauche… dévoiler la partie avant et pousser la
@@ -3017,17 +3034,19 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // change when its own start is dragged — so in the composition's own
         // coordinates a head that opens pushes ITSELF and everything after it to
         // the right, which is the opposite of what the eye is promised. Scrolling
-        // the track by exactly what the piece gained cancels that: the piece's
-        // closing edge, its film and every section after it stand perfectly
-        // still, the sections BEFORE it slide aside, and the cap follows the
-        // finger. Measured on the device by pixel correlation, both directions.
+        // the track by exactly how far its closing edge moved on the clock
+        // cancels that: the piece's closing edge and every section after it
+        // stand perfectly still, the sections BEFORE it slide aside, and the cap
+        // follows the finger. Measured on the device by pixel correlation, both
+        // directions. (By the change in the drawn END, not the width: where the
+        // piece limits the overlap before it, its start moves on the clock too.)
         //
         // ⚠️ **AND THE LEADING INSET IS WHAT LETS THE FIRST PIECE DO IT.** A
         // scroll view will not go past its own leading inset, and for the first
         // piece it is already sitting on it; the inset grows for the length of
         // the gesture and settles back on release.
         if grip == .start {
-            let lost = wide - width(ofPiece: index)
+            let lost = -CGFloat(after[index].drawnTo - before[index].drawnTo) * pointsPerSecond
             if abs(lost) > 0.01 {
                 leadingSlack = max(leadingSlack + lost, 0)
                 // Suppressed, because this is not the author scrubbing: the drag

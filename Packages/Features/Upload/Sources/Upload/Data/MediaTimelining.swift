@@ -1791,6 +1791,48 @@ enum MediaTimelining {
         return MediaTimeline(segments: pieces)
     }
 
+    /// Moves one edge of piece `index` so that the piece's DRAWN width changes by
+    /// `seconds` of played time — what a finger on one of its caps asks for.
+    ///
+    /// ⚠️ **NOT ALWAYS THE SAME AS MOVING THE EDGE BY THAT MUCH FILM.** A
+    /// transition overlaps its pieces by at most half of each (`Laid`), so where
+    /// the held piece is the shorter side, trimming it shortens the overlap
+    /// too, and the piece is drawn from the middle of an overlap that moved:
+    /// the drawn width changes by between half and all of the change in played
+    /// length. Converting the finger's travel straight into film left the cap
+    /// behind the finger — at half its speed with both ends clamped — found by
+    /// review. So the change is found on the width itself, by bisection
+    /// (the width only ever grows with the piece); where the piece limits no
+    /// overlap it is the plain conversion, exactly. What `moved` refuses — the
+    /// floor, the file's ends — still stops it.
+    static func moved(
+        _ timeline: MediaTimeline, piece index: Int, edge: Edge,
+        changingDrawnWidthBy seconds: Double, withinSource duration: Double
+    ) -> MediaTimeline {
+        let pieces = resolved(timeline, withinSource: duration)
+        guard pieces.indices.contains(index), seconds.isFinite, seconds != 0 else { return timeline }
+        let rate = speed(of: pieces[index])
+        let before = laid(pieces)[index]
+        let width = before.drawnTo - before.drawnFrom
+        // `played` longer or shorter, by moving the edge outwards or inwards.
+        func trying(_ played: Double) -> (timeline: MediaTimeline, change: Double) {
+            let film = (edge == .end ? played : -played) * rate
+            let next = moved(timeline, piece: index, edge: edge, bySourceSeconds: film, withinSource: duration)
+            let after = laid(next, withinSource: duration)[index]
+            return (next, after.drawnTo - after.drawnFrom - width)
+        }
+        let plain = trying(seconds)
+        guard abs(plain.change - seconds) > 1e-9 else { return plain.timeline }
+        // The width changes by at least half the played length, so the answer
+        // lies between the finger's travel and twice it — or at a refusal.
+        var (near, far) = (seconds, 2 * seconds)
+        for _ in 0..<40 {
+            let middle = (near + far) / 2
+            if abs(trying(middle).change) < abs(seconds) { near = middle } else { far = middle }
+        }
+        return trying(far).timeline
+    }
+
     /// The outer pair, for the spoken adjustment — which has no notion of which
     /// piece is selected and means "the end of the whole thing".
     static func moved(

@@ -175,4 +175,69 @@ struct MediaTimelineOverlapTrackTests {
 
         #expect(track.accessibilityValue == "9 seconds kept", "got \(String(describing: track.accessibilityValue))")
     }
+
+    // MARK: - The handles
+
+    /// The file's [0, 6) dissolves into its [6, 10) over two seconds, and the
+    /// second piece is held — drawn over [5, 8]. It is the shorter side: the
+    /// overlap is half of it, so a trim shortens the overlap too, and the piece
+    /// is drawn from the middle of an overlap that moves.
+    private func heldBesideALongDissolve() -> MediaTimelineTrackView {
+        let track = TrackFixture.cutInThree(holding: 1, segments: [
+            MediaSegment(start: 0, end: 6, transitionOut: .dissolve, transitionSeconds: 2),
+            MediaSegment(start: 6, end: 10)
+        ], duration: 10)
+        track.layoutIfNeeded()
+        return track
+    }
+
+    /// Where a cap stands on the SCREEN: its place in the content, less the
+    /// scroll.
+    private func onScreen(_ cap: CGRect, of track: MediaTimelineTrackView) -> CGFloat {
+        cap.midX - track.debugContentOffset
+    }
+
+    /// ⚠️ **THE RIGHT PINCE FOLLOWS THE FINGER, AND ITS START CAP STANDS
+    /// STILL** — found by review: converting the travel straight into film, the
+    /// end cap moved 30pt for 60 of finger, and the start cap and the cut before
+    /// it slid 15pt right. Sixty points left is a second off the drawn width:
+    /// the piece plays 2.667s and overlaps by half that, 1.333s.
+    @Test func theEndCapFollowsTheFingerWhenThePieceLimitsTheOverlap() throws {
+        let track = heldBesideALongDissolve()
+        let start = onScreen(track.debugStartGrip, of: track)
+        let end = onScreen(track.debugEndGrip, of: track)
+
+        track.debugTakeHold(at: track.debugEndGrip.midX)
+        try #require(track.debugGrip == .end, "guard: the drag took \(String(describing: track.debugGrip))")
+        for _ in 0..<6 { track.debugDrag(byPoints: -10) }
+
+        #expect(abs(onScreen(track.debugEndGrip, of: track) - (end - 60)) < 0.5,
+                "the end cap moved \(onScreen(track.debugEndGrip, of: track) - end)pt for -60pt of finger")
+        #expect(abs(onScreen(track.debugStartGrip, of: track) - start) < 0.5,
+                "the start cap moved \(onScreen(track.debugStartGrip, of: track) - start)pt")
+        let trimmed = MediaTimelining.resolved(track.debugTimeline, withinSource: 10)
+        #expect(abs(trimmed[1].end - (6 + 8.0 / 3)) < 0.01, "the piece ends at \(trimmed[1].end)")
+        track.debugRelease()
+    }
+
+    /// ⚠️ **AND THE LEFT PINCE FOLLOWS IT WHILE THE END CAP STANDS STILL** —
+    /// by review, the end and everything after it drifted by a quarter of the
+    /// trim. Sixty points right is a second off the drawn width again.
+    @Test func theStartCapFollowsTheFingerWhenThePieceLimitsTheOverlap() throws {
+        let track = heldBesideALongDissolve()
+        let start = onScreen(track.debugStartGrip, of: track)
+        let end = onScreen(track.debugEndGrip, of: track)
+
+        track.debugTakeHold(at: track.debugStartGrip.midX)
+        try #require(track.debugGrip == .start, "guard: the drag took \(String(describing: track.debugGrip))")
+        for _ in 0..<6 { track.debugDrag(byPoints: 10) }
+
+        #expect(abs(onScreen(track.debugStartGrip, of: track) - (start + 60)) < 0.5,
+                "the start cap moved \(onScreen(track.debugStartGrip, of: track) - start)pt for 60pt of finger")
+        #expect(abs(onScreen(track.debugEndGrip, of: track) - end) < 0.5,
+                "the end cap moved \(onScreen(track.debugEndGrip, of: track) - end)pt")
+        let trimmed = MediaTimelining.resolved(track.debugTimeline, withinSource: 10)
+        #expect(abs(trimmed[1].start - (10 - 8.0 / 3)) < 0.01, "the piece starts at \(trimmed[1].start)")
+        track.debugRelease()
+    }
 }

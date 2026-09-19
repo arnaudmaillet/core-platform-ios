@@ -349,6 +349,48 @@ struct MediaEditorTransitionsTests {
         #expect(tools.durations.debugEnabled == ["0.25s", "0.5s"], "offers \(tools.durations.debugEnabled)")
     }
 
+    /// ⚠️ **A CUT BESIDE A LONG TRANSITION KEEPS THE FILM UNDER THE NEEDLE, AND
+    /// THE NEW CUT IS DRAWN THERE.** Found by review. [0, 5) dissolves into
+    /// [5, 10) over a second and a half: the second piece starts at 3.5s, and
+    /// with the needle at 5s it shows the file's 6.5s. Cut there, its left half
+    /// plays 1.5s and gives the dissolve half of it, 0.75s — so the half starts
+    /// at 4.25s and ends at 5.75s. Left where it was, the needle stood on the
+    /// file's 5.75s, 45pt short of the new cut, and the canvas reloaded there.
+    @Test func aCutBesideALongTransitionKeepsTheFilmUnderTheNeedle() async throws {
+        let (screen, tools) = try await cutClip()
+        let track = tools.track
+        track.debugTapSeam(0)
+        tools.transitions.debugTap(.dissolve)
+        try await landed(screen, beyond: 0)
+        let chosen = screen.preview.plans.count
+        tools.durations.debugTap(seconds: 1.5)
+        try await landed(screen, beyond: chosen)
+        tools.transitions.debugTapClose()
+        screen.window.layoutIfNeeded()
+        try await settle(until: { !track.debugIsEasing })
+        try #require(!track.debugIsEasing, "guard: the track never stopped easing")
+        track.debugScroll(
+            toContentOffset: MediaTimelining.contentOffset(
+                forPlayedSeconds: 5, trackWidth: track.bounds.width, pointsPerSecond: track.debugPointsPerSecond
+            )
+        )
+        let watching = try #require(track.momentUnderNeedle)
+        try #require(watching.piece == 1 && abs(watching.sourceSeconds - 6.5) < 0.01,
+                     "guard: the needle is on \(watching)")
+        let loads = screen.preview.plans.count
+
+        screen.editor.debugSplitAtTheNeedle()
+        screen.window.layoutIfNeeded()
+
+        let after = try #require(track.momentUnderNeedle)
+        #expect(after.piece == 1 && abs(after.sourceSeconds - 6.5) < 0.01, "the film under the needle moved to \(after)")
+        #expect(abs(track.playedSecondsUnderNeedle - 5.75) < 0.01,
+                "the needle is at \(track.playedSecondsUnderNeedle)s, not on the new cut at 5.75s")
+        try await landed(screen, beyond: loads)
+        let landing = try #require(screen.preview.landings.last)
+        #expect(abs(landing.seconds - 5.75) < 0.01, "the canvas landed at \(landing.seconds)s, not on the new cut")
+    }
+
     /// ⚠️ **THE LENGTHS RAISE THE BAND, AND A FITTED PICTURE FOLLOWS IT IN THE
     /// SAME TURN.** Its window runs from the bar to the head of the dots, and
     /// the dots stand on the band. Any later layout pass would lay the picture
