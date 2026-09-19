@@ -90,6 +90,9 @@ final class ProfileRelationshipListViewController: UIViewController {
         // a list that happens to be narrower than its content cannot start
         // competing for the pan that pages.
         collectionView.alwaysBounceHorizontal = false
+        // Each list fades out under the header rather than being cut at a
+        // hairline — see `prefersSoftTopEdge`.
+        collectionView.prefersSoftTopEdge()
         collectionView.pin(to: view)
 
         refreshControl.addAction(

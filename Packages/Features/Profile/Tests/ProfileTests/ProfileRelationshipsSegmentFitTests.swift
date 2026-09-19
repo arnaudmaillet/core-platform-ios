@@ -196,6 +196,26 @@ struct ProfileRelationshipsTabSyncTests {
         #expect(controller.pager.activeIndex == 0)
         #expect(controller.tabBar.selectedIndex == 0)
     }
+
+    /// ⚠️ Every list asks for the SOFT fade under the header, and so does the
+    /// pager over them — its own scroll view spans the header and draws its own
+    /// effect. Left `.automatic`, iOS 27 cuts the header off at a hard line with
+    /// a hairline (measured on this screen). See `prefersSoftTopEdge`.
+    @Test("Every list, and the pager over them, fades under the header")
+    func everyListFadesUnderTheHeader() {
+        let controller = makeController()
+        let paging = controller.pager.pagingScrollView
+        var lists: [UICollectionView] = []
+        func collect(_ view: UIView) {
+            if let list = view as? UICollectionView { lists.append(list) }
+            view.subviews.forEach(collect)
+        }
+        collect(paging)
+
+        #expect(lists.count == 3, "Followers, Following and Friends")
+        #expect(lists.allSatisfy { $0.topEdgeEffect.style == .soft })
+        #expect(paging.topEdgeEffect.style == .soft)
+    }
 }
 
 private actor SyncStubProvider: ProfileRelationshipsProviding {
