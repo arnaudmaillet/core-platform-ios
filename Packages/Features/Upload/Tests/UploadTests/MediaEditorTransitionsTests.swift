@@ -332,8 +332,8 @@ struct MediaEditorTransitionsTests {
     }
 
     /// ⚠️ **A CUT OPENS ON WHAT IT CARRIES, AND ON WHAT ITS PIECES CAN GIVE.**
-    /// Cut at 1.5s, the first piece can lend at most 0.75s either side of the
-    /// cut, so nothing past 1.5s is offered.
+    /// Cut at 1.5s, the first piece can give a transition at most half of
+    /// itself, 0.75s, so nothing past 0.5s is offered.
     @Test func aCutOpensOnItsLengthAndDimsWhatItsPiecesCannotGive() async throws {
         let (screen, tools) = try await cutClip(at: 1.5)
         tools.track.debugTapSeam(0)
@@ -346,7 +346,7 @@ struct MediaEditorTransitionsTests {
         tools.track.debugTapSeam(0)
 
         #expect(tools.durations.debugChosen == ["0.25s"], "reopened on \(tools.durations.debugChosen)")
-        #expect(tools.durations.debugEnabled == ["0.25s", "0.5s", "1s", "1.5s"], "offers \(tools.durations.debugEnabled)")
+        #expect(tools.durations.debugEnabled == ["0.25s", "0.5s"], "offers \(tools.durations.debugEnabled)")
     }
 
     /// ⚠️ **THE LENGTHS RAISE THE BAND, AND A FITTED PICTURE FOLLOWS IT IN THE

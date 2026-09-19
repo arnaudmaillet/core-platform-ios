@@ -154,6 +154,80 @@ enum MediaTimelining {
             - centringInset(forTrackWidth: trackWidth)
     }
 
+    // MARK: - The composition's clock
+
+    /// One piece on the composition's clock: where its film starts, how long it
+    /// plays, and how long it overlaps each neighbour.
+    ///
+    /// ⚠️ **A TRANSITION OVERLAPS ITS TWO PIECES, SO THE CLOCK IS NO LONGER A SUM
+    /// OF LENGTHS.** Chosen by the author, CapCut's way — *"oui, chevauche les
+    /// deux segments"*: a transition of `d` plays the outgoing piece's last `d`
+    /// over the incoming piece's first `d` (`VideoExporter.insertPieces`), so a
+    /// piece's film starts `d` before the one before it ends, and the result is
+    /// `d` shorter per transition. The exporter lays exactly this; everything
+    /// here that reads time — the track, the needle, a seek, a loop, a mark —
+    /// reads it from `laid`.
+    ///
+    /// ⚠️ **THE TRACK DRAWS EACH PIECE FROM THE MIDDLE OF ONE OVERLAP TO THE
+    /// MIDDLE OF THE NEXT.** Two pieces that play at once cannot both own the
+    /// same stretch of track without one hiding the other, and the needle must
+    /// still cross a result with no holes at one speed. So the drawn pieces stay
+    /// end to end on the composition's clock, the cut is drawn at the middle of
+    /// the overlap — where a dip or a zoom changes piece and the outgoing picture
+    /// stops dominating — and the lit window of the transition spans it, half on
+    /// each piece: the overlap is shown as the stretch it takes, not as two
+    /// films stacked. A piece's film under its neighbour's half is simply not
+    /// drawn, as the daylight's is not.
+    struct Laid: Equatable, Sendable {
+        let piece: MediaSegment
+        /// Where its film starts, in played seconds of the result.
+        let starts: Double
+        /// How long its film plays.
+        let played: Double
+        /// How long it overlaps the piece before it — and the piece after it.
+        let overlapIn: Double
+        let overlapOut: Double
+
+        var ends: Double { starts + played }
+        /// Where the track draws it.
+        var drawnFrom: Double { starts + overlapIn / 2 }
+        var drawnTo: Double { ends - overlapOut / 2 }
+    }
+
+    static func laid(_ timeline: MediaTimeline, withinSource duration: Double) -> [Laid] {
+        laid(resolved(timeline, withinSource: duration))
+    }
+
+    /// `pieces`, in the order given, on the composition's clock.
+    static func laid(_ pieces: [MediaSegment]) -> [Laid] {
+        var out: [Laid] = []
+        var starts = 0.0
+        for (index, piece) in pieces.enumerated() {
+            let overlapOut = index < pieces.count - 1 ? overlap(after: piece, before: pieces[index + 1]) : 0
+            let at = Laid(
+                piece: piece, starts: starts, played: piece.playedSeconds,
+                overlapIn: out.last?.overlapOut ?? 0, overlapOut: overlapOut
+            )
+            out.append(at)
+            starts = at.ends - overlapOut
+        }
+        return out
+    }
+
+    /// How long `piece` and `next` overlap at the cut between them — nothing
+    /// on a plain cut.
+    ///
+    /// ⚠️ **`VideoExporter.transitionOverlap`, THE EXPORTER'S OWN RULE.** Written
+    /// twice, the track and the published film would part the first time
+    /// either changed.
+    static func overlap(after piece: MediaSegment, before next: MediaSegment) -> Double {
+        VideoExporter.transitionOverlap(
+            piece.transitionOut,
+            seconds: piece.transitionSeconds ?? VideoTransitionKind.standardSeconds,
+            outgoingPlayedSeconds: piece.playedSeconds, incomingPlayedSeconds: next.playedSeconds
+        )
+    }
+
     // MARK: - The composition, piece by piece
 
     /// Where one piece of the composition is drawn.
@@ -162,13 +236,27 @@ enum MediaTimelining {
         let piece: MediaSegment
         let from: CGFloat
         let to: CGFloat
+        /// Where the piece's FILM starts on the same axis — before `from` by
+        /// half the overlap it shares with the piece before it
+        /// (`Laid.drawnFrom`). What places its squares of film.
+        let origin: CGFloat
+
+        init(index: Int, piece: MediaSegment, from: CGFloat, to: CGFloat, origin: CGFloat? = nil) {
+            self.index = index
+            self.piece = piece
+            self.from = from
+            self.to = to
+            self.origin = origin ?? from
+        }
 
         var width: CGFloat { max(to - from, 0) }
         func contains(_ x: CGFloat) -> Bool { x >= from && x <= to }
         var middle: CGFloat { (from + to) / 2 }
     }
 
-    /// The kept pieces laid END TO END, in the order they will play.
+    /// The kept pieces DRAWN END TO END, in the order they will play — each
+    /// from the middle of its overlap with the one before to the middle of its
+    /// overlap with the one after (`Laid`).
     ///
     /// ⚠️ **NOTHING SITS BETWEEN THEM, AND FOR ONE ROUND THE DISCARDED FILM DID.**
     /// The track carried the whole file, holes and all, greyed — which made an
@@ -188,15 +276,14 @@ enum MediaTimelining {
         _ timeline: MediaTimeline, withinSource duration: Double,
         pointsPerSecond: CGFloat = pointsPerSecond
     ) -> [Placement] {
-        var placed: [Placement] = []
-        var played: Double = 0
-        for (index, piece) in resolved(timeline, withinSource: duration).enumerated() {
-            let from = x(atPlayedSeconds: played, pointsPerSecond: pointsPerSecond)
-            played += piece.playedSeconds
-            let to = x(atPlayedSeconds: played, pointsPerSecond: pointsPerSecond)
-            placed.append(Placement(index: index, piece: piece, from: from, to: to))
+        laid(timeline, withinSource: duration).enumerated().map { index, at in
+            Placement(
+                index: index, piece: at.piece,
+                from: x(atPlayedSeconds: at.drawnFrom, pointsPerSecond: pointsPerSecond),
+                to: x(atPlayedSeconds: at.drawnTo, pointsPerSecond: pointsPerSecond),
+                origin: x(atPlayedSeconds: at.starts, pointsPerSecond: pointsPerSecond)
+            )
         }
-        return placed
     }
 
     /// Which piece a touch at `x` content points landed on, if any.
@@ -218,40 +305,37 @@ enum MediaTimelining {
         let sourceSeconds: Double
     }
 
+    /// ⚠️ **INSIDE AN OVERLAP, THE PIECE THE TRACK DRAWS THERE** — the outgoing
+    /// one up to the middle, the incoming one from it — and where ITS film has
+    /// got to. Both pieces play there; the one drawn is the one the author sees
+    /// under the needle, and the one a split or a rate chip then acts on.
     static func moment(
         atPlayedSeconds seconds: Double, in timeline: MediaTimeline, withinSource duration: Double
     ) -> Moment? {
-        let pieces = resolved(timeline, withinSource: duration)
-        guard let first = pieces.first else { return nil }
-        guard seconds.isFinite, seconds > 0 else { return Moment(piece: 0, sourceSeconds: first.start) }
-        var remaining = seconds
-        for (index, piece) in pieces.enumerated() {
-            let played = piece.playedSeconds
-            if remaining > played {
-                remaining -= played
-                continue
-            }
-            return Moment(
-                piece: index,
-                sourceSeconds: min(piece.start + remaining * speed(of: piece), piece.end)
-            )
-        }
-        let last = pieces.count - 1
-        return Moment(piece: last, sourceSeconds: pieces[last].end)
+        let all = laid(timeline, withinSource: duration)
+        guard let first = all.first else { return nil }
+        guard seconds.isFinite, seconds > 0 else { return Moment(piece: 0, sourceSeconds: first.piece.start) }
+        let index = all.firstIndex { seconds <= $0.drawnTo } ?? all.count - 1
+        let at = all[index]
+        let into = max(seconds - at.starts, 0)
+        return Moment(
+            piece: index,
+            sourceSeconds: min(at.piece.start + into * speed(of: at.piece), at.piece.end)
+        )
     }
 
-    /// And back: how far into the result a moment inside a known piece is.
+    /// And back: how far into the result a moment inside a known piece is —
+    /// where that piece's film plays it, which inside an overlap can be under
+    /// the neighbour's half of the track.
     static func playedSeconds(
         ofPiece index: Int, atSourceSeconds seconds: Double,
         in timeline: MediaTimeline, withinSource duration: Double
     ) -> Double {
-        let pieces = resolved(timeline, withinSource: duration)
-        guard pieces.indices.contains(index) else { return 0 }
-        var played: Double = 0
-        for piece in pieces[..<index] { played += piece.playedSeconds }
-        let piece = pieces[index]
-        let into = min(max(seconds, piece.start), piece.end) - piece.start
-        return played + into / speed(of: piece)
+        let all = laid(timeline, withinSource: duration)
+        guard all.indices.contains(index) else { return 0 }
+        let at = all[index]
+        let into = min(max(seconds, at.piece.start), at.piece.end) - at.piece.start
+        return at.starts + into / speed(of: at.piece)
     }
 
     // MARK: - Splitting, and rates
@@ -400,14 +484,14 @@ enum MediaTimelining {
     ) -> Double {
         guard seconds.isFinite else { return 0 }
         var played = 0.0
-        for piece in resolved(timeline, withinSource: duration) {
-            if seconds >= piece.end {
-                played += piece.playedSeconds
+        for at in laid(timeline, withinSource: duration) {
+            if seconds >= at.piece.end {
+                played = at.drawnTo
                 continue
             }
-            if seconds > piece.start {
-                played += (seconds - piece.start) / speed(of: piece)
-            }
+            played = seconds > at.piece.start
+                ? at.starts + (seconds - at.piece.start) / speed(of: at.piece)
+                : at.drawnFrom
             break
         }
         return played
@@ -652,9 +736,10 @@ enum MediaTimelining {
             let rate = speed(of: at.piece)
             let film = Double(tileWidth / pointsPerSecond) * rate
             guard at.width > 0, span.width > 0, rate > 0, film > 0 else { continue }
-            // Where a second of the FILE is drawn inside this piece.
+            // Where a second of the FILE is drawn inside this piece — from where
+            // its film starts, which an overlap puts before where it is drawn.
             let x = { (second: Double) -> CGFloat in
-                at.from + CGFloat((second - at.piece.start) / rate) * pointsPerSecond
+                at.origin + CGFloat((second - at.piece.start) / rate) * pointsPerSecond
             }
             let first = Int((at.piece.start / film).rounded(.down))
             let last = Int((at.piece.end / film).rounded(.up))
@@ -1120,9 +1205,10 @@ enum MediaTimelining {
     static let slowest: Double = 1 / 32
     static let fastest: Double = 32
 
-    /// How long the finished clip will run, in PLAYED seconds.
+    /// How long the finished clip will run, in PLAYED seconds: its pieces, less
+    /// every overlap (`Laid`).
     static func playedSeconds(of timeline: MediaTimeline, withinSource duration: Double) -> Double {
-        resolved(timeline, withinSource: duration).reduce(0) { $0 + $1.playedSeconds }
+        laid(timeline, withinSource: duration).last?.ends ?? 0
     }
 
     /// Whether this timeline asks for anything other than the clip as shot.
@@ -1186,34 +1272,26 @@ enum MediaTimelining {
     struct Seam: Equatable, Sendable {
         /// Which cut: the one after piece `index`.
         let index: Int
-        /// Where the cut is, in PLAYED seconds.
+        /// Where the cut is drawn, in PLAYED seconds: the middle of the overlap.
         let at: Double
         /// What the author chose there — which may draw nothing if the pieces
         /// are too short to give it any room (`half` is then zero).
         let kind: VideoTransitionKind?
-        /// How far the transition reaches on each side, in played seconds.
+        /// Half of how long the two pieces overlap, in played seconds: the
+        /// window runs from where the incoming piece starts, `at − half`, to
+        /// where the outgoing one ends, `at + half`.
         let half: Double
 
         var opens: Double { at - half }
         var closes: Double { at + half }
     }
 
-    /// Every cut of a timeline, in order, with its transition's reach.
+    /// Every cut of a timeline, in order, with its transition's window.
     static func seams(_ timeline: MediaTimeline, withinSource duration: Double) -> [Seam] {
-        let pieces = resolved(timeline, withinSource: duration)
-        guard pieces.count > 1 else { return [] }
-        var at: Double = 0
-        return (0..<(pieces.count - 1)).map { index in
-            at += pieces[index].playedSeconds
-            let kind = pieces[index].transitionOut
-            return Seam(
-                index: index, at: at, kind: kind,
-                half: VideoExporter.transitionHalf(
-                    kind, seconds: pieces[index].transitionSeconds ?? VideoTransitionKind.standardSeconds,
-                    outgoingPlayedSeconds: pieces[index].playedSeconds,
-                    incomingPlayedSeconds: pieces[index + 1].playedSeconds
-                )
-            )
+        let all = laid(timeline, withinSource: duration)
+        guard all.count > 1 else { return [] }
+        return all.dropLast().enumerated().map { index, at in
+            Seam(index: index, at: at.drawnTo, kind: at.piece.transitionOut, half: at.overlapOut / 2)
         }
     }
 
@@ -1245,23 +1323,29 @@ enum MediaTimelining {
         return pieces[seam].transitionSeconds ?? VideoTransitionKind.standardSeconds
     }
 
-    /// The longest transition cut `seam` can carry, in PLAYED seconds: the
+    /// The longest transition cut `seam` can carry, in PLAYED seconds: half the
     /// shorter of its two pieces, never past the last length offered. Zero where
     /// there is no cut.
     ///
-    /// ⚠️ **THE SHORTER NEIGHBOUR, WHOLE — AND THAT IS HALF OF EACH.** A
-    /// transition of `d` borrows `d / 2` from the end of the piece before its cut
-    /// and `d / 2` from the start of the piece after it, and a piece lends at most
-    /// half of itself so the transitions at its two ends can meet but never cross
-    /// (`VideoExporter.transitionHalf`, which applies the same rule to what is
-    /// drawn).
+    /// ⚠️ **HALF OF EACH NEIGHBOUR, SO THE TWO TRANSITIONS AROUND A PIECE NEVER
+    /// OVERLAP EACH OTHER.** A transition of `d` overlaps the last `d` of the
+    /// piece before its cut with the first `d` of the piece after it, and a
+    /// piece gives each of its two cuts at most half of itself: the two windows
+    /// around it can meet and never cross, and neither cut's length ever
+    /// depends on the other's. At the very limit they meet and the piece plays
+    /// alone for one instant — the price of keeping the standard half second on
+    /// the shortest piece a split leaves, a second. Floored to the composition's
+    /// 1/600 grid, as `VideoExporter.transitionOverlap` floors what is drawn —
+    /// the same rule, so a chip is dimmed exactly when its length would not be
+    /// drawn.
     static func longestTransition(
         atSeam seam: Int, in timeline: MediaTimeline, withinSource duration: Double
     ) -> Double {
         let pieces = resolved(timeline, withinSource: duration)
         guard seam >= 0, seam < pieces.count - 1 else { return 0 }
-        let reach = min(pieces[seam].playedSeconds, pieces[seam + 1].playedSeconds)
-        return min(reach, transitionLengths.last ?? VideoTransitionKind.standardSeconds)
+        let half = min(pieces[seam].playedSeconds, pieces[seam + 1].playedSeconds) / 2
+        let floored = (half * 600).rounded(.down) / 600
+        return min(floored, transitionLengths.last ?? VideoTransitionKind.standardSeconds)
     }
 
     /// Gives the transition at cut `seam` a length, clamped to what its two
@@ -1341,14 +1425,16 @@ enum MediaTimelining {
     /// What the preview plays while piece `index`'s filter is being chosen: the
     /// piece itself, from its start, at most `longestPieceRehearsal` of it.
     ///
-    /// ⚠️ **PLAYED SECONDS**, as every looped range is.
+    /// ⚠️ **PLAYED SECONDS**, as every looped range is — and the piece as the
+    /// track DRAWS it, from the middle of the overlap before it: the stretch
+    /// the author holds, where its picture is the one that dominates.
     static func rehearsal(
         ofPiece index: Int, in timeline: MediaTimeline, withinSource duration: Double
     ) -> ClosedRange<Double>? {
-        let pieces = resolved(timeline, withinSource: duration)
-        guard pieces.indices.contains(index) else { return nil }
-        let startsAt = pieces[..<index].reduce(0) { $0 + $1.playedSeconds }
-        let length = min(pieces[index].playedSeconds, longestPieceRehearsal)
+        let all = laid(timeline, withinSource: duration)
+        guard all.indices.contains(index) else { return nil }
+        let startsAt = all[index].drawnFrom
+        let length = min(all[index].drawnTo - startsAt, longestPieceRehearsal)
         guard length > 0, startsAt.isFinite else { return nil }
         return startsAt...(startsAt + length)
     }
@@ -1374,13 +1460,14 @@ enum MediaTimelining {
         atSeam index: Int, in timeline: MediaTimeline, withinSource duration: Double,
         lead: Double
     ) -> (range: ClosedRange<Double>, window: ClosedRange<Double>)? {
-        let pieces = resolved(timeline, withinSource: duration)
+        let pieces = laid(timeline, withinSource: duration)
         let all = seams(timeline, withinSource: duration)
         guard all.indices.contains(index), lead.isFinite else { return nil }
         let seam = all[index]
-        let startsAt = seam.at - pieces[index].playedSeconds
-        let endsAt = seam.at + pieces[index + 1].playedSeconds
-        let total = playedSeconds(of: timeline, withinSource: duration)
+        // The two pieces as the track draws them.
+        let startsAt = pieces[index].drawnFrom
+        let endsAt = pieces[index + 1].drawnTo
+        let total = pieces.last?.ends ?? 0
         let longer = max(seam.closes - seam.opens - VideoTransitionKind.standardSeconds, 0)
         let lead = max(lead - longer / 2, min(max(lead, 0), shortestRehearsalLead))
         let lower = max(seam.opens - max(lead, 0), startsAt, 0)
@@ -1599,9 +1686,10 @@ enum MediaTimelining {
         let seconds: Double
     }
 
-    /// The time marks above the shot list: the moment of the RESULT at which each
-    /// piece begins, over the edge of the chip that stands for it, and the end of
-    /// the result over the last chip's far edge.
+    /// The time marks above the shot list: the moment of the RESULT at which the
+    /// track draws each piece beginning — the middle of its overlap with the one
+    /// before (`Laid`) — over the edge of the chip that stands for it, and the
+    /// end of the result over the last chip's far edge.
     ///
     /// ⚠️ **THE RULER HAS TO TELL THE TRUTH ABOUT THE LIST, NOT ABOUT THE TRACK
     /// IT REPLACED.** Asked for in those words: *"mettre à jour les crans /
@@ -1618,13 +1706,11 @@ enum MediaTimelining {
     /// always stay, and the ones between are kept only where there is room.
     static func shotMarks(_ shots: [Placement], minimumSpacing: CGFloat) -> [ShotMark] {
         guard let last = shots.last else { return [] }
-        var all: [ShotMark] = []
-        var played: Double = 0
-        for shot in shots {
-            all.append(ShotMark(x: shot.from, seconds: played))
-            played += shot.piece.playedSeconds
-        }
-        let end = ShotMark(x: last.to, seconds: played)
+        // ⚠️ ON THE CLOCK OF THE ORDER AS IT STANDS: a transition travels with
+        // the piece before its cut, so a carry changes what overlaps what.
+        let clock = laid(shots.map(\.piece))
+        let all = zip(shots, clock).map { ShotMark(x: $0.from, seconds: $1.drawnFrom) }
+        let end = ShotMark(x: last.to, seconds: clock.last?.ends ?? 0)
         var kept: [ShotMark] = []
         for mark in all {
             let clearOfThePrevious = kept.last.map { mark.x - $0.x >= minimumSpacing } ?? true

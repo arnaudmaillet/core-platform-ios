@@ -1856,7 +1856,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     }
 
     private static func spoken(_ pieces: [MediaSegment]) -> String {
-        let seconds = Int(pieces.reduce(0) { $0 + $1.playedSeconds }.rounded())
+        // The result's length: its pieces less every transition's overlap.
+        let seconds = Int((MediaTimelining.laid(pieces).last?.ends ?? 0).rounded())
         return seconds == 1 ? "1 second kept" : "\(seconds) seconds kept"
     }
 

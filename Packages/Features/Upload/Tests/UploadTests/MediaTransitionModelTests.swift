@@ -97,34 +97,44 @@ struct MediaTransitionModelTests {
 
     // MARK: - How far it reaches
 
-    @Test func aTransitionReachesAQuarterSecondEachSide() {
+    /// ⚠️ **A TRANSITION OVERLAPS ITS TWO PIECES, AND THE CUT IS DRAWN AT THE
+    /// MIDDLE OF THE OVERLAP.** Four seconds then six, overlapping by the
+    /// standard half second: the incoming piece starts at 3.5s, the outgoing
+    /// one ends at 4.0s, the cut is drawn at 3.75s, and the result is 9.5s.
+    @Test func aTransitionOverlapsItsPiecesAndIsDrawnAtTheMiddle() {
         let cut = timeline([(0, 4, 1, .dipToBlack), (4, 10, 1, nil)])
         let seams = MediaTimelining.seams(cut, withinSource: duration)
 
         #expect(seams.count == 1)
-        #expect(seams.first?.at == 4 && seams.first?.half == 0.25, "got \(seams)")
+        #expect(seams.first?.at == 3.75 && seams.first?.half == 0.25, "got \(seams)")
+        #expect(seams.first?.opens == 3.5 && seams.first?.closes == 4, "got \(seams)")
         #expect(seams.first?.kind == .dipToBlack)
-        #expect(MediaTimelining.seams(timeline([(0, 4, 1, nil), (4, 10, 1, nil)]), withinSource: duration)
-            .first?.half == 0, "a plain cut reaches")
+        #expect(MediaTimelining.playedSeconds(of: cut, withinSource: duration) == 9.5)
+        let plain = timeline([(0, 4, 1, nil), (4, 10, 1, nil)])
+        #expect(MediaTimelining.seams(plain, withinSource: duration).first?.half == 0, "a plain cut overlaps")
+        #expect(MediaTimelining.seams(plain, withinSource: duration).first?.at == 4)
+        #expect(MediaTimelining.playedSeconds(of: plain, withinSource: duration) == 10)
     }
 
-    /// ⚠️ **TWO TRANSITIONS AROUND A SHORT PIECE TOUCH AND NEVER CROSS** —
-    /// crossing instructions fail the export.
+    /// ⚠️ **TWO TRANSITIONS AROUND A SHORT PIECE MEET AND NEVER CROSS** —
+    /// crossing windows would ask for three pictures on two lanes. A second at
+    /// 4x plays a quarter second and gives each cut half of it.
     @Test func twoTransitionsAroundAShortPieceNeverOverlap() throws {
         let cut = timeline([(0, 4, 1, .dipToBlack), (4, 5, 4, .dipToBlack), (5, 10, 1, nil)])
         let seams = MediaTimelining.seams(cut, withinSource: duration)
         try #require(seams.count == 2)
 
-        #expect(seams[0].half == 0.125 && seams[1].half == 0.125, "got \(seams)")
+        #expect(seams[0].half == 0.0625 && seams[1].half == 0.0625, "got \(seams)")
         #expect(seams[0].closes <= seams[1].opens + 0.000_001, "the windows cross: \(seams)")
+        #expect(abs(seams[0].closes - seams[1].opens) < 0.000_001, "the windows do not meet: \(seams)")
     }
 
-    @Test func aTransitionTooShortToSeeReachesNothing() {
-        #expect(VideoExporter.transitionHalf(.zoom, outgoingPlayedSeconds: 0.05, incomingPlayedSeconds: 5) == 0)
-        #expect(VideoExporter.transitionHalf(nil, outgoingPlayedSeconds: 5, incomingPlayedSeconds: 5) == 0)
-        let half = VideoExporter.transitionHalf(.zoom, outgoingPlayedSeconds: 0.3, incomingPlayedSeconds: 5)
-        #expect(abs(half - 0.15) < 0.000_001, "got \(half)")
-        #expect(abs(half * 600 - (half * 600).rounded()) < 0.000_001, "off the 1/600 grid: \(half)")
+    @Test func aTransitionTooShortToSeeOverlapsNothing() {
+        #expect(VideoExporter.transitionOverlap(.zoom, outgoingPlayedSeconds: 0.05, incomingPlayedSeconds: 5) == 0)
+        #expect(VideoExporter.transitionOverlap(nil, outgoingPlayedSeconds: 5, incomingPlayedSeconds: 5) == 0)
+        let overlap = VideoExporter.transitionOverlap(.zoom, outgoingPlayedSeconds: 0.3, incomingPlayedSeconds: 5)
+        #expect(abs(overlap - 0.15) < 0.000_001, "got \(overlap)")
+        #expect(abs(overlap * 600 - (overlap * 600).rounded()) < 0.000_001, "off the 1/600 grid: \(overlap)")
     }
 
     // MARK: - The preview's equality
@@ -207,23 +217,26 @@ struct MediaTransitionModelTests {
 
     // MARK: - What the preview rehearses
 
+    /// Three seconds, three and four, the first two overlapping by the
+    /// standard half second: the dip's window is [2.5, 3.0], and the track
+    /// draws the pieces over [0, 2.75], [2.75, 5.5] and [5.5, 9.5].
     @Test func aRehearsalIsTheWindowPlusTheLeadClampedToTheTwoPieces() throws {
         let cut = timeline([(0, 3, 1, .dipToBlack), (3, 6, 1, nil), (6, 10, 1, nil)])
 
         let first = try #require(MediaTimelining.rehearsal(atSeam: 0, in: cut, withinSource: duration, lead: 1.24))
-        #expect(abs(first.window.lowerBound - 2.75) < 0.000_001 && abs(first.window.upperBound - 3.25) < 0.000_001,
+        #expect(abs(first.window.lowerBound - 2.5) < 0.000_001 && abs(first.window.upperBound - 3) < 0.000_001,
                 "got \(first.window)")
-        #expect(abs(first.range.lowerBound - 1.51) < 0.000_001 && abs(first.range.upperBound - 4.49) < 0.000_001,
+        #expect(abs(first.range.lowerBound - 1.26) < 0.000_001 && abs(first.range.upperBound - 4.24) < 0.000_001,
                 "got \(first.range)")
 
         let wide = try #require(MediaTimelining.rehearsal(atSeam: 0, in: cut, withinSource: duration, lead: 10))
-        #expect(wide.range == 0...6, "the lead ran past the two pieces: \(wide.range)")
+        #expect(wide.range == 0...5.5, "the lead ran past the two pieces: \(wide.range)")
         let later = try #require(MediaTimelining.rehearsal(atSeam: 1, in: cut, withinSource: duration, lead: 10))
-        #expect(later.range == 3...10, "the lead ran before the piece that meets the cut: \(later.range)")
+        #expect(later.range == 2.75...9.5, "the lead ran before the piece that meets the cut: \(later.range)")
 
         let bare = try #require(MediaTimelining.rehearsal(atSeam: 1, in: cut, withinSource: duration, lead: 1))
-        #expect(bare.window == 6...6, "a plain cut has a window: \(bare.window)")
-        #expect(bare.range == 5...7, "got \(bare.range)")
+        #expect(bare.window == 5.5...5.5, "a plain cut has a window: \(bare.window)")
+        #expect(bare.range == 4.5...6.5, "got \(bare.range)")
 
         #expect(MediaTimelining.rehearsal(atSeam: 2, in: cut, withinSource: duration, lead: 1) == nil)
     }

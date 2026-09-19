@@ -9,11 +9,12 @@ import UIKit
 /// CAN GIVE.** Asked for as *"pouvoir changer/adapter la durée d'une
 /// transition"*.
 ///
-/// The rule: a transition of `d` seconds is centred on its cut and borrows
-/// `d / 2` from the end of the piece before it and `d / 2` from the start of
-/// the piece after it. A piece lends at most half of itself, so a cut can carry
-/// at most as long a transition as its SHORTER neighbour plays for — and the
-/// transitions at a piece's two ends can meet but never cross.
+/// The rule: a transition of `d` seconds overlaps the last `d` of the piece
+/// before its cut with the first `d` of the piece after it — the author's
+/// choice, *"oui, chevauche les deux segments"*. A piece gives each of its cuts
+/// at most half of itself, so a cut can carry at most HALF its shorter
+/// neighbour — and the transitions at a piece's two ends can meet but never
+/// overlap each other.
 struct MediaTransitionDurationModelTests {
     private let duration = 10.0
 
@@ -56,17 +57,17 @@ struct MediaTransitionDurationModelTests {
                 "a length was stored past the last cut")
     }
 
-    /// ⚠️ **NEVER LONGER THAN THE SHORTER NEIGHBOUR, NEVER PAST TWO SECONDS,
-    /// NEVER UNDER A QUARTER.** 0.8s then 5s: two seconds asked is 0.8 stored,
-    /// and 0.4s drawn either side of the cut.
+    /// ⚠️ **NEVER LONGER THAN HALF THE SHORTER NEIGHBOUR, NEVER PAST TWO
+    /// SECONDS, NEVER UNDER A QUARTER.** 0.8s then 5s: two seconds asked is 0.4
+    /// stored, and the two pieces overlap by 0.4s.
     @Test func aLengthIsClampedToWhatThePiecesCanGive() throws {
         let cut = timeline([(0, 0.8, .dissolve), (0.8, 5.8, nil), (5.8, 10, nil)])
-        #expect(MediaTimelining.longestTransition(atSeam: 0, in: cut, withinSource: duration) == 0.8)
+        #expect(MediaTimelining.longestTransition(atSeam: 0, in: cut, withinSource: duration) == 0.4)
 
         let asked = MediaTimelining.settingTransitionDuration(2, atSeam: 0, in: cut, withinSource: duration)
-        #expect(lengths(asked).first == 0.8, "got \(lengths(asked))")
+        #expect(lengths(asked).first == 0.4, "got \(lengths(asked))")
         let seam = try #require(MediaTimelining.seams(asked, withinSource: duration).first)
-        #expect(abs(seam.half - 0.4) < 0.000_001, "drawn \(seam.half) either side")
+        #expect(abs(seam.closes - seam.opens - 0.4) < 0.000_001, "overlapping by \(seam.closes - seam.opens)")
 
         let roomy = timeline([(0, 5, .dissolve), (5, 10, nil)])
         #expect(MediaTimelining.longestTransition(atSeam: 0, in: roomy, withinSource: duration) == 2)
@@ -88,19 +89,23 @@ struct MediaTransitionDurationModelTests {
 
         #expect(MediaTimelining.transitionSeconds(atSeam: 0, in: trimmed, withinSource: duration) == 2)
         let seam = try #require(MediaTimelining.seams(trimmed, withinSource: duration).first)
-        #expect(abs(seam.half - 0.5) < 0.000_001, "drawn \(seam.half) either side of a one-second piece")
+        #expect(abs(seam.closes - seam.opens - 0.5) < 0.000_001,
+                "a one-second piece overlaps by \(seam.closes - seam.opens)")
     }
 
     // MARK: - What it changes
 
-    /// ⚠️ **A LENGTH IS A NEW FILM** — the window it draws, what the preview
-    /// compares, and what the export is handed all change with it.
+    /// ⚠️ **A LENGTH IS A NEW FILM** — the window it draws, the result's
+    /// length, what the preview compares, and what the export is handed all
+    /// change with it. Four seconds and six overlapping by a second and a
+    /// half: the incoming piece starts at 2.5s, the outgoing one ends at 4s.
     @Test func aLengthChangesTheWindowTheFilmAndTheExport() throws {
         let cut = timeline([(0, 4, .dissolve), (4, 10, nil)])
         let long = MediaTimelining.settingTransitionDuration(1.5, atSeam: 0, in: cut, withinSource: duration)
 
         let seam = try #require(MediaTimelining.seams(long, withinSource: duration).first)
-        #expect(seam.opens == 3.25 && seam.closes == 4.75, "the window is \(seam.opens)...\(seam.closes)")
+        #expect(seam.opens == 2.5 && seam.closes == 4, "the window is \(seam.opens)...\(seam.closes)")
+        #expect(MediaTimelining.playedSeconds(of: long, withinSource: duration) == 8.5)
         #expect(!MediaTimelining.playsTheSame(cut, long, withinSource: duration), "a new length plays the same")
         let exported = MediaTimelining.exportSegments(long, withinSource: duration)
         #expect(exported.map(\.transitionSeconds) == [1.5, 0.5], "the export was handed \(exported)")
@@ -142,22 +147,25 @@ struct MediaTransitionDurationModelTests {
     /// ⚠️ **A LONGER TRANSITION TAKES WHAT IT ADDS OUT OF THE LEADS** — the lead
     /// the track gives is sized for the standard half second, so the loop still
     /// fits to the needle's right; never under half a second a side (F30).
+    /// Five seconds and five: the standard window is [4.5, 5.0], a second's
+    /// [4, 5], two seconds' [3, 5] — the incoming piece starting that much
+    /// earlier, the outgoing one always ending at 5s.
     @Test func aLongerTransitionRehearsesWithShorterLeads() throws {
         let cut = timeline([(0, 5, .dissolve), (5, 10, nil)])
         let standard = try #require(MediaTimelining.rehearsal(atSeam: 0, in: cut, withinSource: duration, lead: 1.24))
-        #expect(abs(standard.range.lowerBound - 3.51) < 0.000_001 && abs(standard.range.upperBound - 6.49) < 0.000_001,
+        #expect(abs(standard.range.lowerBound - 3.26) < 0.000_001 && abs(standard.range.upperBound - 6.24) < 0.000_001,
                 "got \(standard.range)")
 
         let one = MediaTimelining.settingTransitionDuration(1, atSeam: 0, in: cut, withinSource: duration)
         let longer = try #require(MediaTimelining.rehearsal(atSeam: 0, in: one, withinSource: duration, lead: 1.24))
-        #expect(longer.window == 4.5...5.5, "got \(longer.window)")
-        #expect(abs(longer.range.lowerBound - 3.51) < 0.000_001 && abs(longer.range.upperBound - 6.49) < 0.000_001,
+        #expect(longer.window == 4...5, "got \(longer.window)")
+        #expect(abs(longer.range.lowerBound - 3.01) < 0.000_001 && abs(longer.range.upperBound - 5.99) < 0.000_001,
                 "the stretch grew with the window: \(longer.range)")
 
         let two = MediaTimelining.settingTransitionDuration(2, atSeam: 0, in: cut, withinSource: duration)
         let longest = try #require(MediaTimelining.rehearsal(atSeam: 0, in: two, withinSource: duration, lead: 1.24))
-        #expect(longest.window == 4...6, "got \(longest.window)")
-        #expect(longest.range == 3.5...6.5, "the leads went under half a second: \(longest.range)")
+        #expect(longest.window == 3...5, "got \(longest.window)")
+        #expect(longest.range == 2.5...5.5, "the leads went under half a second: \(longest.range)")
     }
 }
 

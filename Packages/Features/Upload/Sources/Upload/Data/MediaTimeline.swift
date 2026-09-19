@@ -37,9 +37,10 @@ struct MediaSegment: Equatable, Sendable {
     var transitionOut: VideoTransitionKind? {
         didSet { if transitionOut == nil { transitionSeconds = nil } }
     }
-    /// How long that transition runs, in PLAYED seconds, as the author asked —
-    /// what is drawn is clamped to what the two pieces can give
-    /// (`VideoExporter.transitionHalf`). Nil is the standard half second.
+    /// How long that transition runs — how long this piece and the next play
+    /// over each other — in PLAYED seconds, as the author asked: what is drawn
+    /// is clamped to what the two pieces can give
+    /// (`VideoExporter.transitionOverlap`). Nil is the standard half second.
     ///
     /// ⚠️ **NIL FOR THE STANDARD, AND NIL ON A PLAIN CUT — WRITES ARE TURNED INTO
     /// IT, IN THE INITIALISER TOO.** A length stored where no transition is, or

@@ -436,8 +436,9 @@ struct VideoPublishEndToEndTests {
 
     /// ⚠️ **A TRANSITION CHOSEN IN THE EDITOR IS IN THE PUBLISHED FILE.** The
     /// preview draws it from the same builder; this asks the file that came out
-    /// of the whole chain, at the cut, with a witness cut by the same pieces and
-    /// no transition.
+    /// of the whole chain, at the middle of the overlap — the two pieces play
+    /// over each other for half a second, [0.7, 1.2) — with a witness cut by the
+    /// same pieces and no transition.
     @Test func aPublishedClipKeepsItsFade() async throws {
         func published(_ kind: VideoTransitionKind?) async throws -> URL {
             var edited = MediaEdits.untouched
@@ -464,8 +465,8 @@ struct VideoPublishEndToEndTests {
         let faded = try await published(.dipToBlack)
         let plain = try await published(nil)
 
-        #expect(try await ink(of: plain, at: 1.2) > 90, "guard: the witness is dark at the cut anyway")
-        #expect(try await ink(of: faded, at: 1.2) < 30, "the published clip does not dip at the cut")
+        #expect(try await ink(of: plain, at: 0.95) > 90, "guard: the witness is dark there anyway")
+        #expect(try await ink(of: faded, at: 0.95) < 30, "the published clip does not dip at the middle of its overlap")
     }
 
     /// ⚠️ **AND THE ORDER SURVIVES, BECAUSE THE ORDER IS THE CAROUSEL.**
