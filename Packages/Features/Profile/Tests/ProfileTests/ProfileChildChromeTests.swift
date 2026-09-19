@@ -62,6 +62,26 @@ struct ProfileChildChromeTests {
         #expect(settings.hidesBottomBarWhenPushed)
     }
 
+    /// ⚠️ Both lists run under their bar and ask for the SOFT fade there. Left
+    /// `.automatic`, iOS 27 draws a hard band with a hairline instead — see
+    /// `prefersSoftTopEdge`.
+    @Test func theProfileEditorFadesUnderItsBar() throws {
+        let editor = EditProfileViewController(
+            viewModel: EditProfileViewModel(repository: StubProfiles(), onSaved: {}),
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher())
+        )
+        editor.loadViewIfNeeded()
+        let list = try #require(editor.view.subviews.compactMap { $0 as? UICollectionView }.first)
+        #expect(list.topEdgeEffect.style == .soft)
+    }
+
+    @Test func accountSettingsFadesUnderItsBar() throws {
+        let settings = AccountSettingsViewController(account: StubAccount(), onLogout: {})
+        settings.loadViewIfNeeded()
+        let list = try #require(settings.view.subviews.compactMap { $0 as? UICollectionView }.first)
+        #expect(list.topEdgeEffect.style == .soft)
+    }
+
     /// A profile that was PUSHED owns the bottom of the screen, and the bar
     /// goes with the transition that brought it.
     ///

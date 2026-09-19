@@ -160,6 +160,9 @@ final class ConversationListViewController: UIViewController {
         // switch reads as motion nobody asked for.
         tableView.showsVerticalScrollIndicator = false
         tableView.showsHorizontalScrollIndicator = false
+        // The inbox header fades into the rows rather than cutting them at a
+        // hairline — iOS 27's `.automatic` is the hard band. See `prefersSoftTopEdge`.
+        tableView.prefersSoftTopEdge()
         tableView.delegate = self
         tableView.register(
             InboxSectionHeaderView.self,

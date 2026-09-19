@@ -78,6 +78,9 @@ final class AccountSettingsViewController: UIViewController {
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // The soft fade under the bar, not iOS 27's hard band — see
+        // `prefersSoftTopEdge`.
+        collectionView.prefersSoftTopEdge()
         collectionView.delegate = self
         view.addSubview(collectionView)
     }

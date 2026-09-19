@@ -109,6 +109,9 @@ final class EditProfileViewController: UIViewController {
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.delegate = self
         collectionView.keyboardDismissMode = .interactive
+        // The soft fade under the bar, not iOS 27's hard band — see
+        // `prefersSoftTopEdge`.
+        collectionView.prefersSoftTopEdge()
         view.addSubview(collectionView)
     }
 
