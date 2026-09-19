@@ -353,6 +353,68 @@ struct TransitionCompositionTests {
         #expect(heard.rms(at: 1.6) > full * 0.5, "the rated piece is silent: \(heard.rms(at: 1.6)) of \(full)")
     }
 
+    /// ⚠️ **A SOUND CUT NEXT TO A RATED PIECE IS CUT TO THE TICK, AND A PIECE AS
+    /// SHOT IS NEVER SCALED.** Found by review: the trims went back through
+    /// `CMTime(seconds:preferredTimescale:)`, which truncates — 55/600 of a
+    /// second came back as 54/600 — so where an overlap is clamped by a rated
+    /// neighbour's half, a piece as shot heard a tick more film than it plays
+    /// for, and its sound became a scaled edit on a shared lane, under the ramp
+    /// of the crossfade it arrived through.
+    ///
+    /// The review's plan, on the ten-second clip, in 1/600ths: P0 [0, 2)
+    /// dissolves into A [2, 5), which dips into R [5, 6.47) at 4x — 220 ticks
+    /// played, so their overlap is half of it floored, 109, and the sound
+    /// changes piece at its middle, 2645 — then R into B [6.47, 9), overlapping
+    /// by 109 again, the sound changing at 2756. A's sound is the file's
+    /// [1200, 2945) over [900, 2645); B's is [3936, 5400) from 2756.
+    @Test func aSoundCutNextToARatedPieceIsCutToTheTick() async throws {
+        let file = try await TimecodeClipWriter.clip()
+        let arranged = try await VideoExporter.arrangement(
+            of: AVURLAsset(url: file),
+            cut: [
+                VideoExportSegment(start: 0, end: 2, transitionOut: .dissolve),
+                VideoExportSegment(start: 2, end: 5, transitionOut: .dipToBlack),
+                VideoExportSegment(start: 5, end: 6.47, speed: 4, transitionOut: .dissolve),
+                VideoExportSegment(start: 6.47, end: 9)
+            ],
+            orientation: .whenComposited
+        )
+        func ticks(_ time: CMTime) -> Int64 { CMTimeConvertScale(time, timescale: 600, method: .roundHalfAwayFromZero).value }
+        // ⚠️ PLAIN RANGES AND ONE STEP AT A TIME: key paths through tuples in an
+        // `#expect` took 170ms to type-check here, over CI's 60.
+        struct Edit: CustomStringConvertible {
+            let track: CMPersistentTrackID
+            let source: ClosedRange<Int64>
+            let target: ClosedRange<Int64>
+            var scaled: Bool { source.upperBound - source.lowerBound != target.upperBound - target.lowerBound }
+            var description: String { "\(track): \(source) -> \(target)" }
+        }
+        let tracks = try await arranged.asset.loadTracks(withMediaType: .audio).compactMap { $0 as? AVCompositionTrack }
+        var edits: [Edit] = []
+        for track in tracks {
+            for segment in track.segments where !segment.isEmpty {
+                let mapping = segment.timeMapping
+                edits.append(Edit(
+                    track: track.trackID,
+                    source: ticks(mapping.source.start)...ticks(mapping.source.end),
+                    target: ticks(mapping.target.start)...ticks(mapping.target.end)
+                ))
+            }
+        }
+        try #require(edits.count == 4, "guard: \(edits)")
+        let scaled: [Edit] = edits.filter { $0.scaled }
+        let scaledStarts: [Int64] = scaled.map { $0.target.lowerBound }
+        #expect(scaledStarts == [2645], "only the 4x sound is scaled: \(edits)")
+        for edit in scaled {
+            let sharing: Int = edits.filter { $0.track == edit.track }.count
+            #expect(sharing == 1, "a scaled sound shares its track: \(edits)")
+        }
+        let dissolving: Bool = edits.contains { $0.source == 1200...2945 && $0.target == 900...2645 }
+        #expect(dissolving, "the dissolving piece's sound is not cut at the middle of its overlap, to the tick: \(edits)")
+        let last: Bool = edits.contains { $0.source == 3936...5400 && $0.target == 2756...4220 }
+        #expect(last, "the last piece's sound does not start at the middle of its overlap, to the tick: \(edits)")
+    }
+
     /// Every kind but the dips crosses the two sounds, the zoom included.
     @Test func aZoomCrossesTheSoundToo() async throws {
         let zoom = try await arranged([

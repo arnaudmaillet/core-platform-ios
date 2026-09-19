@@ -627,6 +627,38 @@ struct TransitionLengthTests {
         #expect(exported.transitionWindows == [0.5...1.0, 1.2...1.5], "the file says \(exported.transitionWindows)")
     }
 
+    /// ⚠️ **AND THE FILE ENDS WITH ITS PICTURES.** The time-pitch pass hands a
+    /// rated piece's sound back with a tail past its edit, and an export left
+    /// unbound kept it: measured three times each, a second at 2x published as
+    /// 1.113s every time, the review's 2x-then-0.5x dissolve as 1.665s once in
+    /// three, and a dissolve into 3x drew its pictures a frame past the film,
+    /// 1.267s. Bound to the composition's own length (`VideoExporter.export`),
+    /// every one lasted exactly its plan — which is what the track shows and
+    /// what a looping feed plays.
+    @Test func anExportEndsWithItsPictures() async throws {
+        let file = try await ColourClipWriter.clip()
+        let plans: [[VideoExportSegment]] = [
+            [VideoExportSegment(start: 0, end: 2, speed: 2)],
+            [
+                VideoExportSegment(start: 0, end: 2, speed: 2, transitionOut: .dissolve),
+                VideoExportSegment(start: 2, end: 2.5, speed: 0.5)
+            ],
+            [VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve), VideoExportSegment(start: 1, end: 2.5, speed: 3)]
+        ]
+        for segments in plans {
+            let arranged = try await VideoExporter.arrangement(
+                of: AVURLAsset(url: file), cut: segments, orientation: .whenComposited
+            )
+            let planned = try await arranged.asset.load(.duration).seconds
+            let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
+            defer { try? FileManager.default.removeItem(at: exported.fileURL) }
+            let pictures = try #require(try await AVURLAsset(url: exported.fileURL).loadTracks(withMediaType: .video).first)
+            let drawn = try await pictures.load(.timeRange).duration.seconds
+            #expect(abs(exported.durationSeconds - planned) < 0.005 && abs(drawn - planned) < 0.005,
+                    "\(segments.map { "\($0.start)-\($0.end)@\($0.speed)" }): planned \(planned)s, the file lasts \(exported.durationSeconds)s, its pictures \(drawn)s")
+        }
+    }
+
     /// ⚠️ **A LENGTH ON A PLAIN CUT IS NOT STORED** — the initialiser puts the
     /// standard there, so two plain pieces compare equal whatever was passed.
     @Test func aPlainCutCarriesNoLength() {

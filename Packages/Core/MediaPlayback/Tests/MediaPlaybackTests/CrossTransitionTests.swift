@@ -317,15 +317,15 @@ struct CrossTransitionTests {
     /// scaled on its own track. A composition-level scale would stretch the
     /// other lane where the two overlap, and its sound with it.
     ///
-    /// ⚠️ **THE EXPORT'S LENGTH IS READ FROM ITS VIDEO TRACK.** The sound of a
-    /// rated export runs on past the pictures — the time-pitch pass's tail and
-    /// AAC's packets: 35–55ms when these two pieces shared one track, 160–165ms
-    /// now that the one at 0.5x starts its own lane after the overlap. Measured
-    /// silent, and the sound under the pictures stays within 20ms of them
-    /// (`TransitionSyncTests`, at 2x). The file's own duration is the longer of
-    /// the two, so it is held only to that overhang. The pictures themselves
-    /// measured a frame short, as a composed dip over the same pieces is —
-    /// hence a frame of slack, plus a millisecond for the floating point.
+    /// ⚠️ **THE FILE ENDS WITH ITS PICTURES, TO THE MILLISECOND.** The
+    /// time-pitch pass hands a rated piece's sound back with a tail past its
+    /// edit: unbound, this export published 160–165ms of silence after the last
+    /// picture once the 0.5x piece had a sound track of its own (35–55ms when
+    /// the two shared one), and a looping feed holds a still frame for it every
+    /// time round. Found by review, where this test had been loosened to let it
+    /// through. The session is now bound to the composition's own length
+    /// (`VideoExporter.export`), which cuts none of its film: measured four
+    /// times, the file and its pictures lasted exactly 1.500s.
     @Test func aDissolveBetweenRatedPiecesKeepsTheirTiming() async throws {
         let segments = [
             VideoExportSegment(start: 0, end: 2, speed: 2, transitionOut: .dissolve),
@@ -352,8 +352,8 @@ struct CrossTransitionTests {
         let asset = AVURLAsset(url: exported.fileURL)
         let pictures = try #require(try await asset.loadTracks(withMediaType: .video).first)
         let drawn = try await pictures.load(.timeRange).duration.seconds
-        #expect(abs(drawn - played) <= 1.0 / 30 + 0.001, "the exported pictures last \(drawn)s, the pieces \(played)s")
-        #expect(exported.durationSeconds >= drawn && exported.durationSeconds - played <= 0.2,
+        #expect(abs(drawn - played) < 0.005, "the exported pictures last \(drawn)s, the pieces \(played)s")
+        #expect(abs(exported.durationSeconds - played) < 0.005,
                 "the export lasts \(exported.durationSeconds)s, the pieces \(played)s")
         #expect(exported.transitionWindows == [0.5...1.0], "got \(exported.transitionWindows)")
         // 0.3s of the export is 0.6s of the file at 2x; 1.4s is 0.9s into the

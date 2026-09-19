@@ -433,21 +433,31 @@ public struct VideoExporter: Sendable {
             }
             audio.append(sound)
         }
+        // ⚠️ **ONLY A RATED PIECE IS EVER SCALED.** A piece as shot plays its
+        // own ticks, so its range and its length are the same number — and if a
+        // rounding anywhere ever made them differ by one, a scaled edit of a 1x
+        // sound on a shared lane, under a crossfade's ramp, is exactly the shape
+        // `export-volume-ramp-hang` and the lost rate changes above forbid. It
+        // is laid as it is instead.
         func place(
             _ range: CMTimeRange, of track: AVAssetTrack, on lane: AVMutableCompositionTrack,
-            at start: CMTime, lasting target: CMTime
+            at start: CMTime, lasting target: CMTime, rated: Bool
         ) throws {
             if lane.timeRange.end < start {
                 lane.insertEmptyTimeRange(CMTimeRange(start: lane.timeRange.end, end: start))
             }
             try lane.insertTimeRange(range, of: track, at: start)
-            if range.duration != target {
+            if rated, range.duration != target {
                 lane.scaleTimeRange(CMTimeRange(start: start, duration: range.duration), toDuration: target)
             }
         }
         do {
             for (index, piece) in pieces.enumerated() {
-                try place(ranges[index], of: source, on: video[lanes[index]], at: starts[index], lasting: played[index])
+                let rated = !piece.isAsShot && piece.speed > 0
+                try place(
+                    ranges[index], of: source, on: video[lanes[index]], at: starts[index],
+                    lasting: played[index], rated: rated
+                )
                 let lane = soundLanes[index]
                 guard let sourceAudio, audio.indices.contains(lane) else { continue }
                 // Played time cut off this piece's sound at a cut that does not
@@ -455,15 +465,23 @@ public struct VideoExporter: Sendable {
                 // from its middle to its close (outgoing).
                 let head = cuts.first { $0.outgoing + 1 == index && !$0.crossfades }.map { $0.at - $0.opens } ?? .zero
                 let tail = cuts.first { $0.outgoing == index && !$0.crossfades }.map { $0.closes - $0.at } ?? .zero
-                let rate = piece.isAsShot || piece.speed <= 0 ? 1 : piece.speed
+                // ⚠️ **IN TICKS, NEVER BACK THROUGH SECONDS.**
+                // `CMTime(seconds:preferredTimescale:)` TRUNCATES: 55/600 of a
+                // second comes back as 54/600, and so do 305 of the tick values
+                // from 1 to 6000. Where an overlap is clamped by a rated
+                // neighbour's half, a piece as shot then heard a tick more film
+                // than it plays for, a tick early. As shot a trim is its own
+                // ticks; rated, `CMTimeMultiplyByFloat64` rounds.
+                func film(_ played: CMTime) -> CMTime {
+                    rated ? CMTimeMultiplyByFloat64(played, multiplier: piece.speed) : played
+                }
                 let heard = CMTimeRange(
-                    start: ranges[index].start + time(head.seconds * rate),
-                    end: ranges[index].end - time(tail.seconds * rate)
+                    start: ranges[index].start + film(head), end: ranges[index].end - film(tail)
                 )
                 guard heard.duration > .zero else { continue }
                 try place(
                     heard, of: sourceAudio, on: audio[lane], at: starts[index] + head,
-                    lasting: played[index] - head - tail
+                    lasting: played[index] - head - tail, rated: rated
                 )
             }
         } catch {
@@ -975,6 +993,15 @@ public struct VideoExporter: Sendable {
                 start: CMTime(seconds: only.start, preferredTimescale: 600),
                 end: CMTime(seconds: only.end, preferredTimescale: 600)
             )
+        } else if let arranged {
+            // ⚠️ **A COMPOSITION IS BOUND TO ITS OWN LENGTH — WHICH CUTS NONE OF
+            // ITS FILM, AND ENDS THE SOUND WITH THE PICTURES.** The time-pitch
+            // pass hands a rated piece's sound back with a tail past the end of
+            // its edit, and unbound the writer kept it: a 0.5x piece ending the
+            // film published 160–165ms of silence after the last picture (and a
+            // plain rated export 35–55ms), which a looping feed holds on a still
+            // frame every time round.
+            session.timeRange = CMTimeRange(start: .zero, duration: try await arranged.asset.load(.duration))
         }
 
         await session.export()
