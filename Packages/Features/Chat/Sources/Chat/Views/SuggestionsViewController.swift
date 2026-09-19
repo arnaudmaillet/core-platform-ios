@@ -65,6 +65,9 @@ final class SuggestionsViewController: UIViewController {
         // switch reads as motion nobody asked for.
         tableView.showsVerticalScrollIndicator = false
         tableView.showsHorizontalScrollIndicator = false
+        // The inbox header fades into the rows rather than cutting them at a
+        // hairline — iOS 27's `.automatic` is the hard band. See `prefersSoftTopEdge`.
+        tableView.prefersSoftTopEdge()
         tableView.delegate = self
         // No hairlines, matching every other people list in the app: a 48pt
         // disc and two lines of type already make each row its own object.

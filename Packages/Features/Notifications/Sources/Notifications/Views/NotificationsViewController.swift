@@ -61,6 +61,9 @@ final class NotificationsViewController: UIViewController {
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 64
+        // The soft fade under the bar, not iOS 27's hard band — see
+        // `prefersSoftTopEdge`.
+        tableView.prefersSoftTopEdge()
         tableView.pin(to: view)
 
         refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
