@@ -571,6 +571,23 @@ struct SearchFilterTrayTests {
         #expect(host.viewModel.sortOrder == .popularity)
     }
 
+    /// ⚠️ The explore list and the filter sheet's groups both run under a bar
+    /// and ask for the SOFT fade there. Left `.automatic`, iOS 27 can draw a
+    /// hard band with a hairline instead — see `prefersSoftTopEdge`.
+    @Test func theSearchScreenFadesUnderItsBar() throws {
+        let host = Host()
+        let list = try #require(host.screen.view.subviews.compactMap { $0 as? UICollectionView }.first)
+        #expect(list.topEdgeEffect.style == .soft)
+    }
+
+    @Test func theFilterSheetFadesUnderItsBar() throws {
+        let host = Host()
+        let sheet = SearchFilterSheetViewController(groups: host.filterGroups) { _, _ in }
+        sheet.loadViewIfNeeded()
+        let groups = try #require(sheet.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        #expect(groups.topEdgeEffect.style == .soft)
+    }
+
     @Test func cancellingAfterNoChangeChangesNothing() async {
         let host = Host()
         await host.showResults("haddad")
