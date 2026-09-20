@@ -694,6 +694,10 @@ final class SearchViewController: UIViewController {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.delegate = self
         collectionView.keyboardDismissMode = .onDrag
+        // The explore sections fade out under the search bar. Asked for by
+        // name, not left to `.automatic`, which iOS 27 turns into a hard band
+        // on most screens — see `prefersSoftTopEdge`.
+        collectionView.prefersSoftTopEdge()
         // ⚠️ **Full bleed, all four edges.** It used to end at
         // `keyboardLayoutGuide.top`, which at rest is the top of the tab bar —
         // so the list stopped in a hard line above the search capsule and the

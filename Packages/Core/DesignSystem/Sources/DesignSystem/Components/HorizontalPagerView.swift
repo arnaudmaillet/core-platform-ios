@@ -71,7 +71,11 @@ public final class HorizontalPagerView: UIView {
     /// hand UIKit a change it has to react to sixty times a second.
     private weak var publishedScroller: UIScrollView?
 
-    public init(pages: [UIView], initialIndex: Int = 0) {
+    /// - Parameter prefersSoftTopEdge: whether the pager asks for the soft
+    ///   fade under the header over it (`UIScrollView.prefersSoftTopEdge`).
+    ///   True for every host but one; the media picker opts out, and says why
+    ///   where it builds its pager.
+    public init(pages: [UIView], initialIndex: Int = 0, prefersSoftTopEdge: Bool = true) {
         self.pages = pages
         let start = pages.indices.contains(initialIndex) ? initialIndex : 0
         activeIndex = start
@@ -83,6 +87,11 @@ public final class HorizontalPagerView: UIView {
         scrollView.showsVerticalScrollIndicator = false
         scrollView.delegate = self
         scrollView.alwaysBounceVertical = false
+        // ⚠️ THE PAGER NEEDS IT AS WELL AS ITS PAGES. Its scroll view spans the
+        // header too, and its OWN top edge effect is drawn: with only the pages
+        // set to `.soft`, iOS 27 still cut the header off at a hard line with a
+        // hairline under it (measured on the Messages inbox and For You).
+        if prefersSoftTopEdge { scrollView.prefersSoftTopEdge() }
         scrollView.contentInsetAdjustmentBehavior = .never
         // Rows must highlight the instant a finger lands, exactly as they do
         // in a plain table: without this the enclosing scroll view holds

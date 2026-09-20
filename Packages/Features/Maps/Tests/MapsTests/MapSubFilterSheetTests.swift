@@ -67,6 +67,15 @@ struct MapSubFilterSheetTests {
         #expect(sheet.doneItem.title == "Done")
     }
 
+    @Test("The list fades under the bar and its search field rather than cutting at a line")
+    func listFadesUnderTheBar() throws {
+        let (sheet, _) = Self.makeSheet()
+        let list = try #require(sheet.view.subviews.compactMap { $0 as? UICollectionView }.first)
+        // Left `.automatic`, iOS 27 can draw a hard band with a hairline under a
+        // header — see `prefersSoftTopEdge`.
+        #expect(list.topEdgeEffect.style == .soft)
+    }
+
     // MARK: - Done availability
 
     @Test("An untouched sheet offers nothing to commit — Done starts dark")

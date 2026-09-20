@@ -45,6 +45,9 @@ final class EditLinksViewController: UIViewController {
 
     private func configureLayout() {
         scrollView.keyboardDismissMode = .interactive
+        // The soft fade under the bar, not iOS 27's hard band — see
+        // `prefersSoftTopEdge`.
+        scrollView.prefersSoftTopEdge()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
 

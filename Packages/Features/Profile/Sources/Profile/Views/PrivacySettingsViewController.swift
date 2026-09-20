@@ -80,6 +80,9 @@ final class PrivacySettingsViewController: UIViewController {
         let layout = UICollectionViewCompositionalLayout.list(using: configuration)
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
+        // The soft fade under the bar, not iOS 27's hard band — see
+        // `prefersSoftTopEdge`.
+        collectionView.prefersSoftTopEdge()
         collectionView.pin(to: view)
 
         let cellRegistration = UICollectionView.CellRegistration<
