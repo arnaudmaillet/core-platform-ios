@@ -8,8 +8,14 @@ import Foundation
 /// every frame of its green second is the same frame.
 ///
 /// 160x120, four seconds at 30fps, keyed every half second, silent: black and
-/// white stripes 16px wide (a 32px period) running RIGHT at 64px a second — so
-/// a quarter of a second moves them half a period and turns every stripe over.
+/// white stripes 16px wide (a 32px period) running RIGHT at 32px a second — so
+/// half a second moves them half a period and turns every stripe over: the two
+/// sides of a standard overlap on a split disagree at every point.
+///
+/// ⚠️ **32px A SECOND, NOT 64, SINCE TRANSITIONS OVERLAP.** At 64 the two sides
+/// of a half-second overlap were a whole period apart — the same picture — and
+/// a dissolve on a split read as no dissolve at all. Renamed with the change:
+/// the file is cached by name, and an old one would be read at the old speed.
 ///
 /// ⚠️ **STRIPES, NOT A RAMP.** A dissolve of a ramp with two copies of itself
 /// shifted either way IS the ramp, everywhere but at its jump — two moments
@@ -21,7 +27,7 @@ enum StripeClipWriter {
     static let seconds = 4
     static let period = 32
     /// Pixels a second the stripes travel.
-    static let speed = 64.0
+    static let speed = 32.0
 
     /// Whether the stripe pattern is white at column `x`, `seconds` in.
     static func isWhite(x: Double, at seconds: Double) -> Bool {
@@ -31,11 +37,11 @@ enum StripeClipWriter {
     }
 
     static func clip() async throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("stripe-clip.mov")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("stripe-clip-32px.mov")
         if FileManager.default.fileExists(atPath: url.path) { return url }
         // ⚠️ A NAME OF ITS OWN: two suites run side by side and may both write it.
         let partial = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(UUID().uuidString)-stripe-clip.mov")
+            .appendingPathComponent("\(UUID().uuidString)-stripe-clip-32px.mov")
 
         let writer = try AVAssetWriter(outputURL: partial, fileType: .mov)
         let video = AVAssetWriterInput(mediaType: .video, outputSettings: [

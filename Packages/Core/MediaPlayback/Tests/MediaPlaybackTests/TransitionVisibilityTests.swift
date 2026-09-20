@@ -8,18 +8,17 @@ import Testing
 /// THE FILE THAT IS PUBLISHED.**
 ///
 /// Reported as *"la plupart des transitions entre segments ne fonctionnent
-/// pas"*. Measured before the fix, frame by frame through both routes: on a
-/// SPLIT — the only way this editor makes a cut — a dissolve, a swipe, a swirl
-/// and a fold drew every frame of their window identical to the plain cut, and
-/// bars, the scan, the page and the crumble changed at most a fifth of it: the
+/// pas"*. Measured then, frame by frame through both routes: on a SPLIT — the
+/// only way this editor makes a cut — a dissolve, a swipe, a swirl and a fold
+/// drew every frame of their window identical to the plain cut, because the
 /// other side of the cut was read from the film just past the pieces, and on a
-/// split that film IS the neighbouring piece. Between two pieces whose film
-/// differs every kind drew — but the fold drew a plain cross-fade (Core Image
-/// folds only between pictures of different heights), and every two-picture
-/// kind blended in film the author had cut away. The other side is now the
-/// neighbouring piece's own edge frame, held (`VideoExporter.heldSides`), and
-/// the picture that dominates stays the arrangement, in sync with its sound
-/// (`TransitionSyncTests`).
+/// split that film IS the neighbouring piece. A held edge frame fixed that
+/// weakly (at most half the picture changed, and least at the cut). The author
+/// then chose to OVERLAP the two pieces, CapCut's way — *"oui, chevauche les
+/// deux segments"* — so a transition of `d` seconds plays the outgoing piece's
+/// last `d` over the incoming piece's first `d` (`VideoExporter.insertPieces`):
+/// on a split the two pictures are `d` of the shot apart, and a dissolve at
+/// its middle is something no moment of the film is.
 ///
 /// ⚠️ **EVERY READING IS PIXELS, AND EVERY FRAME OF THE WINDOW IS READ** — never
 /// the instructions the builder wrote. The PREVIEW is the composition the
@@ -39,7 +38,7 @@ import Testing
 /// to it (`theCanvasDrawsWhatTheExportDraws`); three are exported for real and
 /// held to their own composition (`theExportedFileDrawsWhatItsCompositionSays`);
 /// and every kind is exported once for its length
-/// (`CrossTransitionTests.everyKindExportsAtThePlansLength`). Every kind
+/// (`CrossTransitionTests.everyKindExportsItsPiecesLessTheOverlap`). Every kind
 /// exported and played here, twice over, saturated every core for minutes —
 /// and the real-time suites Swift Testing runs beside this one missed their
 /// deadlines in CI.
@@ -62,7 +61,7 @@ import Testing
 /// already the slowest lane (203s on develop's CI), and these suites running
 /// beside its real-time ones pushed `RehearsalLoopTests` past its range.
 /// `CompositorFinishTests` is gated the same way.
-@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer))
+@Suite(.serialized, .enabled(if: VideoRenderFlags.usesSampleBufferLayer), .exclusiveMediaWork)
 struct TransitionVisibilityTests {
     typealias RGB = ColourClipWriter.RGB
 
@@ -275,14 +274,15 @@ struct TransitionVisibilityTests {
 
     // MARK: - Every kind, on two distinct pieces
 
-    /// Red for three quarters of a second, then blue — a transition at 0.75s
-    /// whose window is [0.5, 1.0). A dip far away at 1.5s keeps the plain cut
-    /// composed.
+    /// Red for a second, then blue: the two overlap by the standard half
+    /// second, so the window is [0.5, 1.0) — the red piece's last half second
+    /// under the blue one's first. A short dip at the far end of the blue piece,
+    /// [1.4, 1.5), keeps the plain cut composed.
     private static func redThenBlue(_ kind: VideoTransitionKind?) -> [VideoExportSegment] {
         [
-            VideoExportSegment(start: 0, end: 0.75, transitionOut: kind),
-            VideoExportSegment(start: 2.25, end: 3, transitionOut: .dipToBlack),
-            VideoExportSegment(start: 3, end: 3.75)
+            VideoExportSegment(start: 0, end: 1, transitionOut: kind),
+            VideoExportSegment(start: 2, end: 3, transitionOut: .dipToBlack, transitionSeconds: 0.1),
+            VideoExportSegment(start: 3, end: 4)
         ]
     }
 
@@ -400,93 +400,111 @@ struct TransitionVisibilityTests {
 
     // MARK: - One shot, cut in two
 
-    /// A split at 2s of the moving stripes: [1, 2) then [2, 3), so the cut is
-    /// at 1s and a half-second window is [0.75, 1.25). A dip far away at 2.5s
-    /// keeps the plain film composed.
+    /// The moving stripes split at 2s: [0.5, 2) then [2, 3.5). They overlap by
+    /// the standard half second, so the window is [1.0, 1.5): the outgoing
+    /// piece plays the shot's [1.5, 2.0) while the incoming one plays its
+    /// [2.0, 2.5) — HALF A SECOND APART, which at 32px a second is half a
+    /// period: every stripe of one is the opposite colour in the other. A short
+    /// dip at the far end, [2.9, 3.0), keeps the plain film composed.
     private static func split(_ kind: VideoTransitionKind?) -> [VideoExportSegment] {
         [
-            VideoExportSegment(start: 1, end: 2, transitionOut: kind),
-            VideoExportSegment(start: 2, end: 3, transitionOut: .dipToBlack),
-            VideoExportSegment(start: 3, end: 4)
+            VideoExportSegment(start: 0.5, end: 2, transitionOut: kind),
+            VideoExportSegment(start: 2, end: 3.5, transitionOut: .dipToBlack, transitionSeconds: 0.1),
+            VideoExportSegment(start: 3.5, end: 4)
         ]
     }
 
-    /// ⚠️ **ON A SPLIT EVERY TWO-PICTURE KIND DRAWS A PICTURE NO SINGLE MOMENT
-    /// OF THE FILM IS.** The plain cut here is no cut at all — the film runs on
-    /// — so a transition is only seen if it lays something over the running
-    /// film: the other piece's edge frame, held, or light of its own. Each frame
-    /// of the window is held against EVERY frame of the film around the cut, and
-    /// the closest one must still differ — comparing with the plain frame at
-    /// the same time alone would pass a picture that was only late.
+    /// ⚠️ **A DISSOLVE AT A PLAIN SPLIT CHANGES MOST OF THE PICTURE.** Asked for
+    /// in those words once the author chose the overlap. Half way through the
+    /// window the dissolve is half each of two stripe patterns that disagree
+    /// everywhere: an even grey where the film is black and white. Every frame
+    /// of the middle third is held against EVERY frame of the film around the
+    /// split, and the closest single moment must still miss most of it —
+    /// comparing with the plain frame at the same time alone would pass a
+    /// picture that was only late.
     ///
-    /// ⚠️ **WEAKEST AT THE CUT, AND THAT IS THE PRICE OF SYNC.** The held frame
-    /// is the moment of the cut, so it drifts from the running film by the
-    /// distance to the cut and meets it there (`VideoExporter.heldSides`).
+    /// Measured: every point of every frame of the middle third (100%). With
+    /// the held edge frame this replaced, 3% at the cut.
+    @Test func aDissolveAtASplitChangesMostOfThePicture() async throws {
+        let file = try await StripeClipWriter.clip()
+        let film = try await Self.frames(Self.split(nil), file: file, route: .export, from: 0.5, to: 2.0)
+        try #require(film.count >= 44, "guard: the plain film has \(film.count) frames")
+        let drawn = try await Self.frames(Self.split(.dissolve), file: file, route: .export, from: 1.0, to: 1.5)
+        try #require(drawn.count >= 14, "guard: the dissolve drew \(drawn.count) frames")
+        let middle = drawn.filter { $0.time >= 1.0 + 0.5 / 3 - 0.001 && $0.time <= 1.0 + 1.0 / 3 + 0.001 }
+        try #require(middle.count >= 4, "guard: \(middle.count) frames in the middle third")
+        let unexplained = middle.map { frame in film.map { Self.changed(frame, from: $0) }.min() ?? 0 }
+        #expect((unexplained.min() ?? 0) >= 0.6,
+                "the dissolve at a split leaves the film showing: \(unexplained.map { String(format: "%.2f", $0) })")
+    }
+
+    /// ⚠️ **ON A SPLIT EVERY KIND DRAWS A PICTURE NO SINGLE MOMENT OF THE FILM
+    /// IS** — the dips and the zoom as well as the kinds that show both pieces,
+    /// the fold included. The plain cut is no cut at all here — the film runs
+    /// on — so a transition is only seen if it lays something over it. Each
+    /// frame of the window is held against every frame of the film around the
+    /// split, as above.
     ///
-    /// Measured, identically through both routes. Before the fix: dissolve,
-    /// swipe, swirl and fold changed NOTHING (every point within 60 levels of
-    /// the film in every frame); bars, the scan, the page and the crumble at
-    /// most 21%, 13%, 19% and 13% — their own edges, light and shade over one
-    /// picture. After: the closest single moment still misses 8% of the
-    /// picture for the swirl (whose bands each match one moment or the other),
-    /// 18–19% for the crumble and the swipe, and 23–50% for the rest.
-    @Test func onASplitEveryTwoPictureKindDrawsMoreThanTheFilm() async throws {
+    /// Before any fix a dissolve, a swipe, a swirl and a fold changed NOTHING
+    /// on a split. Measured with the overlap, at its best frame: the dissolve
+    /// 100%, the fold 75%, a ripple 52%, the dips, the zoom, a swipe, the scan
+    /// and the flash 50% — a frame of two halves matches the film in one of
+    /// them — and bars, the swirl, the pages and the crumble 42–47%.
+    @Test func onASplitEveryKindDrawsMoreThanTheFilm() async throws {
         let route = Route.export
         let file = try await StripeClipWriter.clip()
-        let film = try await Self.frames(Self.split(nil), file: file, route: route, from: 0.25, to: 1.75)
+        let film = try await Self.frames(Self.split(nil), file: file, route: route, from: 0.5, to: 2.0)
         try #require(film.count >= 44, "guard: the plain film has \(film.count) frames")
-        for kind in VideoTransitionKind.allCases where kind.needsBothPictures {
-            let drawn = try await Self.frames(Self.split(kind), file: file, route: route, from: 0.75, to: 1.25)
+        for kind in VideoTransitionKind.allCases {
+            let drawn = try await Self.frames(Self.split(kind), file: file, route: route, from: 1.0, to: 1.5)
             try #require(drawn.count >= 14, "\(kind): \(drawn.count) frames")
             let unexplained = drawn.map { frame in film.map { Self.changed(frame, from: $0) }.min() ?? 0 }
-            #expect((unexplained.max() ?? 0) >= 0.05,
+            #expect((unexplained.max() ?? 0) >= 0.3,
                     "\(route) \(kind) on a split draws single moments of the film: \(unexplained.map { String(format: "%.2f", $0) })")
         }
     }
 
-    /// ⚠️ **AND IT MEETS THE FILM EITHER SIDE WITHOUT A JUMP.** The running side
-    /// IS the film, and the held side is invisible where the window opens and
-    /// closes, so the window's first frame is the plain film's, and so is the
-    /// frame after its last. Read on the moving stripes, where a side a frame
-    /// early or late would turn a whole stripe edge over. Somewhere inside, the
-    /// held frame shows.
-    @Test func aDissolveOnASplitMeetsTheFilmAtBothEdges() async throws {
+    /// ⚠️ **AND IT MEETS EACH PIECE'S OWN FILM AT ITS EDGES, WITHOUT A JUMP.**
+    /// Where the window opens the picture is the outgoing piece alone — the
+    /// plain film at that moment; where it closes it is the incoming piece
+    /// alone, which the plain split, not overlapping, shows HALF A SECOND
+    /// LATER. Read on the moving stripes, where a side a frame early or late
+    /// would turn a whole stripe edge over.
+    @Test func aDissolveOnASplitMeetsEachPieceAtItsEdges() async throws {
         let file = try await StripeClipWriter.clip()
-        let plain = try await Self.frames(Self.split(nil), file: file, route: .export, from: 0.7, to: 1.3)
-        let drawn = try await Self.frames(Self.split(.dissolve), file: file, route: .export, from: 0.7, to: 1.3)
-        try #require(drawn.count == plain.count && drawn.count >= 17, "guard: \(drawn.count) and \(plain.count) frames")
-        // ⚠️ THE FRAMES EITHER SIDE OF EACH EDGE, NOT "BEFORE 0.75": the frames
-        // fall on thirtieths, so the window's first one is 0.767s and its last
-        // 1.233s — a test of the frames outside it checked nothing the window
-        // draws. Inside, the held frame is 3% of the picture: 7 levels.
+        let plain = try await Self.frames(Self.split(nil), file: file, route: .export, from: 0.9, to: 2.1)
+        let drawn = try await Self.frames(Self.split(.dissolve), file: file, route: .export, from: 0.9, to: 1.6)
+        func film(at time: Double) throws -> Frame {
+            try #require(plain.first { abs($0.time - time) < 0.25 / 30 }, "guard: no plain frame at \(time)s")
+        }
+        // ⚠️ THE FRAMES EITHER SIDE OF EACH EDGE: the window's first frame is
+        // at 1.0s and its last at 1.467s; the frame after it is 1.5s.
         // ⚠️ AND AT 24 LEVELS, NOT 60: both are this route's own composed
-        // frames, and a held frame already a quarter blended in moves a
-        // stripe by 55 — under the 60 used elsewhere, and a jump all the same.
-        let edges = zip(drawn, plain).filter { pair in
-            [0.75, 1.25].contains { abs(pair.0.time - $0) < 1.5 / 30 }
+        // frames, and a frame already a tenth blended moves a stripe by 25.
+        let edges: [(time: Double, filmAt: Double)] = [
+            (1.0 - 1.0 / 30, 1.0 - 1.0 / 30), (1.0, 1.0),
+            (1.5 - 1.0 / 30, 2.0 - 1.0 / 30), (1.5, 2.0)
+        ]
+        for edge in edges {
+            let got = try #require(drawn.first { abs($0.time - edge.time) < 0.25 / 30 }, "guard: no frame at \(edge.time)s")
+            let off = Self.changed(got, from: try film(at: edge.filmAt), by: 24)
+            #expect(off <= 0.02, "at \(got.time)s the dissolve is not the film at \(edge.filmAt)s: \(off) of it differs")
         }
-        try #require(edges.count == 4, "guard: \(edges.count) frames by the window's edges")
-        for (got, reference) in edges {
-            let off = Self.changed(got, from: reference, by: 24)
-            #expect(off <= 0.02, "at \(got.time)s the dissolve is not the plain film: \(off) of it differs")
-        }
-        let inside = zip(drawn, plain).filter { $0.0.time > 0.76 && $0.0.time < 1.24 }.map { Self.changed($0, from: $1) }
-        #expect((inside.max() ?? 0) >= 0.25, "guard: nothing is laid over the film: \(inside)")
+        let inside = drawn.filter { $0.time > 1.01 && $0.time < 1.46 }
+        let changed = try inside.map { Self.changed($0, from: try film(at: $0.time)) }
+        #expect((changed.max() ?? 0) >= 0.5, "guard: nothing is laid over the film: \(changed)")
     }
 
-    /// ⚠️ **ONLY FILM THE AUTHOR KEPT.** Red [0.5, 1.0) then blue [2.0, 2.5):
-    /// the film just past either piece is GREEN — cut away. The handles this
-    /// replaced blended that green into every kind; held from the pieces,
-    /// no green reaches the window at all. (The flash and the scan are left
-    /// out: their own light is green.)
+    /// ⚠️ **ONLY FILM THE AUTHOR KEPT.** Red [0, 1) then blue [2, 3): the film
+    /// just past either piece is GREEN — cut away. An overlap taken from the
+    /// pieces' handles would keep the length and blend that green in; taken
+    /// from the pieces themselves, no green reaches the window at all. (The
+    /// flash and the scan are left out: their own light is green.)
     @Test func aTransitionShowsOnlyFilmThePiecesKeep() async throws {
         let route = Route.export
         let file = try await ColourClipWriter.clip()
         for kind in VideoTransitionKind.allCases where kind.needsBothPictures && kind != .flash && kind != .copyMachine {
-            let drawn = try await Self.frames([
-                VideoExportSegment(start: 0.5, end: 1.0, transitionOut: kind),
-                VideoExportSegment(start: 2.0, end: 2.5)
-            ], file: file, route: route, from: 0.25, to: 0.75)
+            let drawn = try await Self.frames(Self.redThenBlue(kind), file: file, route: route, from: 0.5, to: 1.0)
             try #require(drawn.count >= 14, "guard: \(kind) drew \(drawn.count) frames")
             // ⚠️ ONE STEP AT A TIME: written as one comparator, Xcode 26's type
             // checker gives up on this line ("unable to type-check this
@@ -501,18 +519,19 @@ struct TransitionVisibilityTests {
 
     // MARK: - The duration
 
-    /// ⚠️ **A LONGER TRANSITION DRAWS OVER A LONGER WINDOW — IN BOTH ROUTES.**
-    /// One second asked between red and blue: the window is [1.0, 2.0) around
-    /// the cut at 1.5s, so at 1.2s a fifth of the blue is already in (~46 of
-    /// 229), where the standard half second, [1.25, 1.75), has not opened — and
-    /// at 0.95s the long one has not either.
+    /// ⚠️ **A LONGER TRANSITION OVERLAPS MORE — IN BOTH ROUTES.** One second
+    /// asked between two pieces of two seconds — red then green, blue then
+    /// white — each able to give half of itself: the window is [1.0, 2.0), the
+    /// green second under the blue one, so at 1.25s a quarter of the blue is
+    /// already in (~57 of 229), where the standard half second, [1.5, 2.0),
+    /// has not opened — and at 0.95s the long one has not either.
     @Test(arguments: Route.allCases)
     func aTransitionRunsForTheSecondsItWasGiven(route: Route) async throws {
         let file = try await ColourClipWriter.clip()
         func pieces(_ seconds: Double) -> [VideoExportSegment] {
             [
-                VideoExportSegment(start: 0, end: 1.5, transitionOut: .dissolve, transitionSeconds: seconds),
-                VideoExportSegment(start: 2.0, end: 3.5)
+                VideoExportSegment(start: 0, end: 2, transitionOut: .dissolve, transitionSeconds: seconds),
+                VideoExportSegment(start: 2, end: 4)
             ]
         }
         func blue(_ frames: [Frame], at time: Double) throws -> Double {
@@ -520,11 +539,11 @@ struct TransitionVisibilityTests {
             let points = Self.background(frame)
             return Double(points.map(\.colour.b).reduce(0, +)) / Double(max(points.count, 1))
         }
-        let long = try await Self.frames(pieces(1), file: file, route: route, from: 0.9, to: 1.25)
-        let standard = try await Self.frames(pieces(0.5), file: file, route: route, from: 0.9, to: 1.25)
+        let long = try await Self.frames(pieces(1), file: file, route: route, from: 0.9, to: 1.3)
+        let standard = try await Self.frames(pieces(0.5), file: file, route: route, from: 0.9, to: 1.3)
         #expect(try blue(long, at: 0.95) <= 12, "\(route): a one-second window opened before 1.0s")
-        #expect(try blue(long, at: 1.2) >= 30, "\(route): a one-second window is not blending at 1.2s")
-        #expect(try blue(standard, at: 1.2) <= 12, "guard: \(route) the standard window blends at 1.2s")
+        #expect(try blue(long, at: 1.25) >= 30, "\(route): a one-second window is not blending at 1.25s")
+        #expect(try blue(standard, at: 1.25) <= 12, "guard: \(route) the standard window blends at 1.25s")
 
         if route == .export {
             let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: pieces(1)))
@@ -532,17 +551,17 @@ struct TransitionVisibilityTests {
             #expect(exported.transitionWindows == [1.0...2.0], "the file says it drew at \(exported.transitionWindows)")
         }
     }
-
 }
 
-/// **A TRANSITION'S LENGTH, AS ARITHMETIC** — the rules
-/// `TransitionVisibilityTests` reads off the pixels, asked of the functions
-/// that make them.
+/// **A TRANSITION'S LENGTH, AS ARITHMETIC — AND WHAT IT TAKES OFF THE FILM.**
+/// The rules `TransitionVisibilityTests` reads off the pixels, asked of the
+/// functions that make them — the default lane only, as it is: an export
+/// does not depend on the canvas's layer.
+@Suite(.enabled(if: VideoRenderFlags.usesSampleBufferLayer))
 struct TransitionLengthTests {
     /// ⚠️ **NEVER MORE THAN THE SHORTER NEIGHBOUR CAN GIVE.** Two seconds asked
-    /// between a 0.6s piece and a 1.5s one: each lends at most half of itself,
-    /// so the window is 0.6s — [0.3, 0.9] — and the result is exactly as long as
-    /// its pieces.
+    /// between a 0.6s piece and a 1.5s one: each gives at most half of itself,
+    /// so they overlap by 0.3s — [0.3, 0.6] — and the result is 0.6 + 1.5 − 0.3.
     @Test func aTransitionIsClampedToWhatItsPiecesCanGive() async throws {
         let file = try await ColourClipWriter.clip()
         let arranged = try await VideoExporter.arrangement(
@@ -553,20 +572,91 @@ struct TransitionLengthTests {
             ],
             orientation: .whenComposited
         )
-        #expect(arranged.windows == [0.3...0.9], "drew at \(arranged.windows)")
-        let duration = try await arranged.asset.load(.duration).seconds
-        #expect(abs(duration - 2.1) < 0.001, "the arrangement lasts \(duration)s")
+        #expect(arranged.windows == [0.3...0.6], "drew at \(arranged.windows)")
+        let duration = try await arranged.asset.load(.duration)
+        #expect(duration == CMTime(value: 1080, timescale: 600), "the arrangement lasts \(duration.seconds)s, not 1.8s")
     }
 
-    /// The reach, as arithmetic: half the seconds asked, never more than half
-    /// of either neighbour, on the 1/600 grid, nothing under a frame.
-    @Test func theReachIsHalfWhatWasAskedWithinTheNeighbours() {
-        #expect(VideoExporter.transitionHalf(.dissolve, outgoingPlayedSeconds: 3, incomingPlayedSeconds: 3) == 0.25)
-        #expect(VideoExporter.transitionHalf(.dissolve, seconds: 1.5, outgoingPlayedSeconds: 3, incomingPlayedSeconds: 3) == 0.75)
-        #expect(VideoExporter.transitionHalf(.dissolve, seconds: 2, outgoingPlayedSeconds: 3, incomingPlayedSeconds: 1.2) == 0.6)
-        #expect(VideoExporter.transitionHalf(.dissolve, seconds: 2, outgoingPlayedSeconds: 0.9, incomingPlayedSeconds: 3) == 0.45)
-        #expect(VideoExporter.transitionHalf(.dissolve, seconds: 0.05, outgoingPlayedSeconds: 3, incomingPlayedSeconds: 3) == 0)
-        #expect(VideoExporter.transitionHalf(nil, seconds: 1, outgoingPlayedSeconds: 3, incomingPlayedSeconds: 3) == 0)
+    /// The overlap, as arithmetic: what was asked, never more than half of
+    /// either neighbour, floored to the 1/600 grid, nothing under two frames.
+    @Test func theOverlapIsWhatWasAskedWithinTheNeighbours() {
+        func overlap(_ kind: VideoTransitionKind?, _ seconds: Double, _ outgoing: Double, _ incoming: Double) -> Double {
+            VideoExporter.transitionOverlap(
+                kind, seconds: seconds, outgoingPlayedSeconds: outgoing, incomingPlayedSeconds: incoming
+            )
+        }
+        #expect(VideoExporter.transitionOverlap(.dissolve, outgoingPlayedSeconds: 3, incomingPlayedSeconds: 3) == 0.5)
+        #expect(overlap(.dissolve, 1.5, 3, 3) == 1.5)
+        #expect(overlap(.dissolve, 2, 3, 1.2) == 0.6)
+        #expect(overlap(.dissolve, 2, 0.9, 3) == 0.45)
+        #expect(overlap(.dissolve, 2, 1.0025, 3) == 0.5, "not floored to the grid: 300.75 ticks")
+        #expect(overlap(.dissolve, 40.0 / 600, 3, 3) == 40.0 / 600, "two frames is drawn")
+        #expect(overlap(.dissolve, 39.0 / 600, 3, 3) == 0, "under two frames is a flicker")
+        #expect(overlap(.dissolve, 2, 3, 78.0 / 600) == 0, "half of a short neighbour is under two frames")
+        #expect(overlap(nil, 1, 3, 3) == 0)
+        #expect(overlap(.dissolve, .nan, 3, 3) == 0)
+    }
+
+    /// ⚠️ **THE FILE LASTS ITS PIECES LESS THEIR OVERLAPS.** Asked for in those
+    /// words with the overlap: the composition is `d` shorter per transition.
+    /// Four pieces — a second at 1x, two seconds at 2x, 0.6s and 0.6s, played
+    /// 3.2s in all — joined by a dissolve (0.5s), a dip asked at 0.4s and
+    /// clamped to 0.3s by the 0.6s piece after it, and a plain cut, which
+    /// overlaps nothing: 3.2 − 0.5 − 0.3 = 2.4s, on the composition's clock to
+    /// the tick and in the written file to a frame.
+    @Test func anExportLastsItsPiecesLessTheirOverlaps() async throws {
+        let file = try await ColourClipWriter.clip()
+        let segments = [
+            VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve),
+            VideoExportSegment(start: 1, end: 3, speed: 2, transitionOut: .dipToBlack, transitionSeconds: 0.4),
+            VideoExportSegment(start: 3, end: 3.6),
+            VideoExportSegment(start: 0.2, end: 0.8)
+        ]
+        let arranged = try await VideoExporter.arrangement(
+            of: AVURLAsset(url: file), cut: segments, orientation: .whenComposited
+        )
+        let duration = try await arranged.asset.load(.duration)
+        #expect(duration == CMTime(value: 1440, timescale: 600), "the arrangement lasts \(duration.seconds)s, not 2.4s")
+        #expect(arranged.windows == [0.5...1.0, 1.2...1.5], "drew at \(arranged.windows)")
+
+        let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
+        defer { try? FileManager.default.removeItem(at: exported.fileURL) }
+        let pictures = try #require(try await AVURLAsset(url: exported.fileURL).loadTracks(withMediaType: .video).first)
+        let drawn = try await pictures.load(.timeRange).duration.seconds
+        #expect(abs(drawn - 2.4) <= 1.0 / 30 + 0.001, "the exported pictures last \(drawn)s, not 2.4s")
+        #expect(exported.transitionWindows == [0.5...1.0, 1.2...1.5], "the file says \(exported.transitionWindows)")
+    }
+
+    /// ⚠️ **AND THE FILE ENDS WITH ITS PICTURES.** The time-pitch pass hands a
+    /// rated piece's sound back with a tail past its edit, and an export left
+    /// unbound kept it: measured three times each, a second at 2x published as
+    /// 1.113s every time, the review's 2x-then-0.5x dissolve as 1.665s once in
+    /// three, and a dissolve into 3x drew its pictures a frame past the film,
+    /// 1.267s. Bound to the composition's own length (`VideoExporter.export`),
+    /// every one lasted exactly its plan — which is what the track shows and
+    /// what a looping feed plays.
+    @Test func anExportEndsWithItsPictures() async throws {
+        let file = try await ColourClipWriter.clip()
+        let plans: [[VideoExportSegment]] = [
+            [VideoExportSegment(start: 0, end: 2, speed: 2)],
+            [
+                VideoExportSegment(start: 0, end: 2, speed: 2, transitionOut: .dissolve),
+                VideoExportSegment(start: 2, end: 2.5, speed: 0.5)
+            ],
+            [VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve), VideoExportSegment(start: 1, end: 2.5, speed: 3)]
+        ]
+        for segments in plans {
+            let arranged = try await VideoExporter.arrangement(
+                of: AVURLAsset(url: file), cut: segments, orientation: .whenComposited
+            )
+            let planned = try await arranged.asset.load(.duration).seconds
+            let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
+            defer { try? FileManager.default.removeItem(at: exported.fileURL) }
+            let pictures = try #require(try await AVURLAsset(url: exported.fileURL).loadTracks(withMediaType: .video).first)
+            let drawn = try await pictures.load(.timeRange).duration.seconds
+            #expect(abs(exported.durationSeconds - planned) < 0.005 && abs(drawn - planned) < 0.005,
+                    "\(segments.map { "\($0.start)-\($0.end)@\($0.speed)" }): planned \(planned)s, the file lasts \(exported.durationSeconds)s, its pictures \(drawn)s")
+        }
     }
 
     /// ⚠️ **A LENGTH ON A PLAIN CUT IS NOT STORED** — the initialiser puts the

@@ -9,7 +9,7 @@ import Testing
 /// A real player over a real file: whether the playhead stays inside the range
 /// is AVFoundation's answer, and a stub would answer whatever it was written to.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .exclusiveMediaWork)
 struct RehearsalLoopTests {
     private struct Passthrough: VideoSource {
         func playableURL(for url: URL) async throws -> URL { url }
@@ -87,9 +87,11 @@ struct RehearsalLoopTests {
         let controller = controller()
         let view = surface()
         defer { controller.stop(view) }
+        // A second, then a second and a half, overlapping by half a second:
+        // two seconds, with the loop around the dip at [0.5, 1.0).
         try await loadWholeClip(controller, view, loop: 0.5...1.5, segments: [
             VideoExportSegment(start: 0, end: 1, transitionOut: .dipToBlack),
-            VideoExportSegment(start: 2, end: 3)
+            VideoExportSegment(start: 2, end: 3.5)
         ])
 
         let taken = try await samples(controller, view, for: 3.5)
