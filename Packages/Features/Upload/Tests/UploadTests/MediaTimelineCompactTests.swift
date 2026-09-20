@@ -181,9 +181,10 @@ struct MediaTimelineCompactTests {
 
     // MARK: - The lit stretch
 
-    /// ⚠️ **ON THE PLAYED CLOCK.** The first piece runs at 2x, so the cut is at
-    /// two seconds of the result and four of the file — and the line is drawn
-    /// in the result's.
+    /// ⚠️ **ON THE PLAYED CLOCK.** The first piece runs at 2x, so its film ends
+    /// at two seconds of the result and four of the file; the second overlaps
+    /// its last half second, so the cut is drawn at the middle of the overlap,
+    /// 1.75s — and the line is drawn in the result's.
     @Test func theRehearsalIsLitWhereItPlays() throws {
         let segments = [
             MediaSegment(start: 0, end: 4, speed: 2, transitionOut: .dipToBlack),
@@ -201,7 +202,7 @@ struct MediaTimelineCompactTests {
         let window = try #require(track.debugWindowFrame, "the transition is not marked")
         #expect(abs(bar.minX - CGFloat(rehearsal.range.lowerBound) * 60) < 0.01, "the stretch starts at \(bar.minX)")
         #expect(abs(bar.maxX - CGFloat(rehearsal.range.upperBound) * 60) < 0.01, "the stretch ends at \(bar.maxX)")
-        #expect(abs(window.midX - 120) < 0.01, "the transition is marked at \(window.midX), not at the cut")
+        #expect(abs(window.midX - 105) < 0.01, "the transition is marked at \(window.midX), not at the cut")
         #expect(abs(window.width - 30) < 0.01, "the transition is \(window.width)pt wide")
         #expect(track.debugWindowCorner == 4, "the transition's corners are \(track.debugWindowCorner)pt")
         #expect(bar.midY == track.debugLineFrames.first?.midY, "the stretch is off the line")

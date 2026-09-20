@@ -6,16 +6,21 @@ import Foundation
 /// A clip whose picture AND sound each say which moment of the file they are,
 /// for the tests that ask whether the two stay together.
 ///
-/// 160x120, six seconds at 30fps, keyed every half second. The PICTURE is black
-/// with one lit square: the file is a grid of 8px cells, twenty to a row, and
-/// frame `n` lights cell `n` — so a blend of two frames lights two cells, each
-/// as bright as its share, and the brighter one is the picture that dominates.
-/// The SOUND is a sine whose pitch climbs 400 Hz a second from 300 Hz, so its
-/// pitch is its clock: one frame of film is 13.3 Hz.
+/// 160x120, ten seconds at 30fps, keyed every half second. The PICTURE is black
+/// with one lit square: the file is a grid of 8px cells, twenty to a row and
+/// fifteen rows — one per frame, exactly — and frame `n` lights cell `n`, so a
+/// blend of two frames lights two cells, each as bright as its share. The
+/// SOUND is a sine whose pitch climbs 400 Hz a second from 300 Hz, so its pitch
+/// is its clock: one frame of film is 13.3 Hz.
+///
+/// ⚠️ **TEN SECONDS, SINCE TRANSITIONS OVERLAP.** A split with a two-second
+/// overlap needs two seconds of film either side of the window from pieces
+/// that give at most half of themselves. Renamed with the change: the file is
+/// cached by name.
 enum TimecodeClipWriter {
     static let width = 160
     static let height = 120
-    static let seconds = 6
+    static let seconds = 10
     static let cell = 8
     static let cellsPerRow = width / cell
     static let rate: Double = 44_100
@@ -65,12 +70,12 @@ enum TimecodeClipWriter {
     }
 
     private static func write() async throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("timecode-clip-fed-apart.mov")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("timecode-clip-10s.mov")
         if FileManager.default.fileExists(atPath: url.path) { return url }
         // ⚠️ A NAME OF ITS OWN: another process on the same simulator may be
         // writing it too.
         let partial = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(UUID().uuidString)-timecode-clip-fed-apart.mov")
+            .appendingPathComponent("\(UUID().uuidString)-timecode-clip-10s.mov")
 
         let writer = try AVAssetWriter(outputURL: partial, fileType: .mov)
         let video = AVAssetWriterInput(mediaType: .video, outputSettings: [

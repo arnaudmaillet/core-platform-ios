@@ -1,8 +1,8 @@
 import AVFoundation
 
 extension VideoExporter {
-    /// Where an arrangement's sound lives: the song's track, the film's own, and
-    /// the dips the film's sound takes at its dips to black or white.
+    /// Where an arrangement's sound lives: the song's track, the film's own —
+    /// one track per lane — and how the film's sound crosses its transitions.
     ///
     /// ⚠️ **A VALUE KEPT BESIDE A PLAYING ITEM, SO ITS LEVELS CAN MOVE WITHOUT A
     /// NEW ITEM.** A slider dragged across the song's level would otherwise
@@ -12,10 +12,11 @@ extension VideoExporter {
     struct SoundtrackLayout: Sendable, Equatable {
         /// The track the song is laid on.
         let music: CMPersistentTrackID
-        /// The film's own sound, or nil for a clip that has none.
-        let original: CMPersistentTrackID?
-        /// Where the film's own sound falls to silence and back.
-        let dips: [SoundDip]
+        /// The film's own sound, a track per lane — empty for a clip that has
+        /// none.
+        let originals: [CMPersistentTrackID]
+        /// How the film's own sound crosses its transitions (`soundSteps`).
+        let steps: [SoundStep]
 
         /// The song at `musicLevel` and the film at `originalLevel`, both 0...1.
         ///
@@ -25,41 +26,19 @@ extension VideoExporter {
         /// and a song runs under every piece. One level set at zero is the whole
         /// of its automation.
         ///
-        /// ⚠️ **THE FILM'S DIPS ARE REBUILT AT ITS OWN LEVEL**, from that level
-        /// down to silence and back, rather than from full volume: a film turned
-        /// down to half under a song would otherwise jump to full on the way into
-        /// every dip. They are the dips `soundDips` already chose, which never
-        /// touch a rated piece.
+        /// ⚠️ **THE FILM'S CROSSINGS ARE REBUILT AT ITS OWN LEVEL**, between that
+        /// level and silence, rather than from full volume: a film turned down to
+        /// half under a song would otherwise jump to full at every transition.
+        /// They are the steps `soundSteps` already chose, which never touch a
+        /// rated piece.
         func mix(music musicLevel: Double, original originalLevel: Double) -> AVAudioMix {
             let song = AVMutableAudioMixInputParameters()
             song.trackID = music
             song.setVolume(Self.level(musicLevel), at: .zero)
-            var inputs = [song]
-            if let original {
-                let film = AVMutableAudioMixInputParameters()
-                film.trackID = original
-                let level = Self.level(originalLevel)
-                // ⚠️ NOT WHERE A DIP ALREADY BEGINS: a ramp and a level at the
-                // same instant are two answers for one moment. Before the first
-                // setting a track plays at full volume, so the level is stated
-                // whenever the film does not open on a dip.
-                if dips.first?.opens != .zero {
-                    film.setVolume(level, at: .zero)
-                }
-                for dip in dips {
-                    film.setVolumeRamp(
-                        fromStartVolume: level, toEndVolume: 0,
-                        timeRange: CMTimeRange(start: dip.opens, end: dip.at)
-                    )
-                    film.setVolumeRamp(
-                        fromStartVolume: 0, toEndVolume: level,
-                        timeRange: CMTimeRange(start: dip.at, end: dip.closes)
-                    )
-                }
-                inputs.append(film)
-            }
             let mix = AVMutableAudioMix()
-            mix.inputParameters = inputs
+            mix.inputParameters = [song] + SoundStep.parameters(
+                steps, tracks: originals, level: Self.level(originalLevel), stated: true
+            )
             return mix
         }
 
@@ -67,7 +46,43 @@ extension VideoExporter {
             value.isFinite ? Float(min(max(value, 0), 1)) : 1
         }
     }
+}
 
+extension VideoExporter.SoundStep {
+    /// The film's lanes `tracks` following `steps`, at `level`.
+    ///
+    /// ⚠️ **`stated` SETS THE LEVEL AT ZERO — NOT WHERE A STEP IS ALREADY SET.** A
+    /// ramp or a level and another level at the same instant are two answers
+    /// for one moment. Before its first setting a track plays at full volume,
+    /// so a mix under a song states the film's level on every lane at zero.
+    static func parameters(
+        _ steps: [Self], tracks: [CMPersistentTrackID], level: Float, stated: Bool
+    ) -> [AVMutableAudioMixInputParameters] {
+        tracks.map { track in
+            let film = AVMutableAudioMixInputParameters()
+            film.trackID = track
+            let own = steps.filter { $0.track == track }
+            let setAtZero = own.contains {
+                switch $0.shape {
+                case let .ramp(_, _, range): range.start == .zero
+                case let .level(_, at): at == .zero
+                }
+            }
+            if stated, !setAtZero { film.setVolume(level, at: .zero) }
+            for step in own {
+                switch step.shape {
+                case let .ramp(from, to, range):
+                    film.setVolumeRamp(fromStartVolume: from * level, toEndVolume: to * level, timeRange: range)
+                case let .level(value, at):
+                    film.setVolume(value * level, at: at)
+                }
+            }
+            return film
+        }
+    }
+}
+
+extension VideoExporter {
     /// A song laid into a composition, and the mix it plays with.
     ///
     /// ⚠️ **NOT SENDABLE, LIKE THE ARRANGEMENT IT ENDS UP IN** —
@@ -80,11 +95,10 @@ extension VideoExporter {
     /// Lays `soundtrack` under an arranged film, and returns what it laid with
     /// the mix that replaces the film's own — or nil when there is no song.
     ///
-    /// ⚠️ **CALLED AFTER EVERY COMPOSITION-LEVEL `scaleTimeRange`.** That call
-    /// rescales every track inside its range, so a song inserted before a rated
-    /// piece is scaled would play at that piece's rate for its length — and,
-    /// under the spectral pitch the export uses, at its own pitch, so nobody
-    /// would hear why the chorus came early.
+    /// ⚠️ **CALLED ONCE THE PIECES ARE LAID AND SCALED.** The song runs the
+    /// result's whole length, which is only known once every overlap has been
+    /// taken off it — and a song laid before a rated piece was scaled would, if
+    /// that scaling ever reached it, play at that piece's rate for its length.
     ///
     /// ⚠️ **FROM `startSeconds`, OVER THE WHOLE FILM, CLIPPED TO THE SONG.** A
     /// song shorter than what is left of the film stops where it ends — no loop
@@ -96,7 +110,7 @@ extension VideoExporter {
     /// song the author chose is the defect this whole plan is written against.
     static func applySoundtrack(
         _ soundtrack: VideoSoundtrack?, to composition: AVMutableComposition,
-        original: AVMutableCompositionTrack?, dips: [SoundDip]
+        originals: [AVMutableCompositionTrack], steps: [SoundStep]
     ) async throws -> LaidSoundtrack? {
         guard let soundtrack else { return nil }
         let song = AVURLAsset(url: soundtrack.fileURL)
@@ -125,7 +139,7 @@ extension VideoExporter {
         } catch {
             throw VideoExportError.exportFailed
         }
-        let layout = SoundtrackLayout(music: track.trackID, original: original?.trackID, dips: dips)
+        let layout = SoundtrackLayout(music: track.trackID, originals: originals.map(\.trackID), steps: steps)
         return LaidSoundtrack(
             layout: layout,
             mix: layout.mix(music: soundtrack.musicVolume, original: soundtrack.originalVolume)

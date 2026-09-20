@@ -97,7 +97,16 @@ struct SoundProbe {
 
     /// Every audio track of `asset`, mixed by `mix`, as 16-bit mono at 44.1 kHz.
     static func listen(to asset: AVAsset, mix: AVAudioMix?) async throws -> SoundProbe {
-        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        try await listen(to: asset, tracks: try await asset.loadTracks(withMediaType: .audio), mix: mix)
+    }
+
+    /// `tracks` of `asset` alone, mixed by `mix` — one lane of a composition,
+    /// say, heard without the other.
+    ///
+    /// ⚠️ **FROM THE ASSET'S START, SILENCE INCLUDED.** A composition track that
+    /// begins with an empty stretch is read as silence there, so sample `n` is
+    /// always `n / 44100` seconds into the asset.
+    static func listen(to asset: AVAsset, tracks: [AVAssetTrack], mix: AVAudioMix?) async throws -> SoundProbe {
         guard !tracks.isEmpty else { return SoundProbe(samples: []) }
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: [
@@ -121,6 +130,13 @@ struct SoundProbe {
                 CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: count * 2, destination: raw.baseAddress!)
             }
             samples.append(contentsOf: chunk)
+        }
+        // ⚠️ A READ THAT STOPPED EARLY IS AN ERROR, NOT A QUIET TAIL: the
+        // samples run out, and every level measured past them reads zero.
+        guard reader.status == .completed else {
+            throw reader.error ?? CocoaError(.fileReadUnknown, userInfo: [
+                NSLocalizedDescriptionKey: "the sound stopped after \(samples.count) samples, status \(reader.status.rawValue)"
+            ])
         }
         return SoundProbe(samples: samples)
     }

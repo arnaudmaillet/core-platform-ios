@@ -136,19 +136,25 @@ public enum VideoTransitionKind: String, CaseIterable, Sendable {
     /// The outgoing picture breaks up into flakes.
     case disintegrate
 
-    /// How long a transition runs, in PLAYED seconds, centred on its cut, when
-    /// the author has not said otherwise — what every cut ran for before a
-    /// duration could be chosen (`VideoExportSegment.transitionSeconds`).
+    /// How long a transition runs — how long its two pieces overlap — in
+    /// PLAYED seconds, when the author has not said otherwise
+    /// (`VideoExportSegment.transitionSeconds`).
     public static let standardSeconds: Double = 0.5
 
-    /// Whether the transition shows both pieces at once — and so needs the
-    /// other piece's edge frame on a second lane (`VideoExporter.heldSides`).
-    /// The dips and the zoom draw each piece on its own side of the cut.
+    /// Whether the transition shows both pieces at once. The dips and the zoom
+    /// draw the outgoing piece up to the middle of the overlap and the incoming
+    /// one from it.
     public var needsBothPictures: Bool {
         switch self {
         case .dipToBlack, .dipToWhite, .zoom: false
         default: true
         }
+    }
+
+    /// Whether the film's own sound goes down and up with the picture, as a
+    /// dip does, rather than the two sounds crossing over the overlap.
+    public var dipsTheSound: Bool {
+        self == .dipToBlack || self == .dipToWhite
     }
 }
 
@@ -162,8 +168,9 @@ public struct VideoExportSegment: Sendable, Equatable {
     /// The transition at the cut AFTER this piece. ⚠️ Ignored on the last
     /// piece, which has no cut after it.
     public let transitionOut: VideoTransitionKind?
-    /// How long that transition runs, in PLAYED seconds, before
-    /// `VideoExporter.transitionHalf` clamps it to what the two pieces can give.
+    /// How long that transition runs — how long this piece and the next overlap
+    /// — in PLAYED seconds, before `VideoExporter.transitionOverlap` clamps it
+    /// to what the two pieces can give.
     ///
     /// ⚠️ **THE STANDARD WHENEVER THERE IS NO TRANSITION — THE INITIALISER SEES
     /// TO IT.** A length on a plain cut is a second spelling of "nothing", and
@@ -235,112 +242,258 @@ public struct VideoExporter: Sendable {
         needsComposition(for: plan.segments) || !plan.finish.isNone || plan.soundtrack != nil
     }
 
-    /// How far a transition reaches on EACH side of its cut, in played seconds.
+    /// How long a transition's two pieces OVERLAP, in played seconds: the
+    /// window it draws in, and what it takes off the result.
     ///
     /// ⚠️ **ONE FUNCTION FOR THE TRACK, THE HIGHLIGHT, THE PREVIEW'S EQUALITY AND
-    /// THE BUILDER.** Written twice, the lit window and the drawn fade would
+    /// THE BUILDER.** Written twice, the lit window and the drawn blend would
     /// disagree the first time either changed.
     ///
-    /// ⚠️ **HALF OF WHAT THE AUTHOR ASKED FOR, AND NEVER MORE THAN HALF OF
-    /// EITHER NEIGHBOUR.** A transition of `seconds` borrows `seconds / 2` from
-    /// the end of the piece before its cut and as much from the start of the
-    /// piece after it. A piece with a transition at both ends lends each at most
-    /// half of itself, so the two can touch and never cross — crossing
-    /// instructions fail the export. So a cut can carry at most as long a
-    /// transition as its SHORTER neighbour plays for. Floored to the
-    /// composition's 1/600 grid, and nothing at all below a frame at 30fps, where
-    /// a transition would be a flicker nobody chose.
-    public static func transitionHalf(
+    /// ⚠️ **WHAT THE AUTHOR ASKED FOR, AND NEVER MORE THAN HALF OF EITHER
+    /// NEIGHBOUR.** A transition of `seconds` plays the last `seconds` of the
+    /// piece before its cut over the first `seconds` of the piece after it, so
+    /// each piece gives it that much of its own film. A piece gives each of its
+    /// two transitions at most half of itself, so the two windows around it can
+    /// meet and never cross — crossing windows would ask for three pictures at
+    /// once, on two lanes. Floored to the composition's 1/600 grid, and nothing
+    /// at all under two frames at 30fps, where a transition would be a flicker
+    /// nobody chose.
+    public static func transitionOverlap(
         _ kind: VideoTransitionKind?, seconds: Double = VideoTransitionKind.standardSeconds,
         outgoingPlayedSeconds outgoing: Double, incomingPlayedSeconds incoming: Double
     ) -> Double {
         guard kind != nil, seconds.isFinite, seconds > 0, outgoing.isFinite, incoming.isFinite,
               outgoing > 0, incoming > 0
         else { return 0 }
-        let half = min(seconds / 2, outgoing / 2, incoming / 2)
-        let floored = (half * 600).rounded(.down) / 600
-        return floored < 1.0 / 30 ? 0 : floored
+        let ticks = (min(seconds, outgoing / 2, incoming / 2) * 600).rounded(.down)
+        return ticks < shortestOverlapTicks ? 0 : ticks / 600
     }
 
-    /// The kept pieces, laid end to end, each scaled to the rate it plays at.
+    /// Two frames at 30fps, in 1/600ths of a second: the shortest overlap drawn.
+    static let shortestOverlapTicks: Double = 40
+
+    /// One piece as the composition lays it.
+    private struct Laid {
+        /// The lane — 0 or 1 — its picture is on.
+        let lane: Int
+        /// The track its sound is on: one of two shared by the pieces as shot,
+        /// or one of its own for a rated piece (`insertPieces`).
+        let soundLane: Int
+        /// Where its film starts on the composition's clock.
+        let start: CMTime
+        /// How long it plays there.
+        let played: CMTime
+        let look: LookPreset?
+
+        var end: CMTime { start + played }
+    }
+
+    /// One transition, on the composition's own clock.
+    private struct Cut {
+        let kind: VideoTransitionKind
+        /// Where the incoming piece starts: the window opens.
+        let opens: CMTime
+        /// The middle of the overlap — where a dip or a zoom changes piece, and
+        /// where the track draws the cut.
+        let at: CMTime
+        /// Where the outgoing piece ends: the window closes.
+        let closes: CMTime
+        /// The piece before the cut; the one after it is `outgoing + 1`.
+        let outgoing: Int
+        /// Whether the two sounds cross — both pieces as shot, the only place a
+        /// volume ramp is safe (`export-volume-ramp-hang`).
+        let crossfades: Bool
+    }
+
+    /// The kept pieces, each at the rate it plays at, OVERLAPPING wherever a
+    /// transition joins two of them.
     ///
     /// ⚠️ **BUILT HERE AND USED ONCE, WHICH IS THE ONLY WAY IT CAN EXIST.**
     /// `AVMutableComposition` and `AVMutableCompositionTrack` are explicitly
     /// `@_nonSendable` — the conformance is *unavailable*, measured with
     /// `-emit-sil` — so one can never be stored in a `Sendable` value or handed
-    /// across an isolation boundary. Region isolation does allow what happens
-    /// here: a composition made inside one function, never escaping except as the
-    /// `AVAsset` an export session reads. That is why `VideoExportPlan` carries
+    /// across an isolation boundary. That is why `VideoExportPlan` carries
     /// segment VALUES and not a composition.
     ///
-    /// ⚠️ **`scaleTimeRange` ON THE COMPOSITION, NEVER ON A TRACK.** The
-    /// track-level call scales that track alone, so a sped-up piece keeps its
-    /// audio at the original rate and the two drift apart for the rest of the
-    /// film. The composition-level one moves every track together. Neither is
-    /// deprecated; the asset-level `insertTimeRange` IS, which is why the inserts
-    /// below are per-track.
+    /// ⚠️ **TWO LANES, AND A PIECE CHANGES LANE ONLY ACROSS A TRANSITION.** Two
+    /// pieces that overlap cannot share a track, so the picture after a
+    /// transition goes on the other lane; across a plain cut it follows on the
+    /// same one. (Its sound changes lane only where two sounds cross — below.) An arrangement with no transition is one lane,
+    /// exactly as it was before overlaps existed — which is what lets it play
+    /// with no video composition at all.
     ///
-    /// ⚠️ **AND THE CURSOR IS READ BACK FROM THE COMPOSITION, NOT ACCUMULATED.**
-    /// Scaling a piece changes how long it occupies the timeline, so the place
-    /// the next piece starts is wherever the composition now ends. Adding up
-    /// source durations would lay every later piece over the one before it.
+    /// ⚠️ **SCALED ON ITS OWN TWO TRACKS, NEVER ON THE COMPOSITION.** A
+    /// composition-level `scaleTimeRange` rescales every track inside its range —
+    /// here that would stretch the other lane's piece where the two overlap. A
+    /// piece's picture and its sound are each scaled by the same call on their
+    /// own track, so they keep one clock, and the other lane is not touched.
     ///
-    /// ⚠️ **SHARED WITH THE PREVIEW, AND EACH CALLER BUILDS ITS OWN.** The
-    /// editor's canvas plays exactly this arrangement (`VideoPlaybackController
-    /// .load`), so what the author watches is what the export produces — and a
-    /// piece boundary is an edit inside one item rather than a seek in the file.
-    /// A composition is never handed from one caller to the other; nothing that
-    /// only one of them needs (a render size, a video composition) belongs here.
+    /// ⚠️ **AND EVERY POSITION IS WORKED OUT IN TICKS, NEVER READ BACK.** A piece
+    /// starts where the one before it ends less their overlap; the overlaps are
+    /// measured on the composition's own lengths, so the two windows around a
+    /// piece fit inside it without a second clamp — `floor(y/2) ==
+    /// floor(floor(y)/2)`.
+    ///
+    /// ⚠️ **WHERE A RAMP IS NOT SAFE, THE SOUND IS CUT AT THE MIDDLE INSTEAD.** A
+    /// volume ramp over a piece played at 3x or 4x has frozen the export for good
+    /// (memory `export-volume-ramp-hang`). So across a transition that touches a
+    /// rated piece the two sounds do not cross: the outgoing piece's sound is
+    /// inserted up to the middle of the overlap and the incoming one's from it —
+    /// an edit, with no automation at all, and each sound still exactly under
+    /// its own picture.
+    ///
+    /// ⚠️ **AND A RATED PIECE'S SOUND HAS A TRACK OF ITS OWN, WITH NOTHING BEFORE
+    /// IT.** A rate change on an audio track that has already played something
+    /// is now and then LOST: the log says `AppendRateChange: scheduling rate
+    /// change at unscaled t=16538, but we previously did a conversion for
+    /// t=19456` — the line the export freeze left too — and the piece plays
+    /// silent. Measured (12 exports each): a 3x piece whose sound followed
+    /// 0.375s of its neighbour's on one track, cut at the middle, was silent 4
+    /// times; after another piece's sound and a gap, silent in one read of
+    /// three; after a plain cut, as before overlaps existed, 0 to 1 time. On a
+    /// track of its own, empty up to it, 0 times in 12 in every one of those
+    /// shapes. Pieces as shot share two tracks and change track only where two
+    /// sounds cross, since only they ever ramp.
     private struct Inserted {
         let composition: AVMutableComposition
-        /// Where each piece starts on the composition's own clock; the end of
-        /// the last is `composition.duration`.
-        let starts: [CMTime]
-        let video: AVMutableCompositionTrack
-        let audio: AVMutableCompositionTrack?
+        let laid: [Laid]
+        let cuts: [Cut]
+        let video: [AVMutableCompositionTrack]
+        let audio: [AVMutableCompositionTrack]
     }
 
     private static func insertPieces(
         of source: AVAssetTrack, audio sourceAudio: AVAssetTrack?,
-        cut segments: [VideoExportSegment]
+        cut pieces: [VideoExportSegment]
     ) throws -> Inserted {
-        let composition = AVMutableComposition()
-        guard let videoTrack = composition.addMutableTrack(
-            withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
-        ) else {
-            throw VideoExportError.exportFailed
+        func time(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 600) }
+        let ranges = pieces.map { CMTimeRange(start: time($0.start), end: time($0.end)) }
+        let played = zip(pieces, ranges).map { piece, range in
+            piece.isAsShot || piece.speed <= 0 ? range.duration : time(piece.sourceSeconds / piece.speed)
         }
-        // A clip with no sound is ordinary — a screen recording, a muted export —
-        // and asking for an audio track it cannot fill would leave an empty one.
-        let audioTrack = sourceAudio == nil ? nil : composition.addMutableTrack(
-            withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid
-        )
-
-        var starts: [CMTime] = []
-        for segment in segments where segment.sourceSeconds > 0 {
-            let cursor = composition.duration
-            starts.append(cursor)
-            let range = CMTimeRange(
-                start: CMTime(seconds: segment.start, preferredTimescale: 600),
-                end: CMTime(seconds: segment.end, preferredTimescale: 600)
+        var overlaps: [CMTime] = []
+        for index in pieces.indices.dropLast() {
+            let seconds = transitionOverlap(
+                pieces[index].transitionOut, seconds: pieces[index].transitionSeconds,
+                outgoingPlayedSeconds: played[index].seconds, incomingPlayedSeconds: played[index + 1].seconds
             )
-            do {
-                try videoTrack.insertTimeRange(range, of: source, at: cursor)
-                if let audioTrack, let sourceAudio {
-                    try audioTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
-                }
-            } catch {
+            // ⚠️ ROUNDED, NOT FLOORED: the value is already on the grid, and
+            // flooring its product again loses a tick to the floating point.
+            overlaps.append(CMTime(value: CMTimeValue((seconds * 600).rounded()), timescale: 600))
+        }
+        var lanes = [0]
+        var starts = [CMTime.zero]
+        for index in overlaps.indices {
+            lanes.append(overlaps[index] > .zero ? 1 - lanes[index] : lanes[index])
+            starts.append(starts[index] + played[index] - overlaps[index])
+        }
+        // Where each piece's sound goes: pieces as shot on lane 0 or 1, changing
+        // only where two sounds cross; a rated piece on a track of its own.
+        var sounds: [Int] = []
+        var asShotLane = 0
+        for index in pieces.indices {
+            if index > 0, overlaps[index - 1] > .zero, pieces[index - 1].isAsShot, pieces[index].isAsShot {
+                asShotLane = 1 - asShotLane
+            }
+            sounds.append(pieces[index].isAsShot ? asShotLane : 2 + index)
+        }
+        let used = Array(Set(sounds)).sorted()
+        let soundLanes = sounds.map { used.firstIndex(of: $0) ?? 0 }
+        var cuts: [Cut] = []
+        for index in overlaps.indices where overlaps[index] > .zero {
+            guard let kind = pieces[index].transitionOut else { continue }
+            let opens = starts[index + 1]
+            cuts.append(Cut(
+                kind: kind, opens: opens,
+                at: opens + CMTime(value: overlaps[index].value / 2, timescale: 600),
+                closes: opens + overlaps[index], outgoing: index,
+                crossfades: pieces[index].isAsShot && pieces[index + 1].isAsShot
+            ))
+        }
+
+        let composition = AVMutableComposition()
+        let laneCount = overlaps.contains { $0 > .zero } ? 2 : 1
+        var video: [AVMutableCompositionTrack] = []
+        var audio: [AVMutableCompositionTrack] = []
+        for _ in 0..<laneCount {
+            guard let track = composition.addMutableTrack(
+                withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
+            ) else {
                 throw VideoExportError.exportFailed
             }
-            guard !segment.isAsShot, segment.speed > 0 else { continue }
-            composition.scaleTimeRange(
-                CMTimeRange(start: cursor, duration: range.duration),
-                toDuration: CMTime(
-                    seconds: segment.sourceSeconds / segment.speed, preferredTimescale: 600
+            video.append(track)
+        }
+        // A clip with no sound is ordinary — a screen recording, a muted export
+        // — and an audio track it cannot fill would be left empty.
+        for _ in used where sourceAudio != nil {
+            guard let sound = composition.addMutableTrack(
+                withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid
+            ) else {
+                throw VideoExportError.exportFailed
+            }
+            audio.append(sound)
+        }
+        // ⚠️ **ONLY A RATED PIECE IS EVER SCALED.** A piece as shot plays its
+        // own ticks, so its range and its length are the same number — and if a
+        // rounding anywhere ever made them differ by one, a scaled edit of a 1x
+        // sound on a shared lane, under a crossfade's ramp, is exactly the shape
+        // `export-volume-ramp-hang` and the lost rate changes above forbid. It
+        // is laid as it is instead.
+        func place(
+            _ range: CMTimeRange, of track: AVAssetTrack, on lane: AVMutableCompositionTrack,
+            at start: CMTime, lasting target: CMTime, rated: Bool
+        ) throws {
+            if lane.timeRange.end < start {
+                lane.insertEmptyTimeRange(CMTimeRange(start: lane.timeRange.end, end: start))
+            }
+            try lane.insertTimeRange(range, of: track, at: start)
+            if rated, range.duration != target {
+                lane.scaleTimeRange(CMTimeRange(start: start, duration: range.duration), toDuration: target)
+            }
+        }
+        do {
+            for (index, piece) in pieces.enumerated() {
+                let rated = !piece.isAsShot && piece.speed > 0
+                try place(
+                    ranges[index], of: source, on: video[lanes[index]], at: starts[index],
+                    lasting: played[index], rated: rated
                 )
+                let lane = soundLanes[index]
+                guard let sourceAudio, audio.indices.contains(lane) else { continue }
+                // Played time cut off this piece's sound at a cut that does not
+                // cross-fade: from the window's opening to its middle (incoming),
+                // from its middle to its close (outgoing).
+                let head = cuts.first { $0.outgoing + 1 == index && !$0.crossfades }.map { $0.at - $0.opens } ?? .zero
+                let tail = cuts.first { $0.outgoing == index && !$0.crossfades }.map { $0.closes - $0.at } ?? .zero
+                // ⚠️ **IN TICKS, NEVER BACK THROUGH SECONDS.**
+                // `CMTime(seconds:preferredTimescale:)` TRUNCATES: 55/600 of a
+                // second comes back as 54/600, and so do 305 of the tick values
+                // from 1 to 6000. Where an overlap is clamped by a rated
+                // neighbour's half, a piece as shot then heard a tick more film
+                // than it plays for, a tick early. As shot a trim is its own
+                // ticks; rated, `CMTimeMultiplyByFloat64` rounds.
+                func film(_ played: CMTime) -> CMTime {
+                    rated ? CMTimeMultiplyByFloat64(played, multiplier: piece.speed) : played
+                }
+                let heard = CMTimeRange(
+                    start: ranges[index].start + film(head), end: ranges[index].end - film(tail)
+                )
+                guard heard.duration > .zero else { continue }
+                try place(
+                    heard, of: sourceAudio, on: audio[lane], at: starts[index] + head,
+                    lasting: played[index] - head - tail, rated: rated
+                )
+            }
+        } catch {
+            throw VideoExportError.exportFailed
+        }
+        let laid = pieces.indices.map {
+            Laid(
+                lane: lanes[$0], soundLane: soundLanes[$0], start: starts[$0], played: played[$0],
+                look: pieces[$0].look
             )
         }
-        return Inserted(composition: composition, starts: starts, video: videoTrack, audio: audioTrack)
+        return Inserted(composition: composition, laid: laid, cuts: cuts, video: video, audio: audio)
     }
 
     /// When the preview or the export needs a video composition for the
@@ -387,30 +540,25 @@ public struct VideoExporter: Sendable {
         }
     }
 
-    /// The kept pieces, laid end to end, each scaled to the rate it plays at,
-    /// with every transition drawn at its cut.
+    /// The kept pieces, each scaled to the rate it plays at, overlapping at every
+    /// transition, with every transition drawn in its overlap.
     ///
     /// ⚠️ **ONE BUILDER FOR THE PREVIEW AND THE EXPORT** — the editor's canvas
     /// plays exactly what the post will be, transitions and sound included.
     ///
-    /// ⚠️ **`scaleTimeRange` ON THE COMPOSITION, NEVER ON A TRACK.** The
-    /// track-level call scales that track alone, so a sped-up piece keeps its
-    /// audio at the original rate and the two drift apart for the rest of the
-    /// film. And the cursor is read back from the composition, not accumulated:
-    /// scaling a piece changes where the next one starts.
+    /// ⚠️ **A TRANSITION OVERLAPS ITS TWO PIECES, AND THE RESULT IS THAT MUCH
+    /// SHORTER.** Chosen by the author, over pictures that held still to keep
+    /// the length: *"oui, chevauche les deux segments"*. The last `d` of the
+    /// outgoing piece and the first `d` of the incoming one play at once, each
+    /// real film at its own pace on its own lane, each over its own sound — so
+    /// on a split of one continuous shot the two pictures are `d` apart and a
+    /// dissolve is plainly seen (`insertPieces`).
     ///
     /// ⚠️ **THE INSTRUCTIONS TILE THE WHOLE DURATION ON THE COMPOSITION'S OWN
-    /// CLOCK.** Cut times come from the cursors, never from a sum of source
-    /// seconds; a set that ends one tick short renders in an image generator and
-    /// FAILS THE EXPORT (-11841), and a gap renders black with no error at all.
-    ///
-    /// ⚠️ **A TRANSITION DRAWS INSIDE ITS OWN TWO PIECES, FROM THEIR OWN FILM.**
-    /// The dips and the zoom play on the single lane: the outgoing piece fades
-    /// or zooms up to the cut, the incoming one from it. A two-picture kind
-    /// draws the other piece's edge frame beside it from a second lane
-    /// (`heldSides`) instead of overlapping the pieces, so the played length is
-    /// exactly what the track shows either way, and the picture that dominates
-    /// is always the arrangement, in sync with its sound.
+    /// CLOCK.** Cut times come from the laid pieces in ticks, never from a sum
+    /// of source seconds; a set that ends one tick short renders in an image
+    /// generator and FAILS THE EXPORT (-11841), and a gap renders black with no
+    /// error at all.
     ///
     /// ⚠️ **EVERYTHING IS DRAWN BY `VideoCompositor`.** A custom compositor
     /// takes over the whole composition, so the dips and the zoom are its too —
@@ -466,8 +614,8 @@ public struct VideoExporter: Sendable {
             }
             let duration = try await asset.load(.duration)
             let composition = try composed(
-                laneA: source.trackID, laneB: nil, drawing: drawing,
-                pieces: [Piece(start: .zero, look: nil)], windows: [], duration: duration
+                pieces: [(Laid(lane: 0, soundLane: 0, start: .zero, played: duration, look: nil), source.trackID)],
+                drawing: drawing, windows: [], duration: duration
             )
             return Arrangement(
                 asset: asset, videoComposition: composition, audioMix: nil, windows: [],
@@ -479,20 +627,19 @@ public struct VideoExporter: Sendable {
             .filter { $0.sourceSeconds > 0 }
         let inserted = try insertPieces(of: source, audio: sourceAudio, cut: kept)
         // ⚠️ THE TRANSFORM TRAVELS WITH THE PICTURES. Without it a clip a phone
-        // recorded upright exports on its side — the composition track starts
+        // recorded upright exports on its side — a composition track starts
         // with an identity transform whatever the source carried. (The
         // compositor turns the frames itself; this keeps a composition that
         // draws nothing upright for whoever plays it without one.)
-        inserted.video.preferredTransform = preferred
+        for lane in inserted.video { lane.preferredTransform = preferred }
         let composition = inserted.composition
         let duration = composition.duration
-        let windows = cuts(of: kept, starts: inserted.starts, duration: duration)
-        let dips = soundDips(at: windows)
-        // ⚠️ HERE, AND NOT EARLIER: every composition-level `scaleTimeRange` has
-        // run in `insertPieces`, and a song inserted before one would be sped up
-        // or slowed down with the rated piece it overlaps.
+        let windows = inserted.cuts
+        let steps = soundSteps(of: inserted.laid, cuts: windows, audio: inserted.audio)
+        // ⚠️ HERE, AND NOT EARLIER: every piece is laid and scaled, and a song
+        // is laid over the result's whole length, which is only known now.
         let music = try await applySoundtrack(
-            soundtrack, to: composition, original: inserted.audio, dips: dips
+            soundtrack, to: composition, originals: inserted.audio, steps: steps
         )
 
         let looks = kept.map(\.look)
@@ -502,15 +649,13 @@ public struct VideoExporter: Sendable {
                 sound: music?.layout
             )
         }
-        let laneB = try heldSides(of: windows, pieces: kept, from: source, in: composition)
         let video = try composed(
-            laneA: inserted.video.trackID, laneB: laneB, drawing: drawing,
-            pieces: zip(inserted.starts, looks).map { Piece(start: $0, look: $1) },
-            windows: windows, duration: duration
+            pieces: inserted.laid.map { ($0, inserted.video[$0.lane].trackID) },
+            drawing: drawing, windows: windows, duration: duration
         )
         return Arrangement(
             asset: composition, videoComposition: video,
-            audioMix: music?.mix ?? inserted.audio.flatMap { soundMix(on: $0, dips: dips) },
+            audioMix: music?.mix ?? soundMix(steps: steps),
             windows: windows.map { $0.opens.seconds...$0.closes.seconds },
             videoTracks: composition.tracks(withMediaType: .video), live: live,
             sound: music?.layout
@@ -527,59 +672,6 @@ public struct VideoExporter: Sendable {
             return VideoExportSegment(start: range.start.seconds, end: range.end.seconds)
         }
         return VideoExportSegment(start: 0, end: try await asset.load(.duration).seconds)
-    }
-
-    /// One transition, on the composition's own clock.
-    private struct Cut {
-        let kind: VideoTransitionKind
-        let at: CMTime
-        let half: CMTime
-        /// Whether both pieces play as shot — the only place the sound may ramp.
-        let asShotBothSides: Bool
-        /// Which pieces meet here.
-        let outgoing: Int
-
-        var opens: CMTime { at - half }
-        var closes: CMTime { at + half }
-    }
-
-    /// Where every transition draws.
-    ///
-    /// ⚠️ **MEASURED ON THE COMPOSITION'S OWN LENGTHS, NOT ON THE PLAN'S.** The
-    /// plan's seconds and the composition's can differ by a tick
-    /// (`CMTime(seconds:)` truncates — 0.6 is 359/600), and two windows around
-    /// one piece must never cross. Asked of the composition, a half is
-    /// `floor(length·600 / 2)` ticks, which is never more than half of the
-    /// length's whole ticks — `floor(y/2) == floor(floor(y)/2)` — so the two
-    /// halves around a piece fit inside it without a second clamp.
-    private static func cuts(
-        of pieces: [VideoExportSegment], starts: [CMTime], duration: CMTime
-    ) -> [Cut] {
-        guard pieces.count > 1, starts.count == pieces.count else { return [] }
-        var made: [Cut] = []
-        for index in 0..<(pieces.count - 1) {
-            guard let kind = pieces[index].transitionOut else { continue }
-            let opens = starts[index]
-            let at = starts[index + 1]
-            let closes = index + 2 < starts.count ? starts[index + 2] : duration
-            let outgoing = at - opens
-            let incoming = closes - at
-            let half = transitionHalf(
-                kind, seconds: pieces[index].transitionSeconds,
-                outgoingPlayedSeconds: outgoing.seconds, incomingPlayedSeconds: incoming.seconds
-            )
-            // ⚠️ NO RE-CLAMP ON THE TICKS: `transitionHalf` already floors to
-            // the 1/600 grid, and flooring again here once made a window a tick
-            // shorter than the one the track lights.
-            let ticks = Int64((half * 600).rounded(.down))
-            guard ticks >= 20 else { continue }
-            made.append(Cut(
-                kind: kind, at: at, half: CMTime(value: ticks, timescale: 600),
-                asShotBothSides: pieces[index].isAsShot && pieces[index + 1].isAsShot,
-                outgoing: index
-            ))
-        }
-        return made
     }
 
     /// How far the zoom goes at the cut.
@@ -641,100 +733,6 @@ public struct VideoExporter: Sendable {
         }
     }
 
-    /// Lays the OTHER side of every two-picture cut on a second lane: the
-    /// incoming piece's first frame, held, from the window's opening to the cut;
-    /// the outgoing piece's last frame, held, from the cut to the window's close.
-    /// The arrangement's own lane is not touched.
-    ///
-    /// ⚠️ **FROM THE TWO PIECES, NEVER FROM THE FILE AROUND THEM.** This used to
-    /// read the other side from the film just past the pieces — what LED INTO
-    /// the incoming piece and what FOLLOWED the outgoing one, the "handles" a
-    /// desktop editor reads. On a split, which is how every cut in this editor is
-    /// made, the film leading into the right half IS the end of the left half:
-    /// both lanes carried the same pictures, and a dissolve, a swipe, a swirl or
-    /// a fold drew a picture over itself — every frame of their windows
-    /// identical to the plain cut's, 0 on every channel, reported as *"la
-    /// plupart des transitions entre segments ne fonctionnent pas"*. And after a
-    /// trim or a re-order the handles showed film the author had cut AWAY.
-    ///
-    /// ⚠️ **THE PICTURE THAT DOMINATES IS THE ARRANGEMENT, SO IT IS IN SYNC WITH
-    /// ITS SOUND.** Lane A plays the outgoing piece up to the cut and the
-    /// incoming one from it, at their rates, exactly as the sound does; lane B
-    /// only ever carries the side that is fading — in before the cut, out after
-    /// it — and the two swap roles at the cut (`VideoCompositor.joined`).
-    /// Measured, a version that borrowed MOVING film from the two pieces instead
-    /// (each side eased across the whole window, since a fixed length gives each
-    /// only half a window of film) put the outgoing picture `L·u²` behind its
-    /// words and the incoming one `L(1−u)²` ahead of them — a quarter of the
-    /// window's half at the cut: 62ms at the standard half second, 250ms at two
-    /// seconds, where a talking head goes visibly out of sync from about 45.
-    ///
-    /// ⚠️ **HELD, BECAUSE NOTHING ELSE CAN MEET THE CUT.** The fading side must be
-    /// the dominant side's own frame at the cut, or the picture jumps there while
-    /// half of it is that side; and the only kept film that ENDS on the incoming
-    /// piece's first frame, or starts on the outgoing piece's last, is that
-    /// frame. So on a split the two pictures are as far apart as the moment is
-    /// from the cut — half a window where it opens and closes, nothing at the
-    /// cut — and a still fading in or out is what an editor with no handles
-    /// draws.
-    ///
-    /// ⚠️ **A TICK OF FILM, NOT A FRAME.** Held over a whole frame's duration, a
-    /// piece that does not start on a frame boundary shows the frame AFTER its
-    /// first part way through the hold, which is not the frame lane A shows at
-    /// the cut. One tick at the piece's edge lies inside the very frame lane A
-    /// shows there.
-    ///
-    /// ⚠️ **SCALED ON THIS TRACK ONLY, AND AFTER THE ARRANGEMENT IS BUILT.** The
-    /// lane has no sound, so a track-level scale drifts nothing, and the
-    /// composition-level scales that set the pieces' rates have all been applied
-    /// already — one issued now would stretch these inserts too.
-    private static func heldSides(
-        of windows: [Cut], pieces: [VideoExportSegment], from source: AVAssetTrack,
-        in composition: AVMutableComposition
-    ) throws -> CMPersistentTrackID? {
-        let crossings = windows.filter(\.kind.needsBothPictures)
-        guard !crossings.isEmpty else { return nil }
-        guard let lane = composition.addMutableTrack(
-            withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
-        ) else {
-            throw VideoExportError.exportFailed
-        }
-        let tick = CMTime(value: 1, timescale: 600)
-        func time(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 600) }
-        func hold(_ film: CMTimeRange, over target: CMTimeRange) throws {
-            if lane.timeRange.end < target.start {
-                lane.insertEmptyTimeRange(CMTimeRange(start: lane.timeRange.end, end: target.start))
-            }
-            try lane.insertTimeRange(film, of: source, at: target.start)
-            lane.scaleTimeRange(
-                CMTimeRange(start: target.start, duration: film.duration), toDuration: target.duration
-            )
-        }
-        do {
-            for cut in crossings {
-                // Before the cut: the incoming piece's first frame.
-                try hold(
-                    CMTimeRange(start: time(pieces[cut.outgoing + 1].start), duration: tick),
-                    over: CMTimeRange(start: cut.opens, end: cut.at)
-                )
-                // After the cut: the outgoing piece's last frame.
-                try hold(
-                    CMTimeRange(start: time(pieces[cut.outgoing].end) - tick, duration: tick),
-                    over: CMTimeRange(start: cut.at, end: cut.closes)
-                )
-            }
-        } catch {
-            throw VideoExportError.exportFailed
-        }
-        return lane.trackID
-    }
-
-    /// Where a piece starts on the composition's clock, and the look it wears.
-    private struct Piece {
-        let start: CMTime
-        let look: LookPreset?
-    }
-
     /// Everything drawn over the film that does not change from one stretch
     /// to the next.
     private struct Drawing {
@@ -747,59 +745,57 @@ public struct VideoExporter: Sendable {
     /// The video composition: the picture upright, each piece in its look,
     /// every transition drawn and the finish over it all, by `VideoCompositor`.
     ///
-    /// ⚠️ **ONE INSTRUCTION PER STRETCH, SPLIT AT EVERY PIECE BOUNDARY AND AT
-    /// EVERY WINDOW'S EDGES.** A stretch carries one look per lane, so one that
-    /// ran across two pieces would dress the second in the first's look. A
-    /// window is split at its cut by the same rule — the cut IS a boundary —
-    /// which is also where the lanes swap roles, and where AVFoundation is sure
-    /// to hand over the frames of the pieces either side.
+    /// ⚠️ **ONE INSTRUCTION PER STRETCH, SPLIT WHEREVER A PIECE STARTS OR ENDS
+    /// AND AT THE MIDDLE OF EVERY WINDOW.** A stretch carries one look per lane,
+    /// so one that ran across two pieces would dress the second in the first's
+    /// look. A window opens where the incoming piece starts and closes where the
+    /// outgoing one ends, so those marks are its edges; its middle is where a dip
+    /// or a zoom changes piece.
+    ///
+    /// ⚠️ **INSIDE A WINDOW LANE A IS THE OUTGOING PIECE AND LANE B THE INCOMING
+    /// ONE, EACH ON ITS OWN TRACK AND AT ITS OWN PACE.** Outside one, lane A is
+    /// whichever track the one playing piece is on.
     private static func composed(
-        laneA: CMPersistentTrackID, laneB: CMPersistentTrackID?, drawing: Drawing,
-        pieces: [Piece], windows: [Cut], duration: CMTime
+        pieces: [(laid: Laid, track: CMPersistentTrackID)], drawing: Drawing, windows: [Cut], duration: CMTime
     ) throws -> AVVideoComposition {
         let canvas = drawing.canvas
         // ⚠️ POSITIVE OR NOTHING: an item handed a zero render size or frame
         // duration raises an Objective-C exception rather than an error.
-        guard canvas.size.width > 0, canvas.size.height > 0, duration > .zero else {
+        guard canvas.size.width > 0, canvas.size.height > 0, duration > .zero, !pieces.isEmpty else {
             throw VideoExportError.exportFailed
-        }
-        func look(_ index: Int) -> LookPreset? {
-            pieces.indices.contains(index) ? pieces[index].look : nil
         }
         func instruction(from start: CMTime, to end: CMTime) -> VideoCompositorInstruction {
             var scene = VideoCompositionScene(
                 orientation: canvas.orientation, uprightSize: canvas.upright, renderSize: canvas.size,
                 finish: drawing.finish
             )
-            var other: CMPersistentTrackID?
+            let laneA: CMPersistentTrackID
+            var laneB: CMPersistentTrackID?
             if let cut = windows.first(where: { $0.opens <= start && start < $0.closes }) {
-                let beforeCut = start < cut.at
-                let outgoing = look(cut.outgoing)
-                let incoming = look(cut.outgoing + 1)
+                let outgoing = pieces[cut.outgoing]
+                let incoming = pieces[cut.outgoing + 1]
                 scene.transition = .init(
                     kind: cut.kind, opens: cut.opens.seconds, cut: cut.at.seconds, closes: cut.closes.seconds
                 )
-                // ⚠️ THE LANES SWAP PIECES AT THE CUT, AND THEIR LOOKS WITH
-                // THEM: lane A is the arrangement, lane B the other piece's held
-                // frame (`heldSides`).
-                scene.looks.a = beforeCut ? outgoing : incoming
-                if cut.kind.needsBothPictures {
-                    other = laneB
-                    scene.looks.b = beforeCut ? incoming : outgoing
-                }
+                laneA = outgoing.track
+                laneB = incoming.track
+                scene.looks.a = outgoing.laid.look
+                scene.looks.b = incoming.laid.look
             } else {
-                scene.looks.a = look(pieces.lastIndex { $0.start <= start } ?? 0)
+                let playing = pieces.last { $0.laid.start <= start } ?? pieces[0]
+                laneA = playing.track
+                scene.looks.a = playing.laid.look
             }
             return VideoCompositorInstruction(
-                timeRange: CMTimeRange(start: start, end: end), laneA: laneA, laneB: other,
+                timeRange: CMTimeRange(start: start, end: end), laneA: laneA, laneB: laneB,
                 scene: scene, artwork: drawing.artwork, live: drawing.live
             )
         }
         // ⚠️ THE MARKS TILE [0, duration] WITH NO GAP AND NO OVERLAP: every
         // stretch starts where the last one ended, on the composition's clock.
+        let edges = pieces.flatMap { [$0.laid.start, $0.laid.end] } + windows.map(\.at)
         var marks: [CMTime] = []
-        for mark in ([.zero, duration] + pieces.map(\.start) + windows.flatMap { [$0.opens, $0.closes] })
-            .filter({ $0 >= .zero && $0 <= duration }).sorted()
+        for mark in ([.zero, duration] + edges).filter({ $0 >= .zero && $0 <= duration }).sorted()
         where marks.last != mark {
             marks.append(mark)
         }
@@ -823,52 +819,100 @@ public struct VideoExporter: Sendable {
             .concatenating(CGAffineTransform(translationX: centre.x, y: centre.y))
     }
 
-    /// Where the film's own sound dips to silence and back: at a dip to black
-    /// or white, from the window's opening down to the cut and back up to its
-    /// close, on the composition's clock.
+    /// One change to the level of the film's own sound, on one of its lanes —
+    /// relative to the level the author left it at, 0...1.
     ///
-    /// ⚠️ **A VALUE, SO THE SONG'S MIX CAN REBUILD THE SAME RAMPS** at the level
-    /// the author left the original sound at, rather than inventing its own.
-    struct SoundDip: Sendable, Equatable {
-        let opens: CMTime
-        let at: CMTime
-        let closes: CMTime
+    /// ⚠️ **A VALUE, SO THE SONG'S MIX CAN REBUILD THE SAME AUTOMATION** at the
+    /// level the author left the original sound at, rather than inventing its
+    /// own (`SoundtrackLayout.mix`).
+    struct SoundStep: Sendable, Equatable {
+        enum Shape: Sendable, Equatable {
+            /// From `from` to `to` across `range`.
+            case ramp(from: Float, to: Float, range: CMTimeRange)
+            /// `level` from `at` on.
+            case level(Float, at: CMTime)
+        }
+
+        let track: CMPersistentTrackID
+        let shape: Shape
     }
 
-    /// The sound follows a dip down and back up; a zoom leaves it alone.
+    /// How the film's own sound crosses each transition.
+    ///
+    /// ⚠️ **ACROSS THE WHOLE OVERLAP, AND WITH THE PICTURE.** Most kinds cross
+    /// the two sounds over the window, the outgoing one down as the incoming one
+    /// comes up; a dip takes the outgoing sound down to silence by the middle and
+    /// brings the incoming one up from it, as its picture goes through black or
+    /// white.
     ///
     /// ⚠️ **NEVER ACROSS A PIECE THAT IS NOT AS SHOT — A RAMP THERE CAN FREEZE THE
     /// EXPORT FOR GOOD.** Measured on the iOS 26.5 simulator: a volume ramp at
     /// the start of a piece played at 3x or 4x left `AVAssetExportSession` with
-    /// every remaker thread waiting and no error, once in twelve exports (the
-    /// offline mixer logs "AppendRateChange … previously did a conversion" as it
-    /// goes); ninety exports of the same ramps between pieces at 1x all finished.
-    /// A publish that never ends is worse than a dip heard as a plain cut, so a
-    /// cut touching a rated piece dips its picture only.
-    private static func soundDips(at windows: [Cut]) -> [SoundDip] {
-        windows
-            .filter { ($0.kind == .dipToBlack || $0.kind == .dipToWhite) && $0.asShotBothSides }
-            .map { SoundDip(opens: $0.opens, at: $0.at, closes: $0.closes) }
+    /// every remaker thread waiting and no error, once in twelve exports. Such a
+    /// cut was never laid to cross (`insertPieces` cuts the two sounds at its
+    /// middle), so it has no step here.
+    ///
+    /// ⚠️ **THE SECOND LANE IS SILENCED BEFORE ITS FIRST PIECE, NEVER ON IT.** A
+    /// piece that arrives through a crossing must start from silence, and a
+    /// ramp that opens on a track's very first sample does not do that: until
+    /// the ramp takes hold, a track plays at the level it was left at — full,
+    /// on a lane nothing has set yet. Measured: the incoming piece's first
+    /// 25ms at full volume, a burst under every dissolve that put the heard
+    /// pitch 80ms off its picture. So the lane is set to silence half way
+    /// through the empty stretch before it is first heard: away from any
+    /// piece's first sample, where the freeze was measured. After that a lane
+    /// silenced by crossing out of it is only ever re-entered by crossing back
+    /// into it, which ramps it up — pieces as shot change lane only where they
+    /// cross (`insertPieces`) — and a rated piece's own track is never set at
+    /// all, so no other level is ever needed.
+    private static func soundSteps(
+        of laid: [Laid], cuts: [Cut], audio: [AVMutableCompositionTrack]
+    ) -> [SoundStep] {
+        guard !audio.isEmpty else { return [] }
+        var steps: [SoundStep] = []
+        var heard = [Bool](repeating: false, count: audio.count)
+        for (index, piece) in laid.enumerated() where audio.indices.contains(piece.soundLane) {
+            let lane = piece.soundLane
+            let track = audio[lane].trackID
+            defer { heard[lane] = true }
+            let arriving = cuts.first { $0.outgoing + 1 == index }
+            let leaving = cuts.first { $0.outgoing == index }
+            if let cut = arriving, cut.crossfades {
+                if !heard[lane] {
+                    steps.append(SoundStep(track: track, shape: .level(
+                        0, at: CMTimeMultiplyByRatio(cut.opens, multiplier: 1, divisor: 2)
+                    )))
+                }
+                if cut.kind.dipsTheSound {
+                    steps.append(SoundStep(track: track, shape: .ramp(
+                        from: 0, to: 0, range: CMTimeRange(start: cut.opens, end: cut.at)
+                    )))
+                    steps.append(SoundStep(track: track, shape: .ramp(
+                        from: 0, to: 1, range: CMTimeRange(start: cut.at, end: cut.closes)
+                    )))
+                } else {
+                    steps.append(SoundStep(track: track, shape: .ramp(
+                        from: 0, to: 1, range: CMTimeRange(start: cut.opens, end: cut.closes)
+                    )))
+                }
+            }
+            if let cut = leaving, cut.crossfades {
+                steps.append(SoundStep(track: track, shape: .ramp(
+                    from: 1, to: 0,
+                    range: CMTimeRange(start: cut.opens, end: cut.kind.dipsTheSound ? cut.at : cut.closes)
+                )))
+            }
+        }
+        return steps
     }
 
-    /// The film's own sound, dipping where `dips` say; nil when it never dips.
-    private static func soundMix(
-        on track: AVMutableCompositionTrack, dips: [SoundDip]
-    ) -> AVAudioMix? {
-        guard !dips.isEmpty else { return nil }
-        let parameters = AVMutableAudioMixInputParameters(track: track)
-        for dip in dips {
-            parameters.setVolumeRamp(
-                fromStartVolume: 1, toEndVolume: 0,
-                timeRange: CMTimeRange(start: dip.opens, end: dip.at)
-            )
-            parameters.setVolumeRamp(
-                fromStartVolume: 0, toEndVolume: 1,
-                timeRange: CMTimeRange(start: dip.at, end: dip.closes)
-            )
-        }
+    /// The film's own sound, following `steps`; nil when nothing moves it.
+    private static func soundMix(steps: [SoundStep]) -> AVAudioMix? {
+        guard !steps.isEmpty else { return nil }
         let mix = AVMutableAudioMix()
-        mix.inputParameters = [parameters]
+        mix.inputParameters = SoundStep.parameters(
+            steps, tracks: Array(Set(steps.map(\.track))).sorted(), level: 1, stated: false
+        )
         return mix
     }
 
@@ -949,6 +993,15 @@ public struct VideoExporter: Sendable {
                 start: CMTime(seconds: only.start, preferredTimescale: 600),
                 end: CMTime(seconds: only.end, preferredTimescale: 600)
             )
+        } else if let arranged {
+            // ⚠️ **A COMPOSITION IS BOUND TO ITS OWN LENGTH — WHICH CUTS NONE OF
+            // ITS FILM, AND ENDS THE SOUND WITH THE PICTURES.** The time-pitch
+            // pass hands a rated piece's sound back with a tail past the end of
+            // its edit, and unbound the writer kept it: a 0.5x piece ending the
+            // film published 160–165ms of silence after the last picture (and a
+            // plain rated export 35–55ms), which a looping feed holds on a still
+            // frame every time round.
+            session.timeRange = CMTimeRange(start: .zero, duration: try await arranged.asset.load(.duration))
         }
 
         await session.export()

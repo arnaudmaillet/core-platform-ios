@@ -3071,8 +3071,16 @@ final class MediaEditorViewController: UIViewController {
         guard after != before else { return }
         change(id) { $0.timeline = after }
         timelineTrack.configure(duration: trackSeconds, timeline: after)
-        // A cut leaves the same film on the same clock: the preview's record of
-        // what it plays changes, and nothing it shows does.
+        // ⚠️ **THE FRAME UNDER THE NEEDLE STAYS THERE — AND A CUT CAN MOVE THE
+        // CLOCK.** A transition overlaps its pieces by at most half of each, so
+        // the half a cut leaves next to one can shorten that overlap, and every
+        // piece from there on starts later: a 1.5s dissolve into a piece cut
+        // 1.5s in overlaps by 0.75s, and the needle, left where it was, stood
+        // 0.75s of film back from the cut, with the new cut drawn 45pt away and
+        // the canvas jumping back to it. Found by review. The moment read before
+        // the cut is put back under the needle, as a rate does (`chooseRate`):
+        // the left half keeps the piece's index, and the moment is its end.
+        timelineTrack.bringUnderTheNeedle(moment)
         refreshPreview()
         // ⚠️ **THE CUT HANDS BACK THE LEFT HALF, HELD — AND LEAVING NOTHING HELD
         // WAS THE DEFECT.** The handles exist only around the piece that is held
