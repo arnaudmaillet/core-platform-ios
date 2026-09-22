@@ -31,6 +31,9 @@ final class ConversationListViewController: UIViewController {
     /// once, until it takes.
     private var contentObservation: NSKeyValueObservation?
     private var wantsRestPastHeader = false
+    /// Set by `willEndDragging` when a slow release was redirected to rest —
+    /// see `flingVelocity`.
+    private var releaseNeedsOwnTravel = false
 
     private func restPastLeadingHeaderWhenContentLands() {
         wantsRestPastHeader = true
@@ -563,29 +566,45 @@ extension ConversationListViewController: UITableViewDelegate {
     ) {
         // Judged on UIKit's own projected landing, so a fling from deep in the
         // list that would run out above the first row is redirected too.
+        releaseNeedsOwnTravel = false
         if let target = tableView.restingOffset(
             ifLandingAbove: targetContentOffset.pointee.y, unlessRefreshing: refreshControl
         ) {
             targetContentOffset.pointee.y = target
-            // ⚠️ AND THE BOUNCE IS OFF FOR THIS ONE DECELERATION. Given a
+            // ⚠️ ONLY A FLING RIDES UIKIT'S DECELERATION TO THAT TARGET. Its
+            // duration is set by the release velocity, and a finger lifted
+            // still after a pull has none — the list crawled home over three
+            // seconds, filmed. A slow release gets the list's own animated
+            // scroll instead (`didEndDragging`), which has a fixed duration;
+            // the target is still redirected so UIKit plans no bounce first.
+            let isFling = abs(velocity.y) >= Self.flingVelocity
+            releaseNeedsOwnTravel = !isFling
+            // ⚠️ AND THE BOUNCE IS OFF FOR A FLING'S DECELERATION. Given a
             // target inside the content, a fast fling still carried past the
             // top of it and sprang back — far enough to arm the refresh
             // control, which a fling never did before (filmed twice). With
             // nothing to bounce into, the deceleration runs out on the
             // target. Restored the moment the scroll is over, or a finger
             // comes back.
-            scrollView.bounces = false
+            if isFling { scrollView.bounces = false }
         }
     }
+
+    /// Points per millisecond at release, below which a redirected landing
+    /// travels on the list's own clock rather than UIKit's deceleration.
+    private static let flingVelocity: CGFloat = 1.5
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         scrollView.bounces = true
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        // A release that will not decelerate has no bounce to land: snap.
-        if !decelerate {
+        // A release that will not decelerate has no bounce to land, and a
+        // slow release whose landing was redirected must not crawl: both
+        // travel on the list's own clock.
+        if !decelerate || releaseNeedsOwnTravel {
             scrollView.bounces = true
+            releaseNeedsOwnTravel = false
             tableView.snapPastLeadingHeader(unlessRefreshing: refreshControl)
         }
     }
