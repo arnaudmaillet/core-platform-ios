@@ -394,12 +394,13 @@ final class MediaPickerViewController: UIViewController {
     /// in at index 0 so the tray, the empty state and the spinner stay above it.
     private func configurePager(for albums: [MediaLibraryAlbum], bar: PagedTabBar) {
         pages = albums.map { _ in makePage() }
-        // The album runs up to Cancel / Drafts / Next with nothing drawn between
-        // them — the same bare header as every other screen. (It never had a
-        // fade here on either system; asked for `.soft`, iOS 27 laid a heavy
-        // blur over the top rows, which is why this pager once opted out of the
-        // style. Hidden, there is nothing to opt out of.)
-        let pager = HorizontalPagerView(pages: pages, initialIndex: 0)
+        // ⚠️ THE ONE PAGER THAT LEAVES ITS TOP EDGE EFFECT ALONE. The album
+        // has never drawn one under Cancel / Drafts / Next on either system, so
+        // there is nothing to hide — and hiding it would read `topEdgeEffect`
+        // at construction, the access pattern that stalled a headless CI
+        // process for ~64s once (`prefersClearTopEdge`'s caveat). The album
+        // pages say the same (`MediaAlbumPageView.configureGrid`).
+        let pager = HorizontalPagerView(pages: pages, initialIndex: 0, prefersClearTopEdge: false)
         self.pager = pager
         // ⚠️ **`pin(to:)` WOULD UNDO THE LINE ABOVE IT.** That helper calls
         // `parent.addSubview(self)` unconditionally, and `addSubview` MOVES a

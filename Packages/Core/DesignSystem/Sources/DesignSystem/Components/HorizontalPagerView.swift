@@ -71,7 +71,11 @@ public final class HorizontalPagerView: UIView {
     /// hand UIKit a change it has to react to sixty times a second.
     private weak var publishedScroller: UIScrollView?
 
-    public init(pages: [UIView], initialIndex: Int = 0) {
+    /// - Parameter prefersClearTopEdge: whether the pager hides the system's
+    ///   edge effect under the header over it (`UIScrollView.prefersClearTopEdge`).
+    ///   True for every host but one: the media picker leaves its effect
+    ///   alone, and says why where it builds its pager.
+    public init(pages: [UIView], initialIndex: Int = 0, prefersClearTopEdge: Bool = true) {
         self.pages = pages
         let start = pages.indices.contains(initialIndex) ? initialIndex : 0
         activeIndex = start
@@ -87,7 +91,7 @@ public final class HorizontalPagerView: UIView {
         // header too, and its OWN top edge effect is drawn: with only the pages
         // hidden, the pager's band still cut the header off (measured on the
         // Messages inbox and For You). See `prefersClearTopEdge`.
-        scrollView.prefersClearTopEdge()
+        if prefersClearTopEdge { scrollView.prefersClearTopEdge() }
         scrollView.contentInsetAdjustmentBehavior = .never
         // Rows must highlight the instant a finger lands, exactly as they do
         // in a plain table: without this the enclosing scroll view holds

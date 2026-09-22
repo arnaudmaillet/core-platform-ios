@@ -50,4 +50,11 @@ struct HorizontalPagerClearTopEdgeTests {
         let pager = HorizontalPagerView(pages: [UIView(), UIView()])
         #expect(pager.pagingScrollView.topEdgeEffect.isHidden)
     }
+
+    /// The media picker's opt-out must really leave the effect alone, or the
+    /// parameter is one that does nothing.
+    @Test func aPagerThatOptsOutLeavesTheEffectAlone() {
+        let pager = HorizontalPagerView(pages: [UIView(), UIView()], prefersClearTopEdge: false)
+        #expect(!pager.pagingScrollView.topEdgeEffect.isHidden)
+    }
 }

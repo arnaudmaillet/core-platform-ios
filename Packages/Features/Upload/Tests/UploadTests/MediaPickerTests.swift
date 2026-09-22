@@ -279,19 +279,20 @@ struct MediaPickerTests {
         #expect(bar.badgeTint == .systemBlue)
     }
 
-    /// The album and the pager over it hide the system's top edge effect like
-    /// every other list under a header. This screen once opted OUT of the `.soft`
-    /// style — it never had a fade under Cancel / Drafts / Next, and asked for
-    /// `.soft` iOS 27 laid a heavy blur over its top rows (measured) — but hidden
-    /// draws nothing on either system, so there is nothing left to opt out of.
-    @Test func theAlbumHidesTheSystemsTopEdge() async throws {
+    /// ⚠️ THE ONE SCREEN THAT LEAVES ITS TOP EDGE EFFECT ALONE. Every other
+    /// list under a header hides it; the picker's album never drew one under
+    /// its bar on either system, so there is nothing to hide — and the hide
+    /// reads `topEdgeEffect` in a view initialiser, the access measured
+    /// stalling a headless CI process. Pinned so a sweep that "fixes" every
+    /// scroll view does not quietly touch this one.
+    @Test func theAlbumLeavesItsTopEdgeAlone() async throws {
         let screen = try await open(Self.library(photos: 7, videos: 3))
         let pager = try #require(screen.picker.debugPager)
-        #expect(pager.pagingScrollView.topEdgeEffect.isHidden, "the pager")
+        #expect(!pager.pagingScrollView.topEdgeEffect.isHidden, "the pager")
 
         let page = MediaAlbumPageView()
         let grid = try #require(page.subviews.compactMap { $0 as? UICollectionView }.first)
-        #expect(grid.topEdgeEffect.isHidden, "each album's grid")
+        #expect(!grid.topEdgeEffect.isHidden, "each album's grid")
     }
 
     /// The albums are TABS: one page each, and the strip selects between them.

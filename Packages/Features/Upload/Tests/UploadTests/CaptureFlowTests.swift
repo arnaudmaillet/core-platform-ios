@@ -1047,7 +1047,14 @@ struct CaptureFlowTests {
         try #require(screen.navigation.topViewController === screen.camera)
         #expect(screen.camera.openOption == .filters, "the band is still open")
         let before = screen.camera.debugCardRefreshes
-        try await Task.sleep(for: .seconds(1.6))
+        // ⚠️ SETTLED, NOT SLEPT. The cards refresh on a 0.5s timer and each
+        // refresh is an asynchronous snapshot, so "two more within 1.6s" holds
+        // only on an idle machine: on the CI runner, with 68 suites sharing the
+        // process, the second one landed late and this read 3 against 4 —
+        // twice, on develop (2026-09-19) and on an unrelated PR. What the test
+        // is about is that the timer RUNS again after the return, and a wait
+        // for the count says exactly that without betting on the cadence.
+        try await settle { screen.camera.debugCardRefreshes >= before + 2 }
         #expect(screen.camera.debugCardRefreshes >= before + 2, "the cards are redrawn from the live frame")
     }
 
