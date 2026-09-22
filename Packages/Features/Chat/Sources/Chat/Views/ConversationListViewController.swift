@@ -47,9 +47,15 @@ final class ConversationListViewController: UIViewController {
         else { return }
         tableView.padToRestPastLeadingHeader()
         guard wantsRestPastHeader else { return }
-        let before = tableView.contentOffset.y
         tableView.restPastLeadingHeader()
-        if tableView.contentOffset.y > before + 0.5 { wantsRestPastHeader = false }
+        // ⚠️ CLEARED ON ARRIVAL, NOT ON MOVEMENT. This used to clear only when
+        // the offset had moved, and a rest that was applied onto a list
+        // already sitting at rest left the flag set — after which EVERY
+        // content-size change (a self-sizing row settling mid-scroll, the
+        // mock's timestamps ticking) re-applied the rest and the list snapped
+        // back to its top under the finger. Filmed as a list that would not
+        // scroll at all.
+        if tableView.isRestingPastLeadingHeader { wantsRestPastHeader = false }
     }
 
     override func viewDidLayoutSubviews() {
@@ -555,17 +561,37 @@ extension ConversationListViewController: UITableViewDelegate {
         _ scrollView: UIScrollView, withVelocity velocity: CGPoint,
         targetContentOffset: UnsafeMutablePointer<CGPoint>
     ) {
-        if let target = tableView.restingOffsetIfAboveFirstRow(unlessRefreshing: refreshControl) {
+        // Judged on UIKit's own projected landing, so a fling from deep in the
+        // list that would run out above the first row is redirected too.
+        if let target = tableView.restingOffset(
+            ifLandingAbove: targetContentOffset.pointee.y, unlessRefreshing: refreshControl
+        ) {
             targetContentOffset.pointee.y = target
+            // ⚠️ AND THE BOUNCE IS OFF FOR THIS ONE DECELERATION. Given a
+            // target inside the content, a fast fling still carried past the
+            // top of it and sprang back — far enough to arm the refresh
+            // control, which a fling never did before (filmed twice). With
+            // nothing to bounce into, the deceleration runs out on the
+            // target. Restored the moment the scroll is over, or a finger
+            // comes back.
+            scrollView.bounces = false
         }
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        scrollView.bounces = true
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         // A release that will not decelerate has no bounce to land: snap.
-        if !decelerate { tableView.snapPastLeadingHeader(unlessRefreshing: refreshControl) }
+        if !decelerate {
+            scrollView.bounces = true
+            tableView.snapPastLeadingHeader(unlessRefreshing: refreshControl)
+        }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        scrollView.bounces = true
         // A fling from deeper in the list that ran out inside the header band.
         tableView.snapPastLeadingHeader(unlessRefreshing: refreshControl)
     }

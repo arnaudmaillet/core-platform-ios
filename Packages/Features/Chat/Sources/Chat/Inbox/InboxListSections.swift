@@ -151,6 +151,13 @@ extension UITableView {
         scrollFirstRow(ofSection: 0, animated: false)
     }
 
+    /// Whether the list currently sits at that resting position.
+    var isRestingPastLeadingHeader: Bool {
+        guard numberOfSections > 0, numberOfRows(inSection: 0) > 0 else { return false }
+        let rowTop = rectForRow(at: IndexPath(row: 0, section: 0)).minY - adjustedContentInset.top
+        return abs(contentOffset.y - rowTop) < 0.5
+    }
+
     /// ⚠️ A SHORT LIST CANNOT REST PAST ITS HEADER ON ITS OWN. Scrolling is
     /// bounded by the content, and a list that does not fill the screen — the
     /// Requests page, most days — has nowhere to go: the resting offset was
@@ -223,19 +230,29 @@ extension UITableView {
     /// where the finger left the list on purpose, and `endRefreshingAtRest`
     /// brings it home when the refresh is done.
     func snapPastLeadingHeader(unlessRefreshing control: UIRefreshControl?) {
-        guard let target = restingOffsetIfAboveFirstRow(unlessRefreshing: control) else { return }
+        guard let target = restingOffset(ifLandingAbove: contentOffset.y, unlessRefreshing: control)
+        else { return }
         setContentOffset(CGPoint(x: 0, y: target), animated: true)
     }
 
-    /// The resting offset, when the list is currently above its first row and
-    /// no refresh is running — nil otherwise. `willEndDragging` hands this to
-    /// UIKit as the deceleration's target, so the bounce itself lands at rest.
-    func restingOffsetIfAboveFirstRow(unlessRefreshing control: UIRefreshControl?) -> CGFloat? {
+    /// The resting offset, when a scroll that would land at `landing` would
+    /// land above the first row and no refresh is running — nil otherwise.
+    /// `willEndDragging` hands this to UIKit as the deceleration's target, so
+    /// the bounce — or the fling — itself lands at rest.
+    ///
+    /// ⚠️ THE LANDING, NOT THE CURRENT OFFSET. Judged on where the finger left
+    /// the list, a fling from deep in it was left alone: UIKit projected its
+    /// deceleration to the top of the content, bounced there with "New" in
+    /// the flow, and only then did `didEndDecelerating` travel on to rest —
+    /// the same two-step the pull used to have, filmed again from the bottom
+    /// of the list. UIKit's projected target is what says where a fling
+    /// ends, and it is what is redirected.
+    func restingOffset(ifLandingAbove landing: CGFloat, unlessRefreshing control: UIRefreshControl?) -> CGFloat? {
         guard control?.isRefreshing != true else { return nil }
         guard numberOfSections > 0, numberOfRows(inSection: 0) > 0 else { return nil }
         let inset = adjustedContentInset
         let rowTop = rectForRow(at: IndexPath(row: 0, section: 0)).minY - inset.top
-        guard contentOffset.y < rowTop - 0.5 else { return nil }
+        guard landing < rowTop - 0.5 else { return nil }
         let furthest = contentSize.height + inset.bottom - bounds.height
         return max(-inset.top, min(rowTop, furthest))
     }
