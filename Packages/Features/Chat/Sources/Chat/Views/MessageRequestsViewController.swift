@@ -19,20 +19,38 @@ final class MessageRequestsViewController: UIViewController {
     /// after all; a layout pass of this controller's VIEW never came either,
     /// because rows landing inside the table lay out the table, not its
     /// host. `contentSize` is the one thing that changes when they land, so it
-    /// is what is watched — once, and released the moment the offset takes.
-    private var restObservation: NSKeyValueObservation?
+    /// is watched — for the life of the list, because the bottom padding that
+    /// lets a short list rest past its header (`padToRestPastLeadingHeader`)
+    /// has to follow every change of size — and the rest itself is asked for
+    /// once, until it takes.
+    private var contentObservation: NSKeyValueObservation?
+    private var wantsRestPastHeader = false
 
     private func restPastLeadingHeaderWhenContentLands() {
-        restObservation = tableView.observe(\.contentSize, options: [.initial, .new]) { [weak self] table, _ in
-            guard let self, table.bounds.height > 0,
-                  table.numberOfSections > 0, table.numberOfRows(inSection: 0) > 0
-            else { return }
-            let before = table.contentOffset.y
-            table.restPastLeadingHeader()
-            // Took only if the list is long enough to rest past the header at
-            // all; a short list keeps the header in view and keeps watching.
-            if table.contentOffset.y > before + 0.5 { restObservation = nil }
+        wantsRestPastHeader = true
+        guard contentObservation == nil else { return }
+        contentObservation = tableView.observe(\.contentSize, options: [.initial, .new]) { [weak self] _, _ in
+            self?.settleLeadingHeader()
         }
+    }
+
+    /// The padding first, so the rest has somewhere to go.
+    private func settleLeadingHeader() {
+        guard tableView.bounds.height > 0,
+              tableView.numberOfSections > 0, tableView.numberOfRows(inSection: 0) > 0
+        else { return }
+        tableView.padToRestPastLeadingHeader()
+        guard wantsRestPastHeader else { return }
+        let before = tableView.contentOffset.y
+        tableView.restPastLeadingHeader()
+        if tableView.contentOffset.y > before + 0.5 { wantsRestPastHeader = false }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The bounds are the other input to the padding — a page laid out
+        // for the first time, a rotation.
+        if contentObservation != nil { settleLeadingHeader() }
     }
 
     /// See `InboxSurface.pinnedSectionTitle`; kept current by
@@ -175,7 +193,7 @@ final class MessageRequestsViewController: UIViewController {
             tableView.isHidden = true
             statusView.isHidden = true
         case .content(let sections):
-            refreshControl.endRefreshing()
+            tableView.endRefreshingAtRest(refreshControl)
             statusView.isHidden = true
             var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
             if !sections.new.isEmpty {
@@ -400,12 +418,30 @@ extension MessageRequestsViewController: UITableViewDelegate {
     /// that does not refresh snaps past it again (`snapPastLeadingHeader`),
     /// the way a large title snaps shown or hidden. A refresh leaves it shown
     /// until the next scroll, which is what pulling was for.
+    /// ⚠️ THE BOUNCE'S OWN TARGET, not a scroll issued beside it. A
+    /// `setContentOffset(animated:)` at `didEndDragging` ran first and was
+    /// then overrun by UIKit's bounce back to the top of the content, and the
+    /// snap at `didEndDecelerating` made a third motion — filmed at 30fps as
+    /// the header leaving, returning, and leaving again. Handing UIKit the
+    /// resting offset as the deceleration's target makes its one bounce land
+    /// there.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView, withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        if let target = tableView.restingOffsetIfAboveFirstRow(unlessRefreshing: refreshControl) {
+            targetContentOffset.pointee.y = target
+        }
+    }
+
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate { tableView.snapPastLeadingHeader() }
+        // A release that will not decelerate has no bounce to land: snap.
+        if !decelerate { tableView.snapPastLeadingHeader(unlessRefreshing: refreshControl) }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        tableView.snapPastLeadingHeader()
+        // A fling from deeper in the list that ran out inside the header band.
+        tableView.snapPastLeadingHeader(unlessRefreshing: refreshControl)
     }
 }
 

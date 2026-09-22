@@ -151,17 +151,92 @@ extension UITableView {
         scrollFirstRow(ofSection: 0, animated: false)
     }
 
-    /// A scroll that ends INSIDE the first header's band — between the top of
-    /// the content and the first row — snaps past it, the way a large title
-    /// snaps shown or hidden rather than resting half-revealed. A release
-    /// that pulled far enough to refresh is not a scroll end and is left alone.
-    func snapPastLeadingHeader() {
+    /// ⚠️ A SHORT LIST CANNOT REST PAST ITS HEADER ON ITS OWN. Scrolling is
+    /// bounded by the content, and a list that does not fill the screen — the
+    /// Requests page, most days — has nowhere to go: the resting offset was
+    /// clamped back to the top and the header stayed in view, the one page
+    /// opening on a large "New" under a bar that says nothing. This pads the
+    /// bottom inset by exactly the shortfall, so every list can travel the
+    /// header's height; a list that already fills the screen gets nothing.
+    /// Re-read whenever the content size or the bounds change.
+    func padToRestPastLeadingHeader() {
         guard numberOfSections > 0, numberOfRows(inSection: 0) > 0 else { return }
-        let inset = adjustedContentInset
-        let headerTop = rect(forSection: 0).minY - inset.top
-        let rowTop = rectForRow(at: IndexPath(row: 0, section: 0)).minY - inset.top
-        let offset = contentOffset.y
-        guard offset > headerTop - 0.5, offset < rowTop - 0.5 else { return }
+        let headerHeight = rectForRow(at: IndexPath(row: 0, section: 0)).minY - rect(forSection: 0).minY
+        // The system's part of the bottom inset (tab bar, safe area), which
+        // is what the content must clear BEFORE the header's height is added.
+        let systemBottom = adjustedContentInset.bottom - contentInset.bottom
+        let reach = contentSize.height + systemBottom - bounds.height
+        let padding = max(0, headerHeight - reach)
+        guard abs(contentInset.bottom - padding) > 0.5 else { return }
+        contentInset.bottom = padding
+    }
+
+    /// Ends a pull-to-refresh by travelling straight back to the resting
+    /// position — first row under the bar, header out of view.
+    ///
+    /// ⚠️ ONE MOTION, NOT TWO, AND THE CONTROL'S OWN ANIMATION IS THE THING
+    /// IN THE WAY. `endRefreshing()` retracts its inset with an animation of
+    /// its own, and every request made beside it waited that animation out:
+    /// a `setContentOffset(animated:)` in the same turn, then both changes in
+    /// one `UIView.animate` block — filmed at 30fps each time as the list
+    /// coming back to the top of its content, holding there with "New" in
+    /// the flow for ~0.4s, and only then travelling on to "New" in the bar.
+    /// So the retraction is taken WITHOUT animation while the content is held
+    /// exactly where it was drawn (the offset re-stated, so the spinner's
+    /// distance is now plain overscroll), and the one animation that runs is
+    /// the list's own, from there to rest.
+    ///
+    /// ⚠️ AND NOTHING IS ANIMATED WHILE A FINGER IS DOWN. A refresh that ends
+    /// under the finger (the mock's does, in under a second) used to start
+    /// this travel mid-drag; on release UIKit put the content back where the
+    /// finger had it, and the list travelled a second time — filmed as the
+    /// header coming back into view after it had already gone. Under a drag
+    /// only the spinner goes; `snapPastLeadingHeader` makes the one motion
+    /// at the release.
+    func endRefreshingAtRest(_ control: UIRefreshControl) {
+        guard control.isRefreshing else { return }
+        let held = contentOffset
+        UIView.performWithoutAnimation {
+            control.endRefreshing()
+            layoutIfNeeded()
+            contentOffset = held
+        }
+        guard !isTracking, !isDragging else { return }
         scrollFirstRow(ofSection: 0)
+    }
+
+    /// A scroll that ends ABOVE the first row — inside the first header's
+    /// band, or pulled past the top of the content — travels to rest from
+    /// wherever the finger left it, the way a large title snaps shown or
+    /// hidden rather than resting half-revealed.
+    ///
+    /// ⚠️ FROM THE RELEASE, NOT FROM THE BOUNCE'S END. Called only once the
+    /// bounce had settled, this ran as a second motion: the list came back to
+    /// the top of its content, held there ~0.4s with "New" in the flow, and
+    /// only then travelled on — filmed at 30fps, three times, through three
+    /// attempts at the refresh control's retraction that were all beside the
+    /// point (the mock refresh had ended under the finger; what the viewer
+    /// saw was UIKit's own bounce, then this). Asked for at `didEndDragging`,
+    /// the animation replaces the bounce and there is one curve.
+    ///
+    /// Left alone while a refresh is still running: the spinner's inset is
+    /// where the finger left the list on purpose, and `endRefreshingAtRest`
+    /// brings it home when the refresh is done.
+    func snapPastLeadingHeader(unlessRefreshing control: UIRefreshControl?) {
+        guard let target = restingOffsetIfAboveFirstRow(unlessRefreshing: control) else { return }
+        setContentOffset(CGPoint(x: 0, y: target), animated: true)
+    }
+
+    /// The resting offset, when the list is currently above its first row and
+    /// no refresh is running — nil otherwise. `willEndDragging` hands this to
+    /// UIKit as the deceleration's target, so the bounce itself lands at rest.
+    func restingOffsetIfAboveFirstRow(unlessRefreshing control: UIRefreshControl?) -> CGFloat? {
+        guard control?.isRefreshing != true else { return nil }
+        guard numberOfSections > 0, numberOfRows(inSection: 0) > 0 else { return nil }
+        let inset = adjustedContentInset
+        let rowTop = rectForRow(at: IndexPath(row: 0, section: 0)).minY - inset.top
+        guard contentOffset.y < rowTop - 0.5 else { return nil }
+        let furthest = contentSize.height + inset.bottom - bounds.height
+        return max(-inset.top, min(rowTop, furthest))
     }
 }
