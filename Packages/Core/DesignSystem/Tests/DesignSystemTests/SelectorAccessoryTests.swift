@@ -62,16 +62,25 @@ struct SelectorAccessoryTests {
         #expect(widthConstraints.isEmpty, "a width constraint here is how the strip vanishes")
     }
 
-    /// ⚠️ FOUR EQUAL MARGINS, BY CONSTRUCTION. The lens fills its segment when
-    /// the backdrop is suppressed, so the strip's inset IS the selection's
-    /// margin — pinned flush horizontally it touched the container's left and
-    /// right edges while sitting clear of top and bottom.
-    @Test func theStripSitsEquallyInsetOnAllFourSides() {
+    /// ⚠️ **THE STRIP FILLS THE CONTAINER; THE PILL KEEPS THE MARGIN.** The
+    /// strip used to sit 4pt inside the container on every side with its lens
+    /// filling its segment, so that its inset was the selection's margin. The
+    /// pixels at rest were right and the pixels under a scroll were not: the
+    /// viewport ended 4pt inside the glass and a crowded strip clipped its
+    /// titles against an edge nobody could see. Now the strip is the whole of
+    /// the container and the lens stands 4pt inside its own segment — four
+    /// equal margins still, carried by the pill.
+    @Test func theStripFillsTheContainerAndItsPillKeepsFourEqualMargins() {
         let (host, strip) = makeHost()
-        #expect(strip.frame.minX == 4)
-        #expect(strip.frame.minY == 4)
-        #expect(host.bounds.maxX - strip.frame.maxX == 4)
-        #expect(host.bounds.maxY - strip.frame.maxY == 4)
+        #expect(strip.frame == host.bounds, "strip \(strip.frame) in \(host.bounds)")
+
+        guard let lens = strip.debugLensAlignment?.segment else {
+            Issue.record("the strip reported no lens")
+            return
+        }
+        #expect(lens.minX == 4)
+        #expect(lens.minY == 4)
+        #expect(host.bounds.height - lens.maxY == 4)
     }
 
     /// ⚠️ **THE BAR ALWAYS SPANS; ONLY THE SEGMENTS CHANGE.** `fillsWidth` says
@@ -158,11 +167,11 @@ struct SelectorAccessoryTests {
     /// viewer sees; a strip carrying its own backdrop draws a second one.
     @Test func theStripIsBareUnlessAskedForItsOwnGlass() {
         let (_, strip) = makeHost()
-        #expect(strip.suppressesBackdrop)
+        #expect(strip.hosting == .container)
 
         let dressed = PagedTabBar(titles: ["One"], style: .navigationTitle)
         _ = SelectorAccessoryHost(strip: dressed, options: .init(keepsOwnGlass: true))
-        #expect(!dressed.suppressesBackdrop)
+        #expect(dressed.hosting == .standalone)
     }
 
     /// ⚠️ **THE REMOVE IS IDENTITY-CHECKED, AND WITH FOUR HOSTS THAT IS NOT

@@ -247,7 +247,7 @@ struct MediaEditorTrackToolsTests {
 
         choose(Mode.trim, on: screen)
 
-        #expect(screen.editor.debugActionBar.suppressesBackdrop)
+        #expect(screen.editor.debugActionBar.hosting == .platter)
     }
 
     /// ⚠️ **A SYMBOL THAT DOES NOT RESOLVE IS AN EMPTY BUTTON, NOT AN ERROR** —

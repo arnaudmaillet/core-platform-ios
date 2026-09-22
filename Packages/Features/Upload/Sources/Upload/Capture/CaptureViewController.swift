@@ -125,7 +125,7 @@ final class CaptureViewController: UIViewController {
     /// strip (`BottomBarShare`).
     private(set) lazy var closeBar: IconActionBar = {
         let bar = IconActionBar(items: [IconActionBar.Item(symbolName: "xmark", accessibilityLabel: "Close camera")])
-        bar.suppressesBackdrop = true
+        bar.hosting = .platter
         // Red, as asked: the one control on the screen that throws a take away.
         bar.tintColor = .systemRed
         bar.onTap = { [weak self] _ in self?.closeTapped() }
@@ -659,7 +659,7 @@ final class CaptureViewController: UIViewController {
         // margins at the top and the sides. The toolbar supplies the glass, so
         // the bar draws none of its own — the rule `IconSelectorBar` states for
         // any bar that lives in one.
-        selector.suppressesBackdrop = true
+        selector.hosting = .platter
         selector.onSelect = { [weak self] index in self?.optionChosen(index) }
         // ⚠️ A SECOND TAP ON THE CHOSEN ICON PUTS ITS CONTROLS AWAY — the
         // editor's neutral state, asked for in the same words.

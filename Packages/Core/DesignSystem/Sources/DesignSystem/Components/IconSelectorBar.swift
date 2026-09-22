@@ -96,39 +96,79 @@ public final class IconSelectorBar: UIView {
     /// The chosen item, or nil while the bar is neutral.
     public var selection: Int? { isNeutral ? nil : selectedIndex }
 
-    /// The host draws the capsule; this one draws none.
+    /// Who draws the capsule — see `SelectorHosting` for the one rule the three
+    /// selectors share.
     ///
-    /// ⚠️ **SET THIS INSIDE A BAR.** The iOS 26 toolbar and navigation bar
+    /// ⚠️ **`.platter` INSIDE A BAR.** The iOS 26 toolbar and navigation bar
     /// composite every custom view through their own neutral glass platter, so a
     /// control carrying its own backdrop renders as a bubble inside a bubble —
     /// a defect this repository has already shipped once, in the picker's first
-    /// cut. The platter is also 4pt larger than the view it hosts, so the outer
-    /// clearance goes to zero with it: keeping both would double the ring.
-    public var suppressesBackdrop: Bool = false {
+    /// cut. The platter is also 4pt larger than the view it hosts, so the pill's
+    /// clearance inside the view goes to zero with it: keeping both would double
+    /// the ring. What does NOT go to zero is the capsule: it is laid out at the
+    /// platter's size, reaching beyond this view, so the strip scrolls its
+    /// icons right up to the glass the viewer sees.
+    public var hosting: SelectorHosting = .standalone {
         didSet {
-            guard suppressesBackdrop != oldValue else { return }
-            if suppressesBackdrop {
+            guard hosting != oldValue else { return }
+            if !hosting.drawsBackdrop {
                 capsule.effect = nil
             } else if window != nil {
                 materialiseCapsule()
             }
-            rowLeading?.constant = outerInset
-            rowTrailing?.constant = -outerInset
-            invalidateIntrinsicContentSize()
-            setNeedsLayout()
+            applyHosting()
         }
     }
 
-    /// The clearance this view keeps around its own row — nil when something
-    /// else is supplying it.
-    private var outerInset: CGFloat { suppressesBackdrop ? 0 : Metrics.lensInset }
+    /// How far the visible capsule reaches beyond this view, per axis — and so,
+    /// how far inside the capsule the row begins. Measured once the bar is in a
+    /// platter and in a window; the hosting's stated number until then.
+    private var platterOverhang: CGSize?
+    private var overhangX: CGFloat { platterOverhang?.width ?? hosting.overhang }
+    private var overhangY: CGFloat { platterOverhang?.height ?? hosting.overhang }
 
-    /// The pill's own clearance inside its segment — nil when something else is
-    /// supplying it, so the two never stack.
-    private var lensClearance: CGFloat { suppressesBackdrop ? 0 : Metrics.lensInset }
+    /// The pill's own clearance inside its segment: the visible clearance less
+    /// what the ring above and below already supplies, so the two never stack.
+    /// NEGATIVE in a ring deeper than the clearance — the pill then reaches
+    /// past the segment, so that it still stands the same 4pt off the glass.
+    private var lensClearance: CGFloat { Metrics.clearance - overhangY }
+
+    /// Re-states every constant that follows from the hosting and the ring.
+    private func applyHosting() {
+        for (edge, reach) in zip(capsuleEdges, [-overhangX, overhangX, -overhangY, overhangY]) {
+            edge.constant = reach
+        }
+        rowLeading?.constant = overhangX
+        rowTrailing?.constant = -overhangX
+        rowTop?.constant = overhangY
+        rowBottom?.constant = -overhangY
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    /// Takes the platter's real reach once there is one to measure — see
+    /// `SelectorHosting.measuredPlatterOverhang(around:)`. Guarded on change.
+    private func measurePlatterIfHosted() {
+        let measured = hosting == .platter ? SelectorHosting.measuredPlatterOverhang(around: self) : nil
+        if hosting == .platter, window != nil {
+            remeasure.arm { [weak self] in self?.measurePlatterIfHosted() }
+        } else {
+            remeasure.reset()
+        }
+        guard measured != platterOverhang else { return }
+        platterOverhang = measured
+        applyHosting()
+    }
+
+    /// The re-asks that land the platter's true reach — see
+    /// `PlatterRemeasureSchedule` for why one measurement is not enough.
+    private let remeasure = PlatterRemeasureSchedule()
 
     /// The pill's side, which grows to the whole segment when the clearance goes.
     private var lensSide: CGFloat { Metrics.segmentSide - lensClearance * 2 }
+
+    /// The capsule's four edges, whose constants ARE the overhang.
+    private var capsuleEdges: [NSLayoutConstraint] = []
 
     private enum Metrics {
         /// How faint a resting item is drawn — the shape the camera locks.
@@ -136,25 +176,15 @@ public final class IconSelectorBar: UIView {
         /// The square each icon occupies. Stated once for every icon bar in
         /// `IconBarMetrics`, because the action bar sits beside this one.
         static var segmentSide: CGFloat { IconBarMetrics.segmentSide }
-        /// Capsule edge to selection pill.
+        /// Visible capsule edge to selection pill, on every side and every host.
         ///
-        /// ⚠️ **ONE NUMBER GOVERNS BOTH GAPS, AND THAT IS WHY IT IS SMALL.**
-        /// Shrinking this grows the pill by twice as much, which is the trade
-        /// asked for: the pill sits closer to the capsule and the icon gets more
-        /// air inside it. Two numbers here would let the pill drift off centre
-        /// vertically without any arithmetic disagreeing — the shape of the defect
-        /// `PagedTabBar` records from having had 5 horizontally and 4 vertically.
-        static var lensInset: CGFloat { IconBarMetrics.clearance }
-        /// The selection background, when this view draws its own capsule. What
-        /// is left of a segment once the clearance is taken off both sides.
-        ///
-        /// ⚠️ **INSIDE A BAR THE CLEARANCE IS THE PLATTER'S, AND THIS ONE GOES TO
-        /// ZERO.** A toolbar's platter is 4pt larger than the view it hosts, so
-        /// keeping a clearance of our own stacks on top of it: the pill reads 6pt
-        /// off the edge where `PagedTabBar`, which zeroes its own padding for
-        /// exactly this reason, reads 4. Matching the rest of the app is therefore
-        /// not a smaller number picked by eye — it is the same rule.
-        static var lensSide: CGFloat { segmentSide - lensInset * 2 }
+        /// ⚠️ **ONE NUMBER GOVERNS BOTH GAPS.** Two numbers here would let the
+        /// pill drift off centre vertically without any arithmetic disagreeing —
+        /// the shape of the defect `PagedTabBar` records from having had 5
+        /// horizontally and 4 vertically. Inside a platter the number is the
+        /// platter's own, and the pill's clearance INSIDE THIS VIEW is zero —
+        /// see `hosting`.
+        static var clearance: CGFloat { IconBarMetrics.clearance }
         static var interSegmentSpacing: CGFloat { IconBarMetrics.interSegmentSpacing }
         static var capsuleHeight: CGFloat { segmentSide }
         /// How far a finger travels before a press on the pill stops being a tap.
@@ -205,6 +235,8 @@ public final class IconSelectorBar: UIView {
     private var drag: Drag?
     private var rowLeading: NSLayoutConstraint?
     private var rowTrailing: NSLayoutConstraint?
+    private var rowTop: NSLayoutConstraint?
+    private var rowBottom: NSLayoutConstraint?
     private var edgeLink: CADisplayLink?
     private var lastTouchX: CGFloat = 0
 
@@ -258,12 +290,18 @@ public final class IconSelectorBar: UIView {
         row.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(row)
 
-        NSLayoutConstraint.activate([
-            capsule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            capsule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            capsule.topAnchor.constraint(equalTo: topAnchor),
-            capsule.bottomAnchor.constraint(equalTo: bottomAnchor),
-
+        // ⚠️ THE CAPSULE IS THE VISIBLE ONE, NOT THIS VIEW. Inside a platter it
+        // reaches `overhang` beyond every edge, so that its clip — and the
+        // scroll viewport inside it — end where the viewer sees the glass end
+        // rather than 4pt short of it. This view does not clip; the capsule
+        // does, at the visible capsule's own radius.
+        capsuleEdges = [
+            capsule.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -overhangX),
+            capsule.trailingAnchor.constraint(equalTo: trailingAnchor, constant: overhangX),
+            capsule.topAnchor.constraint(equalTo: topAnchor, constant: -overhangY),
+            capsule.bottomAnchor.constraint(equalTo: bottomAnchor, constant: overhangY)
+        ]
+        NSLayoutConstraint.activate(capsuleEdges + [
             scroller.leadingAnchor.constraint(equalTo: capsule.contentView.leadingAnchor),
             scroller.trailingAnchor.constraint(equalTo: capsule.contentView.trailingAnchor),
             scroller.topAnchor.constraint(equalTo: capsule.contentView.topAnchor),
@@ -277,8 +315,8 @@ public final class IconSelectorBar: UIView {
 
             rowLeadingConstraint(),
             rowTrailingConstraint(),
-            row.topAnchor.constraint(equalTo: content.topAnchor),
-            row.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+            rowTopConstraint(),
+            rowBottomConstraint()
         ])
 
         let grab = UILongPressGestureRecognizer(target: self, action: #selector(handleGrab))
@@ -295,17 +333,34 @@ public final class IconSelectorBar: UIView {
         addGestureRecognizer(grab)
     }
 
+    /// The row begins `overhang` inside the scrolled content — the platter's
+    /// own ring, which is scroll CONTENT here, not a margin of the viewport: a
+    /// crowded strip carries its first icon under the ring and out to the edge.
     private func rowLeadingConstraint() -> NSLayoutConstraint {
         let constraint = row.leadingAnchor.constraint(
-            equalTo: content.leadingAnchor, constant: outerInset
+            equalTo: content.leadingAnchor, constant: overhangX
         )
         rowLeading = constraint
         return constraint
     }
 
+    /// The same on the vertical axis: the icons stay in this view's rect, and a
+    /// platter's capsule stands `overhang` above and below them.
+    private func rowTopConstraint() -> NSLayoutConstraint {
+        let constraint = row.topAnchor.constraint(equalTo: content.topAnchor, constant: overhangY)
+        rowTop = constraint
+        return constraint
+    }
+
+    private func rowBottomConstraint() -> NSLayoutConstraint {
+        let constraint = row.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -overhangY)
+        rowBottom = constraint
+        return constraint
+    }
+
     private func rowTrailingConstraint() -> NSLayoutConstraint {
         let constraint = row.trailingAnchor.constraint(
-            equalTo: content.trailingAnchor, constant: -outerInset
+            equalTo: content.trailingAnchor, constant: -overhangX
         )
         rowTrailing = constraint
         return constraint
@@ -451,7 +506,7 @@ public final class IconSelectorBar: UIView {
 
     public override var intrinsicContentSize: CGSize {
         CGSize(
-            width: IconBarMetrics.intrinsicWidth(count: items.count, outerInset: outerInset),
+            width: IconBarMetrics.intrinsicWidth(count: items.count),
             height: Metrics.capsuleHeight
         )
     }
@@ -461,15 +516,50 @@ public final class IconSelectorBar: UIView {
         // ⚠️ SHAPE BEFORE MATERIAL. `didMoveToWindow` can land before the first
         // layout pass has given the capsule real bounds, and a glass effect
         // switched on over a zero-radius layer draws one frame of hard corners.
+        //
+        // The CAPSULE's height, not this view's: inside a platter the two differ
+        // by the overhang, and the radius has to be the visible capsule's.
+        measurePlatterIfHosted()
         capsule.layer.cornerCurve = .continuous
-        capsule.layer.cornerRadius = bounds.height / 2
+        capsule.layer.cornerRadius = capsule.bounds.height / 2
         lens.layer.cornerRadius = lensSide / 2
         applyProgress()
+        #if DEBUG
+        traceChainOnce()
+        #endif
     }
+
+    #if DEBUG
+    private var lastTracedKey = ""
+    /// The chain of views UIKit puts this bar in, once per size it takes — the
+    /// measurement behind `SelectorHosting.measuredPlatterOverhang`. Same
+    /// instrument and same launch argument as `PagedTabBar`'s.
+    private func traceChainOnce() {
+        let traceKey = "\(bounds.size)-\(String(describing: platterOverhang))"
+        guard lastTracedKey != traceKey, bounds.width > 0, window != nil,
+              ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") else { return }
+        lastTracedKey = traceKey
+        var chain: [String] = []
+        var view: UIView? = self
+        for _ in 0..<5 {
+            guard let current = view else { break }
+            let frame = current.convert(current.bounds, to: nil)
+            chain.append(String(format: "%@ %.1fx%.1f@%.1f,%.1f",
+                                String(describing: type(of: current)),
+                                frame.width, frame.height, frame.minX, frame.minY))
+            view = current.superview
+        }
+        print("[tabshape] chain hosting=\(hosting) measured=\(platterOverhang.map { "\($0.width)x\($0.height)" } ?? "nil") "
+              + chain.joined(separator: " < "))
+    }
+    #endif
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil, capsule.effect == nil, !suppressesBackdrop else { return }
+        // A bar that leaves its window starts its platter measurement over
+        // when it comes back — the next host may be a different ring.
+        if window == nil { remeasure.reset() }
+        guard window != nil, capsule.effect == nil, hosting.drawsBackdrop else { return }
         materialiseCapsule()
     }
 
@@ -484,24 +574,32 @@ public final class IconSelectorBar: UIView {
         guard !buttons.isEmpty else { return }
         let stride = Metrics.segmentSide + Metrics.interSegmentSpacing
         // Centred in its segment, horizontally AND vertically, from the one
-        // clearance number — so the pill cannot drift on one axis only.
+        // clearance number — so the pill cannot drift on one axis only. In the
+        // scrolled content's space, which is the visible capsule's: the pill
+        // stands `clearance` off the visible edge on every host, as the overhang
+        // and the clearance inside the segment between them.
         let centring = (Metrics.segmentSide - lensSide) / 2
+        // ⚠️ THE CAPSULE's height, not the scrolled content's: this runs from
+        // this view's own layout pass, where a direct subview's bounds are
+        // already current and a grandchild's are a pass stale — the content
+        // read 0 tall on the first pass and the pill was placed 14pt above it.
         lens.frame = CGRect(
-            x: outerInset + centring + progress * stride,
-            y: (bounds.height - lensSide) / 2,
+            x: overhangX + centring + progress * stride,
+            y: (capsule.bounds.height - lensSide) / 2,
             width: lensSide, height: lensSide
         )
     }
 
-    /// Brings the lens back into the viewport by the minimum that shows it.
+    /// Brings the lens back into the viewport by the minimum that shows it —
+    /// with its clearance, so a revealed pill never reads as clipped.
     private func keepLensVisible(animated: Bool) {
         guard scroller.bounds.width > 0 else { return }
         let visible = CGRect(origin: scroller.contentOffset, size: scroller.bounds.size)
         var offset = scroller.contentOffset.x
         if lens.frame.minX < visible.minX {
-            offset = lens.frame.minX - Metrics.lensInset
+            offset = lens.frame.minX - Metrics.clearance
         } else if lens.frame.maxX > visible.maxX {
-            offset = lens.frame.maxX + Metrics.lensInset - scroller.bounds.width
+            offset = lens.frame.maxX + Metrics.clearance - scroller.bounds.width
         }
         let maximum = max(0, scroller.contentSize.width - scroller.bounds.width)
         offset = min(max(0, offset), maximum)
@@ -530,7 +628,7 @@ extension IconSelectorBar: UIGestureRecognizerDelegate {
         // pill was inset inside its segment; now that the pill fills the segment
         // in a bar, a fixed inflation overlaps both neighbours and steals touches
         // meant for them.
-        let reach = lensClearance
+        let reach = max(0, lensClearance)
         return lens.frame.insetBy(dx: -reach, dy: -reach).contains(point)
     }
 
@@ -591,7 +689,9 @@ extension IconSelectorBar: UIGestureRecognizerDelegate {
 
         let stride = Metrics.segmentSide + Metrics.interSegmentSpacing
         let centre = x + scroller.contentOffset.x - current.grip
-        let raw = (centre - Metrics.lensInset - Metrics.lensSide / 2) / stride
+        // The inverse of `applyProgress`: the pill's centre sits half a segment
+        // past the row's start, whatever clearance it keeps inside the segment.
+        let raw = (centre - overhangX - Metrics.segmentSide / 2) / stride
         let clamped = min(max(0, raw), CGFloat(items.count - 1))
 
         let elapsed = now - current.lastMoment

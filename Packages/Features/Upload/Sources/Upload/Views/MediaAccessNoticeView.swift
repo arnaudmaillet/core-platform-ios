@@ -81,7 +81,7 @@ final class MediaAccessNoticeView: UIView {
         // `layer.cornerRadius` underneath it: the design system's rule is one
         // material per surface, and a colour beneath glass reads as two. The
         // album strip on this screen carries none of its own — it sets
-        // `suppressesBackdrop`, because a bar item is already composited through
+        // `hosting = .platter`, because a bar item is already composited through
         // the toolbar's glass — so this pill is the only material in the band.
         host = GlassCapsule.wrap(row)
         super.init(frame: frame)

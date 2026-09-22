@@ -689,7 +689,7 @@ struct MediaEditorTests {
         // A photograph is offered every category but the timeline.
         #expect(screen.editor.debugCategoryTitles
                 == MediaEditorViewController.categories(for: .photo).map(\.title))
-        #expect(screen.editor.debugCategoryBar.suppressesBackdrop, "no bubble inside a bubble")
+        #expect(screen.editor.debugCategoryBar.hosting == .platter, "no bubble inside a bubble")
         #expect(screen.navigation.isToolbarHidden == false, "raised by the screen itself")
     }
 

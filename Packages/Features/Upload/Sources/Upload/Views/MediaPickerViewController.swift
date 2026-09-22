@@ -356,7 +356,7 @@ final class MediaPickerViewController: UIViewController {
             // carries its backdrop renders as a bubble inside a bubble — which
             // is exactly what shipped in the first cut of this screen. The
             // search results screen sets this for the same reason.
-            bar.suppressesBackdrop = true
+            bar.hosting = .platter
             // ⚠️ NOT NOTIFICATION RED. The default is the unread pill's colour,
             // which is right for the two hosts it was written for and wrong
             // here: an album's count is how many photographs are in it, not how

@@ -637,11 +637,11 @@ final class SearchResultsViewController: UIViewController {
         // the chat composer's sticker strip — and that is the precedent
         // followed here.
         //
-        // ⚠️ BARE, THOUGH. UIKit wraps a bar item's custom view in its own
-        // glass capsule wherever the item lives, so a bar carrying its own
-        // backdrop draws a lens inside a lens. `SelectorAccessoryHost` sets the
-        // same flag for the same reason on the screens that use an accessory.
-        tabBar.suppressesBackdrop = true
+        // ⚠️ BARE, THOUGH — and the HOST says so. `SelectorAccessoryHost` sets
+        // the strip's `hosting` to `.container`, because the accessory's glass
+        // is drawn around the content view and a bar carrying its own backdrop
+        // would draw a lens inside a lens. Stating it here as well was an
+        // opinion the host overwrote.
 
         // ⚠️ `toolbarItems` IS PER VIEW CONTROLLER even though the toolbar is
         // the navigation controller's, so the selector cannot leak onto another

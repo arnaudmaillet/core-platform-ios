@@ -64,22 +64,22 @@ public final class SelectorAccessoryHost: UIView {
 
     private let options: Options
 
-    /// The gap between the strip and the container, on EVERY side.
+    /// The gap between a trailing control and the container.
     ///
-    /// ⚠️ ONE NUMBER, FOUR EDGES, AND THAT IS THE POINT. Pinned flush
-    /// horizontally and centred vertically, the selection lens touched the
-    /// container's left and right edges while sitting 6pt clear of its top and
-    /// bottom — a selected first or last tab read as spilling out of the band.
-    /// The lens fills its segment when the backdrop is suppressed, so the
-    /// strip's inset IS the lens's margin, and pinning all four edges to the
-    /// same constant makes them equal by construction rather than by
-    /// arithmetic that goes stale when the container's height changes.
+    /// ⚠️ **THE STRIP NO LONGER KEEPS THIS.** It used to sit 4pt inside the
+    /// container on every side, with its lens filling its segment, so that the
+    /// inset WAS the selection's margin. The pixels at rest were right and the
+    /// pixels under a scroll were not: the strip's viewport ended 4pt inside
+    /// the glass, and a crowded strip clipped its titles against an edge the
+    /// viewer could not see. The strip now fills the container edge to edge
+    /// (`SelectorHosting.container`) and its pill carries the 4pt itself, so
+    /// the margin the viewer sees is unchanged and the scroll runs to the glass.
     private static let contentInset: CGFloat = 4
 
     /// Between the strip and a trailing control sharing its glass. Wider than
-    /// the content inset on purpose: the strip's lens runs to its own edge when
-    /// the backdrop is suppressed, so a 4pt gap would put a selected segment
-    /// against the glyph.
+    /// the control's own inset on purpose: the strip's segments run to its
+    /// edge, so a 4pt gap would put a selected segment's title against the
+    /// glyph.
     private static let trailingGap: CGFloat = 10
 
     private let strip: PagedTabBar?
@@ -89,7 +89,7 @@ public final class SelectorAccessoryHost: UIView {
     /// ⚠️ **IT SHARES THE CONTAINER'S CAPSULE, IT DOES NOT GET ONE.** UIKit
     /// draws exactly one capsule per accessory, around the whole content view;
     /// a trailing control that brought its own backdrop would be a bubble
-    /// inside a bubble, the same fault `suppressesBackdrop` exists to prevent
+    /// inside a bubble, the same fault `SelectorHosting` exists to prevent
     /// for the strip. Hand it a bare control.
     private let trailing: UIView?
 
@@ -128,7 +128,12 @@ public final class SelectorAccessoryHost: UIView {
         // on the one adopting screen while there was one adopting screen; with
         // four hosts, a rule kept outside the component is a rule the next host
         // forgets.
-        strip.suppressesBackdrop = !options.keepsOwnGlass
+        //
+        // `.container`, not `.platter`: the container is EXACTLY the content
+        // view's size (measured, see the type comment), so there is no overhang
+        // for the strip to lay itself out against — the strip fills it and
+        // keeps the pill's clearance inside its own segments.
+        strip.hosting = options.keepsOwnGlass ? .standalone : .container
 
         strip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(strip)
@@ -137,9 +142,13 @@ public final class SelectorAccessoryHost: UIView {
         NSLayoutConstraint.activate([
             // ⚠️ NO WIDTH CONSTRAINT — see the note above. These are edge pins,
             // which say where the strip is, not how wide it may be.
-            strip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            strip.topAnchor.constraint(equalTo: topAnchor, constant: inset),
-            strip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
+            //
+            // ⚠️ FLUSH ON EVERY SIDE. The strip's scroll viewport is the whole
+            // of the glass, and its pill stands 4pt inside — see `contentInset`
+            // for what pinning the strip 4pt in used to cost.
+            strip.leadingAnchor.constraint(equalTo: leadingAnchor),
+            strip.topAnchor.constraint(equalTo: topAnchor),
+            strip.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
         if let trailing {
@@ -161,7 +170,7 @@ public final class SelectorAccessoryHost: UIView {
                                                  constant: -inset * 2)
             ])
         } else {
-            strip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset).isActive = true
+            strip.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
         }
 
         // ⚠️ **FILLED IN BOTH ENVIRONMENTS, AND `.inline` IS WHY.** Hugging
