@@ -321,9 +321,10 @@ struct IconSelectorBarTests {
         let wide = bar(Self.four).intrinsicContentSize.width
 
         #expect(wide > narrow, "four icons ask for more room than two: \(wide) vs \(narrow)")
-        // 4 × 36 + 3 × 2 + 2 × 2 = 154 — five would be 192, where four WORDS did
-        // not fit the editor's toolbar at all.
-        #expect(abs(wide - 154) < 0.5, "and the arithmetic is the stated one: \(wide)")
+        // 4 × 36 + 3 × 2 = 150 — five would be 188, where four WORDS did not
+        // fit the editor's toolbar at all. No clearance term: the pill's
+        // clearance is inside the segments, not added around the row.
+        #expect(abs(wide - 150) < 0.5, "and the arithmetic is the stated one: \(wide)")
     }
 
     // MARK: - Where a release lands
@@ -387,7 +388,7 @@ struct IconSelectorBarTests {
         let standalone = bar.debugLensSide
         #expect(standalone < 36, "guard: on its own it keeps a clearance: \(standalone)")
 
-        bar.suppressesBackdrop = true
+        bar.hosting = .platter
         bar.setNeedsLayout()
         bar.layoutIfNeeded()
 

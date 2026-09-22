@@ -33,46 +33,76 @@ struct PagedTabBarGeometryTests {
         #expect(vertical == horizontal)
     }
 
-    /// ⚠️ **A bare bar stands its lens on its own edge, and that is what makes
-    /// the clearance the viewer sees the same as inline.**
+    /// ⚠️ **THE PILL STANDS 4pt INSIDE THE VISIBLE CAPSULE ON EVERY HOST, AND
+    /// THE PILL IS WHAT CARRIES IT.** Standing alone or in an accessory's
+    /// container the capsule is the view and the lens is inset inside its
+    /// segment; in a bar item's platter the capsule reaches 4pt beyond the view
+    /// on every side (measured: a 149×36 host in a 157×44 platter) and the lens
+    /// stands on the view's own edge, so that the platter's ring is the
+    /// clearance rather than stacking on top of one of ours — a lens inset 4pt
+    /// inside the view there would land 8pt inside the pill the viewer sees.
     ///
-    /// The bar renders bare only inside a `UIBarButtonItem`'s platter, and the
-    /// platter is 4pt larger than the view it hosts on every side (measured: a
-    /// 149×36 host in a 157×44 platter). So a lens inset 4pt inside the view
-    /// lands 8pt inside the pill the viewer sees — twice the clearance the same
-    /// bar shows inline on the profile, and visibly chunkier. Zero here is 4
-    /// there.
-    @Test func aBareBarGivesItsLensTheEdgeAndABackdroppedOneDoesNot() {
-        let backdropped = laidOutBar(titles: ["All", "Requests", "Suggestions"])
-        guard let inset = backdropped.debugLensAlignment?.segment else {
-            Issue.record("the backdropped bar reported no lens")
-            return
+    /// Read in the CAPSULE's space, where the two are the same number.
+    @Test func theLensStandsTheSameClearanceInsideTheVisibleCapsuleOnEveryHost() {
+        for hosting in [SelectorHosting.standalone, .container, .platter] {
+            let bar = PagedTabBar(titles: ["All", "Requests", "Suggestions"], style: .navigationTitle)
+            bar.hosting = hosting
+            bar.frame = CGRect(origin: .zero, size: bar.intrinsicContentSize)
+            bar.setNeedsLayout()
+            bar.layoutIfNeeded()
+            guard let lens = bar.debugLensAlignment?.segment else {
+                Issue.record("\(hosting): the bar reported no lens")
+                return
+            }
+            let capsuleHeight = bar.debugCapsuleShape.height
+            #expect(lens.minX == 4, "\(hosting): leading clearance \(lens.minX)")
+            #expect(lens.minY == 4, "\(hosting): top clearance \(lens.minY)")
+            #expect(lens.height == capsuleHeight - 8, "\(hosting): lens \(lens.height) in \(capsuleHeight)")
         }
-        #expect(inset.minX == 4)
-        #expect(inset.height == backdropped.bounds.height - 8)
-
-        let bare = PagedTabBar(titles: ["All", "Requests", "Suggestions"], style: .navigationTitle)
-        bare.suppressesBackdrop = true
-        bare.frame = CGRect(origin: .zero, size: bare.intrinsicContentSize)
-        bare.setNeedsLayout()
-        bare.layoutIfNeeded()
-        guard let flush = bare.debugLensAlignment?.segment else {
-            Issue.record("the bare bar reported no lens")
-            return
-        }
-        #expect(flush.minX == 0)
-        #expect(flush.height == bare.bounds.height)
     }
 
-    /// The width has to follow the padding, or the bar asks for room it no
-    /// longer uses — 8pt of it, which is a capsule that never quite hugs its
-    /// titles.
-    @Test func aBareBarAsksForEightPointsLessThanABackdroppedOne() {
+    /// The capsule the viewer sees is the bar's own view everywhere but in a
+    /// platter, where it reaches the platter's 4pt beyond every edge.
+    @Test func onlyAPlatterHostedCapsuleReachesBeyondTheBar() {
+        let reaches: [(SelectorHosting, CGFloat)] = [(.standalone, 0), (.container, 0), (.platter, 4)]
+        for (hosting, reach) in reaches {
+            let bar = laidOutBar(titles: ["All", "Requests"])
+            bar.hosting = hosting
+            bar.layoutIfNeeded()
+            let capsule = bar.debugCapsuleShape.height
+            let expected = bar.bounds.height + reach * 2
+            #expect(abs(capsule - expected) < 0.5,
+                    "\(hosting): capsule \(capsule) for a \(bar.bounds.height) bar, expected \(expected)")
+        }
+    }
+
+    /// The VISIBLE capsule is the same width on every host — the segments are
+    /// measured the same way everywhere, with the pill's clearance inside them.
+    /// What differs is how much of it is the bar's own view: inside a platter
+    /// the ring is the platter's, so the view asks for 8pt less and the platter
+    /// puts the 8pt back.
+    @Test func theVisibleCapsuleIsTheSameWidthOnEveryHost() {
         let titles = ["All", "Requests", "Suggestions"]
-        let backdropped = PagedTabBar(titles: titles, style: .navigationTitle)
-        let bare = PagedTabBar(titles: titles, style: .navigationTitle)
-        bare.suppressesBackdrop = true
-        #expect(backdropped.intrinsicContentSize.width - bare.intrinsicContentSize.width == 8)
+        let standalone = PagedTabBar(titles: titles, style: .navigationTitle)
+        let container = PagedTabBar(titles: titles, style: .navigationTitle)
+        container.hosting = .container
+        let platter = PagedTabBar(titles: titles, style: .navigationTitle)
+        platter.hosting = .platter
+        #expect(standalone.intrinsicContentSize.width == container.intrinsicContentSize.width)
+        #expect(standalone.intrinsicContentSize.width == platter.intrinsicContentSize.width + 8)
+    }
+
+    /// ⚠️ **THE STRIP KEEPS NO MARGIN OF ITS OWN.** The first segment starts at
+    /// the capsule's very edge and the last ends at it, so a crowded strip
+    /// scrolls its titles right up to the glass; the 4pt the viewer sees is the
+    /// pill's, inside the segment. A padding on the row here is the defect this
+    /// bar shipped for a year — invisible at rest, and a clipped title under a
+    /// scroll.
+    @Test func theSegmentsRunFromEdgeToEdgeOfTheCapsule() {
+        let bar = laidOutBar(titles: ["All", "Requests", "Suggestions"])
+        let frames = bar.debugSegmentFrames
+        #expect(frames.first?.minX == 0, "first segment starts at \(frames.first?.minX ?? -1)")
+        #expect(frames.last?.maxX == bar.bounds.width, "last segment ends at \(frames.last?.maxX ?? -1) of \(bar.bounds.width)")
     }
 
     /// A segment narrower than the lens is tall cannot draw a round selection:

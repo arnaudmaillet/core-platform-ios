@@ -297,7 +297,7 @@ public final class PagedTabBar: UIControl {
         /// segment is expressed against THIS rather than against the capsule,
         /// because the lens is what a viewer actually sees a badge sitting
         /// inside.
-        var lensHeight: CGFloat { capsuleHeight - Metrics.lensInset * 2 }
+        var lensHeight: CGFloat { capsuleHeight - SelectorCapsuleMetrics.clearance * 2 }
 
         /// The count pill's height: half the lens, which keeps it a small mark
         /// beside the title rather than a second element competing with it.
@@ -361,7 +361,8 @@ public final class PagedTabBar: UIControl {
     }
 
     private enum Metrics {
-        /// The lens's clearance inside the capsule, on EVERY side.
+        /// The lens's clearance inside the VISIBLE capsule, on EVERY side — the
+        /// number every selector in this module shares.
         ///
         /// One number, not two. It was 5 horizontally and 4 vertically, which
         /// meant the selection pill sat closer to the capsule's top and bottom
@@ -370,11 +371,20 @@ public final class PagedTabBar: UIControl {
         /// curve. The horizontal figure is what gave way, because the vertical
         /// one is what decides the lens's HEIGHT, and that height is the
         /// diameter every disk in the bar is measured against.
-        static let lensInset: CGFloat = 4
-        /// Breathing room between the capsule's edge and the first segment —
-        /// the same inset, seen from the horizontal axis.
-        static var capsulePadding: CGFloat { lensInset }
-        static let interSegmentSpacing: CGFloat = 2
+        ///
+        /// ⚠️ **THE PILL CARRIES IT, THE STRIP DOES NOT.** This used to be two
+        /// numbers in one: the lens's inset AND a `capsulePadding` between the
+        /// capsule's edge and the first segment. The padding is gone. Segments
+        /// run edge to edge under the glass and the lens stands this far inside
+        /// its own segment, so a crowded strip scrolls its titles right up to
+        /// the capsule's edge instead of clipping them 4pt short of it — at rest
+        /// the two draw the same pixels; under a scroll only this one is right.
+        static var clearance: CGFloat { SelectorCapsuleMetrics.clearance }
+        /// ZERO, and it was 2. The gap only ever showed as daylight between two
+        /// adjacent lenses, and there is one lens; now that it keeps its own
+        /// clearance inside its segment, adjacent rest positions already stand
+        /// 8pt apart and a gap on the row would only make the strip wider.
+        static let interSegmentSpacing: CGFloat = 0
         /// How far a finger has to travel before a press on the pill stops
         /// being a tap. Small: the pill is dragged from a standstill, so the
         /// first few points are the ones that have to feel connected.
@@ -420,20 +430,15 @@ public final class PagedTabBar: UIControl {
     /// both ends, or the slack lands as margin either side and the segments
     /// never see it. And the bar stops STATING a width, or its intrinsic size
     /// argues with the host's constraint over a number the host owns.
-    /// Renders the bar BARE, for a host that already composites what it holds.
     ///
-    /// ⚠️ Exists for one host: a `UIBarButtonItem(customView:)`. UIKit gives bar
-    /// items the system's own glass capsule — "bar items get a capsule, the
-    /// title slot gets nothing" — so a bar carrying its own backdrop there is a
-    /// glass lens inside a glass capsule, the arrangement that cost the lens its
-    /// edge entirely (see the type comment). The title slot is the opposite case
-    /// and must keep its backdrop.
-    /// The width of the FIRST segment, plus the capsule's own padding — the
-    /// least width at which this bar still says something: one whole tab,
-    /// legible, with every other reachable by scrolling.
+    /// The width of the FIRST segment, as a width of THIS VIEW — the least
+    /// width at which this bar still says something: one whole tab, legible,
+    /// with every other reachable by scrolling. Inside a platter the visible
+    /// capsule is wider than the view by the overhang, and the segment is
+    /// measured against the capsule.
     public var firstSegmentWidth: CGFloat {
-        guard let first = segments.first else { return capsulePadding * 2 }
-        return ceil(first.pinnedWidth) + capsulePadding * 2
+        guard let first = segments.first else { return 0 }
+        return max(0, ceil(first.pinnedWidth) - overhangX * 2)
     }
 
     #if DEBUG
@@ -462,15 +467,25 @@ public final class PagedTabBar: UIControl {
     public var debugSegmentWidths: [CGFloat] { debugSegmentFrames.map(\.width) }
     #endif
 
-    public var suppressesBackdrop: Bool = false {
+    /// Who draws the capsule — see `SelectorHosting` for the one rule the three
+    /// selectors share.
+    ///
+    /// ⚠️ **`.container` in an accessory, `.platter` in a bar item, and the
+    /// HOST sets it.** UIKit gives bar items the system's own glass capsule —
+    /// "bar items get a capsule, the title slot gets nothing" — so a bar
+    /// carrying its own backdrop there is a glass lens inside a glass capsule,
+    /// the arrangement that cost the lens its edge entirely (see the type
+    /// comment). A `UITabAccessory` container draws glass too, exactly around
+    /// the content view. Only a bar standing on its own draws.
+    public var hosting: SelectorHosting = .standalone {
         didSet {
-            guard suppressesBackdrop != oldValue else { return }
-            if suppressesBackdrop {
+            guard hosting != oldValue else { return }
+            if !hosting.drawsBackdrop {
                 capsule.effect = nil
             } else {
                 materializeEffects()
             }
-            applyCapsulePadding()
+            applyHosting()
         }
     }
 
@@ -487,11 +502,21 @@ public final class PagedTabBar: UIControl {
     ///
     /// The radii agree by construction: the lens is a capsule of its own height,
     /// so a 36pt lens centred in a 44pt pill is concentric with it (18 = 22 − 4).
-    private var lensInset: CGFloat { suppressesBackdrop ? 0 : Metrics.lensInset }
+    ///
+    /// NEGATIVE in a ring deeper than the clearance (the bottom toolbar's
+    /// platter stands 6pt above and below a 46pt strip): the lens then reaches
+    /// past the view, so that it still stands the same 4pt off the glass.
+    private var lensInset: CGFloat { Metrics.clearance - overhangY }
 
-    /// The same clearance on the horizontal axis — between the capsule's edge
-    /// and the first segment.
-    private var capsulePadding: CGFloat { lensInset }
+    /// How far the visible capsule reaches beyond this view, per axis. The
+    /// capsule is laid out at THAT size, so a platter's own ring is where the
+    /// first segment's clearance comes from, and the strip scrolls under it.
+    /// Measured once the bar is in a platter and in a window — see
+    /// `SelectorHosting.measuredPlatterOverhang(around:)` — and the hosting's
+    /// stated number until then.
+    private var platterOverhang: CGSize?
+    private var overhangX: CGFloat { platterOverhang?.width ?? hosting.overhang }
+    private var overhangY: CGFloat { platterOverhang?.height ?? hosting.overhang }
 
     public var fillsWidth: Bool = false {
         didSet {
@@ -599,10 +624,13 @@ public final class PagedTabBar: UIControl {
 
     private var rowHugsConstraints: [NSLayoutConstraint] = []
     private var rowFillsConstraints: [NSLayoutConstraint] = []
-    /// The row constraints whose constant IS `capsulePadding`, kept so a change
-    /// of host can re-state it — see `applyCapsulePadding`.
-    private var paddedLeadingConstraints: [NSLayoutConstraint] = []
-    private var paddedTrailingConstraints: [NSLayoutConstraint] = []
+    /// The row's vertical pins, whose constant IS the overhang, kept so a change
+    /// of host can re-state it — see `applyHosting`. The horizontal pins carry
+    /// no constant on any host; see where the row is built.
+    private var paddedTopConstraints: [NSLayoutConstraint] = []
+    private var paddedBottomConstraints: [NSLayoutConstraint] = []
+    /// The capsule's four edges, whose constants are the overhang too.
+    private var capsuleEdges: [NSLayoutConstraint] = []
 
     /// The segment the bar is reporting — updated by taps AND by the pages
     /// moving under it, so it is never stale. Reading it is how a
@@ -771,16 +799,27 @@ public final class PagedTabBar: UIControl {
         // a shadow set on the same layer would have been clipped away with it.
         // With no shadow to host, the wrapper was a view that existed to hold a
         // property nothing sets.
-        capsule.constrain(in: self) { parent in
-            capsule.topAnchor.constraint(equalTo: parent.topAnchor, constant: style.topMargin)
-            capsule.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -style.bottomMargin)
+        //
+        // ⚠️ THE CAPSULE IS THE VISIBLE ONE, NOT THIS VIEW. Inside a platter it
+        // reaches `overhang` beyond every edge of the view, so that its clip —
+        // and the scroll viewport inside it — end where the viewer sees the
+        // glass end rather than 4pt short of it. This view does not clip, so the
+        // reach is real; the capsule does, at the visible capsule's own radius.
+        // The constants are re-stated by `applyHosting`, because the host sets
+        // `hosting` after init.
+        capsuleEdges = [
             capsule.leadingAnchor.constraint(
-                equalTo: parent.safeAreaLayoutGuide.leadingAnchor, constant: style.horizontalMargin
-            )
+                equalTo: safeAreaLayoutGuide.leadingAnchor, constant: style.horizontalMargin - overhangX
+            ),
             capsule.trailingAnchor.constraint(
-                equalTo: parent.safeAreaLayoutGuide.trailingAnchor, constant: -style.horizontalMargin
-            )
-        }
+                equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -style.horizontalMargin + overhangX
+            ),
+            capsule.topAnchor.constraint(equalTo: topAnchor, constant: style.topMargin - overhangY),
+            capsule.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -style.bottomMargin + overhangY)
+        ]
+        capsule.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(capsule)
+        NSLayoutConstraint.activate(capsuleEdges)
 
         scroller.showsHorizontalScrollIndicator = false
         scroller.showsVerticalScrollIndicator = false
@@ -827,10 +866,17 @@ public final class PagedTabBar: UIControl {
         // placed the very frames the lens is derived from.
         row.onLayout = { [weak self] in self?.applyProgress() }
         buildSegments()
-        row.constrain(in: content) { parent in
-            row.topAnchor.constraint(equalTo: parent.topAnchor)
-            row.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-        }
+        row.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(row)
+        // VERTICALLY the row lives in THIS VIEW's rect inside the capsule:
+        // inside a platter the capsule is 4pt taller than the view at each end,
+        // and a row pinned to the capsule would make a 52pt lens of a 44pt bar.
+        // (Horizontally it spans the capsule — see below — because a segment's
+        // width is the bar's to give and its height is the host's.) Re-stated
+        // by `applyHosting`.
+        paddedTopConstraints = [row.topAnchor.constraint(equalTo: content.topAnchor, constant: overhangY)]
+        paddedBottomConstraints = [row.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -overhangY)]
+        NSLayoutConstraint.activate(paddedTopConstraints + paddedBottomConstraints)
         // How the row sits between the capsule's ends.
         //
         // A floating bar PINS to both margins: it spans the screen, and equal
@@ -851,30 +897,24 @@ public final class PagedTabBar: UIControl {
         // decide — a hugging bar that is asked to fill has to stop centring, or
         // the extra width lands as margin at its two ends and the segments never
         // see it. See `fillsWidth`.
-        let hugsLeading = row.leadingAnchor.constraint(
-            greaterThanOrEqualTo: content.leadingAnchor, constant: capsulePadding
-        )
-        let hugsTrailing = row.trailingAnchor.constraint(
-            lessThanOrEqualTo: content.trailingAnchor, constant: -capsulePadding
-        )
+        //
+        // ⚠️ THE ROW HAS NO PADDING OF ITS OWN, ON ANY HOST. It runs from one
+        // edge of the VISIBLE capsule to the other — inside a platter that is
+        // 4pt beyond this view at each end, under the ring — and the pill keeps
+        // the clearance inside its own segment. That is what makes the strip
+        // read the same everywhere: in the capsule's space a title stands the
+        // same distance from the glass and from its neighbour whether the glass
+        // is the bar's, an accessory's or a toolbar's, and a crowded strip
+        // scrolls its titles right up to the edge on all three.
         rowHugsConstraints = [
-            hugsLeading, hugsTrailing,
+            row.leadingAnchor.constraint(greaterThanOrEqualTo: content.leadingAnchor),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor),
             row.centerXAnchor.constraint(equalTo: content.centerXAnchor)
         ]
-        let fillsLeading = row.leadingAnchor.constraint(
-            equalTo: content.leadingAnchor, constant: capsulePadding
-        )
-        let fillsTrailing = row.trailingAnchor.constraint(
-            equalTo: content.trailingAnchor, constant: -capsulePadding
-        )
-        rowFillsConstraints = [fillsLeading, fillsTrailing]
-        // ⚠️ Held by NAME, because `capsulePadding` is not a constant here:
-        // `suppressesBackdrop` is set by the host AFTER init (a bar item's
-        // platter supplies the pill), and it takes the padding to zero. Without
-        // these the row keeps the 4pt it was built with and only the lens moves,
-        // which is half a change and looks like a bug.
-        paddedLeadingConstraints = [hugsLeading, fillsLeading]
-        paddedTrailingConstraints = [hugsTrailing, fillsTrailing]
+        rowFillsConstraints = [
+            row.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: content.trailingAnchor)
+        ]
         NSLayoutConstraint.activate(spreadsSegments ? rowFillsConstraints : rowHugsConstraints)
 
         // How the content relates to the capsule's width — and this is what
@@ -1003,14 +1043,18 @@ public final class PagedTabBar: UIControl {
         default: widths.reduce(0, +)
         }
         let spacing = Metrics.interSegmentSpacing * CGFloat(max(0, segments.count - 1))
-        return ceil(total + spacing) + capsulePadding * 2
+        // No padding term: the row spans the visible capsule, and the pill's
+        // clearance is inside the segments. Inside a platter the visible
+        // capsule reaches `overhang` beyond the view this width sizes, so the
+        // view asks for the row LESS the ring — the platter puts it back.
+        return ceil(total + spacing) - overhangX * 2
     }
 
     /// Materialized in-window, never in init: creating a real effect off
     /// screen stalls the render server on headless CI simulators (the same
     /// rule `CommentsInputBar` and `SnapGlassCardView` follow).
     private func materializeEffects() {
-        guard window != nil, style.carriesBackdrop, !suppressesBackdrop else { return }
+        guard window != nil, style.carriesBackdrop, hosting.drawsBackdrop else { return }
         if capsule.effect == nil {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
@@ -1059,14 +1103,39 @@ public final class PagedTabBar: UIControl {
     /// drawn in, which is precisely the square flash. A display-link probe
     /// cannot see this window: its first sample lands after both events.
     private var hasLaidOut = false
+    #if DEBUG
+    private var lastTracedKey = ""
+    #endif
 
     public override func layoutSubviews() {
         super.layoutSubviews()
+        measurePlatterIfHosted()
         #if DEBUG
         if !hasLaidOut, ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
             print(String(format: "[tabshape] first layout h=%.1f r=%.1f glass=%@",
                          capsule.bounds.height, capsule.layer.cornerRadius,
                          capsule.effect != nil ? "on" : "off"))
+        }
+        // The chain of views UIKit puts this bar in, once per SIZE it takes —
+        // the measurement behind `SelectorHosting.measuredPlatterOverhang`. A
+        // bar item lays out mid-transition at a fraction of its size, so a
+        // one-shot trace read a 37×8 bar in a 37×8 wrapper and said nothing.
+        let traceKey = "\(bounds.size)-\(String(describing: platterOverhang))"
+        if lastTracedKey != traceKey, bounds.width > 0, window != nil,
+           ProcessInfo.processInfo.arguments.contains("-tabbar-shape-trace") {
+            lastTracedKey = traceKey
+            var chain: [String] = []
+            var view: UIView? = self
+            for _ in 0..<5 {
+                guard let current = view else { break }
+                let frame = current.convert(current.bounds, to: nil)
+                chain.append(String(format: "%@ %.0fx%.0f@%.0f,%.0f",
+                                    String(describing: type(of: current)),
+                                    frame.width, frame.height, frame.minX, frame.minY))
+                view = current.superview
+            }
+            print("[tabshape] chain hosting=\(hosting) measured=\(platterOverhang.map { "\($0.width)x\($0.height)" } ?? "nil") "
+                  + chain.joined(separator: " < "))
         }
         #endif
         hasLaidOut = true
@@ -1081,8 +1150,21 @@ public final class PagedTabBar: UIControl {
             applyRowArrangement()
         }
         enforceCapsuleShape()
+        // ⚠️ THE DISK FLOOR FOLLOWS THE CAPSULE'S REAL HEIGHT. A host can
+        // stretch the capsule past the style's number — an accessory's 48pt
+        // container against a 44pt style — and the segment's floor was stated
+        // from the style before any of that was known. Guarded on change, or
+        // this would re-pin every pass and never settle.
+        let capsuleHeight = capsule.bounds.height
+        if capsuleHeight > 0, capsuleHeight != appliedDiskFloor {
+            appliedDiskFloor = capsuleHeight
+            for segment in segments { segment.diskFloor = capsuleHeight }
+        }
         resolveSegmentsThenApplyProgress()
     }
+
+    /// The capsule height the segments' disk floor was last stated from.
+    private var appliedDiskFloor: CGFloat = 0
 
     /// Re-derives the lens, for the paths that change geometry outside a layout
     /// pass (a badge arriving, a transition restoring the bar).
@@ -1097,6 +1179,9 @@ public final class PagedTabBar: UIControl {
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         materializeEffects()
+        // A bar that leaves its window starts its platter measurement over
+        // when it comes back — the next host may be a different ring.
+        if window == nil { remeasure.reset() }
         // ⚠️ **A DRAG DOES NOT SURVIVE THE SCREEN IT WAS ON.** A `CADisplayLink`
         // RETAINS its target, so a bar that goes away mid-drag — a pop, a tab
         // change, a selector swapped for another screen's — would be kept alive
@@ -1130,7 +1215,7 @@ public final class PagedTabBar: UIControl {
         // The fallback matters: bounds are zero until the first layout pass, and
         // `0 / 2` is a square. Falling back to the style's own height means the
         // radius is never wrong, only occasionally early.
-        let height = capsule.bounds.height > 0 ? capsule.bounds.height : effectiveCapsuleHeight
+        let height = capsule.bounds.height > 0 ? capsule.bounds.height : effectiveCapsuleHeight + overhangY * 2
         capsule.layer.cornerCurve = .continuous
         capsule.layer.cornerRadius = height / 2
     }
@@ -1844,7 +1929,10 @@ public final class PagedTabBar: UIControl {
         segments = titles.enumerated().map { index, title in
             let segment = SegmentView(
                 title: title,
-                titlePadding: style.segmentPadding,
+                // The title's padding is measured from the LENS's edge, and the
+                // lens stands the clearance inside its segment — so the segment
+                // makes room for both, on every host.
+                titlePadding: style.segmentPadding + Metrics.clearance * 2,
                 widthPriority: style.segmentWidthPriority,
                 textStyle: style.titleTextStyle,
                 maximumPointSize: style.maximumTitlePointSize,
@@ -1852,7 +1940,7 @@ public final class PagedTabBar: UIControl {
                 badgeHeight: style.badgeHeight,
                 badgeSpacing: style.badgeSpacing,
                 contentOffset: style.contentOffset,
-                lensHeight: style.lensHeight
+                diskFloor: style.capsuleHeight
             )
             segment.addAction(
                 UIAction { [weak self] _ in self?.selectSegment(index, fromTap: true) },
@@ -1977,10 +2065,11 @@ public final class PagedTabBar: UIControl {
         guard scroller.contentSize.width > scroller.bounds.width,
               !scroller.isDragging, !scroller.isDecelerating
         else { return }
-        // `Metrics`, not the instance padding: this is how much CONTEXT to
-        // reveal beside the lens when scrolling to it, not how far inside the
-        // capsule it is drawn. A bare bar's lens stands on its own edge, and
-        // revealing it with nothing either side of it would read as clipped.
+        // The visible clearance, not the instance inset: this is how much
+        // CONTEXT to reveal beside the lens when scrolling to it, not how far
+        // inside the view it is drawn. A platter-hosted bar's lens stands on the
+        // view's own edge, and revealing it with nothing either side of it
+        // would read as clipped.
         // ⚠️ **The offset is COMPUTED, not asked for.** This used to be
         // `scrollRectToVisible`, which is the natural call and does the right
         // arithmetic — but it silently declines from inside the scroll view's
@@ -1994,7 +2083,7 @@ public final class PagedTabBar: UIControl {
         // The semantics are the ones the doc above describes and are worth
         // keeping: the MINIMUM distance that brings the lens into view, and
         // nothing at all when it is already there.
-        let reveal = lens.frame.insetBy(dx: -Metrics.capsulePadding, dy: 0)
+        let reveal = lens.frame.insetBy(dx: -Metrics.clearance, dy: 0)
         let viewport = scroller.bounds.width
         var offset = scroller.contentOffset.x
         if reveal.minX < offset {
@@ -2015,19 +2104,43 @@ public final class PagedTabBar: UIControl {
         #endif
     }
 
-    /// Re-states the row's horizontal padding, and everything derived from it.
+    /// Re-states every constant that follows from the hosting.
     ///
     /// Three things move together and leaving any one behind is visible: the
-    /// row's own inset, the width the bar ASKS for (which includes that inset
-    /// twice), and the lens, which is placed off the segments the row just
-    /// moved.
-    private func applyCapsulePadding() {
-        for constraint in paddedLeadingConstraints { constraint.constant = capsulePadding }
-        for constraint in paddedTrailingConstraints { constraint.constant = -capsulePadding }
+    /// capsule's reach beyond the view, the row's vertical inset inside it, and
+    /// the lens, which is placed off the segments the row just moved. The width
+    /// the bar asks for follows too, since the ring lies outside it.
+    private func applyHosting() {
+        let reaches = [
+            style.horizontalMargin - overhangX, -style.horizontalMargin + overhangX,
+            style.topMargin - overhangY, -style.bottomMargin + overhangY
+        ]
+        for (edge, reach) in zip(capsuleEdges, reaches) { edge.constant = reach }
+        for constraint in paddedTopConstraints { constraint.constant = overhangY }
+        for constraint in paddedBottomConstraints { constraint.constant = -overhangY }
         invalidateIntrinsicContentSize()
         setNeedsLayout()
         applyProgress()
     }
+
+    /// Takes the platter's real reach once there is one to measure — see
+    /// `SelectorHosting.measuredPlatterOverhang(around:)`. Guarded on change,
+    /// or this would re-state its constraints every pass and never settle.
+    private func measurePlatterIfHosted() {
+        let measured = hosting == .platter ? SelectorHosting.measuredPlatterOverhang(around: self) : nil
+        if hosting == .platter, window != nil {
+            remeasure.arm { [weak self] in self?.measurePlatterIfHosted() }
+        } else {
+            remeasure.reset()
+        }
+        guard measured != platterOverhang else { return }
+        platterOverhang = measured
+        applyHosting()
+    }
+
+    /// The re-asks that land the platter's true reach — see
+    /// `PlatterRemeasureSchedule` for why one measurement is not enough.
+    private let remeasure = PlatterRemeasureSchedule()
 
     /// Built by hand rather than with `insetBy`: insetting a rect past its own
     /// size yields `CGRect.null`, whose infinite origin turns the frame
@@ -2038,12 +2151,19 @@ public final class PagedTabBar: UIControl {
     /// already expressed in `content`, and the lens is a sibling there, so the
     /// arithmetic is unchanged by the scroll view and no content offset has to
     /// be subtracted anywhere.
+    ///
+    /// The pill carries the clearance and the segment runs to the capsule's
+    /// edge. HORIZONTALLY the lens stands the full clearance inside its segment
+    /// on every host, because the segment spans the visible capsule on every
+    /// host; VERTICALLY it stands `lensInset` inside, which is the clearance
+    /// less whatever a platter's ring already supplies above and below the
+    /// view. Both come out at the same 4pt from the glass the viewer sees.
     private func lensFrame(for index: Int) -> CGRect {
         let segment = segments[index].frame
         return CGRect(
-            x: row.frame.minX + segment.minX,
+            x: row.frame.minX + segment.minX + Metrics.clearance,
             y: row.frame.minY + segment.minY + lensInset,
-            width: segment.width,
+            width: max(0, segment.width - Metrics.clearance * 2),
             height: max(0, segment.height - lensInset * 2)
         )
     }
@@ -2158,9 +2278,17 @@ private final class SegmentView: UIButton {
     /// The pill's laid-out size, for a host asserting its margins.
     var badgeSize: CGSize { badge.bounds.size }
 
-    /// The lens's height inside this segment, which is also the smallest width
-    /// the segment may take — see `updatePinnedWidth`.
-    private let lensHeight: CGFloat
+    /// The smallest width this segment may take — see `updatePinnedWidth`.
+    ///
+    /// The lens is the segment inset by the clearance on every side of the
+    /// VISIBLE capsule, so it is a disk exactly when the segment is at least as
+    /// wide as the capsule is tall. Stated from the style at birth (the
+    /// capsule's own height) and re-stated by the bar once the capsule has real
+    /// bounds, since a host can stretch the capsule taller than the style says
+    /// (an accessory's 48pt container) or reach beyond the bar (a platter).
+    var diskFloor: CGFloat {
+        didSet { if diskFloor != oldValue { updatePinnedWidth() } }
+    }
 
     /// The gap between the title and its badge, handed down by the style.
     private let badgeSpacing: CGFloat
@@ -2179,7 +2307,7 @@ private final class SegmentView: UIButton {
         badgeHeight: CGFloat,
         badgeSpacing: CGFloat,
         contentOffset: CGFloat,
-        lensHeight: CGFloat
+        diskFloor: CGFloat
     ) {
         self.title = title
         self.titlePadding = titlePadding
@@ -2188,7 +2316,7 @@ private final class SegmentView: UIButton {
         self.maximumPointSize = maximumPointSize
         self.badgeSpacing = badgeSpacing
         self.contentOffset = contentOffset
-        self.lensHeight = lensHeight
+        self.diskFloor = diskFloor
         badge = BadgeView(maximumPointSize: maximumBadgePointSize, height: badgeHeight)
         super.init(frame: .zero)
 
@@ -2357,13 +2485,14 @@ private final class SegmentView: UIButton {
         if !badge.isHidden {
             width += badge.measuredWidth + badgeSpacing
         }
-        // ⚠️ FLOOR at the lens's own height, which is what makes a short title's
-        // selection a DISK rather than a squashed oval. The lens is as tall as
-        // the segment minus its inset and as wide as the segment, so a segment
-        // narrower than that height cannot draw a round pill at any radius —
-        // its own corner rounding (height / 2) exceeds half its width and the
-        // shape degenerates. Below the floor the title simply sits in more air.
-        pinnedWidthConstraint.constant = max(lensHeight, width)
+        // ⚠️ FLOOR at the capsule's height, which is what makes a short title's
+        // selection a DISK rather than a squashed oval. The lens is the segment
+        // inset by the same clearance on every side of the visible capsule, so
+        // a segment narrower than the capsule is tall cannot draw a round pill
+        // at any radius — its own corner rounding (height / 2) exceeds half its
+        // width and the shape degenerates. Below the floor the title simply
+        // sits in more air.
+        pinnedWidthConstraint.constant = max(diskFloor, width)
     }
 }
 

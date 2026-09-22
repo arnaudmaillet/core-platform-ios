@@ -135,14 +135,27 @@ struct IconActionBarTests {
                 "two items are two items: \(actions.intrinsicContentSize) vs \(selector.intrinsicContentSize)")
     }
 
+    /// ⚠️ **THE PLATTER'S RING IS THE CLEARANCE, AND THE CAPSULE IS LAID OUT AT
+    /// THE PLATTER'S SIZE.** Inside a bar the lens grows to the whole 36pt
+    /// segment (a clearance of ours would stack on the platter's and the ring
+    /// would double), the capsule reaches 4pt beyond the view on every side,
+    /// and the width the bar asks for does not move: the ring lies outside it.
     @Test func insideABarItDrawsNoCapsuleOfItsOwn() {
         let bar = bar()
         let wide = bar.intrinsicContentSize.width
 
-        bar.suppressesBackdrop = true
+        bar.hosting = .platter
+        bar.setActive(0)
+        bar.layoutIfNeeded()
 
-        #expect(bar.intrinsicContentSize.width < wide,
-                "the clearance the platter supplies must come off, or the ring doubles")
+        #expect(bar.intrinsicContentSize.width == wide, "the ring is the platter's, outside the view")
+        #expect(!bar.debugHasCapsuleMaterial, "no glass of its own inside glass")
+        guard let lit = bar.debugLensFrame else {
+            Issue.record("nothing is drawn as open")
+            return
+        }
+        #expect(lit.width == IconBarMetrics.segmentSide, "the pill fills its segment: \(lit)")
+        #expect(lit.minX == 4 && lit.minY == 4, "and stands the platter's 4pt inside the capsule: \(lit)")
     }
 
     // MARK: - The glyphs exist

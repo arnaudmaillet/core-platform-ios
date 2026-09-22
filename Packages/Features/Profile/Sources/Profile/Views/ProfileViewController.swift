@@ -2222,7 +2222,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private func placeSelectors() {
         guard viewModel.hasGallery else { return }
         selectorTouchProbe.attach(to: selectorBar)
-        // `suppressesBackdrop` and `fillsWidth` are the host's to set — see
+        // `hosting` and `fillsWidth` are the host's to set — see
         // `SelectorAccessoryHost`, which is where the reasons for both live.
         selectorAccessory = SelectorAccessory(strip: selectorBar)
     }

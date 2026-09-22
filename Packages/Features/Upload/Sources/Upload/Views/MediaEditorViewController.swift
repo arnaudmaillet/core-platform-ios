@@ -283,7 +283,7 @@ final class MediaEditorViewController: UIViewController {
         )
         // ⚠️ THE TOOLBAR ALREADY SUPPLIES A CAPSULE — see `configureCategoryStrip`
         // for what a bubble inside a bubble looks like.
-        bar.suppressesBackdrop = true
+        bar.hosting = .platter
         // ⚠️ **THE FILTER STARTS DEAD.** It acts on a HELD piece, and nothing is
         // held when the bar is built; `refreshTrackActions` decides it from then
         // on, but only once a clip's length is known.
@@ -1433,7 +1433,7 @@ final class MediaEditorViewController: UIViewController {
         // item through its own neutral glass, so a strip carrying its own
         // backdrop renders as a bubble inside a bubble — the defect the picker's
         // first cut shipped.
-        strip.suppressesBackdrop = true
+        strip.hosting = .platter
         // ⚠️ **THE PILL DOES NOT MOVE ITSELF — AND THIS COMMENT USED TO CLAIM IT
         // DID.** `PagedTabBar` answers a tap by setting `selectedIndex` and
         // sending `.valueChanged`; the pill is placed by `applyProgress`, which

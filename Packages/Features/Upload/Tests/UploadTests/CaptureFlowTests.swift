@@ -1148,7 +1148,7 @@ struct CaptureFlowTests {
         #expect(items[2].customView === camera.debugCloseBar)
         #expect(items[2].identifier == CaptureViewController.closeItemID)
         #expect(camera.debugCloseBar.debugSymbols == ["xmark"])
-        #expect(camera.debugSelector.suppressesBackdrop && camera.debugCloseBar.suppressesBackdrop, "the toolbar supplies the glass")
+        #expect(camera.debugSelector.hosting == .platter && camera.debugCloseBar.hosting == .platter, "the toolbar supplies the glass")
 
         screen.window.layoutIfNeeded()
         let share = try #require(camera.debugBarShare)

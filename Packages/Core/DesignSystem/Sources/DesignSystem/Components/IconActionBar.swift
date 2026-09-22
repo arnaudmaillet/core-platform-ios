@@ -48,29 +48,37 @@ public final class IconActionBar: UIView {
     /// which is the difference from a selector and the reason this type exists.
     public var onTap: ((Int) -> Void)?
 
-    /// The host draws the capsule; this one draws none. See
-    /// `IconSelectorBar.suppressesBackdrop` for what the doubled platter looks
-    /// like.
-    public var suppressesBackdrop: Bool = false {
+    /// Who draws the capsule — see `SelectorHosting` for the one rule the three
+    /// selectors share, and `IconSelectorBar.hosting` for what a doubled platter
+    /// looks like.
+    public var hosting: SelectorHosting = .standalone {
         didSet {
-            guard suppressesBackdrop != oldValue else { return }
-            if suppressesBackdrop {
+            guard hosting != oldValue else { return }
+            if !hosting.drawsBackdrop {
                 capsule.effect = nil
             } else if window != nil {
                 materialiseCapsule()
             }
-            rowLeading?.constant = outerInset
-            rowTrailing?.constant = -outerInset
-            invalidateIntrinsicContentSize()
-            setNeedsLayout()
+            applyHosting()
         }
     }
 
     /// The bar's own height, so a host can lay it out before it has items.
     public static var height: CGFloat { IconBarMetrics.capsuleHeight }
 
-    private var outerInset: CGFloat { suppressesBackdrop ? 0 : IconBarMetrics.clearance }
-    private var lensClearance: CGFloat { suppressesBackdrop ? 0 : IconBarMetrics.clearance }
+    /// How far the visible capsule reaches beyond this view, per axis — and so,
+    /// how far inside the capsule the row of segments begins. The capsule is
+    /// laid out at THAT size, so a platter's own ring is where the first
+    /// segment's clearance comes from. Measured once the bar is in a platter
+    /// and in a window; the hosting's stated number until then.
+    private var platterOverhang: CGSize?
+    private var overhangX: CGFloat { platterOverhang?.width ?? hosting.overhang }
+    private var overhangY: CGFloat { platterOverhang?.height ?? hosting.overhang }
+    /// The pill's clearance inside its segment: the visible clearance less what
+    /// the ring above and below already supplies. NEGATIVE in a ring deeper
+    /// than the clearance — the pill then reaches past the segment, so that it
+    /// still stands the same 4pt off the glass the viewer sees.
+    private var lensClearance: CGFloat { IconBarMetrics.clearance - overhangY }
     private var lensSide: CGFloat { IconBarMetrics.segmentSide - lensClearance * 2 }
 
     private var items: [Item]
@@ -80,6 +88,10 @@ public final class IconActionBar: UIView {
     private var buttons: [UIButton] = []
     private var rowLeading: NSLayoutConstraint?
     private var rowTrailing: NSLayoutConstraint?
+    private var rowTop: NSLayoutConstraint?
+    private var rowBottom: NSLayoutConstraint?
+    /// The capsule's four edges, whose constants ARE the overhang.
+    private var capsuleEdges: [NSLayoutConstraint] = []
 
     /// The item whose panel is standing open, if any — drawn with the selector's
     /// own tint so "this one is showing something" reads the same in both bars.
@@ -120,24 +132,66 @@ public final class IconActionBar: UIView {
         capsule.contentView.addSubview(row)
 
         let leading = row.leadingAnchor.constraint(
-            equalTo: capsule.contentView.leadingAnchor, constant: outerInset
+            equalTo: capsule.contentView.leadingAnchor, constant: overhangX
         )
         let trailing = row.trailingAnchor.constraint(
-            equalTo: capsule.contentView.trailingAnchor, constant: -outerInset
+            equalTo: capsule.contentView.trailingAnchor, constant: -overhangX
         )
         rowLeading = leading
         rowTrailing = trailing
-        NSLayoutConstraint.activate([
-            capsule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            capsule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            capsule.topAnchor.constraint(equalTo: topAnchor),
-            capsule.bottomAnchor.constraint(equalTo: bottomAnchor),
-            leading,
-            trailing,
-            row.topAnchor.constraint(equalTo: capsule.contentView.topAnchor),
-            row.bottomAnchor.constraint(equalTo: capsule.contentView.bottomAnchor)
-        ])
+        // ⚠️ THE CAPSULE IS THE VISIBLE ONE, NOT THIS VIEW. Inside a platter it
+        // reaches `overhang` beyond every edge of the view, so that its clip —
+        // and the row inside it — end where the viewer sees the glass end
+        // rather than 4pt short of it. This view does not clip, so the reach is
+        // real; the capsule does, at the visible capsule's own radius.
+        capsuleEdges = [
+            capsule.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -overhangX),
+            capsule.trailingAnchor.constraint(equalTo: trailingAnchor, constant: overhangX),
+            capsule.topAnchor.constraint(equalTo: topAnchor, constant: -overhangY),
+            capsule.bottomAnchor.constraint(equalTo: bottomAnchor, constant: overhangY)
+        ]
+        // The same on the vertical axis: the icons stay in this view's rect,
+        // and a platter's capsule stands `overhangY` above and below them.
+        let top = row.topAnchor.constraint(equalTo: capsule.contentView.topAnchor, constant: overhangY)
+        let bottom = row.bottomAnchor.constraint(equalTo: capsule.contentView.bottomAnchor, constant: -overhangY)
+        rowTop = top
+        rowBottom = bottom
+        NSLayoutConstraint.activate(capsuleEdges + [leading, trailing, top, bottom])
     }
+
+    /// Re-states every constant that follows from the hosting: the capsule's
+    /// reach beyond the view and the row's inset inside it. The lens is placed
+    /// from the same numbers on the next layout pass.
+    private func applyHosting() {
+        for (edge, reach) in zip(capsuleEdges, [-overhangX, overhangX, -overhangY, overhangY]) {
+            edge.constant = reach
+        }
+        rowLeading?.constant = overhangX
+        rowTrailing?.constant = -overhangX
+        rowTop?.constant = overhangY
+        rowBottom?.constant = -overhangY
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    /// Takes the platter's real reach once there is one to measure, and lays
+    /// the capsule out against it. Guarded on change, or this would re-state
+    /// its constraints every pass and never settle.
+    private func measurePlatterIfHosted() {
+        let measured = hosting == .platter ? SelectorHosting.measuredPlatterOverhang(around: self) : nil
+        if hosting == .platter, window != nil {
+            remeasure.arm { [weak self] in self?.measurePlatterIfHosted() }
+        } else {
+            remeasure.reset()
+        }
+        guard measured != platterOverhang else { return }
+        platterOverhang = measured
+        applyHosting()
+    }
+
+    /// The re-asks that land the platter's true reach — see
+    /// `PlatterRemeasureSchedule` for why one measurement is not enough.
+    private let remeasure = PlatterRemeasureSchedule()
 
     private func rebuildSegments() {
         for button in buttons {
@@ -206,18 +260,22 @@ public final class IconActionBar: UIView {
 
     public override var intrinsicContentSize: CGSize {
         CGSize(
-            width: IconBarMetrics.intrinsicWidth(count: items.count, outerInset: outerInset),
+            width: IconBarMetrics.intrinsicWidth(count: items.count),
             height: IconBarMetrics.capsuleHeight
         )
     }
 
     public override func layoutSubviews() {
         super.layoutSubviews()
+        measurePlatterIfHosted()
         // ⚠️ SHAPE BEFORE MATERIAL. `didMoveToWindow` can land before the first
         // layout pass has given the capsule real bounds, and a glass effect
         // switched on over a zero-radius layer draws one frame of hard corners.
+        //
+        // The CAPSULE's height, not this view's: inside a platter the two differ
+        // by the overhang, and the radius has to be the visible capsule's.
         capsule.layer.cornerCurve = .continuous
-        capsule.layer.cornerRadius = bounds.height / 2
+        capsule.layer.cornerRadius = capsule.bounds.height / 2
         lens.layer.cornerRadius = lensSide / 2
         guard let activeIndex, buttons.indices.contains(activeIndex) else {
             lens.isHidden = true
@@ -226,16 +284,24 @@ public final class IconActionBar: UIView {
         lens.isHidden = false
         let stride = IconBarMetrics.segmentSide + IconBarMetrics.interSegmentSpacing
         let centring = (IconBarMetrics.segmentSide - lensSide) / 2
+        // In the capsule's own space, where the lens lives: the pill stands
+        // `SelectorCapsuleMetrics.clearance` off the visible edge on every host,
+        // as the overhang and the clearance inside the segment between them.
+        // Square, from the vertical ring; a ring half a point deeper at the ends
+        // than above is a half point nobody sees.
         lens.frame = CGRect(
-            x: outerInset + centring + CGFloat(activeIndex) * stride,
-            y: (bounds.height - lensSide) / 2,
+            x: overhangX + centring + CGFloat(activeIndex) * stride,
+            y: (capsule.bounds.height - lensSide) / 2,
             width: lensSide, height: lensSide
         )
     }
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil, capsule.effect == nil, !suppressesBackdrop else { return }
+        // A bar that leaves its window starts its platter measurement over
+        // when it comes back — the next host may be a different ring.
+        if window == nil { remeasure.reset() }
+        guard window != nil, capsule.effect == nil, hosting.drawsBackdrop else { return }
         materialiseCapsule()
     }
 
@@ -257,8 +323,11 @@ extension IconActionBar {
         buttons[index].sendActions(for: .primaryActionTriggered)
     }
 
-    /// Internal for tests: where the open-panel tint is, or nil when nothing is.
+    /// Internal for tests: where the open-panel tint is, or nil when nothing is —
+    /// in the CAPSULE's space, which inside a platter reaches beyond this view.
     public var debugLensFrame: CGRect? { lens.isHidden ? nil : lens.frame }
+
+    public var debugHasCapsuleMaterial: Bool { capsule.effect != nil }
 
     public var debugSymbols: [String] { items.map(\.symbolName) }
 }

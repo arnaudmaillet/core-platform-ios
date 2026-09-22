@@ -21,25 +21,31 @@ enum IconBarMetrics {
 
     static let interSegmentSpacing: CGFloat = 2
 
-    /// Capsule edge to the ink inside it.
+    /// Capsule edge to the pill inside it — the number every selector in this
+    /// module shares, stated once in `SelectorCapsuleMetrics`.
     ///
-    /// ⚠️ **ZERO INSIDE A BAR, AND THAT IS NOT A SMALLER NUMBER PICKED BY EYE.**
-    /// A toolbar's platter is 4pt larger than the view it hosts, so a clearance
-    /// of our own stacks on top of it and the ink reads 6pt off the edge where
-    /// `PagedTabBar`, which zeroes its own padding for exactly this reason, reads
-    /// 4. See `IconSelectorBar.suppressesBackdrop`.
-    static let clearance: CGFloat = 2
+    /// ⚠️ **INSIDE A PLATTER THE RING IS MOST OF IT, AND THAT IS NOT A SMALLER
+    /// NUMBER PICKED BY EYE.** A bar item's platter reaches beyond the view it
+    /// hosts (4pt a side in a navigation bar, more in the bottom toolbar), so a
+    /// clearance of our own would stack on top of it and the pill would read
+    /// 8pt off the edge where `PagedTabBar` reads 4. The bars keep the
+    /// clearance LESS the measured ring inside their segments — see
+    /// `SelectorHosting.measuredPlatterOverhang(around:)`.
+    static var clearance: CGFloat { SelectorCapsuleMetrics.clearance }
 
     static var capsuleHeight: CGFloat { segmentSide }
 
     /// The tint behind the item that is chosen, or whose panel is open.
     static let lensTint = UIColor.label.withAlphaComponent(0.18)
 
-    /// How wide a bar of `count` segments wants to be.
-    static func intrinsicWidth(count: Int, outerInset: CGFloat) -> CGFloat {
+    /// How wide a bar of `count` segments is.
+    ///
+    /// No inset term, on every host: the segments run from one edge of the
+    /// VISIBLE capsule to the other, and a platter's overhang lies outside the
+    /// view this width sizes. Standing alone, the pill's clearance is taken from
+    /// inside the segment, not added around the row.
+    static func intrinsicWidth(count: Int) -> CGFloat {
         let count = CGFloat(max(count, 1))
-        return count * segmentSide
-            + max(0, count - 1) * interSegmentSpacing
-            + outerInset * 2
+        return count * segmentSide + max(0, count - 1) * interSegmentSpacing
     }
 }

@@ -456,6 +456,13 @@ final class ProfileRelationshipsViewController: UIViewController {
         // same shared toolbar with no width math at all — the chat composer's
         // sticker strip.
         selectorTouchProbe.attach(to: tabBar)
+        // ⚠️ **A BAR ITEM GETS THE SYSTEM'S OWN GLASS PLATTER**, 4pt larger than
+        // the view it hosts on every side. Left to draw its own capsule the strip
+        // rendered as a bubble inside a bubble — which this screen shipped, the
+        // only selector in the app still doing so. `.platter` draws no material
+        // and lays the strip out against the platter's edge, so its titles
+        // scroll right up to the glass the viewer sees.
+        tabBar.hosting = .platter
         toolbarItems = [UIBarButtonItem(customView: tabBar), .flexibleSpace()]
     }
 
