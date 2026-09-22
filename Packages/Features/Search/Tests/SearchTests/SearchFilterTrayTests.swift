@@ -92,10 +92,7 @@ struct SearchFilterTrayTests {
         /// with no platter of its own, while the results screen it pushes wears
         /// the same field as a real item. `-header-bar-tree` showed the
         /// difference plainly: one platter on this screen, four on that one.
-        var field: UITextField? {
-            screen.navigationItem.rightBarButtonItems?
-                .compactMap { $0.customView as? UITextField }.first
-        }
+        var field: UITextField? { screen.navigationItem.titleView as? UITextField }
 
         /// ⚠️ THE TRAY IS ON THE RESULTS SCREEN'S TOOLBAR NOW, not the search
         /// screen's bar. The search screen shows a history and a typeahead;
@@ -356,7 +353,36 @@ struct SearchFilterTrayTests {
     }
 
     /// `[ field ][ Cancel ]` — the inbox's searching bar, and the relationship
-    /// lists', on a screen that is pushed rather than morphed.
+    /// lists', on a screen that is pushed rather than morphed. ⚠️ IN BOTH
+    /// MODES: the origin screen used to be `[back][field]`, the one search
+    /// header in the app with a chevron, and Cancel pops it now.
+    @Test func originModeWearsTheInboxSearchingBar() {
+        let host = Host()
+        #expect(host.screen.navigationItem.hidesBackButton)
+        #expect(host.screen.navigationItem.rightBarButtonItems?.map(\.title) == ["Cancel"])
+        // ⚠️ THE TITLE SLOT, not a bar item: an item has to state a width and
+        // the budget left a 24pt hole at the leading edge; the slot is sized
+        // by UIKit to what is left, which is how the inbox's field reaches the
+        // 16pt margin.
+        #expect(host.screen.navigationItem.titleView is UITextField)
+    }
+
+    /// Cancel from the origin is a pop, and nothing else: there is no answer
+    /// underneath to restore, and the screen it lands on is the one the
+    /// magnifier was tapped on.
+    @Test func cancellingFromTheOriginPopsBackToWhereTheSearchWasOpened() {
+        let host = Host()
+        let origin = UIViewController()
+        host.navigation.setViewControllers([origin, host.screen], animated: false)
+        host.window.layoutIfNeeded()
+        let cancel = try? #require(host.screen.navigationItem.rightBarButtonItems?.first)
+        #expect(cancel?.title == "Cancel")
+        cancel?.primaryAction?.performWithSender(nil, target: nil)
+        // A pop updates the stack synchronously; only the slide is animated.
+        #expect(host.navigation.viewControllers.map { $0 === origin } == [true],
+                "the search screen left the stack and the origin is on top")
+    }
+
     @Test func refineModeWearsTheInboxSearchingBar() {
         let host = Host()
         let refine = SearchViewController(
@@ -366,11 +392,8 @@ struct SearchFilterTrayTests {
         )
         refine.loadViewIfNeeded()
         #expect(refine.navigationItem.hidesBackButton)
-        // `[0]` IS THE SCREEN EDGE: Cancel leads the array so it renders
-        // TRAILING of the field — `[ field ][ Cancel ]`.
-        #expect(refine.navigationItem.rightBarButtonItems?.first?.title == "Cancel")
-        #expect(refine.navigationItem.rightBarButtonItems?.last?.customView is UITextField)
-        #expect(refine.navigationItem.titleView == nil, "the field is a bar item now")
+        #expect(refine.navigationItem.rightBarButtonItems?.map(\.title) == ["Cancel"])
+        #expect(refine.navigationItem.titleView is UITextField, "the field is the title view")
     }
 
     /// It exists to change an answer that already exists, so starting empty
@@ -384,7 +407,7 @@ struct SearchFilterTrayTests {
             mode: .refine
         )
         refine.loadViewIfNeeded()
-        #expect((refine.navigationItem.rightBarButtonItems?.compactMap { $0.customView as? UITextField }.first)?.text == "haddad")
+        #expect((refine.navigationItem.titleView as? UITextField)?.text == "haddad")
     }
 
     /// ⚠️ ONE VIEW MODEL, TWO SCREENS, AND ONE CALLBACK SLOT. A refine screen
@@ -572,20 +595,20 @@ struct SearchFilterTrayTests {
     }
 
     /// ⚠️ The explore list and the filter sheet's groups both run under a bar
-    /// and ask for the SOFT fade there. Left `.automatic`, iOS 27 can draw a
-    /// hard band with a hairline instead — see `prefersSoftTopEdge`.
-    @Test func theSearchScreenFadesUnderItsBar() throws {
+    /// with no system effect drawn there — neither iOS 26's fade nor iOS 27's
+    /// hard band — see `prefersClearTopEdge`.
+    @Test func theSearchScreenRunsUnderItsBarWithNoSystemEffect() throws {
         let host = Host()
         let list = try #require(host.screen.view.subviews.compactMap { $0 as? UICollectionView }.first)
-        #expect(list.topEdgeEffect.style == .soft)
+        #expect(list.topEdgeEffect.isHidden)
     }
 
-    @Test func theFilterSheetFadesUnderItsBar() throws {
+    @Test func theFilterSheetRunsUnderItsBarWithNoSystemEffect() throws {
         let host = Host()
         let sheet = SearchFilterSheetViewController(groups: host.filterGroups) { _, _ in }
         sheet.loadViewIfNeeded()
         let groups = try #require(sheet.view.subviews.compactMap { $0 as? UIScrollView }.first)
-        #expect(groups.topEdgeEffect.style == .soft)
+        #expect(groups.topEdgeEffect.isHidden)
     }
 
     @Test func cancellingAfterNoChangeChangesNothing() async {

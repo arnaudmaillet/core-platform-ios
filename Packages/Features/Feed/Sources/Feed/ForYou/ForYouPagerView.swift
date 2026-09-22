@@ -117,10 +117,10 @@ final class ForYouPagerView: UIView {
         scrollView.showsVerticalScrollIndicator = false
         scrollView.alwaysBounceVertical = false
         // ⚠️ The pager needs it as well as its pages: its own top edge effect is
-        // drawn under the header, and with only the pages soft iOS 27 still cut the
-        // header off at a hard line with a hairline. Same finding, same fix, as
-        // `HorizontalPagerView`. See `prefersSoftTopEdge`.
-        scrollView.prefersSoftTopEdge()
+        // drawn under the header too, so pages alone would leave the system's
+        // band in place. Same finding as `HorizontalPagerView`. See
+        // `prefersClearTopEdge`.
+        scrollView.prefersClearTopEdge()
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.delegate = self
         scrollView.pin(to: self)

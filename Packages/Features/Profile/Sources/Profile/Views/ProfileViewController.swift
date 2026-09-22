@@ -1557,8 +1557,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     /// The banner runs under the navigation area, so the bar is transparent
     /// while the header is at the scroll edge (white title over the banner's
-    /// top scrim) and snaps back to the system bar once content scrolls up
-    /// underneath it.
+    /// top scrim) and stays transparent, with the title in the system's ink,
+    /// once content scrolls up underneath it.
     private func configureNavigationBar() {
         // A custom leading item silently disables the navigation controller's
         // interactive pop gesture (the feed had to build a whole replacement
@@ -1572,7 +1572,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         transparent.titleTextAttributes = [.foregroundColor: UIColor.white]
         transparentBarAppearance = transparent
         navigationItem.scrollEdgeAppearance = transparent
-        navigationItem.standardAppearance = UINavigationBarAppearance()
+        // ⚠️ TRANSPARENT HERE TOO, not a fresh `UINavigationBarAppearance()`: a
+        // default one is the system's material slab, and this bar wears none in
+        // any state — `updateBarTransparency` only ever changes the title's
+        // colour.
+        navigationItem.standardAppearance = dockedBarAppearance
 
         // Account actions only exist for the viewer's own profile. (`onLogout`
         // is retained for the Account Settings screen, which will host Log Out.)
@@ -2389,31 +2393,36 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         headerHost.isUserInteractionEnabled = alpha > 0.01
     }
 
-    /// Gives the navigation bar its material back once the banner is no longer
-    /// behind it.
+    /// Swaps the bar's title colour once the banner is no longer behind it.
     ///
     /// ⚠️ **UIKit normally does this for us and cannot here.** The scroll-edge
     /// appearance is chosen by watching a scroll view in the hierarchy, and this
     /// screen no longer has one at the top level — the pages own their own
     /// scrolling, one level down. Left alone the bar stays at its scroll-edge
-    /// dress forever, which on this screen is fully transparent: the header's
-    /// bio and link went on showing through it after the header had docked,
-    /// sitting over the status bar.
+    /// dress forever, whose white title is written for the banner and unreadable
+    /// over the docked content.
+    ///
+    /// ⚠️ THE DOCKED BAR IS AS TRANSPARENT AS THE BANNER ONE. It used to take a
+    /// `configureWithDefaultBackground()` dress here — the system's material,
+    /// a flat slab — which made this the one header in the app with a blurred
+    /// band behind it. No header wears one (`prefersClearTopEdge`), so the bar
+    /// stays transparent and the only thing this swap changes is the ink.
     private func updateBarTransparency(travelled: CGFloat) {
         let shouldBeTransparent = travelled <= 0
         guard shouldBeTransparent != isBarTransparent else { return }
         isBarTransparent = shouldBeTransparent
-        let appearance = shouldBeTransparent ? transparentBarAppearance : opaqueBarAppearance
+        let appearance = shouldBeTransparent ? transparentBarAppearance : dockedBarAppearance
         navigationItem.scrollEdgeAppearance = appearance
         navigationItem.standardAppearance = appearance
         navigationItem.compactAppearance = appearance
         forceNavigationBarLayout()
     }
 
-    /// The bar's material dress, worn once the header has scrolled behind it.
-    private var opaqueBarAppearance: UINavigationBarAppearance {
+    /// The bar's dress once the header has scrolled behind it: the same
+    /// transparent background, with the title back in the system's ink.
+    private var dockedBarAppearance: UINavigationBarAppearance {
         let appearance = UINavigationBarAppearance()
-        appearance.configureWithDefaultBackground()
+        appearance.configureWithTransparentBackground()
         return appearance
     }
 

@@ -507,19 +507,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // selector is at the foot of the screen in a `UITabAccessory` now, and
         // an empty centre is just an empty centre.
         //
-        // ⚠️ **THE STATIC WORD, NOT THE LIVE LENS NAME.** This tab renames
-        // ITSELF from the active content lens — the `UITab` reads "For You",
-        // "Entertainment", "Work", "Focus" or "Gaming" (see
-        // `publishTabPresentation`). Mirroring that here is the one width risk
-        // in this change: "Entertainment" is ~104pt of text against a centre
-        // this bar leaves ~102-117pt of at 375pt, and it is the bar that
-        // already carries a leading glyph plus two trailing items. The static
-        // word costs ~56 and cannot collide.
+        // ⚠️ **NO TITLE IN THE BAR.** "For You" was written here (the static
+        // word, never the live lens name, which at "Entertainment" would have
+        // collided with the items); it went with Maps' on 2026-09-22 — the two
+        // roots' headers carry their controls and nothing else, and the tab
+        // bar already says the word. `title` still feeds nothing: the capsule
+        // in `titleView` outranks it when present, and the bar is bare when not.
         //
         // `largeTitleDisplayMode` stays `.never`: the large-title content-area
         // layout is kept out of the hero flight's path, which is a separate
-        // reason from the title string and still holds.
-        navigationItem.title = "For You"
+        // reason and still holds.
         navigationItem.largeTitleDisplayMode = .never
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were

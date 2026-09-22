@@ -67,13 +67,12 @@ struct MapSubFilterSheetTests {
         #expect(sheet.doneItem.title == "Done")
     }
 
-    @Test("The list fades under the bar and its search field rather than cutting at a line")
-    func listFadesUnderTheBar() throws {
+    @Test("The list runs under the bar and its search field with no system effect")
+    func listRunsUnderTheBarWithNoSystemEffect() throws {
         let (sheet, _) = Self.makeSheet()
         let list = try #require(sheet.view.subviews.compactMap { $0 as? UICollectionView }.first)
-        // Left `.automatic`, iOS 27 can draw a hard band with a hairline under a
-        // header — see `prefersSoftTopEdge`.
-        #expect(list.topEdgeEffect.style == .soft)
+        // Neither iOS 26's fade nor iOS 27's hard band — see `prefersClearTopEdge`.
+        #expect(list.topEdgeEffect.isHidden)
     }
 
     // MARK: - Done availability

@@ -463,9 +463,9 @@ final class NewPostViewController: UIViewController {
         list = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
         list.backgroundColor = .clear
         list.keyboardDismissMode = .interactive
-        // The soft fade under the bar, not iOS 27's hard band — see
-        // `prefersSoftTopEdge`.
-        list.prefersSoftTopEdge()
+        // No effect under the bar: the rows run up under the pills untouched — see
+        // `prefersClearTopEdge`.
+        list.prefersClearTopEdge()
         // ⚠️ **DISMISSING A KEYBOARD IS NOT THE SAME AS MAKING ROOM FOR ONE.**
         // This screen had the dismiss mode and a dismiss tap and nothing else,
         // so the field being typed into simply sat under the keyboard.

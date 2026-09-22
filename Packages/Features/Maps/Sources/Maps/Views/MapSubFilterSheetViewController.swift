@@ -273,9 +273,9 @@ final class MapSubFilterSheetViewController: UIViewController {
         // two things you can do to it — remove/add, and drag; a highlight on
         // tap would promise a third that doesn't exist.
         collectionView.allowsSelection = false
-        // The soft fade under the bar and its search field, not iOS 27's hard
-        // band — see `prefersSoftTopEdge`.
-        collectionView.prefersSoftTopEdge()
+        // No effect under the bar: the rows run up under the pills untouched — see
+        // `prefersClearTopEdge`.
+        collectionView.prefersClearTopEdge()
         collectionView.pin(to: view)
 
         let registration = UICollectionView.CellRegistration<MapSubFilterRowCell, MapSubFilter> {

@@ -56,10 +56,9 @@ final class SearchPeoplePage: UIViewController {
         collectionView.delegate = self
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.keyboardDismissMode = .onDrag
-        // The people tab fades out under the header. Asked for by name, not
-        // left to `.automatic`, which iOS 27 turns into a hard band on most
-        // screens — see `prefersSoftTopEdge`.
-        collectionView.prefersSoftTopEdge()
+        // No effect under the bar: the rows run up under the pills untouched — see
+        // `prefersClearTopEdge`.
+        collectionView.prefersClearTopEdge()
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
             collectionView.topAnchor.constraint(equalTo: view.topAnchor),

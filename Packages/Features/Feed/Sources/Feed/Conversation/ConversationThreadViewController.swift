@@ -185,10 +185,9 @@ final class ConversationThreadViewController: UIViewController {
         collectionView.alwaysBounceVertical = true
         collectionView.keyboardDismissMode = .interactive
         collectionView.contentInset.top = SnapCommentsLayout.streamTopBreath
-        // Under the header frost the system's own fade still draws, and on
-        // iOS 27 `.automatic` makes it a hard band cutting a message in half at a
-        // hairline, just below the frost. See `prefersSoftTopEdge`.
-        collectionView.prefersSoftTopEdge()
+        // No effect under the bar: the rows run up under the pills untouched — see
+        // `prefersClearTopEdge`.
+        collectionView.prefersClearTopEdge()
         collectionView.delegate = self
         if mode == .preview {
             // The tail never sits flush on the platter's edge.

@@ -193,10 +193,9 @@ final class ProfileGalleryGridView: UIView {
         // on every switch reads as motion the viewer did not cause.
         collectionView.showsVerticalScrollIndicator = false
         collectionView.showsHorizontalScrollIndicator = false
-        // The header floats over this page and fades into it. Asked for by name,
-        // not left to `.automatic`, which iOS 27 turns into a hard band with a
-        // hairline on most screens — see `prefersSoftTopEdge`.
-        collectionView.prefersSoftTopEdge()
+        // No effect under the bar: the rows run up under the pills untouched — see
+        // `prefersClearTopEdge`.
+        collectionView.prefersClearTopEdge()
         // The owner supplies the top inset (the header's height) and drives the
         // header from this view's offset, so UIKit must not also be adjusting
         // for safe areas underneath it.

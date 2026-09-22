@@ -791,9 +791,9 @@ final class ProfileShareViewController: UIViewController {
 
         // The list runs the FULL height of the sheet and the search row floats
         // over it — the iOS 26 composition. Its top inset holds the rows clear
-        // of the row at rest (see `applyResultsInset`), and `.soft` fades
-        // them out as they pass beneath it instead of clipping at a hard line.
-        resultsView.topEdgeEffect.style = .soft
+        // of the row at rest (see `applyResultsInset`); passing beneath it they
+        // stay untouched, with no system effect drawn — see `prefersClearTopEdge`.
+        resultsView.prefersClearTopEdge()
 
         // Bottom pinned to the VIEW at required priority, which is the whole
         // point of this layout.

@@ -433,10 +433,10 @@ final class MediaAlbumPageView: UIView {
         grid = UICollectionView(frame: .zero, collectionViewLayout: Self.gridLayout())
         grid.backgroundColor = .systemBackground
         grid.alwaysBounceVertical = true
-        // ⚠️ NOT `prefersSoftTopEdge()`, unlike every other list under a header.
-        // The album runs crisp under the picker's bar on iOS 26.5 and on iOS 27
-        // alike, with no line to remove; `.soft` would ADD a blur on iOS 27 that
-        // this screen has never had. The picker's pager says the same, and why.
+        // No effect under the picker's bar, like every other list under a header
+        // — the album runs up to Cancel / Drafts / Next untouched. See
+        // `prefersClearTopEdge`.
+        grid.prefersClearTopEdge()
         grid.delegate = self
         grid.prefetchDataSource = self
         // ⚠️ **NO MASK ON THIS GRID, DELIBERATELY.** The album used to fade its
