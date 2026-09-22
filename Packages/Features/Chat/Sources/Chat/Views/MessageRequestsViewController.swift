@@ -234,7 +234,7 @@ extension MessageRequestsViewController: UITableViewDelegate {
 
     /// The glass pill, and the tap that scrolls to the section it names.
     func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
-        guard let section = dataSource.headedSection(at: index) else { return nil }
+        guard index > 0, let section = dataSource.headedSection(at: index) else { return nil }
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: InboxSectionHeaderView.reuseIdentifier
         ) as? InboxSectionHeaderView
@@ -256,8 +256,17 @@ extension MessageRequestsViewController: UITableViewDelegate {
     /// Zero for an unheaded list — a table gives an unclaimed plain-style
     /// section a default height even when its header view is nil, which would
     /// leave a blank band above a list that has no header at all.
+    /// ⚠️ THE FIRST SECTION HAS NO HEADER IN THE FLOW. Its name is in the bar
+    /// from the moment the list appears (`InboxSurface.pinnedSectionTitle`
+    /// names the section at the top even at rest), so a large "New" under a
+    /// bar already saying "New" was the same word twice and a band of it
+    /// between the bar and the first row. The rows start under the bar; only a
+    /// LATER section keeps its inline title, which is the break between two
+    /// runs of content — and the bar takes that name over as it pins.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
-        dataSource.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+        index == 0 || dataSource.headedSection(at: index) == nil
+            ? .leastNormalMagnitude
+            : UITableView.automaticDimension
     }
 
     /// ⚠️ A FOOTER, not a bigger header margin.

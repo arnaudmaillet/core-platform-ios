@@ -209,15 +209,13 @@ struct SectionHeaderPresentationTests {
 struct SectionHeaderPinnedSectionTests {
     private let morph = SectionHeaderPillButton.Metrics.morphDistance
 
-    /// A list resting at its top has nothing pinned — it just has a top.
-    @Test func nothingIsPinnedWhileTheListRestsAtItsTop() {
-        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 0) == nil)
-        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: morph) == nil)
-    }
-
-    @Test func theFirstSectionPinsOnceTheListHasScrolledPastTheGrace() {
-        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: morph + 1) == 0)
+    /// A list resting at its top is showing its first section, and says so —
+    /// the bar names it from the first frame. Only an empty list names nothing.
+    @Test func theFirstSectionIsNamedWhileTheListRestsAtItsTop() {
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 0) == 0)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: -20) == 0)
         #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 200) == 0)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [], pinLine: 0) == nil)
     }
 
     /// The header forms its capsule just BEFORE it touches the line, and the

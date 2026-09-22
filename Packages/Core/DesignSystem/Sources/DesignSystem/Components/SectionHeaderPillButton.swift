@@ -319,20 +319,25 @@ public final class SectionHeaderPillButton: UIButton {
         alpha = hidesWhenPinned && presentation == .pinned ? 0 : 1
     }
 
-    /// Which section is stuck at the pin line — the SAME rule
-    /// `updatePresentation(in:)` applies per header, asked once for a whole
-    /// list so a host can say what its bar should show. `sectionTops` are the
-    /// sections' natural top edges in content coordinates, in order.
+    /// Which section is at the pin line — the section a bar should NAME.
+    /// `sectionTops` are the sections' natural top edges in content
+    /// coordinates, in order.
     ///
     /// The last section whose top has reached the line (within
-    /// `Metrics.morphDistance`) is the one pinned: an earlier header that has
-    /// been pushed off by the next is still "at the line" by distance, and
-    /// choosing the last resolves that the way the eye does. Nothing is pinned
-    /// while the list rests at its top — `pinLine` itself must have travelled
-    /// past the morph distance, the grace the first header gets.
+    /// `Metrics.morphDistance`, the same lead each header gives its own
+    /// morph) is the one: an earlier header that has been pushed off by the
+    /// next is still "at the line" by distance, and choosing the last resolves
+    /// that the way the eye does. ⚠️ At rest this is the FIRST section, not
+    /// nothing — a list resting at its top is showing its first section, and
+    /// the inbox's bar says so from the first frame (its first section has no
+    /// header in the flow for exactly that reason). That holds through a
+    /// rubber-band overscroll too: pulled down to refresh, the line sits
+    /// ABOVE every section top, and a distance test alone answered nothing —
+    /// the bar's item would have blinked out for the length of the bounce.
+    /// Only an empty list names nothing.
     public static func pinnedSection(sectionTops: [CGFloat], pinLine: CGFloat) -> Int? {
-        guard pinLine > Metrics.morphDistance else { return nil }
-        return sectionTops.lastIndex { $0 - pinLine <= Metrics.morphDistance }
+        guard !sectionTops.isEmpty else { return nil }
+        return sectionTops.lastIndex { $0 - pinLine <= Metrics.morphDistance } ?? 0
     }
 
     private static func font(for presentation: Presentation, traits: UITraitCollection) -> UIFont {
