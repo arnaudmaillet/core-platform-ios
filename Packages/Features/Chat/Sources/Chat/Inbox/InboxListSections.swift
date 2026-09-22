@@ -102,143 +102,22 @@ extension UITableViewDiffableDataSource<InboxListSection, ConversationID> {
         return current.sectionIdentifiers[index]
     }
 
-    /// Puts a section's first row directly under the bar — see
-    /// `UITableView.scrollFirstRow(ofSection:toPinLine:)` for why not
-    /// `scrollToRow(at:.top)`. A no-op for a section with no rows.
+    /// Puts a section's first row directly under the header, which is what
+    /// tapping that header's pill means: "show me this part".
+    ///
+    /// A no-op for a section with no rows, and for a list too short to scroll —
+    /// `scrollToRow` cannot invent content, so a two-section list that already
+    /// fits on screen simply stays where it is. That is correct, and it is also
+    /// why this is verified on the longest list rather than the shortest.
     func scroll(_ tableView: UITableView, toSectionAt index: Int) {
         guard snapshot().numberOfSections > index,
               tableView.numberOfRows(inSection: index) > 0
         else { return }
-        tableView.scrollFirstRow(ofSection: index)
+        tableView.scrollToRow(at: IndexPath(row: 0, section: index), at: .top, animated: true)
     }
 
     /// Where a section currently sits, or `nil` if the list does not have one.
     func index(of section: InboxListSection) -> Int? {
         snapshot().sectionIdentifiers.firstIndex(of: section)
-    }
-}
-
-extension UITableView {
-    /// Puts a section's first row on the PIN LINE — the top of the visible
-    /// content, under the bar — which is what tapping that section's name
-    /// means: "show me this part".
-    ///
-    /// ⚠️ NOT `scrollToRow(at:.top)`. A plain table keeps its pinned header's
-    /// box in front of the row it scrolls to, which was right while the
-    /// capsule was drawn in that box. The capsule is in the navigation bar now
-    /// and the pinned header is invisible (`InboxSectionHeaderView`), so
-    /// `.top` landed the row under an empty band as tall as the header — a
-    /// blank strip between the bar and the first row, measured on the inbox
-    /// at 55pt. The offset is set by hand instead: the row's own top on the
-    /// line, its (invisible) header stuck over it exactly as it is mid-scroll.
-    ///
-    /// Clamped for a list too short to scroll — an offset cannot invent
-    /// content, so a two-section list that already fits on screen stays where
-    /// it is.
-    func scrollFirstRow(ofSection section: Int, animated: Bool = true) {
-        guard numberOfSections > section, numberOfRows(inSection: section) > 0 else { return }
-        layoutIfNeeded()
-        let row = rectForRow(at: IndexPath(row: 0, section: section))
-        let inset = adjustedContentInset
-        let furthest = contentSize.height + inset.bottom - bounds.height
-        let target = min(row.minY - inset.top, furthest)
-        setContentOffset(CGPoint(x: 0, y: max(-inset.top, target)), animated: animated)
-    }
-
-    /// Where the list RESTS: the first row on the pin line, its header above
-    /// the resting position — in the flow, out of view, and one pull away.
-    func restPastLeadingHeader() {
-        scrollFirstRow(ofSection: 0, animated: false)
-    }
-
-    /// Whether the list currently sits at that resting position.
-    var isRestingPastLeadingHeader: Bool {
-        guard numberOfSections > 0, numberOfRows(inSection: 0) > 0 else { return false }
-        let rowTop = rectForRow(at: IndexPath(row: 0, section: 0)).minY - adjustedContentInset.top
-        return abs(contentOffset.y - rowTop) < 0.5
-    }
-
-    /// ⚠️ A SHORT LIST CANNOT REST PAST ITS HEADER ON ITS OWN. Scrolling is
-    /// bounded by the content, and a list that does not fill the screen — the
-    /// Requests page, most days — has nowhere to go: the resting offset was
-    /// clamped back to the top and the header stayed in view, the one page
-    /// opening on a large "New" under a bar that says nothing. This pads the
-    /// bottom inset by exactly the shortfall, so every list can travel the
-    /// header's height; a list that already fills the screen gets nothing.
-    /// Re-read whenever the content size or the bounds change.
-    func padToRestPastLeadingHeader() {
-        guard numberOfSections > 0, numberOfRows(inSection: 0) > 0 else { return }
-        let headerHeight = rectForRow(at: IndexPath(row: 0, section: 0)).minY - rect(forSection: 0).minY
-        // The system's part of the bottom inset (tab bar, safe area), which
-        // is what the content must clear BEFORE the header's height is added.
-        let systemBottom = adjustedContentInset.bottom - contentInset.bottom
-        let reach = contentSize.height + systemBottom - bounds.height
-        let padding = max(0, headerHeight - reach)
-        guard abs(contentInset.bottom - padding) > 0.5 else { return }
-        contentInset.bottom = padding
-    }
-
-    /// Ends a pull-to-refresh by travelling straight back to the resting
-    /// position — first row under the bar, header out of view.
-    ///
-    /// ⚠️ ONE MOTION, NOT TWO, AND THE CONTROL'S OWN ANIMATION IS THE THING
-    /// IN THE WAY. `endRefreshing()` retracts its inset with an animation of
-    /// its own, and every request made beside it waited that animation out:
-    /// a `setContentOffset(animated:)` in the same turn, then both changes in
-    /// one `UIView.animate` block — filmed at 30fps each time as the list
-    /// coming back to the top of its content, holding there with "New" in
-    /// the flow for ~0.4s, and only then travelling on to "New" in the bar.
-    /// So the retraction is taken WITHOUT animation while the content is held
-    /// exactly where it was drawn (the offset re-stated, so the spinner's
-    /// distance is now plain overscroll), and the one animation that runs is
-    /// the list's own, from there to rest.
-    ///
-    /// ⚠️ AND NOTHING IS ANIMATED WHILE A FINGER IS DOWN. A refresh that ends
-    /// under the finger (the mock's does, in under a second) used to start
-    /// this travel mid-drag; on release UIKit put the content back where the
-    /// finger had it, and the list travelled a second time — filmed as the
-    /// header coming back into view after it had already gone. Under a drag
-    /// only the spinner goes; `snapPastLeadingHeader` makes the one motion
-    /// at the release.
-    func endRefreshingAtRest(_ control: UIRefreshControl) {
-        guard control.isRefreshing else { return }
-        let held = contentOffset
-        UIView.performWithoutAnimation {
-            control.endRefreshing()
-            layoutIfNeeded()
-            contentOffset = held
-        }
-        guard !isTracking, !isDragging else { return }
-        scrollFirstRow(ofSection: 0)
-    }
-
-    /// A scroll that ends ABOVE the first row — inside the first header's
-    /// band, or pulled past the top of the content — travels to rest from
-    /// wherever the finger left it, the way a large title snaps shown or
-    /// hidden rather than resting half-revealed.
-    ///
-    /// Left alone while a refresh is still running: the spinner's inset is
-    /// where the finger left the list on purpose, and `endRefreshingAtRest`
-    /// brings it home when the refresh is done.
-    func snapPastLeadingHeader(unlessRefreshing control: UIRefreshControl?) {
-        guard let target = restingOffset(ifLandingAbove: contentOffset.y, unlessRefreshing: control)
-        else { return }
-        setContentOffset(CGPoint(x: 0, y: target), animated: true)
-    }
-
-    /// The resting offset, when a scroll landing at `landing` would land
-    /// above the first row and no refresh is running — nil otherwise.
-    ///
-    /// ⚠️ NOT HANDED TO UIKIT AS A DECELERATION TARGET ANY MORE. That was
-    /// tried, in three shapes, and each crawled on the device — see the note
-    /// on `scrollViewDidEndDragging` in the lists.
-    func restingOffset(ifLandingAbove landing: CGFloat, unlessRefreshing control: UIRefreshControl?) -> CGFloat? {
-        guard control?.isRefreshing != true else { return nil }
-        guard numberOfSections > 0, numberOfRows(inSection: 0) > 0 else { return nil }
-        let inset = adjustedContentInset
-        let rowTop = rectForRow(at: IndexPath(row: 0, section: 0)).minY - inset.top
-        guard landing < rowTop - 0.5 else { return nil }
-        let furthest = contentSize.height + inset.bottom - bounds.height
-        return max(-inset.top, min(rowTop, furthest))
     }
 }

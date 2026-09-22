@@ -17,60 +17,6 @@ import UIKit
 /// actions: the horizontal axis belongs to paging between inbox categories,
 /// and a row that also claims it would make every page swipe a coin flip.
 final class ConversationListViewController: UIViewController {
-    /// ⚠️ THE RESTING OFFSET IS APPLIED WHEN THE CONTENT SIZE LANDS, NOT ON
-    /// APPLY. The first apply returns before the rows exist in the table (the
-    /// batch update is still in flight) and, for a page the pager has not
-    /// shown yet, before the table has a height — an offset set then was
-    /// clamped straight back to the top, and the list opened on its header
-    /// after all; a layout pass of this controller's VIEW never came either,
-    /// because rows landing inside the table lay out the table, not its
-    /// host. `contentSize` is the one thing that changes when they land, so it
-    /// is watched — for the life of the list, because the bottom padding that
-    /// lets a short list rest past its header (`padToRestPastLeadingHeader`)
-    /// has to follow every change of size — and the rest itself is asked for
-    /// once, until it takes.
-    private var contentObservation: NSKeyValueObservation?
-    private var wantsRestPastHeader = false
-
-    private func restPastLeadingHeaderWhenContentLands() {
-        wantsRestPastHeader = true
-        guard contentObservation == nil else { return }
-        contentObservation = tableView.observe(\.contentSize, options: [.initial, .new]) { [weak self] _, _ in
-            self?.settleLeadingHeader()
-        }
-    }
-
-    /// The padding first, so the rest has somewhere to go.
-    private func settleLeadingHeader() {
-        guard tableView.bounds.height > 0,
-              tableView.numberOfSections > 0, tableView.numberOfRows(inSection: 0) > 0
-        else { return }
-        tableView.padToRestPastLeadingHeader()
-        guard wantsRestPastHeader else { return }
-        tableView.restPastLeadingHeader()
-        // ⚠️ CLEARED ON ARRIVAL, NOT ON MOVEMENT. This used to clear only when
-        // the offset had moved, and a rest that was applied onto a list
-        // already sitting at rest left the flag set — after which EVERY
-        // content-size change (a self-sizing row settling mid-scroll, the
-        // mock's timestamps ticking) re-applied the rest and the list snapped
-        // back to its top under the finger. Filmed as a list that would not
-        // scroll at all.
-        if tableView.isRestingPastLeadingHeader { wantsRestPastHeader = false }
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        // The bounds are the other input to the padding — a page laid out
-        // for the first time, a rotation.
-        if contentObservation != nil { settleLeadingHeader() }
-    }
-
-    /// See `InboxSurface.pinnedSectionTitle`; kept current by
-    /// `updatePinnedSection` on every scroll and every apply.
-    private(set) var pinnedSectionTitle: String?
-    private var pinnedSectionIndex: Int?
-    var onPinnedSectionChange: ((String?) -> Void)?
-
     private let viewModel: ConversationListViewModel
 
     /// ⚠️ Built with its horizontal indicator off explicitly. The app-wide
@@ -282,7 +228,7 @@ final class ConversationListViewController: UIViewController {
             tableView.isHidden = true
             statusView.isHidden = true
         case .content(let sections):
-            tableView.endRefreshingAtRest(refreshControl)
+            refreshControl.endRefreshing()
             statusView.isHidden = true
             let models = sections.all
             // Rows whose content changed without moving. Applied straight to
@@ -310,17 +256,6 @@ final class ConversationListViewController: UIViewController {
             // ones, means the cell already looks right when the batch picks it
             // up and the band travels with it.
             reconfigureVisible(changed)
-            // ⚠️ READ BEFORE THE `defer`, which runs after `hasRenderedContent`
-            // has been flipped below — read inside it, "first render" was
-            // never true and the list opened on its header after all.
-            let isFirstRender = !hasRenderedContent
-            defer {
-                // First content only: the list opens resting past its first
-                // header (see `scrollViewDidEndDragging`), and a later apply
-                // must not yank a list the viewer has scrolled.
-                if isFirstRender { restPastLeadingHeaderWhenContentLands() }
-                updatePinnedSection()
-            }
             adapter.apply(sections, animated: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
             revealContent()
@@ -512,59 +447,6 @@ extension ConversationListViewController: UITableViewDelegate {
         ) { [weak self] _ in self?.viewModel.delete([id]) }
         // Destructive action in its own inline section, per system menus.
         return UIMenu(children: [pin, mute, UIMenu(options: .displayInline, children: [delete])])
-    }
-
-    // MARK: - The pinned section, for the bar
-
-    func scrollToPinnedSection() {
-        guard let index = pinnedSectionIndex else { return }
-        adapter.scroll(tableView, toSectionAt: index)
-    }
-
-    /// The section stuck at the pin line, published only when it changes: a
-    /// scroll fires this every frame, and the bar must not be rewritten on
-    /// every one of them. The rule is each header's own
-    /// (`SectionHeaderPillButton.pinnedSection`), asked once for the list.
-    func updatePinnedSection() {
-        let pinLine = tableView.contentOffset.y + tableView.adjustedContentInset.top
-        let tops = (0..<tableView.numberOfSections).map { tableView.rect(forSection: $0).minY }
-        let index = SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: pinLine)
-            .flatMap { adapter.headedSection(at: $0) == nil ? nil : $0 }
-        let title = index.flatMap { adapter.headedSection(at: $0)?.title }
-        pinnedSectionIndex = index
-        guard title != pinnedSectionTitle else { return }
-        pinnedSectionTitle = title
-        onPinnedSectionChange?(title)
-    }
-
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        updatePinnedSection()
-    }
-
-    /// ⚠️ THE LIST RESTS WITH ITS FIRST ROW UNDER THE BAR, not with its first
-    /// header — the bar names that section, so a large "New" under a bar
-    /// already saying "New" was the same word twice and a band of it between
-    /// the bar and the first row. The header is still there, ABOVE the
-    /// resting position: pull the list down and it comes into view as the
-    /// title over the first row while the bar's item fades out, and a release
-    /// that does not refresh snaps past it again (`snapPastLeadingHeader`),
-    /// the way a large title snaps shown or hidden. A refresh leaves it shown
-    /// until the next scroll, which is what pulling was for.
-    /// ⚠️ NO REDIRECTED DECELERATION, AND THAT IS A DECISION. Handing UIKit the
-    /// resting offset as `targetContentOffset` (with the bounce off for a
-    /// fling, the list's own scroll for a slow release) made every landing a
-    /// single motion on film and still crawled for seconds on Arnaud's device
-    /// in cases the simulator never reproduced. Removed outright, 2026-09-22:
-    /// a scroll ends where UIKit ends it, and one that ends above the first
-    /// row then travels to rest on the list's own clock. That is a bounce and
-    /// a snap on a fling to the top — two motions, and a pause the eye can
-    /// see — preferred to a crawl nobody can explain.
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate { tableView.snapPastLeadingHeader(unlessRefreshing: refreshControl) }
-    }
-
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        tableView.snapPastLeadingHeader(unlessRefreshing: refreshControl)
     }
 }
 
