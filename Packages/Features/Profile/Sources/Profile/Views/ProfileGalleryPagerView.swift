@@ -118,10 +118,10 @@ final class ProfileGalleryPagerView: UIView {
         // vertically, so the two axes never arbitrate for the same drag.
         scrollView.alwaysBounceVertical = false
         // ⚠️ The pager needs it as well as its pages: its own top edge effect is
-        // drawn under the header too. On For You and the inbox, pages alone left
-        // iOS 27's hard line in place; this pager is built the same way. See
-        // `prefersSoftTopEdge`.
-        scrollView.prefersSoftTopEdge()
+        // drawn under the header too, so pages alone would leave the system's
+        // band in place. Same finding as `HorizontalPagerView`. See
+        // `prefersClearTopEdge`.
+        scrollView.prefersClearTopEdge()
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.pin(to: self)
 

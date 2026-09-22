@@ -433,10 +433,14 @@ final class MediaAlbumPageView: UIView {
         grid = UICollectionView(frame: .zero, collectionViewLayout: Self.gridLayout())
         grid.backgroundColor = .systemBackground
         grid.alwaysBounceVertical = true
-        // ⚠️ NOT `prefersSoftTopEdge()`, unlike every other list under a header.
-        // The album runs crisp under the picker's bar on iOS 26.5 and on iOS 27
-        // alike, with no line to remove; `.soft` would ADD a blur on iOS 27 that
-        // this screen has never had. The picker's pager says the same, and why.
+        // ⚠️ NOT `prefersClearTopEdge()`, unlike every other list under a
+        // header, and NOT for a visual reason: the album runs crisp under the
+        // picker's bar on iOS 26.5 and iOS 27 alike, so hiding an effect that
+        // never draws would change nothing on screen — and it would touch
+        // `topEdgeEffect` in a VIEW INITIALISER, which is the one access
+        // pattern measured holding a headless CI test process for ~64s (see
+        // `prefersClearTopEdge`'s caveat). This grid is built by every picker
+        // test; the picker's pager opts out for the same reason.
         grid.delegate = self
         grid.prefetchDataSource = self
         // ⚠️ **NO MASK ON THIS GRID, DELIBERATELY.** The album used to fade its

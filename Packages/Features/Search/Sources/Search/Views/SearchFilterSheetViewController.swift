@@ -168,9 +168,9 @@ final class SearchFilterSheetViewController: UIViewController {
 
         let scroll = UIScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        // Starts BELOW the bar, but its top edge is still the bar's to fade
-        // into once the groups scroll — see `prefersSoftTopEdge`.
-        scroll.prefersSoftTopEdge()
+        // No effect under the bar: the rows run up under the pills untouched — see
+        // `prefersClearTopEdge`.
+        scroll.prefersClearTopEdge()
         scroll.addSubview(stack)
         view.addSubview(scroll)
         NSLayoutConstraint.activate([

@@ -279,19 +279,20 @@ struct MediaPickerTests {
         #expect(bar.badgeTint == .systemBlue)
     }
 
-    /// ⚠️ THE ONE SCREEN THAT KEEPS `.automatic` ON TOP. Every other list under a
-    /// header asks for `.soft`; the picker's album has never had a fade under its
-    /// bar, on iOS 26.5 or on iOS 27, and `.soft` would lay a heavy blur over its
-    /// top rows on iOS 27 — measured. Pinned so a sweep that "fixes" every
-    /// scroll view does not quietly give this one a look nobody chose.
-    @Test func theAlbumKeepsTheSystemsTopEdge() async throws {
+    /// ⚠️ THE ONE SCREEN THAT LEAVES ITS TOP EDGE EFFECT ALONE. Every other
+    /// list under a header hides it; the picker's album never drew one under
+    /// its bar on either system, so there is nothing to hide — and the hide
+    /// reads `topEdgeEffect` in a view initialiser, the access measured
+    /// stalling a headless CI process. Pinned so a sweep that "fixes" every
+    /// scroll view does not quietly touch this one.
+    @Test func theAlbumLeavesItsTopEdgeAlone() async throws {
         let screen = try await open(Self.library(photos: 7, videos: 3))
         let pager = try #require(screen.picker.debugPager)
-        #expect(pager.pagingScrollView.topEdgeEffect.style == .automatic, "the pager")
+        #expect(!pager.pagingScrollView.topEdgeEffect.isHidden, "the pager")
 
         let page = MediaAlbumPageView()
         let grid = try #require(page.subviews.compactMap { $0 as? UICollectionView }.first)
-        #expect(grid.topEdgeEffect.style == .automatic, "each album's grid")
+        #expect(!grid.topEdgeEffect.isHidden, "each album's grid")
     }
 
     /// The albums are TABS: one page each, and the strip selects between them.

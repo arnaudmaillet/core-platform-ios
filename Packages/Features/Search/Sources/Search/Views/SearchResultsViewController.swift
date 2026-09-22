@@ -412,11 +412,12 @@ final class SearchResultsViewController: UIViewController {
     ///   all.
     ///
     ///   ⚠️ **CHARGING ONE THAT IS NOT THERE LEAVES A HOLE.** The global
-    ///   search screen hides its back button in refine mode
-    ///   (`setHidesBackButton(true)`), and the field was still being charged
-    ///   the 44pt chevron plus the 24pt gap to a leading group that does not
-    ///   exist — 68pt of empty bar, visible at the LEADING edge because the
-    ///   field is trailing and the shortfall collects behind it.
+    ///   search screen hid its back button and was still charged the 44pt
+    ///   chevron plus the 24pt gap to a leading group that did not exist —
+    ///   68pt of empty bar at the LEADING edge, because the field is trailing
+    ///   and the shortfall collects behind it. (That screen's field is in the
+    ///   title slot now and no longer budgets at all; the parameter stays for
+    ///   the arithmetic's sake.)
     static func queryWidth(inBarOfWidth barWidth: CGFloat,
                            trailingSiblingWanted: CGFloat,
                            leadingWanted: CGFloat = 0,

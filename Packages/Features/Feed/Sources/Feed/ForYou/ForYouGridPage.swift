@@ -429,10 +429,9 @@ final class ForYouGridPage: UIView {
         // under it. Same reason as the profile's pages.
         collectionView.showsVerticalScrollIndicator = false
         collectionView.showsHorizontalScrollIndicator = false
-        // The header floats over these pages and fades into them; left
-        // `.automatic`, iOS 27 draws a hard band with a hairline instead. See
-        // `prefersSoftTopEdge`.
-        collectionView.prefersSoftTopEdge()
+        // No effect under the bar: the rows run up under the pills untouched — see
+        // `prefersClearTopEdge`.
+        collectionView.prefersClearTopEdge()
         collectionView.register(PostGridTileCell.self, forCellWithReuseIdentifier: PostGridTileCell.reuseID)
         collectionView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
         collectionView.register(

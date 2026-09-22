@@ -38,9 +38,9 @@ final class OTPVerificationViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Enter Code"
-        // The soft fade under the bar, not iOS 27's hard band — see
-        // `prefersSoftTopEdge`.
-        tableView.prefersSoftTopEdge()
+        // No effect under the bar: the rows run up under the pills untouched — see
+        // `prefersClearTopEdge`.
+        tableView.prefersClearTopEdge()
         navigationItem.rightBarButtonItem = verifyButton
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel,

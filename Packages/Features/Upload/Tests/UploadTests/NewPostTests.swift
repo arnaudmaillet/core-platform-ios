@@ -410,14 +410,14 @@ struct NewPostTests {
 
     // MARK: - The bars
 
-    /// ⚠️ The list runs under the bar and asks for the SOFT fade there. Left
-    /// `.automatic`, iOS 27 draws a flat band with a hard edge across the caption
-    /// card instead — measured on this screen. See `prefersSoftTopEdge`.
-    @Test func theListFadesUnderTheBarRatherThanCuttingAtALine() throws {
+    /// ⚠️ The list runs under the bar with no system effect drawn there. Left
+    /// alone, iOS 27 laid a flat band with a hard edge across the caption card —
+    /// measured on this screen. See `prefersClearTopEdge`.
+    @Test func theListRunsUnderTheBarWithNoSystemEffect() throws {
         let screen = open(Self.items(2))
         let lists = screen.post.view.subviews.compactMap { $0 as? UICollectionView }
         try #require(lists.count == 1, "the screen's one list")
-        #expect(lists[0].topEdgeEffect.style == .soft)
+        #expect(lists[0].topEdgeEffect.isHidden)
     }
 
     /// The bar is `[‹][save] ——— [Post]` and nothing else: a centred title

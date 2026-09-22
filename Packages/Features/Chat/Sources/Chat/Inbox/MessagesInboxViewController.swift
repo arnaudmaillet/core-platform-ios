@@ -102,15 +102,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // The tab's own name, in the bar. The slot was empty because the
-        // capsule used to occupy it; the capsule is in a `UITabAccessory` at
-        // the foot of the screen now.
-        //
-        // ⚠️ SET ONCE, AND THE SEARCH MORPH IS LEFT ALONE. `applySearchingBar`
-        // puts a `UISearchTextField` in `titleView`, which OUTRANKS `title` —
-        // so the word hides itself while searching and comes back on Cancel,
-        // with nothing to write in either direction.
-        navigationItem.title = "Messages"
+        // ⚠️ NO TITLE. "Messages" sat here for a while (the tab bar says the
+        // word already); it went on 2026-09-22 with Maps' and For You's, and
+        // the bar's leading slot now carries the pinned section's name
+        // instead — see `applyPinnedSection`.
         navigationItem.largeTitleDisplayMode = .never
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were
@@ -221,6 +216,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         for surface in surfaces {
             apply(surface.chrome, from: surface)
             surface.onChromeChange = { [weak self] chrome in self?.apply(chrome, from: surface) }
+            // Only the page in front writes the bar; a page scrolled off-screen
+            // by a settle still reports, and must not.
+            surface.onPinnedSectionChange = { [weak self] title in
+                guard let self, surface === activeSurface else { return }
+                applyPinnedSection(title, animated: true)
+            }
         }
 
         categoryBar.setProgress(CGFloat(pagerView.activeIndex))
@@ -484,6 +485,41 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         navigationItem.rightBarButtonItems = [searchItem]
         navigationItem.leftBarButtonItems = []
         navigationItem.titleView = nil
+        pinnedItemTitle = nil
+        applyPinnedSection(activeSurface?.pinnedSectionTitle, animated: false)
+    }
+
+    // MARK: - The pinned section, in the bar
+
+    /// What the leading item currently says, so a scroll that re-reports the
+    /// same section rewrites nothing.
+    private var pinnedItemTitle: String?
+
+    /// `[ Recent ] ————————————————— [ search ]`
+    ///
+    /// The section stuck at the top of the active page, as a LEADING BAR ITEM.
+    /// It used to be a glass capsule pinned inside the list, hanging just
+    /// under a bar whose top-left was empty — two header rows where one would
+    /// do. A plain titled `UIBarButtonItem` is the native shape for it: the
+    /// bar draws the same glass platter around it that it draws around
+    /// Cancel, and `setLeftBarButtonItems(_:animated:)` fades it in and out
+    /// as sections come and go, which is UIKit's own way of changing a bar.
+    /// The page's own header fades out at the pin line so the two never show
+    /// at once (`InboxSectionHeaderView`). Tapping it does what tapping the
+    /// pinned capsule did: the section's first row comes under the bar.
+    ///
+    /// ⚠️ NOT WHILE SEARCHING. The searching bar owns the whole row
+    /// (`applySearchingBar` empties the leading group), and Cancel restores
+    /// the resting bar, which re-reads the active page.
+    private func applyPinnedSection(_ title: String?, animated: Bool) {
+        guard !isSearching, title != pinnedItemTitle else { return }
+        pinnedItemTitle = title
+        let items = title.map { title in
+            [UIBarButtonItem(title: title, primaryAction: UIAction { [weak self] _ in
+                self?.activeSurface?.scrollToPinnedSection()
+            })]
+        } ?? []
+        navigationItem.setLeftBarButtonItems(items, animated: animated)
     }
 
     /// `[ field ————————————————— ][ Cancel ]`
@@ -670,6 +706,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // and finding All's count gone is losing the comparison you switched
         // for. Only leaving the screen retires them; see `viewWillDisappear`.
         apply(surface.chrome, from: surface)
+        // The leading item follows the page in front: whatever IT has pinned,
+        // or nothing.
+        applyPinnedSection(surface.pinnedSectionTitle, animated: true)
         // The shared bar follows whichever page is now in front, and the new page
         // gets the same clearance. Re-syncing here is what keeps a bar collapsed
         // on one tab from sitting half-open over another.

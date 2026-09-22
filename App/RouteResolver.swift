@@ -152,7 +152,24 @@ final class RouteResolver: Router {
             // for the slide to finish before the keyboard even starts rising.
             // Skipping the slide takes the transition out of the sum — the
             // screen and its keyboard arrive together.
-            push(searchFeature().makeSearchViewController(), using: navigator, animated: false)
+            //
+            // ⚠️ AND IT IS A CROSS-DISSOLVE, NOT A CUT. A cut was tried
+            // (`performWithoutAnimation` around the unanimated push, because
+            // on iOS 26 `animated: false` alone still animated the wrapper's
+            // frame — filmed as the list growing out of the top-left corner)
+            // and read as brutal: the bar's items simply swapped. The dissolve
+            // is the one native alternative to the slide that needs no
+            // navigation delegate — see `crossDissolve`. The keyboard still
+            // rises at once: the push inside is unanimated, so the screen's
+            // `viewDidAppear` claims the field synchronously.
+            let destination = searchFeature().makeSearchViewController()
+            if let navigation = navigator.activeNavigationController {
+                navigation.crossDissolve { [self] in
+                    push(destination, using: navigator, animated: false)
+                }
+            } else {
+                push(destination, using: navigator, animated: false)
+            }
 
         case .post(let postID):
             let detail = feedFeature().makePostDetailViewController(for: postID, mode: .full)

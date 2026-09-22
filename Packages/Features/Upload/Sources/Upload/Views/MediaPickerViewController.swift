@@ -394,15 +394,13 @@ final class MediaPickerViewController: UIViewController {
     /// in at index 0 so the tray, the empty state and the spinner stay above it.
     private func configurePager(for albums: [MediaLibraryAlbum], bar: PagedTabBar) {
         pages = albums.map { _ in makePage() }
-        // ⚠️ **NO SOFT TOP EDGE HERE — THE ONE PAGER THAT KEEPS `.automatic`.**
-        // Every other screen asks for `.soft` because iOS 27's `.automatic` drew
-        // a hard band with a hairline under its header. This one never did:
-        // measured on iOS 27 (iPhone 18 Pro) and on iOS 26.5 (iPhone 17 Pro Max),
-        // the album runs crisp under Cancel / Drafts / Next, no fade and no line,
-        // on both. Asked for `.soft`, iOS 27 lays a heavy blur over the top rows
-        // instead — a look this screen has had on neither system. The album
-        // pages keep `.automatic` too (`MediaAlbumPageView.configureGrid`).
-        let pager = HorizontalPagerView(pages: pages, initialIndex: 0, prefersSoftTopEdge: false)
+        // ⚠️ THE ONE PAGER THAT LEAVES ITS TOP EDGE EFFECT ALONE. The album
+        // has never drawn one under Cancel / Drafts / Next on either system, so
+        // there is nothing to hide — and hiding it would read `topEdgeEffect`
+        // at construction, the access pattern that stalled a headless CI
+        // process for ~64s once (`prefersClearTopEdge`'s caveat). The album
+        // pages say the same (`MediaAlbumPageView.configureGrid`).
+        let pager = HorizontalPagerView(pages: pages, initialIndex: 0, prefersClearTopEdge: false)
         self.pager = pager
         // ⚠️ **`pin(to:)` WOULD UNDO THE LINE ABOVE IT.** That helper calls
         // `parent.addSubview(self)` unconditionally, and `addSubview` MOVES a

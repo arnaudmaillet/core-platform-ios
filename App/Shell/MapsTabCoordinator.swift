@@ -71,17 +71,13 @@ final class MapsTabCoordinator: TabCoordinator {
         // compose screen it opened has been removed from the product. The
         // header now reads `[bell] … [coins][search]`.
         mapViewController.navigationItem.leftBarButtonItem = notificationsButtonItem
-        // The tab's own name, in the bar.
-        //
-        // ⚠️ WRITTEN HERE, NOT IN THE MAPS PACKAGE. `MapsViewController` is
-        // deliberately navigation-agnostic — its own comment says the name
-        // "lives on `UITab`, not here" — and this coordinator is already the
-        // thing writing this navigation item. A coordinator-side write works on
-        // this tab and only this tab: the other three roots set their own
-        // titles from `viewDidLoad`, which would clobber anything written here.
-        mapViewController.navigationItem.title = "Maps"
+        // ⚠️ NO TITLE IN THE BAR. "Maps" was written here for a while (the
+        // controller is navigation-agnostic, so the coordinator was the one
+        // place to write it); it went with For You's on 2026-09-22 — the two
+        // roots' headers carry their controls and nothing else, and the tab
+        // bar already says the word.
         // The chevron on every screen pushed from here stays bare — see the
-        // same line on the other titled roots for the widths it protects.
+        // same line on the other roots for the widths it protects.
         mapViewController.navigationItem.backButtonDisplayMode = .minimal
         navigationController.viewControllers = [mapViewController]
 

@@ -360,6 +360,26 @@ final class MapsViewController: UIViewController {
         // names itself; the header band belongs to its controls — the
         // compose "+", the wallet badge, the bell. (The tab bar still says
         // "Maps"; that label lives on `UITab`, not here.)
+        // ⚠️ THE BAR WEARS A TRANSPARENT APPEARANCE, STATED. Every other
+        // screen keeps UIKit's default and is bare because its list hides the
+        // top edge effect (`prefersClearTopEdge`). This screen has no scroll
+        // view for the bar to track — measured with a probe: no `UIScrollView`
+        // under `MKMapView` on iOS 27, `contentScrollView(for: .top)` nil — and
+        // with nothing to track UIKit fell back to the bar's own material: a
+        // 116pt `_UIBarBackground` slab with a hard edge, the one header in
+        // the app still wearing one. Stated transparent, the slab is gone.
+        //
+        // What remains under the status bar is MapKit's: `_MKMapContentView`
+        // hosts a `ScrollEdgeEffectView` of its own (402x156, soft), with no
+        // public switch — only private `_setScrollEdgeEffectViewInteraction…`
+        // selectors, which this app does not call. Hidden by a class-name walk
+        // in a probe it vanished, so that is the whole of the gradient; it is
+        // MapKit's to draw and stays.
+        let bare = UINavigationBarAppearance()
+        bare.configureWithTransparentBackground()
+        navigationItem.standardAppearance = bare
+        navigationItem.scrollEdgeAppearance = bare
+        navigationItem.compactAppearance = bare
         configureMapView()
         bindViewModel()
         observeAppLifecycle()

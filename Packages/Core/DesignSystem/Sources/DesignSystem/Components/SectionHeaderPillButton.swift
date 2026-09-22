@@ -65,6 +65,16 @@ public final class SectionHeaderPillButton: UIButton {
     public var onTap: (() -> Void)?
 
     public private(set) var presentation: Presentation = .inline
+    /// When set, the pinned shape is not drawn here at all: the header fades
+    /// out as it reaches the pin line instead of forming its capsule, because
+    /// the capsule is drawn SOMEWHERE ELSE — the inbox puts it in the
+    /// navigation bar's leading slot (`MessagesInboxViewController`). The
+    /// inline title in the flow is untouched; only the stuck state moves.
+    /// The same crossfade carries the title out, so the morph still reads as
+    /// one header becoming one chrome, just not in this box.
+    public var hidesWhenPinned = false {
+        didSet { applyConfiguration(for: presentation) }
+    }
 
     /// Held so the section gap can be applied per header — see `setLeadsList`.
     private var topConstraint: NSLayoutConstraint?
@@ -306,6 +316,27 @@ public final class SectionHeaderPillButton: UIButton {
             return AttributedString(title, attributes: attributes)
         }
         self.configuration = configuration
+        alpha = hidesWhenPinned && presentation == .pinned ? 0 : 1
+    }
+
+    /// Which section is at the pin line — the section a bar should NAME.
+    /// `sectionTops` are the sections' natural top edges in content
+    /// coordinates, in order.
+    ///
+    /// The last section whose top has reached the line (within
+    /// `Metrics.morphDistance`, the same lead each header gives its own
+    /// morph) is the one: an earlier header that has been pushed off by the
+    /// next is still "at the line" by distance, and choosing the last resolves
+    /// that the way the eye does. Nothing is named while the first header is
+    /// in view — the line within the morph distance of the top of the content,
+    /// or above it on a pull — because the header IS the name then, drawn in
+    /// the flow; the bar's item fades out as the inline title fades in. The
+    /// inbox rests past that header (`UITableView.restPastLeadingHeader`), so
+    /// at rest the first section is named by the bar and the header is one
+    /// pull away.
+    public static func pinnedSection(sectionTops: [CGFloat], pinLine: CGFloat) -> Int? {
+        guard pinLine > Metrics.morphDistance else { return nil }
+        return sectionTops.lastIndex { $0 - pinLine <= Metrics.morphDistance }
     }
 
     private static func font(for presentation: Presentation, traits: UITraitCollection) -> UIFont {

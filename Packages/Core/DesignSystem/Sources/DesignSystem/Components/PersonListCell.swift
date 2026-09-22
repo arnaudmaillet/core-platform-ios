@@ -133,10 +133,10 @@ public final class PersonListCell: UICollectionViewListCell {
     private let handleLabel = UILabel()
     private let separatorLabel = UILabel()
     private let contextLabel = UILabel()
-    private lazy var subtitleRow = UIStackView(
+    private lazy var subtitleRow = SteadyStackView(
         arrangedSubviews: [handleLabel, separatorLabel, contextLabel]
     )
-    private lazy var textColumn = UIStackView(arrangedSubviews: [nameLabel, subtitleRow])
+    private lazy var textColumn = SteadyStackView(arrangedSubviews: [nameLabel, subtitleRow])
     /// The text column's top and bottom pins, held so the row's height can be
     /// set by widening them.
     ///
@@ -237,6 +237,25 @@ public final class PersonListCell: UICollectionViewListCell {
 
     /// The picture for this row, once its caller has one. Rows without an
     /// avatar simply never call it and keep their initials.
+    /// ⚠️ **THE ROW'S INSIDES NEVER ANIMATE; THE ROW DOES.** A cell inserted by
+    /// an animated snapshot apply — the search screen's skeleton giving way to
+    /// people — is laid out INSIDE the collection view's animation block, and
+    /// every frame the layout engine hands a label there becomes an implicit
+    /// animation. Filmed: the context label revealed itself left to right
+    /// ("Follow", "Followi", "Following") over ~15 frames while the name and
+    /// the handle stood still. Traced with a display link: `bounds.size` and
+    /// `position` animations on the subtitle row and its context label, none
+    /// on the column, the content view or the cell — the stack's own layout
+    /// pass, not the cell's, which is why a flush at configure time changed
+    /// nothing. So the layout passes themselves run with animations off: this
+    /// one for the cell's direct subviews, `SteadyStackView`'s for the labels
+    /// the stacks place. The cell's FRAME is still set by the collection view
+    /// outside these passes, so a row that moves still slides, and a row that
+    /// arrives still fades — whole.
+    override public func layoutSubviews() {
+        UIView.performWithoutAnimation { super.layoutSubviews() }
+    }
+
     public func setAvatarImage(_ image: UIImage?) {
         avatarHost.setImage(image)
     }
@@ -314,5 +333,13 @@ public final class PersonListCell: UICollectionViewListCell {
         name.append(NSAttributedString(string: "\u{00A0}"))
         name.append(NSAttributedString(attachment: seal))
         return name
+    }
+}
+
+/// A stack view whose layout pass never animates the frames it hands out —
+/// see `PersonListCell.layoutSubviews`.
+private final class SteadyStackView: UIStackView {
+    override func layoutSubviews() {
+        UIView.performWithoutAnimation { super.layoutSubviews() }
     }
 }

@@ -94,9 +94,9 @@ final class InboxSearchResultsViewController: UIViewController {
         // The field lives in the navigation bar above, so a drag downward is
         // unambiguously "put the keyboard away and let me read".
         collectionView.keyboardDismissMode = .onDrag
-        // Results fade out under the search field rather than being cut at a
-        // hairline — see `prefersSoftTopEdge`.
-        collectionView.prefersSoftTopEdge()
+        // No effect under the bar: the rows run up under the pills untouched — see
+        // `prefersClearTopEdge`.
+        collectionView.prefersClearTopEdge()
         collectionView.pin(to: view)
 
         let conversationRegistration = UICollectionView.CellRegistration<
