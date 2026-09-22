@@ -217,15 +217,6 @@ extension UITableView {
     /// wherever the finger left it, the way a large title snaps shown or
     /// hidden rather than resting half-revealed.
     ///
-    /// ⚠️ FROM THE RELEASE, NOT FROM THE BOUNCE'S END. Called only once the
-    /// bounce had settled, this ran as a second motion: the list came back to
-    /// the top of its content, held there ~0.4s with "New" in the flow, and
-    /// only then travelled on — filmed at 30fps, three times, through three
-    /// attempts at the refresh control's retraction that were all beside the
-    /// point (the mock refresh had ended under the finger; what the viewer
-    /// saw was UIKit's own bounce, then this). Asked for at `didEndDragging`,
-    /// the animation replaces the bounce and there is one curve.
-    ///
     /// Left alone while a refresh is still running: the spinner's inset is
     /// where the finger left the list on purpose, and `endRefreshingAtRest`
     /// brings it home when the refresh is done.
@@ -235,18 +226,12 @@ extension UITableView {
         setContentOffset(CGPoint(x: 0, y: target), animated: true)
     }
 
-    /// The resting offset, when a scroll that would land at `landing` would
-    /// land above the first row and no refresh is running — nil otherwise.
-    /// `willEndDragging` hands this to UIKit as the deceleration's target, so
-    /// the bounce — or the fling — itself lands at rest.
+    /// The resting offset, when a scroll landing at `landing` would land
+    /// above the first row and no refresh is running — nil otherwise.
     ///
-    /// ⚠️ THE LANDING, NOT THE CURRENT OFFSET. Judged on where the finger left
-    /// the list, a fling from deep in it was left alone: UIKit projected its
-    /// deceleration to the top of the content, bounced there with "New" in
-    /// the flow, and only then did `didEndDecelerating` travel on to rest —
-    /// the same two-step the pull used to have, filmed again from the bottom
-    /// of the list. UIKit's projected target is what says where a fling
-    /// ends, and it is what is redirected.
+    /// ⚠️ NOT HANDED TO UIKIT AS A DECELERATION TARGET ANY MORE. That was
+    /// tried, in three shapes, and each crawled on the device — see the note
+    /// on `scrollViewDidEndDragging` in the lists.
     func restingOffset(ifLandingAbove landing: CGFloat, unlessRefreshing control: UIRefreshControl?) -> CGFloat? {
         guard control?.isRefreshing != true else { return nil }
         guard numberOfSections > 0, numberOfRows(inSection: 0) > 0 else { return nil }
