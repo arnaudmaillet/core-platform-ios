@@ -602,9 +602,16 @@ extension ConversationListViewController: UITableViewDelegate {
         // A release that will not decelerate has no bounce to land, and a
         // slow release whose landing was redirected must not crawl: both
         // travel on the list's own clock.
-        if !decelerate || releaseNeedsOwnTravel {
-            scrollView.bounces = true
+        if releaseNeedsOwnTravel {
+            // ⚠️ TO REST OUTRIGHT, not through `snapPastLeadingHeader`, which
+            // judges the CURRENT offset — still deep at the moment of release
+            // — and stayed silent, leaving the redirected deceleration to
+            // crawl after all (filmed a second time).
             releaseNeedsOwnTravel = false
+            scrollView.bounces = true
+            tableView.scrollFirstRow(ofSection: 0)
+        } else if !decelerate {
+            scrollView.bounces = true
             tableView.snapPastLeadingHeader(unlessRefreshing: refreshControl)
         }
     }
