@@ -201,3 +201,47 @@ struct SectionHeaderPresentationTests {
         #expect(pill.presentation == first)
     }
 }
+
+/// The pin rule, asked once for a whole list — what the inbox's bar item is
+/// driven by. It is each header's own rule (`updatePresentation(in:)`), so
+/// the bar and the headers can never disagree about which section is stuck.
+@MainActor
+struct SectionHeaderPinnedSectionTests {
+    private let morph = SectionHeaderPillButton.Metrics.morphDistance
+
+    /// A list resting at its top has nothing pinned — it just has a top.
+    @Test func nothingIsPinnedWhileTheListRestsAtItsTop() {
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 0) == nil)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: morph) == nil)
+    }
+
+    @Test func theFirstSectionPinsOnceTheListHasScrolledPastTheGrace() {
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: morph + 1) == 0)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 200) == 0)
+    }
+
+    /// The header forms its capsule just BEFORE it touches the line, and the
+    /// bar says the same section at the same moment.
+    @Test func theNextSectionTakesOverWithinTheMorphDistance() {
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 400 - morph - 1) == 0)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 400 - morph) == 1)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 900) == 1)
+    }
+
+    /// A header that withholds its pinned shape is invisible exactly while
+    /// pinned, and back the moment it is inline again.
+    @Test func aHeaderThatHidesWhenPinnedIsInvisibleOnlyWhilePinned() {
+        let pill = SectionHeaderPillButton()
+        pill.setPillTitle("Recent")
+        pill.hidesWhenPinned = true
+        #expect(pill.alpha == 1)
+        pill.setPresentation(.pinned, animated: false)
+        #expect(pill.alpha == 0)
+        pill.setPresentation(.inline, animated: false)
+        #expect(pill.alpha == 1)
+        // The default keeps drawing the capsule: every other host relies on it.
+        let plain = SectionHeaderPillButton()
+        plain.setPresentation(.pinned, animated: false)
+        #expect(plain.alpha == 1)
+    }
+}

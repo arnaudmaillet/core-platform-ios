@@ -17,6 +17,12 @@ import UIKit
 /// actions: the horizontal axis belongs to paging between inbox categories,
 /// and a row that also claims it would make every page swipe a coin flip.
 final class ConversationListViewController: UIViewController {
+    /// See `InboxSurface.pinnedSectionTitle`; kept current by
+    /// `updatePinnedSection` on every scroll and every apply.
+    private(set) var pinnedSectionTitle: String?
+    private var pinnedSectionIndex: Int?
+    var onPinnedSectionChange: ((String?) -> Void)?
+
     private let viewModel: ConversationListViewModel
 
     /// ⚠️ Built with its horizontal indicator off explicitly. The app-wide
@@ -256,6 +262,7 @@ final class ConversationListViewController: UIViewController {
             // ones, means the cell already looks right when the batch picks it
             // up and the band travels with it.
             reconfigureVisible(changed)
+            defer { updatePinnedSection() }
             adapter.apply(sections, animated: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
             revealContent()
@@ -447,6 +454,33 @@ extension ConversationListViewController: UITableViewDelegate {
         ) { [weak self] _ in self?.viewModel.delete([id]) }
         // Destructive action in its own inline section, per system menus.
         return UIMenu(children: [pin, mute, UIMenu(options: .displayInline, children: [delete])])
+    }
+
+    // MARK: - The pinned section, for the bar
+
+    func scrollToPinnedSection() {
+        guard let index = pinnedSectionIndex else { return }
+        adapter.scroll(tableView, toSectionAt: index)
+    }
+
+    /// The section stuck at the pin line, published only when it changes: a
+    /// scroll fires this every frame, and the bar must not be rewritten on
+    /// every one of them. The rule is each header's own
+    /// (`SectionHeaderPillButton.pinnedSection`), asked once for the list.
+    func updatePinnedSection() {
+        let pinLine = tableView.contentOffset.y + tableView.adjustedContentInset.top
+        let tops = (0..<tableView.numberOfSections).map { tableView.rect(forSection: $0).minY }
+        let index = SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: pinLine)
+            .flatMap { adapter.headedSection(at: $0) == nil ? nil : $0 }
+        let title = index.flatMap { adapter.headedSection(at: $0)?.title }
+        pinnedSectionIndex = index
+        guard title != pinnedSectionTitle else { return }
+        pinnedSectionTitle = title
+        onPinnedSectionChange?(title)
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        updatePinnedSection()
     }
 }
 

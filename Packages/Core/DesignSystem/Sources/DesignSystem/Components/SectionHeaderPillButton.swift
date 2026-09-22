@@ -65,6 +65,16 @@ public final class SectionHeaderPillButton: UIButton {
     public var onTap: (() -> Void)?
 
     public private(set) var presentation: Presentation = .inline
+    /// When set, the pinned shape is not drawn here at all: the header fades
+    /// out as it reaches the pin line instead of forming its capsule, because
+    /// the capsule is drawn SOMEWHERE ELSE — the inbox puts it in the
+    /// navigation bar's leading slot (`MessagesInboxViewController`). The
+    /// inline title in the flow is untouched; only the stuck state moves.
+    /// The same crossfade carries the title out, so the morph still reads as
+    /// one header becoming one chrome, just not in this box.
+    public var hidesWhenPinned = false {
+        didSet { applyConfiguration(for: presentation) }
+    }
 
     /// Held so the section gap can be applied per header — see `setLeadsList`.
     private var topConstraint: NSLayoutConstraint?
@@ -306,6 +316,23 @@ public final class SectionHeaderPillButton: UIButton {
             return AttributedString(title, attributes: attributes)
         }
         self.configuration = configuration
+        alpha = hidesWhenPinned && presentation == .pinned ? 0 : 1
+    }
+
+    /// Which section is stuck at the pin line — the SAME rule
+    /// `updatePresentation(in:)` applies per header, asked once for a whole
+    /// list so a host can say what its bar should show. `sectionTops` are the
+    /// sections' natural top edges in content coordinates, in order.
+    ///
+    /// The last section whose top has reached the line (within
+    /// `Metrics.morphDistance`) is the one pinned: an earlier header that has
+    /// been pushed off by the next is still "at the line" by distance, and
+    /// choosing the last resolves that the way the eye does. Nothing is pinned
+    /// while the list rests at its top — `pinLine` itself must have travelled
+    /// past the morph distance, the grace the first header gets.
+    public static func pinnedSection(sectionTops: [CGFloat], pinLine: CGFloat) -> Int? {
+        guard pinLine > Metrics.morphDistance else { return nil }
+        return sectionTops.lastIndex { $0 - pinLine <= Metrics.morphDistance }
     }
 
     private static func font(for presentation: Presentation, traits: UITraitCollection) -> UIFont {

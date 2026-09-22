@@ -102,22 +102,44 @@ extension UITableViewDiffableDataSource<InboxListSection, ConversationID> {
         return current.sectionIdentifiers[index]
     }
 
-    /// Puts a section's first row directly under the header, which is what
-    /// tapping that header's pill means: "show me this part".
-    ///
-    /// A no-op for a section with no rows, and for a list too short to scroll —
-    /// `scrollToRow` cannot invent content, so a two-section list that already
-    /// fits on screen simply stays where it is. That is correct, and it is also
-    /// why this is verified on the longest list rather than the shortest.
+    /// Puts a section's first row directly under the bar — see
+    /// `UITableView.scrollFirstRow(ofSection:toPinLine:)` for why not
+    /// `scrollToRow(at:.top)`. A no-op for a section with no rows.
     func scroll(_ tableView: UITableView, toSectionAt index: Int) {
         guard snapshot().numberOfSections > index,
               tableView.numberOfRows(inSection: index) > 0
         else { return }
-        tableView.scrollToRow(at: IndexPath(row: 0, section: index), at: .top, animated: true)
+        tableView.scrollFirstRow(ofSection: index)
     }
 
     /// Where a section currently sits, or `nil` if the list does not have one.
     func index(of section: InboxListSection) -> Int? {
         snapshot().sectionIdentifiers.firstIndex(of: section)
+    }
+}
+
+extension UITableView {
+    /// Puts a section's first row on the PIN LINE — the top of the visible
+    /// content, under the bar — which is what tapping that section's name
+    /// means: "show me this part".
+    ///
+    /// ⚠️ NOT `scrollToRow(at:.top)`. A plain table keeps its pinned header's
+    /// box in front of the row it scrolls to, which was right while the
+    /// capsule was drawn in that box. The capsule is in the navigation bar now
+    /// and the pinned header is invisible (`InboxSectionHeaderView`), so
+    /// `.top` landed the row under an empty band as tall as the header — a
+    /// blank strip between the bar and the first row, measured on the inbox
+    /// at 55pt. The offset is set by hand instead: the row's own top on the
+    /// line, its (invisible) header stuck over it exactly as it is mid-scroll.
+    ///
+    /// Clamped for a list too short to scroll — an offset cannot invent
+    /// content, so a two-section list that already fits on screen stays where
+    /// it is.
+    func scrollFirstRow(ofSection section: Int) {
+        let row = rectForRow(at: IndexPath(row: 0, section: section))
+        let inset = adjustedContentInset
+        let furthest = contentSize.height + inset.bottom - bounds.height
+        let target = min(row.minY - inset.top, furthest)
+        setContentOffset(CGPoint(x: 0, y: max(-inset.top, target)), animated: true)
     }
 }
