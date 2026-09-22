@@ -135,11 +135,33 @@ extension UITableView {
     /// Clamped for a list too short to scroll — an offset cannot invent
     /// content, so a two-section list that already fits on screen stays where
     /// it is.
-    func scrollFirstRow(ofSection section: Int) {
+    func scrollFirstRow(ofSection section: Int, animated: Bool = true) {
+        guard numberOfSections > section, numberOfRows(inSection: section) > 0 else { return }
+        layoutIfNeeded()
         let row = rectForRow(at: IndexPath(row: 0, section: section))
         let inset = adjustedContentInset
         let furthest = contentSize.height + inset.bottom - bounds.height
         let target = min(row.minY - inset.top, furthest)
-        setContentOffset(CGPoint(x: 0, y: max(-inset.top, target)), animated: true)
+        setContentOffset(CGPoint(x: 0, y: max(-inset.top, target)), animated: animated)
+    }
+
+    /// Where the list RESTS: the first row on the pin line, its header above
+    /// the resting position — in the flow, out of view, and one pull away.
+    func restPastLeadingHeader() {
+        scrollFirstRow(ofSection: 0, animated: false)
+    }
+
+    /// A scroll that ends INSIDE the first header's band — between the top of
+    /// the content and the first row — snaps past it, the way a large title
+    /// snaps shown or hidden rather than resting half-revealed. A release
+    /// that pulled far enough to refresh is not a scroll end and is left alone.
+    func snapPastLeadingHeader() {
+        guard numberOfSections > 0, numberOfRows(inSection: 0) > 0 else { return }
+        let inset = adjustedContentInset
+        let headerTop = rect(forSection: 0).minY - inset.top
+        let rowTop = rectForRow(at: IndexPath(row: 0, section: 0)).minY - inset.top
+        let offset = contentOffset.y
+        guard offset > headerTop - 0.5, offset < rowTop - 0.5 else { return }
+        scrollFirstRow(ofSection: 0)
     }
 }

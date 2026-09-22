@@ -327,17 +327,16 @@ public final class SectionHeaderPillButton: UIButton {
     /// `Metrics.morphDistance`, the same lead each header gives its own
     /// morph) is the one: an earlier header that has been pushed off by the
     /// next is still "at the line" by distance, and choosing the last resolves
-    /// that the way the eye does. ⚠️ At rest this is the FIRST section, not
-    /// nothing — a list resting at its top is showing its first section, and
-    /// the inbox's bar says so from the first frame (its first section has no
-    /// header in the flow for exactly that reason). That holds through a
-    /// rubber-band overscroll too: pulled down to refresh, the line sits
-    /// ABOVE every section top, and a distance test alone answered nothing —
-    /// the bar's item would have blinked out for the length of the bounce.
-    /// Only an empty list names nothing.
+    /// that the way the eye does. Nothing is named while the first header is
+    /// in view — the line within the morph distance of the top of the content,
+    /// or above it on a pull — because the header IS the name then, drawn in
+    /// the flow; the bar's item fades out as the inline title fades in. The
+    /// inbox rests past that header (`UITableView.restPastLeadingHeader`), so
+    /// at rest the first section is named by the bar and the header is one
+    /// pull away.
     public static func pinnedSection(sectionTops: [CGFloat], pinLine: CGFloat) -> Int? {
-        guard !sectionTops.isEmpty else { return nil }
-        return sectionTops.lastIndex { $0 - pinLine <= Metrics.morphDistance } ?? 0
+        guard pinLine > Metrics.morphDistance else { return nil }
+        return sectionTops.lastIndex { $0 - pinLine <= Metrics.morphDistance }
     }
 
     private static func font(for presentation: Presentation, traits: UITraitCollection) -> UIFont {

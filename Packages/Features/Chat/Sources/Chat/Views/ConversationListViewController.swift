@@ -17,6 +17,30 @@ import UIKit
 /// actions: the horizontal axis belongs to paging between inbox categories,
 /// and a row that also claims it would make every page swipe a coin flip.
 final class ConversationListViewController: UIViewController {
+    /// ⚠️ THE RESTING OFFSET IS APPLIED WHEN THE CONTENT SIZE LANDS, NOT ON
+    /// APPLY. The first apply returns before the rows exist in the table (the
+    /// batch update is still in flight) and, for a page the pager has not
+    /// shown yet, before the table has a height — an offset set then was
+    /// clamped straight back to the top, and the list opened on its header
+    /// after all; a layout pass of this controller's VIEW never came either,
+    /// because rows landing inside the table lay out the table, not its
+    /// host. `contentSize` is the one thing that changes when they land, so it
+    /// is what is watched — once, and released the moment the offset takes.
+    private var restObservation: NSKeyValueObservation?
+
+    private func restPastLeadingHeaderWhenContentLands() {
+        restObservation = tableView.observe(\.contentSize, options: [.initial, .new]) { [weak self] table, _ in
+            guard let self, table.bounds.height > 0,
+                  table.numberOfSections > 0, table.numberOfRows(inSection: 0) > 0
+            else { return }
+            let before = table.contentOffset.y
+            table.restPastLeadingHeader()
+            // Took only if the list is long enough to rest past the header at
+            // all; a short list keeps the header in view and keeps watching.
+            if table.contentOffset.y > before + 0.5 { restObservation = nil }
+        }
+    }
+
     /// See `InboxSurface.pinnedSectionTitle`; kept current by
     /// `updatePinnedSection` on every scroll and every apply.
     private(set) var pinnedSectionTitle: String?
@@ -262,7 +286,17 @@ final class ConversationListViewController: UIViewController {
             // ones, means the cell already looks right when the batch picks it
             // up and the band travels with it.
             reconfigureVisible(changed)
-            defer { updatePinnedSection() }
+            // ⚠️ READ BEFORE THE `defer`, which runs after `hasRenderedContent`
+            // has been flipped below — read inside it, "first render" was
+            // never true and the list opened on its header after all.
+            let isFirstRender = !hasRenderedContent
+            defer {
+                // First content only: the list opens resting past its first
+                // header (see `scrollViewDidEndDragging`), and a later apply
+                // must not yank a list the viewer has scrolled.
+                if isFirstRender { restPastLeadingHeaderWhenContentLands() }
+                updatePinnedSection()
+            }
             adapter.apply(sections, animated: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
             revealContent()
@@ -353,7 +387,7 @@ extension ConversationListViewController: UITableViewDelegate {
     #endif
 
     func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
-        guard index > 0, let section = adapter.headedSection(at: index) else { return nil }
+        guard let section = adapter.headedSection(at: index) else { return nil }
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: InboxSectionHeaderView.reuseIdentifier
         ) as? InboxSectionHeaderView
@@ -375,17 +409,8 @@ extension ConversationListViewController: UITableViewDelegate {
     /// Zero for an unheaded list — a table gives an unclaimed plain-style
     /// section a default height even when its header view is nil, which would
     /// leave a blank band above a list that has no header at all.
-    /// ⚠️ THE FIRST SECTION HAS NO HEADER IN THE FLOW. Its name is in the bar
-    /// from the moment the list appears (`InboxSurface.pinnedSectionTitle`
-    /// names the section at the top even at rest), so a large "New" under a
-    /// bar already saying "New" was the same word twice and a band of it
-    /// between the bar and the first row. The rows start under the bar; only a
-    /// LATER section keeps its inline title, which is the break between two
-    /// runs of content — and the bar takes that name over as it pins.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
-        index == 0 || adapter.headedSection(at: index) == nil
-            ? .leastNormalMagnitude
-            : UITableView.automaticDimension
+        adapter.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
     }
 
     /// ⚠️ A FOOTER, not a bigger header margin.
@@ -490,6 +515,23 @@ extension ConversationListViewController: UITableViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updatePinnedSection()
+    }
+
+    /// ⚠️ THE LIST RESTS WITH ITS FIRST ROW UNDER THE BAR, not with its first
+    /// header — the bar names that section, so a large "New" under a bar
+    /// already saying "New" was the same word twice and a band of it between
+    /// the bar and the first row. The header is still there, ABOVE the
+    /// resting position: pull the list down and it comes into view as the
+    /// title over the first row while the bar's item fades out, and a release
+    /// that does not refresh snaps past it again (`snapPastLeadingHeader`),
+    /// the way a large title snaps shown or hidden. A refresh leaves it shown
+    /// until the next scroll, which is what pulling was for.
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { tableView.snapPastLeadingHeader() }
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        tableView.snapPastLeadingHeader()
     }
 }
 

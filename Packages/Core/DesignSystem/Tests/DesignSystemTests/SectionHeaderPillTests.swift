@@ -209,13 +209,21 @@ struct SectionHeaderPresentationTests {
 struct SectionHeaderPinnedSectionTests {
     private let morph = SectionHeaderPillButton.Metrics.morphDistance
 
-    /// A list resting at its top is showing its first section, and says so —
-    /// the bar names it from the first frame. Only an empty list names nothing.
-    @Test func theFirstSectionIsNamedWhileTheListRestsAtItsTop() {
-        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 0) == 0)
-        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: -20) == 0)
+    /// While the first header is in view — the list pulled down to it, or
+    /// past it — nothing is named: the header is the name, drawn in the flow.
+    @Test func nothingIsNamedWhileTheFirstHeaderIsInView() {
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 0) == nil)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: -20) == nil)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: morph) == nil)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [], pinLine: 100) == nil)
+    }
+
+    /// The inbox rests with its first row under the bar and its header just
+    /// above — past the morph distance — so at rest the bar names section one.
+    @Test func theFirstSectionIsNamedOnceTheHeaderIsAboveTheLine() {
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: morph + 1) == 0)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 60) == 0)
         #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [0, 400], pinLine: 200) == 0)
-        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [], pinLine: 0) == nil)
     }
 
     /// The header forms its capsule just BEFORE it touches the line, and the
