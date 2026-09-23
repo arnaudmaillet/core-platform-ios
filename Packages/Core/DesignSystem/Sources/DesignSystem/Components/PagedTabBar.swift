@@ -2369,9 +2369,10 @@ private final class SegmentView: UIButton {
             label.lineBreakMode = .byTruncatingTail
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
-        plainLabel.textColor = .secondaryLabel
-        boldLabel.textColor = .label
-        boldLabel.alpha = 0
+        // Both labels stay opaque; the crossfade lives in their colours — see
+        // `setSelectionStrength`.
+        plainLabel.textColor = Self.fadedColour(.secondaryLabel, to: 1)
+        boldLabel.textColor = Self.fadedColour(.label, to: 0)
 
         // The SEMIBOLD label defines the geometry (it is the wider of the
         // pair); the regular one is centred on top of it and only ever
@@ -2438,7 +2439,7 @@ private final class SegmentView: UIButton {
             guard let self else { return }
             let dimmed = button.isHighlighted ? 0.55 : 1
             self.content.alpha = dimmed
-            self.plainLabel.alpha = dimmed * (1 - self.strength)
+            self.plainLabel.alpha = dimmed
         }
 
         // A MINIMUM, not an exact width: `fillEqually` on the row hands every
@@ -2469,11 +2470,31 @@ private final class SegmentView: UIButton {
 
     private var strength: CGFloat = 0
 
+    /// `base` at `fraction` of its own alpha — a dynamic colour, so it keeps
+    /// following the appearance (`secondaryLabel` is 60% in light, and
+    /// replacing that alpha outright made the resting title opaque grey).
+    private static func fadedColour(_ base: UIColor, to fraction: CGFloat) -> UIColor {
+        UIColor { traits in
+            let resolved = base.resolvedColor(with: traits)
+            var alpha: CGFloat = 1
+            resolved.getRed(nil, green: nil, blue: nil, alpha: &alpha)
+            return resolved.withAlphaComponent(alpha * max(0, min(1, fraction)))
+        }
+    }
+
     /// 1 = fully selected, 0 = fully unselected, fractions mid-drag.
+    /// ⚠️ **THE CROSSFADE IS IN THE TEXT COLOUR'S ALPHA, NOT THE VIEW'S.** In a
+    /// toolbar's platter UIKit renders these labels as vibrant content and
+    /// FLATTENS a partial view alpha to opaque: mid-drag both titles stood
+    /// fully bold and black, and a tap switched them in one frame, while the
+    /// same bar in a tab accessory faded. Filmed on the followers toolbar
+    /// with a finger held midway. A colour's alpha survives the platter (and
+    /// a container's group opacity does too, which is why the press dim on
+    /// `content` still reads).
     func setSelectionStrength(_ strength: CGFloat) {
         self.strength = strength
-        boldLabel.alpha = strength
-        plainLabel.alpha = 1 - strength
+        boldLabel.textColor = Self.fadedColour(.label, to: strength)
+        plainLabel.textColor = Self.fadedColour(.secondaryLabel, to: 1 - strength)
         let selected = strength > 0.5
         if selected != accessibilityTraits.contains(.selected) {
             accessibilityTraits = selected ? [.button, .selected] : [.button]
