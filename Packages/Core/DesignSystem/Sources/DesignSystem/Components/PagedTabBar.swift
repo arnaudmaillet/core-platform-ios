@@ -744,6 +744,7 @@ public final class PagedTabBar: UIControl {
     private static let keepsLensFrosted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-frosted")
     private static let liftsWithoutScale = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-still")
     private static let liftsWithoutPlate = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-noplate")
+    private static let usesThinPlate = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-thin")
     /// How far the lens has grown past its resting size, per side — driven
     /// towards `Lift.outset` while lifted, by the same frame loop as the
     /// spring, and animated back by `settleLens`.
@@ -2306,7 +2307,11 @@ extension PagedTabBar {
         // and what shows through it is the bar's own frost.
         // `-selector-glass-lens-noplate` leaves it out for comparison.
         if !Self.liftsWithoutPlate {
-            let plate = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+            // `-selector-glass-lens-thin` swaps the ultra-thin plate for a thin
+            // one, to compare how much of the bar the lens should carry.
+            let plate = UIVisualEffectView(effect: UIBlurEffect(
+                style: Self.usesThinPlate ? .systemThinMaterial : .systemUltraThinMaterial
+            ))
             plate.translatesAutoresizingMaskIntoConstraints = false
             plate.isUserInteractionEnabled = false
             lensView.contentView.addSubview(plate)
