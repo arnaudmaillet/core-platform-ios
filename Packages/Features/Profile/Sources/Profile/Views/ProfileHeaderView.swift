@@ -511,9 +511,11 @@ final class ProfileHeaderView: UIView {
         avatarView.contentMode = .scaleAspectFill
         avatarView.clipsToBounds = true
         avatarView.layer.borderWidth = Metrics.avatarRingWidth
-        avatarView.layer.borderColor = UIColor.systemBackground.cgColor
+        // The ring is the page's tone, so the avatar reads as cut from the
+        // page it floats over rather than wearing a whiter halo.
+        avatarView.layer.borderColor = Surface.page.resolvedColor(with: traitCollection).cgColor
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: ProfileHeaderView, _) in
-            self.avatarView.layer.borderColor = UIColor.systemBackground.cgColor
+            self.avatarView.layer.borderColor = Surface.page.resolvedColor(with: self.traitCollection).cgColor
         }
 
         monogramLabel.font = .systemFont(ofSize: 34, weight: .semibold)

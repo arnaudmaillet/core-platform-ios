@@ -491,7 +491,8 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        // The page the cards lie on, a step below them — see `Surface`.
+        view.backgroundColor = Surface.page
         configureHeader()
         // ⚠️ CGColors DO NOT TRACK TRAITS, and every halo on this banner is
         // one. Without this a light↔dark flip leaves light ink wearing a light
@@ -672,7 +673,7 @@ final class PlaceProfileViewController: UIViewController {
         headerTopConstraint = top
 
         bannerBox.clipsToBounds = true
-        bannerBox.backgroundColor = .secondarySystemBackground
+        bannerBox.backgroundColor = Surface.card
         bannerBox.translatesAutoresizingMaskIntoConstraints = false
         headerHost.addSubview(bannerBox)
 
@@ -2299,8 +2300,10 @@ private final class GradientScrimView: UIView {
         // FLAT 1.00. Four stops could not say that — the old middle pair
         // handed the name and its captions almost the same ground, which is
         // why the block read as pasted onto a slab.
+        // The PAGE's tone, so the run-out lands on what the list below
+        // actually sits on — see `Surface`.
         gradient.colors = [0, 0.14, 0.50, 0.86, 1.0, 1.0].map {
-            UIColor.systemBackground.withAlphaComponent($0).cgColor
+            Surface.page.withAlphaComponent($0).cgColor
         }
         // ⚠️ OPAQUE WELL BEFORE THE EDGE, not at it. Reaching full only in the
         // last few points left the photograph still legible where it was cut,

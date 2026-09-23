@@ -33,7 +33,7 @@ final class ProfileBannerView: UIView {
         clipsToBounds = true
         // Neutral backdrop while media loads (or when the profile has none):
         // the fade blends it into the page, so "no banner" degrades quietly.
-        backgroundColor = .secondarySystemBackground
+        backgroundColor = Surface.card
 
         mediaContainer.pin(to: self)
         imageView.contentMode = .scaleAspectFill
@@ -113,7 +113,10 @@ final class ProfileBannerView: UIView {
 
     /// CGColors don't track trait changes; re-resolve on style flips.
     private func refreshGradientColors() {
-        let background = UIColor.systemBackground
+        // The PAGE's tone, not `systemBackground`: the fade has to land on
+        // what the identity block actually sits on, or it ends in a lighter
+        // band the width of the screen.
+        let background = Surface.page
         bottomFade.colors = [
             background.withAlphaComponent(0).cgColor,
             background.withAlphaComponent(0.85).cgColor,

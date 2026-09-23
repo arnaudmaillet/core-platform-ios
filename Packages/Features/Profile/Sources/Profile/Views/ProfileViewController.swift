@@ -351,7 +351,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        // The page the cards lie on, a step below them — see `Surface`.
+        view.backgroundColor = Surface.page
         // Selector-based, so UIKit drops it with this object — no token to hold
         // and no `deinit` to remember.
         NotificationCenter.default.addObserver(

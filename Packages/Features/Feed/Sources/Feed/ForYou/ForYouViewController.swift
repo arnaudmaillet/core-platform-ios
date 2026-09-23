@@ -500,7 +500,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        // The page the cards lie on, a step below them — see `Surface`.
+        view.backgroundColor = Surface.page
         // The tab's own name, in the bar — the screen says where it is.
         //
         // The slot was empty because the selector used to live in it; the

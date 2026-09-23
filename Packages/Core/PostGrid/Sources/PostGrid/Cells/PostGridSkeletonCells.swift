@@ -37,11 +37,13 @@ public final class PostGridSkeletonCard: UIView {
 
     public init() {
         super.init(frame: .zero)
-        backgroundColor = .secondarySystemBackground
+        backgroundColor = PostGridListRowCell.cardFillColor
         // The shimmer has to be the shape content hydrates INTO — a literal
         // here silently stopped matching the day the card's curve moved.
         layer.cornerRadius = PostGridListRowCell.cardCornerRadius
         layer.cornerCurve = .continuous
+        // …and the edge, for the same reason.
+        Surface.applyCardEdge(to: self)
 
         // Caption lines at body-text pitch: 14pt bones on the ~21pt line grid.
         let firstLine = SkeletonBoneView()
