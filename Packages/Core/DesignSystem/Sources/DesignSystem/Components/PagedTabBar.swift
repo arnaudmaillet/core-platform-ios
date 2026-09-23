@@ -691,11 +691,15 @@ public final class PagedTabBar: UIControl {
     /// The active-segment marker. A tinted overlay, NOT a second material —
     /// see the type comment on why glass-inside-glass cost the lens its edge.
     private let lens = UIView()
+    /// The pill the viewer sees, following the model with weight — see
+    /// `SelectorPillMotion`.
+    private lazy var pillMotion = SelectorPillMotion(tint: Self.lensTint) { [weak self] in self?.lens.frame ?? .zero }
     /// The segment strip. A subclass only so it can say when it has finished
     /// positioning its arranged subviews — see `SegmentRow`.
     private let row = SegmentRow()
     private var segments: [SegmentView] = []
     private var progress: CGFloat = 0
+    private var laidOutSize: CGSize = .zero
     /// The grab. A zero-duration long press, not a pan — see `handlePillGrab`.
     private let pillGrab: UILongPressGestureRecognizer = {
         let grab = UILongPressGestureRecognizer()
@@ -848,7 +852,10 @@ public final class PagedTabBar: UIControl {
         content.addSubview(lens)
         lens.clipsToBounds = true
         lens.isUserInteractionEnabled = false
-        lens.backgroundColor = Self.lensTint
+        // The model pill draws nothing: the pill the viewer sees is the
+        // motion's body, beside it, following it with weight.
+        lens.backgroundColor = .clear
+        content.addSubview(pillMotion.body)
 
         row.axis = .horizontal
         row.spacing = Metrics.interSegmentSpacing
@@ -1108,6 +1115,10 @@ public final class PagedTabBar: UIControl {
     #endif
 
     public override func layoutSubviews() {
+        if bounds.size != laidOutSize {
+            laidOutSize = bounds.size
+            pillMotion.snapOnNextMove()
+        }
         super.layoutSubviews()
         measurePlatterIfHosted()
         #if DEBUG
@@ -1179,6 +1190,7 @@ public final class PagedTabBar: UIControl {
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         materializeEffects()
+        if window == nil { pillMotion.cancel() } else { pillMotion.snapOnNextMove() }
         // A bar that leaves its window starts its platter measurement over
         // when it comes back — the next host may be a different ring.
         if window == nil { remeasure.reset() }
@@ -1245,6 +1257,7 @@ public final class PagedTabBar: UIControl {
     public var currentTitles: [String] { titles }
 
     public func setTitles(_ newTitles: [String]) {
+        pillMotion.snapOnNextMove()
         guard newTitles != titles else { return }
         titles = newTitles
         for segment in segments {
@@ -1919,6 +1932,19 @@ public final class PagedTabBar: UIControl {
     /// aim at, since the only honest test of the arbitration is a real finger
     /// and a real finger is placed in screen coordinates.
     public var debugPillOnScreen: CGRect { lens.convert(lens.bounds, to: nil) }
+    /// The VISIBLE pill's frame in the content's space — the model's once the
+    /// motion has come to rest, behind it while it travels.
+    public var debugPillBodyFrame: CGRect { pillMotion.body.frame }
+    public var debugPillIsMoving: Bool { pillMotion.isMoving }
+    /// Lets the pill's spring run in a bare test host (no window, and no
+    /// Reduce Motion read), or forbids every animation.
+    public func debugLetPillMove(_ allowed: Bool) { pillMotion.mayAnimate = { allowed } }
+    /// Ends a layout's snapping placements by hand — a test has no run loop turn.
+    public func debugEndPillLayout() { pillMotion.endSnapping() }
+    /// Steps the pill's spring frame by frame to rest; returns the frames it took.
+    @discardableResult public func debugRunPillToRest() -> Int { pillMotion.runToRest() }
+    /// Steps the pill's spring by `frames` at 120 Hz without settling it.
+    public func debugAdvancePill(frames: Int) { for _ in 0..<frames { pillMotion.advance(by: 1 / 120) } }
 
     public var debugStripOnScreen: CGRect {
         capsule.contentView.convert(capsule.contentView.bounds, to: nil)
@@ -1994,6 +2020,7 @@ public final class PagedTabBar: UIControl {
         lens.frame = rect
         lens.layer.cornerRadius = lens.bounds.height / 2
         lens.layer.cornerCurve = .continuous
+        pillMotion.modelMoved()
         keepLensVisible()
     }
 
