@@ -578,18 +578,49 @@ public final class PagedTabBar: UIControl {
     /// came out 52pt wide where its content needed 36, and its selection read
     /// as an oval instead of a disk. Natural widths therefore centre the row
     /// (`rowHugsConstraints`) rather than stretching it.
-    private var spreadsSegments: Bool {
-        guard spansItsHost else { return false }
+    /// How the row is laid across the capsule — decided by what fits.
+    enum RowArrangement: Equatable {
+        /// Pinned to both edges, every segment the widest's width.
+        case equalSlots
+        /// Pinned to both edges, every segment its natural width PLUS an equal
+        /// share of the slack — the strip fills the glass and the pill keeps
+        /// the same air on every segment. ⚠️ Centring the naturals instead
+        /// left the slack at the ENDS: on For You's docked accessory the pill
+        /// stood 13pt off the left edge and "Following" 23pt off the right,
+        /// and the viewer read an uneven margin (asked 2026-09-23).
+        case naturalsSpread
+        /// Centred at natural widths, scrolling when they out-measure the glass.
+        case naturalsHug
+    }
+
+    private var rowArrangement: RowArrangement {
+        guard spansItsHost else { return .naturalsHug }
         switch segmentSizing {
         case .equalSlots:
-            return true
+            return .equalSlots
         case .naturalWhenCrowded:
             // ⚠️ The test is on the arrangement being LEFT, not the one being
             // taken. "Do the natural widths fit?" is the wrong question: a row
             // whose naturals fit at 220 but whose equal slots want 300 would
             // keep equal slots and overflow, when giving way would have fitted.
             // Asking whether EQUAL SLOTS fit can never do that.
-            return fittedWidth(for: .fillEqually) <= bounds.width + 0.5
+            if fittedWidth(for: .fillEqually) <= bounds.width + 0.5 { return .equalSlots }
+            // The naturals fit with room to spare: share the room, never
+            // scroll a strip that fits. (The width is the host's and changes
+            // with the device and the docking.)
+            if fittedWidth(for: .fill) <= bounds.width + 0.5 { return .naturalsSpread }
+            return .naturalsHug
+        }
+    }
+
+    /// The slack each segment takes on beyond its natural width — non-zero
+    /// only for `.naturalsSpread`.
+    private func shareSlack(for arrangement: RowArrangement) {
+        let share: CGFloat = arrangement == .naturalsSpread && !segments.isEmpty
+            ? max(0, (bounds.width - fittedWidth(for: .fill)) / CGFloat(segments.count))
+            : 0
+        for segment in segments where abs(segment.slackShare - share) > 0.01 {
+            segment.slackShare = share
         }
     }
 
@@ -599,11 +630,15 @@ public final class PagedTabBar: UIControl {
     /// ⚠️ WITHOUT THIS, `layoutSubviews` RE-APPLIES ON EVERY PASS, and
     /// `applyRowArrangement` ends with `setNeedsLayout()` — a loop that never
     /// settles.
-    private var appliedSpread: Bool?
+    private var appliedArrangement: RowArrangement?
 
     /// How the row divides itself RIGHT NOW.
     private var activeDistribution: UIStackView.Distribution {
-        spreadsSegments ? .fillEqually : style.segmentDistribution
+        switch rowArrangement {
+        case .equalSlots: .fillEqually
+        case .naturalsSpread: .fill
+        case .naturalsHug: style.segmentDistribution
+        }
     }
 
     /// Re-states the row's distribution and its pinning together.
@@ -614,10 +649,13 @@ public final class PagedTabBar: UIControl {
     /// defect was a badge arriving while the segments still carried their old
     /// frames, which drew "99" permanently outside its own pill.
     private func applyRowArrangement() {
-        appliedSpread = spreadsSegments
+        let arrangement = rowArrangement
+        appliedArrangement = arrangement
         row.distribution = activeDistribution
-        NSLayoutConstraint.deactivate(spreadsSegments ? rowHugsConstraints : rowFillsConstraints)
-        NSLayoutConstraint.activate(spreadsSegments ? rowFillsConstraints : rowHugsConstraints)
+        let fills = arrangement != .naturalsHug
+        NSLayoutConstraint.deactivate(fills ? rowHugsConstraints : rowFillsConstraints)
+        NSLayoutConstraint.activate(fills ? rowFillsConstraints : rowHugsConstraints)
+        shareSlack(for: arrangement)
         invalidateIntrinsicContentSize()
         setNeedsLayout()
     }
@@ -929,7 +967,7 @@ public final class PagedTabBar: UIControl {
             row.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             row.trailingAnchor.constraint(equalTo: content.trailingAnchor)
         ]
-        NSLayoutConstraint.activate(spreadsSegments ? rowFillsConstraints : rowHugsConstraints)
+        NSLayoutConstraint.activate(rowArrangement == .naturalsHug ? rowHugsConstraints : rowFillsConstraints)
 
         // How the content relates to the capsule's width — and this is what
         // decides whether "too much content" becomes SCROLLING or TRUNCATION.
@@ -1162,10 +1200,12 @@ public final class PagedTabBar: UIControl {
         // until the bar has been given its bounds — which for an accessory
         // changes underneath it, 360pt expanded and 234 docked, with no
         // callback but this one.
-        let spread = spreadsSegments
-        if spread != appliedSpread {
-            appliedSpread = spread
+        let arrangement = rowArrangement
+        if arrangement != appliedArrangement {
             applyRowArrangement()
+        } else if arrangement == .naturalsSpread {
+            // The same arrangement at a new width: the slack is re-shared.
+            shareSlack(for: arrangement)
         }
         enforceCapsuleShape()
         // ⚠️ THE DISK FLOOR FOLLOWS THE CAPSULE'S REAL HEIGHT. A host can
@@ -1939,6 +1979,10 @@ public final class PagedTabBar: UIControl {
     /// aim at, since the only honest test of the arbitration is a real finger
     /// and a real finger is placed in screen coordinates.
     public var debugPillOnScreen: CGRect { lens.convert(lens.bounds, to: nil) }
+    /// The segments' frames in the content's space, and how the row is laid.
+    public var debugRowArrangement: String { String(describing: rowArrangement) }
+    public var debugSegmentNaturalWidths: [CGFloat] { segments.map(\.pinnedWidth) }
+    public var debugContentWidth: CGFloat { content.bounds.width }
     /// The VISIBLE pill's frame in the content's space — the model's once the
     /// motion has come to rest, behind it while it travels.
     public var debugPillBodyFrame: CGRect { pillMotion.body.frame }
@@ -2304,10 +2348,20 @@ private final class SegmentView: UIButton {
     private let maximumPointSize: CGFloat
     private var pinnedWidthConstraint: NSLayoutConstraint!
 
-    /// The width this segment has just asked for — readable the instant it is
-    /// set, where the resolved frame is a layout pass behind. A hugging bar
-    /// sums these to state its own size.
-    var pinnedWidth: CGFloat { pinnedWidthConstraint.constant }
+    /// The width this segment has just asked for on its own account — its
+    /// title, badge and padding, floored at a disk — readable the instant it
+    /// is set, where the resolved frame is a layout pass behind. A hugging
+    /// bar sums these to state its own size; a spread one adds `slackShare`.
+    private(set) var pinnedWidth: CGFloat = 0
+
+    /// The share of a spread row's slack this segment carries beyond its own
+    /// width — see `PagedTabBar.RowArrangement.naturalsSpread`.
+    var slackShare: CGFloat = 0 {
+        didSet {
+            guard slackShare != oldValue else { return }
+            pinnedWidthConstraint.constant = pinnedWidth + slackShare
+        }
+    }
 
     /// The pill's laid-out size, for a host asserting its margins.
     var badgeSize: CGSize { badge.bounds.size }
@@ -2547,7 +2601,8 @@ private final class SegmentView: UIButton {
         // at any radius — its own corner rounding (height / 2) exceeds half its
         // width and the shape degenerates. Below the floor the title simply
         // sits in more air.
-        pinnedWidthConstraint.constant = max(diskFloor, width)
+        pinnedWidth = max(diskFloor, width)
+        pinnedWidthConstraint.constant = pinnedWidth + slackShare
     }
 }
 
