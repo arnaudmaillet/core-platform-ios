@@ -79,6 +79,17 @@ final class SelectorGlassLens {
         /// grows it by `clearance + overhang` a side.
         static let overhang: CGFloat = 3
         static var outset: CGFloat { SelectorCapsuleMetrics.clearance + overhang }
+        /// How much further it stands once it TRAVELS — the native lens is
+        /// barely larger than the platter on a plain hold and well past the
+        /// bar's edges once the finger moves or the item flies to a tap
+        /// (filmed: ~1.36× the platter's height). `-lens-travel-overhang`.
+        static let travelOverhang: CGFloat = {
+            let read = UserDefaults.standard.double(forKey: "lens-travel-overhang")
+            return read > 0 ? CGFloat(read) : 8
+        }()
+        /// How far the model pill must move from where it was grabbed before
+        /// the hold counts as a travel.
+        static let travelThreshold: CGFloat = 6
         /// How far the lens stretches along its travel, per point/second of
         /// speed, and the most it may — small, it is what read as "too wide".
         static let stretchPerSpeed: CGFloat = 1 / 2400
@@ -114,6 +125,10 @@ final class SelectorGlassLens {
     private var centre: CGPoint = .zero
     private var velocity: CGPoint = .zero
     private var grow: CGFloat = 0
+    /// 0 on a plain hold, 1 while travelling (the finger moved, or the pill
+    /// flies to a tap): the native lens grows and magnifies more then.
+    private var zoom: CGFloat = 0
+    private var liftOrigin: CGPoint = .zero
     private var lastTick: CFTimeInterval = 0
     private let tint: UIColor
 
@@ -233,6 +248,8 @@ final class SelectorGlassLens {
         centre = view.center
         velocity = .zero
         grow = 0
+        zoom = 0
+        liftOrigin = CGPoint(x: modelFrame().midX, y: modelFrame().midY)
         startSpring()
         // The effect is ANIMATED into place, never faded in — a glass view's
         // alpha is the house rule the capsules already follow.
@@ -356,9 +373,18 @@ final class SelectorGlassLens {
         centre.x += velocity.x * dt
         centre.y += velocity.y * dt
 
+        // Travelling: a tap sends the pill flying (not held), or the finger
+        // has moved it past the threshold. The zoom eases in over ~0.1 s and
+        // stays for the rest of the lift — the native lens keeps its travel
+        // size once the finger has moved, until it lifts.
+        let travelling = !isHeld() || abs(goal.x - liftOrigin.x) > Lift.travelThreshold
+            || abs(goal.y - liftOrigin.y) > Lift.travelThreshold
+        if travelling { zoom += (1 - zoom) * min(1, dt * 10) }
+
         // The lift: the pill grows past the capsule by a constant margin on
-        // every side, eased in over a few frames.
-        let wantedGrow = Self.liftsWithoutGrowth ? 0 : Lift.outset
+        // every side, eased in over a few frames, and further while it
+        // travels.
+        let wantedGrow = Self.liftsWithoutGrowth ? 0 : Lift.outset + Lift.travelOverhang * zoom
         grow += (wantedGrow - grow) * min(1, dt * 16)
         view.bounds = CGRect(
             origin: .zero,
@@ -370,7 +396,7 @@ final class SelectorGlassLens {
         view.transform = CGAffineTransform(scaleX: 1 + stretch, y: 1 - stretch * 0.4)
 
         // The copy of the strip, magnified and bent in step with the lift.
-        refract(lift: Lift.outset > 0 ? grow / Lift.outset : 1,
+        refract(lift: Lift.outset > 0 ? grow / Lift.outset : 1, zoom: zoom,
                 box: CGRect(x: centre.x - view.bounds.width / 2, y: centre.y - view.bounds.height / 2,
                             width: view.bounds.width, height: view.bounds.height),
                 transform: view.transform,
@@ -396,7 +422,7 @@ final class SelectorGlassLens {
         }
         let remaining = CGFloat(1 - elapsed / Lift.settleDuration)
         let presented = view.layer.presentation()?.frame ?? view.frame
-        refract(lift: remaining * remaining, box: presented, transform: .identity, hole: presented)
+        refract(lift: remaining * remaining, zoom: zoom * remaining, box: presented, transform: .identity, hole: presented)
     }
 
     // MARK: The optics
@@ -405,8 +431,9 @@ final class SelectorGlassLens {
     /// `transform` — the glass's stretch, which the copy takes on too), cuts
     /// the real titles out of the strip within `hole` (the bar's space, the
     /// glass as it shows), and renders the refracted copy at `lift` (0: the
-    /// plain strip, 1: fully magnified and bent).
-    private func refract(lift: CGFloat, box: CGRect, transform: CGAffineTransform, hole: CGRect?) {
+    /// plain strip, 1: magnified and bent as on a hold) and `zoom` (1: as
+    /// while travelling, the stronger magnification).
+    private func refract(lift: CGFloat, zoom: CGFloat, box: CGRect, transform: CGAffineTransform, hole: CGRect?) {
         guard let copy, let bar = view.superview, let content = source() else { return }
         if copy.superview !== bar { bar.insertSubview(copy, aboveSubview: view) }
         let refractor = LensRefractor.shared
@@ -415,12 +442,22 @@ final class SelectorGlassLens {
             return
         }
         let scale = max(1, view.window?.screen.scale ?? view.traitCollection.displayScale)
+        let lift = Float(max(0, min(1, lift)))
+        let zoom = Float(max(0, min(1, zoom)))
+        // A hold magnifies a little, a travel a lot — both read off the
+        // native lens (1.15× held, 1.4× dragging).
+        let held = 1 + (optics.magnification - 1) * lift
+        let magnification = held + (optics.travelMagnification - optics.magnification) * zoom * lift
+        // Captured as fine as the copy will show it, so a 1.4× title is a
+        // title, not a 3× bitmap blown up soft.
+        let captureScale = scale * CGFloat(magnification)
         let margin = LensRefractor.Optics.captureMargin
         let region = box.insetBy(dx: -margin, dy: -margin)
-        let width = Int(ceil(region.width * scale)), height = Int(ceil(region.height * scale))
+        let width = Int(ceil(region.width * captureScale)), height = Int(ceil(region.height * captureScale))
         let started = Self.tracesOptics ? CACurrentMediaTime() : 0
         guard let texture = sourceTexture(width: width, height: height),
-              capture(content, region: content.convert(region, from: bar), scale: scale, into: texture) else {
+              capture(content, region: content.convert(region, from: bar), scale: captureScale,
+                      pill: content.convert(box.insetBy(dx: Lift.outset, dy: Lift.outset), from: bar), into: texture) else {
             hideCopy()
             return
         }
@@ -436,26 +473,28 @@ final class SelectorGlassLens {
         layer.contentsScale = scale
         let size = SIMD2<Float>(Float(box.width * scale), Float(box.height * scale))
         layer.drawableSize = CGSize(width: CGFloat(size.x), height: CGFloat(size.y))
-        let lift = Float(max(0, min(1, lift)))
-        let magnification = 1 + (optics.magnification - 1) * lift
         // The bend may reach a little past the lens's own edge: at the rim the
         // magnified sample sits r/mag from the centre, and the native lens
         // shows the neighbouring item's edge pulled in there (the "M" of
         // Messages inside the held For You lens, filmed). ⚠️ At 10pt it read
         // the editor's neighbouring icons 2pt past the rim, split into
-        // colours — the bend is 4pt now, the split 1pt.
-        let bend = optics.bend * Float(scale) * lift
+        // colours. It grows with the zoom, as the native pull does.
+        let bend = optics.bend * Float(scale) * lift * (1 + zoom)
+        #if DEBUG
+        debugMagnification = CGFloat(magnification)
+        #endif
         let uniforms = LensRefractor.Uniforms(
             size: size,
             centre: size / 2,
             halfExtent: size / 2,
-            sourceOffset: SIMD2(repeating: Float(margin * scale)),
+            sourceOffset: SIMD2(repeating: Float(margin * captureScale)),
             sourceSize: SIMD2(Float(width), Float(height)),
             magnification: magnification,
             edge: optics.edge * Float(scale),
             bend: bend,
             aberration: optics.aberration,
-            blur: optics.blur * Float(scale) * lift
+            blur: optics.blur * Float(scale) * lift,
+            sourceScale: Float(captureScale / scale)
         )
         refractor.render(source: texture, into: layer, uniforms: uniforms)
         if Self.tracesOptics {
@@ -491,7 +530,7 @@ final class SelectorGlassLens {
     /// `scale`, top row first — UIKit's orientation, flipped for a bitmap
     /// context. The strip's mask does not apply: the copy is drawn from the
     /// views, not from the layer tree.
-    private func capture(_ content: UIView, region: CGRect, scale: CGFloat, into texture: MTLTexture) -> Bool {
+    private func capture(_ content: UIView, region: CGRect, scale: CGFloat, pill: CGRect, into texture: MTLTexture) -> Bool {
         let width = texture.width, height = texture.height, bytesPerRow = width * 4
         if sourceBytes.count != bytesPerRow * height {
             sourceBytes = [UInt8](repeating: 0, count: bytesPerRow * height)
@@ -506,12 +545,13 @@ final class SelectorGlassLens {
             context.translateBy(x: 0, y: CGFloat(height))
             context.scaleBy(x: scale, y: -scale)
             context.translateBy(x: -region.minX, y: -region.minY)
-            // The resting pill's tint first, lighter: the native lens refracts
-            // the item's PLATTER (its edge is what makes the rim's fringe on
-            // a plain page) and shows it lighter than at rest. The model pill
+            // The resting pill's tint first, lighter, UNDER THE LENS (not at
+            // the model pill, which jumps ahead on a tap and read as a ghost
+            // capsule inside the lagging lens): the native lens refracts the
+            // item's PLATTER — its edge is what makes the rim's fringe on a
+            // plain page — and shows it lighter than at rest. The model pill
             // is alpha 0 in the strip while the glass stands in for it.
-            if let bar = view.superview {
-                let pill = content.convert(modelFrame(), from: bar)
+            do {
                 context.saveGState()
                 context.setFillColor(tint.withAlphaComponent(tint.cgColor.alpha * 0.6).cgColor)
                 context.addPath(UIBezierPath(roundedRect: pill, cornerRadius: min(pill.width, pill.height) / 2).cgPath)
@@ -667,6 +707,8 @@ final class SelectorGlassLens {
 
     /// Whether the refracted copy is showing.
     var debugCopyIsShowing: Bool { copy?.isHidden == false }
+    /// The magnification of the last rendered copy.
+    private(set) var debugMagnification: CGFloat = 1
     /// Whether the strip's real titles are cut out under the lens.
     var debugSourceIsMasked: Bool { maskedLayer?.mask != nil && maskedLayer?.mask === sourceMask }
     /// Ends a settle at once, as the last frame of its display link would.

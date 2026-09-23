@@ -121,4 +121,30 @@ struct PagedTabBarLensOpticsTests {
         #expect(!bar.debugLensMasksTitles, "settled: the real titles are back")
         #expect(!bar.debugLensCopyIsShowing, "settled: no copy")
     }
+
+    @Test func aHoldMagnifiesALittleAndATravelALot() async {
+        guard LensRefractor.shared.device != nil else {
+            Issue.record("no Metal device in this test host")
+            return
+        }
+        await LensRefractor.shared.ready()
+        let bar = PagedTabBar(titles: ["Activity", "Gallery", "Short"], style: .floating)
+        bar.liftsLensAsGlass = true
+        bar.frame = CGRect(x: 0, y: 0, width: 360, height: PagedTabBar.Style.floating.height)
+        bar.layoutIfNeeded()
+        let pill = bar.debugPillInViewport.midX
+
+        #expect(bar.debugBeginPillDrag(atViewportX: pill))
+        bar.debugAdvanceLens(frames: 60)
+        let held = bar.debugLensMagnification
+        #expect(abs(held - CGFloat(LensRefractor.Optics.standard.magnification)) < 0.02,
+                "a plain hold magnifies as the native lens does on a hold, got \(held)")
+
+        bar.debugDragPill(toViewportX: pill + 60)
+        bar.debugAdvanceLens(frames: 60)
+        let travelling = bar.debugLensMagnification
+        #expect(abs(travelling - CGFloat(LensRefractor.Optics.standard.travelMagnification)) < 0.02,
+                "once the finger has moved, the native lens magnifies more, got \(travelling)")
+        bar.debugEndPillDrag()
+    }
 }

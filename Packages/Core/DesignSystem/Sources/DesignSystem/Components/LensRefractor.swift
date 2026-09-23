@@ -29,8 +29,10 @@ final class LensRefractor {
 
     /// The lens's optics, in points — scaled to pixels at render time.
     struct Optics: Sendable {
-        /// How much larger the strip reads through the lens's middle.
+        /// How much larger the strip reads through the lens's middle, on a
+        /// hold — and once the lens travels.
         var magnification: Float
+        var travelMagnification: Float
         /// How far in from the rim the bend reaches.
         var edge: Float
         /// How far outward the rim pulls the strip, at the rim itself.
@@ -47,7 +49,7 @@ final class LensRefractor {
         /// same simulator: its held item reads 1.13–1.15× its resting size
         /// (text 108 → 124 px, glyph 64 → 72 px), and the neighbouring item's
         /// edge shows inside the rim, pulled in a little.
-        static let standard = Optics(magnification: 1.15, edge: 14, bend: 6, aberration: 0.4, blur: 0.5)
+        static let standard = Optics(magnification: 1.15, travelMagnification: 1.4, edge: 14, bend: 6, aberration: 0.4, blur: 0.5)
 
         /// `standard`, with any `-lens-…` launch argument over it.
         static func fromArguments() -> Optics {
@@ -58,6 +60,7 @@ final class LensRefractor {
             }
             var optics = standard
             optics.magnification = value("lens-mag", optics.magnification)
+            optics.travelMagnification = value("lens-mag-travel", optics.travelMagnification)
             optics.edge = value("lens-edge", optics.edge)
             optics.bend = value("lens-bend", optics.bend)
             optics.aberration = value("lens-ca", optics.aberration)
@@ -67,7 +70,7 @@ final class LensRefractor {
     }
 
     /// What one frame of the shader needs. Laid out as the Metal struct is:
-    /// five float2, then five floats, padded to a multiple of 8 bytes.
+    /// five float2, then six floats, padded to a multiple of 8 bytes.
     struct Uniforms {
         /// The output, in pixels.
         var size: SIMD2<Float>
@@ -83,11 +86,15 @@ final class LensRefractor {
         var bend: Float
         var aberration: Float
         var blur: Float
-        private var padding: SIMD3<Float> = .zero
+        /// Source pixels per output pixel: the strip is captured finer than
+        /// the screen while the lens magnifies, so the copy stays crisp.
+        var sourceScale: Float
+        private var padding: SIMD2<Float> = .zero
 
         init(size: SIMD2<Float>, centre: SIMD2<Float>, halfExtent: SIMD2<Float>,
              sourceOffset: SIMD2<Float>, sourceSize: SIMD2<Float>,
-             magnification: Float, edge: Float, bend: Float, aberration: Float, blur: Float) {
+             magnification: Float, edge: Float, bend: Float, aberration: Float, blur: Float,
+             sourceScale: Float = 1) {
             self.size = size
             self.centre = centre
             self.halfExtent = halfExtent
@@ -98,6 +105,7 @@ final class LensRefractor {
             self.bend = bend
             self.aberration = aberration
             self.blur = blur
+            self.sourceScale = sourceScale
         }
     }
 
@@ -257,7 +265,7 @@ final class LensRefractor {
 
     struct Uniforms {
         float2 size; float2 centre; float2 halfExtent; float2 sourceOffset; float2 sourceSize;
-        float magnification; float edge; float bend; float aberration; float blur; float3 padding;
+        float magnification; float edge; float bend; float aberration; float blur; float sourceScale; float2 padding;
     };
 
     // Signed distance to the capsule, negative inside, and the outward normal.
@@ -286,9 +294,9 @@ final class LensRefractor {
         for (int i = -2; i <= 2; i++) {
             float w = (i == 0) ? 0.4 : ((abs(i) == 1) ? 0.2 : 0.1);
             float2 s = base + pull + step * float(i);
-            float4 g = source.sample(linear, (s + u.sourceOffset) / u.sourceSize);
-            float r = source.sample(linear, (s + pull * u.aberration + u.sourceOffset) / u.sourceSize).r;
-            float b = source.sample(linear, (s - pull * u.aberration + u.sourceOffset) / u.sourceSize).b;
+            float4 g = source.sample(linear, (s * u.sourceScale + u.sourceOffset) / u.sourceSize);
+            float r = source.sample(linear, ((s + pull * u.aberration) * u.sourceScale + u.sourceOffset) / u.sourceSize).r;
+            float b = source.sample(linear, ((s - pull * u.aberration) * u.sourceScale + u.sourceOffset) / u.sourceSize).b;
             sum += w * float4(min(r, g.a), g.g, min(b, g.a), g.a);
         }
         return sum * cover;

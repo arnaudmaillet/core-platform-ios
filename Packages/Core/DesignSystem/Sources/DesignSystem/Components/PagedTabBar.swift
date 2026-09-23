@@ -2274,6 +2274,13 @@ extension PagedTabBar {
     public var debugLensMasksTitles: Bool { glassLens?.debugSourceIsMasked ?? false }
     /// Ends the lens's settle at once — a test has no run loop.
     public func debugFinishLensSettle() { glassLens?.debugFinishSettle() }
+    /// Steps the lens's display link by hand, `frames` at 120 Hz — a held
+    /// lens keeps ticking while the finger stays, and a test has no run loop.
+    public func debugAdvanceLens(frames: Int) {
+        for _ in 0..<frames { glassLens?.advance(by: 1 / 120) }
+    }
+    /// The magnification of the lens's last rendered copy.
+    public var debugLensMagnification: CGFloat { glassLens?.debugMagnification ?? 1 }
     #endif
 }
 
