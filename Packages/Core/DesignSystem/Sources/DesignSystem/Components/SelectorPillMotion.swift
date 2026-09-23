@@ -93,7 +93,9 @@ final class SelectorPillMotion {
     func modelMoved() {
         let model = modelFrame()
         guard model.width > 0, model.height > 0 else { return }
-        if !isPlaced || snapsNextMove || !mayAnimate() {
+        // A hidden body does not travel: the icon bar's pill, coming out of
+        // neutral, appeared on the item it left rather than the one chosen.
+        if !isPlaced || snapsNextMove || body.isHidden || !mayAnimate() {
             snap()
             return
         }
