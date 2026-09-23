@@ -71,6 +71,20 @@ final class SelectorGlassLens {
         return .none
     }()
     private static let tracesOptics = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-trace")
+    /// The copy refracts a SNAPSHOT of the page behind the bar too, frosted
+    /// where the bar's glass covers it. It looks the part — the native lens
+    /// refracts everything beneath it — but no capture is affordable:
+    /// measured on For You's video grid, `drawHierarchy` 26–280 ms a call,
+    /// `layer.render` 28 ms, a snapshot view rendered through CG blank; and a
+    /// snapshot taken once per lift goes stale the moment the pages scroll
+    /// under the bar. `-selector-glass-lens-backdrop` keeps it for comparison.
+    static let refractsBackdrop = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-backdrop")
+    private static let frostVeil: CGFloat = {
+        let read = UserDefaults.standard.double(forKey: "lens-frost-veil")
+        // 0.6 read lighter than the real frost beside the lens on For You
+        // (242,239,207 against 223,211,171); 0.4 with a coarser blur is nearer.
+        return read > 0 ? CGFloat(read) : 0.4
+    }()
 
     /// The numbers the lift is cut to, read off the native tab bar.
     enum Lift {
@@ -140,6 +154,9 @@ final class SelectorGlassLens {
     /// a refracted copy of. Converted through `view.superview`, so it may
     /// live in any space (the bars keep it inside a scroll view).
     var source: () -> UIView? = { nil }
+    /// The bar's visible glass, in the bar's space (a platter reaches past
+    /// the bar) — where the backdrop is frosted.
+    var capsuleFrame: () -> CGRect = { .zero }
 
     private(set) var isLifted = false
     private var mayRest = false
@@ -165,9 +182,15 @@ final class SelectorGlassLens {
     private weak var maskedLayer: CALayer?
     /// When the settle began, while the copy eases back to the plain strip.
     private var settleStarted: CFTimeInterval?
+    /// The page behind the bar, snapshotted once per quarter second over the
+    /// whole bar and a margin — `drawHierarchy` costs ~10 ms a call, and the
+    /// page under a held finger does not change.
+    private var backdrop: (raw: UIImage, coarse: UIImage, regionInPage: CGRect, taken: CFTimeInterval, page: ObjectIdentifier)?
+    private static let backdropRefresh: CFTimeInterval = 0.25
     private var traceCost: (frames: Int, capture: Double, render: Double, since: CFTimeInterval) = (0, 0, 0, 0)
     #if DEBUG
     private var traceMotion: (frames: Int, held: Int, maxStretch: CGFloat, maxSpeed: CGFloat, wasHeld: Bool) = (0, 0, 0, 0, false)
+    private var traceSnapshots = 0
     private var dumped = false
     private var dumpPending = false
     #endif
@@ -580,6 +603,24 @@ final class SelectorGlassLens {
             context.translateBy(x: 0, y: CGFloat(height))
             context.scaleBy(x: scale, y: -scale)
             context.translateBy(x: -region.minX, y: -region.minY)
+            if let bar = view.superview {
+                if Self.refractsBackdrop {
+                    drawBackdrop(into: context, region: region, content: content, bar: bar)
+                } else {
+                    // The bar's glass EDGE, so the rim has it to bend: the host's
+                    // frost reads a few levels darker than a white page (247
+                    // against 254 on the user's recording, 3%) and lighter than
+                    // a dark one. A translucent `label` veil over the capsule
+                    // gives that boundary to the copy; the clear glass beneath
+                    // shows the live page itself, unrefracted.
+                    let capsule = content.convert(capsuleFrame(), from: bar)
+                    context.saveGState()
+                    context.setFillColor(UIColor.label.resolvedColor(with: content.traitCollection).withAlphaComponent(0.035).cgColor)
+                    context.addPath(UIBezierPath(roundedRect: capsule, cornerRadius: min(capsule.width, capsule.height) / 2).cgPath)
+                    context.fillPath()
+                    context.restoreGState()
+                }
+            }
             Self.draw(content, in: content, into: context, alpha: 1)
             #if DEBUG
             if Self.tracesOptics, !dumped, traceCost.frames >= 5, let image = context.makeImage() {
@@ -600,6 +641,81 @@ final class SelectorGlassLens {
                             withBytes: raw.baseAddress!, bytesPerRow: bytesPerRow)
         }
         return true
+    }
+
+    /// The page behind the bar, as it shows: raw where the lens overhangs the
+    /// bar's glass, frosted (blurred by downsampling, veiled towards
+    /// `secondarySystemBackground`) inside the capsule — an emulation of the
+    /// host's regular glass, which no API lets us sample. Snapshot with
+    /// `drawHierarchy(afterScreenUpdates: false)` of the PAGE view only (the
+    /// tab's or the navigation stack's top view), never of a view holding
+    /// this lens: that would feed the copy back into itself.
+    private func drawBackdrop(into context: CGContext, region: CGRect, content: UIView, bar: UIView) {
+        guard let page = Self.pageView(behind: bar), !bar.isDescendant(of: page), page.window != nil else { return }
+        let now = CACurrentMediaTime()
+        let neededInPage = page.convert(region, from: content)
+        if let cached = backdrop, cached.page == ObjectIdentifier(page),
+           now - cached.taken < Self.backdropRefresh, cached.regionInPage.contains(neededInPage) {
+            // still good
+        } else {
+            // The whole bar plus the lens's reach, so a drag along it needs
+            // no new snapshot.
+            let reach = Lift.outset + Lift.travelOverhang + LensRefractor.Optics.captureMargin
+            let barInPage = page.convert(bar.bounds.insetBy(dx: -reach - 40, dy: -reach), from: bar)
+            let regionInPage = barInPage.union(neededInPage)
+            guard regionInPage.width > 0, regionInPage.height > 0 else { return }
+            // 1× is plenty for the raw page; the frost comes from an 8× coarser copy.
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let raw = UIGraphicsImageRenderer(size: regionInPage.size, format: format).image { rendererContext in
+                rendererContext.cgContext.translateBy(x: -regionInPage.minX, y: -regionInPage.minY)
+                page.drawHierarchy(in: page.bounds, afterScreenUpdates: false)
+            }
+            let coarseSize = CGSize(width: max(2, regionInPage.width / 12), height: max(2, regionInPage.height / 12))
+            let coarse = UIGraphicsImageRenderer(size: coarseSize, format: format).image { _ in
+                raw.draw(in: CGRect(origin: .zero, size: coarseSize))
+            }
+            backdrop = (raw, coarse, regionInPage, now, ObjectIdentifier(page))
+            #if DEBUG
+            traceSnapshots += 1
+            if Self.tracesOptics, traceSnapshots <= 3 {
+                print(String(format: "[SelectorGlassLens] backdrop snapshot #%d of %@ %.0fx%.0f in %.1f ms", traceSnapshots,
+                             String(describing: type(of: page)), regionInPage.width, regionInPage.height, (CACurrentMediaTime() - now) * 1000))
+            }
+            #endif
+        }
+        guard let backdrop else { return }
+        let placed = content.convert(backdrop.regionInPage, from: page)
+        let capsule = content.convert(capsuleFrame(), from: bar)
+        let veil = UIColor.secondarySystemBackground.resolvedColor(with: content.traitCollection)
+        UIGraphicsPushContext(context)
+        backdrop.raw.draw(in: placed)
+        context.saveGState()
+        context.addPath(UIBezierPath(roundedRect: capsule, cornerRadius: min(capsule.width, capsule.height) / 2).cgPath)
+        context.clip()
+        context.interpolationQuality = .high
+        backdrop.coarse.draw(in: placed)
+        context.setFillColor(veil.withAlphaComponent(Self.frostVeil).cgColor)
+        context.fill(capsule)
+        context.restoreGState()
+        UIGraphicsPopContext()
+    }
+
+    /// The page a bar sits over: the selected tab's top view for a bar in a
+    /// tab accessory, the navigation stack's top view for a bar in a toolbar.
+    private static func pageView(behind bar: UIView) -> UIView? {
+        var responder: UIResponder? = bar
+        while let current = responder {
+            if let tabs = current as? UITabBarController {
+                let selected = tabs.selectedViewController
+                return ((selected as? UINavigationController)?.topViewController ?? selected)?.view
+            }
+            if let navigation = current as? UINavigationController {
+                return navigation.topViewController?.view
+            }
+            responder = current.next
+        }
+        return nil
     }
 
     /// The strip shows everywhere but inside `hole` (its own space), where
@@ -700,6 +816,7 @@ final class SelectorGlassLens {
 
     private func hideCopy() {
         copy?.isHidden = true
+        backdrop = nil
         if let maskedLayer, maskedLayer.mask === sourceMask { maskedLayer.mask = nil }
         maskedLayer = nil
     }
@@ -712,9 +829,10 @@ final class SelectorGlassLens {
         if traceCost.since == 0 { traceCost.since = now }
         if now - traceCost.since >= 1 {
             let n = Double(traceCost.frames)
-            print(String(format: "[SelectorGlassLens] %d frames: capture %.2f ms, render %.2f ms (mean); held %d/%d, max stretch %.2f, max speed %.0f pt/s",
+            print(String(format: "[SelectorGlassLens] %d frames: capture %.2f ms, render %.2f ms (mean); held %d/%d, max stretch %.2f, max speed %.0f pt/s, snapshots %d",
                          traceCost.frames, traceCost.capture / n * 1000, traceCost.render / n * 1000,
-                         traceMotion.held, traceMotion.frames, traceMotion.maxStretch, traceMotion.maxSpeed))
+                         traceMotion.held, traceMotion.frames, traceMotion.maxStretch, traceMotion.maxSpeed, traceSnapshots))
+            traceSnapshots = 0
             traceCost = (0, 0, 0, now)
             traceMotion = (0, 0, 0, 0, traceMotion.wasHeld)
         }
