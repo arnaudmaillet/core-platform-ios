@@ -853,6 +853,8 @@ extension IconSelectorBar {
             return content.convert(lens.frame, to: self)
         }
         overlay.isHeld = { [weak self] in self?.drag != nil }
+        // The strip the lens refracts a copy of, and masks beneath itself.
+        overlay.source = { [weak self] in self?.content }
         // Beneath the capsule, above the host's glass, where the host draws
         // the glass — the icons above it stay crisp.
         if hosting.drawsBackdrop {

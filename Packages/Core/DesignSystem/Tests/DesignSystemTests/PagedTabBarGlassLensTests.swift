@@ -89,3 +89,36 @@ struct PagedTabBarGlassLensTests {
         #expect(bar.debugGlassLensFrame == nil)
     }
 }
+
+/// The lens's optics: while lifted the strip's real titles are cut out under
+/// the lens and its refracted copy shows in their place; once settled the
+/// titles come back and the copy goes.
+@MainActor
+struct PagedTabBarLensOpticsTests {
+    @Test func aLiftedLensMasksTheTitlesAndShowsItsCopyUntilItSettles() async {
+        guard LensRefractor.shared.device != nil else {
+            Issue.record("no Metal device in this test host")
+            return
+        }
+        await LensRefractor.shared.ready()
+        let bar = PagedTabBar(titles: ["Activity", "Gallery", "Short"], style: .floating)
+        bar.liftsLensAsGlass = true
+        bar.frame = CGRect(x: 0, y: 0, width: 360, height: PagedTabBar.Style.floating.height)
+        bar.layoutIfNeeded()
+        #expect(!bar.debugLensMasksTitles && !bar.debugLensCopyIsShowing, "guard: plain strip at rest")
+
+        bar.debugSimulateTap(at: 2)
+        bar.debugRunLensSpringToRest()
+        #expect(bar.debugLensIsGlass, "guard: travelling, the target has not landed")
+        #expect(bar.debugLensMasksTitles, "the real titles are cut out under the lens")
+        #expect(bar.debugLensCopyIsShowing, "the refracted copy stands in for them")
+
+        bar.setProgress(2)
+        bar.debugRunLensSpringToRest()
+        #expect(!bar.debugLensIsGlass, "guard: landed and settling")
+        #expect(bar.debugLensMasksTitles, "the copy eases out over the settle; the titles stay cut until it ends")
+        bar.debugFinishLensSettle()
+        #expect(!bar.debugLensMasksTitles, "settled: the real titles are back")
+        #expect(!bar.debugLensCopyIsShowing, "settled: no copy")
+    }
+}

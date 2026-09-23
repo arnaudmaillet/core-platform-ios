@@ -1,3 +1,4 @@
+import Metal
 import UIKit
 
 /// The selection pill as a Liquid Glass lens that lifts while it is held or
@@ -28,14 +29,24 @@ import UIKit
 /// (glass blurs what is behind it; the native bar draws its items above its
 /// lens too).
 ///
-/// Not reproduced, and not reproducible with public API: the native lens's
-/// chromatic rim and its magnification of the item — hit-testable over the
-/// strip, `isInteractive` gave neither. They are its private material.
+/// The native lens's optics — the item magnified, bent at the rim, with a
+/// chromatic fringe — are its private material (a portal of the bar's own
+/// content under a displacement map; no `UIGlassEffect` gives them). They
+/// are rebuilt here over a bitmap of OUR strip: every frame while lifted the
+/// lens captures the strip beneath it (`layer.render(in:)` of the bar's
+/// content, a margin around), hands it to `LensRefractor`'s shader, and
+/// shows the refracted copy inside the plate, under the glass rim. The REAL
+/// titles inside the lens are cut out of the strip by an even-odd mask while
+/// it is lifted, so only the copy shows there — otherwise the title sits on
+/// its own magnified copy and doubles at the rim. The copy eases back to the
+/// plain strip as the lens settles.
 ///
 /// Instruments: `-selector-glass-lens-always` (never settle),
 /// `-selector-glass-lens-frosted` (`.regular` while lifted),
 /// `-selector-glass-lens-still` (no lift), `-selector-glass-lens-noplate`,
-/// `-selector-glass-lens-thin` (a thin plate rather than ultra-thin).
+/// `-selector-glass-lens-thin` (a thin plate rather than ultra-thin),
+/// `-selector-glass-lens-optics-off` (no refracted copy),
+/// `-selector-glass-lens-trace` (capture + render cost, every second).
 @MainActor
 final class SelectorGlassLens {
     static let isAskedFor = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens")
@@ -44,6 +55,7 @@ final class SelectorGlassLens {
     private static let liftsWithoutGrowth = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-still")
     private static let liftsWithoutPlate = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-noplate")
     private static let usesThinPlate = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-thin")
+    private static let tracesOptics = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-trace")
 
     /// The numbers the lift is cut to, read off the native tab bar.
     enum Lift {
@@ -75,6 +87,10 @@ final class SelectorGlassLens {
     private var isLanded: (() -> Bool)?
     /// Whether the bar still holds the pill (a finger down): no settling then.
     var isHeld: () -> Bool = { false }
+    /// The bar's strip — the view holding the titles or icons the lens shows
+    /// a refracted copy of. Converted through `view.superview`, so it may
+    /// live in any space (the bars keep it inside a scroll view).
+    var source: () -> UIView? = { nil }
 
     private(set) var isLifted = false
     private var mayRest = false
@@ -86,9 +102,31 @@ final class SelectorGlassLens {
     private var lastTick: CFTimeInterval = 0
     private let tint: UIColor
 
+    // The optics: the refracted copy of the strip, its source, and the mask
+    // that cuts the real titles out of the strip beneath it.
+    private let copy: LensCopyView?
+    private let optics = LensRefractor.Optics.fromArguments()
+    private var sourceTexture: MTLTexture?
+    private var sourceBytes: [UInt8] = []
+    private var sourceMask: CAShapeLayer?
+    private weak var maskedLayer: CALayer?
+    /// When the settle began, while the copy eases back to the plain strip.
+    private var settleStarted: CFTimeInterval?
+    private var traceCost: (frames: Int, capture: Double, render: Double, since: CFTimeInterval) = (0, 0, 0, 0)
+    #if DEBUG
+    private var dumped = false
+    private var dumpPending = false
+    #endif
+
     init(tint: UIColor, modelFrame: @escaping () -> CGRect) {
         self.tint = tint
         self.modelFrame = modelFrame
+        if LensRefractor.isSwitchedOff || LensRefractor.shared.device == nil {
+            copy = nil
+        } else {
+            LensRefractor.shared.prepare()
+            copy = LensCopyView(device: LensRefractor.shared.device)
+        }
         view = UIVisualEffectView(effect: nil)
         view.effect = restingGlass()
         view.isUserInteractionEnabled = false
@@ -116,6 +154,12 @@ final class SelectorGlassLens {
                 plate.bottomAnchor.constraint(equalTo: view.contentView.bottomAnchor)
             ])
         }
+        // ⚠️ The copy is NOT in the glass's contentView: a glass effect view
+        // treats its content (adaptive vibrancy), and the copy came out
+        // washed — its darkest glyph pixel at 105/255 against 0 for the real
+        // title, measured on film. It stands beside the glass in the bar, just
+        // above it, placed with it every frame (`refract`).
+        copy?.isHidden = true
     }
 
     private func restingGlass() -> UIGlassEffect {
@@ -157,6 +201,7 @@ final class SelectorGlassLens {
     func lift() {
         guard !isLifted else { return }
         isLifted = true
+        settleStarted = nil
         centre = view.center
         velocity = .zero
         grow = 0
@@ -203,7 +248,14 @@ final class SelectorGlassLens {
         fallback = nil
         guard isLifted, !Self.keepsLifted else { return }
         isLifted = false
-        stopSpring()
+        // The copy eases back to the plain strip over the settle, frame by
+        // frame off the glass's presentation; the link stays for that.
+        if copy?.isHidden == false {
+            settleStarted = CACurrentMediaTime()
+        } else {
+            stopSpring()
+            hideCopy()
+        }
         let rest = modelFrame()
         centre = CGPoint(x: rest.midX, y: rest.midY)
         grow = 0
@@ -223,7 +275,9 @@ final class SelectorGlassLens {
         fallback?.cancel()
         fallback = nil
         stopSpring()
+        hideCopy()
         isLifted = false
+        settleStarted = nil
         view.transform = .identity
         view.effect = restingGlass()
         place()
@@ -232,9 +286,9 @@ final class SelectorGlassLens {
     // MARK: The spring
 
     private func startSpring() {
-        guard link == nil else { return }
         mayRest = false
         lastTick = CACurrentMediaTime()
+        guard link == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.add(to: .main, forMode: .common)
         self.link = link
@@ -249,7 +303,13 @@ final class SelectorGlassLens {
         let now = link.timestamp
         let dt = CGFloat(min(max(now - lastTick, 1.0 / 240), 1.0 / 30))
         lastTick = now
-        advance(by: dt)
+        if isLifted {
+            advance(by: dt)
+        } else if settleStarted != nil {
+            advanceSettle(at: now)
+        } else {
+            stopSpring()
+        }
     }
 
     /// One frame: the glass pill is pulled towards the model pill on a spring,
@@ -281,10 +341,280 @@ final class SelectorGlassLens {
         let stretch = min(Lift.maximumStretch, abs(velocity.x) * Lift.stretchPerSpeed)
         view.transform = CGAffineTransform(scaleX: 1 + stretch, y: 1 - stretch * 0.4)
 
+        // The copy of the strip, magnified and bent in step with the lift.
+        refract(lift: Lift.outset > 0 ? grow / Lift.outset : 1,
+                box: CGRect(x: centre.x - view.bounds.width / 2, y: centre.y - view.bounds.height / 2,
+                            width: view.bounds.width, height: view.bounds.height),
+                transform: view.transform,
+                hole: view.superview.map { $0.convert(view.bounds, from: view) })
+
         // At rest, and allowed to rest: settle.
         let atRest = abs(goal.x - centre.x) < 0.5 && abs(velocity.x) < 8
         if atRest, mayRest, !isHeld() { settle() }
         return atRest
+    }
+
+    /// One frame of the settle: the copy follows the glass's presentation
+    /// frame as it shrinks and eases back to the plain strip; at the end the
+    /// real titles come back.
+    private func advanceSettle(at now: CFTimeInterval) {
+        guard let settleStarted else { return }
+        let elapsed = now - settleStarted
+        guard elapsed < Lift.settleDuration else {
+            self.settleStarted = nil
+            stopSpring()
+            hideCopy()
+            return
+        }
+        let remaining = CGFloat(1 - elapsed / Lift.settleDuration)
+        let presented = view.layer.presentation()?.frame ?? view.frame
+        refract(lift: remaining * remaining, box: presented, transform: .identity, hole: presented)
+    }
+
+    // MARK: The optics
+
+    /// Captures the strip under the lens's `box` (the bar's space, before
+    /// `transform` — the glass's stretch, which the copy takes on too), cuts
+    /// the real titles out of the strip within `hole` (the bar's space, the
+    /// glass as it shows), and renders the refracted copy at `lift` (0: the
+    /// plain strip, 1: fully magnified and bent).
+    private func refract(lift: CGFloat, box: CGRect, transform: CGAffineTransform, hole: CGRect?) {
+        guard let copy, let bar = view.superview, let content = source() else { return }
+        if copy.superview !== bar { bar.insertSubview(copy, aboveSubview: view) }
+        let refractor = LensRefractor.shared
+        guard refractor.isReady, box.width > 0, box.height > 0 else {
+            hideCopy()
+            return
+        }
+        let scale = max(1, view.window?.screen.scale ?? view.traitCollection.displayScale)
+        let margin = LensRefractor.Optics.captureMargin
+        let region = box.insetBy(dx: -margin, dy: -margin)
+        let width = Int(ceil(region.width * scale)), height = Int(ceil(region.height * scale))
+        let started = Self.tracesOptics ? CACurrentMediaTime() : 0
+        guard let texture = sourceTexture(width: width, height: height),
+              capture(content, region: content.convert(region, from: bar), scale: scale, into: texture) else {
+            hideCopy()
+            return
+        }
+        let captured = Self.tracesOptics ? CACurrentMediaTime() : 0
+        if let hole { maskSource(content, hole: content.convert(hole, from: bar)) }
+
+        copy.isHidden = false
+        copy.transform = .identity
+        copy.bounds = CGRect(origin: .zero, size: box.size)
+        copy.center = CGPoint(x: box.midX, y: box.midY)
+        copy.transform = transform
+        let layer = copy.metalLayer
+        layer.contentsScale = scale
+        let size = SIMD2<Float>(Float(box.width * scale), Float(box.height * scale))
+        layer.drawableSize = CGSize(width: CGFloat(size.x), height: CGFloat(size.y))
+        let lift = Float(max(0, min(1, lift)))
+        let magnification = 1 + (optics.magnification - 1) * lift
+        // ⚠️ The bend never reaches past the lens's own edge: at the rim the
+        // magnified sample sits r/mag from the centre, so a pull beyond
+        // r(1 - 1/mag) reads what lies OUTSIDE the lens — on the editor's icon
+        // bar, the neighbouring icons 2pt past the rim, pulled in and split
+        // into colours. Filmed. The pill has the same radius; its neighbours
+        // are simply farther.
+        let radius = Float(min(box.width, box.height) / 2 * scale)
+        let bend = min(optics.bend * Float(scale) * lift, max(0, radius * (1 - 1 / magnification)))
+        let uniforms = LensRefractor.Uniforms(
+            size: size,
+            centre: size / 2,
+            halfExtent: size / 2,
+            sourceOffset: SIMD2(repeating: Float(margin * scale)),
+            sourceSize: SIMD2(Float(width), Float(height)),
+            magnification: magnification,
+            edge: optics.edge * Float(scale),
+            bend: bend,
+            aberration: optics.aberration,
+            blur: optics.blur * Float(scale) * lift
+        )
+        refractor.render(source: texture, into: layer, uniforms: uniforms)
+        if Self.tracesOptics {
+            trace(capture: captured - started, render: CACurrentMediaTime() - captured)
+        }
+        #if DEBUG
+        if dumpPending, let target = refractor.makeTargetTexture(width: Int(size.x), height: Int(size.y)),
+           refractor.render(source: texture, into: target, uniforms: uniforms) {
+            dumpPending = false
+            var bytes = [UInt8](repeating: 0, count: target.width * target.height * 4)
+            target.getBytes(&bytes, bytesPerRow: target.width * 4,
+                            from: MTLRegionMake2D(0, 0, target.width, target.height), mipmapLevel: 0)
+            if let context = CGContext(data: &bytes, width: target.width, height: target.height, bitsPerComponent: 8,
+                                       bytesPerRow: target.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                       bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+               let image = context.makeImage() {
+                let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("lens-copy.png")
+                try? UIImage(cgImage: image).pngData()?.write(to: url)
+                print(String(format: "[SelectorGlassLens] copy dumped (lift %.2f, mag %.3f, copy alpha %.2f, hidden %d) to %@",
+                             lift, uniforms.magnification, copy.alpha, copy.isHidden ? 1 : 0, url.path))
+            }
+        }
+        #endif
+    }
+
+    private func sourceTexture(width: Int, height: Int) -> MTLTexture? {
+        if let sourceTexture, sourceTexture.width == width, sourceTexture.height == height { return sourceTexture }
+        sourceTexture = LensRefractor.shared.makeSourceTexture(width: width, height: height)
+        return sourceTexture
+    }
+
+    /// Draws `region` of the strip (its own space) into the texture, at
+    /// `scale`, top row first — UIKit's orientation, flipped for a bitmap
+    /// context. The strip's mask does not apply: the copy is drawn from the
+    /// views, not from the layer tree.
+    private func capture(_ content: UIView, region: CGRect, scale: CGFloat, into texture: MTLTexture) -> Bool {
+        let width = texture.width, height = texture.height, bytesPerRow = width * 4
+        if sourceBytes.count != bytesPerRow * height {
+            sourceBytes = [UInt8](repeating: 0, count: bytesPerRow * height)
+        }
+        let drawn = sourceBytes.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(
+                data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            ) else { return false }
+            context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+            context.translateBy(x: 0, y: CGFloat(height))
+            context.scaleBy(x: scale, y: -scale)
+            context.translateBy(x: -region.minX, y: -region.minY)
+            Self.draw(content, in: content, into: context, alpha: 1)
+            #if DEBUG
+            if Self.tracesOptics, !dumped, traceCost.frames >= 5, let image = context.makeImage() {
+                // The fifth captured frame of the first lift, as a file, to
+                // read what the copy is of; `refract` dumps the copy with it.
+                dumped = true
+                dumpPending = true
+                let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("lens-source.png")
+                try? UIImage(cgImage: image).pngData()?.write(to: url)
+                print("[SelectorGlassLens] source dumped to \(url.path)")
+            }
+            #endif
+            return true
+        }
+        guard drawn else { return false }
+        sourceBytes.withUnsafeBytes { raw in
+            texture.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0,
+                            withBytes: raw.baseAddress!, bytesPerRow: bytesPerRow)
+        }
+        return true
+    }
+
+    /// The strip shows everywhere but inside `hole` (its own space), where
+    /// the copy stands in for it.
+    private func maskSource(_ content: UIView, hole: CGRect) {
+        let mask: CAShapeLayer
+        if let sourceMask {
+            mask = sourceMask
+        } else {
+            mask = CAShapeLayer()
+            mask.fillRule = .evenOdd
+            sourceMask = mask
+        }
+        if content.layer.mask !== mask {
+            content.layer.mask = mask
+            maskedLayer = content.layer
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mask.frame = content.layer.bounds
+        let path = UIBezierPath(rect: content.bounds)
+        path.append(UIBezierPath(roundedRect: hole, cornerRadius: min(hole.width, hole.height) / 2))
+        mask.path = path.cgPath
+        CATransaction.commit()
+    }
+
+    /// Draws the strip's leaves — labels in their resolved colour, images
+    /// tinted, filled backgrounds rounded — into a context in `content`'s
+    /// space, at the ancestors' combined alpha (the plain/semibold crossfade).
+    ///
+    /// ⚠️ NOT `layer.render(in:)`, and not `drawHierarchy`. In a glass
+    /// container UIKit draws a label as a WHITE MASK and colours it at
+    /// composite time (adaptive vibrancy), so a render of the layer tree is
+    /// white glyphs and a white badge — dumped and looked at. `drawHierarchy`
+    /// from inside an effect view draws nothing at all, at 35 ms a frame.
+    /// The views still know their colours; this draws from them.
+    private static func draw(_ view: UIView, in content: UIView, into context: CGContext, alpha: CGFloat) {
+        guard !view.isHidden, view.alpha > 0.01, !(view is UIVisualEffectView) else { return }
+        let alpha = alpha * view.alpha
+        let rect = content.convert(view.bounds, from: view)
+        let traits = content.traitCollection
+        if let fill = view.backgroundColor?.resolvedColor(with: traits), fill.cgColor.alpha > 0.01 {
+            let radius = min(view.layer.cornerRadius, min(rect.width, rect.height) / 2)
+            context.saveGState()
+            context.setAlpha(alpha)
+            context.setFillColor(fill.cgColor)
+            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
+            context.fillPath()
+            context.restoreGState()
+        }
+        if let label = view as? UILabel, let text = label.text, !text.isEmpty {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = label.textAlignment
+            paragraph.lineBreakMode = label.lineBreakMode
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: label.font ?? UIFont.preferredFont(forTextStyle: .body),
+                .foregroundColor: label.textColor.resolvedColor(with: traits),
+                .paragraphStyle: paragraph
+            ]
+            let string = text as NSString
+            let height = string.boundingRect(with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
+                                             options: [.usesLineFragmentOrigin], attributes: attributes, context: nil).height
+            let box = CGRect(x: rect.minX, y: rect.midY - height / 2, width: rect.width, height: height)
+            context.saveGState()
+            context.setAlpha(alpha)
+            UIGraphicsPushContext(context)
+            string.draw(with: box, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes, context: nil)
+            UIGraphicsPopContext()
+            context.restoreGState()
+        } else if let imageView = view as? UIImageView, var image = imageView.image {
+            if let configuration = imageView.preferredSymbolConfiguration,
+               let configured = image.applyingSymbolConfiguration(configuration) {
+                image = configured
+            }
+            if image.renderingMode != .alwaysOriginal {
+                // ⚠️ `.label`, not the view's `tintColor`: a glass container
+                // recolours its vibrant content to its backdrop, so a button's
+                // symbol shows dark on this bar while its tint still reads
+                // system blue — the copy came out blue, filmed. `.label` is the
+                // nearest resolved colour to what shows.
+                image = image.withTintColor(UIColor.label.resolvedColor(with: traits), renderingMode: .alwaysOriginal)
+            }
+            let size = image.size
+            guard size.width > 0, size.height > 0, rect.width > 0, rect.height > 0 else { return }
+            let ratio = min(rect.width / size.width, rect.height / size.height, 1)
+            let fitted = CGRect(x: rect.midX - size.width * ratio / 2, y: rect.midY - size.height * ratio / 2,
+                                width: size.width * ratio, height: size.height * ratio)
+            UIGraphicsPushContext(context)
+            // ⚠️ The alpha goes in the call: `UIImage.draw(in:)` ignores the
+            // context's `setAlpha` — see the animated-map-icons notes.
+            image.draw(in: fitted, blendMode: .normal, alpha: alpha)
+            UIGraphicsPopContext()
+        }
+        for child in view.subviews {
+            draw(child, in: content, into: context, alpha: alpha)
+        }
+    }
+
+    private func hideCopy() {
+        copy?.isHidden = true
+        if let maskedLayer, maskedLayer.mask === sourceMask { maskedLayer.mask = nil }
+        maskedLayer = nil
+    }
+
+    private func trace(capture: Double, render: Double) {
+        let now = CACurrentMediaTime()
+        traceCost.frames += 1
+        traceCost.capture += capture
+        traceCost.render += render
+        if traceCost.since == 0 { traceCost.since = now }
+        if now - traceCost.since >= 1 {
+            let n = Double(traceCost.frames)
+            print(String(format: "[SelectorGlassLens] %d frames: capture %.2f ms, render %.2f ms (mean)",
+                         traceCost.frames, traceCost.capture / n * 1000, traceCost.render / n * 1000))
+            traceCost = (0, 0, 0, now)
+        }
     }
 
     #if DEBUG
@@ -295,7 +625,43 @@ final class SelectorGlassLens {
             if advance(by: 1 / 120) { break }
         }
     }
+
+    /// Whether the refracted copy is showing.
+    var debugCopyIsShowing: Bool { copy?.isHidden == false }
+    /// Whether the strip's real titles are cut out under the lens.
+    var debugSourceIsMasked: Bool { maskedLayer?.mask != nil && maskedLayer?.mask === sourceMask }
+    /// Ends a settle at once, as the last frame of its display link would.
+    func debugFinishSettle() {
+        guard settleStarted != nil else { return }
+        advanceSettle(at: CACurrentMediaTime() + Lift.settleDuration)
+    }
     #endif
+}
+
+/// The refracted copy's surface: a `CAMetalLayer` the shader draws into. The
+/// shader leaves everything outside the capsule transparent, so it needs no
+/// clipping of its own.
+private final class LensCopyView: UIView {
+    override class var layerClass: AnyClass { CAMetalLayer.self }
+    var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
+
+    init(device: MTLDevice?) {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        isOpaque = false
+        backgroundColor = .clear
+        let layer = metalLayer
+        layer.device = device
+        layer.pixelFormat = .bgra8Unorm
+        layer.isOpaque = false
+        layer.framebufferOnly = true
+        // Presented from the render, inside the transaction that moves the
+        // lens — see `LensRefractor.render(source:into:uniforms:)`.
+        layer.presentsWithTransaction = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
 /// A blur that keeps itself a capsule — see `SelectorGlassLens`'s plate.

@@ -699,7 +699,9 @@ public final class PagedTabBar: UIControl {
     /// settling — is `SelectorGlassLens`, shared with `IconSelectorBar`; this
     /// bar only says WHEN: lift on a grab and on a tap of another segment,
     /// land on the tapped index or, after a release, on any whole page.
-    public var liftsLensAsGlass = SelectorGlassLens.isAskedFor
+    public var liftsLensAsGlass = SelectorGlassLens.isAskedFor {
+        didSet { for segment in segments { segment.dimsWhenPressed = !liftsLensAsGlass } }
+    }
     private var glassLens: SelectorGlassLens?
     /// What the lifted lens is waiting for before it settles.
     private enum AwaitedLanding { case index(Int), anyInteger }
@@ -1985,6 +1987,7 @@ public final class PagedTabBar: UIControl {
                 for: .primaryActionTriggered
             )
             segment.setBadgeTint(badgeTint)
+            segment.dimsWhenPressed = !liftsLensAsGlass
             row.addArrangedSubview(segment)
             return segment
         }
@@ -2212,6 +2215,8 @@ extension PagedTabBar {
         if let glassLens { return glassLens }
         let overlay = SelectorGlassLens(tint: Self.lensTint) { [weak self] in self?.modelPillFrame ?? .zero }
         overlay.isHeld = { [weak self] in self?.pillDrag != nil }
+        // The strip the lens refracts a copy of, and masks beneath itself.
+        overlay.source = { [weak self] in self?.content }
         // Beneath the capsule, above the host's glass, where the host draws
         // the glass — the titles above it stay crisp. A bar drawing its own
         // frosted capsule would hide it there, so it goes over the strip.
@@ -2263,6 +2268,12 @@ extension PagedTabBar {
     }
     /// Runs the glass pill's spring to rest — a test has no run loop.
     public func debugRunLensSpringToRest() { glassLens?.runSpringToRest() }
+    /// Whether the lens shows its refracted copy of the strip.
+    public var debugLensCopyIsShowing: Bool { glassLens?.debugCopyIsShowing ?? false }
+    /// Whether the strip's real titles are cut out under the lens.
+    public var debugLensMasksTitles: Bool { glassLens?.debugSourceIsMasked ?? false }
+    /// Ends the lens's settle at once — a test has no run loop.
+    public func debugFinishLensSettle() { glassLens?.debugFinishSettle() }
     #endif
 }
 
@@ -2352,6 +2363,13 @@ private final class SegmentView: UIButton {
     private let plainLabel = UILabel()
     private let boldLabel = UILabel()
     private let badge: BadgeView
+    /// Whether a press dims the content. Not when the pill lifts as a glass
+    /// lens: the lens IS the press feedback, and the native bar keeps the
+    /// held item crisp under it — the lens's copy of a dimmed title read as
+    /// a washed title (its darkest pixel 117/255 against 0), measured.
+    var dimsWhenPressed = true {
+        didSet { if dimsWhenPressed != oldValue { setNeedsUpdateConfiguration() } }
+    }
     private let content = UIStackView()
     private let title: String
     /// Breathing room added around the measured title; see `Style.segmentPadding`.
@@ -2499,7 +2517,7 @@ private final class SegmentView: UIButton {
         configuration = .plain()
         configurationUpdateHandler = { [weak self] button in
             guard let self else { return }
-            let dimmed = button.isHighlighted ? 0.55 : 1
+            let dimmed = button.isHighlighted && dimsWhenPressed ? 0.55 : 1
             self.content.alpha = dimmed
             self.plainLabel.alpha = dimmed * (1 - self.strength)
         }
