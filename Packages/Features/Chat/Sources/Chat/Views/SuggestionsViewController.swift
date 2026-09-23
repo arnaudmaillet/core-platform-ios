@@ -220,15 +220,6 @@ extension SuggestionsViewController: UITableViewDelegate {
 // MARK: - InboxSurface
 
 extension SuggestionsViewController: InboxSurface {
-    /// One unheaded list: nothing ever pins, so the bar's leading slot stays
-    /// empty on this page.
-    var pinnedSectionTitle: String? { nil }
-    var onPinnedSectionChange: ((String?) -> Void)? {
-        get { nil }
-        set {}
-    }
-    func scrollToPinnedSection() {}
-
     var category: MessagesCategory { .suggestions }
 
     func surfaceDidBecomeActive() {

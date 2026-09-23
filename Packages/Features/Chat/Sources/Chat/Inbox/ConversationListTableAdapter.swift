@@ -124,12 +124,14 @@ final class ConversationListTableAdapter: NSObject, UITableViewDataSource {
         }
     }
 
-    /// Puts a section's first row directly under the bar — see
-    /// `UITableView.scrollFirstRow(ofSection:)` for why not
-    /// `scrollToRow(at:.top)`. A no-op for an empty section.
+    /// Puts a section's first row directly under the header, which is what
+    /// tapping that header's pill means: "show me this part".
+    ///
+    /// A no-op for an empty section, and for a list too short to scroll —
+    /// `scrollToRow` cannot invent content.
     func scroll(_ tableView: UITableView, toSectionAt index: Int) {
         guard rows.indices.contains(index), !rows[index].isEmpty else { return }
-        tableView.scrollFirstRow(ofSection: index)
+        tableView.scrollToRow(at: IndexPath(row: 0, section: index), at: .top, animated: true)
     }
 
     private static func indexPaths(in rows: [[ConversationID]]) -> [ConversationID: IndexPath] {

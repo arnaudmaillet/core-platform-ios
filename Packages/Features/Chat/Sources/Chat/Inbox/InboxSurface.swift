@@ -40,17 +40,6 @@ protocol InboxSurface: UIViewController {
     /// simply no-op here and lazy ones guard their first load.
     func surfaceDidBecomeActive()
 
-    /// The title of the section currently stuck at the top of this page —
-    /// "New", "Recent" — or nil while the page rests at its top or has no
-    /// sections. The container shows it as the navigation bar's leading item,
-    /// which is where the pinned capsule now lives (see
-    /// `InboxSectionHeaderView`); the page's own header fades out at the line.
-    var pinnedSectionTitle: String? { get }
-    /// Fired whenever `pinnedSectionTitle` changes, on the page's own scroll.
-    var onPinnedSectionChange: ((String?) -> Void)? { get set }
-    /// Puts the pinned section's first row under the bar — what tapping the
-    /// header used to do in the flow, now what tapping the bar's item does.
-    func scrollToPinnedSection()
 }
 
 extension MessagesCategory {
