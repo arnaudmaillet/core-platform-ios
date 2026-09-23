@@ -51,7 +51,11 @@ final class LensRefractor {
         /// confined to the rim with a chromatic fringe, glyphs bent where
         /// they cross the rim. (The tab BAR's lens magnifies; it is not the
         /// reference for a selector.)
-        static let standard = Optics(magnification: 1.0, travelMagnification: 1.0, edge: 12, bend: 6, aberration: 0.4, blur: 0.3)
+        /// The rim is STRONG but NARROW on the user's recording of the
+        /// Phone app's control: a glyph crossing it is folded into a blob
+        /// within ~10pt of the edge, with a 2–3pt rainbow — a 10pt edge and
+        /// a 10pt pull. (16/12 read as "35 F" folded small, too wide.)
+        static let standard = Optics(magnification: 1.0, travelMagnification: 1.0, edge: 10, bend: 10, aberration: 0.3, blur: 0.3)
 
         /// `standard`, with any `-lens-…` launch argument over it.
         static func fromArguments() -> Optics {
@@ -301,7 +305,12 @@ final class LensRefractor {
             float b = source.sample(linear, ((s - pull * u.aberration) * u.sourceScale + u.sourceOffset) / u.sourceSize).b;
             sum += w * float4(min(r, g.a), g.g, min(b, g.a), g.a);
         }
-        return sum * cover;
+        // The rim itself, as the native lens draws it over a plain page: a
+        // dark hairline at the edge and a lighter one just inside.
+        float darkLine = 1.0 - smoothstep(0.0, 1.5, abs(d + 0.75));
+        float lightLine = 1.0 - smoothstep(0.0, 1.5, abs(d + 2.5));
+        float4 rim = float4(0.0, 0.0, 0.0, 0.16) * darkLine + float4(0.22, 0.22, 0.22, 0.22) * lightLine;
+        return sum * cover * (1.0 - rim.a) + rim * cover;
     }
     """
 }

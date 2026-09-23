@@ -76,8 +76,10 @@ final class SelectorGlassLens {
     enum Lift {
         /// How far past the CAPSULE's edge the lifted lens stands, on every
         /// side. The pill rests `clearance` inside the capsule, so the lift
-        /// grows it by `clearance + overhang` a side.
-        static let overhang: CGFloat = 3
+        /// grows it by `clearance + overhang` a side — 9pt, the native
+        /// control's lens measured 8pt past its fill on the user's recording
+        /// (fill 222×114 px → lens 270×162 px at 3x).
+        static let overhang: CGFloat = 5
         static var outset: CGFloat { SelectorCapsuleMetrics.clearance + overhang }
         /// How much further it stands once it TRAVELS — the native lens is
         /// barely larger than the platter on a plain hold and well past the
@@ -121,13 +123,12 @@ final class SelectorGlassLens {
     /// the native pill at rest is a plain fill, and only the lifted lens is
     /// glass. Dumped from a `UISegmentedControl` in the tab accessory.
     private let fill: CapsulePlateView
-    static let restingFill = UIColor { traits in
-        // Resolved from the native colour: white in light, a translucent
-        // light veil in dark (0.92, 0.92, 0.96 at 30%).
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.92, green: 0.92, blue: 0.96, alpha: 0.3)
-            : .white
-    }
+    /// ⚠️ Measured on the Phone app's "Tous / Manqués" control (the user's
+    /// own recording, light): the fill reads 226 on a control at 247, a
+    /// page at 254 — a translucent DARK fill, `secondarySystemFill`
+    /// (120,120,128 at 16% → 226 over 247). A white fill, what the same
+    /// control dumped in the tab accessory, vanished on a white toolbar.
+    static let restingFill = UIColor.secondarySystemFill
     /// Where the MODEL pill is, in the coordinate space `view` lives in.
     var modelFrame: () -> CGRect
     /// Whether the bar's progress says the pages have landed — asked every
@@ -166,6 +167,7 @@ final class SelectorGlassLens {
     private var settleStarted: CFTimeInterval?
     private var traceCost: (frames: Int, capture: Double, render: Double, since: CFTimeInterval) = (0, 0, 0, 0)
     #if DEBUG
+    private var traceMotion: (frames: Int, held: Int, maxStretch: CGFloat, maxSpeed: CGFloat, wasHeld: Bool) = (0, 0, 0, 0, false)
     private var dumped = false
     private var dumpPending = false
     #endif
@@ -415,6 +417,18 @@ final class SelectorGlassLens {
         let stretch = min(held ? Lift.maximumStretch : Lift.maximumFlightStretch,
                           abs(velocity.x) * Lift.stretchPerSpeed)
         view.transform = CGAffineTransform(scaleX: 1 + stretch, y: 1 - stretch * 0.4)
+        #if DEBUG
+        if Self.tracesOptics {
+            traceMotion.frames += 1
+            if held { traceMotion.held += 1 }
+            traceMotion.maxStretch = max(traceMotion.maxStretch, stretch)
+            traceMotion.maxSpeed = max(traceMotion.maxSpeed, abs(velocity.x))
+            if held != traceMotion.wasHeld {
+                print(String(format: "[SelectorGlassLens] held → %d at goal %.0f, centre %.0f, v %.0f", held ? 1 : 0, goal.x, centre.x, velocity.x))
+                traceMotion.wasHeld = held
+            }
+        }
+        #endif
 
         // The copy of the strip, magnified and bent in step with the lift.
         refract(lift: Lift.outset > 0 ? grow / Lift.outset : 1, zoom: zoom,
@@ -498,8 +512,9 @@ final class SelectorGlassLens {
         // shows the neighbouring item's edge pulled in there (the "M" of
         // Messages inside the held For You lens, filmed). ⚠️ At 10pt it read
         // the editor's neighbouring icons 2pt past the rim, split into
-        // colours. It grows with the zoom, as the native pull does.
-        let bend = optics.bend * Float(scale) * lift * (1 + zoom)
+        // colours. ⚠️ NOT doubled while travelling: with 24pt over a 16pt
+        // edge, "35 Followers" read as "35 F" folded small at the rim.
+        let bend = optics.bend * Float(scale) * lift
         #if DEBUG
         debugMagnification = CGFloat(magnification)
         #endif
@@ -697,9 +712,11 @@ final class SelectorGlassLens {
         if traceCost.since == 0 { traceCost.since = now }
         if now - traceCost.since >= 1 {
             let n = Double(traceCost.frames)
-            print(String(format: "[SelectorGlassLens] %d frames: capture %.2f ms, render %.2f ms (mean)",
-                         traceCost.frames, traceCost.capture / n * 1000, traceCost.render / n * 1000))
+            print(String(format: "[SelectorGlassLens] %d frames: capture %.2f ms, render %.2f ms (mean); held %d/%d, max stretch %.2f, max speed %.0f pt/s",
+                         traceCost.frames, traceCost.capture / n * 1000, traceCost.render / n * 1000,
+                         traceMotion.held, traceMotion.frames, traceMotion.maxStretch, traceMotion.maxSpeed))
             traceCost = (0, 0, 0, now)
+            traceMotion = (0, 0, 0, 0, traceMotion.wasHeld)
         }
     }
 
