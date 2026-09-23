@@ -274,6 +274,36 @@ final class MainTabCoordinator: NSObject, Coordinator {
         if arguments.contains("-open-feed") {
             DispatchQueue.main.async { [weak self] in self?.openFeed() }
         }
+        #if DEBUG
+        // `-tabbar-lens-dump`: prints the tab bar's view tree — class, frame,
+        // and every visual effect view's effect — at 3 s, then every 2 s for a
+        // while, so a finger held on the native selection lens (MCP
+        // `touch_path`) shows what the lifted lens is MADE of. The question it
+        // answers: is the native lens a public `UIGlassEffect` in some
+        // configuration, or a private material?
+        if arguments.contains("-tabbar-lens-dump") {
+            for delay in stride(from: 3.0, through: 15.0, by: 2.0) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let bar = self?.tabBarController.tabBar else { return }
+                    print("[lensdump] t=\(delay)s")
+                    func walk(_ view: UIView, _ depth: Int) {
+                        var line = String(repeating: "  ", count: depth) + String(describing: type(of: view))
+                        line += String(format: " %.0fx%.0f@%.0f,%.0f", view.frame.width, view.frame.height, view.frame.minX, view.frame.minY)
+                        if let effectView = view as? UIVisualEffectView {
+                            line += " effect=\(effectView.effect.map { String(describing: $0) } ?? "nil")"
+                        }
+                        if view.isHidden { line += " HIDDEN" }
+                        if view.alpha < 1 { line += String(format: " alpha=%.2f", view.alpha) }
+                        if !view.transform.isIdentity { line += " transform=\(view.transform)" }
+                        if let filters = view.layer.filters, !filters.isEmpty { line += " filters=\(filters)" }
+                        print("[lensdump] " + line)
+                        for sub in view.subviews { walk(sub, depth + 1) }
+                    }
+                    walk(bar, 0)
+                }
+            }
+        }
+        #endif
         // `-open-my-profile` selects the Profile tab on launch. It used to push
         // the avatar's destination; the destination is now a root, so the intent
         // "show me my profile" is a selection. Deferred a tick: at `start()` the
