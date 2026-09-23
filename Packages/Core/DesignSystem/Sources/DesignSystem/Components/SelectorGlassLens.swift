@@ -68,7 +68,11 @@ final class SelectorGlassLens {
            let plate = Plate(rawValue: arguments[index + 1]) { return plate }
         if arguments.contains("-selector-glass-lens-noplate") { return .none }
         if arguments.contains("-selector-glass-lens-thin") { return .thin }
-        return .none
+        // `.glass` by default: the user's reference is the native TAB BAR's
+        // lens, whose interior is the bar's frost (the segmented control's
+        // shows the raw page — two native lenses, two looks). Measured in
+        // v9: a `.regular` plate reads 3% lighter than the bar beside it.
+        return .glass
     }()
     private static let tracesOptics = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-trace")
     /// The copy refracts a SNAPSHOT of the page behind the bar too, frosted
