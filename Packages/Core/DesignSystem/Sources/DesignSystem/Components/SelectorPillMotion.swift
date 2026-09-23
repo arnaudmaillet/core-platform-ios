@@ -1,40 +1,37 @@
 import UIKit
 
-/// The selection pill's WEIGHT. The bar keeps its pill as a MODEL — placed
+/// The selection pill's GIVE. The bar keeps its pill as a MODEL — placed
 /// exactly from progress every frame, hit-tested, read by tests — and this
-/// draws the pill the viewer sees: the same flat tint, following the model
-/// on a damped spring so it arrives a beat late and overshoots a touch, and
-/// stretched along its travel by its own speed, thinned across it, like a
-/// drop that is heavy rather than a plate that is pinned. No glass: the
-/// native lens's material is private and a spike (PR #182, closed) proved
-/// no public effect reads like it; its MOTION is what carried over here.
+/// draws the pill the viewer sees: the same flat tint, ON the model at every
+/// moment (no lag: a spring that trailed the finger read as heavy, twice),
+/// stretched along its travel by the model's speed and thinned across it,
+/// like a drop with some give, and drawn a little towards the nearest item
+/// as it passes. No glass: the native lens's material is private and a
+/// spike (PR #182, closed) proved no public effect reads like it.
 ///
-/// The spring runs on a `CADisplayLink` only while the pill is away from its
-/// model; at rest the body sits exactly on the model and the link is gone.
-/// A move that is not a travel — the bar's first layout, a size change, new
-/// titles — SNAPS (`snapOnNextMove`), and so does every move when Reduce
-/// Motion is on.
+/// A `CADisplayLink` runs only while the stretch is easing back after the
+/// model stops. A move that is not a travel — the bar's first layout, a
+/// size change, new titles — SNAPS (`snapOnNextMove`), and so does every
+/// move when Reduce Motion is on.
 @MainActor
 final class SelectorPillMotion {
     enum Tuning {
-        /// Damped spring towards the model: stiff enough to arrive within a
-        /// beat, damped short of critical so a stop overshoots a little.
-        static let stiffness: CGFloat = 420
-        static let dampingRatio: CGFloat = 0.78
-        /// How far the pill stretches along its travel per point/second, and
-        /// the most it may — a bubble's give, not a smear. (280 / 0.72 /
-        /// 0.12 read as too heavy.)
+        /// How far the pill stretches along its travel per point/second of
+        /// the model's speed, and the most it may — a bubble's give, not a
+        /// smear.
         static let stretchPerSpeed: CGFloat = 1 / 3000
         static let maximumStretch: CGFloat = 0.08
         static let squashPerStretch: CGFloat = 0.4
+        /// The speed the stretch is read from is smoothed over this long,
+        /// and eases back to nothing over it once the model stops.
+        static let speedSmoothing: CFTimeInterval = 0.06
         /// The magnet: within this distance of an item's centre the pill is
         /// drawn towards it, fully at the centre and not at all at the edge
         /// of the reach — a light click onto each item as the finger passes,
         /// on the pill the viewer sees only; what the pager is told is
         /// untouched.
         static let magnetReach: CGFloat = 14
-        /// Close enough, and slow enough, to be at rest.
-        static let restDistance: CGFloat = 0.3
+        /// Slow enough to be at rest.
         static let restSpeed: CGFloat = 12
     }
 
@@ -51,9 +48,11 @@ final class SelectorPillMotion {
     }
 
     private var centre: CGPoint = .zero
-    private var velocity: CGPoint = .zero
+    /// The model's speed along x, smoothed — what the stretch reads.
+    private var speed: CGFloat = 0
     private var link: CADisplayLink?
     private var lastTick: CFTimeInterval = 0
+    private var lastMove: CFTimeInterval = 0
     private var isPlaced = false
     private var snapsNextMove = false
 
@@ -66,7 +65,7 @@ final class SelectorPillMotion {
         body.layer.cornerCurve = .continuous
     }
 
-    /// Whether the body is on its way to the model.
+    /// Whether the stretch is still easing back.
     var isMoving: Bool { link != nil }
 
     // MARK: Placing
@@ -105,31 +104,42 @@ final class SelectorPillMotion {
         body.layer.cornerRadius = model.height / 2
         centre = goal(for: model)
         body.center = centre
-        velocity = .zero
+        speed = 0
+        lastMove = 0
         isPlaced = true
     }
 
-    /// The model moved: the body sets off towards it — or lands on it at
-    /// once when there is nothing to travel from.
+    /// The model moved: the body goes with it, stretched by how fast — or
+    /// lands plainly when nothing should animate.
     func modelMoved() {
         let model = modelFrame()
         guard model.width > 0, model.height > 0 else { return }
-        // A hidden body does not travel: the icon bar's pill, coming out of
+        // A hidden body does not stretch: the icon bar's pill, coming out of
         // neutral, appeared on the item it left rather than the one chosen.
         if !isPlaced || snapsNextMove || body.isHidden || !mayAnimate() {
             snap()
             return
         }
-        // The size follows at once; only the position lags.
         body.bounds = CGRect(origin: .zero, size: model.size)
         body.layer.cornerRadius = model.height / 2
         let goal = goal(for: model)
-        if abs(goal.x - centre.x) < Tuning.restDistance, abs(goal.y - centre.y) < Tuning.restDistance, link == nil {
-            body.center = goal
-            centre = goal
-            return
+        let now = CACurrentMediaTime()
+        if lastMove > 0 {
+            let dt = max(now - lastMove, 1.0 / 240)
+            let instant = (goal.x - centre.x) / CGFloat(dt)
+            let blend = CGFloat(min(1, dt / Tuning.speedSmoothing))
+            speed += (instant - speed) * blend
         }
-        start()
+        lastMove = now
+        centre = goal
+        body.center = goal
+        applyStretch()
+        if abs(speed) >= Tuning.restSpeed { start() }
+    }
+
+    private func applyStretch() {
+        let stretch = min(Tuning.maximumStretch, abs(speed) * Tuning.stretchPerSpeed)
+        body.transform = CGAffineTransform(scaleX: 1 + stretch, y: 1 - stretch * Tuning.squashPerStretch)
     }
 
     func setHidden(_ hidden: Bool) { body.isHidden = hidden }
@@ -162,30 +172,23 @@ final class SelectorPillMotion {
         if advance(by: dt) { snap() }
     }
 
-    /// One frame: the body is pulled towards the model on the spring and
-    /// stretched by its speed. Returns whether it has come to rest on the
-    /// model.
+    /// One frame with no move from the model: the speed the stretch reads
+    /// eases back. Returns whether the pill is plain again.
     @discardableResult
     func advance(by dt: CGFloat) -> Bool {
-        let model = modelFrame()
-        let goal = goal(for: model)
-        let damping = 2 * Tuning.dampingRatio * sqrt(Tuning.stiffness)
-        let ax = Tuning.stiffness * (goal.x - centre.x) - damping * velocity.x
-        let ay = Tuning.stiffness * (goal.y - centre.y) - damping * velocity.y
-        velocity.x += ax * dt
-        velocity.y += ay * dt
-        centre.x += velocity.x * dt
-        centre.y += velocity.y * dt
-        body.center = centre
-        let stretch = min(Tuning.maximumStretch, abs(velocity.x) * Tuning.stretchPerSpeed)
-        body.transform = CGAffineTransform(scaleX: 1 + stretch, y: 1 - stretch * Tuning.squashPerStretch)
-        return abs(goal.x - centre.x) < Tuning.restDistance && abs(goal.y - centre.y) < Tuning.restDistance
-            && abs(velocity.x) < Tuning.restSpeed && abs(velocity.y) < Tuning.restSpeed
+        // The model may have moved without telling (a pass that skipped
+        // `modelMoved`); it is the truth of where the body sits.
+        let goal = goal(for: modelFrame())
+        centre = goal
+        body.center = goal
+        speed *= exp(-dt / CGFloat(Tuning.speedSmoothing))
+        applyStretch()
+        return abs(speed) < Tuning.restSpeed
     }
 
     #if DEBUG
-    /// Runs the spring to rest frame by frame, as the display link would — a
-    /// test has no run loop to wait on. Returns the frames it took.
+    /// Runs the stretch back to nothing frame by frame, as the display link
+    /// would — a test has no run loop to wait on. Returns the frames it took.
     @discardableResult
     func runToRest(maximumFrames: Int = 600) -> Int {
         for frame in 0..<maximumFrames {
