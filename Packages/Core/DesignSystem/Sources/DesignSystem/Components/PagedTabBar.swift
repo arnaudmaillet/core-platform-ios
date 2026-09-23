@@ -692,47 +692,75 @@ public final class PagedTabBar: UIControl {
     /// see the type comment on why glass-inside-glass cost the lens its edge.
     private let lens = UIView()
 
-    // MARK: - The lens as Liquid Glass while it moves (SPIKE)
+    // MARK: - The lens as Liquid Glass (SPIKE, v2 — after the native tab bar)
 
-    /// Whether the selection pill turns to Liquid Glass while it is held or
-    /// travelling — the way the native tab bar's and `UISegmentedControl`'s
-    /// indicators do — and settles back to its tint when it lands.
+    /// Whether the selection pill is a Liquid Glass lens that lifts while it
+    /// is held or travelling, the way the native tab bar's indicator does.
     ///
-    /// ⚠️ **A SPIKE, behind `-selector-glass-lens`.** It exists to answer one
-    /// question with screenshots: can a glass lens render inside THIS bar on
-    /// each of its three hosts? The arrangement the earlier attempt lacked is
-    /// the one Apple documents for `UIGlassContainerEffect`: the capsule's
-    /// glass and the lens's glass as SIBLINGS in a container's `contentView`,
-    /// rendered "in one combined view", never a glass inside a glass. That is
-    /// only available where the bar draws its own capsule; in an accessory or
-    /// a platter the glass is UIKit's and the lens sits inside it regardless,
-    /// which is the case the screenshots have to judge.
+    /// ⚠️ **A SPIKE, behind `-selector-glass-lens`.** Filmed against the native
+    /// tab bar in this very app (`-tabbar` drag, iPhone 18 Pro / iOS 27), the
+    /// native lens is three things ours was not: CLEAR glass with the item
+    /// visible and magnified beneath it, LARGER than the item and standing out
+    /// past the bar's capsule, and LATE — it follows the finger on a spring and
+    /// stretches along its travel. So, in order:
     ///
-    /// The glass lens is an OVERLAY outside the scrolled content, placed from
-    /// the tinted lens's frame every time that moves, and only while lifted;
-    /// the tinted lens remains the model everything else reads.
+    /// - the pill IS a glass view at rest (tinted, so it reads exactly as the
+    ///   tinted pill did) and takes the touch itself, which is what lets
+    ///   `UIGlassEffect.isInteractive` play the system's own press: the lens
+    ///   brightens and lenses under the finger without any drawing of ours;
+    /// - held or travelling it loses its tint, scales up past the capsule
+    ///   (`Lift.scale`), and is driven by a spring towards the model pill
+    ///   every frame (`stepLens`), stretched by its own velocity;
+    /// - it settles back to the tinted pill when the pages land.
+    ///
+    /// The overlay lives in THIS view, above the capsule and its strip, on every
+    /// host: the titles sit beneath it and are magnified by it, as the native
+    /// bar's labels are. A `UIGlassContainerEffect` was tried first (capsule and
+    /// lens as siblings) and MERGES the two into one brightened capsule — that
+    /// is what a container is for, and the opposite of a lens.
+    ///
+    /// The tinted `lens` in the scrolled content stays the MODEL — hit-tests,
+    /// reveal and progress all read it — and is simply invisible while the
+    /// glass pill stands in for it.
     public var liftsLensAsGlass = PagedTabBar.liftsLensAsGlassByDefault
     private static let liftsLensAsGlassByDefault =
         ProcessInfo.processInfo.arguments.contains("-selector-glass-lens")
     private var glassLens: UIVisualEffectView?
-    /// The container the capsule and the glass lens are siblings in, when the
-    /// bar draws its own glass. Built at init, because re-parenting the capsule
-    /// later would drop its constraints.
-    private var glassGroup: UIVisualEffectView?
     private var isLensLifted = false
     /// What the lifted lens is waiting for before it settles.
     private enum AwaitedLanding { case index(Int), anyInteger }
     private var awaitedLanding: AwaitedLanding?
     private var liftFallback: Task<Void, Never>?
+    /// The spring that carries the glass pill after the model pill.
+    private var lensLink: CADisplayLink?
+    private var lensCentre: CGPoint = .zero
+    private var lensVelocity: CGPoint = .zero
+    private var lensLastTick: CFTimeInterval = 0
+    private var lensRestFlag = false
     /// Spike instruments: `-selector-glass-lens-always` keeps the lens lifted
-    /// from its first layout (is a still glass lens inside a platter drawn
-    /// twice, or only a moving one?); `-selector-glass-lens-clear` cuts it as
-    /// `.clear` glass rather than `.regular`.
+    /// from its first layout; `-selector-glass-lens-clear` cuts the lifted lens
+    /// as `.clear` glass; `-selector-glass-lens-still` drops the lift scale.
     private static let keepsLensLifted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-always")
     private static let cutsLensClear = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-clear")
-    /// `-selector-glass-lens-still`: no lift scale, to tell a transform's
-    /// artefact from the glass's own.
     private static let liftsWithoutScale = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-still")
+
+    /// The numbers the lift is cut to, read off the native tab bar's lens.
+    private enum Lift {
+        /// The lens over an item: ~1.35× its width and ~1.2× its height, so it
+        /// stands past the capsule's top and bottom by a few points.
+        static let scale = CGSize(width: 1.25, height: 1.18)
+        /// How far the lens stretches along its travel, per point/second of
+        /// speed, and the most it may. Filmed at 0.3 the lens spanned two
+        /// segments mid-flight; the native one elongates a little, not that.
+        static let stretchPerSpeed: CGFloat = 1 / 3000
+        static let maximumStretch: CGFloat = 0.16
+        /// The spring towards the model pill. Stiff enough to arrive within a
+        /// beat, damped short of critical so a stop overshoots a touch.
+        static let stiffness: CGFloat = 320
+        static let dampingRatio: CGFloat = 0.74
+        static let liftDuration: TimeInterval = 0.32
+        static let settleDuration: TimeInterval = 0.36
+    }
     /// The segment strip. A subclass only so it can say when it has finished
     /// positioning its arranged subviews — see `SegmentRow`.
     private let row = SegmentRow()
@@ -860,25 +888,7 @@ public final class PagedTabBar: UIControl {
             capsule.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -style.bottomMargin + overhangY)
         ]
         capsule.translatesAutoresizingMaskIntoConstraints = false
-        if Self.liftsLensAsGlassByDefault {
-            // The capsule's glass and the lens's glass as siblings of ONE
-            // container — see `liftsLensAsGlass`. The container draws nothing
-            // itself; the capsule's own edge constraints still hold, since it
-            // remains a descendant of this view.
-            let group = UIVisualEffectView(effect: UIGlassContainerEffect())
-            group.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(group)
-            NSLayoutConstraint.activate([
-                group.leadingAnchor.constraint(equalTo: leadingAnchor),
-                group.trailingAnchor.constraint(equalTo: trailingAnchor),
-                group.topAnchor.constraint(equalTo: topAnchor),
-                group.bottomAnchor.constraint(equalTo: bottomAnchor)
-            ])
-            group.contentView.addSubview(capsule)
-            glassGroup = group
-        } else {
-            addSubview(capsule)
-        }
+        addSubview(capsule)
         NSLayoutConstraint.activate(capsuleEdges)
 
         scroller.showsHorizontalScrollIndicator = false
@@ -890,26 +900,7 @@ public final class PagedTabBar: UIControl {
         // layout — the viewport is only final once the scroll view has been
         // sized. See `StripScrollView.onLayout`.
         scroller.onLayout = { [weak self] in self?.keepLensVisible() }
-        if let glassGroup {
-            // ⚠️ THE TITLES SIT ABOVE EVERY GLASS, OR THE LENS REFRACTS THEM.
-            // A glass container renders its glass children "behind the visual
-            // effect view's contentView" (Apple), so the strip goes in the
-            // container's contentView — over the capsule's frame, not inside
-            // it — and the lifted lens shows a refracted backdrop rather than
-            // a doubled title. Filmed the other way round on the relationships
-            // toolbar: "35 Followers" drawn twice, offset at the rim.
-            scroller.translatesAutoresizingMaskIntoConstraints = false
-            glassGroup.contentView.addSubview(scroller)
-            NSLayoutConstraint.activate([
-                scroller.leadingAnchor.constraint(equalTo: capsule.leadingAnchor),
-                scroller.trailingAnchor.constraint(equalTo: capsule.trailingAnchor),
-                scroller.topAnchor.constraint(equalTo: capsule.topAnchor),
-                scroller.bottomAnchor.constraint(equalTo: capsule.bottomAnchor)
-            ])
-            scroller.clipsToBounds = true
-        } else {
-            scroller.pin(to: capsule.contentView)
-        }
+        scroller.pin(to: capsule.contentView)
 
         content.constrain(in: scroller) { _ in
             content.topAnchor.constraint(equalTo: scroller.contentLayoutGuide.topAnchor)
@@ -1229,6 +1220,7 @@ public final class PagedTabBar: UIControl {
             applyRowArrangement()
         }
         enforceCapsuleShape()
+        if liftsLensAsGlass, glassLens == nil, bounds.width > 0 { _ = ensureGlassLens() }
         if Self.keepsLensLifted, !isLensLifted, bounds.width > 0, window != nil { liftLens() }
         // ⚠️ THE DISK FLOOR FOLLOWS THE CAPSULE'S REAL HEIGHT. A host can
         // stretch the capsule past the style's number — an accessory's 48pt
@@ -1299,12 +1291,6 @@ public final class PagedTabBar: UIControl {
         let height = capsule.bounds.height > 0 ? capsule.bounds.height : effectiveCapsuleHeight + overhangY * 2
         capsule.layer.cornerCurve = .continuous
         capsule.layer.cornerRadius = height / 2
-        // The strip clips to the same capsule when it lives beside the glass
-        // rather than inside it (the glass-lens spike).
-        if glassGroup != nil {
-            scroller.layer.cornerCurve = .continuous
-            scroller.layer.cornerRadius = height / 2
-        }
     }
 
     /// The segments have re-measured themselves; a hugging bar's own size is
@@ -1820,6 +1806,10 @@ public final class PagedTabBar: UIControl {
         } else {
             settleLensAlone(speed: drag.speed)
         }
+        // ⚠️ A finger let go ON a page reports no further progress — there is
+        // nothing left to settle — so the landing has to be read now, or the
+        // pill stays up until the fallback (filmed: 1.2 s of glass at rest).
+        settleLensIfLanded()
     }
 
     /// No pager on the other end — a bar in a test, an audit, or a host that
@@ -2273,85 +2263,108 @@ public final class PagedTabBar: UIControl {
     }
 }
 
-// MARK: - The lens as Liquid Glass while it moves (SPIKE)
+// MARK: - The lens as Liquid Glass (SPIKE, v2)
 
 extension PagedTabBar {
+    /// The glass pill, made once: a tinted glass at rest that reads as the
+    /// tinted pill did, standing in this view above the capsule and taking the
+    /// touch, so the system's interactive press plays on it.
     private func ensureGlassLens() -> UIVisualEffectView {
         if let glassLens { return glassLens }
-        let lensView = UIVisualEffectView(effect: nil)
-        lensView.isUserInteractionEnabled = false
-        lensView.isHidden = true
+        let lensView = UIVisualEffectView(effect: Self.restingGlass())
         // `cornerConfiguration`, not a layer radius: UIKit owns it and keeps it
         // through the effect's own transitions — see `InlineFilterTrayView`.
         lensView.cornerConfiguration = .capsule()
-        // Above the capsule: a sibling in the glass group where there is one,
-        // and straight in this view where the glass is the host's.
-        if let glassGroup {
-            // Between the capsule and the strip: a glass child the container
-            // composites behind its contentView, so the titles stay in front.
-            glassGroup.contentView.insertSubview(lensView, aboveSubview: capsule)
-        } else {
+        lensView.isUserInteractionEnabled = false
+        // ⚠️ BELOW THE CAPSULE, ABOVE THE HOST'S GLASS. Glass blurs what is
+        // behind it, so a pill laid over the strip blurred the title it was
+        // meant to mark — filmed on the relationships toolbar, "35 Followers"
+        // went to a grey smudge at rest. The native tab bar draws its items
+        // ABOVE its lens for exactly this reason. Where the host draws the
+        // capsule's glass the capsule itself is see-through, so a pill beneath
+        // it shows, magnifies the page behind the bar and can stand out past
+        // the capsule; the titles above stay crisp. A bar drawing its own
+        // frosted capsule would hide it, so there — no host today — the pill
+        // goes over the strip instead.
+        if hosting.drawsBackdrop {
             addSubview(lensView)
+        } else {
+            insertSubview(lensView, belowSubview: capsule)
         }
         glassLens = lensView
+        lens.alpha = 0
+        placeGlassLens()
         return lensView
     }
 
-    /// Puts the glass lens over the tinted one, in the overlay's own space —
-    /// clipped to the capsule, since the overlay is not inside the strip's
-    /// scroll view and a pill half-scrolled out must not float past the glass.
+    private static func restingGlass() -> UIGlassEffect {
+        let effect = UIGlassEffect(style: .regular)
+        effect.isInteractive = true
+        effect.tintColor = lensTint
+        return effect
+    }
+
+    private static func liftedGlass() -> UIGlassEffect {
+        let effect = UIGlassEffect(style: cutsLensClear ? .clear : .regular)
+        effect.isInteractive = true
+        return effect
+    }
+
+    /// Where the model pill is, in this view's space.
+    private var modelPillFrame: CGRect { content.convert(lens.frame, to: self) }
+
+    /// Puts the glass pill on the model pill — at rest exactly, and while
+    /// lifted only its SIZE, since the spring owns its position then.
     private func placeGlassLens() {
-        guard let glassLens, let overlay = glassLens.superview else { return }
-        let over = content.convert(lens.frame, to: overlay)
-        let clip = capsule.convert(capsule.bounds, to: overlay)
-        let frame = over.intersection(clip)
-        guard !frame.isNull, frame.width > 0, frame.height > 0 else {
+        guard let glassLens else { return }
+        let target = modelPillFrame
+        guard target.width > 0, target.height > 0 else {
             glassLens.isHidden = true
             return
         }
+        glassLens.isHidden = false
         // Bounds + centre rather than frame, so the lift's scale grows the
         // pill about its middle.
-        glassLens.bounds = CGRect(origin: .zero, size: frame.size)
-        glassLens.center = CGPoint(x: frame.midX, y: frame.midY)
-        glassLens.isHidden = !isLensLifted
+        glassLens.bounds = CGRect(origin: .zero, size: target.size)
+        if !isLensLifted {
+            lensCentre = CGPoint(x: target.midX, y: target.midY)
+            glassLens.center = lensCentre
+        }
     }
 
-    /// The pill becomes glass: it was grabbed, or it is about to travel.
+    /// The pill lifts: it was grabbed, or it is about to travel.
     private func liftLens() {
         guard liftsLensAsGlass, !isLensLifted else { return }
         isLensLifted = true
         let glass = ensureGlassLens()
-        placeGlassLens()
-        glass.isHidden = false
+        lensCentre = glass.center
+        lensVelocity = .zero
+        startLensSpring()
         // The effect is ANIMATED into place, never faded in — a glass view's
         // alpha is the house rule this bar already follows for its capsule.
-        UIView.animate(withDuration: 0.28, delay: 0,
-                       options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]) {
-            let effect = UIGlassEffect(style: Self.cutsLensClear ? .clear : .regular)
-            effect.isInteractive = true
-            glass.effect = effect
-            if !Self.liftsWithoutScale {
-                glass.transform = CGAffineTransform(scaleX: 1.06, y: 1.06)
-            }
-            self.lens.alpha = 0
+        UIView.animate(withDuration: Lift.liftDuration, delay: 0,
+                       usingSpringWithDamping: 0.6, initialSpringVelocity: 0,
+                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+            glass.effect = Self.liftedGlass()
         }
     }
 
-    /// The pill lands: back to its tint.
+    /// The pill lands: back to its tinted, resting size.
     private func settleLens() {
         awaitedLanding = nil
         liftFallback?.cancel()
         liftFallback = nil
         guard isLensLifted, !Self.keepsLensLifted else { return }
         isLensLifted = false
+        stopLensSpring()
         guard let glass = glassLens else { return }
-        UIView.animate(withDuration: 0.28, delay: 0,
-                       options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]) {
-            glass.effect = nil
+        placeGlassLens()
+        UIView.animate(withDuration: Lift.settleDuration, delay: 0,
+                       usingSpringWithDamping: 0.7, initialSpringVelocity: 0,
+                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+            glass.effect = Self.restingGlass()
             glass.transform = .identity
-            self.lens.alpha = 1
-        } completion: { _ in
-            if !self.isLensLifted { glass.isHidden = true }
+            glass.center = self.lensCentre
         }
     }
 
@@ -2362,7 +2375,7 @@ extension PagedTabBar {
         awaitedLanding = landing
         liftFallback?.cancel()
         liftFallback = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(0.9))
+            try? await Task.sleep(for: .seconds(1.2))
             guard !Task.isCancelled else { return }
             self?.settleLens()
         }
@@ -2374,17 +2387,87 @@ extension PagedTabBar {
         case .index(let index): abs(progress - CGFloat(index)) < 0.01
         case .anyInteger: abs(progress - progress.rounded()) < 0.01
         }
-        if landed { settleLens() }
+        // Landed in the MODEL; the glass pill still has to arrive. The spring
+        // reports that itself (`advanceLens`), so all this does is drop the wait.
+        guard landed else { return }
+        self.awaitedLanding = nil
+        liftFallback?.cancel()
+        liftFallback = nil
+        lensRestFlag = true
+    }
+
+    // MARK: The spring
+
+    private func startLensSpring() {
+        guard lensLink == nil else { return }
+        lensRestFlag = false
+        lensLastTick = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(stepLens))
+        link.add(to: .main, forMode: .common)
+        lensLink = link
+    }
+
+    private func stopLensSpring() {
+        lensLink?.invalidate()
+        lensLink = nil
+    }
+
+    @objc private func stepLens(_ link: CADisplayLink) {
+        let now = link.timestamp
+        let dt = CGFloat(min(max(now - lensLastTick, 1.0 / 240), 1.0 / 30))
+        lensLastTick = now
+        advanceLens(by: dt)
+    }
+
+    /// One frame: the glass pill is pulled towards the model pill on a spring,
+    /// stretched along its own velocity, and grown by the lift. Returns whether
+    /// the pill is at rest on the model.
+    @discardableResult
+    private func advanceLens(by dt: CGFloat) -> Bool {
+        guard let glassLens else { stopLensSpring(); return true }
+        let target = modelPillFrame
+        let goal = CGPoint(x: target.midX, y: target.midY)
+        // A damped spring, integrated semi-implicitly.
+        let damping = 2 * Lift.dampingRatio * sqrt(Lift.stiffness)
+        let ax = Lift.stiffness * (goal.x - lensCentre.x) - damping * lensVelocity.x
+        let ay = Lift.stiffness * (goal.y - lensCentre.y) - damping * lensVelocity.y
+        lensVelocity.x += ax * dt
+        lensVelocity.y += ay * dt
+        lensCentre.x += lensVelocity.x * dt
+        lensCentre.y += lensVelocity.y * dt
+
+        glassLens.bounds = CGRect(origin: .zero, size: target.size)
+        glassLens.center = lensCentre
+        // Stretch along the travel, thin across it — a drop, not a plate.
+        let stretch = min(Lift.maximumStretch, abs(lensVelocity.x) * Lift.stretchPerSpeed)
+        let lift = Self.liftsWithoutScale ? CGSize(width: 1, height: 1) : Lift.scale
+        glassLens.transform = CGAffineTransform(
+            scaleX: lift.width * (1 + stretch),
+            y: lift.height * (1 - stretch * 0.4)
+        )
+
+        // At rest, and allowed to rest: settle.
+        let atRest = abs(goal.x - lensCentre.x) < 0.5 && abs(lensVelocity.x) < 8
+        if atRest, lensRestFlag, pillDrag == nil { settleLens() }
+        return atRest
     }
 
     #if DEBUG
-    /// Whether the pill is currently glass.
+    /// Runs the glass pill's spring to rest, frame by frame, as the display
+    /// link would — a test has no run loop to wait on.
+    public func debugRunLensSpringToRest() {
+        for _ in 0..<600 where isLensLifted {
+            if advanceLens(by: 1 / 120) { break }
+        }
+    }
+
+    /// Whether the pill is currently lifted glass.
     public var debugLensIsGlass: Bool { isLensLifted }
-    /// The glass overlay's frame in the VIEWPORT's space — the same space
-    /// `debugPillInViewport` reports the tinted pill in — while it is showing.
+    /// The glass pill's frame in the VIEWPORT's space — the same space
+    /// `debugPillInViewport` reports the model pill in — while it is showing.
     public var debugGlassLensFrame: CGRect? {
-        guard let glassLens, !glassLens.isHidden, let overlay = glassLens.superview else { return nil }
-        return overlay.convert(glassLens.frame, to: capsule.contentView)
+        guard let glassLens, !glassLens.isHidden else { return nil }
+        return convert(glassLens.frame, to: capsule.contentView)
     }
     #endif
 }

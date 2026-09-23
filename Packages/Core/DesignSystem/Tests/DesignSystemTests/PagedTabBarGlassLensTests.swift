@@ -32,7 +32,9 @@ struct PagedTabBarGlassLensTests {
         #expect(bar.debugLensIsGlass, "a whole page on the way is not the landing")
 
         bar.setProgress(2)
-        #expect(!bar.debugLensIsGlass, "landed, so tint")
+        #expect(bar.debugLensIsGlass, "the pages landed; the glass pill is still on its way")
+        bar.debugRunLensSpringToRest()
+        #expect(!bar.debugLensIsGlass, "arrived, so tint")
     }
 
     @Test func aGrabLiftsThePillAndAReleaseWithoutTravelSettlesIt() {
@@ -61,6 +63,7 @@ struct PagedTabBarGlassLensTests {
         bar.setProgress(0.7)
         #expect(bar.debugLensIsGlass, "still travelling")
         bar.setProgress(1)
+        bar.debugRunLensSpringToRest()
         #expect(!bar.debugLensIsGlass, "any whole page is the landing after a release")
     }
 
