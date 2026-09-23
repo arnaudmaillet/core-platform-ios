@@ -170,6 +170,15 @@ public final class IconSelectorBar: UIView {
     /// The capsule's four edges, whose constants ARE the overhang.
     private var capsuleEdges: [NSLayoutConstraint] = []
 
+    // MARK: - The lens as Liquid Glass (SPIKE) — see `SelectorGlassLens`
+
+    /// Whether the selection pill is a Liquid Glass lens that lifts while it
+    /// is held or travelling — `SelectorGlassLens`, shared with `PagedTabBar`.
+    /// This bar says when: a grab, or a tap on another icon; it lands on the
+    /// icon the bar itself settles on.
+    public var liftsLensAsGlass = SelectorGlassLens.isAskedFor
+    private var glassLens: SelectorGlassLens?
+
     private enum Metrics {
         /// How faint a resting item is drawn — the shape the camera locks.
         static let restingAlpha: CGFloat = 0.35
@@ -471,6 +480,12 @@ public final class IconSelectorBar: UIView {
         }
         let wasNeutral = isNeutral
         isNeutral = false
+        // Coming back from neutral there is nothing to travel from: the pill
+        // appears at rest where it is going. Otherwise it travels as glass.
+        if !wasNeutral {
+            liftLens()
+            awaitLanding(index)
+        }
         UIView.animate(withDuration: Metrics.settle, delay: 0, options: [.curveEaseOut]) {
             // Coming back from neutral the pill has nowhere to travel FROM, so
             // it appears where it is going rather than sliding in from the item
@@ -481,12 +496,17 @@ public final class IconSelectorBar: UIView {
             self.applyProgress()
             self.keepLensVisible(animated: false)
         }
+        // The progress is at the landing now (set in the block above), and
+        // nothing else reports it — without this the lens waited out its
+        // fallback, filmed as a second of glass sitting on the chosen icon.
+        glassLens?.noteProgress()
         applySelectionAppearance()
         onSelect?(index)
     }
 
     private func applySelectionAppearance() {
         lens.isHidden = isNeutral
+        glassLens?.place(hidden: isNeutral)
         for (index, button) in buttons.enumerated() {
             let item = items[index]
             let isSelected = index == selection
@@ -523,6 +543,8 @@ public final class IconSelectorBar: UIView {
         capsule.layer.cornerCurve = .continuous
         capsule.layer.cornerRadius = capsule.bounds.height / 2
         lens.layer.cornerRadius = lensSide / 2
+        if liftsLensAsGlass, glassLens == nil, bounds.width > 0 { _ = ensureGlassLens() }
+        if SelectorGlassLens.keepsLifted, bounds.width > 0, window != nil { liftLens() }
         applyProgress()
         #if DEBUG
         traceChainOnce()
@@ -558,7 +580,7 @@ public final class IconSelectorBar: UIView {
         super.didMoveToWindow()
         // A bar that leaves its window starts its platter measurement over
         // when it comes back — the next host may be a different ring.
-        if window == nil { remeasure.reset() }
+        if window == nil { remeasure.reset(); glassLens?.cancel() }
         guard window != nil, capsule.effect == nil, hosting.drawsBackdrop else { return }
         materialiseCapsule()
     }
@@ -588,6 +610,7 @@ public final class IconSelectorBar: UIView {
             y: (capsule.bounds.height - lensSide) / 2,
             width: lensSide, height: lensSide
         )
+        glassLens?.place(hidden: isNeutral)
     }
 
     /// Brings the lens back into the viewport by the minimum that shows it —
@@ -650,6 +673,7 @@ extension IconSelectorBar: UIGestureRecognizerDelegate {
     }
 
     private func beginDrag(at x: CGFloat) {
+        liftLens()
         lastTouchX = x
         drag = Drag(
             grip: x + scroller.contentOffset.x - lens.frame.midX,
@@ -720,17 +744,22 @@ extension IconSelectorBar: UIGestureRecognizerDelegate {
         // A press that never travelled is a tap, and the button under it has
         // already answered. Publishing a settle here would re-commit the host to
         // the item it is already on.
-        guard current.moved else { return }
+        guard current.moved else {
+            settleLens()
+            return
+        }
 
         let landing = landingIndex(from: progress, speed: current.speed)
         let changed = landing != selectedIndex
         selectedIndex = landing
         applySelectionAppearance()
+        awaitLanding(landing)
         UIView.animate(withDuration: Metrics.settle, delay: 0, options: [.curveEaseOut]) {
             self.progress = CGFloat(landing)
             self.applyProgress()
             self.keepLensVisible(animated: false)
         }
+        glassLens?.noteProgress()
         // ⚠️ ONLY A REAL CHANGE. A drag that wandered off an icon and came back
         // changed nothing and must say nothing, or every host is told to re-open
         // the mode it is already showing.
@@ -814,8 +843,50 @@ extension IconSelectorBar: UIGestureRecognizerDelegate {
     }
 }
 
+// MARK: - The lens as Liquid Glass (SPIKE) — see `SelectorGlassLens`
+
+extension IconSelectorBar {
+    private func ensureGlassLens() -> SelectorGlassLens {
+        if let glassLens { return glassLens }
+        let overlay = SelectorGlassLens(tint: Self.lensTint) { [weak self] in
+            guard let self else { return .zero }
+            return content.convert(lens.frame, to: self)
+        }
+        overlay.isHeld = { [weak self] in self?.drag != nil }
+        // Beneath the capsule, above the host's glass, where the host draws
+        // the glass — the icons above it stay crisp.
+        if hosting.drawsBackdrop {
+            addSubview(overlay.view)
+        } else {
+            insertSubview(overlay.view, belowSubview: capsule)
+        }
+        glassLens = overlay
+        lens.alpha = 0
+        overlay.place(hidden: isNeutral)
+        return overlay
+    }
+
+    private func liftLens() {
+        guard liftsLensAsGlass, !isNeutral else { return }
+        ensureGlassLens().lift()
+    }
+
+    private func settleLens() { glassLens?.settle() }
+
+    /// The lens lands when the bar's own progress reaches `index`.
+    private func awaitLanding(_ index: Int) {
+        glassLens?.awaitLanding { [weak self] in
+            guard let self else { return true }
+            return abs(progress - CGFloat(index)) < 0.01
+        }
+    }
+}
+
 #if DEBUG
 extension IconSelectorBar {
+    /// Whether the pill is currently lifted glass.
+    public var debugLensIsGlass: Bool { glassLens?.isLifted ?? false }
+    public func debugRunLensSpringToRest() { glassLens?.runSpringToRest() }
     public var debugItemCount: Int { items.count }
     public var debugLensFrame: CGRect { lens.frame }
     /// Whether the pill is drawn at all — it is not, while the bar is neutral.
