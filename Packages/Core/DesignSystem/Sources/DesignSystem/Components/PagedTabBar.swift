@@ -743,17 +743,25 @@ public final class PagedTabBar: UIControl {
     private static let keepsLensLifted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-always")
     private static let keepsLensFrosted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-frosted")
     private static let liftsWithoutScale = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-still")
+    private static let liftsWithoutPlate = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-noplate")
+    /// How far the lens has grown past its resting size, per side — driven
+    /// towards `Lift.outset` while lifted, by the same frame loop as the
+    /// spring, and animated back by `settleLens`.
+    private var lensGrow: CGFloat = 0
 
     /// The numbers the lift is cut to, read off the native tab bar's lens.
     private enum Lift {
         /// The lens over an item, read off a TAP on the native tab bar filmed
         /// at 30 fps: mid-flight it stands ~1.35× taller than at rest, past the
         /// bar's capsule top and bottom, and wider still.
-        /// ⚠️ ONE number for both axes, asked for: the lifted lens keeps the
-        /// pill's own proportions and only grows. Two numbers (1.12 × 1.2, and
-        /// 1.3 × 1.36 before) read as a different shape. Past the capsule's top
-        /// and bottom by a point or two.
-        static let scale = CGSize(width: 1.25, height: 1.25)
+        /// How far past the CAPSULE's edge the lifted lens stands, on every
+        /// side. ⚠️ A constant, not a scale: the native lens overhangs the bar
+        /// by the same margin at an end item's left as at its top, and a
+        /// percentage on a wide pill (1.25× was +45pt wide, +10pt tall) reads
+        /// as a different shape. The pill rests `clearance` inside the
+        /// capsule, so the lift grows it by `clearance + overhang` a side.
+        static let overhang: CGFloat = 3
+        static var outset: CGFloat { SelectorCapsuleMetrics.clearance + overhang }
         /// How far the lens stretches along its travel, per point/second of
         /// speed, and the most it may. A tap's spring travel is fast and the
         /// native lens elongates across BOTH items for it; a finger's drag is
@@ -1802,9 +1810,6 @@ public final class PagedTabBar: UIControl {
         // gallery scrolls back to the top.
         guard drag.moved else {
             settleLens()
-            // The glass pill took the touch a segment button used to take, so
-            // a press on it that never travelled is that button's reselect.
-            if let glassLens, glassLens.isUserInteractionEnabled { onReselect?(selectedIndex) }
             return
         }
         cancelSegmentTracking()
@@ -2285,18 +2290,38 @@ extension PagedTabBar {
         // `cornerConfiguration`, not a layer radius: UIKit owns it and keeps it
         // through the effect's own transitions — see `InlineFilterTrayView`.
         lensView.cornerConfiguration = .capsule()
-        // ⚠️ OVER THE STRIP AND HIT-TESTABLE — asked for, to see the system's
-        // own press on the glass. `isInteractive` answers only a touch that
-        // lands on the glass view itself: the pill brightens, lenses and shows
-        // its chromatic rim under the finger, none of it drawn by us. The cost,
-        // filmed the other way round: glass blurs what is behind it, so the
-        // title under the resting pill softens (beneath the capsule it stayed
-        // crisp, and the native tab bar draws its items above its lens). The
-        // bar's grab recognizer still hears the touch through the responder
-        // chain; a press that never travels is answered as the reselect the
-        // segment button beneath would have sent — see `endPillDrag`.
-        lensView.isUserInteractionEnabled = true
-        addSubview(lensView)
+        lensView.isUserInteractionEnabled = false
+        // ⚠️ BENEATH THE CAPSULE, ABOVE THE HOST'S GLASS, titles above it.
+        // Over the strip the glass softened the title it marked, and being
+        // hit-testable there bought nothing: filmed held under the finger, a
+        // public `UIGlassEffect` shows neither the chromatic rim nor the
+        // magnification of the native lens — those are its private material.
+        //
+        // ⚠️ THE PLATE. A glass nested in the host's glass samples the RAW page
+        // behind the bar, not the bar's frosted result — the lens punched a
+        // saturated hole through a pale capsule. The native bar renders its
+        // frosted plate and its clear lens in ONE pass, so the lens shows the
+        // frosted bar, magnified. A thin material inside the lens is the
+        // nearest public equivalent: the clear glass keeps its rim and shape
+        // and what shows through it is the bar's own frost.
+        // `-selector-glass-lens-noplate` leaves it out for comparison.
+        if !Self.liftsWithoutPlate {
+            let plate = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+            plate.translatesAutoresizingMaskIntoConstraints = false
+            plate.isUserInteractionEnabled = false
+            lensView.contentView.addSubview(plate)
+            NSLayoutConstraint.activate([
+                plate.leadingAnchor.constraint(equalTo: lensView.contentView.leadingAnchor),
+                plate.trailingAnchor.constraint(equalTo: lensView.contentView.trailingAnchor),
+                plate.topAnchor.constraint(equalTo: lensView.contentView.topAnchor),
+                plate.bottomAnchor.constraint(equalTo: lensView.contentView.bottomAnchor)
+            ])
+        }
+        if hosting.drawsBackdrop {
+            addSubview(lensView)
+        } else {
+            insertSubview(lensView, belowSubview: capsule)
+        }
         glassLens = lensView
         lens.alpha = 0
         placeGlassLens()
@@ -2332,10 +2357,10 @@ extension PagedTabBar {
             return
         }
         glassLens.isHidden = false
-        // Bounds + centre rather than frame, so the lift's scale grows the
+        // Bounds + centre rather than frame, so a change of size grows the
         // pill about its middle.
-        glassLens.bounds = CGRect(origin: .zero, size: target.size)
         if !isLensLifted {
+            glassLens.bounds = CGRect(origin: .zero, size: target.size)
             lensCentre = CGPoint(x: target.midX, y: target.midY)
             glassLens.center = lensCentre
         }
@@ -2348,6 +2373,7 @@ extension PagedTabBar {
         let glass = ensureGlassLens()
         lensCentre = glass.center
         lensVelocity = .zero
+        lensGrow = 0
         startLensSpring()
         // The effect is ANIMATED into place, never faded in — a glass view's
         // alpha is the house rule this bar already follows for its capsule.
@@ -2367,12 +2393,15 @@ extension PagedTabBar {
         isLensLifted = false
         stopLensSpring()
         guard let glass = glassLens else { return }
-        placeGlassLens()
+        let rest = modelPillFrame
+        lensCentre = CGPoint(x: rest.midX, y: rest.midY)
+        lensGrow = 0
         UIView.animate(withDuration: Lift.settleDuration, delay: 0,
                        usingSpringWithDamping: 0.7, initialSpringVelocity: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             glass.effect = Self.restingGlass()
             glass.transform = .identity
+            glass.bounds = CGRect(origin: .zero, size: rest.size)
             glass.center = self.lensCentre
         }
     }
@@ -2445,15 +2474,18 @@ extension PagedTabBar {
         lensCentre.x += lensVelocity.x * dt
         lensCentre.y += lensVelocity.y * dt
 
-        glassLens.bounds = CGRect(origin: .zero, size: target.size)
+        // The lift: the pill grows past the capsule by a constant margin on
+        // every side, eased in over a few frames.
+        let wantedGrow = Self.liftsWithoutScale ? 0 : Lift.outset
+        lensGrow += (wantedGrow - lensGrow) * min(1, dt * 16)
+        glassLens.bounds = CGRect(
+            origin: .zero,
+            size: CGSize(width: target.width + lensGrow * 2, height: target.height + lensGrow * 2)
+        )
         glassLens.center = lensCentre
         // Stretch along the travel, thin across it — a drop, not a plate.
         let stretch = min(Lift.maximumStretch, abs(lensVelocity.x) * Lift.stretchPerSpeed)
-        let lift = Self.liftsWithoutScale ? CGSize(width: 1, height: 1) : Lift.scale
-        glassLens.transform = CGAffineTransform(
-            scaleX: lift.width * (1 + stretch),
-            y: lift.height * (1 - stretch * 0.4)
-        )
+        glassLens.transform = CGAffineTransform(scaleX: 1 + stretch, y: 1 - stretch * 0.4)
 
         // At rest, and allowed to rest: settle.
         let atRest = abs(goal.x - lensCentre.x) < 0.5 && abs(lensVelocity.x) < 8
