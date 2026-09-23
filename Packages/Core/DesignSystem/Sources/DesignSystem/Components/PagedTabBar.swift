@@ -746,14 +746,16 @@ public final class PagedTabBar: UIControl {
 
     /// The numbers the lift is cut to, read off the native tab bar's lens.
     private enum Lift {
-        /// The lens over an item: ~1.35× its width and ~1.2× its height, so it
-        /// stands past the capsule's top and bottom by a few points.
-        static let scale = CGSize(width: 1.25, height: 1.18)
+        /// The lens over an item, read off a TAP on the native tab bar filmed
+        /// at 30 fps: mid-flight it stands ~1.35× taller than at rest, past the
+        /// bar's capsule top and bottom, and wider still.
+        static let scale = CGSize(width: 1.3, height: 1.36)
         /// How far the lens stretches along its travel, per point/second of
-        /// speed, and the most it may. Filmed at 0.3 the lens spanned two
-        /// segments mid-flight; the native one elongates a little, not that.
-        static let stretchPerSpeed: CGFloat = 1 / 3000
-        static let maximumStretch: CGFloat = 0.16
+        /// speed, and the most it may. A tap's spring travel is fast and the
+        /// native lens elongates across BOTH items for it; a finger's drag is
+        /// slower and stretches it less — one rule, read off the speed.
+        static let stretchPerSpeed: CGFloat = 1 / 2400
+        static let maximumStretch: CGFloat = 0.5
         /// The spring towards the model pill. Stiff enough to arrive within a
         /// beat, damped short of critical so a stop overshoots a touch.
         static let stiffness: CGFloat = 320
@@ -1795,6 +1797,9 @@ public final class PagedTabBar: UIControl {
         // gallery scrolls back to the top.
         guard drag.moved else {
             settleLens()
+            // The glass pill took the touch a segment button used to take, so
+            // a press on it that never travelled is that button's reselect.
+            if let glassLens, glassLens.isUserInteractionEnabled { onReselect?(selectedIndex) }
             return
         }
         cancelSegmentTracking()
@@ -2275,22 +2280,18 @@ extension PagedTabBar {
         // `cornerConfiguration`, not a layer radius: UIKit owns it and keeps it
         // through the effect's own transitions — see `InlineFilterTrayView`.
         lensView.cornerConfiguration = .capsule()
-        lensView.isUserInteractionEnabled = false
-        // ⚠️ BELOW THE CAPSULE, ABOVE THE HOST'S GLASS. Glass blurs what is
-        // behind it, so a pill laid over the strip blurred the title it was
-        // meant to mark — filmed on the relationships toolbar, "35 Followers"
-        // went to a grey smudge at rest. The native tab bar draws its items
-        // ABOVE its lens for exactly this reason. Where the host draws the
-        // capsule's glass the capsule itself is see-through, so a pill beneath
-        // it shows, magnifies the page behind the bar and can stand out past
-        // the capsule; the titles above stay crisp. A bar drawing its own
-        // frosted capsule would hide it, so there — no host today — the pill
-        // goes over the strip instead.
-        if hosting.drawsBackdrop {
-            addSubview(lensView)
-        } else {
-            insertSubview(lensView, belowSubview: capsule)
-        }
+        // ⚠️ OVER THE STRIP AND HIT-TESTABLE — asked for, to see the system's
+        // own press on the glass. `isInteractive` answers only a touch that
+        // lands on the glass view itself: the pill brightens, lenses and shows
+        // its chromatic rim under the finger, none of it drawn by us. The cost,
+        // filmed the other way round: glass blurs what is behind it, so the
+        // title under the resting pill softens (beneath the capsule it stayed
+        // crisp, and the native tab bar draws its items above its lens). The
+        // bar's grab recognizer still hears the touch through the responder
+        // chain; a press that never travels is answered as the reselect the
+        // segment button beneath would have sent — see `endPillDrag`.
+        lensView.isUserInteractionEnabled = true
+        addSubview(lensView)
         glassLens = lensView
         lens.alpha = 0
         placeGlassLens()
