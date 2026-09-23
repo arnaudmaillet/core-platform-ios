@@ -53,8 +53,23 @@ final class SelectorGlassLens {
     static let keepsLifted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-always")
     private static let keepsFrosted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-frosted")
     private static let liftsWithoutGrowth = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-still")
-    private static let liftsWithoutPlate = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-noplate")
-    private static let usesThinPlate = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-thin")
+    /// What fills the lifted lens behind the copy, to read as the bar's own
+    /// frost — a `.clear` glass nested in the host's samples the RAW page
+    /// (a saturated hole, filmed), and the native lens's interior is the
+    /// bar's frost about 12% lighter (sampled: platter 175,221,116 → lens
+    /// 201,236,148). A `.regular` glass plate frosts the page the way the
+    /// bar does; the ultra-thin material read as a bright, near-opaque disc.
+    /// `-selector-glass-lens-plate ultrathin|thin|glass|veil|none`;
+    /// `-selector-glass-lens-noplate` and `-thin` still mean what they did.
+    enum Plate: String { case ultrathin, thin, glass, veil, none }
+    private static let plate: Plate = {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-selector-glass-lens-plate"), index + 1 < arguments.count,
+           let plate = Plate(rawValue: arguments[index + 1]) { return plate }
+        if arguments.contains("-selector-glass-lens-noplate") { return .none }
+        if arguments.contains("-selector-glass-lens-thin") { return .thin }
+        return .glass
+    }()
     private static let tracesOptics = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-trace")
 
     /// The numbers the lift is cut to, read off the native tab bar.
@@ -133,17 +148,7 @@ final class SelectorGlassLens {
         // `cornerConfiguration`, not a layer radius: UIKit owns it and keeps it
         // through the effect's own transitions — see `InlineFilterTrayView`.
         view.cornerConfiguration = .capsule()
-        if !Self.liftsWithoutPlate {
-            // ⚠️ SHAPED LIKE THE LENS, BY A LAYER RADIUS. The glass's corner
-            // configuration shapes the glass, not its content view, and a
-            // BLUR effect view ignores `cornerConfiguration` altogether: both
-            // ways the plate drew as a grey RECTANGLE behind a capsule pill —
-            // filmed on For You's pill and on the editor's icon. A blur does
-            // honour `clipsToBounds` + a layer radius, so the plate rounds
-            // itself to a capsule on every layout.
-            let plate = CapsulePlateView(effect: UIBlurEffect(
-                style: Self.usesThinPlate ? .systemThinMaterial : .systemUltraThinMaterial
-            ))
+        if let plate = Self.makePlate() {
             plate.translatesAutoresizingMaskIntoConstraints = false
             plate.isUserInteractionEnabled = false
             view.contentView.addSubview(plate)
@@ -160,6 +165,29 @@ final class SelectorGlassLens {
         // title, measured on film. It stands beside the glass in the bar, just
         // above it, placed with it every frame (`refract`).
         copy?.isHidden = true
+    }
+
+    /// ⚠️ SHAPED LIKE THE LENS, BY A LAYER RADIUS. The glass's corner
+    /// configuration shapes the glass, not its content view, and a BLUR
+    /// effect view ignores `cornerConfiguration` altogether: both ways the
+    /// plate drew as a grey RECTANGLE behind a capsule pill — filmed on For
+    /// You's pill and on the editor's icon. A blur does honour `clipsToBounds`
+    /// + a layer radius, so the plate rounds itself to a capsule on every
+    /// layout.
+    private static func makePlate() -> UIView? {
+        switch plate {
+        case .none: return nil
+        case .ultrathin: return CapsulePlateView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+        case .thin: return CapsulePlateView(effect: UIBlurEffect(style: .systemThinMaterial))
+        case .glass:
+            let effect = UIGlassEffect(style: .regular)
+            effect.isInteractive = false
+            return CapsulePlateView(effect: effect)
+        case .veil:
+            let veil = CapsulePlateView(effect: nil)
+            veil.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.35)
+            return veil
+        }
     }
 
     private func restingGlass() -> UIGlassEffect {
@@ -410,14 +438,13 @@ final class SelectorGlassLens {
         layer.drawableSize = CGSize(width: CGFloat(size.x), height: CGFloat(size.y))
         let lift = Float(max(0, min(1, lift)))
         let magnification = 1 + (optics.magnification - 1) * lift
-        // ⚠️ The bend never reaches past the lens's own edge: at the rim the
-        // magnified sample sits r/mag from the centre, so a pull beyond
-        // r(1 - 1/mag) reads what lies OUTSIDE the lens — on the editor's icon
-        // bar, the neighbouring icons 2pt past the rim, pulled in and split
-        // into colours. Filmed. The pill has the same radius; its neighbours
-        // are simply farther.
-        let radius = Float(min(box.width, box.height) / 2 * scale)
-        let bend = min(optics.bend * Float(scale) * lift, max(0, radius * (1 - 1 / magnification)))
+        // The bend may reach a little past the lens's own edge: at the rim the
+        // magnified sample sits r/mag from the centre, and the native lens
+        // shows the neighbouring item's edge pulled in there (the "M" of
+        // Messages inside the held For You lens, filmed). ⚠️ At 10pt it read
+        // the editor's neighbouring icons 2pt past the rim, split into
+        // colours — the bend is 4pt now, the split 1pt.
+        let bend = optics.bend * Float(scale) * lift
         let uniforms = LensRefractor.Uniforms(
             size: size,
             centre: size / 2,
@@ -479,6 +506,18 @@ final class SelectorGlassLens {
             context.translateBy(x: 0, y: CGFloat(height))
             context.scaleBy(x: scale, y: -scale)
             context.translateBy(x: -region.minX, y: -region.minY)
+            // The resting pill's tint first, lighter: the native lens refracts
+            // the item's PLATTER (its edge is what makes the rim's fringe on
+            // a plain page) and shows it lighter than at rest. The model pill
+            // is alpha 0 in the strip while the glass stands in for it.
+            if let bar = view.superview {
+                let pill = content.convert(modelFrame(), from: bar)
+                context.saveGState()
+                context.setFillColor(tint.withAlphaComponent(tint.cgColor.alpha * 0.6).cgColor)
+                context.addPath(UIBezierPath(roundedRect: pill, cornerRadius: min(pill.width, pill.height) / 2).cgPath)
+                context.fillPath()
+                context.restoreGState()
+            }
             Self.draw(content, in: content, into: context, alpha: 1)
             #if DEBUG
             if Self.tracesOptics, !dumped, traceCost.frames >= 5, let image = context.makeImage() {

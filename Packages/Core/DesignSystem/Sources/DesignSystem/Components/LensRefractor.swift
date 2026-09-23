@@ -43,7 +43,11 @@ final class LensRefractor {
         /// the magnification to sample into.
         static let captureMargin: CGFloat = 24
 
-        static let standard = Optics(magnification: 1.18, edge: 14, bend: 10, aberration: 0.3, blur: 1.5)
+        /// Cut against the native tab bar's lens, filmed and measured on the
+        /// same simulator: its held item reads 1.13–1.15× its resting size
+        /// (text 108 → 124 px, glyph 64 → 72 px), and the neighbouring item's
+        /// edge shows inside the rim, pulled in a little.
+        static let standard = Optics(magnification: 1.15, edge: 14, bend: 6, aberration: 0.4, blur: 0.5)
 
         /// `standard`, with any `-lens-…` launch argument over it.
         static func fromArguments() -> Optics {
