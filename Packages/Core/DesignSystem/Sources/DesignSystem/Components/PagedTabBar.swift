@@ -741,7 +741,7 @@ public final class PagedTabBar: UIControl {
     /// from its first layout; `-selector-glass-lens-clear` cuts the lifted lens
     /// as `.clear` glass; `-selector-glass-lens-still` drops the lift scale.
     private static let keepsLensLifted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-always")
-    private static let cutsLensClear = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-clear")
+    private static let keepsLensFrosted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-frosted")
     private static let liftsWithoutScale = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-still")
 
     /// The numbers the lift is cut to, read off the native tab bar's lens.
@@ -749,13 +749,16 @@ public final class PagedTabBar: UIControl {
         /// The lens over an item, read off a TAP on the native tab bar filmed
         /// at 30 fps: mid-flight it stands ~1.35× taller than at rest, past the
         /// bar's capsule top and bottom, and wider still.
-        static let scale = CGSize(width: 1.3, height: 1.36)
+        /// ⚠️ Cut down from 1.3 × 1.36 on sight: against the native lens ours
+        /// read as a balloon. Still past the capsule's top and bottom, by a
+        /// point or two.
+        static let scale = CGSize(width: 1.12, height: 1.2)
         /// How far the lens stretches along its travel, per point/second of
         /// speed, and the most it may. A tap's spring travel is fast and the
         /// native lens elongates across BOTH items for it; a finger's drag is
         /// slower and stretches it less — one rule, read off the speed.
         static let stretchPerSpeed: CGFloat = 1 / 2400
-        static let maximumStretch: CGFloat = 0.5
+        static let maximumStretch: CGFloat = 0.25
         /// The spring towards the model pill. Stiff enough to arrive within a
         /// beat, damped short of critical so a stop overshoots a touch.
         static let stiffness: CGFloat = 320
@@ -2305,8 +2308,11 @@ extension PagedTabBar {
         return effect
     }
 
+    /// CLEAR while held or travelling — the native lens shows what is under it
+    /// sharp, and `.regular` frosted it. `-selector-glass-lens-frosted` keeps
+    /// the regular material for comparison.
     private static func liftedGlass() -> UIGlassEffect {
-        let effect = UIGlassEffect(style: cutsLensClear ? .clear : .regular)
+        let effect = UIGlassEffect(style: keepsLensFrosted ? .regular : .clear)
         effect.isInteractive = true
         return effect
     }
