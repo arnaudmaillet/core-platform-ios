@@ -45,11 +45,13 @@ final class LensRefractor {
         /// the magnification to sample into.
         static let captureMargin: CGFloat = 24
 
-        /// Cut against the native tab bar's lens, filmed and measured on the
-        /// same simulator: its held item reads 1.13–1.15× its resting size
-        /// (text 108 → 124 px, glyph 64 → 72 px), and the neighbouring item's
-        /// edge shows inside the rim, pulled in a little.
-        static let standard = Optics(magnification: 1.15, travelMagnification: 1.4, edge: 14, bend: 6, aberration: 0.4, blur: 0.5)
+        /// Cut against the native `UISegmentedControl`'s lens, filmed in the
+        /// tab accessory on the same simulator: NO magnification (its held
+        /// title reads 158 → 165 px, 1.04×, all of it the rim), a refraction
+        /// confined to the rim with a chromatic fringe, glyphs bent where
+        /// they cross the rim. (The tab BAR's lens magnifies; it is not the
+        /// reference for a selector.)
+        static let standard = Optics(magnification: 1.0, travelMagnification: 1.0, edge: 12, bend: 6, aberration: 0.4, blur: 0.3)
 
         /// `standard`, with any `-lens-…` launch argument over it.
         static func fromArguments() -> Optics {

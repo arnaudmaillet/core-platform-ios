@@ -53,12 +53,12 @@ final class SelectorGlassLens {
     static let keepsLifted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-always")
     private static let keepsFrosted = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-frosted")
     private static let liftsWithoutGrowth = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-still")
-    /// What fills the lifted lens behind the copy, to read as the bar's own
-    /// frost — a `.clear` glass nested in the host's samples the RAW page
-    /// (a saturated hole, filmed), and the native lens's interior is the
-    /// bar's frost about 12% lighter (sampled: platter 175,221,116 → lens
-    /// 201,236,148). A `.regular` glass plate frosts the page the way the
-    /// bar does; the ultra-thin material read as a bright, near-opaque disc.
+    /// What fills the lifted lens behind the copy. NOTHING, by default: a
+    /// `.clear` glass nested in the host's samples the RAW page, and that is
+    /// exactly what the native `UISegmentedControl`'s lens shows — filmed in
+    /// the tab accessory over a green page, its interior read 172,236,167
+    /// against the control's frosted 197,220,251. The plates remain to
+    /// compare (the tab BAR's lens reads as the bar's frost instead).
     /// `-selector-glass-lens-plate ultrathin|thin|glass|veil|none`;
     /// `-selector-glass-lens-noplate` and `-thin` still mean what they did.
     enum Plate: String { case ultrathin, thin, glass, veil, none }
@@ -68,7 +68,7 @@ final class SelectorGlassLens {
            let plate = Plate(rawValue: arguments[index + 1]) { return plate }
         if arguments.contains("-selector-glass-lens-noplate") { return .none }
         if arguments.contains("-selector-glass-lens-thin") { return .thin }
-        return .glass
+        return .none
     }()
     private static let tracesOptics = ProcessInfo.processInfo.arguments.contains("-selector-glass-lens-trace")
 
@@ -85,7 +85,7 @@ final class SelectorGlassLens {
         /// (filmed: ~1.36× the platter's height). `-lens-travel-overhang`.
         static let travelOverhang: CGFloat = {
             let read = UserDefaults.standard.double(forKey: "lens-travel-overhang")
-            return read > 0 ? CGFloat(read) : 8
+            return read > 0 ? CGFloat(read) : 0
         }()
         /// How far the model pill must move from where it was grabbed before
         /// the hold counts as a travel.
@@ -94,18 +94,40 @@ final class SelectorGlassLens {
         /// speed, and the most it may — small, it is what read as "too wide".
         static let stretchPerSpeed: CGFloat = 1 / 2400
         static let maximumStretch: CGFloat = 0.12
+        /// Flying to a TAP the native lens elongates hard — nearly across
+        /// both segments — and lands within ~150 ms; under a finger it hardly
+        /// stretches at all. Filmed on `UISegmentedControl`.
+        static let maximumFlightStretch: CGFloat = 0.4
         /// The spring towards the model pill. Stiff enough to arrive within a
-        /// beat, damped short of critical so a stop overshoots a touch.
+        /// beat, damped short of critical so a stop overshoots a touch; a
+        /// flight to a tap is stiffer still.
         static let stiffness: CGFloat = 320
+        static let flightStiffness: CGFloat = 640
         static let dampingRatio: CGFloat = 0.74
-        static let liftDuration: TimeInterval = 0.32
-        static let settleDuration: TimeInterval = 0.36
+        static let flightDampingRatio: CGFloat = 0.85
+        /// The flat pill turns to glass in ~150 ms and back in ~200 ms —
+        /// filmed on `UISegmentedControl` (tap: glass at +150 ms, flat again
+        /// ~200 ms after landing).
+        static let liftDuration: TimeInterval = 0.15
+        static let settleDuration: TimeInterval = 0.2
         /// The lens settles anyway after this, for a host that never reports.
         static let landingFallback: TimeInterval = 1.2
     }
 
-    /// The glass pill itself.
+    /// The glass pill itself — flat at rest (`fill`), glass while lifted.
     let view: UIVisualEffectView
+    /// The resting indicator: a flat fill, the native segmented control's
+    /// `_controlForegroundColor` (white in light, a grey in dark). Not glass:
+    /// the native pill at rest is a plain fill, and only the lifted lens is
+    /// glass. Dumped from a `UISegmentedControl` in the tab accessory.
+    private let fill: CapsulePlateView
+    static let restingFill = UIColor { traits in
+        // Resolved from the native colour: white in light, a translucent
+        // light veil in dark (0.92, 0.92, 0.96 at 30%).
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.92, green: 0.92, blue: 0.96, alpha: 0.3)
+            : .white
+    }
     /// Where the MODEL pill is, in the coordinate space `view` lives in.
     var modelFrame: () -> CGRect
     /// Whether the bar's progress says the pages have landed — asked every
@@ -158,12 +180,13 @@ final class SelectorGlassLens {
             copy = LensCopyView(device: LensRefractor.shared.device)
         }
         view = UIVisualEffectView(effect: nil)
-        view.effect = restingGlass()
         view.isUserInteractionEnabled = false
+        fill = CapsulePlateView(effect: nil)
+        fill.backgroundColor = Self.restingFill
         // `cornerConfiguration`, not a layer radius: UIKit owns it and keeps it
         // through the effect's own transitions — see `InlineFilterTrayView`.
         view.cornerConfiguration = .capsule()
-        if let plate = Self.makePlate() {
+        for plate in [Self.makePlate(), fill].compactMap({ $0 }) {
             plate.translatesAutoresizingMaskIntoConstraints = false
             plate.isUserInteractionEnabled = false
             view.contentView.addSubview(plate)
@@ -203,13 +226,6 @@ final class SelectorGlassLens {
             veil.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.35)
             return veil
         }
-    }
-
-    private func restingGlass() -> UIGlassEffect {
-        let effect = UIGlassEffect(style: .regular)
-        effect.isInteractive = true
-        effect.tintColor = tint
-        return effect
     }
 
     private func liftedGlass() -> UIGlassEffect {
@@ -254,9 +270,9 @@ final class SelectorGlassLens {
         // The effect is ANIMATED into place, never faded in — a glass view's
         // alpha is the house rule the capsules already follow.
         UIView.animate(withDuration: Lift.liftDuration, delay: 0,
-                       usingSpringWithDamping: 0.6, initialSpringVelocity: 0,
-                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+                       options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]) {
             self.view.effect = self.liftedGlass()
+            self.fill.alpha = 0
         }
     }
 
@@ -305,9 +321,9 @@ final class SelectorGlassLens {
         centre = CGPoint(x: rest.midX, y: rest.midY)
         grow = 0
         UIView.animate(withDuration: Lift.settleDuration, delay: 0,
-                       usingSpringWithDamping: 0.7, initialSpringVelocity: 0,
-                       options: [.allowUserInteraction, .beginFromCurrentState]) {
-            self.view.effect = self.restingGlass()
+                       options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]) {
+            self.view.effect = nil
+            self.fill.alpha = 1
             self.view.transform = .identity
             self.view.bounds = CGRect(origin: .zero, size: rest.size)
             self.view.center = self.centre
@@ -324,7 +340,8 @@ final class SelectorGlassLens {
         isLifted = false
         settleStarted = nil
         view.transform = .identity
-        view.effect = restingGlass()
+        view.effect = nil
+        fill.alpha = 1
         place()
     }
 
@@ -364,10 +381,13 @@ final class SelectorGlassLens {
     func advance(by dt: CGFloat) -> Bool {
         let target = modelFrame()
         let goal = CGPoint(x: target.midX, y: target.midY)
-        // A damped spring, integrated semi-implicitly.
-        let damping = 2 * Lift.dampingRatio * sqrt(Lift.stiffness)
-        let ax = Lift.stiffness * (goal.x - centre.x) - damping * velocity.x
-        let ay = Lift.stiffness * (goal.y - centre.y) - damping * velocity.y
+        // A damped spring, integrated semi-implicitly — stiffer for a flight
+        // to a tap than under a finger.
+        let held = isHeld()
+        let stiffness = held ? Lift.stiffness : Lift.flightStiffness
+        let damping = 2 * (held ? Lift.dampingRatio : Lift.flightDampingRatio) * sqrt(stiffness)
+        let ax = stiffness * (goal.x - centre.x) - damping * velocity.x
+        let ay = stiffness * (goal.y - centre.y) - damping * velocity.y
         velocity.x += ax * dt
         velocity.y += ay * dt
         centre.x += velocity.x * dt
@@ -392,7 +412,8 @@ final class SelectorGlassLens {
         )
         view.center = centre
         // Stretch along the travel, thin across it — a drop, not a plate.
-        let stretch = min(Lift.maximumStretch, abs(velocity.x) * Lift.stretchPerSpeed)
+        let stretch = min(held ? Lift.maximumStretch : Lift.maximumFlightStretch,
+                          abs(velocity.x) * Lift.stretchPerSpeed)
         view.transform = CGAffineTransform(scaleX: 1 + stretch, y: 1 - stretch * 0.4)
 
         // The copy of the strip, magnified and bent in step with the lift.
@@ -456,8 +477,7 @@ final class SelectorGlassLens {
         let width = Int(ceil(region.width * captureScale)), height = Int(ceil(region.height * captureScale))
         let started = Self.tracesOptics ? CACurrentMediaTime() : 0
         guard let texture = sourceTexture(width: width, height: height),
-              capture(content, region: content.convert(region, from: bar), scale: captureScale,
-                      pill: content.convert(box.insetBy(dx: Lift.outset, dy: Lift.outset), from: bar), into: texture) else {
+              capture(content, region: content.convert(region, from: bar), scale: captureScale, into: texture) else {
             hideCopy()
             return
         }
@@ -530,7 +550,7 @@ final class SelectorGlassLens {
     /// `scale`, top row first — UIKit's orientation, flipped for a bitmap
     /// context. The strip's mask does not apply: the copy is drawn from the
     /// views, not from the layer tree.
-    private func capture(_ content: UIView, region: CGRect, scale: CGFloat, pill: CGRect, into texture: MTLTexture) -> Bool {
+    private func capture(_ content: UIView, region: CGRect, scale: CGFloat, into texture: MTLTexture) -> Bool {
         let width = texture.width, height = texture.height, bytesPerRow = width * 4
         if sourceBytes.count != bytesPerRow * height {
             sourceBytes = [UInt8](repeating: 0, count: bytesPerRow * height)
@@ -545,19 +565,6 @@ final class SelectorGlassLens {
             context.translateBy(x: 0, y: CGFloat(height))
             context.scaleBy(x: scale, y: -scale)
             context.translateBy(x: -region.minX, y: -region.minY)
-            // The resting pill's tint first, lighter, UNDER THE LENS (not at
-            // the model pill, which jumps ahead on a tap and read as a ghost
-            // capsule inside the lagging lens): the native lens refracts the
-            // item's PLATTER — its edge is what makes the rim's fringe on a
-            // plain page — and shows it lighter than at rest. The model pill
-            // is alpha 0 in the strip while the glass stands in for it.
-            do {
-                context.saveGState()
-                context.setFillColor(tint.withAlphaComponent(tint.cgColor.alpha * 0.6).cgColor)
-                context.addPath(UIBezierPath(roundedRect: pill, cornerRadius: min(pill.width, pill.height) / 2).cgPath)
-                context.fillPath()
-                context.restoreGState()
-            }
             Self.draw(content, in: content, into: context, alpha: 1)
             #if DEBUG
             if Self.tracesOptics, !dumped, traceCost.frames >= 5, let image = context.makeImage() {

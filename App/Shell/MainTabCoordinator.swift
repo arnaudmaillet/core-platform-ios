@@ -275,6 +275,45 @@ final class MainTabCoordinator: NSObject, Coordinator {
             DispatchQueue.main.async { [weak self] in self?.openFeed() }
         }
         #if DEBUG
+        // `-native-segmented-sample`: a real `UISegmentedControl` laid over the
+        // selected tab's view, 70pt ABOVE where the For You pill sits, so the
+        // native indicator and ours are filmed in the same frame on the same
+        // page — rest, hold, drag, release. The reference for the selector's
+        // lens is this control, not the tab bar's.
+        if arguments.contains("-native-segmented-sample") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                guard let host = self?.tabBarController.view else { return }
+                _ = host
+                let control = UISegmentedControl(items: ["Discover", "Following"])
+                control.selectedSegmentIndex = 0
+                // In the SAME host as ours: the tab bar's bottom accessory, where
+                // the control takes its glass styling.
+                self?.tabBarController.bottomAccessory = UITabAccessory(contentView: control)
+                for delay in stride(from: 6.0, through: 24.0, by: 3.0) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    print("[segsample] t=\(delay + 3)s frame \(control.frame) in \(control.superview.map { String(describing: type(of: $0)) } ?? "-")")
+                    func walk(_ view: UIView, _ depth: Int) {
+                        var line = String(repeating: "  ", count: depth) + String(describing: type(of: view))
+                        line += String(format: " %.0fx%.0f@%.0f,%.0f", view.frame.width, view.frame.height, view.frame.minX, view.frame.minY)
+                        if let effectView = view as? UIVisualEffectView {
+                            line += " effect=\(effectView.effect.map { String(describing: $0) } ?? "nil")"
+                        }
+                        if view.isHidden { line += " HIDDEN" }
+                        if view.alpha < 1 { line += String(format: " alpha=%.2f", view.alpha) }
+                        if let colour = view.backgroundColor, colour.cgColor.alpha > 0 {
+                            let light = colour.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+                            let dark = colour.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
+                            line += " bg=\(colour) light=\(light) dark=\(dark)"
+                        }
+                        if let filters = view.layer.filters, !filters.isEmpty { line += " filters=\(filters)" }
+                        print("[segsample] " + line)
+                        for sub in view.subviews { walk(sub, depth + 1) }
+                    }
+                    walk(control, 0)
+                }
+                }
+            }
+        }
         // `-tabbar-lens-dump`: prints the tab bar's view tree — class, frame,
         // and every visual effect view's effect — at 3 s, then every 2 s for a
         // while, so a finger held on the native selection lens (MCP

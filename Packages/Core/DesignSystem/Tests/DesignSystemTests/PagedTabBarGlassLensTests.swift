@@ -122,7 +122,10 @@ struct PagedTabBarLensOpticsTests {
         #expect(!bar.debugLensCopyIsShowing, "settled: no copy")
     }
 
-    @Test func aHoldMagnifiesALittleAndATravelALot() async {
+    /// The native `UISegmentedControl`'s lens does not magnify — its held
+    /// title measured 1.04× on film, all of it the rim — and it is no larger
+    /// once it moves. Neither is ours.
+    @Test func theLensNeitherMagnifiesNorGrowsOnceItMoves() async {
         guard LensRefractor.shared.device != nil else {
             Issue.record("no Metal device in this test host")
             return
@@ -137,14 +140,17 @@ struct PagedTabBarLensOpticsTests {
         #expect(bar.debugBeginPillDrag(atViewportX: pill))
         bar.debugAdvanceLens(frames: 60)
         let held = bar.debugLensMagnification
-        #expect(abs(held - CGFloat(LensRefractor.Optics.standard.magnification)) < 0.02,
-                "a plain hold magnifies as the native lens does on a hold, got \(held)")
+        let heldFrame = bar.debugGlassLensFrame
+        #expect(abs(held - 1) < 0.001, "a hold does not magnify, got \(held)")
 
         bar.debugDragPill(toViewportX: pill + 60)
-        bar.debugAdvanceLens(frames: 60)
+        bar.debugAdvanceLens(frames: 90)
         let travelling = bar.debugLensMagnification
-        #expect(abs(travelling - CGFloat(LensRefractor.Optics.standard.travelMagnification)) < 0.02,
-                "once the finger has moved, the native lens magnifies more, got \(travelling)")
+        #expect(abs(travelling - 1) < 0.001, "nor does a travel, got \(travelling)")
+        if let heldFrame, let movedFrame = bar.debugGlassLensFrame {
+            #expect(abs(movedFrame.height - heldFrame.height) < 0.5 && abs(movedFrame.width - heldFrame.width) < 0.5,
+                    "the lens keeps its held size while it moves: \(heldFrame.size) → \(movedFrame.size)")
+        }
         bar.debugEndPillDrag()
     }
 }
