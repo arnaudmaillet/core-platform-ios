@@ -1535,7 +1535,7 @@ final class MediaEditorViewController: UIViewController {
         let held = toolbarItems ?? []
         // A swipe between a photograph and a clip is never skipped by this: the
         // strip in the bar is then ANOTHER view (`dressCategoryStrip`).
-        let unchanged = held.count == 4
+        let unchanged = held.count == 3
             && held[0].customView === leading
             && held[2].customView === categoryBar
         if !unchanged {
@@ -1543,12 +1543,15 @@ final class MediaEditorViewController: UIViewController {
             debugRealHandovers += 1
             debugLastHandoverWasAnimated = animated
             #endif
+            // The selector stands at the TRAILING edge and the slack sits
+            // between the two groups: it is as wide as it needs to be, never
+            // as wide as the room (asked 2026-09-23 — it used to fill the
+            // room whatever its five or three icons wanted).
             setToolbarItems(
                 [
                     Self.barItem(leading, as: ItemID.leading),
-                    .fixedSpace(Spacing.sm),
-                    Self.barItem(categoryBar, as: ItemID.categories(categories)),
-                    .flexibleSpace()
+                    .flexibleSpace(),
+                    Self.barItem(categoryBar, as: ItemID.categories(categories))
                 ],
                 animated: animated
             )
@@ -1667,7 +1670,10 @@ final class MediaEditorViewController: UIViewController {
         // the bar then — at the action bar's 112pt, and it stayed there when
         // the band closed. The author photographed the result: "Add a s...".
         if !isTimelineShowing { soundPillCap.constant = held.leading }
-        categoryBarWidth.constant = held.trailing
+        // ⚠️ THE ROOM IS A CEILING, NOT A WIDTH. The strip takes its own
+        // width when that fits, and only gives way — and scrolls — when the
+        // song pill leaves it less.
+        categoryBarWidth.constant = min(held.trailing, categoryBar.intrinsicContentSize.width)
         categoryBarWidth.isActive = true
         // A bar item's view keeps its autoresizing mask, so the size UIKit
         // reads at the hand-over is the frame's.
@@ -1749,7 +1755,12 @@ final class MediaEditorViewController: UIViewController {
     /// and a geometry read from one would be the collapse measuring itself.
     private func measureTheBar() {
         let leading: UIView = isTimelineShowing ? actionBar : soundPill
-        guard let measured = BottomBarShare.measure(leading: leading, trailing: categoryBar) else { return }
+        // The flexible space between the two groups holds the slack the
+        // selector no longer fills; the bar's own gap is the 20pt it charges
+        // at rest — the same read the capture screen makes.
+        guard let measured = BottomBarShare.measure(
+            leading: leading, trailing: categoryBar, flush: false, keepingGap: ToolbarGeometry.fallback.gap
+        ) else { return }
         barGeometry = measured
     }
 
