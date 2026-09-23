@@ -19,13 +19,20 @@ final class SelectorPillMotion {
     enum Tuning {
         /// Damped spring towards the model: stiff enough to arrive within a
         /// beat, damped short of critical so a stop overshoots a little.
-        static let stiffness: CGFloat = 280
-        static let dampingRatio: CGFloat = 0.72
+        static let stiffness: CGFloat = 420
+        static let dampingRatio: CGFloat = 0.78
         /// How far the pill stretches along its travel per point/second, and
-        /// the most it may — a bubble's give, not a smear.
-        static let stretchPerSpeed: CGFloat = 1 / 2400
-        static let maximumStretch: CGFloat = 0.12
+        /// the most it may — a bubble's give, not a smear. (280 / 0.72 /
+        /// 0.12 read as too heavy.)
+        static let stretchPerSpeed: CGFloat = 1 / 3000
+        static let maximumStretch: CGFloat = 0.08
         static let squashPerStretch: CGFloat = 0.4
+        /// The magnet: within this distance of an item's centre the pill is
+        /// drawn towards it, fully at the centre and not at all at the edge
+        /// of the reach — a light click onto each item as the finger passes,
+        /// on the pill the viewer sees only; what the pager is told is
+        /// untouched.
+        static let magnetReach: CGFloat = 14
         /// Close enough, and slow enough, to be at rest.
         static let restDistance: CGFloat = 0.3
         static let restSpeed: CGFloat = 12
@@ -35,6 +42,8 @@ final class SelectorPillMotion {
     let body: UIView
     /// Where the MODEL pill is, in the space `body` lives in.
     var modelFrame: () -> CGRect
+    /// The items' centres along x, in the same space — the magnet's detents.
+    var detents: () -> [CGFloat] = { [] }
     /// Whether a move may animate at all: not off-window, not under Reduce
     /// Motion. A test overrides it to run the spring in a bare host.
     lazy var mayAnimate: () -> Bool = { [weak self] in
@@ -74,7 +83,19 @@ final class SelectorPillMotion {
     /// calls this; a test, which does not turn it, calls it by hand.)
     func endSnapping() { snapsNextMove = false }
 
-    /// Lands the body exactly on the model and stops.
+    /// Where the body is drawn to: the model's centre, pulled towards the
+    /// nearest item within the magnet's reach.
+    private func goal(for model: CGRect) -> CGPoint {
+        var goal = CGPoint(x: model.midX, y: model.midY)
+        if let nearest = detents().min(by: { abs($0 - goal.x) < abs($1 - goal.x) }) {
+            let distance = nearest - goal.x
+            let hold = max(0, 1 - abs(distance) / Tuning.magnetReach)
+            goal.x += distance * hold
+        }
+        return goal
+    }
+
+    /// Lands the body on its goal (the model, magnet included) and stops.
     func snap() {
         stop()
         let model = modelFrame()
@@ -82,7 +103,7 @@ final class SelectorPillMotion {
         body.transform = .identity
         body.bounds = CGRect(origin: .zero, size: model.size)
         body.layer.cornerRadius = model.height / 2
-        centre = CGPoint(x: model.midX, y: model.midY)
+        centre = goal(for: model)
         body.center = centre
         velocity = .zero
         isPlaced = true
@@ -102,7 +123,7 @@ final class SelectorPillMotion {
         // The size follows at once; only the position lags.
         body.bounds = CGRect(origin: .zero, size: model.size)
         body.layer.cornerRadius = model.height / 2
-        let goal = CGPoint(x: model.midX, y: model.midY)
+        let goal = goal(for: model)
         if abs(goal.x - centre.x) < Tuning.restDistance, abs(goal.y - centre.y) < Tuning.restDistance, link == nil {
             body.center = goal
             centre = goal
@@ -147,7 +168,7 @@ final class SelectorPillMotion {
     @discardableResult
     func advance(by dt: CGFloat) -> Bool {
         let model = modelFrame()
-        let goal = CGPoint(x: model.midX, y: model.midY)
+        let goal = goal(for: model)
         let damping = 2 * Tuning.dampingRatio * sqrt(Tuning.stiffness)
         let ax = Tuning.stiffness * (goal.x - centre.x) - damping * velocity.x
         let ay = Tuning.stiffness * (goal.y - centre.y) - damping * velocity.y

@@ -62,4 +62,24 @@ struct PagedTabBarPillMotionTests {
         #expect(!bar.debugPillIsMoving)
         #expect(abs(bar.debugPillBodyFrame.midX - bar.debugPillInViewport.midX) < 0.5, "the body is on the model at once")
     }
+
+    @Test func thePillClicksLightlyOntoTheNearestItem() {
+        let bar = bar()
+        bar.debugLetPillMove(true)
+        let home = bar.debugPillInViewport.midX
+
+        // A little past the first item: the pill is drawn back towards it,
+        // part of the way, never all of it.
+        bar.setProgress(0.06)
+        bar.debugRunPillToRest()
+        let model = bar.debugPillInViewport.midX
+        let body = bar.debugPillBodyFrame.midX
+        #expect(model - home > 4, "guard: the model has left the item, by \(model - home)")
+        #expect(body < model - 1 && body > home + 1, "the body sits between the item (\(home)) and the model (\(model)): \(body)")
+
+        // Far from any item, the magnet lets go.
+        bar.setProgress(0.5)
+        bar.debugRunPillToRest()
+        #expect(abs(bar.debugPillBodyFrame.midX - bar.debugPillInViewport.midX) < 0.5, "midway, the body is on the model")
+    }
 }

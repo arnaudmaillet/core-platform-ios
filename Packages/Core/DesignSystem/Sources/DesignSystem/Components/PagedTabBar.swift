@@ -693,7 +693,14 @@ public final class PagedTabBar: UIControl {
     private let lens = UIView()
     /// The pill the viewer sees, following the model with weight — see
     /// `SelectorPillMotion`.
-    private lazy var pillMotion = SelectorPillMotion(tint: Self.lensTint) { [weak self] in self?.lens.frame ?? .zero }
+    private lazy var pillMotion: SelectorPillMotion = {
+        let motion = SelectorPillMotion(tint: Self.lensTint) { [weak self] in self?.lens.frame ?? .zero }
+        motion.detents = { [weak self] in
+            guard let self else { return [] }
+            return segments.indices.map { lensFrame(for: $0).midX }
+        }
+        return motion
+    }()
     /// The segment strip. A subclass only so it can say when it has finished
     /// positioning its arranged subviews — see `SegmentRow`.
     private let row = SegmentRow()

@@ -218,7 +218,19 @@ public final class IconSelectorBar: UIView {
     private let lens = UIView()
     /// The pill the viewer sees, following the model with weight — see
     /// `SelectorPillMotion`.
-    private lazy var pillMotion = SelectorPillMotion(tint: Self.lensTint) { [weak self] in self?.lens.frame ?? .zero }
+    /// The items' centres along x in the content's space — the magnet's detents.
+    private var itemCentres: [CGFloat] {
+        let centring: CGFloat = (Metrics.segmentSide - lensSide) / 2
+        let first: CGFloat = overhangX + centring + lensSide / 2
+        let step: CGFloat = Metrics.segmentSide + Metrics.interSegmentSpacing
+        return items.indices.map { index -> CGFloat in first + CGFloat(index) * step }
+    }
+
+    private lazy var pillMotion: SelectorPillMotion = {
+        let motion = SelectorPillMotion(tint: Self.lensTint) { [weak self] in self?.lens.frame ?? .zero }
+        motion.detents = { [weak self] in self?.itemCentres ?? [] }
+        return motion
+    }()
     private var laidOutSize: CGSize = .zero
     private let row = UIStackView()
     private var buttons: [UIButton] = []
