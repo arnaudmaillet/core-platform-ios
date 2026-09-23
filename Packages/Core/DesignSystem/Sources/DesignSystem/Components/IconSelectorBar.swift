@@ -216,6 +216,22 @@ public final class IconSelectorBar: UIView {
     private let content = UIView()
     /// The active marker. A tint, not a material — see the type comment.
     private let lens = UIView()
+    /// The pill the viewer sees, following the model with weight — see
+    /// `SelectorPillMotion`.
+    /// The items' centres along x in the content's space — the magnet's detents.
+    private var itemCentres: [CGFloat] {
+        let centring: CGFloat = (Metrics.segmentSide - lensSide) / 2
+        let first: CGFloat = overhangX + centring + lensSide / 2
+        let step: CGFloat = Metrics.segmentSide + Metrics.interSegmentSpacing
+        return items.indices.map { index -> CGFloat in first + CGFloat(index) * step }
+    }
+
+    private lazy var pillMotion: SelectorPillMotion = {
+        let motion = SelectorPillMotion(tint: Self.lensTint) { [weak self] in self?.lens.frame ?? .zero }
+        motion.detents = { [weak self] in self?.itemCentres ?? [] }
+        return motion
+    }()
+    private var laidOutSize: CGSize = .zero
     private let row = UIStackView()
     private var buttons: [UIButton] = []
     /// Fractional position of the lens, in item units. Only meaningful during a
@@ -270,10 +286,13 @@ public final class IconSelectorBar: UIView {
         // ⚠️ THE LENS LIVES IN THE SCROLLED CONTENT, not in the capsule. Pinned
         // outside it, every frame of both gestures would have to subtract the
         // content offset back out of its position.
-        lens.backgroundColor = Self.lensTint
+        // The model pill draws nothing: the pill the viewer sees is the
+        // motion's body, beside it, following it with weight.
+        lens.backgroundColor = .clear
         lens.isUserInteractionEnabled = false
         lens.layer.cornerCurve = .continuous
         content.addSubview(lens)
+        content.addSubview(pillMotion.body)
 
         row.axis = .horizontal
         row.spacing = Metrics.interSegmentSpacing
@@ -402,6 +421,7 @@ public final class IconSelectorBar: UIView {
     }
 
     public func setItems(_ newItems: [Item]) {
+        pillMotion.snapOnNextMove()
         guard newItems != items else { return }
         items = newItems
         rebuildSegments()
@@ -487,6 +507,7 @@ public final class IconSelectorBar: UIView {
 
     private func applySelectionAppearance() {
         lens.isHidden = isNeutral
+        pillMotion.setHidden(isNeutral)
         for (index, button) in buttons.enumerated() {
             let item = items[index]
             let isSelected = index == selection
@@ -512,6 +533,10 @@ public final class IconSelectorBar: UIView {
     }
 
     public override func layoutSubviews() {
+        if bounds.size != laidOutSize {
+            laidOutSize = bounds.size
+            pillMotion.snapOnNextMove()
+        }
         super.layoutSubviews()
         // ⚠️ SHAPE BEFORE MATERIAL. `didMoveToWindow` can land before the first
         // layout pass has given the capsule real bounds, and a glass effect
@@ -559,6 +584,7 @@ public final class IconSelectorBar: UIView {
         // A bar that leaves its window starts its platter measurement over
         // when it comes back — the next host may be a different ring.
         if window == nil { remeasure.reset() }
+        if window == nil { pillMotion.cancel() } else { pillMotion.snapOnNextMove() }
         guard window != nil, capsule.effect == nil, hosting.drawsBackdrop else { return }
         materialiseCapsule()
     }
@@ -588,6 +614,7 @@ public final class IconSelectorBar: UIView {
             y: (capsule.bounds.height - lensSide) / 2,
             width: lensSide, height: lensSide
         )
+        pillMotion.modelMoved()
     }
 
     /// Brings the lens back into the viewport by the minimum that shows it —
