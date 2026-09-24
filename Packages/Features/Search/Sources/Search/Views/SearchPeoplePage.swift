@@ -110,14 +110,9 @@ final class SearchPeoplePage: UIViewController {
 
     private func showSkeleton(_ shown: Bool) {
         if shown {
-            skeleton.isHidden = false
-            skeleton.alpha = 1
-        } else if !skeleton.isHidden {
-            UIView.animate(withDuration: 0.25) {
-                self.skeleton.alpha = 0
-            } completion: { _ in
-                self.skeleton.isHidden = true
-            }
+            skeleton.showSkeleton()
+        } else {
+            skeleton.fadeOutSkeleton()
         }
     }
 

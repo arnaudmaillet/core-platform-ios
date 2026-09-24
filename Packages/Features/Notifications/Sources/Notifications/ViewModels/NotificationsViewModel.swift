@@ -1,15 +1,13 @@
 import CoreModels
 import CoreNavigation
+import DesignSystem
 import Foundation
 
 @MainActor
 public final class NotificationsViewModel {
-    public nonisolated enum Phase: Equatable, Sendable {
-        case loading
-        case content([NotificationDisplayModel])
-        case empty
-        case failed(message: String)
-    }
+    /// The shared four states (charter P11) — the first screen to adopt
+    /// `Loadable` instead of spelling them itself.
+    public typealias Phase = Loadable<[NotificationDisplayModel]>
 
     public var onPhaseChange: ((Phase) -> Void)?
     /// Enables/disables the "Mark all read" affordance (true when any unread).
