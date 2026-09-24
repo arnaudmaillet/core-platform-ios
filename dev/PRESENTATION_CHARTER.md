@@ -203,7 +203,7 @@ and mergeable on green. Order is by user-visible cost, not by size.
 sweep test. Ships FIRST so every later PR can cite a before/after number
 instead of a feeling. No production code changes.
 
-### PR 2 — Media picker off the main actor (P4, P8) — #192
+### PR 2 — Media picker off the main actor (P4, P8) — shipped (#192)
 
 `PhotosMediaLibrary.albums()` and `items(in:)` walk every asset of every album
 on the main actor (`PhotosMediaLibrary.swift`), and `MediaLibraryReading` is
@@ -218,7 +218,7 @@ most-used destination and the largest library is the slowest.
   the sheet, so the album strip and the grid frame are final at frame 0.
 - Before/after on the simulator with `-seed-photo-albums` and on a device.
 
-### PR 3 — Containers load lazily (P1, P3) — #193
+### PR 3 — Containers load lazily (P1, P3) — shipped (#193)
 
 - `ProfileRelationshipsViewController` builds both list pages' views in its
   init (`pages.map(\.view)`); load the opening page only.
@@ -228,7 +228,7 @@ most-used destination and the largest library is the slowest.
   the surfaces, so nothing else observes a page that is not loaded yet —
   verify that claim, do not assume it.
 
-### PR 4 — Stores built once (P4) — #194
+### PR 4 — Stores built once (P4) — shipped (#194)
 
 `TextPostComposerViewController` receives `postDrafts ?? PostDraftStore()` and
 the app never injects it, so every "+" → Text Post reads and decodes the
@@ -252,17 +252,32 @@ design — it is after the flight, not in it. Nothing to do here; the work is
 A symbol-image cache for `SnapShortcutRailView` (one `UIImage(systemName:)`
 per bubble per configure, which the sampler had listed) was tried the same
 day and measured at 182 / 176 ms against 155 / 392 ms before — no gain
-outside the noise, so it was not shipped. The feed's first-layout cost is not
-the symbols.
+outside the noise. On 25 September it was tried again, properly: a quiet
+host, three runs per route, the cache PLUS a prewarm of the whole pool off
+the main thread at feature build (so the process's first resolution — the
+IPC the sampler was really seeing — happened before any tile was tapped),
+and bubble reuse instead of rebuild. For You tile: 269–276 ms before,
+272–276 ms after. Map pin: 152–160 before, 155–256 after. The symbol frames
+vanished from the samples and the turn did not move: what the sampler
+attributes to a frame that is BLOCKED (an IPC, a lock) is wall time the turn
+would have spent anyway on whatever ran next. Not shipped, twice. The feed's
+first-layout cost is not the symbols.
 
-### PR 6 — Editor thumbnails render off the main actor (P13)
+⚠️ **THE SAMPLER'S LESSON, WRITTEN DOWN.** A hottest-frames list is a list
+of where the main thread WAS, not of what would be saved by removing it: a
+frame that waits (an IPC to a daemon, a lock) collects samples for its whole
+wait and removing it saves nothing if the wait overlapped work that had to
+happen anyway. Before acting on a frame, remove it and measure the turn on
+a quiet host, three runs; only a turn that moves is a cause.
+
+### PR 6 — Editor thumbnails render off the main actor (P13) — #198
 
 A reopened draft with edits renders every cell's thumbnail through
 `MediaEdits.applied(to:)` on the main actor as the picture arrives
 (`MediaEditorViewController.swift`). Run it inside the same detached task the
 thumbnail comes from.
 
-### PR 7 — Spinners become skeletons (P8)
+### PR 7 — Spinners become skeletons (P8) — shipped (#196), `PostDetail` `.full` left
 
 Notifications (large spinner, table hidden), Post Detail in `.full` mode,
 Search's People results, and the share sheet's target search. Each gets
@@ -271,7 +286,7 @@ skeleton rows from the existing components (`PersonSkeletonCell`,
 size. The Maps tab is exempt: the map IS its content, and its clusters arrive
 over a drawn map.
 
-### PR 8 — Screens read what the previous screen had (P7)
+### PR 8 — Screens read what the previous screen had (P7) — shipped (#197)
 
 - Edit Profile refetches `currentUserProfile()` though Profile just rendered
   it; seed from `ProfileCache` and refresh.
@@ -279,20 +294,28 @@ over a drawn map.
 - Profile's first load never reads `ProfileCache` (only account switching
   does); a revisit should render the cached profile at frame 0 and refresh.
 
-### PR 5b — The snap feed's first layout (P13)
+### PR 5b — The snap feed's first layout (P13) — open, and a product question
 
 Found by the instrument: whatever opens the snap feed (a For You tile, a
 profile tile, a map pin), its first layout inside the hero's setup is the
-largest screen turn in the app. The sampler blames the zoom flight's setup
-(`ZoomAnimator.present`, `ZoomFlightInterruptor.startInteractiveTransition`)
-running `SnapFeedCell.configure` and the cell provider's `Collection.map`;
-the symbol images were tried and ruled out (see PR 5). The next candidates,
-in order: what `SnapFeedCell.configure` builds per item that is not needed
-for the first frame (the comment band, the ticker, the rail), and whether the
-flight can present over a cell configured for its poster alone with the rest
-arriving after `zoomTransitionDidEnd`. Measure with `-presentation-budget` on
-the map-pin route (harness alone, quiet host) before and after; the sweep's
-three feed routes share one ceiling to lower.
+largest screen turn in the app (For You tile 270 ms, pin 155 ms, debug sim,
+quiet host). After the symbols were ruled out twice (PR 5), the samples on
+the For You route read: `RevealPresentAnimator.animateTransition` running
+the feed's first layout (68 of ~150), inside it `willDisplay` →
+`presentRestingComments` → `installRestingPanel`, which builds a whole
+`PostDetailViewController` (the comments panel under the media) for the
+landing page (27), `SnapFeedCell.installComments` (18), the accessory's
+settle (15) and the lifecycle's `updateActiveItem` (15).
+
+The resting comments panel is part of the page's FIRST FRAME by design
+(comments under the media, since 2026-08-06), so deferring it until after
+the flight is a product decision, not an optimisation: the page would land
+without its band and grow one. That is the one lever the sampler leaves that
+is worth ~20% of the turn; the rest is the cell's own configure and UIKit's
+layout of it, which a debug build inflates and which no single frame owns.
+Measure any attempt on the For You route (`-select-tab 1 -foryou-open 0`;
+⚠️ the hook fires only once the tile's cover has loaded, up to 15 s, so
+give it 22 s) and the map-pin route, harness alone, quiet host, three runs.
 
 ### PR 5c — The "+" menu (P2)
 
@@ -300,7 +323,7 @@ three feed routes share one ceiling to lower.
 before the composer or the picker exists. Measure whether the cost is the
 menu's images or the menu itself; if the latter, a prebuilt menu.
 
-### PR 9 — One `Loadable` and one cross-fade (P10, P11)
+### PR 9 — One `Loadable` and one cross-fade (P10, P11) — #200
 
 Sixteen `enum Phase` declarations spell the same four states, and at least
 four screens reimplement "fade the skeleton out and the content in". A
