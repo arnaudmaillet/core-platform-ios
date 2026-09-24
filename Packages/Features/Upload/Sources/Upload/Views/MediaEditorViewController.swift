@@ -611,6 +611,25 @@ final class MediaEditorViewController: UIViewController {
         chosen.applied(to: source, artwork: nil, includingOverlays: false)
     }
 
+    /// `image` with the page's current cut and look, drawn off the main
+    /// actor; the image itself when there is nothing to draw. If the edits
+    /// change while the draw runs, it runs again on the new ones, so what
+    /// lands is what is chosen at landing.
+    private func dressed(_ image: UIImage?, for id: String) async -> UIImage? {
+        guard let image else { return nil }
+        var chosen = edits(for: id)
+        while true {
+            guard !chosen.finish(includingOverlays: false).isNone else { return image }
+            let snapshot = chosen
+            let drawn = await Task.detached(priority: .userInitiated) { @Sendable in Self.draw(image, as: snapshot) }.value
+            let current = edits(for: id)
+            if current.finish(includingOverlays: false) == chosen.finish(includingOverlays: false) {
+                return drawn
+            }
+            chosen = current
+        }
+    }
+
     /// ⚠️ AN ENTRY THAT SAYS NOTHING IS WORSE THAN NO ENTRY: it makes "was this
     /// picture edited?" answerable two ways. Undoing every change removes the
     /// entry rather than storing a neutral one.
@@ -1256,10 +1275,15 @@ final class MediaEditorViewController: UIViewController {
             Task { [weak cell] in
                 let image = await self.library.thumbnail(for: id, size: size)
                 self.remember(image, for: id)
-                cell?.show(
-                    image.map { self.edits(for: id).applied(to: $0, artwork: nil, includingOverlays: false) },
-                    for: id
-                )
+                // ⚠️ DRESSED OFF THE MAIN ACTOR (charter P13). This ran
+                // `applied(to:)` — a CoreImage render — right here, on the
+                // main actor, for every page of a reopened draft that had a
+                // cut or a look; `-presentation-budget` counted it inside the
+                // editor's arrival. The same detached draw `render` uses, and
+                // the same re-read at landing: the edits are checked again
+                // once the pixels are back, and drawn once more if they moved.
+                let dressed = await self.dressed(image, for: id)
+                cell?.show(dressed, for: id)
                 // ⚠️ **AND THE TRACK IS WAITING FOR THIS SAME PICTURE.** Opening
                 // the timeline hands over whatever `lastSource` holds, which on a
                 // page that has just been swiped to is still the PREVIOUS clip's

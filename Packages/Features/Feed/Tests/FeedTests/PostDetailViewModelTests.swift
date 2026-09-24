@@ -6,12 +6,22 @@ import Testing
 
 private final class DetailFeedProvider: FeedProviding, @unchecked Sendable {
     var post: Result<FeedEntry, FeedError>
-    init(_ post: Result<FeedEntry, FeedError>) { self.post = post }
+    /// What a warm cache would answer synchronously; nil is a miss.
+    let peekable: FeedEntry?
+    private(set) var loads = 0
+    init(_ post: Result<FeedEntry, FeedError>, peekable: FeedEntry? = nil) {
+        self.post = post
+        self.peekable = peekable
+    }
+    nonisolated func peekPost(_ id: PostID) -> FeedEntry? { peekable }
 
     func cachedFirstPage() async -> [FeedEntry]? { nil }
     func loadFirstPage() async throws -> FeedPage { FeedPage(entries: [], nextPageToken: nil, isCold: false) }
     func loadPage(afterToken token: String) async throws -> FeedPage { FeedPage(entries: [], nextPageToken: nil, isCold: false) }
-    func loadPost(_ id: PostID) async throws -> FeedEntry { try post.get() }
+    func loadPost(_ id: PostID) async throws -> FeedEntry {
+        loads += 1
+        return try post.get()
+    }
 }
 
 private final class SpyEngagement: EngagementProviding, @unchecked Sendable {
@@ -63,6 +73,38 @@ struct PostDetailViewModelTests {
         #expect(model.authorName == "Ava Moreau")
         #expect(model.handle == "@ava")
         #expect(model.caption == "hello")
+    }
+
+    /// Charter P7: a post the repository already holds renders in the same
+    /// turn `viewDidLoad` runs in, and the fetch that confirms it publishes
+    /// nothing when the post is unchanged.
+    @Test func opensOnTheCachedPostBeforeTheFetchAndRendersOnce() async {
+        let provider = DetailFeedProvider(.success(entry()), peekable: entry())
+        let viewModel = PostDetailViewModel(postID: PostID("post-1"), repository: provider)
+        var phases: [PostDetailViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+
+        viewModel.viewDidLoad()
+        guard case .content(let model)? = phases.first else {
+            Issue.record("expected content before any await, got \(String(describing: phases.first))")
+            return
+        }
+        #expect(model.authorName == "Ava Moreau")
+
+        await settle()
+        #expect(provider.loads == 1, "the fetch still runs, to confirm the cache")
+        #expect(phases.count == 1, "an unchanged post is not re-rendered")
+    }
+
+    @Test func aChangedPostReplacesTheCachedOne() async {
+        let provider = DetailFeedProvider(.success(entry(likes: 99)), peekable: entry(likes: 10))
+        let viewModel = PostDetailViewModel(postID: PostID("post-1"), repository: provider)
+        var phases: [PostDetailViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+
+        viewModel.viewDidLoad()
+        await settle()
+        #expect(phases.count == 2)
     }
 
     @Test func failsWhenPostUnavailable() async {
