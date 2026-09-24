@@ -445,3 +445,116 @@ public final class PostChipSlotView: UIView {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
+
+/// A pill of CONTROLS, wearing the card's own capsule.
+///
+/// Interaction is ON, which is the one thing every other `PostMetaPillView` on
+/// a card turns off — the counters are furniture and must not swallow the tap
+/// that opens the post. This one exists to be pressed: it holds the row's
+/// repost and save glyphs, and any other lone control a card wants in a
+/// capsule.
+public final class PostActionPillView: PostCardPillView {
+    /// The width of one glyph control inside it.
+    ///
+    /// 36 rather than a disc's 40: a glyph button carries its own margin
+    /// inside its width, and the capsule's ends add the rest. Every point a
+    /// control takes is a point off whatever shares its row.
+    public static let controlWidth: CGFloat = 36
+    /// The capsule's padding around glyph controls. Narrower than the text
+    /// pills' 12: a glyph button already carries its own margin, so the text
+    /// value would push two apart and swell the capsule.
+    public static let glyphInsets = NSDirectionalEdgeInsets(
+        top: 0, leading: 6, bottom: 0, trailing: 6
+    )
+
+    override public init(
+        contents: [UIView], spacing: CGFloat = 8,
+        insets: NSDirectionalEdgeInsets = PostMetaPillView.insets
+    ) {
+        super.init(contents: contents, spacing: spacing, insets: insets)
+        isUserInteractionEnabled = true
+    }
+
+    /// A capsule around exactly one glyph control.
+    public convenience init(control: UIView) {
+        self.init(contents: [control], spacing: 0, insets: Self.glyphInsets)
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// ⚠️ A LONE GLYPH IS SIZED TO ITS CONTAINER, NOT TO THE CARD'S TYPE.
+    ///
+    /// Two wrong answers were tried first, in opposite directions. A `UIButton`
+    /// sizes a symbol from its own font — body, 17pt — which crowds a capsule
+    /// the height of a footnote. Matching the counters' font instead, so every
+    /// glyph on the card would be drawn at one size, produced glyphs that LOOK
+    /// smaller than the counters' — measured, the heart beside "160" is 9pt of
+    /// ink, a lone bookmark at that size 13pt: bigger, and reading as smaller,
+    /// because a glyph alone in a capsule is read against the empty capsule
+    /// around it. UIKit's own bar buttons settle this at a little over half
+    /// their container.
+    public static var glyphPointSize: CGFloat {
+        (PostMetaPillView.height * 0.58).rounded()
+    }
+
+    /// One configuration for every glyph control on a card.
+    ///
+    /// Zero content insets, rather than padding a glyph out to size: the width
+    /// is set by a constraint, so insets would only fight it. `.medium`
+    /// weight, one step up from regular and deliberately not two: regular
+    /// reads thin on a filled ground, semibold empties the repost arrows into a
+    /// blob. `.secondaryLabel`, so a control never outranks the name or the
+    /// count beside it.
+    public static func glyphConfiguration(systemName: String) -> UIButton.Configuration {
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: systemName)
+        configuration.baseForegroundColor = .secondaryLabel
+        configuration.contentInsets = .zero
+        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+            pointSize: glyphPointSize, weight: .medium, scale: .medium
+        )
+        return configuration
+    }
+
+    /// Builds one glyph control: a fixed width, the glyph floating in the
+    /// middle, the height left to whatever pill or row holds it, and a touch
+    /// region grown back to a finger's size around the drawn chrome.
+    public static func makeGlyphControl(systemName: String, label: String) -> UIButton {
+        let button = PostGlyphButton(type: .system)
+        button.configuration = glyphConfiguration(systemName: systemName)
+        button.accessibilityLabel = label
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: controlWidth).isActive = true
+        return button
+    }
+
+    /// Folds the pill's vertical hit-slop onto the row inside it.
+    ///
+    /// ⚠️ `point(inside:)` alone does NOT give the buttons a 44pt target. It
+    /// lets the touch reach the PILL, and hit-testing then walks its subviews —
+    /// which are bounded normally, so a touch 6pt below the capsule finds the
+    /// content view outside itself, and the pill answers for a press that was
+    /// aimed at a control. Clamping the point back into the pill hands it to
+    /// whichever button it was under.
+    override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let hit = super.hitTest(point, with: event), hit !== self { return hit }
+        guard self.point(inside: point, with: event), bounds.height > 2 else { return nil }
+        let clamped = CGPoint(x: point.x, y: min(max(point.y, 1), bounds.height - 1))
+        let retargeted = super.hitTest(clamped, with: event)
+        return retargeted === self ? nil : retargeted
+    }
+}
+
+/// A glyph control of a card. The pill it sits in is the height of a line of
+/// type, which is shorter than a finger — so the drawn glyph stays small and
+/// the hit region grows around it, the way `PostMetaPillView` sizes its own
+/// chips.
+final class PostGlyphButton: UIButton {
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let slopY = max((PostMetaPillView.minimumTouchTarget - bounds.height) / 2, 0)
+        return bounds.insetBy(dx: 0, dy: -slopY).contains(point)
+    }
+}

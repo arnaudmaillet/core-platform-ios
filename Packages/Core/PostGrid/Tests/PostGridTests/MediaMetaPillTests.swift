@@ -4,14 +4,16 @@ import UIKit
 import Testing
 @testable import PostGrid
 
-// A card carries the same four values — views, reactions, comments, age — in
-// one of two placements, and which one it is falls out of the post's kind: a
-// quiet line closing a text card, two chips of glass on a media card's preview.
+// A card closes on ONE line — comments, likes, and whatever controls the host
+// wired — under the caption of a text card and under the preview of a media
+// card. The preview itself wears nothing but the page indicator: what a viewer
+// can press about a post is in the closing line, and the picture stays a
+// picture.
 //
-// What these pin is the part a visual check cannot see. The pills LOOK right in
-// a screenshot whether or not the line under the preview went away with them,
-// whether or not they conceal with the media a flight is carrying, and whether
-// or not an empty capsule is being drawn for a post with nothing to count.
+// What these pin is the part a visual check cannot see: that the closing line
+// is the same line on both shapes, that a media card's preview carries no
+// counters, and that an empty capsule is never drawn for a post with nothing
+// to count.
 
 @MainActor
 private func row(
@@ -19,15 +21,17 @@ private func row(
     reactions: Int64? = 160,
     comments: Int64? = 12,
     views: Int64? = 4_200,
+    pages: Int = 1,
     width: CGFloat = 390
 ) -> PostGridListRowCell {
     let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: width, height: 400))
+    let page = GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://photo/1"))
     cell.configure(
         with: GalleryPost(
             id: PostID("p"),
             kind: kind,
             isRepost: false,
-            thumbnailURL: nil,
+            pages: kind == .text ? [] : Array(repeating: page, count: pages),
             caption: "A caption short enough to leave the card its own shape.",
             publishedAtMS: 0,
             reactionCount: reactions,
@@ -50,21 +54,9 @@ private func pills(in view: UIView) -> [PostMetaPillView] {
     return view.subviews.flatMap(pills(in:))
 }
 
-/// ⚠️ A CHIP IS A BOX ON THE ROW; a PILL is a box with a capsule.
-///
-/// Three of the preview's four wear one. The date does not — a capsule claims
-/// its contents can be pressed, and it is the one thing on that row that never
-/// will be — so it keeps the box and stands on a fading material instead.
-/// Tests about PLACEMENT want all four; tests about the capsule want three.
-private func chips(in view: UIView) -> [UIView] {
-    if view is PostMetaPillView || view is PostChipSlotView { return [view] }
-    return view.subviews.flatMap(chips(in:))
-}
-
-
 /// Whether `view` is on screen at all, which is a question about its ANCESTORS
-/// as much as itself: the pills live inside the preview, so a text row hides
-/// them by hiding the preview and never touches the pills themselves.
+/// as much as itself: the indicator lives inside the preview, so a text row
+/// hides it by hiding the preview and never touches the indicator itself.
 private func isVisible(_ view: UIView, within root: UIView) -> Bool {
     var node: UIView? = view
     while let current = node, current !== root.superview {
@@ -74,60 +66,48 @@ private func isVisible(_ view: UIView, within root: UIView) -> Bool {
     return true
 }
 
+private func visiblePills(in cell: PostGridListRowCell) -> [PostMetaPillView] {
+    pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
+}
+
 @MainActor
 struct MediaMetaPillPlacementTests {
-    /// The point of moving the metadata: a media card ENDS at its preview.
-    ///
-    /// Asserted as arithmetic rather than as a height, because the height
-    /// depends on the caption and the type size. The card closes at the same
-    /// inset it holds the preview off its sides by, which is what keeps the
-    /// curve concentric all the way round.
-    @Test func aMediaCardClosesAtItsPreview() throws {
+    /// The point of one closing line: a media card ends at it, under the
+    /// preview, at the same inset a text card keeps under its own.
+    @Test func aMediaCardClosesOnItsLineUnderThePreview() throws {
         let cell = row(kind: .photo)
         let preview = try #require(cell.mediaHeroRect)
-
-        #expect(abs(cell.bounds.height - preview.maxY - PostGridListRowCell.mediaInset) < 0.5)
+        let line = visiblePills(in: cell)
+        #expect(line.count == 2)
+        for pill in line {
+            let frame = pill.convert(pill.bounds, to: cell.contentView)
+            #expect(frame.minY >= preview.maxY + PostGridListRowCell.captionFollowGap - 0.5)
+            #expect(abs(cell.bounds.height - frame.maxY - PostGridListRowCell.metaBottomInset) < 0.5)
+        }
     }
 
-    /// And the line it replaced is GONE, not merely covered. The check is the
-    /// one above stated the other way round: a card still carrying a closing
-    /// line below its preview is ~28pt taller than one that is not, so a
-    /// duplicate would show up as slack under the media.
-    @Test func aMediaCardHasNoClosingLineUnderThePreview() throws {
-        let media = row(kind: .photo)
-        let preview = try #require(media.mediaHeroRect)
-        let slack = media.bounds.height - preview.maxY
-
-        #expect(slack < PostGridListRowCell.metaBottomInset + 20)
+    /// And the preview carries NO counters: the two capsules on a media card
+    /// are the same two a text card has, under the preview rather than on it.
+    @Test func thePreviewWearsNoCounters() throws {
+        let cell = row(kind: .photo)
+        let preview = try #require(cell.mediaHeroRect)
+        for pill in visiblePills(in: cell) {
+            let frame = pill.convert(pill.bounds, to: cell.contentView)
+            #expect(!frame.intersects(preview))
+        }
     }
 
-    /// ⚠️ A text row wears the SAME TWO CHIPS, at its own card's inset.
+    /// ⚠️ A text row wears the SAME line, at the caption's inset.
     ///
-    /// It used to close on a bare pair of grey labels, which was right while the
-    /// preview's chips were a legibility device and nothing more. They are
-    /// becoming buttons, and an affordance that appears only when the post
-    /// happens to carry a photograph is not one.
-    ///
-    /// The DATE is the deliberate exception and is asserted as such: it stays a
-    /// bare label, because a capsule on this card reads as a control and the
-    /// date is not one. Two chips, not three.
-    @Test func aTextCardWearsTheSameCountersInItsOwnColumn() {
+    /// Measured at the TRAILING edge: the counters close the row on both of a
+    /// card's shapes, and there is no date leading it any more — the date is
+    /// on the band's handle line.
+    @Test func aTextCardWearsTheSameLineInItsOwnColumn() {
         let cell = row(kind: .text)
-        let visible = pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
+        let visible = visiblePills(in: cell)
 
         #expect(cell.mediaHeroRect == nil)
         #expect(visible.count == 2)
-        // ⚠️ At the CAPTION's inset, not at the preview's furniture inset.
-        //
-        // Matching the media card's 26 would have been the tidy answer to "they
-        // are misaligned" and is the wrong one: that 26 is 12 to the preview
-        // plus 14 to clear its corner arc — a rule that exists because there is
-        // an arc. On a card with no preview it would only indent the closing
-        // line away from the caption above it, trading a real alignment for an
-        // abstract one.
-        //
-        // Measured at the TRAILING edge, which is the counters' side on both of
-        // a card's placements: the date leads and the numbers close the row.
         for pill in visible {
             let frame = pill.convert(pill.bounds, to: cell.contentView)
             #expect(cell.contentView.bounds.maxX - frame.maxX
@@ -139,86 +119,58 @@ struct MediaMetaPillPlacementTests {
         #expect(abs(trailing - PostGridListRowCell.captionInset) < 0.5)
     }
 
-    /// ⚠️ The closing line's INK is symmetric, which its constraints are not.
-    ///
-    /// Pinning the row at `captionInset` on both sides aligns the capsules'
-    /// EDGES with the caption and reads correctly as code. On screen a capsule's
-    /// number starts a pill's padding further in, so the ink ran 12 on the
-    /// date's side against 24 on the counters' and the date looked shoved
-    /// against the card.
-    ///
-    /// Measured off the DATE's own frame rather than the row's, because the row
-    /// is exactly the thing that was already symmetric while the card was not.
-    @Test func theClosingLinesDateIsInsetLikeAChipsText() throws {
-        let cell = row(kind: .text)
-        let age = PostMetadata.compactAge(ofMillis: 0)
-
-        func labels(_ view: UIView) -> [UILabel] {
-            if let label = view as? UILabel { return [label] }
-            return view.subviews.flatMap(labels)
+    /// The two shapes agree about the line: same capsules, same order
+    /// (comments then likes), same trailing inset, same distance from the
+    /// card's foot.
+    @Test func bothShapesCloseOnTheSameLine() {
+        let text = row(kind: .text)
+        let media = row(kind: .photo)
+        func line(_ cell: PostGridListRowCell) -> [(CGFloat, CGFloat)] {
+            visiblePills(in: cell)
+                .map { $0.convert($0.bounds, to: cell.contentView) }
+                .sorted { $0.minX < $1.minX }
+                .map { (cell.contentView.bounds.maxX - $0.maxX, cell.bounds.height - $0.maxY) }
         }
-        // ⚠️ Filtered by VISIBILITY, and it matters: the card builds both shapes
-        // and hides one, so the preview's own age label carries the same string
-        // from inside the hidden preview. Without this the test measured that
-        // one and failed by 101pt — which is the same trap the pill counts hit.
-        let date = try #require(
-            labels(cell.contentView).first {
-                $0.text == age && isVisible($0, within: cell.contentView)
-            }
-        )
-        let frame = date.convert(date.bounds, to: cell.contentView)
-        let dateGap = frame.minX
-
-        // The OUTERMOST capsule, not the first one found: the counters sit at
-        // the trailing edge and their ink is what the date is compared to.
-        let chip = try #require(
-            pills(in: cell.contentView)
-                .filter { isVisible($0, within: cell.contentView) }
-                .max { $0.convert($0.bounds, to: cell.contentView).maxX
-                        < $1.convert($1.bounds, to: cell.contentView).maxX }
-        )
-        let countersGap = cell.contentView.bounds.maxX
-            - chip.convert(chip.bounds, to: cell.contentView).maxX
-            + PostMetaPillView.insets.trailing
-
-        #expect(abs(dateGap - countersGap) < 1)
-        // And it really moved: the naive pinning would put it at the row's own
-        // inset, which is a pill's padding closer to the edge.
-        #expect(dateGap > PostGridListRowCell.captionInset + 1)
+        let textLine = line(text)
+        let mediaLine = line(media)
+        #expect(textLine.count == mediaLine.count)
+        for (a, b) in zip(textLine, mediaLine) {
+            #expect(abs(a.0 - b.0) < 0.5)
+            #expect(abs(a.1 - b.1) < 0.5)
+        }
     }
 
-    /// Every chip rests on the preview's bottom edge — the DATE leading, the
-    /// counters closing the row at the trailing edge.
-    ///
-    /// ⚠️ Which end each lands on is asserted by IDENTITY, not by position
-    /// alone: "leftmost sits at the leading inset" is true of any order, so it
-    /// would have gone on passing when the row was reversed. The date is the
-    /// one chip with no capsule, which is exactly what tells them apart.
-    @Test func thePillsRestOnThePreviewsBottomEdge() throws {
-        let cell = row(kind: .photo)
+    /// The page indicator is the preview's one piece of furniture, on its
+    /// bottom trailing corner at the furniture inset, and a pill tall so it
+    /// reads as the same kind of chip as the line below.
+    @Test func theIndicatorRestsOnThePreviewsBottomTrailingCorner() throws {
+        let cell = row(kind: .photo, pages: 3)
         let preview = try #require(cell.mediaHeroRect)
-        let visible = chips(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
-        // Likes, comments, age. No indicator: this post is one photograph.
-        #expect(visible.count == 3)
-
+        func indicators(_ view: UIView) -> [MediaPageIndicatorView] {
+            if let chip = view as? MediaPageIndicatorView { return [chip] }
+            return view.subviews.flatMap(indicators)
+        }
+        let chip = try #require(
+            indicators(cell.contentView).first { isVisible($0, within: cell.contentView) }
+        )
+        let frame = chip.convert(chip.bounds, to: cell.contentView)
         let inset = PostGridListRowCell.mediaFurnitureInset
-        for pill in visible {
-            let frame = pill.convert(pill.bounds, to: cell.contentView)
-            #expect(abs(preview.maxY - frame.maxY - inset) < 0.5)
+        #expect(abs(preview.maxY - frame.maxY - inset) < 0.5)
+        #expect(abs(frame.height - PostMetaPillView.height) < 0.5)
+        // A single-media row's box is the preview; the chip sits at its
+        // trailing furniture inset. (A collection's page is narrower than
+        // the box by the peek, so the chip is measured against the box.)
+        #expect(frame.maxX <= cell.bounds.width - PostGridListRowCell.mediaInset - inset + 0.5)
+    }
+
+    /// A single photograph shows no indicator at all.
+    @Test func aSinglePhotographHasNoIndicator() {
+        let cell = row(kind: .photo)
+        func indicators(_ view: UIView) -> [MediaPageIndicatorView] {
+            if let chip = view as? MediaPageIndicatorView { return [chip] }
+            return view.subviews.flatMap(indicators)
         }
-        let ordered = visible.sorted {
-            $0.convert($0.bounds, to: cell.contentView).minX
-                < $1.convert($1.bounds, to: cell.contentView).minX
-        }
-        let frames = ordered.map { $0.convert($0.bounds, to: cell.contentView) }
-        #expect(abs(frames[0].minX - preview.minX - inset) < 0.5)
-        #expect(abs(preview.maxX - frames[2].maxX - inset) < 0.5)
-        // The date leads and wears no capsule; the counters close the row.
-        #expect(ordered[0] is PostChipSlotView)
-        #expect(ordered[1] is PostMetaPillView)
-        #expect(ordered[2] is PostMetaPillView)
-        // And they never touch: one gap between the two counters.
-        #expect(frames[2].minX - frames[1].maxX >= PostGridListRowCell.chipGap - 0.5)
+        #expect(indicators(cell.contentView).allSatisfy { !isVisible($0, within: cell.contentView) })
     }
 }
 
@@ -252,7 +204,7 @@ struct TileMetaTests {
 
         let visible = metrics(cell.contentView).filter { isVisible($0, within: cell.contentView) }
         #expect(visible.count == 1)
-        // And it closes the row, like the counters on both of a card's shapes.
+        // And it closes the row, like the counters on a card.
         let frame = visible[0].convert(visible[0].bounds, to: cell.contentView)
         #expect(cell.contentView.bounds.maxX - frame.maxX < frame.minX)
     }
@@ -263,51 +215,11 @@ struct MediaMetaPillContentTests {
     /// A pill tracks its contents' ANSWER, not their presence.
     ///
     /// The counters hide themselves when the post carries no number — absence,
-    /// not an asserted zero — and the leftover here is not a dimmed glyph but a
-    /// filled capsule sitting on the photo.
-    @Test func aPostWithNoCountersDrawsNoEmptyCapsule() throws {
+    /// not an asserted zero — and the leftover would be a filled capsule with
+    /// nothing in it.
+    @Test func aPostWithNoCountersDrawsNoEmptyCapsule() {
         let cell = row(kind: .photo, reactions: nil, comments: nil, views: nil)
-        let capsules = pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
-        let boxes = chips(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
-
-        // NO capsule at all — and the age still drawn, in its own bare box at
-        // the LEADING edge. Counting boxes and capsules separately is the point
-        // of the test: a regression that gave the date a capsule back, or one
-        // that dropped the date with the counters, moves exactly one of them.
-        #expect(capsules.isEmpty)
-        #expect(boxes.count == 1)
-        let preview = try #require(cell.mediaHeroRect)
-        let frame = boxes[0].convert(boxes[0].bounds, to: cell.contentView)
-        #expect(abs(frame.minX - preview.minX - PostGridListRowCell.mediaFurnitureInset) < 0.5)
-    }
-
-    /// ⚠️ THE PREVIEW'S DATE IS WHITE ON A BLACK HALO, and the halo is not
-    /// optional decoration — it is the only thing holding the word up.
-    ///
-    /// The date is the one piece of the row with no ground under it. An earlier
-    /// version sampled the picture and chose a side; `MediaDateInk` records why
-    /// that was dropped. What replaced it only works as a PAIR, so both halves
-    /// are asserted here: a white word with the shadow turned off is invisible
-    /// on any bright photograph, and nothing else in the cell would notice.
-    @Test func thePreviewsDateIsWhiteAndCarriesItsOwnHalo() throws {
-        let cell = row(kind: .photo)
-        let age = PostMetadata.compactAge(ofMillis: 0)
-        func labels(_ view: UIView) -> [UILabel] {
-            if let label = view as? UILabel { return [label] }
-            return view.subviews.flatMap(labels)
-        }
-        let date = try #require(
-            labels(cell.contentView).first {
-                $0.text == age && isVisible($0, within: cell.contentView)
-            }
-        )
-
-        #expect(date.textColor == MediaDateInk.colour)
-        #expect(date.layer.shadowColor == MediaDateInk.halo.cgColor)
-        #expect(date.layer.shadowOpacity > 0)
-        #expect(date.layer.shadowRadius > 0)
-        // And the halo really is the other side, whatever the ink becomes.
-        #expect(MediaDateInk.halo != MediaDateInk.colour)
+        #expect(visiblePills(in: cell).isEmpty)
     }
 
     /// ⚠️ EACH CHIP ANSWERS FOR ITS OWN NUMBER.
@@ -317,14 +229,21 @@ struct MediaMetaPillContentTests {
     /// half its contents missing. Views are carried by the model and rendered on
     /// no card at all.
     @Test func eachCounterEarnsItsOwnCapsule() {
-        func shown(_ cell: PostGridListRowCell) -> Int {
-            pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }.count
-        }
+        #expect(visiblePills(in: row(kind: .photo, reactions: nil, comments: nil, views: 4_200)).count == 0)
+        #expect(visiblePills(in: row(kind: .photo, reactions: 160, comments: nil, views: nil)).count == 1)
+        #expect(visiblePills(in: row(kind: .photo, reactions: 160, comments: 12, views: nil)).count == 2)
+    }
 
-        // The date is not counted here — it wears no capsule.
-        #expect(shown(row(kind: .photo, reactions: nil, comments: nil, views: 4_200)) == 0)
-        #expect(shown(row(kind: .photo, reactions: 160, comments: nil, views: nil)) == 1)
-        #expect(shown(row(kind: .photo, reactions: 160, comments: 12, views: nil)) == 2)
+    /// The controls join the line only when the host wired them — a capsule
+    /// per control, beside the counters.
+    @Test func wiredControlsJoinTheLineOneCapsuleEach() {
+        let cell = row(kind: .text)
+        #expect(visiblePills(in: cell).count == 2)
+        cell.onBookmarkTapped = {}
+        #expect(visiblePills(in: cell).count == 3)
+        cell.onRepostTapped = {}
+        #expect(visiblePills(in: cell).count == 4)
+        #expect(visiblePills(in: cell).filter { $0 is PostActionPillView }.count == 2)
     }
 
     /// The rule, tested where it lives rather than only through a cell.
@@ -386,10 +305,11 @@ struct MediaMetaPillContentTests {
 /// turn. Along a straight edge there is no such constraint at all.
 ///
 /// So the preview is concentric with the card, whose corners it sits on; and
-/// the chips are capsules, because they are held clear of the preview's corners
-/// and meet nothing but flat edge. The second half is the one a test has to
-/// carry: it is invisible, it is what the capsule is standing on, and the
-/// clearance would be the first thing "tidied" by anyone tightening the inset.
+/// the indicator is a capsule, because it is held clear of the preview's
+/// corners and meets nothing but flat edge. The second half is the one a test
+/// has to carry: it is invisible, it is what the capsule is standing on, and
+/// the clearance would be the first thing "tidied" by anyone tightening the
+/// inset.
 @MainActor
 struct CardShapeSystemTests {
     @Test func thePreviewIsConcentricWithTheCard() {
@@ -398,170 +318,15 @@ struct CardShapeSystemTests {
     }
 
     /// The preview's edges fall on the caption's, which is the whole reason
-    /// `contentInset` is one constant serving both.
-    @Test func thePreviewIsInsetLikeTheText() {
+    /// the inset is shared.
+    @Test func thePreviewSitsOnTheCaptionsColumn() {
         #expect(PostGridListRowCell.mediaInset == PostGridListRowCell.captionInset)
     }
 
-    /// ⚠️ The clearance the capsules rest on, stated as the inequality that
-    /// matters rather than as the value that satisfies it today.
-    ///
-    /// A rounded rect's corner arc occupies a box of its own radius. A chip held
-    /// further in than that from BOTH edges never enters it, so its own corners
-    /// have no curve to agree with. Tighten this below the preview's radius and
-    /// the chips move back inside the arc, where a ~10.5pt capsule against a
-    /// 10pt corner is the equal-radii case: an 8pt band on the straights opening
-    /// to 11.5 at 45°.
-    @Test func theChipsAreHeldClearOfThePreviewsCornerArcs() {
-        #expect(PostGridListRowCell.mediaFurnitureInset
-            >= PostGridListRowCell.mediaCornerRadius)
-    }
-
-    /// And they really are laid out there, not merely allowed to be — measured
-    /// off the realised frames, since the constant only governs the constraints.
-    @Test func theChipsLandOutsideTheArcs() throws {
-        let cell = row(kind: .photo)
-        let preview = try #require(cell.mediaHeroRect)
-        let arc = PostGridListRowCell.mediaCornerRadius
-        let visible = chips(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
-        #expect(visible.count == 3)
-
-        // Half a point of slack, and it is not decoration: these are differences
-        // of converted rects, so an exact `>=` compares 13.999999999999972
-        // against 14 and fails on a layout that is right. Measured, not assumed
-        // — that was the first run of this test.
-        for pill in visible {
-            let frame = pill.convert(pill.bounds, to: cell.contentView)
-            #expect(frame.minX - preview.minX >= arc - 0.5)
-            #expect(preview.maxX - frame.maxX >= arc - 0.5)
-            #expect(preview.maxY - frame.maxY >= arc - 0.5)
-        }
-    }
-
-    /// The chips are CAPSULES — pinned so the choice survives someone reading
-    /// the concentric rule off the preview above them and "correcting" it.
-    ///
-    /// Read from `effectiveRadius` rather than from the corner configuration:
-    /// `.capsule()` resolves itself against the bounds, so the only honest
-    /// question is what UIKit actually drew.
-    @Test func theChipsAreCapsules() throws {
-        let cell = row(kind: .photo)
-        let pill = try #require(
-            pills(in: cell.contentView).first { isVisible($0, within: cell.contentView) }
-        )
-
-        #expect(abs(pill.effectiveRadius(corner: .allCorners) - pill.bounds.height / 2) < 0.5)
-        // ⚠️ The second half, and the assertion above is worth little without
-        // it. A resolved radius says the shape was CONFIGURED, not that it was
-        // drawn: `UIGlassEffect` draws its own shape, a `UIBlurEffect` backdrop
-        // fills the bounds and is clipped by the layer or not at all. Swapping
-        // one for the other turned every capsule back into a rectangle while
-        // this test stayed green — caught in a 3x crop of a screenshot, not
-        // here.
-        #expect(pill.clipsToBounds)
-    }
-
-    /// ⚠️ The band's cluster pill sits IN the card's top-right corner, and its
-    /// curve is the concentric answer to that corner's.
-    ///
-    /// It was centred on the avatar, which put it below the arc where its curve
-    /// answered to nothing. Inset from both edges by `contentInset`, the rule
-    /// says its radius should be the card's less that inset — 26 - 12 = 14 —
-    /// and a capsule this tall resolves to 14.5. It is the right shape already;
-    /// what this pins is that it stays in the place where that is TRUE, because
-    /// nothing about the capsule itself would change if someone re-centred it.
-    @Test func theClusterPillTurnsWithTheCardsCorner() throws {
-        let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 400))
-        cell.configure(
-            with: GalleryPost(
-                id: PostID("p"), kind: .photo, isRepost: false,
-                thumbnailURL: nil, caption: "Short.", publishedAtMS: 0,
-                authorID: ProfileID("a"), authorName: "Sofía Reyes", authorHandle: "sofia.reyes"
-            ),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
-        )
-        cell.onRepostTapped = {}
-        cell.onBookmarkTapped = {}
-        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
-        attributes.frame = cell.frame
-        cell.bounds.size.height = cell.preferredLayoutAttributesFitting(attributes).frame.height
-        cell.layoutIfNeeded()
-
-        // The card is pinned to the content view, so the content view IS the
-        // card's box.
-        // Found by ANCESTRY, not by `superview`: the band nests its cluster, and
-        // a direct-parent check silently stopped finding this pill the moment
-        // the "..." moved out of it and a stack appeared in between.
-        func isInsideBand(_ view: UIView) -> Bool {
-            sequence(first: view, next: \.superview).contains { $0 is PostAuthorBandView }
-        }
-        let cluster = try #require(pills(in: cell.contentView).first(where: isInsideBand))
-        let frame = cluster.convert(cluster.bounds, to: cell.contentView)
-        let inset = PostGridListRowCell.contentInset
-
-        // The PLACEMENT is what the layout controls, and it is exact.
-        #expect(abs(frame.minY - inset) < 0.5)
-        #expect(abs(cell.contentView.bounds.maxX - frame.maxX - inset) < 0.5)
-
-        // ⚠️ The radius is APPROXIMATELY concentric, and the tolerance is the
-        // mechanism rather than a fudge.
-        //
-        // A capsule's radius is half its height, and that height is a rounding
-        // of the footnote's line height — so it moves with Dynamic Type while
-        // the card's corner does not. The two agree to within a point at any
-        // reasonable text size and exactly at none: 14.5 against 14 here, 15
-        // against 14 on CI, where the same style resolved a point taller.
-        //
-        // Asserted at half a point, this test was red on CI and green locally
-        // for a layout that was correct in both. What the design claims is that
-        // the capsule ALREADY has the right shape for that corner — not that it
-        // is pinned to a number the type system is free to move.
-        let concentric = PostGridListRowCell.cardCornerRadius - inset
-        let radius = cluster.effectiveRadius(corner: .allCorners)
-        #expect(abs(radius - concentric) <= 1)
-        // And it really is a capsule, which is where that radius comes from.
-        #expect(abs(radius - cluster.bounds.height / 2) < 0.5)
-    }
-}
-
-@MainActor
-struct MediaMetaPillConcealmentTests {
-    /// CONCEAL EXACTLY WHAT THE FLIGHT REPRODUCES, and the pills are part of
-    /// what it does not.
-    ///
-    /// A flight carries the preview's image and nothing else, so the chips
-    /// resting on it have to leave with it — a capsule left floating on an
-    /// empty rounded box for the length of a flight is the caption-vanishing
-    /// defect at a smaller scale. They get there through the preview's own
-    /// alpha, which is the whole reason they are built inside it: there is no
-    /// second channel that could fall out of step.
-    @Test func thePillsLeaveWithThePreviewTheyRestOn() {
-        let cell = row(kind: .photo)
-        // The chips ON SCREEN: a single-media row also holds a page indicator,
-        // built for every row and hidden unless the post is a collection.
-        // Chips, not capsules: the date wears no capsule and still has to leave
-        // with the picture.
-        let all = chips(in: cell.contentView)
-            .filter { isVisible($0, within: cell.contentView) }
-        // Likes, comments, age.
-        #expect(all.count == 3)
-
-        cell.setHeroMediaConcealed(true)
-        #expect(all.allSatisfy { !isVisible($0, within: cell.contentView) })
-
-        cell.setHeroMediaConcealed(false)
-        #expect(all.allSatisfy { isVisible($0, within: cell.contentView) })
-    }
-
-    /// And the row still answers where its media is while they are gone — the
-    /// rect the DISMISSAL flies home to, which is why concealment is alpha
-    /// rather than `isHidden` in the first place.
-    @Test func aConcealedPreviewStillReportsItsRect() {
-        let cell = row(kind: .photo)
-        let resting = cell.mediaHeroRect
-
-        cell.setHeroMediaConcealed(true)
-
-        #expect(cell.mediaHeroRect == resting)
+    /// Furniture on the preview starts outside its corner arcs, whatever the
+    /// padding is — a floor, not a preference.
+    @Test func furnitureClearsThePreviewsCorners() {
+        #expect(PostGridListRowCell.mediaFurnitureInset >= PostGridListRowCell.mediaCornerRadius)
+        #expect(PostGridListRowCell.mediaFurnitureInset >= PostGridListRowCell.contentInset)
     }
 }

@@ -64,11 +64,12 @@ struct AuthorBandRevealTests {
         return cell
     }
 
-    /// A post with no author identity has no band, so its caption starts at the
-    /// card's own inset and the transition needs no offset at all — the
-    /// behaviour every profile gallery still gets.
-    @Test func anUnauthoredRowHasNoCaptionOffset() {
-        #expect(Self.sized(Self.short, authored: false).revealCaptionTop == 0)
+    /// A post with no author identity still wears a band — the BARE one, a
+    /// pill tall, carrying the date — so its caption is offset by that much
+    /// and no more: the behaviour a profile's own rows get.
+    @Test func anUnauthoredRowOffsetsByTheBareBand() {
+        #expect(Self.sized(Self.short, authored: false).revealCaptionTop
+            == PostAuthorBandView.bareHeight + PostGridListRowCell.authorFollowGap)
     }
 
     /// An authored one offsets by the disc and the gap under it, exactly.
@@ -86,7 +87,8 @@ struct AuthorBandRevealTests {
     @Test func theBandGrowsTheCardByTheOffsetItDeclares() {
         let bare = Self.sized(Self.short, authored: false)
         let banded = Self.sized(Self.short, authored: true)
-        #expect(abs((banded.bounds.height - bare.bounds.height) - banded.revealCaptionTop) < 1)
+        #expect(abs((banded.bounds.height - bare.bounds.height)
+            - (banded.revealCaptionTop - bare.revealCaptionTop)) < 1)
     }
 
     /// And the cut does not move, because it is measured in the DESTINATION's

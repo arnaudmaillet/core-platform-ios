@@ -197,25 +197,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     ///    hosted view is just a subview it has to carry, which is what makes
     ///    custom bar items snap while native ones interpolate.
     ///
-    /// Identity matters as much as nativeness. `applyNavigationState` runs on
-    /// every `viewWillAppear`, including the one a *pop* delivers — and a fresh
-    /// `UIBarButtonItem` handed to the bar mid-transition is not a state change
-    /// UIKit can animate either: it discards the outgoing item's rendered
-    /// content and lays the replacement out from scratch, so the capsule
-    /// arrives empty and its title fades in after the transition settles.
-    /// Recorded at 30fps on the pop back from the relationships screen: six
-    /// frames of a blank glass pill, then a late text fade. So this item is
-    /// created once and only ever retitled.
-    ///
-    /// The tap is a `UIAction` primary action rather than a target/selector —
-    /// same native item, no `@objc` shim.
-    private lazy var followActionItem = UIBarButtonItem(
-        title: "Follow",
-        image: nil,
-        primaryAction: UIAction { [weak self] _ in self?.viewModel.toggleFollow() },
-        menu: nil
-    )
-
     /// The item set last handed to the navigation item, so a re-entrant apply
     /// that resolves to the same items touches nothing. `UIBarButtonItem`
     /// inherits `NSObject`'s identity equality, so this compares by reference —
@@ -383,6 +364,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         headerView.makeMapPinMenu = { [weak self] in
             self?.makeMapFavoriteMenu() ?? UIMenu()
+        }
+        headerView.onFollowTapped = { [weak self] in
+            self?.viewModel.toggleFollow()
         }
         headerView.onMessageTapped = { [weak self] in
             self?.viewModel.messageTapped()
@@ -1811,17 +1795,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // — and the one thing in this slot that UIKit could not animate across
         // a transition. An absent item is the honest native answer for "no
         // relationship applies".
-        let action: UIBarButtonItem? = switch state {
-        case .hidden: nil
-        case .follow, .following: followActionItem
-        case .edit: nil
-        }
-        if state == .follow || state == .following {
-            let resolvedTitle = state == .follow ? "Follow" : "Following"
-            if followActionItem.title != resolvedTitle {
-                followActionItem.title = resolvedTitle
-            }
-        }
+        // ⚠️ NO RELATIONSHIP ITEM UP HERE ANY MORE. Follow / Following sits
+        // in the header's tray beside Message — see
+        // `ProfileHeaderView.configureAction` — so the bar carries only the
+        // own-profile chrome and whatever the shell injects. `state` still
+        // arrives, because a rebuild is keyed on it and the guard below
+        // decides whether anything actually changed.
+        _ = state
         // The switcher sits in the LEADING slot, opposite the gear.
         //
         // Safe here and only here: the item exists solely on the canonical own
@@ -1856,7 +1836,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // Relationship action for other users; the gear for own profile (where
         // `action` is nil).
         var items: [UIBarButtonItem] = []
-        if let action { items.append(action) }
         if let settingsItem { items.append(settingsItem) }
         // The switcher, on the own profile only — see the note above for why it
         // is not in the leading group.
@@ -1903,15 +1882,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// simulator cannot tap, so this is the only way to prove the wiring
     /// survived the conversion off target/action.
     private func qaTapFollowItem() {
-        guard let action = followActionItem.primaryAction else {
-            print("PROFILE-FOLLOW-TAP no primary action on the item")
+        print("PROFILE-FOLLOW-TAP before=\(followButtonState)")
+        guard headerView.debugTapFollow() else {
+            print("PROFILE-FOLLOW-TAP the header shows no follow capsule")
             return
         }
-        print("PROFILE-FOLLOW-TAP before=\(followButtonState) customView=\(followActionItem.customView != nil)")
-        action.performWithSender(followActionItem, target: nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self else { return }
-            print("PROFILE-FOLLOW-TAP after=\(self.followButtonState) title=\(self.followActionItem.title ?? "nil")")
+            print("PROFILE-FOLLOW-TAP after=\(self.followButtonState)")
         }
     }
     #endif
@@ -2509,6 +2487,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // the whole screen blinking over at once.
             headerView.configure(with: model, staggered: isSwitchingProfile)
             headerView.setRedacted(false, animated: view.window != nil)
+            // The gallery learns whose it is from the same model: the subject's
+            // own rows then wear the bare band — see
+            // `ProfileGalleryGridView.showsAuthorIdentity(for:)`.
+            galleryPager.subjectID = model.id
 
         case .failed(let message):
             pullIndicator.endRefreshing()

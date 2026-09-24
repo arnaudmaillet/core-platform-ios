@@ -56,6 +56,12 @@ final class ProfileGalleryGridView: UIView {
     /// What a row's "..." offers. Asked at press time, per row; the screen
     /// decides, because this view knows nothing about what can be serviced.
     var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
+    /// Whose profile this gallery belongs to, so that person's own rows can
+    /// drop the identity the screen already states. Nil until the profile
+    /// resolves; every row names its author until then.
+    var subjectID: ProfileID? {
+        didSet { if subjectID != oldValue { collectionView.reloadData() } }
+    }
 
     /// Everything a host needs to build one row's menu.
     struct AuthorMenuContext {
@@ -388,7 +394,8 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             cell.configure(
                 with: post,
                 imagePipeline: imagePipeline,
-                captionExpanded: captionExpansion.isExpanded(post.id)
+                captionExpanded: captionExpansion.isExpanded(post.id),
+                showsAuthorIdentity: showsAuthorIdentity(for: post)
             )
             // Captured by POST, never by index path: the row that asked can
             // have moved by the time the answer is applied.
@@ -701,6 +708,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // row.
             captionExpanded: captionExpansion.isExpanded(postID),
             showsAuthorMenu: showsAuthorMenu(for: post),
+            showsAuthorIdentity: showsAuthorIdentity(for: post),
             // ⚠️ NEITHER control, because this surface wires neither: nothing
             // here sets `onRepostTapped` or `onBookmarkTapped`, so the row's
             // header carries the "..." alone and a stand-in drawing a repost
@@ -727,6 +735,19 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     ///
     /// The provider rather than the realized cell, because a row that scrolled
     /// out still has to produce a card and cannot be asked what it is showing.
+    /// Whether a row names its author above the caption.
+    ///
+    /// Not on the profile's OWN posts: the screen is already under that
+    /// person's name and picture, and a card that repeats both above every
+    /// post is a row of headers saying what the header said. The band then
+    /// wears only the date and the "...". Anyone else's post on this screen —
+    /// the Tagged tab is other people's — keeps its identity, because there
+    /// the name is news.
+    private func showsAuthorIdentity(for post: GalleryPost) -> Bool {
+        guard let subjectID, let authorID = post.authorID else { return true }
+        return authorID != subjectID
+    }
+
     private func showsAuthorMenu(for post: GalleryPost) -> Bool {
         guard let authorID = post.authorID, let authorMenuActions else { return false }
         // The anchor is only ever read to place a popover, and nothing is being
@@ -742,7 +763,10 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// Read from the POST rather than from the cell, so it answers for a row
     /// that has scrolled out as readily as for one on screen.
     func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
-        posts.first { $0.id == postID }.flatMap(PostAuthorBandView.Model.init(post:))
+        if let model = (cell(for: postID) as? PostGridListRowCell)?.authorBandModel { return model }
+        return posts.first { $0.id == postID }.map {
+            PostAuthorBandView.Model(post: $0, showsIdentity: showsAuthorIdentity(for: $0))
+        }
     }
 
 

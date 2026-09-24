@@ -18,14 +18,14 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     public let isVerified: Bool
     /// Abbreviated counts ("1.2K"), or "—" when the counter service was
     /// unreachable — never a misleading "0".
-    public let followerText: String
-    public let followingText: String
+    public let followerText: String?
+    public let followingText: String?
     /// Total reactions received across the profile's posts. Served only by
     /// counter.v1; "—" wherever that projection isn't live.
-    public let reactionsText: String
+    public let reactionsText: String?
     /// Total content views. Served only by counter.v1; "—" wherever that
     /// projection isn't live (it isn't on the fleet or the mock today).
-    public let viewsText: String
+    public let viewsText: String?
     /// The immersive banner's media. profile.v1 has no dedicated cover asset
     /// yet, so this mirrors the avatar image until the contract grows one —
     /// swap the source here, and the header needs no change.
@@ -75,11 +75,14 @@ public struct ProfileDisplayModel: Equatable, Sendable {
 
     /// Renders a count estimate: exact → "1.2K", bounded fallback → "1.2K+",
     /// unreadable → "—" (never a misleading "0").
-    static func format(_ estimate: CountEstimate) -> String {
+    /// Nil for a counter the backend did not project: the column is then not
+    /// drawn, rather than shown with a dash that reads as a defect. See
+    /// `ProfileStatView.setValue`.
+    static func format(_ estimate: CountEstimate) -> String? {
         switch estimate {
         case .exact(let value): abbreviate(value)
         case .atLeast(let value): abbreviate(value) + "+"
-        case .unavailable: "—"
+        case .unavailable: nil
         }
     }
 

@@ -56,11 +56,13 @@ struct DismissalReturnMatrixTests {
         }
     }
 
-    private func page(style: ForYouGridPage.Style, count: Int = 30) -> ForYouGridPage {
+    private func page(
+        style: ForYouGridPage.Style, count: Int = 30, height: CGFloat = 852
+    ) -> ForYouGridPage {
         let page = ForYouGridPage(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style
         )
-        page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        page.frame = CGRect(x: 0, y: 0, width: 393, height: height)
         page.render(.content(corpus(count)))
         page.layoutIfNeeded()
         return page
@@ -571,7 +573,10 @@ struct DismissalReturnMatrixTests {
     /// The flight's own answer, end to end: a source anchored to a post with no
     /// media still reports the row rather than the middle of the screen.
     @Test func aFlightAnchoredToATextRowLandsOnTheRow() {
-        let page = page(style: .list)
+        // Tall enough that the THIRD row is realized: two square media cards,
+        // each with its closing line, run past a phone's height, and a row
+        // that is not on screen has no rect to land on by design.
+        let page = page(style: .list, height: 1400)
         let text = page.posts[2].id
         #expect(page.posts[2].kind == .text)
         #expect(page.hero(for: text, in: page) == nil, "a text row has no hero — the premise")

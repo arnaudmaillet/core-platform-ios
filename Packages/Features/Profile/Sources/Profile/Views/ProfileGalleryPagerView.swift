@@ -85,6 +85,11 @@ final class ProfileGalleryPagerView: UIView {
     /// the pill keeps following it.
     private var isScrubbing = false
     private let pages: [ProfileGalleryGridView]
+    /// Whose profile this is — handed to every page, so that person's own
+    /// rows can drop the identity the header already states.
+    var subjectID: ProfileID? {
+        didSet { for page in pages { page.subjectID = subjectID } }
+    }
     private var activeIndex = 0 {
         didSet { syncAutoplay() }
     }

@@ -209,9 +209,9 @@ public final class ProfileRelationshipsViewModel {
     private func segmentTitle(for direction: RelationshipDirection) -> String {
         let noun = Self.noun(for: direction)
         guard direction != .friends,
-              let count = counts[direction], count != .unavailable
+              let count = counts[direction], let formatted = ProfileDisplayModel.format(count)
         else { return noun }
-        return "\(ProfileDisplayModel.format(count)) \(noun)"
+        return "\(formatted) \(noun)"
     }
 
     private static func noun(for direction: RelationshipDirection) -> String {
