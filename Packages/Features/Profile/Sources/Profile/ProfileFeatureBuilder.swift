@@ -119,9 +119,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             videoPlayback: videoPlayback,
             shareTargeting: shareTargeting,
             onLogout: onLogout,
-            makeEditViewController: { [imagePipeline] onSaved in
+            makeEditViewController: { [imagePipeline] profile, onSaved in
                 let editor = EditProfileViewController(
-                    viewModel: EditProfileViewModel(repository: repository, onSaved: onSaved),
+                    viewModel: EditProfileViewModel(repository: repository, seed: profile, onSaved: onSaved),
                     imagePipeline: imagePipeline
                 )
                 editor.onOpenPrivacy = { [weak editor] in

@@ -52,6 +52,8 @@ public final class EditProfileViewModel {
     /// It does NOT dismiss the editor — edits happen per-field and the user
     /// stays on the list until they navigate back themselves.
     private let onSaved: () -> Void
+    /// The profile the screen that opened this one already held, if any.
+    private let seed: UserProfile?
 
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
@@ -63,14 +65,38 @@ public final class EditProfileViewModel {
     /// another (never dropped) so two quick field edits both persist, in order.
     private var saveTask: Task<Void, Never>?
 
-    public init(repository: any ProfileProviding, onSaved: @escaping () -> Void) {
+    public init(repository: any ProfileProviding, seed: UserProfile? = nil, onSaved: @escaping () -> Void) {
         self.repository = repository
+        self.seed = seed
         self.onSaved = onSaved
     }
 
     // MARK: - Load
 
-    public func viewDidLoad() { load() }
+    /// ⚠️ **SEEDED, THE FORM DOES NOT FETCH AT ALL (charter P7).** The
+    /// profile screen fetched this profile seconds ago and the editor used
+    /// to fetch it again behind a skeleton. With a seed the fields are ready
+    /// at frame 0 — and there is no refresh behind them on purpose: a fetch
+    /// landing after the viewer started typing would overwrite their edits.
+    /// A pull-to-retry (`reload`) still fetches.
+    public func viewDidLoad() {
+        if let seed {
+            onAvatarURLChange?(seed.avatarURL)
+            phase = .ready(Self.fields(from: seed))
+        } else {
+            load()
+        }
+    }
+
+    private static func fields(from profile: UserProfile) -> Fields {
+        Fields(
+            displayName: profile.displayName,
+            username: profile.handle,
+            bio: profile.bio,
+            website: profile.websiteURL?.absoluteString ?? "",
+            links: profile.customLinks
+        )
+    }
 
     /// Re-fetches authoritative state — used to recover after a failed save.
     public func reload() { load() }
@@ -81,13 +107,7 @@ public final class EditProfileViewModel {
             do {
                 let profile = try await self.repository.currentUserProfile()
                 self.onAvatarURLChange?(profile.avatarURL)
-                self.phase = .ready(Fields(
-                    displayName: profile.displayName,
-                    username: profile.handle,
-                    bio: profile.bio,
-                    website: profile.websiteURL?.absoluteString ?? "",
-                    links: profile.customLinks
-                ))
+                self.phase = .ready(Self.fields(from: profile))
             } catch {
                 self.phase = .failed(message: "Couldn't load your profile.")
             }
