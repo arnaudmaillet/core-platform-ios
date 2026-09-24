@@ -109,8 +109,10 @@ final class PresentationBudgetUITests: XCTestCase {
               ceilingMs: 500, trackedBy: "charter PR 5"),
         Route("+ → text post", ["-select-tab", "1"],
               ceilingMs: 550, trackedBy: "charter PR 5c", drive: createMenu("Text Post")),
+        // PR 2 (the picker's library off the main actor): 514 → ~200 ms
+        // under XCUITest. The remaining cost is the sheet's own presentation.
         Route("+ → upload media", ["-select-tab", "1"],
-              ceilingMs: 800, trackedBy: "charter PR 2", drive: createMenu("Upload Media")),
+              ceilingMs: 320, trackedBy: "charter PR 2 (done); what remains is the sheet", drive: createMenu("Upload Media")),
     ]
 
     /// A route is opened this many times and judged on its BEST run: a turn's
