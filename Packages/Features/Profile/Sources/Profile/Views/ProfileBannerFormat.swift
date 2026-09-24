@@ -34,9 +34,8 @@ import Foundation
 /// portrait one a poster: a setting would add a menu and, worse, a picture
 /// cropped into the wrong shape. A square is a poster — it is what every
 /// banner was before the band existed, and a square cropped to a strip
-/// loses the subject's head or feet. A build can force either with
-/// `-profile-banner band|poster|none` for QA — `none` being what a profile
-/// with no picture gets, which every mock profile has one of.
+/// loses the subject's head or feet. The mock corpus seeds all three
+/// shapes, so each can be looked at without forcing anything.
 enum ProfileBannerFormat: Equatable, Sendable {
     case band
     case poster
@@ -55,23 +54,4 @@ enum ProfileBannerFormat: Equatable, Sendable {
     /// What a profile shows before its picture has said anything: the
     /// poster, which is the shape the header had before there were two.
     static let unresolved: ProfileBannerFormat = .poster
-
-    #if DEBUG
-    /// `-profile-banner band|poster|none`: forces the shape whatever the
-    /// picture is, so any can be looked at on a corpus whose pictures happen
-    /// to be all one shape.
-    static var debugOverride: ProfileBannerFormat? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-profile-banner"), index + 1 < arguments.count
-        else { return nil }
-        // ⚠️ Spelled in full: in an optional context `.none` is `Optional.none`
-        // — nil — and the case silently vanished.
-        switch arguments[index + 1] {
-        case "band": return ProfileBannerFormat.band
-        case "poster": return ProfileBannerFormat.poster
-        case "none": return ProfileBannerFormat.none
-        default: return nil
-        }
-    }
-    #endif
 }

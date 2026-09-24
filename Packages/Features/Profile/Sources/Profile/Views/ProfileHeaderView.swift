@@ -54,9 +54,10 @@ final class ProfileHeaderView: UIView {
         /// The air between the chrome's bottom edge and the avatar, on a band
         /// and on a header with no picture.
         static let bandGap: CGFloat = Spacing.md
-        /// How far down the avatar a band reaches: its first third, so the
-        /// strip's edge cuts the disc high and leaves air above the name.
-        static let bandOverlap: CGFloat = avatarSize / 3
+        /// How far down the avatar a band reaches: its first quarter, so the
+        /// strip's edge cuts the disc high and the name below sits clear of
+        /// it, with air above.
+        static let bandOverlap: CGFloat = avatarSize / 4
         /// How far above the counters the poster's run-out begins. The avatar
         /// and the name sit on the picture itself; the tone arrives for the
         /// numbers and is strong by the bio.
@@ -134,16 +135,13 @@ final class ProfileHeaderView: UIView {
     /// Adopts a banner shape: the column's start, where the banner ends, how
     /// the name sits against the avatar, and whether the picture runs out.
     func setBannerFormat(_ format: ProfileBannerFormat) {
-        #if DEBUG
-        // A profile with no picture has nothing to force into a shape.
-        let format = format == .none ? .none : (ProfileBannerFormat.debugOverride ?? format)
-        #endif
         guard format != bannerFormat || !hasAppliedBannerFormat else { return }
         hasAppliedBannerFormat = true
         bannerFormat = format
         columnTopConstraint?.constant = columnTopConstant
-        // A band ends a third of the way down the avatar, its edge cut by the
-        // disc; a poster runs to the foot of the tray; no picture, no banner.
+        // A band ends a quarter of the way down the avatar, its edge cut by
+        // the disc; a poster runs to the foot of the tray; no picture, no
+        // banner.
         bannerView.isHidden = format == .none
         bannerEndsAtTray?.isActive = format == .poster
         bannerEndsInAvatar?.isActive = format != .poster

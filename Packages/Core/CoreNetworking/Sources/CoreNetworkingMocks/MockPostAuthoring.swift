@@ -46,7 +46,8 @@ public final class MockPostStore: @unchecked Sendable {
         profileID: MockSocialDataset.viewerProfileID,
         handle: "you",
         displayName: "Demo Viewer",
-        avatarURL: "mock://avatar/viewer?w=128&h=128",
+        // Landscape, so the viewer's own profile wears a band.
+        avatarURL: "mock://avatar/viewer?w=1600&h=900",
         bio: "Kicking the tires. Everything here is mock data.",
         websiteURL: "https://www.example.com/demo/"
     )

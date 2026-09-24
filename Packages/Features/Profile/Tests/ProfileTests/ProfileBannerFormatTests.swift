@@ -54,19 +54,19 @@ struct ProfileBannerFormatTests {
         #expect(ProfileBannerFormat.resolved(forImageSize: .zero) == .poster)
     }
 
-    /// A band ends a third of the way down the avatar: the disc straddles the
-    /// strip's edge high, its ring cutting the picture, and the name below
-    /// has air above it.
-    @Test func aBandEndsInTheAvatarsFirstThird() {
+    /// A band ends a quarter of the way down the avatar: the disc straddles
+    /// the strip's edge high, its ring cutting the picture, and the name
+    /// below sits clear of it with air above.
+    @Test func aBandEndsInTheAvatarsFirstQuarter() {
         let header = header(format: .band)
         let banner = header.debugBannerFrame
         let avatar = header.debugAvatarFrame
-        #expect(abs(banner.maxY - (avatar.minY + avatar.height / 3)) < 0.5)
+        #expect(abs(banner.maxY - (avatar.minY + avatar.height / 4)) < 0.5)
         #expect(banner.minY == 0)
         // The disc's top sits a small gap under the chrome's bottom edge: air,
         // not a strip of picture.
         #expect(abs(avatar.minY - (header.chromeTopInset + 12)) < 0.5)
-        #expect(abs(banner.height - (header.chromeTopInset + 12 + avatar.height / 3)) < 0.5)
+        #expect(abs(banner.height - (header.chromeTopInset + 12 + avatar.height / 4)) < 0.5)
         // The edge is softened, lightly and only near the edge — not run out.
         let stops = header.debugBannerFadeLocations
         let alphas = header.debugBannerFadeAlphas
