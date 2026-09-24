@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -56,12 +57,15 @@ final class ProfileGalleryGridView: UIView {
     /// What a row's "..." offers. Asked at press time, per row; the screen
     /// decides, because this view knows nothing about what can be serviced.
     var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
-    /// Whose profile this gallery belongs to, so that person's own rows can
-    /// drop the identity the screen already states. Nil until the profile
-    /// resolves; every row names its author until then.
-    var subjectID: ProfileID? {
-        didSet { if subjectID != oldValue { collectionView.reloadData() } }
-    }
+    /// Fired when the viewer asks to repost a row's post. Nothing sets it yet
+    /// — the same open seam For You has (`ForYouGridPage.onRepostRequested`):
+    /// the control is drawn because the card's design calls for it.
+    var onRepostRequested: ((GalleryPost) -> Void)?
+    /// The viewer's saved pile, the SAME store the Saved tab reads, so a card
+    /// here and the tab below cannot disagree about whether a post is saved.
+    /// Nil where no pile exists (anyone else's profile in some setups); the
+    /// save control is then not drawn.
+    private let bookmarks: PostBookmarkStore?
 
     /// Everything a host needs to build one row's menu.
     struct AuthorMenuContext {
@@ -165,11 +169,13 @@ final class ProfileGalleryGridView: UIView {
         imagePipeline: ImagePipeline,
         style: Style,
         tab: ProfileTab,
-        videoPlayback: VideoPlaybackController? = nil
+        videoPlayback: VideoPlaybackController? = nil,
+        bookmarks: PostBookmarkStore? = nil
     ) {
         self.imagePipeline = imagePipeline
         self.style = style
         self.tab = tab
+        self.bookmarks = bookmarks
         // The SAME coordinator the For You surfaces use, on the same terms:
         // candidates ranked by distance from the viewport centre, the nearest
         // N kept. Six for a mosaic, five for a timeline — a column fits fewer
@@ -391,12 +397,24 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
+            // ⚠️ THE SAME CARD FOR YOU DRAWS, wired the same way. A profile
+            // shows reposts among the posts, so the author on the card is
+            // news even here — the row is not a place to abbreviate.
             cell.configure(
                 with: post,
                 imagePipeline: imagePipeline,
-                captionExpanded: captionExpansion.isExpanded(post.id),
-                showsAuthorIdentity: showsAuthorIdentity(for: post)
+                captionExpanded: captionExpansion.isExpanded(post.id)
             )
+            // See `ForYouGridPage`: repost has no action yet and is drawn
+            // anyway; save toggles the shared pile and reads its answer back.
+            cell.onRepostTapped = { [weak self] in self?.onRepostRequested?(post) }
+            if let bookmarks {
+                cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                cell.onBookmarkTapped = { [weak cell] in
+                    _ = bookmarks.toggle(post.id.rawValue)
+                    cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                }
+            }
             // Captured by POST, never by index path: the row that asked can
             // have moved by the time the answer is applied.
             cell.onRevealFullCaption = { [weak self] in
@@ -708,13 +726,13 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // row.
             captionExpanded: captionExpansion.isExpanded(postID),
             showsAuthorMenu: showsAuthorMenu(for: post),
-            showsAuthorIdentity: showsAuthorIdentity(for: post),
-            // ⚠️ NEITHER control, because this surface wires neither: nothing
-            // here sets `onRepostTapped` or `onBookmarkTapped`, so the row's
-            // header carries the "..." alone and a stand-in drawing a repost
-            // would end every dismissal with a control vanishing. If this
-            // screen ever wires them, this is the line that has to know.
-            actions: .none,
+            // What the row wires — see `configure`: repost always, save when
+            // there is a pile — so the stand-in lands on a card drawing the
+            // same controls rather than ending with one vanishing.
+            actions: .init(
+                repost: true, bookmark: bookmarks != nil,
+                saved: bookmarks?.isSaved(postID.rawValue) ?? false
+            ),
             // The row's own date when there is a row — a compact age is a
             // function of the clock, and the row worked its own out when it was
             // configured.
@@ -735,19 +753,6 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     ///
     /// The provider rather than the realized cell, because a row that scrolled
     /// out still has to produce a card and cannot be asked what it is showing.
-    /// Whether a row names its author above the caption.
-    ///
-    /// Not on the profile's OWN posts: the screen is already under that
-    /// person's name and picture, and a card that repeats both above every
-    /// post is a row of headers saying what the header said. The band then
-    /// wears only the date and the "...". Anyone else's post on this screen —
-    /// the Tagged tab is other people's — keeps its identity, because there
-    /// the name is news.
-    private func showsAuthorIdentity(for post: GalleryPost) -> Bool {
-        guard let subjectID, let authorID = post.authorID else { return true }
-        return authorID != subjectID
-    }
-
     private func showsAuthorMenu(for post: GalleryPost) -> Bool {
         guard let authorID = post.authorID, let authorMenuActions else { return false }
         // The anchor is only ever read to place a popover, and nothing is being
@@ -764,13 +769,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// that has scrolled out as readily as for one on screen.
     func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
         if let row = cell(for: postID) as? PostGridListRowCell { return row.authorBandModel }
-        guard let post = posts.first(where: { $0.id == postID }) else { return nil }
-        let showsIdentity = showsAuthorIdentity(for: post)
-        // A bare band with no "..." is no band — see
-        // `PostAuthorBandView.isCollapsed` — and a prop for it would draw a
-        // control the card does not have.
-        guard showsIdentity || showsAuthorMenu(for: post) else { return nil }
-        return PostAuthorBandView.Model(post: post, showsIdentity: showsIdentity)
+        return posts.first { $0.id == postID }.map { PostAuthorBandView.Model(post: $0) }
     }
 
 

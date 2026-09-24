@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -85,11 +86,6 @@ final class ProfileGalleryPagerView: UIView {
     /// the pill keeps following it.
     private var isScrubbing = false
     private let pages: [ProfileGalleryGridView]
-    /// Whose profile this is — handed to every page, so that person's own
-    /// rows can drop the identity the header already states.
-    var subjectID: ProfileID? {
-        didSet { for page in pages { page.subjectID = subjectID } }
-    }
     private var activeIndex = 0 {
         didSet { syncAutoplay() }
     }
@@ -100,7 +96,8 @@ final class ProfileGalleryPagerView: UIView {
     init(
         imagePipeline: ImagePipeline,
         tabs: [ProfileTab] = ProfileTab.publicTabs,
-        videoPlayback: VideoPlaybackController? = nil
+        videoPlayback: VideoPlaybackController? = nil,
+        bookmarks: PostBookmarkStore? = nil
     ) {
         pageOrder = tabs
         pages = tabs.map { tab in
@@ -110,7 +107,8 @@ final class ProfileGalleryPagerView: UIView {
                 // Liked are whatever the viewer kept, which is mostly not.
                 style: tab == .format(.media) ? .grid : .list,
                 tab: tab,
-                videoPlayback: videoPlayback
+                videoPlayback: videoPlayback,
+                bookmarks: bookmarks
             )
         }
         super.init(frame: .zero)

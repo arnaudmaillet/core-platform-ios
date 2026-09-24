@@ -283,7 +283,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         let tabs = viewModel.isOwnProfile ? ProfileTab.ownTabs : ProfileTab.publicTabs
         self.tabs = tabs
         galleryPager = ProfileGalleryPagerView(
-            imagePipeline: imagePipeline, tabs: tabs, videoPlayback: videoPlayback
+            imagePipeline: imagePipeline, tabs: tabs, videoPlayback: videoPlayback,
+            bookmarks: viewModel.bookmarks
         )
         selectorBar = PagedTabBar(titles: tabs.map(\.title), style: .navigationTitle)
         super.init(nibName: nil, bundle: nil)
@@ -1441,6 +1442,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private func galleryMenuActions(
         for context: ProfileGalleryGridView.AuthorMenuContext
     ) -> [PostCardMenuAction] {
+        // The viewer's OWN post offers what a post of one's own is for. The
+        // rows are offered before either feature exists — the menu names
+        // them, and the handlers are empty until edit and delete land.
+        if viewModel.isViewerPost(by: context.authorID) {
+            return [.edit {}, .delete {}]
+        }
         guard viewModel.canReportPost(by: context.authorID) else { return [] }
         return [.report { [weak self] in
             self?.presentPostReportReasons(for: context)
@@ -2487,10 +2494,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // the whole screen blinking over at once.
             headerView.configure(with: model, staggered: isSwitchingProfile)
             headerView.setRedacted(false, animated: view.window != nil)
-            // The gallery learns whose it is from the same model: the subject's
-            // own rows then wear the bare band — see
-            // `ProfileGalleryGridView.showsAuthorIdentity(for:)`.
-            galleryPager.subjectID = model.id
 
         case .failed(let message):
             pullIndicator.endRefreshing()

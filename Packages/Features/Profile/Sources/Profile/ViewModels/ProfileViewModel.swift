@@ -155,7 +155,9 @@ public final class ProfileViewModel {
     /// The viewer's saved pile — client-owned, because nothing on the wire
     /// carries one. Absent on anyone else's profile, and absent in the many
     /// setups that never show a Saved tab at all.
-    private let bookmarks: PostBookmarkStore?
+    /// Read by the gallery's rows too, so a card's save control and the
+    /// Saved tab share one pile.
+    let bookmarks: PostBookmarkStore?
     /// The saved pile's tiles, once hydrated. Held because the pile can change
     /// while the screen is up (a post unsaved from the feed underneath) and the
     /// snapshot is rebuilt from parts.
@@ -644,6 +646,14 @@ public final class ProfileViewModel {
     /// the only row this menu has, so the whole "..." disappears with it. The
     /// Tagged tab is why this is a per-POST question rather than a per-screen
     /// one: those rows are other people's posts on your own profile.
+    /// Whether a gallery post is the VIEWER's own: on their own profile, a
+    /// post whose author is the profile. Anyone else's post there (the Tagged
+    /// tab) is not, and neither is anything on someone else's profile.
+    public func isViewerPost(by authorID: ProfileID?) -> Bool {
+        guard let authorID, let profile else { return false }
+        return followButton == .edit && authorID == profile.id
+    }
+
     public func canReportPost(by authorID: ProfileID?) -> Bool {
         guard reporting != nil else { return false }
         // `canModerate` is false exactly on the viewer's own profile, and there

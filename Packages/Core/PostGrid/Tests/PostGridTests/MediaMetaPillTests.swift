@@ -203,6 +203,31 @@ struct MediaMetaPillPlacementTests {
         }
     }
 
+    /// The indicator wears the card's own fill, like the capsules beside it,
+    /// and draws its dots in the card's ink — white dots on a light capsule
+    /// would be no dots at all.
+    @Test func theIndicatorWearsTheCardsFillAndInk() throws {
+        let cell = row(kind: .photo, pages: 3)
+        func indicators(_ view: UIView) -> [MediaPageIndicatorView] {
+            if let chip = view as? MediaPageIndicatorView { return [chip] }
+            return view.subviews.flatMap(indicators)
+        }
+        let chip = try #require(indicators(cell.contentView).first)
+        let counter = try #require(visiblePills(in: cell).first { !($0 is MediaPageIndicatorView) })
+        #expect(chip.contentView.backgroundColor == counter.contentView.backgroundColor)
+        #expect(chip.contentView.backgroundColor == .tertiarySystemFill)
+        func dots(_ view: UIView) -> [UIView] {
+            let own = view.subviews.filter { $0.layer.cornerRadius == MediaPageIndicatorView.dotDiameter / 2 && $0.bounds.width > 0 }
+            return own + view.subviews.flatMap(dots)
+        }
+        let drawn = dots(chip).filter { $0.alpha > 0 }
+        #expect(!drawn.isEmpty)
+        for dot in drawn {
+            #expect(dot.backgroundColor == PostMetaPillView.foreground)
+            #expect(dot.layer.shadowOpacity == 0)
+        }
+    }
+
     /// A single photograph shows no indicator at all.
     @Test func aSinglePhotographHasNoIndicator() {
         let cell = row(kind: .photo)
