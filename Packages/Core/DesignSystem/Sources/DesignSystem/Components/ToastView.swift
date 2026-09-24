@@ -227,6 +227,13 @@ public final class ToastView: UIView {
             removeFromSuperview()
             return
         }
+        // Settle whatever the host has pending BEFORE the exit animates — the
+        // same line `animateIn` has, for the same reason: this fires from a
+        // timer, on whatever the host holds by then, and a screen installed in
+        // the meantime that has not had its first pass would take it inside
+        // the block below, growing out of the top-left corner. Before the
+        // constant changes, or the slide itself would be settled away.
+        superview?.layoutIfNeeded()
         slide?.constant = -Metrics.bottomGap + Metrics.travel
         UIView.animate(withDuration: Metrics.transitionDuration, delay: 0, options: .curveEaseIn) {
             self.superview?.layoutIfNeeded()

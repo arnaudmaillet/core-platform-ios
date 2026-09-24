@@ -33,4 +33,21 @@ public extension UINavigationController {
             UIView.performWithoutAnimation(change)
         }
     }
+
+    /// Runs a stack change as a CUT: the new top is simply there.
+    ///
+    /// ⚠️ `animated: false` ALONE IS NOT A CUT ON iOS 26 — see `crossDissolve`:
+    /// the unanimated push still animated the wrapper's frame from a smaller
+    /// rect, filmed as the screen growing out of the top-left corner. This is
+    /// the same guard, for the stack changes that want no dissolve either: the
+    /// change runs with view animations off, and the navigation view is laid
+    /// out in the same breath so the arriving screen's first pass cannot be
+    /// picked up by whatever animates next (a keyboard rising, a bar hiding —
+    /// both measured doing exactly that, see `-first-layout-trace`).
+    func cut(_ change: () -> Void) {
+        UIView.performWithoutAnimation {
+            change()
+            viewIfLoaded?.layoutIfNeeded()
+        }
+    }
 }

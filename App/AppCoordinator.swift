@@ -288,8 +288,19 @@ final class AppCoordinator: Coordinator {
             window.rootViewController = viewController
             return
         }
+        // ⚠️ THE SWAP RUNS INSIDE `performWithoutAnimation`, for the reason
+        // `UINavigationController.crossDissolve` states: a `UIView.transition`
+        // block is an animation block, and the new root's first layout inside
+        // it animates every subview from a zero frame — the whole shell
+        // unfolding from the top-left corner behind the dissolve. The dissolve
+        // is the container's transition and survives animations being disabled
+        // for the block; the implicit frame animations do not. Laid out in the
+        // same breath so nothing of the first pass is left for a later block.
         UIView.transition(with: window, duration: 0.3, options: .transitionCrossDissolve) {
-            self.window.rootViewController = viewController
+            UIView.performWithoutAnimation {
+                self.window.rootViewController = viewController
+                self.window.layoutIfNeeded()
+            }
         }
     }
 }
