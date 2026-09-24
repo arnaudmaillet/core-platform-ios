@@ -60,10 +60,10 @@ struct ProfileBannerFormatTests {
         let avatar = header.debugAvatarFrame
         #expect(abs(banner.maxY - avatar.midY) < 0.5)
         #expect(banner.minY == 0)
-        // The disc's top sits on the chrome's bottom edge: no strip of
-        // picture between the two.
-        #expect(abs(avatar.minY - header.chromeTopInset) < 0.5)
-        #expect(abs(banner.height - (header.chromeTopInset + avatar.height / 2)) < 0.5)
+        // The disc's top sits a small gap under the chrome's bottom edge: air,
+        // not a strip of picture.
+        #expect(abs(avatar.minY - (header.chromeTopInset + 12)) < 0.5)
+        #expect(abs(banner.height - (header.chromeTopInset + 12 + avatar.height / 2)) < 0.5)
         // The edge is softened, lightly and only near the edge — not run out.
         let stops = header.debugBannerFadeLocations
         let alphas = header.debugBannerFadeAlphas
@@ -78,13 +78,54 @@ struct ProfileBannerFormatTests {
         let banner = header.debugBannerFrame
         let tray = header.debugTrayFrame
         #expect(abs(banner.maxY - tray.maxY) < 0.5)
-        // And the picture is never quite hidden: the run-out's strongest
-        // stop, at the foot, still lets it through.
+        // The picture shows through under the whole block — and the very
+        // foot is opaque, so the banner meets the page without a seam.
         let alphas = header.debugBannerFadeAlphas
-        #expect(alphas.count == 4)
+        let stops = header.debugBannerFadeLocations
+        #expect(alphas.count == 5)
         #expect(alphas[3] < 1)
         #expect(alphas[3] > alphas[2])
         #expect(alphas[2] > alphas[1])
+        #expect(alphas[4] == 1)
+        #expect(stops[4] == 1)
+        #expect((1 - stops[3]) * banner.height <= ProfileBannerView.posterFootDepth + 0.5)
+    }
+
+    /// On the way up the picture lags the content, and a poster is gone by
+    /// the time the avatar's top reaches where a band would hold it.
+    @Test func aPosterFadesOutAsTheAvatarReachesTheBandsLine() {
+        let header = header(format: .poster)
+        let avatarAtRest = header.debugAvatarFrame.minY
+        let bandLine = header.chromeTopInset + 12
+        let fadeOut = avatarAtRest - bandLine
+        #expect(fadeOut > 0)
+
+        header.setTravelled(0)
+        #expect(header.debugBannerAlpha == 1)
+        #expect(header.debugBannerPictureShift == 0)
+
+        header.setTravelled(fadeOut / 2)
+        #expect(abs(header.debugBannerAlpha - 0.5) < 0.01)
+        #expect(abs(header.debugBannerPictureShift - fadeOut / 2 * ProfileBannerView.parallaxShare) < 0.5)
+
+        header.setTravelled(fadeOut)
+        #expect(header.debugBannerAlpha == 0)
+        header.setTravelled(fadeOut * 2)
+        #expect(header.debugBannerAlpha == 0)
+
+        // A pull down neither fades nor shifts: the stretch is the banner's.
+        header.setTravelled(-60)
+        #expect(header.debugBannerAlpha == 1)
+        #expect(header.debugBannerPictureShift == 0)
+    }
+
+    /// A band keeps its picture whole on the way up — it scrolls off like
+    /// the rest of the header — and lags the content the same way.
+    @Test func aBandOnlyLags() {
+        let header = header(format: .band)
+        header.setTravelled(100)
+        #expect(header.debugBannerAlpha == 1)
+        #expect(abs(header.debugBannerPictureShift - 100 * ProfileBannerView.parallaxShare) < 0.5)
     }
 
     /// The poster's picture is left alone above the avatar and the run-out
@@ -95,7 +136,7 @@ struct ProfileBannerFormatTests {
         let banner = header.debugBannerFrame
         let avatar = header.debugAvatarFrame
         let stops = header.debugBannerFadeLocations
-        #expect(stops.count == 4)
+        #expect(stops.count == 5)
         let start = stops[0] * banner.height
         let opaque = stops[2] * banner.height
         #expect(abs(start - (avatar.minY - 40)) < 1)
@@ -111,7 +152,7 @@ struct ProfileBannerFormatTests {
         let band = header(format: .band)
         let poster = header(format: .poster)
         #expect(band.bounds.height < poster.bounds.height)
-        #expect(abs((poster.bounds.height - band.bounds.height) - 200) < 1)
+        #expect(abs((poster.bounds.height - band.bounds.height) - (200 - 12)) < 1)
     }
 
     /// On a band the name sits BELOW the strip's edge, on the page — not on

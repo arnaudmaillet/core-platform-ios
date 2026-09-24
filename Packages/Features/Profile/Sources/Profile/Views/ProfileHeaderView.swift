@@ -47,10 +47,12 @@ final class ProfileHeaderView: UIView {
         /// disc's midline.
         static func bannerClearance(for format: ProfileBannerFormat) -> CGFloat {
             switch format {
-            case .band: avatarSize / 2
+            case .band: avatarSize / 2 + bandGap
             case .poster: 200
             }
         }
+        /// The air between the chrome's bottom edge and a band's avatar.
+        static let bandGap: CGFloat = Spacing.md
         /// How far above the run-out's start the picture is still clear: the
         /// fade begins this much above the avatar's top.
         static let posterFadeLead: CGFloat = 40
@@ -146,6 +148,16 @@ final class ProfileHeaderView: UIView {
         setNeedsLayout()
     }
 
+    /// The scroll, handed down to the banner: the picture lags the content,
+    /// and a poster fades out over exactly the travel that brings the
+    /// avatar's top to where a band would hold it — under the chrome, a gap
+    /// below it — so the two shapes meet at the same picture: none.
+    func setTravelled(_ travelled: CGFloat) {
+        let fadeOut = Metrics.bannerClearance(for: .poster) - Metrics.bannerClearance(for: .band)
+            + Metrics.avatarSize / 2
+        bannerView.setTravelled(travelled, fadeOutTravel: fadeOut)
+    }
+
     private var hasAppliedBannerFormat = false
     private var bannerEndsAtTray: NSLayoutConstraint?
     private var bannerEndsAtAvatarMidline: NSLayoutConstraint?
@@ -159,6 +171,8 @@ final class ProfileHeaderView: UIView {
     var debugBannerShowsFade: Bool { bannerView.debugShowsFade }
     var debugBannerFadeLocations: [CGFloat] { bannerView.debugFadeLocations }
     var debugBannerFadeAlphas: [CGFloat] { bannerView.debugFadeAlphas }
+    var debugBannerAlpha: CGFloat { bannerView.alpha }
+    var debugBannerPictureShift: CGFloat { bannerView.debugPictureShift }
     private weak var actionRowForDebug: UIView?
     #endif
 

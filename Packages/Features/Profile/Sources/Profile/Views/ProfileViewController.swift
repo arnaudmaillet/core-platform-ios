@@ -2346,6 +2346,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // clamps its ramp, and `isDocked` compares against a dock line no
         // negative offset can reach.
         headerTopConstraint?.constant = -min(travelled, headerTravel)
+        headerView.setTravelled(travelled)
         applyIdentityFade(travelled: travelled)
         updateBarTransparency(travelled: travelled)
     }

@@ -50,7 +50,17 @@ final class ProfileBannerView: UIView {
         mediaContainer.pin(to: self)
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
-        imageView.pin(to: mediaContainer)
+        // The picture reaches ABOVE the banner by the most the parallax can
+        // carry it down, so lagging behind the content never uncovers the
+        // banner's floor at the top — see `setTravelled`.
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        mediaContainer.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: mediaContainer.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: mediaContainer.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: mediaContainer.topAnchor, constant: -Self.parallaxReserve),
+            imageView.bottomAnchor.constraint(equalTo: mediaContainer.bottomAnchor)
+        ])
 
         // Provisional until the header has laid its column out and says
         // where the run-out goes — see `setFade(start:opaque:)`.
@@ -112,18 +122,47 @@ final class ProfileBannerView: UIView {
         setNeedsLayout()
     }
 
+    /// How much slower than the content the picture climbs: it keeps this
+    /// share of the travel, so the identity block slides up OVER it rather
+    /// than the two moving as one flat sheet.
+    static let parallaxShare: CGFloat = 0.4
+    /// How far the parallax may carry the picture down before it would
+    /// uncover the banner's top — the picture is given this much extra
+    /// height above the banner. 200pt of travel is more than either shape
+    /// stays on screen for.
+    static let parallaxReserve: CGFloat = 80
+
+    /// The scroll, as the picture experiences it: it lags the content by
+    /// `parallaxShare`, and a poster fades on the way — gone entirely by
+    /// `fadeOutTravel`, the point at which the avatar's top reaches where a
+    /// band would have put it, under the chrome. Nothing on a pull down: the
+    /// stretch there is the banner's own.
+    func setTravelled(_ travelled: CGFloat, fadeOutTravel: CGFloat) {
+        let climb = max(0, travelled)
+        imageView.transform = CGAffineTransform(
+            translationX: 0, y: min(climb * Self.parallaxShare, Self.parallaxReserve)
+        )
+        guard format == .poster, fadeOutTravel > 0 else {
+            alpha = 1
+            return
+        }
+        alpha = max(0, 1 - climb / fadeOutTravel)
+    }
+
     /// How far above a band's edge its softening begins.
     static let bandFadeDepth: CGFloat = 56
     /// How much of the page's tone a band's edge reaches: a softening, not a
     /// run-out — the edge is still an edge, the avatar's ring still cuts it.
     static let bandFadeAlpha: CGFloat = 0.5
-    /// The poster's run-out at the counters, and at its foot. Neither is
-    /// opaque: the picture shows through to the tray, faintly, so the poster
-    /// reads as running the whole way down — while the page's tone is
+    /// The poster's run-out at the counters and just above its foot. Neither
+    /// is opaque: the picture shows through to the tray, faintly, so the
+    /// poster reads as running the whole way down — while the page's tone is
     /// strong enough under every line of type for it to stay page ink on
-    /// page colour.
+    /// page colour. The very foot IS opaque, over `posterFootDepth`, so the
+    /// banner's edge meets the page without a seam.
     static let posterFadeAtCounters: CGFloat = 0.75
-    static let posterFadeAtFoot: CGFloat = 0.92
+    static let posterFadeNearFoot: CGFloat = 0.92
+    static let posterFootDepth: CGFloat = 40
 
     /// Where the poster's run-out begins and where it is fully the page's
     /// tone, in this view's points from its top. The header sets both from
@@ -145,6 +184,8 @@ final class ProfileBannerView: UIView {
         (bottomFade.colors as? [CGColor] ?? []).map { $0.alpha }
     }
     var debugShowsFade: Bool { !bottomFade.isHidden }
+    /// How far the picture has been carried down by the parallax.
+    var debugPictureShift: CGFloat { imageView.transform.ty }
     #endif
 
     // MARK: - Redaction
@@ -189,10 +230,12 @@ final class ProfileBannerView: UIView {
             if height > 0, fadeOpaque > fadeStart {
                 let start = max(0, min(fadeStart / height, 1))
                 let counters = max(start, min(fadeOpaque / height, 1))
+                let nearFoot = max(counters, (height - Self.posterFootDepth) / height)
                 bottomFade.locations = [
                     NSNumber(value: Double(start)),
                     NSNumber(value: Double((start + counters) / 2)),
                     NSNumber(value: Double(counters)),
+                    NSNumber(value: Double(nearFoot)),
                     1
                 ]
             }
@@ -217,7 +260,8 @@ final class ProfileBannerView: UIView {
                 background.withAlphaComponent(0).cgColor,
                 background.withAlphaComponent(0.45).cgColor,
                 background.withAlphaComponent(Self.posterFadeAtCounters).cgColor,
-                background.withAlphaComponent(Self.posterFadeAtFoot).cgColor
+                background.withAlphaComponent(Self.posterFadeNearFoot).cgColor,
+                background.cgColor
             ]
         }
         topScrim.colors = [
