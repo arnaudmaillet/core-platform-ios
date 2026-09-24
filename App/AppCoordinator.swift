@@ -31,8 +31,17 @@ final class AppCoordinator: Coordinator {
     }
 
     func start() {
+        #if DEBUG
+        // `-first-layout-trace`: names the animation block that captures a
+        // screen's first layout (the "unfolds from the top-left" defect).
+        // Installed before the first root so the launch swap is covered too.
+        FirstLayoutTrace.installIfRequested()
+        #endif
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
+        #if DEBUG
+        FirstLayoutTrace.selfTestIfRequested(in: window)
+        #endif
 
         #if DEBUG
         // Dev convenience: `-mock-auto-login` signs into the mock BFF fixture

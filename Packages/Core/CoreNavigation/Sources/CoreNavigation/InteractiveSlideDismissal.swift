@@ -776,8 +776,20 @@ private final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimated
             return
         }
         let container = context.containerView
+        // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
+        // measurement. iOS 26/27 calls this inside an implicit animation
+        // context of the transition's duration, so a frame or a first layout
+        // assigned here would animate from the view's previous (or zero)
+        // frame: the screen unfolding from the top-left. The poses below are
+        // frame 0; only the blocks after the restore may animate.
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
         toView.frame = context.finalFrame(for: toVC)
         container.insertSubview(toView, belowSubview: fromView)
+        // Settled NOW, like every other animator's landing: a page spliced
+        // under the feed for this pop (the map's place page) may never have
+        // been laid out, and its first pass must not be the transition's.
+        container.layoutIfNeeded()
 
         let dim = UIView(frame: toView.bounds)
         dim.backgroundColor = UIColor.black.withAlphaComponent(0.15)
@@ -804,6 +816,7 @@ private final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimated
         let entry = axis.offset(along: -span * parallax, across: 0)
         let exit = axis.offset(along: span, across: 0)
         toView.transform = CGAffineTransform(translationX: entry.x, y: entry.y)
+        UIView.setAnimationsEnabled(animationsWereEnabled)
         UIView.animate(
             withDuration: transitionDuration(using: context),
             delay: 0,

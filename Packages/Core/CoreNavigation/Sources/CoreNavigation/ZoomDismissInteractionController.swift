@@ -233,6 +233,15 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
             context.completeTransition(false)
             return
         }
+        // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
+        // measurement. iOS 26/27 calls this inside an implicit animation
+        // context of the transition's duration, so a frame or a first layout
+        // assigned here would animate from the view's previous (or zero)
+        // frame: the screen unfolding from the top-left. The poses below are
+        // frame 0; only the blocks after the restore may animate.
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        defer { UIView.setAnimationsEnabled(animationsWereEnabled) }
         // Reinstall the map behind the grabbed card — a navigation controller
         // removes non-top views, so it isn't in the hierarchy yet.
         if let toView = context.view(forKey: .to) {
