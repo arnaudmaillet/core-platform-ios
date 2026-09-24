@@ -239,8 +239,10 @@ struct RowActionsTests {
         cell.bounds.size.height = cell.preferredLayoutAttributesFitting(attributes).frame.height
         cell.layoutIfNeeded()
 
-        let band = try #require(band(in: cell))
-        #expect(abs(band.bounds.height - PostAuthorBandView.bareHeight) < 0.5)
+        // Named apart from the helper: an older compiler resolves `band` inside
+        // the macro to the constant being declared and refuses the call.
+        let bandView = try #require(band(in: cell))
+        #expect(abs(bandView.bounds.height - PostAuthorBandView.bareHeight) < 0.5)
         #expect(cell.revealCaptionTop == PostAuthorBandView.captionOffset(showsIdentity: false))
         #expect(cell.authorBandModel?.showsIdentity == false)
 
@@ -248,9 +250,9 @@ struct RowActionsTests {
             if let label = view as? UILabel { return [label] }
             return view.subviews.flatMap(labels)
         }
-        let visible = labels(band).filter { !$0.isHidden && $0.superviewChainIsVisible }
+        let visible = labels(bandView).filter { !$0.isHidden && $0.superviewChainIsVisible }
         #expect(visible.isEmpty)
-        #expect(buttons(in: band).map(\.accessibilityLabel) == ["More actions"])
+        #expect(buttons(in: bandView).map(\.accessibilityLabel) == ["More actions"])
 
         // The date, on the closing line, at the caption's inset — before the
         // counters.

@@ -46,8 +46,11 @@ public final class PostAuthorBandView: UIView {
     /// The band's disc: two lines tall, because that is what it sits beside —
     /// the display name over the handle.
     public static let avatarDiameter: CGFloat = 40
-    /// The gap between the band and the caption under it.
-    public static let captionGap: CGFloat = 12
+    /// The gap between the band and the caption under it: a step more than
+    /// the card's padding, so the words breathe between the header above and
+    /// the picture or the line below. 12 read as cramped once the band grew
+    /// a bold name at the caption's own size.
+    public static let captionGap: CGFloat = 16
     /// The height of a BARE band — the "..." control's own, which is the one
     /// height every pill on the card is.
     public static var bareHeight: CGFloat { PostMetaPillView.height }

@@ -1340,9 +1340,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// wall — four lines. Only the card truncates: `PostCaptionRowView`, which
     /// wears the same face on the post's own page, deliberately does not.
     public static let captionLineLimit = 4
-    /// The gap between the caption and whatever follows it — the metric line,
-    /// the media preview, or the reveal affordance.
-    public static let captionFollowGap: CGFloat = 12
+    /// The gap between the caption and whatever follows it — the closing
+    /// line, the media preview — and between the preview and the line. The
+    /// same step as the gap above the caption (`authorFollowGap`), so the
+    /// words sit in equal air.
+    public static let captionFollowGap: CGFloat = 16
     /// The author band's measurements, restated as this cell's own names only
     /// so call sites read naturally — the values live with the view that draws
     /// them, because the reveal's prop draws the same band.
