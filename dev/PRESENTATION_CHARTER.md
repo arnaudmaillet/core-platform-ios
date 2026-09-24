@@ -112,28 +112,77 @@ dressed up as one.
 
 ## How it is measured
 
-A clause that nobody measures is a preference. Three instruments, two of which
-exist:
+A clause that nobody measures is a preference. Three instruments:
 
 | Instrument | Catches | Status |
 |---|---|---|
 | `-first-layout-trace` | P15 | shipped (`App/Shell/FirstLayoutTrace.swift`) |
 | Hero and profile transition verification (`.claude/skills/verify`) | P9 for hero destinations | shipped |
-| **`-presentation-budget`** | P1, P2, P4 | to build (PR 1 below) |
+| `-presentation-budget` | P1, P2, P4, P13 | shipped (`App/Shell/PresentationBudget.swift`, PR 1 below) |
 
 `-presentation-budget` is a DEBUG harness in the same shape as the layout
-trace. It swizzles `viewDidLoad` and the first `viewDidLayoutSubviews` of every
-`UIViewController` in the app's modules, times them on the main thread, and
-logs one line per screen: class, `viewDidLoad` ms, first-layout ms, and the
-sum. Over the P2 budget it logs at fault level with a stack sample of the
-longest call under the budgeted method, so the report names the culprit rather
-than the screen. Under `-presentation-budget-trap` it traps instead, which is
-what a UI test runs with. The number is reported in wall-clock ms on the
-simulator with a 2.5x factor noted, and verified on the SE for the screens that
-fail on the simulator.
+trace. **Its unit is the main-thread run-loop turn**, not a method: timing
+`viewDidLoad` alone misses the init (a Swift init cannot be hooked), the
+`loadView`, the first layout of the whole subtree (children lay out after
+their parent's `layoutSubviews` returns) and the builder work before the
+push, and all of it runs in the one turn the push starts in. A run-loop
+observer brackets each turn (`afterWaiting` → `beforeWaiting` after Core
+Animation's commit, nested loops ignored), and every `viewDidLoad` and every
+controller root view's first `layoutSubviews` inside it is that turn's screen
+event. A turn with screen events over the budget is a P2 failure, logged with:
 
-The budget test is the same sweep the hero suite already runs (open every
-screen from every route), with the trap flag on.
+- the events (`load:ProfileViewController, layout:ProfileViewController, …`);
+- every `viewDidLoad` override in the app's own images timed by class (the
+  overrides are wrapped once at install through their IMPs);
+- **the app's own frames that were hottest** while the turn ran past the
+  budget — a watchdog thread suspends the main thread every 2 ms, walks its
+  frame pointers, resumes it, and the report counts symbols across samples.
+  This is what names a culprit rather than a screen.
+
+The launch is exempt: the turn that builds the tab shell and every screen
+turn back to back after it (the tab roots, a `-select-tab`), up to the first
+quiet turn. Arguments: `-presentation-budget-ms N` (default 8),
+`-presentation-budget-trap` (a screen turn over budget traps),
+`-presentation-budget-grace N`. The log is `Documents/presentation-budget.log`
+and a probe on the key window (`budget;turns=…;screens=…;over=…;worst=…;hot=…`)
+gives a UI test the denominator.
+
+**The sweep** (`UITests/PresentationBudgetUITests.swift`) opens eight routes
+(a For You tile, a conversation, a profile tile, relationships, the share
+sheet, a map pin, the "+" menu's Text Post and Upload Media) and reads the
+probe after each. Two numbers per route: the simulator **budget** every route
+must come down to, and a per-route **ceiling** — a ratchet set at the last
+measurement with head-room, that a route may not get worse than, and that
+the PR fixing the route lowers or removes. That is how the sweep is green on
+every merge and still refuses a regression. Like the hero suites it runs on
+demand (`hero-uitests.yml`), not in the required checks.
+
+⚠️ **The sweep's numbers are not the charter's 8 ms.** It runs a DEBUG build
+on a simulator under XCUITest: no optimizer, an accessibility runtime that
+roughly doubles a turn, and an Apple-silicon host that is faster than the SE
+on some paths and slower on others. The 8 ms is measured on the SE with the
+harness alone, for the screens the sweep flags; the sweep's budget is
+calibrated on the same runner as its ceilings.
+
+### What the instrument found on day one (24 September 2026)
+
+Debug build, iPhone 18 Pro simulator, harness alone (no XCUITest), the
+turn that brought the screen on and the frames the sampler blamed:
+
+| Route | Turn | Blamed |
+|---|---|---|
+| Map pin → snap feed | 151 ms + 111 ms | `MapsViewController.openAnnotation` → the zoom flight's setup; then `SnapFeedViewController.installCommentsPanel` / `prewarmComments` and `PostDetailViewController.viewDidLoad` inside the feed's first idle |
+| For You tile → snap feed | 376 ms (under XCUITest) | `RevealPresentAnimator.animateTransition` running the feed's first layout: `SnapFeedCell.configure`, `SnapShortcutRailView.setSymbols` (one `UIImage(systemName:)` per bubble), a `Collection.map` |
+| Profile → relationships | 205 ms | `ProfileRelationshipListViewController.render/apply` for three pages at once (P3), flushed by `SelectorAccessory.settlePendingLayout` |
+| Profile → share sheet | 38 ms + 105 ms | `ProfileShareViewController.viewDidLoad` (31 ms in `configureViews`), then `fittedContentHeight` re-laying the sheet for its detent |
+| "+" → Text Post | 327 ms (under XCUITest) | `CreateTabItem.presentMenu`: the `UIMenu`'s own controller, before the composer |
+| "+" → Upload Media | 514 ms (under XCUITest) | `MediaPickerViewController` (P4, PR 2) |
+| Messages → thread | 602 ms (under XCUITest) | `ConversationThreadViewController` first layout |
+
+Two of these were not in the audit: the snap feed's first layout is the
+largest cost in the app whatever opens it (the shortcut rail's symbol images
+and the cell configure), and the "+" menu pays for its `UIMenu` before any
+composer exists. Both join the list below.
 
 ---
 
@@ -214,6 +263,23 @@ over a drawn map.
 - Post Detail calls `loadPost` without trying `peekPost`.
 - Profile's first load never reads `ProfileCache` (only account switching
   does); a revisit should render the cached profile at frame 0 and refresh.
+
+### PR 5b — The snap feed's first layout (P13)
+
+Found by the instrument: whatever opens the snap feed (a For You tile, a
+profile tile, a map pin), its first layout inside the hero's setup is the
+largest screen turn in the app. The sampler blames `SnapShortcutRailView.setSymbols`
+(a `UIImage(systemName:)` per bubble, every time), `SnapFeedCell.configure`
+and a `Collection.map` in the cell provider. Cache the symbol images once,
+and move what `configure` does per item that is not layout off the first
+pass. Measure with `-presentation-budget` on the For You route before and
+after; the sweep's three feed routes share one ceiling to lower.
+
+### PR 5c — The "+" menu (P2)
+
+`CreateTabItem.presentMenu` pays for the `UIMenu`'s controller on the tap,
+before the composer or the picker exists. Measure whether the cost is the
+menu's images or the menu itself; if the latter, a prebuilt menu.
 
 ### PR 9 — One `Loadable` and one cross-fade (P10, P11)
 
