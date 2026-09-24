@@ -1242,7 +1242,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// the preview's own radius is derived from it, and the two must move
     /// together or the curves stop being parallel.
     public static var mediaInset: CGFloat { contentInset }
-    public static let cardFillColor: UIColor = .secondarySystemBackground
+    /// The card's tone — `Surface.card`, so a card is lighter than the page
+    /// it lies on and raised by that alone (see `Surface`).
+    public static let cardFillColor: UIColor = Surface.card
     /// The caption's inset, which is the preview's, which is the card's — see
     /// `contentInset`. Public because the post's own page reproduces this exact
     /// register so a reveal's window lands its caption on the card's own.
@@ -1544,6 +1546,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         card.backgroundColor = Self.cardFillColor
         card.layer.cornerRadius = Self.cardCornerRadius
         card.layer.cornerCurve = .continuous
+        // An edge in the dark and nothing in the light — see `Surface`.
+        Surface.applyCardEdge(to: card)
         card.pin(to: contentView)
 
         captionLabel.font = .preferredFont(forTextStyle: .body)
@@ -2253,7 +2257,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// make the empty beat of a dismissal a different shade from the brick it
     /// lands on.
     public static func fillColor(for post: GalleryPost) -> UIColor {
-        post.kind == .video ? .darkGray : .secondarySystemBackground
+        post.kind == .video ? .darkGray : Surface.card
     }
 
     /// The image the brick is currently showing — see `PostGridListRowCell`'s
@@ -2352,7 +2356,7 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = .secondarySystemBackground
+        contentView.backgroundColor = Surface.card
         contentView.clipsToBounds = true
         // Soft bricks, not hard edges. `cornerRadius` re-applies this whenever
         // a host wants the softer pairing; the curve stays continuous either

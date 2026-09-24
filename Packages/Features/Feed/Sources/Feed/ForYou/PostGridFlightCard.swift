@@ -142,7 +142,7 @@ final class PostGridFlightCard: UIView {
         self.style = style
         // Video bricks keep a dark floor, exactly as the tile cell does: the
         // poster may be unrenderable and the glyph needs a stage.
-        restingBackground = post.kind == .video ? .darkGray : .secondarySystemBackground
+        restingBackground = PostGridTileCell.fillColor(for: post)
         super.init(frame: .zero)
         #if DEBUG
         // Balanced in deinit: a card alive after its flight settled is the

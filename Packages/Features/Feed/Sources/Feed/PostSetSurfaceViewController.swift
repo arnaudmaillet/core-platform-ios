@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import DesignSystem
 import FeedInterface
 import MediaPlayback
 import PostGrid
@@ -81,7 +82,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = Surface.page
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
         NSLayoutConstraint.activate([
